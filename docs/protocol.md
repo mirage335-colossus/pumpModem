@@ -1,0 +1,169 @@
+# Data Pump packet format, version 1
+
+This document specifies the implemented packet codec. It is a versioned project
+format, not a claim of compatibility with an existing radio modem. Integers use
+network byte order. A packet has no destination, source address, route, or hop
+field. Optional callsign and grid strings describe content and are never used for
+routing. Content is text, a file, or a screenshot; receiving does not execute it.
+
+The audio synchronization preamble is outside the packet codec. It is neither
+covered by packet Reed–Solomon coding nor by the packet digest/MAC. When
+encryption is enabled, the transmitter encrypts the complete modem frame,
+including its preamble and all packet error correction. The packet codec itself
+does not encrypt and never adds an encryption nonce or public-key envelope.
+
+## Wire layout
+
+The wire packet consists of a 72-byte protected bootstrap followed by an
+interleaved, optionally Reed–Solomon-protected body. Each bootstrap is a shortened
+RS(72,40) codeword with 32 parity bytes. Its first 40 bytes are systematic data:
+
+| Byte offset | Bytes | Meaning |
+| --- | ---: | --- |
+| 0 | 4 | ASCII `DP01` |
+| 4 | 1 | Format version, `1` |
+| 5 | 1 | Body FEC: `0` off, `1` 20%, `2` 60% |
+| 6 | 1 | Flags: bit 0 dictionary compression, bit 1 keyed MAC, bit 2 request repeat |
+| 7 | 1 | Content kind: `0` text, `1` file, `2` screenshot |
+| 8 | 8 | Body length before body FEC, including the 32-byte tag |
+| 16 | 8 | Original payload byte count |
+| 24 | 8 | Encoded payload byte count |
+| 32 | 2 | Tag length, always `32` |
+| 34 | 2 | Reserved, both zero |
+| 36 | 4 | CRC-32 of bootstrap bytes 0–35 |
+
+The receiver corrects this fixed-size codeword, checks its magic, version,
+reserved values, flags, CRC, and internal lengths, and enforces the memory budget
+before allocating any advertised body. The CRC uses the reflected polynomial
+`0xedb88320`, with initial and final XOR `0xffffffff`. This CRC limits accidental
+false prefixes; it is not authentication. All 40 bootstrap bytes are also covered
+by the final digest or keyed MAC, so modifying FEC mode, lengths, flags, or kind
+cannot produce an accepted keyed packet without a valid tag.
+
+`packet_frame_size` returns the total required bytes from a complete valid
+bootstrap. With fewer than 72 bytes it returns no size. `decode_packet` accepts
+extra demodulator tail bytes and reports the exact consumed packet length.
+
+The decoded body is:
+
+| Byte offset | Bytes | Meaning |
+| --- | ---: | --- |
+| 0 | 16 | Random packet identifier |
+| 16 | 4 | CRC-32 of the 16 ID bytes followed by one repeat-flag byte (`0` or `1`) |
+| 20 | 2 | Filename byte count, 0–255 |
+| 22 | 2 | Callsign byte count, 0–64 |
+| 24 | 2 | Grid byte count, 0–32 |
+| 26 | variable | Filename, then callsign, then grid, with no terminators |
+| following | variable | Encoded payload |
+| final | 32 | Integrity digest or keyed message authentication code |
+
+If the application supplies an all-zero identifier, the encoder generates 16
+bytes using OpenSSL's cryptographic random generator. A repeated packet keeps
+the identifier from the decoded message. The repeat flag requests repetition by
+an external application; the library does not retransmit or implement a
+repeater. The independent ID checksum is checked even when the full body digest
+is valid.
+
+The canonical input to the digest/MAC is the 40-byte bootstrap concatenated with
+the entire body except its final 32-byte tag. Unkeyed packets use SHA-256; this
+detects corruption but does not authenticate a sender. Keyed packets use the
+provided 32-byte MAC callback. A receiver configured with a verifier rejects
+unkeyed packets; a receiver without one rejects keyed packets. Successful Reed–
+Solomon correction alone never releases a validated message. The decoder also
+requires the full digest or MAC and all metadata checks to pass.
+
+## Reed–Solomon and interleaving
+
+RS uses GF(256), primitive polynomial `x^8 + x^4 + x^3 + x^2 + 1` (`0x11d`),
+primitive element 2, and generator roots `alpha^0` through `alpha^(p-1)`. All
+codewords are systematic, highest-degree coefficient first; shortened words
+omit leading zero data symbols. For example, data `01` with two parity symbols
+encodes as `01 03 02`.
+
+The 20% setting divides the body into at most 210 data bytes per block; full
+blocks have 42 parity bytes. The 60% setting uses at most 150 data bytes and 90
+parity bytes. A final short block uses `ceil(k/5)` or `ceil(3k/5)` parity bytes,
+rounded up to the next even number. Thus percentages refer to parity relative
+to data, and rounding adds up to two bytes for short blocks. An RS block can
+correct at most half its parity count in unknown byte errors. No erasure hints
+are required. Decoding uses Berlekamp–Massey, a root search, and a small GF(256)
+linear solve for error magnitudes, then checks all syndromes again.
+
+The encoder lays full systematic codewords out as rows and transmits columns:
+byte zero of each row, byte one of each row, and so on, skipping nonexistent
+positions of the final short row. The receiver reverses this interleaver before
+correction. This distributes a contiguous burst across blocks. With FEC off,
+the body is transmitted directly without interleaving; the bootstrap still has
+its fixed protection. Every body byte, including its digest/MAC, is covered by
+body FEC when enabled. Beyond the correction radius, RS may fail or miscorrect;
+the independent final digest/MAC is mandatory in either case.
+
+## Deterministic short compression
+
+Payloads below 256 bytes are eligible for the fixed dictionary, regardless of
+content kind. The compressor operates on bytes, so UTF-8, embedded NULs, and
+arbitrary binary data remain lossless. It uses compression only when the encoded
+byte sequence is strictly shorter; all other payloads are stored verbatim. The
+flag and both lengths are authenticated in the bootstrap.
+
+Tokens are packed most-significant bit first:
+
+| Prefix | Following bits | Meaning |
+| --- | --- | --- |
+| `00` | 5-bit index | One character from the 32-byte alphabet below |
+| `01` | 6-bit index | One dictionary entry below |
+| `10` | 8-bit value | One literal byte |
+| `11` | none | Reserved, rejected |
+
+The alphabet in index order is the following escaped ASCII string:
+`" etaoinshrdlucmfwypvbgkqjxz0123\n"`.
+
+The 64 dictionary entries, in index order, are:
+
+```text
+"the ", "The ", "and ", "message", "received", "station", "ready", "please",
+"hello", "thank", "you", "this ", "that ", "with ", "from ", "have ",
+"for ", "your ", "will ", "are ", "not ", "can ", "all ", "test",
+"ing", "tion", " to ", " is ", " in ", " of ", " on ", " at ",
+"CQ", "QRS", "73", "599", "copy", "send", "file", "next",
+"time", "good", "signal", "power", "radio", "call", "grid", "data",
+"pump", "status", "normal", "distress", "over", "out", "yes", "no",
+"http", "://", ".com", "www.", "00", "11", "  ", "\r\n"
+```
+
+At each input offset, the encoder chooses the longest matching dictionary entry,
+breaking ties by its lowest index. If none matches, it uses an alphabet token
+when possible, otherwise a literal. There is no end marker: decoding stops at
+the authenticated original byte length. Up to seven trailing zero padding bits
+are allowed; extra bytes, nonzero padding, reserved tokens, truncation, and
+expansion beyond the declared length are rejected. This is a deliberately
+small, fixed dictionary, not a claim of a statistically optimal compressor.
+
+## Resource and attachment validation
+
+The configured decode memory limit defaults to 256 MiB. Before body allocation,
+the implementation budgets coded-body bytes, twice the decoded body, original
+payload length, and 4096 bytes for fixed decoding scratch. The caller-owned input
+buffer is excluded. Checked size arithmetic rejects integer overflow, and
+metadata and dictionary expansion have separate small bounds. Consequently the
+maximum payload is below the configured memory limit; applications should also
+budget audio buffers and their received-message cache.
+
+Encoding also checks its memory budget before allocating payload-sized copies.
+Its conservative budget uses the uncompressed size and includes the caller's
+message bytes, twice the maximum coded-body bytes, twice the maximum uncoded-body
+bytes, and 4096 bytes of scratch. The encoder does not rely on compression to fit
+an oversized input within the limit.
+
+File and screenshot content requires a basename; text may omit it. Filenames
+cannot contain directory separators, drive separators, control bytes, Windows
+forbidden punctuation, trailing spaces or periods, or reserved device names.
+Device checks include the superscript port digits listed in Microsoft's
+[Windows filename rules](https://learn.microsoft.com/en-us/windows/win32/fileio/naming-a-file).
+Filename, callsign, and grid strings must be valid UTF-8. Callsign and grid strings
+also reject ASCII control bytes. Payloads, including text payloads, may contain
+arbitrary bytes; this metadata validation does not change the transmitted content.
+The codec performs no filesystem
+or clipboard writes; a user interface must require an explicit save destination
+and must render received text as data. Callsign and grid fields are descriptive
+metadata, not authenticated personal identities in unkeyed mode.

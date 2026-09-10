@@ -1,0 +1,114 @@
+#include "datapump/modem.hpp"
+#include <algorithm>
+#include <cmath>
+#include <iostream>
+#include <limits>
+#include <random>
+#include <sstream>
+#include <stdexcept>
+
+using namespace datapump;
+namespace m = datapump::modem;
+void require(bool b, const char* msg) { if (!b) throw std::runtime_error(msg); }
+template<class F> void rejects(F f, const char* msg) {
+    bool rejected = false; try { f(); } catch (const Error&) { rejected = true; }
+    require(rejected, msg);
+}
+Bytes message(const m::Config& c) {
+    auto data = m::preamble(c);
+    for (unsigned i = 0; i < 256; ++i) data.push_back(static_cast<std::uint8_t>(i));
+    return data;
+}
+int main() {
+    try {
+        m::Config c;
+        const auto pre = m::preamble(c);
+        const auto data = message(c);
+        const auto wave = m::modulate(data, c);
+        require(m::modulate(pre, c).size() >= 5 * c.sample_rate, "training shorter than 5 seconds");
+        auto decoded = m::demodulate(wave, c, pre);
+        require(decoded.bytes == data, "binary loopback");
+        require(decoded.diagnostics.preamble_correlation > .9, "clean correlation");
+        require(decoded.diagnostics.sample_offset == 0, "clean timing");
+        m::ChannelConfig channel;
+        channel.delay_samples = 1237; // Not a chip, symbol, or byte boundary.
+        channel.snr_db = 3;
+        channel.seed = 731;
+        auto noisy = m::simulate(wave, c, channel);
+        decoded = m::demodulate(noisy, c, pre);
+        require(decoded.bytes == data, "AWGN delayed loopback");
+        require(std::abs(static_cast<long long>(decoded.diagnostics.sample_offset) - 1237) <= 2,
+                "sample timing acquisition");
+        require(noisy == m::simulate(wave, c, channel), "deterministic simulation");
+        channel.snr_db = 12;
+        channel.frequency_offset_hz = 3;
+        decoded = m::demodulate(m::simulate(wave, c, channel), c, pre);
+        require(decoded.bytes == data, "static carrier offset loopback");
+        c.spreading_factor = 8;
+        c.scramble = true;
+        c.spreading_seed[0] = 19;
+        c.dsss = true; c.dsss_seed[0] = 62;
+        const auto spread_pre = m::preamble(c);
+        const auto spread_data = message(c);
+        const auto spread_wave = m::modulate(spread_data, c);
+        channel.snr_db = -10;
+        channel.frequency_offset_hz = 0;
+        channel.delay_samples = 91;
+        decoded = m::demodulate(m::simulate(spread_wave, c, channel), c, spread_pre);
+        require(decoded.bytes == spread_data, "seeded pattern spreading loopback");
+        auto wrong = spread_pre;
+        for (std::size_t i = 0; i < wrong.size(); ++i) wrong[i] ^= static_cast<std::uint8_t>(i * 71);
+        rejects([&] { (void)m::demodulate(spread_wave, c, wrong); }, "wrong preamble accepted");
+        c = {};
+        // Ciphertext-like preamble: no fixed sync bytes are inserted by the DSP.
+        auto arbitrary_pre = m::preamble(c);
+        std::mt19937 ciphertext_rng(8337);
+        for (auto& b : arbitrary_pre) b = static_cast<std::uint8_t>(ciphertext_rng());
+        auto arbitrary_data = arbitrary_pre;
+        arbitrary_data.insert(arbitrary_data.end(), data.end()-256, data.end());
+        channel.delay_samples = 40571; channel.snr_db = 6;
+        require(m::demodulate(m::simulate(m::modulate(arbitrary_data,c),c,channel),c,arbitrary_pre).bytes == arbitrary_data,
+                "encrypted preamble acquisition");
+        auto wide = c; wide.sample_rate = 96000; wide.carrier_hz = 12000; wide.bandwidth_hz = 24000;
+        const auto wide_data = message(wide);
+        require(m::demodulate(m::modulate(wide_data,wide),wide,m::preamble(wide)).bytes == wide_data,
+                "wide audio preset loopback");
+        std::vector<float> silence(wave.size());
+        rejects([&] { (void)m::demodulate(silence, c, pre); }, "silence accepted");
+        std::mt19937 rng(991);
+        std::normal_distribution<float> normal;
+        for (auto& v : silence) v = normal(rng);
+        rejects([&] { (void)m::demodulate(silence, c, pre); }, "noise accepted");
+        auto invalid = c; invalid.bandwidth_hz = std::numeric_limits<double>::quiet_NaN();
+        rejects([&] { (void)m::preamble(invalid); }, "NaN config accepted");
+        invalid = c; invalid.spreading_factor = 16385;
+        rejects([&] { (void)m::preamble(invalid); }, "oversized spreading accepted");
+        invalid = c; invalid.memory_limit = 1024;
+        rejects([&] { (void)m::modulate(data, invalid); }, "modulation memory limit ignored");
+        auto small = c; small.memory_limit = 2*1024*1024;
+        rejects([&] { (void)m::demodulate(wave,small,pre); }, "FFT working memory limit ignored");
+        silence[0] = std::numeric_limits<float>::infinity();
+        rejects([&] { (void)m::demodulate(silence, c, pre); }, "infinite sample accepted");
+        std::stringstream wav(std::ios::in | std::ios::out | std::ios::binary);
+        m::write_wav(wav, wave, c.sample_rate);
+        auto restored = m::read_wav(wav);
+        require(restored.sample_rate == c.sample_rate && restored.samples.size() == wave.size(), "WAV metadata");
+        for (std::size_t i = 0; i < wave.size(); ++i)
+            require(std::abs(wave[i] - restored.samples[i]) < 0.00004, "WAV PCM16 quantization");
+        require(m::demodulate(restored.samples, c, pre).bytes == data, "WAV loopback");
+        std::stringstream short_wav("RIFF", std::ios::in | std::ios::binary);
+        rejects([&] { (void)m::read_wav(short_wav); }, "truncated WAV accepted");
+        std::stringstream memory_wav(wav.str(), std::ios::in | std::ios::binary);
+        rejects([&] { (void)m::read_wav(memory_wav, 32); }, "WAV allocation limit ignored");
+        auto corrupt = wav.str(); corrupt[40] = static_cast<char>(0xff); corrupt[41] = static_cast<char>(0xff);
+        corrupt[42] = static_cast<char>(0xff); corrupt[43] = static_cast<char>(0x7f);
+        std::stringstream huge(corrupt, std::ios::in | std::ios::binary);
+        rejects([&] { (void)m::read_wav(huge); }, "oversized data chunk accepted");
+        const Bytes status{1,0,1};
+        auto status_wave = m::modulate_status(status, c);
+        require(status_wave.size() == static_cast<std::size_t>(std::llround(3 * c.sample_rate / (m::bit_rate(c) / 2))), "three bit status padded");
+        require(m::detect_status(status_wave, status, c) > .99, "status correlation");
+        std::cout << "modem tests passed\n";
+        return 0;
+    } catch (const std::exception& e) { std::cerr << e.what() << '\n'; return 1; }
+}
