@@ -12,10 +12,13 @@ struct Settings {
     std::string device = "default";
     bool simulation = false;
     double simulation_snr_db = 18;
+    // Received content and pending event storage are independent of DSP work.
+    std::size_t content_limit = default_memory_limit;
+    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
+    // Compatibility fields: streaming capture no longer retains a duration
+    // window, and simulated media progresses as fast as bounded DSP permits.
     double receive_buffer_seconds = 30;
     std::uint64_t simulation_seed = 1;
-    // Media time per wall-clock second; 1 is ordinary operation. Acceleration
-    // supports deterministic streaming tests without changing the waveform.
     double simulation_speed = 1;
     std::vector<Crypto> receive_keys;
     // Selecting a transmit key also requires authenticated reception. An
@@ -33,6 +36,8 @@ struct SignalUpdate {
     double snr_db = 0;
     std::size_t received_bytes = 0;
     std::size_t expected_bytes = 0;
+    std::uint64_t sequence = 0;
+    double virtual_seconds = 0;
 };
 struct Snapshot {
     std::vector<float> waveform;
@@ -49,6 +54,12 @@ struct Snapshot {
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
     std::size_t buffered_samples = 0;
+    double virtual_seconds = 0;
+    double transmission_seconds = 0;
+    double transmission_fraction = 0;
+    bool transmission_finished = true;
+    bool transmission_cancelled = false;
+    std::size_t dsp_buffered_bytes = 0;
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure

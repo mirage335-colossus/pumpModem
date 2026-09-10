@@ -48,6 +48,41 @@ int main() {
         for (std::uint64_t id=8;id<80;++id) signals.update({id,1500,std::string(5000,'a'),false,{}});
         check(signals.lines().size()==64 && signals.lines().back().text.size()==4096);
         signals.clear(); check(signals.lines().empty());
+        signals.update({90,1500,"readme.txt",true,"file-id",false});
+        check(!signals.copy_id(0)); // Even UTF-8 files require explicit Save.
+        gui::Inbox mixed;
+        mixed.put(packet(1,3)); // Text belongs to the signal browser only.
+        auto file=packet(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";
+        mixed.put(file);
+        mixed.put(packet(3,2));
+        auto screenshot=packet(4,5); screenshot.message.kind=MessageKind::screenshot; screenshot.message.filename="capture.png";
+        mixed.put(screenshot);
+        const auto files=mixed.file_items();
+        check(files.size()==2 && files[0]->message.id[0]==2 && files[1]->message.id[0]==4);
+        check(mixed.items().size()==4); // Verified text remains available for exact clipboard copy.
+        gui::TransmissionPolicy policy;
+        const auto time=gui::TransmissionPolicy::Clock::time_point{};
+        policy.started(false,false,time);
+        bool concurrent_rejected=false;
+        try { policy.started(true,false,time); } catch (const Error&) { concurrent_rejected=true; }
+        check(concurrent_rejected); // All modes allow only one active transmission.
+        policy.finished(time+std::chrono::seconds(1));
+        check(policy.remaining(false,false,time+std::chrono::seconds(1)).count()==0);
+        policy.started(true,true,time+std::chrono::seconds(1));
+        policy.finished(time+std::chrono::seconds(2));
+        check(policy.remaining(true,true,time+std::chrono::seconds(2)).count()==0);
+        check(policy.remaining(false,true,time+std::chrono::seconds(2)).count()==0);
+        policy.started(false,true,time+std::chrono::seconds(2));
+        policy.finished(time+std::chrono::seconds(3));
+        check(policy.remaining(false,true,time+std::chrono::seconds(4))==std::chrono::seconds(5));
+        check(policy.remaining(true,true,time+std::chrono::seconds(4)).count()==0);
+        check(policy.remaining(false,false,time+std::chrono::seconds(4)).count()==0);
+        policy.started(true,false,time+std::chrono::seconds(4));
+        policy.finished(time+std::chrono::seconds(5));
+        check(policy.remaining(false,true,time+std::chrono::seconds(5))==std::chrono::seconds(4));
+        policy.started(false,true,time+std::chrono::seconds(9));
+        policy.abort_start();
+        check(policy.remaining(false,true,time+std::chrono::seconds(9)).count()==0);
         std::cout<<"Native GUI policy tests passed\n";
     } catch (const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

@@ -31,7 +31,7 @@ class PumpCase(unittest.TestCase):
 class CommandTests(PumpCase):
     def test_help_and_invalid_options(self):
         self.assertIn(b"simulate", self.run_pump("--help").stdout)
-        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.1.0\n")
+        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.2.0\n")
         self.run_pump("simulate", "--text", "x", "--nonsense", "yes", ok=False)
         self.run_pump("simulate", "--text", "x", "--snr", "nan", ok=False)
         self.run_pump("tx", "--text", "x", ok=False)
@@ -41,6 +41,7 @@ class CommandTests(PumpCase):
                         ("--carrier", "nan"), ("--carrier", "inf"),
                         ("--fec", "21"), ("--memory-mb", "4097"),
                         ("--memory-mb", "-1"), ("--memory-mb", "1.5"),
+                        ("--cache-mb", "0"), ("--dsp-mb", "0"),
                         ("--time", "18446744073709551616"),
                         ("--scramble",), ("--dsss",),
                         ("--text", "duplicate"), ("--json=true",)):
@@ -159,8 +160,30 @@ class CommandTests(PumpCase):
         result = self.run_pump("simulate", "--text", "repeat me", "--repeatable", "--json")
         self.assertTrue(json.loads(result.stdout)["repeatable"])
         self.run_pump("simulate", "--text", "x", "--memory-mb", "0", ok=False)
-        self.run_pump("simulate", "--text", "x", "--memory-mb", "1", ok=False)
+        # Legacy batch PCM memory must not limit an accelerated/streamed transfer.
+        self.run_pump("simulate", "--text", "x", "--memory-mb", "1")
+        self.run_pump("pack", "--input", "-", "--cache-mb", "1",
+                      data=b"x" * (1024 * 1024 + 1), ok=False)
         self.run_pump("rx", "--device-type", "ethernet", ok=False)
+
+    def test_long_tone_simulation_and_slow_estimate(self):
+        result = self.run_pump("simulate", "--text", "long tone", "--bw", "2400",
+                               "--pattern", "tone-1024", "--memory-mb", "1", "--json")
+        self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"long tone")
+        slow = json.loads(self.run_pump("estimate", "--text", "!", "--bw", "2400",
+                         "--target-snr", "-20", "--pattern", "auto-tone", "--repeatable").stdout)
+        self.assertTrue(slow["target_supported"])
+        self.assertTrue(slow["memory_supported"])
+        self.assertFalse(slow["batch_memory_supported"])
+        self.assertTrue(slow["repeatable_allowed"])
+        self.assertGreater(slow["symbol_seconds"], 5)
+        self.assertAlmostEqual(slow["total_seconds"] - slow["packet_seconds"], 5, delta=0.01)
+
+    def test_content_capacity_excludes_packet_parity(self):
+        payload = bytes(range(256)) * 4096
+        packet = self.run_pump("pack", "--fec", "60", "--cache-mb", "1", data=payload).stdout
+        self.assertGreater(len(packet), len(payload))
+        self.assertEqual(self.run_pump("unpack", "--cache-mb", "1", data=packet).stdout, payload)
 
     def test_automatic_tuning_and_estimate(self):
         normal = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "40").stdout)
@@ -175,8 +198,8 @@ class CommandTests(PumpCase):
         self.run_pump("estimate", "--text", "x", "--pattern", "bad", ok=False)
         self.run_pump("estimate", "--text", "x", "--target-snr", "40", "--spreading", "2", ok=False)
         self.run_pump("estimate", "--text", "x", "--target-snr", "37.5", "--bw", "3000", "--sample-rate", "8000", ok=False)
-        unsupported = json.loads(self.run_pump("estimate", "--text", "!", "--target-snr", "-270").stdout)
-        self.assertFalse(unsupported["target_supported"])
+        unsupported = self.run_pump("estimate", "--text", "!", "--target-snr", "-270", ok=False)
+        self.assertIn(b"duration", unsupported.stderr)
         result = self.run_pump("simulate", "--text", "tone test", "--pattern", "tone-3",
                                "--simulation", "3dBm -120dB", "--json", "--bw", "1000")
         self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"tone test")
@@ -207,8 +230,8 @@ class CommandTests(PumpCase):
         self.run_pump("pack", "--repeatable", data=b"a" * 65537, ok=False)
         self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!" )
         self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!?", ok=False)
-        self.run_pump("pack", "--memory-mb", "1", data=b"a" * (1024 * 1024 + 1), ok=False)
-        self.run_pump("pack", "--memory-mb", "1", data=b"a" * (200 * 1024), ok=False)
+        self.run_pump("pack", "--cache-mb", "1", data=b"a" * (1024 * 1024 + 1), ok=False)
+        self.run_pump("pack", "--memory-mb", "1", "--cache-mb", "1", data=b"a" * (200 * 1024))
 
         filename, callsign, grid = "café-地球-🌍.bin", "台灣-é", "AA00aa"
         packed = self.run_pump("pack", "--kind", "file", "--filename", filename,

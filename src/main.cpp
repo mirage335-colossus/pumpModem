@@ -7,6 +7,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/live.hpp"
+#include "datapump/streaming_modem.hpp"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -30,11 +31,14 @@
 #endif
 
 using namespace datapump;
+#ifndef DATAPUMP_VERSION
+#define DATAPUMP_VERSION "0.2.0"
+#endif
 namespace {
-const char* usage=R"HELP(Data Pump 0.1 — civilian audio text and file modem
+const char* usage=R"HELP(Data Pump 0.2 — civilian audio text and file modem
 
 Usage: pump COMMAND [OPTIONS]
-  simulate     Encode, modulate, add seeded AWGN, acquire, correct and verify
+  simulate     Accelerated AWGN loopback; --output WAV uses raw sampled audio
   listen       Continuous live receiver (or noise/loopback with --simulation)
   estimate     Calculate exact message airtime without creating a waveform
   tx           Encode text/file to WAV (--output) or live audio (--device)
@@ -61,14 +65,16 @@ Modem:
   --bw HZ               Nominal bandwidth, default1200 (also 1.2kHz etc.)
   --sample-rate HZ      Manual sample rate, 8000..384000; default48000
   --carrier HZ          Default1500 (bandwidth/2+1000 for wide bandwidths)
-  --spreading N         Chips per dibit, 1..16384; default1
+  --spreading N         Chips per 4-bit APSK symbol, 1..16384; default1
   --target-snr DBHZ     Automatic integration target C/N0; default40
   --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Independent encrypted direct-sequence spreading
   --fec 20|60|off        Reed-Solomon parity overhead, default20
   --no-compression      Diagnostic override; normal compression is automatic
-  --memory-mb N         Buffer budget, default256 MiB
+  --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
+  --cache-mb N          Received content/input limit, default256 MiB
+  --dsp-mb N            Independent streaming DSP workspace, default64 MiB
   --keyfile PATH        Symmetric keyfile; encrypted preamble, frame, FEC
   --key-name NAME       Select a named key set (default: first)
   --key-names A,B,C     Names to create with keygen (default: Default)
@@ -109,7 +115,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","pattern","simulation","key-name","key-names"};
+            "target-snr","pattern","simulation","key-name","key-names","cache-mb","dsp-mb"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -179,6 +185,16 @@ std::size_t budget(const Args& a) {
     if(mb==0 || mb>4096) throw Error("memory-mb must be 1..4096");
     return static_cast<std::size_t>(mb*1024*1024);
 }
+std::size_t content_budget(const Args& a) {
+    const auto mb=a.integer("cache-mb",256);
+    if(!mb || mb>4096)throw Error("cache-mb must be 1..4096");
+    return static_cast<std::size_t>(mb*1024*1024);
+}
+std::size_t dsp_budget(const Args& a) {
+    const auto mb=a.integer("dsp-mb",64);
+    if(!mb || mb>1024)throw Error("dsp-mb must be 1..1024");
+    return static_cast<std::size_t>(mb*1024*1024);
+}
 modem::Config config(const Args& a) {
     modem::Config c;
     c.bandwidth_hz=a.number("bw",1200);
@@ -218,6 +234,8 @@ std::optional<Crypto> key(const Args& a) {
 transfer::Options transfer_options(const Args& a,const modem::Config& c,const std::optional<Crypto>& k,std::uint64_t timestamp) {
     transfer::Options options;
     options.modem=c;
+    options.content_limit=content_budget(a);
+    options.dsp_workspace_bytes=dsp_budget(a);
     options.key=k;
     options.timestamp=timestamp;
     const auto window=a.integer("search-seconds",6);
@@ -233,10 +251,11 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
 }
 Bytes input_bytes(const Args& a) {
     auto path=a.get("input","-");
-    if(path=="-") return read_bounded(std::cin,budget(a));
+    const auto limit=a.command=="unpack"?transfer::packet_workspace_limit(content_budget(a)):content_budget(a);
+    if(path=="-") return read_bounded(std::cin,limit);
     std::ifstream input(path,std::ios::binary);
     if(!input) throw Error("cannot open input: "+path);
-    return read_bounded(input,budget(a));
+    return read_bounded(input,limit);
 }
 Message message(const Args& a) {
     if(a.has("text") && a.has("input")) throw Error("choose --text or --input");
@@ -250,7 +269,7 @@ Message message(const Args& a) {
     else throw Error("unknown message kind");
     if(m.kind!=MessageKind::text) m.filename=a.get("filename",std::filesystem::path(a.get("input")).filename().string());
     m.callsign=a.get("callsign");m.grid=a.get("grid");m.repeatable=a.has("repeatable");
-    if(m.data.size()>budget(a)) throw Error("message exceeds memory budget");
+    if(m.data.size()>content_budget(a)) throw Error("message exceeds content limit");
     return m;
 }
 modem::Wav input_wav(const Args& a) {
@@ -277,7 +296,7 @@ void output_wave(const Args& a,const std::vector<float>& samples,const modem::Co
         auto delay=a.number("tx-delay",6);
         if(delay<0 || delay>3600) throw Error("tx-delay must be0..3600 seconds");
         audio::play(samples,c.sample_rate,a.get("device"));
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+        if(a.has("keyfile"))std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
 std::string id_string(const Message& m) {
@@ -318,6 +337,8 @@ void interrupt_handler(int) {interrupted=1;}
 void listen(const Args& a,const transfer::Options& options) {
     live::Settings settings;
     settings.transfer=options;
+    settings.content_limit=content_budget(a);
+    settings.dsp_workspace_bytes=dsp_budget(a);
     if(!a.has("time")) settings.transfer.timestamp=0;
     settings.device=a.get("device","default");
     if(a.has("simulation")) {
@@ -352,6 +373,10 @@ void listen(const Args& a,const transfer::Options& options) {
         if(a.has("json") && a.has("progress")) {
             std::cout<<"{\"event\":\"signal\",\"sequence\":"<<snapshot.sequence
                 <<",\"samples_received\":"<<snapshot.samples_received
+                <<",\"virtual_seconds\":"<<snapshot.virtual_seconds
+                <<",\"transmission_seconds\":"<<snapshot.transmission_seconds
+                <<",\"transmission_fraction\":"<<snapshot.transmission_fraction
+                <<",\"dsp_buffered_bytes\":"<<snapshot.dsp_buffered_bytes
                 <<",\"simulation\":"<<(snapshot.simulation?"true":"false")
                 <<",\"transmitting\":"<<(snapshot.transmitting?"true":"false")<<"}\n";
             for(const auto& signal:snapshot.signals) if(!signal.validated) {
@@ -376,7 +401,7 @@ int main(int argc,char** argv) {
         _setmode(_fileno(stdin),_O_BINARY);_setmode(_fileno(stdout),_O_BINARY);
 #endif
         Args a(argc,argv);
-        if(a.has("version")) {std::cout<<"Data Pump 0.1.0\n";return 0;}
+        if(a.has("version")) {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<'\n';return 0;}
         if(a.has("help") || a.command.empty()) {std::cout<<usage;return 0;}
         a.validate_options();
         if(a.command=="qr") {
@@ -416,15 +441,20 @@ int main(int argc,char** argv) {
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="estimate") {
             const auto result=transfer::estimate(message(a),settings);
-            std::cout<<"{\"packet_bytes\":"<<result.packet_bytes<<",\"content_bytes\":"<<result.content_bytes
+            std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
+                <<"{\"packet_bytes\":"<<result.packet_bytes<<",\"content_bytes\":"<<result.content_bytes
                 <<",\"packet_seconds\":"<<result.packet_seconds<<",\"content_seconds\":"<<result.content_seconds
                 <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
                 <<",\"spreading\":"<<c.spreading_factor
                 <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")
-                <<",\"memory_supported\":"<<(result.memory_supported?"true":"false");
+                <<",\"memory_supported\":"<<(result.memory_supported?"true":"false")
+                <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
             if(a.has("target-snr") || a.has("pattern")) {
-                const auto snr=a.number("target-snr",40)+10*std::log10(2/modem::bit_rate(c));
-                std::cout<<",\"estimated_symbol_snr_db\":"<<snr<<",\"target_supported\":"<<(snr+1e-10>=10?"true":"false");
+                const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",40),
+                    tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
+                std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
+                    <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)
+                    <<",\"target_supported\":"<<(plan.target_supported?"true":"false");
             }
             std::cout<<"}\n";
             return 0;
@@ -458,11 +488,17 @@ int main(int argc,char** argv) {
         if(a.command=="tx" && !a.has("output") && !a.has("device")) throw Error("tx requires --output WAV or explicit --device");
         if(a.command=="simulate" && a.has("device")) throw Error("simulation uses in-memory loopback; omit --device");
         if(a.command=="tx") {
-            const auto samples=transfer::transmit(message(a),settings);
-            output_wave(a,samples,c);
-            const auto total_bytes=static_cast<std::size_t>(std::llround(static_cast<double>(samples.size())*modem::bit_rate(c)/(8.0*c.sample_rate)));
-            const auto frame_bytes=total_bytes-modem::preamble(c).size();
-            std::cerr<<"Transmitted "<<frame_bytes<<" frame bytes, "<<static_cast<double>(samples.size())/c.sample_rate
+            const auto outgoing=message(a);
+            const auto estimate=transfer::estimate(outgoing,settings);
+            if(a.has("device")) {
+                const auto delay=a.number("tx-delay",6);
+                if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
+                modem::StreamingTransmitter source(transfer::transmission_wire(outgoing,settings),
+                    transfer::seeded_config(settings,timestamp),settings.dsp_workspace_bytes);
+                audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source.read(chunk);});
+                if(settings.key)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+            } else output_wave(a,transfer::transmit(outgoing,settings),c);
+            std::cerr<<"Transmitted "<<estimate.packet_bytes<<" frame bytes, "<<estimate.total_seconds
                      <<" seconds; start epoch "<<timestamp<<'\n';return 0;
         }
         modem::ChannelConfig channel;

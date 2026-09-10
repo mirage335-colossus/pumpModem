@@ -1,5 +1,7 @@
 #include "datapump/modem.hpp"
+#include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
+#include "constellation.hpp"
 #include <algorithm>
 #include <bit>
 #include <cmath>
@@ -17,7 +19,7 @@ namespace {
 using Complex = std::complex<double>;
 constexpr double tau = 2 * std::numbers::pi;
 constexpr double amplitude = 0.7;
-constexpr std::array<Complex, 4> shifts{{{1,0}, {0,1}, {0,-1}, {-1,0}}};
+
 void check(bool ok, const char* message) { if (!ok) throw Error(message); }
 void check_cancelled(const std::stop_token& stop) {
     if (stop.stop_requested()) throw Error("modem operation cancelled");
@@ -74,19 +76,6 @@ std::vector<int> signs(std::size_t chips, const Config& c, std::stop_token stop 
     }
     return out;
 }
-std::vector<Complex> phases(std::span<const std::uint8_t> bytes, std::stop_token stop = {}) {
-    std::vector<Complex> out;
-    out.reserve(bytes.size() * 4);
-    Complex phase{1, 0};
-    for (std::size_t i = 0; i < bytes.size(); ++i) {
-        periodic_cancel(i, stop);
-        for (int shift = 6; shift >= 0; shift -= 2) {
-            phase *= shifts[(bytes[i] >> shift) & 3];
-            out.push_back(phase);
-        }
-    }
-    return out;
-}
 void fft(std::vector<Complex>& data, bool inverse, std::stop_token stop = {}) {
     check_cancelled(stop);
     const std::size_t n = data.size();
@@ -122,117 +111,104 @@ std::size_t fft_size(std::size_t minimum, std::size_t limit, std::size_t bytes_p
     product(n, bytes_per_item, limit);
     return n;
 }
-// Integrate over one chip, sampled four times per chip. Mixing is phase blind:
-// absolute RF/audio phase is removed by differential matching below.
-std::vector<Complex> baseband(std::span<const float> samples, const Config& c, std::stop_token stop) {
-    check_cancelled(stop);
-    const auto chip = chip_samples(c), stride = chip / 4;
-    if (samples.size() < chip) return {};
-    std::vector<Complex> out;
-    out.reserve((samples.size() - chip) / stride + 1);
-    std::vector<Complex> ring(chip);
-    const auto step = std::polar(1.0, -tau * c.carrier_hz / c.sample_rate);
-    Complex oscillator{1,0}, sum{};
-    for (std::size_t i = 0; i < samples.size(); ++i) {
-        periodic_cancel(i, stop);
-        auto x = static_cast<double>(samples[i]) * oscillator;
-        oscillator *= step;
-        sum += x - ring[i % chip]; ring[i % chip] = x;
-        if (i + 1 >= chip && (i + 1 - chip) % stride == 0)
-            out.push_back(sum * (2.0 / static_cast<double>(chip)));
+// Generic raw-byte callers can acquire the known five-second training. Packet
+// services instead use StreamingReceiver's protected bootstrap blind search.
+DecodeResult known_training(std::span<const float> samples,const Config& c,
+                            std::span<const std::uint8_t> pre,std::stop_token stop) {
+    check(pre.size()==32,"16APSK expects a 32-byte training prefix");
+    const auto training=static_cast<std::size_t>(training_sample_count(c));
+    check(samples.size()>=training,"capture is shorter than training");
+    budget(c.memory_limit,{{samples.size(),sizeof(float)},{samples.size()+1,sizeof(Complex)},
+                           {8*1024*1024,1}});
+    std::array<Complex,64> expected{};
+    Complex phase{1,0};
+    for(std::size_t i=0;i<expected.size();++i) {
+        const auto bits=static_cast<unsigned>((pre[i/2]>>((i&1)?0:4))&15);
+        phase*=std::polar(1.,tau*detail::phase_steps[bits&7]/8);
+        expected[i]=phase*((bits&8)? .7:.35);
     }
-    return out;
-}
-std::vector<Complex> differential(const std::vector<Complex>& x, std::stop_token stop) {
-    check_cancelled(stop);
-    if (x.size() <= 4) return {};
-    std::vector<Complex> out(x.size() - 4);
-    for (std::size_t i = 0; i < out.size(); ++i) {
-        periodic_cancel(i, stop);
-        out[i] = x[i+4] * std::conj(x[i]);
-    }
-    return out;
-}
-struct Acquisition { std::size_t offset; double correlation; };
-Acquisition acquire(std::span<const float> samples, std::span<const float> reference, const Config& c, std::stop_token stop) {
-    auto signal = differential(baseband(samples, c, stop), stop);
-    auto expected = differential(baseband(reference, c, stop), stop);
-    check(!expected.empty() && signal.size() >= expected.size(), "capture shorter than preamble");
-    const auto signal_count = signal.size(), expected_count = expected.size();
-    // Two FFT buffers plus signal energy prefix, temporary baseband, and audio.
-    const auto n = fft_size(signal_count + expected_count - 1, c.memory_limit, 80);
-    std::vector<double> energy(signal_count + 1);
-    for (std::size_t i = 0; i < signal_count; ++i) {
-        periodic_cancel(i, stop);
-        energy[i+1] = energy[i] + std::norm(signal[i]);
-    }
-    double reference_energy = 0;
-    for (std::size_t i = 0; i < expected.size(); ++i) {
-        periodic_cancel(i, stop);
-        reference_energy += std::norm(expected[i]);
-    }
-    signal.resize(n); expected.resize(n);
-    fft(signal, false, stop); fft(expected, false, stop);
-    for (std::size_t i = 0; i < n; ++i) {
-        periodic_cancel(i, stop);
-        signal[i] *= std::conj(expected[i]);
-    }
-    fft(signal, true, stop);
-    Acquisition best{0, 0};
-    for (std::size_t offset = 0; offset + expected_count <= signal_count; ++offset) {
-        periodic_cancel(offset, stop);
-        const double denominator = std::sqrt(reference_energy * std::max(0.0, energy[offset+expected_count]-energy[offset]));
-        const double score = denominator > 1e-20 ? std::abs(signal[offset]) / denominator : 0;
-        if (score > best.correlation) best = {offset * (chip_samples(c) / 4), score};
-    }
-    check(best.correlation > 0.35, "no matching modem preamble found");
-    return best;
-}
-std::vector<Complex> symbols(std::span<const float> samples, std::size_t offset,
-                             std::size_t count, const Config& c, const std::vector<int>& code, std::stop_token stop) {
-    check_cancelled(stop);
-    const auto chip = chip_samples(c), duration = symbol_samples(c);
-    std::vector<Complex> out(count);
-    auto oscillator = std::polar(1.0, -tau * c.carrier_hz * static_cast<double>(offset) / c.sample_rate);
-    const auto step = std::polar(1.0, -tau * c.carrier_hz / c.sample_rate);
-    for (std::size_t j = 0; j < count; ++j) {
-        periodic_cancel(j, stop);
-        Complex sum{}; std::size_t actual = 0;
-        for (std::size_t k = 0; k < duration && offset < samples.size(); ++k, ++offset) {
-            periodic_cancel(offset, stop);
-            sum += static_cast<double>(samples[offset]) * oscillator * static_cast<double>(code[j*c.spreading_factor+k/chip]);
-            oscillator *= step; ++actual;
+    std::vector<Complex> prefix(samples.size()+1);
+    const auto mix=[&](double frequency) {
+        Complex oscillator{1,0};const auto step=std::polar(1.,-tau*frequency/c.sample_rate);
+        for(std::size_t i=0;i<samples.size();++i) {
+            periodic_cancel(i,stop);prefix[i+1]=prefix[i]+2.*static_cast<double>(samples[i])*oscillator;oscillator*=step;
         }
-        out[j] = actual ? sum * (2.0 / static_cast<double>(actual)) : Complex{};
+    };
+    mix(c.carrier_hz);
+    const auto points=[&](std::size_t offset) {
+        std::array<Complex,64> result{};
+        for(std::size_t i=0;i<result.size();++i) {
+            const auto begin=offset+training*i/64,end=offset+training*(i+1)/64;
+            result[i]=(prefix[end]-prefix[begin])/static_cast<double>(end-begin);
+        }
+        return result;
+    };
+    const auto differential=[&](std::size_t offset) {
+        const auto values=points(offset);Complex correlation{};double power=0;
+        for(std::size_t i=1;i<values.size();++i) {
+            const auto actual=values[i]*std::conj(values[i-1]);
+            const auto reference=expected[i]*std::conj(expected[i-1]);
+            correlation+=actual*std::conj(reference);power+=std::abs(actual*reference);
+        }
+        return std::pair{power>1e-20?std::abs(correlation)/power:0.,correlation};
+    };
+    std::size_t offset=0;double best=0;
+    const auto step=std::max<std::size_t>(1,training/64/32);
+    for(std::size_t candidate=0;candidate<=samples.size()-training;candidate+=step) {
+        check_cancelled(stop);const auto score=differential(candidate).first;
+        if(score>best){best=score;offset=candidate;}
     }
-    return out;
+    check(best>.82,"known 16APSK training does not validate");
+    const auto frequency_offset=std::arg(differential(offset).second)*c.sample_rate/(tau*static_cast<double>(training)/64);
+    mix(c.carrier_hz+frequency_offset);
+    const auto coherent=[&](std::size_t candidate) {
+        const auto values=points(candidate);Complex dot{};double signal=0,reference=0;
+        for(std::size_t i=0;i<values.size();++i) {dot+=values[i]*std::conj(expected[i]);signal+=std::norm(values[i]);reference+=std::norm(expected[i]);}
+        return std::pair{signal>1e-20?std::abs(dot)/std::sqrt(signal*reference):0.,dot/reference};
+    };
+    const auto lower=offset>2*step?offset-2*step:0,upper=std::min(samples.size()-training,offset+2*step);
+    double strongest=0;
+    for(std::size_t candidate=lower;candidate<=upper;++candidate) {
+        periodic_cancel(candidate,stop);const auto score=coherent(candidate);
+        if(std::abs(score.second)>strongest){strongest=std::abs(score.second);offset=candidate;}
+    }
+    best=coherent(offset).first;
+    check(best>.85,"known 16APSK training coherence is too low");
+    const auto gain=std::abs(coherent(offset).second);
+    const auto training_points=points(offset);
+    Complex previous=training_points.back();
+    const auto duration=static_cast<std::size_t>(symbol_sample_count(c)),chip=chip_samples(c);
+    const auto code=signs(c.spreading_factor,c,stop);
+    DecodeResult result;result.bytes.assign(pre.begin(),pre.end());
+    result.diagnostics.sample_offset=offset;result.diagnostics.bit_rate=bit_rate(c);
+    result.diagnostics.preamble_correlation=best;
+    const auto start=offset+training;
+    const auto remaining=samples.size()-start;
+    const auto count=remaining/duration+(remaining%duration!=0);
+    auto oscillator=std::polar(1.,tau*(c.carrier_hz+frequency_offset)*static_cast<double>(start)/c.sample_rate);
+    const auto rotation=std::polar(1.,tau*(c.carrier_hz+frequency_offset)/c.sample_rate);
+    double power=0,error=0;unsigned partial=0;
+    for(std::size_t symbol=0;symbol<count;++symbol) {
+        check_cancelled(stop);double xc=0,xs=0,cc=0,ss=0,cs=0;
+        for(std::size_t i=0;i<duration;++i) {
+            periodic_cancel(i,stop);const double cosine=oscillator.real(),sine=oscillator.imag();
+            const auto position=start+symbol*duration+i;
+            const auto sample=position<samples.size()?static_cast<double>(samples[position])*code[(i/chip)%code.size()]:0.;
+            xc+=sample*cosine;xs+=sample*sine;cc+=cosine*cosine;ss+=sine*sine;cs+=cosine*sine;oscillator*=rotation;
+        }
+        const double determinant=cc*ss-cs*cs;
+        check(determinant>1e-12,"carrier quadratures are singular");
+        const Complex point{(xc*ss-xs*cs)/determinant,-(xs*cc-xc*cs)/determinant};
+        const auto bits=detail::nibble(point,previous,gain);
+        const auto ideal=std::polar(gain*((bits&8)? .7:.35),std::arg(previous)+tau*detail::phase_steps[bits&7]/8);
+        power+=std::norm(ideal);error+=std::norm(point-ideal);previous=point;
+        if((symbol&1)==0)partial=bits<<4;else result.bytes.push_back(static_cast<std::uint8_t>(partial|bits));
+        if(result.diagnostics.constellation.size()<2048)result.diagnostics.constellation.push_back(point/gain);
+    }
+    result.diagnostics.snr_db=10*std::log10(std::max(power,1e-20)/std::max(error,1e-20));
+    return result;
 }
-struct Fit { double score; double rotation; Complex gain; };
-Fit fit(const std::vector<Complex>& received, const std::vector<Complex>& expected, std::stop_token stop) {
-    // Regress the unwrapped phase of known training symbols. Averaging raw
-    // adjacent products biases long-preamble timing toward accidental noise.
-    double sx = 0, sy = 0, sxx = 0, sxy = 0, previous = 0, unwrapped = 0;
-    for (std::size_t i = 0; i < expected.size(); ++i) {
-        periodic_cancel(i, stop);
-        const double phase = std::arg(received[i] * std::conj(expected[i]));
-        if (i == 0) unwrapped = phase;
-        else unwrapped += std::remainder(phase - previous, tau);
-        previous = phase;
-        const double x = static_cast<double>(i);
-        sx += x; sy += unwrapped; sxx += x*x; sxy += x*unwrapped;
-    }
-    const double n = static_cast<double>(expected.size());
-    const double denominator = n*sxx - sx*sx;
-    const double angle = denominator > 0 ? (n*sxy - sx*sy) / denominator : 0;
-    Complex sum{}; double energy = 0;
-    for (std::size_t i = 0; i < expected.size(); ++i) {
-        periodic_cancel(i, stop);
-        sum += received[i] * std::conj(expected[i]) * std::polar(1.0, -angle * static_cast<double>(i));
-        energy += std::norm(received[i]);
-    }
-    return {energy > 1e-20 ? std::norm(sum) / (energy * static_cast<double>(expected.size())) : 0,
-            angle, sum / static_cast<double>(expected.size())};
-}
+
 void put16(std::ostream& out, std::uint16_t value) {
     const char b[2]{static_cast<char>(value), static_cast<char>(value >> 8)}; out.write(b,2);
 }
@@ -257,8 +233,10 @@ void validate(const Config& c) {
     check(std::isfinite(c.carrier_hz) && c.carrier_hz >= c.bandwidth_hz / 2 &&
           c.carrier_hz + c.bandwidth_hz / 2 <= c.sample_rate / 2.0,
           "carrier and bandwidth must fit inside audio passband");
-    check(std::isfinite(c.training_seconds) && c.training_seconds >= 5 && c.training_seconds <= 32768,
-          "training must last 5..32768 seconds");
+    check(std::isfinite(c.training_seconds) && c.training_seconds == 5,
+          "normal training duration is fixed at 5 seconds");
+    check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");
+    (void)symbol_sample_count(c);
     check(c.spreading_factor >= 1 && c.spreading_factor <= 16384, "spreading factor must be 1..16384");
     check(c.spreading_mode == SpreadingMode::pattern || c.spreading_mode == SpreadingMode::tone,"unknown spreading mode");
     check(c.spreading_mode != SpreadingMode::tone || !c.scramble,"tone mode cannot enable pattern keystream scrambling");
@@ -266,142 +244,58 @@ void validate(const Config& c) {
     check(chip_samples(c) >= 4, "chip sampling is too fast");
     product(chip_samples(c), c.spreading_factor, std::numeric_limits<std::size_t>::max());
 }
-double bit_rate(const Config& c) { validate(c); return 2.0 * c.sample_rate / static_cast<double>(symbol_samples(c)); }
+std::uint64_t symbol_sample_count(const Config& c) {
+    if(c.integration_seconds>0) {
+        const long double samples=std::ceil(static_cast<long double>(c.integration_seconds)*c.sample_rate);
+        check(samples>=4 && samples<static_cast<long double>(std::numeric_limits<std::uint64_t>::max()),"integration duration exceeds 64-bit sample counter");
+        return static_cast<std::uint64_t>(samples);
+    }
+    return static_cast<std::uint64_t>(chip_samples(c))*c.spreading_factor;
+}
+std::uint64_t training_sample_count(const Config& c) { return static_cast<std::uint64_t>(c.sample_rate)*5; }
+double symbol_seconds(const Config& c) { validate(c); return static_cast<double>(symbol_sample_count(c))/c.sample_rate; }
+double bit_rate(const Config& c) { return bits_per_symbol/symbol_seconds(c); }
 std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
-    validate(c);
-    const auto symbols=product(wire_bytes,4,std::numeric_limits<std::size_t>::max());
-    return product(symbols,symbol_samples(c),std::numeric_limits<std::size_t>::max());
+    validate(c);check(wire_bytes>=32,"16APSK wire requires the 32-byte training prefix");
+    const auto count=product(wire_bytes-32,2,std::numeric_limits<std::size_t>::max());
+    const auto duration=symbol_sample_count(c);
+    check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
+    const auto payload=product(count,static_cast<std::size_t>(duration),std::numeric_limits<std::size_t>::max());
+    const auto training=training_sample_count(c);
+    check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");
+    return payload+static_cast<std::size_t>(training);
 }
 bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Config& c) {
     validate(c);
     try {
-        check(preamble_bytes>0 && wire_bytes>=preamble_bytes,"invalid estimated training length");
-        const auto symbols=product(wire_bytes,4,c.memory_limit);
+        check(preamble_bytes==32 && wire_bytes>=32,"invalid estimated training length");
         const auto samples=waveform_sample_count(wire_bytes,c);
-        const auto training_symbols=product(preamble_bytes,4,c.memory_limit);
-        const auto training_samples=waveform_sample_count(preamble_bytes,c);
-        const auto spread_chips=product(symbols,c.spreading_factor,c.memory_limit);
-        budget(c.memory_limit,{{samples,sizeof(float)},{symbols,sizeof(Complex)},{spread_chips,sizeof(int)},{(spread_chips+7)/8,1}});
-        const auto chip=chip_samples(c),stride=chip/4;
-        const auto signal_bins=(samples-chip)/stride+1,training_bins=(training_samples-chip)/stride+1;
-        const auto fft_count=fft_size(signal_bins+training_bins,c.memory_limit,sizeof(Complex));
-        budget(c.memory_limit,{{samples,sizeof(float)},{training_samples,sizeof(float)},{fft_count,64},{chip,sizeof(Complex)}});
-        // acquire() also checks an 80-byte bound on the slightly shorter
-        // differential correlation FFT, before allocating its work buffers.
-        fft_size(signal_bins+training_bins-9,c.memory_limit,80);
-        budget(c.memory_limit,{{samples,sizeof(float)},{training_samples,sizeof(float)},
-                              {symbols,sizeof(Complex)},{training_symbols,sizeof(Complex)*2},{spread_chips,sizeof(int)+1}});
+        budget(c.memory_limit,{{samples,sizeof(float)+sizeof(Complex)},{wire_bytes,2},{8*1024*1024,1}});
         return true;
     } catch(const Error&) {return false;}
 }
 Bytes preamble(const Config& c) {
     validate(c);
-    const auto length = std::max<std::size_t>(12, static_cast<std::size_t>(std::ceil(c.training_seconds * bit_rate(c) / 8)));
-    product(length, 1, c.memory_limit);
-    constexpr std::array<std::uint8_t, 6> text{'U','3','<','Z','i','f'};
-    Bytes out(length);
-    for (std::size_t i = 0; i < length; ++i) out[i] = text[i % text.size()];
-    return out;
+    return {0x53,0x19,0xa7,0xe2,0x86,0xd4,0x3b,0x0f,0x65,0x92,0xce,0x48,0x71,0xad,0xf0,0x26,
+            0xb8,0x4d,0x03,0xe7,0x9a,0x61,0x35,0xcf,0x28,0xd0,0x7e,0x94,0xab,0x16,0xf3,0x59};
 }
 std::vector<float> modulate(std::span<const std::uint8_t> bytes, const Config& c, std::stop_token stop) {
-    check_cancelled(stop);
-    validate(c);
-    const auto count = product(bytes.size(), 4, c.memory_limit);
-    const auto chip = chip_samples(c), duration = symbol_samples(c);
-    const auto sample_count = product(count, duration, c.memory_limit / sizeof(float));
-    budget(c.memory_limit, {{sample_count,sizeof(float)}, {count,sizeof(Complex)},
-                             {count*c.spreading_factor,sizeof(int)}, {(count*c.spreading_factor+7)/8,1}});
-    const auto code = signs(count * c.spreading_factor, c, stop);
-    const auto phase = phases(bytes, stop);
-    std::vector<float> out(sample_count);
-    const auto step = std::polar(1.0, tau * c.carrier_hz / c.sample_rate);
-    Complex oscillator{1, 0};
-    for (std::size_t i = 0; i < sample_count; ++i) {
-        periodic_cancel(i, stop);
-        out[i] = static_cast<float>(amplitude * (phase[i / duration] * oscillator).real() * code[i / chip]);
-        oscillator *= step;
-    }
-    check_cancelled(stop);
-    return out;
+    check_cancelled(stop); validate(c);
+    const auto count=waveform_sample_count(bytes.size(),c);
+    budget(c.memory_limit,{{count,sizeof(float)},{bytes.size(),2},{65536,1}});
+    StreamingTransmitter source(Bytes(bytes.begin(),bytes.end()),c);
+    std::vector<float> result(count);
+    std::size_t position=0;
+    while(position<result.size())position+=source.read(std::span(result).subspan(position,std::min<std::size_t>(4096,result.size()-position)),stop);
+    return result;
 }
 DecodeResult demodulate(std::span<const float> samples, const Config& c,
                         std::span<const std::uint8_t> expected_preamble, std::stop_token stop) {
-    check_cancelled(stop);
-    validate(c); finite_samples(samples, c.memory_limit, stop);
-    check(!expected_preamble.empty(), "expected preamble is required");
-    const auto duration = symbol_samples(c), chip = chip_samples(c);
-    const auto training_symbols = product(expected_preamble.size(),4,c.memory_limit);
-    const auto training_samples = product(training_symbols,duration,c.memory_limit/sizeof(float));
-    check(samples.size() >= training_samples, "capture shorter than preamble");
-    const auto stride = chip/4;
-    const auto signal_bins = (samples.size()-chip)/stride+1;
-    const auto training_bins = (training_samples-chip)/stride+1;
-    const auto fft_count = fft_size(signal_bins+training_bins,c.memory_limit,sizeof(Complex));
-    // Bound every large allocation before materializing baseband or FFT arrays.
-    // 64 bytes per FFT item covers two FFTs, energy prefixes, and temporary
-    // baseband/differential copies, with input and reference audio accounted too.
-    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {training_samples,sizeof(float)},
-                             {fft_count,64}, {chip,sizeof(Complex)}});
-    const auto maximum_symbols = (samples.size()+duration/2)/duration;
-    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {training_samples,sizeof(float)},
-                             {maximum_symbols,sizeof(Complex)}, {training_symbols,sizeof(Complex)*2},
-                             {maximum_symbols*c.spreading_factor,sizeof(int)+1}});
-    const auto reference = modulate(expected_preamble, c, stop);
-    const auto acquired = acquire(samples, reference, c, stop);
-    const auto expected = phases(expected_preamble, stop);
-    const auto code = signs(((samples.size() + duration / 2) / duration) * c.spreading_factor, c, stop);
-    auto radius = chip / 4;
-    Fit best{0,0,{}}; std::size_t start = acquired.offset;
-    // Hierarchical refinement bounds trial count even for multi-second chips.
-    // Each stage evaluates at most 17 candidates, ending at single samples.
-    for (;;) {
-        check_cancelled(stop);
-        const auto step = std::max<std::size_t>(1,radius/8);
-        const auto low = start > radius ? start-radius : 0;
-        const auto high = std::min(start+radius,samples.size()-reference.size());
-        for (std::size_t trial = low;; trial = std::min(high,trial+step)) {
-            const auto received = symbols(samples,trial,expected.size(),c,code,stop);
-            const auto candidate = fit(received,expected,stop);
-            if (candidate.score > best.score) { best = candidate; start = trial; }
-            if (trial == high) break;
-        }
-        if (step == 1) break;
-        radius = step;
-    }
-    check(best.score >= .60, "preamble does not validate after timing search");
-    const auto count = ((samples.size() - start + chip / 2) / duration / 4) * 4;
-    auto received = symbols(samples, start, count, c, code, stop);
-    DecodeResult out;
-    out.bytes.resize(count / 4);
-    Complex previous = best.gain;
-    double error_energy = 0, signal_energy = 0;
-    for (std::size_t j = 0; j < count; ++j) {
-        periodic_cancel(j, stop);
-        const auto point = received[j] * std::polar(1.0, -best.rotation * static_cast<double>(j));
-        const auto delta = point * std::conj(previous);
-        unsigned closest = 0; double distance = -std::numeric_limits<double>::infinity();
-        for (unsigned k = 0; k < 4; ++k) {
-            const double score = (delta * std::conj(shifts[k])).real();
-            if (score > distance) { distance = score; closest = k; }
-        }
-        out.bytes[j/4] |= static_cast<std::uint8_t>(closest << (6 - 2 * (j % 4)));
-        if (out.diagnostics.constellation.size() < 2048)
-            out.diagnostics.constellation.push_back(std::abs(delta) > 1e-20 ? delta / std::abs(delta) : Complex{});
-        if (j < expected.size()) {
-            signal_energy += std::norm(best.gain);
-            error_energy += std::norm(point - best.gain * expected[j]);
-        }
-        previous = point;
-    }
-    out.diagnostics.sample_offset = start;
-    out.diagnostics.preamble_correlation = std::sqrt(best.score);
-    out.diagnostics.snr_db = 10 * std::log10(signal_energy / std::max(error_energy, 1e-20));
-    out.diagnostics.bit_rate = bit_rate(c);
-    const auto display_stride = std::max<std::size_t>(1, samples.size() / 2048);
-    for (std::size_t i = 0; i < samples.size() && out.diagnostics.waveform.size() < 2048; i += display_stride)
-        out.diagnostics.waveform.push_back(samples[i]);
-    check_cancelled(stop);
-    return out;
+    check_cancelled(stop); validate(c); finite_samples(samples,c.memory_limit,stop);
+    auto result=known_training(samples,c,expected_preamble,stop);
+    for(std::size_t i=0,stride=std::max<std::size_t>(1,samples.size()/2048);i<samples.size() && result.diagnostics.waveform.size()<2048;i+=stride)
+        result.diagnostics.waveform.push_back(samples[i]);
+    return result;
 }
 std::vector<float> simulate(std::span<const float> samples, const Config& c, const ChannelConfig& channel) {
     validate(c); finite_samples(samples, c.memory_limit);

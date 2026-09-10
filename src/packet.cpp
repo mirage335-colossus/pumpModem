@@ -573,6 +573,31 @@ Bytes encode_packet(const Message& message, const PacketOptions& options, std::s
     return result;
 }
 
+bool packet_bootstrap_possible(const Bytes& prefix,std::size_t max_memory) {
+    if(prefix.size()<header_size)return true;
+    unsigned contradictions=0;
+    constexpr std::array<std::uint8_t,4> magic{'D','P','0','1'};
+    for(std::size_t i=0;i<magic.size();++i)contradictions+=prefix[i]!=magic[i];
+    contradictions+=prefix[4]!=1 && prefix[4]!=2;
+    contradictions+=prefix[5]>static_cast<std::uint8_t>(FecMode::rs60);
+    contradictions+=(prefix[6]&~std::uint8_t{7})!=0;
+    contradictions+=prefix[7]>static_cast<std::uint8_t>(MessageKind::screenshot);
+    contradictions+=prefix[32]!=0;
+    contradictions+=prefix[33]!=tag_size;
+    contradictions+=prefix[34]!=0;
+    contradictions+=prefix[35]!=0;
+    // Only the leading bytes provably zero for every admissible integer are
+    // counted. Relations between fields and CRC bytes are deliberately omitted:
+    // one corrupt input byte can violate several such relations at once.
+    const auto bound=static_cast<std::uint64_t>(max_memory);
+    for(unsigned byte=0;byte<8;++byte) {
+        const unsigned shift=(7-byte)*8;
+        if((bound>>shift)!=0)break;
+        for(const auto offset:{8U,16U,24U})contradictions+=prefix[offset+byte]!=0;
+    }
+    return contradictions<=header_parity/2;
+}
+
 std::optional<std::size_t> packet_frame_size(const Bytes& prefix, std::size_t max_memory) {
     if (prefix.size() < packet_prefix_size) return std::nullopt;
     return read_header(prefix, max_memory).wire_length;

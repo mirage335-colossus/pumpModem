@@ -2,6 +2,7 @@
 #include <openssl/evp.h>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <random>
 #include <stdexcept>
 
@@ -51,6 +52,41 @@ void test_rs() {
         for (std::size_t i = 0; i < count; ++i) damaged[positions[i]] ^= static_cast<std::uint8_t>(1 + random() % 255);
         check(packet_codec::rs_correct(damaged, parity) == count && damaged == pristine, "seeded shortened RS properties");
     }
+}
+void test_bootstrap_prefilter() {
+    std::mt19937 random(9173);
+    for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        PacketOptions options;options.fec=fec;
+        for(const auto length:{0U,100U,300U}) {
+            auto message=text_message(std::string(length,'e'));message.id[0]=37;
+            auto prefix=encode_packet(message,options);prefix.resize(packet_prefix_size);
+            check(packet_bootstrap_possible(prefix),"valid bootstrap rejected by prefilter");
+            for(std::size_t offset=0;offset<prefix.size();++offset)
+                for(unsigned delta=1;delta<256;++delta) {
+                    auto damaged=prefix;damaged[offset]^=static_cast<std::uint8_t>(delta);
+                    check(packet_bootstrap_possible(damaged),"single-byte correctable bootstrap rejected");
+                }
+            for(unsigned trial=0;trial<100;++trial) {
+                auto damaged=prefix;std::array<std::size_t,packet_prefix_size> positions{};
+                for(std::size_t i=0;i<positions.size();++i)positions[i]=i;
+                std::shuffle(positions.begin(),positions.end(),random);
+                for(std::size_t i=0;i<16;++i)damaged[positions[i]]^=static_cast<std::uint8_t>(1+random()%255);
+                check(packet_bootstrap_possible(damaged),"prefilter reduces the RS sixteen-byte correction budget");
+                check(packet_frame_size(damaged)==packet_frame_size(prefix),"prefilter preserved correctable frame size");
+            }
+        }
+    }
+    check(packet_bootstrap_possible({}),"incomplete header must not be prematurely rejected");
+    unsigned rejected=0;
+    for(unsigned trial=0;trial<1000;++trial) {
+        Bytes noise(packet_prefix_size);for(auto& byte:noise)byte=static_cast<std::uint8_t>(random());
+        rejected+=!packet_bootstrap_possible(noise);
+    }
+    check(rejected>990,"prefilter fails to cheaply reject independent noise");
+    // No leading length byte is mandatory zero when the bound spans uint64.
+    // The filter must remain conservative even when this removes its power.
+    if constexpr(sizeof(std::size_t)==8)check(packet_bootstrap_possible(Bytes(packet_prefix_size,0xff),std::numeric_limits<std::size_t>::max()),
+          "unbounded length prefilter counted non-mandatory zeros");
 }
 void test_compression() {
     // Frozen prefix-code vector: 000 space, 001 e, 010 t, then zero padding.
@@ -275,7 +311,7 @@ void test_adversarial_metadata() {
 }
 int main() {
     try {
-        test_rs(); test_compression(); test_partial_preview(); test_packets(); test_corruption(); test_authentication(); test_filenames(); test_adversarial_metadata();
+        test_rs(); test_bootstrap_prefilter(); test_compression(); test_partial_preview(); test_packets(); test_corruption(); test_authentication(); test_filenames(); test_adversarial_metadata();
         std::cout << "packet tests passed\n";
         return 0;
     } catch (const std::exception& error) {

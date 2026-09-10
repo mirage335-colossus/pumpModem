@@ -5,6 +5,8 @@ No decoded address selects a network endpoint. No received command is executed,
 no received filename selects a write path, and no received file is auto-opened.
 The native GUI calls the C++ transfer service directly without a subprocess or
 shell. File saves require a user-selected path and exclusive creation.
+Release 0.2 changes the physical waveform from DQPSK to differential 16-APSK;
+packet integrity/authentication and existing keyfile formats are unchanged.
 
 The protected computer still trusts its audio/ADC hardware, firmware, operating
 system drivers, and application runtime. Audio modulation does not prove the
@@ -25,7 +27,9 @@ part of the authenticated user message and is not signed.
 The live ticker can display provisional text before the footer arrives. This is
 explicitly unvalidated: partial bootstrap correction and metadata checks do not
 establish integrity or authentication. Only a complete verified frame enters the
-received-message cache and normal save/copy workflow. Diagnostic CLI previews
+received-message cache. Verified text is eligible for strict UTF-8 clipboard
+copy; only verified files and screenshots enter the explicit-save list. A file
+containing valid text is still a file. Diagnostic CLI previews
 likewise carry `validated:false` and are base64 encoded.
 
 Text written directly to a terminal escapes control characters that could
@@ -37,7 +41,7 @@ also requires valid UTF8 and refuses to silently replace binary bytes.
 Encrypted on-air ordering is:
 
 ```
-AES256-CTR(balanced training || RS-protected bootstrap ||
+AES256-CTR(known training || RS-protected bootstrap ||
            interleaved RS(plaintext content || HMAC(context || metadata || content)))
 ```
 
@@ -49,7 +53,9 @@ unauthenticated and cannot establish identity.
 
 Repeating a timestamp under the same shared key repeats stream positions. This
 can expose matching portions of plaintexts but does not replace the independent
-MAC. Users sharing a key must coordinate large sends; GUI cooldown does not
+MAC. The GUI's six-second cooldown applies only to actual encrypted output;
+simulation and unencrypted output retain the one-active-TX rule without this
+delay. Users sharing a key must coordinate large sends; GUI cooldown does not
 coordinate separate hosts. Replay within the clock window remains possible.
 Packet IDs allow external scripts to deduplicate repeat requests but do not
 constitute durable anti-replay state.
@@ -58,9 +64,24 @@ The cache is RAM-only at the application level. OS swapping, hibernation, core
 dumps, terminal scrollback, explicit redirection, and clipboard managers may
 persist content outside the application. Key buffers are cleansed where
 practical; the entire process memory is not locked or scrubbed. Very large
-captures or inputs are bounded and can be rejected before processing. The
-configured workspace limits are conservative per operation, not a total process
-resource sandbox. Continuous reception is local audio only; there is no network API, built-in
+inputs are bounded and can be rejected before processing. Continuous TX/RX uses
+bounded chunks/integrals, with a default 64 MiB DSP budget distinct from the
+256 MiB content/cache limits. Packet coding scratch is checked separately from
+DSP. A long symbol does not require retaining its whole PCM duration; legacy
+batch PCM/WAV calls still have full-waveform allocation limits. These bounds are
+not a total process resource sandbox or a guarantee against CPU exhaustion.
+
+Actual acquisition evaluates a finite timing/key/epoch bank at one carrier.
+Too many candidate receivers can exceed the configured workspace and fail
+explicitly. Successful symbol correlation is never sufficient to accept content.
+Accelerated simulation supplies ideal carrier/symbol timing and integrated AWGN;
+it still runs packet decoding and integrity/authentication, but success there
+does not validate arbitrary physical acquisition or receiver sensitivity. Blind
+protected-bootstrap acquisition avoids requiring detectable five-second training
+when payload symbols are much longer. Bootstrap correction remains provisional
+until complete packet digest/MAC verification succeeds.
+
+Continuous reception is local audio only; there is no network API, built-in
 repeater, or automatic radio-control channel.
 
 Automated tests and review do not substitute for an independent security audit.

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <memory>
+#include <string_view>
 #include <thread>
 #include <chrono>
 #include <cerrno>
@@ -66,11 +67,57 @@ struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
     Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,bool nonblocking=false):api(a) {
         if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
-        if(api.open(&pcm,device.empty()?"default":device.c_str(),direction,nonblocking?1:0)<0) throw Error("cannot open audio device: "+device);
-        // ALSA S16_LE=2, RW_INTERLEAVED=3, mono, 100ms latency.
-        if(api.set_params(pcm,2,3,1,rate,1,100000)<0) {
-            api.close(pcm);pcm=nullptr;throw Error("audio device rejected PCM16 mono format");
+        const auto requested=device.empty()?std::string("default"):device;
+        std::string attempted;
+        const auto try_device=[&](const std::string& name) {
+            if(!attempted.empty())attempted+=", ";
+            attempted+=name;
+            if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
+            // ALSA plug/default endpoints may convert to the hardware format.
+            if(api.set_params(pcm,2,3,1,rate,1,100000)>=0)return true;
+            api.close(pcm);pcm=nullptr;return false;
+        };
+        if(try_device(requested))return;
+        if(requested=="default") {
+            void** hints=nullptr;
+            if(api.hint(-1,"pcm",&hints)>=0) {
+                const auto release=[&](void** value){if(value)api.free_hint(value);};
+                std::unique_ptr<void*,decltype(release)> guard(hints,release);
+                struct Endpoint {std::string name;bool duplex;};
+                std::vector<Endpoint> defaults,system_defaults,converters;
+                const auto card=[](std::string_view name) {
+                    const auto start=name.find("CARD=");
+                    if(start==std::string_view::npos)return std::string{};
+                    const auto end=name.find(',',start);
+                    return std::string(name.substr(start,end==std::string_view::npos?end:end-start));
+                };
+                for(auto** hint=hints;hint && *hint;++hint) {
+                    std::unique_ptr<char,decltype(&std::free)> name(api.get_hint(*hint,"NAME"),std::free);
+                    std::unique_ptr<char,decltype(&std::free)> io(api.get_hint(*hint,"IOID"),std::free);
+                    const bool duplex=!io || std::string_view(io.get()).empty();
+                    if(!name || (!duplex && std::string_view(io.get())!=(direction?"Input":"Output")))continue;
+                    const std::string value=name.get();
+                    auto* group=value.starts_with("default:")?&defaults:value.starts_with("sysdefault:")?&system_defaults:value.starts_with("plughw:")?&converters:nullptr;
+                    if(group && std::none_of(group->begin(),group->end(),[&](const auto& endpoint){return endpoint.name==value;}))
+                        group->push_back({value,duplex});
+                }
+                // A modem needs both directions. Prefer the same duplex card
+                // over an earlier output-only HDMI default. Within that card,
+                // conversion may be necessary for the 96 kHz bandwidth preset.
+                for(const bool duplex:{true,false}) {
+                    for(const auto& endpoint:defaults)if(endpoint.duplex==duplex && try_device(endpoint.name))return;
+                    for(const auto& endpoint:system_defaults)if(endpoint.duplex==duplex && try_device(endpoint.name))return;
+                    for(const auto& endpoint:converters) {
+                        const auto candidate=card(endpoint.name);
+                        const auto matches=[&](const Endpoint& id){return id.duplex==duplex && card(id.name)==candidate;};
+                        if(!candidate.empty() && (std::any_of(defaults.begin(),defaults.end(),matches) ||
+                           std::any_of(system_defaults.begin(),system_defaults.end(),matches)))
+                            if(try_device(endpoint.name))return;
+                    }
+                }
+            }
         }
+        throw Error("cannot open audio device at "+std::to_string(rate)+" Hz (tried "+attempted+")");
     }
     ~Stream(){if(pcm) api.close(pcm);}
 };
@@ -87,25 +134,32 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop) {
     check_cancelled(stop);
+    if(!next_samples)throw Error("playback callback is required");
     Alsa api; Stream stream(api,device,0,rate);
     std::vector<std::int16_t> block(4096);
     const auto chunk_limit=std::min<std::size_t>(block.size(),rate/20);
-    std::size_t offset=0;
+    std::vector<float> samples(chunk_limit);
     unsigned failures=0;
-    while(offset<samples.size()) {
+    while(true) {
         check_cancelled(stop);
-        auto count=std::min(chunk_limit,samples.size()-offset);
+        const auto count=next_samples(samples);
+        if(count>samples.size())throw Error("playback callback returned invalid sample count");
+        if(!count)break;
         for(std::size_t i=0;i<count;++i) {
-            if(!std::isfinite(samples[offset+i])) throw Error("nonfinite transmit sample");
-            block[i]=static_cast<std::int16_t>(std::clamp(samples[offset+i],-1.0f,1.0f)*32767);
+            if(!std::isfinite(samples[i])) throw Error("nonfinite transmit sample");
+            block[i]=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
         }
-        auto n=api.write(stream.pcm,block.data(),count);
-        check_cancelled(stop);
-        if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio playback failed");}
-        else if(n==0) throw Error("audio playback stalled");
-        else {offset+=static_cast<std::size_t>(n);failures=0;}
+        std::size_t offset=0;
+        while(offset<count) {
+            check_cancelled(stop);
+            const auto n=api.write(stream.pcm,block.data()+offset,count-offset);
+            check_cancelled(stop);
+            if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio playback failed");}
+            else if(n==0 || static_cast<std::size_t>(n)>count-offset) throw Error("audio playback returned invalid sample count");
+            else {offset+=static_cast<std::size_t>(n);failures=0;}
+        }
     }
     check_cancelled(stop);
     if(api.drain(stream.pcm)<0) throw Error("audio playback drain failed");
@@ -256,40 +310,45 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop) {
     check_cancelled(stop);
-    // Check the entire input before any samples reach the playback device.
-    for(auto value:samples) if(!std::isfinite(value)) throw Error("nonfinite transmit sample");
+    if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
-    std::size_t offset=0;
+    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_samples,rate/20));
+    bool finished=false,started=false;
     std::array<bool,2> queued{};
     const auto enqueue=[&](std::size_t slot) {
         check_cancelled(stop);
-        const auto count=std::min(WaveSession::block_samples,samples.size()-offset);
-        if(!count) return;
-        for(std::size_t i=0;i<count;++i)
-            session.pcm[slot][i]=static_cast<std::int16_t>(std::clamp(samples[offset+i],-1.0f,1.0f)*32767);
+        if(finished)return;
+        const auto count=next_samples(samples);
+        check_cancelled(stop);
+        if(count>samples.size())throw Error("playback callback returned invalid sample count");
+        if(!count){finished=true;return;}
+        for(std::size_t i=0;i<count;++i) {
+            if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
+            session.pcm[slot][i]=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
+        }
         auto& header=session.headers[slot];
         header.dwBufferLength=static_cast<DWORD>(count*sizeof(std::int16_t));
+        // The other buffer may finish while the producer computes this block.
+        // Detect that gap after generation, before publishing more PCM.
+        if(started && queued[1-slot] && (session.headers[1-slot].dwFlags&WHDR_DONE))
+            throw Error("audio playback underrun");
         mm_check(waveOutWrite(session.output,&header,sizeof(WAVEHDR)),"waveOut write failed");
-        offset+=count;queued[slot]=true;
+        queued[slot]=true;
     };
     // Playback cannot begin until both initial buffers have been queued.
     enqueue(0);enqueue(1);
-    if(queued[0]) mm_check(waveOutRestart(session.output),"waveOut restart failed");
+    if(queued[0]) {mm_check(waveOutRestart(session.output),"waveOut restart failed");started=true;}
     std::size_t slot=0;
     while(queued[0] || queued[1]) {
         check_cancelled(stop);
         if(queued[slot]) {
             session.wait(session.headers[slot],stop);
             queued[slot]=false;
-            if(offset<samples.size()) {
-                if(queued[1-slot] && (session.headers[1-slot].dwFlags&WHDR_DONE))
-                    throw Error("audio playback underrun");
-                enqueue(slot);
-            }
+            if(!finished)enqueue(slot);
         }
         slot=1-slot;
     }
@@ -340,4 +399,14 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 
 #endif
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop) {
+    check_cancelled(stop);
+    for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
+    std::size_t offset=0;
+    playback(rate,device,[&](std::span<float> chunk) {
+        const auto count=std::min(chunk.size(),samples.size()-offset);
+        std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
+        offset+=count;return count;
+    },stop);
+}
 }

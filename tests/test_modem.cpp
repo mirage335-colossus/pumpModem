@@ -42,7 +42,7 @@ void cancellation() {
     // concurrent request. It must unwind from active DSP work, not just reject
     // a token that was already stopped when the call began.
     std::vector<float> long_capture(8 * 1024 * 1024, 0);
-    config.memory_limit = 128 * 1024 * 1024;
+    config.memory_limit = 256 * 1024 * 1024;
     std::stop_source during_decode;
     std::jthread cancel_decode([&] {
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -78,7 +78,9 @@ int main() {
         require(decoded.diagnostics.sample_offset == 0, "clean timing");
         m::ChannelConfig channel;
         channel.delay_samples = 1237; // Not a chip, symbol, or byte boundary.
-        channel.snr_db = 3;
+        // Four-bit differential APSK requires more uncoded symbol energy than
+        // the previous two-bit phase constellation. Packet FEC is tested separately.
+        channel.snr_db = 8;
         channel.seed = 731;
         auto noisy = m::simulate(wave, c, channel);
         decoded = m::demodulate(noisy, c, pre);
@@ -97,7 +99,7 @@ int main() {
         const auto spread_pre = m::preamble(c);
         const auto spread_data = message(c);
         const auto spread_wave = m::modulate(spread_data, c);
-        channel.snr_db = -10;
+        channel.snr_db = -1;
         channel.frequency_offset_hz = 0;
         channel.delay_samples = 91;
         decoded = m::demodulate(m::simulate(spread_wave, c, channel), c, spread_pre);
@@ -112,7 +114,7 @@ int main() {
         for (auto& b : arbitrary_pre) b = static_cast<std::uint8_t>(ciphertext_rng());
         auto arbitrary_data = arbitrary_pre;
         arbitrary_data.insert(arbitrary_data.end(), data.end()-256, data.end());
-        channel.delay_samples = 40571; channel.snr_db = 6;
+        channel.delay_samples = 40571; channel.snr_db = 10;
         require(m::demodulate(m::simulate(m::modulate(arbitrary_data,c),c,channel),c,arbitrary_pre).bytes == arbitrary_data,
                 "encrypted preamble acquisition");
         auto wide = c; wide.sample_rate = 96000; wide.carrier_hz = 12000; wide.bandwidth_hz = 24000;
@@ -127,6 +129,8 @@ int main() {
         rejects([&] { (void)m::demodulate(silence, c, pre); }, "noise accepted");
         auto invalid = c; invalid.bandwidth_hz = std::numeric_limits<double>::quiet_NaN();
         rejects([&] { (void)m::preamble(invalid); }, "NaN config accepted");
+        invalid = c; invalid.training_seconds = 6;
+        rejects([&] { (void)m::preamble(invalid); }, "nonstandard training duration silently ignored");
         invalid = c; invalid.spreading_factor = 16385;
         rejects([&] { (void)m::preamble(invalid); }, "oversized spreading accepted");
         invalid = c; invalid.memory_limit = 1024;
@@ -152,7 +156,7 @@ int main() {
         rejects([&] { (void)m::read_wav(huge); }, "oversized data chunk accepted");
         const Bytes status{1,0,1};
         auto status_wave = m::modulate_status(status, c);
-        require(status_wave.size() == static_cast<std::size_t>(std::llround(3 * c.sample_rate / (m::bit_rate(c) / 2))), "three bit status padded");
+        require(status_wave.size() == static_cast<std::size_t>(std::llround(3 * c.sample_rate / (m::bit_rate(c) / m::bits_per_symbol))), "three bit status padded");
         require(m::detect_status(status_wave, status, c) > .99, "status correlation");
         std::cout << "modem tests passed\n";
         return 0;

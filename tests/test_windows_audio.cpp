@@ -24,6 +24,22 @@ int main() {
         for(std::size_t i=0;i<samples.size();++i)
             require(fake::state.played[i]==static_cast<std::int16_t>(samples[i]*32767),"playback reordered samples");
         clean();
+        fake::reset();std::size_t generated=0;
+        audio::playback(48000,"default",[&](std::span<float> chunk) {
+            require(chunk.size()<=2400,"stream playback chunk exceeds 50ms");
+            const auto count=std::min(chunk.size(),samples.size()-generated);
+            std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(generated),count,chunk.begin());
+            generated+=count;return count;
+        });
+        require(fake::state.open_calls==1 && fake::state.initial_queue==2 && !fake::state.gap,"stream playback must keep one device and two queued buffers");
+        require(fake::state.played.size()==samples.size(),"stream playback lost samples");clean();
+        fake::reset();unsigned generated_blocks=0;
+        rejects([&]{audio::playback(48000,"default",[&](std::span<float> chunk) {
+            if(++generated_blocks==3)WaitForSingleObject(reinterpret_cast<HANDLE>(1),1);
+            if(generated_blocks>3)return std::size_t{0};
+            std::fill(chunk.begin(),chunk.end(),.25f);return chunk.size();
+        });});
+        require(!fake::state.gap,"a slow generator must report underrun before queueing discontinuous output");
         fake::reset();auto captured=audio::record(1,16000,"default",1024*1024);
         require(fake::state.initial_queue==2 && !fake::state.gap,"capture buffers not continuous");
         require(captured.size()==16000,"capture duration changed");

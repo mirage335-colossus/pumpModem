@@ -70,7 +70,11 @@ void test_shared_packet_pipeline() {
     rejects([&] { transfer::transmit(oversize, options()); }, "repeatable airtime enforced for audio");
     auto small = options();
     small.modem.memory_limit = 1024;
-    rejects([&] { transfer::pack(message, small); }, "shared packet memory budget");
+    check(transfer::unpack(transfer::pack(message,small),small).message.data==message.data,
+          "packet content is independent of the legacy PCM memory budget");
+    small.content_limit=1;
+    rejects([&] { transfer::pack(message, small); }, "shared packet content budget");
+    rejects([&] { transfer::unpack(transfer::pack(message, options()), small); }, "decoded content budget");
 }
 void test_airtime_estimates_and_repeat_policy() {
     auto value=options();
@@ -87,11 +91,18 @@ void test_airtime_estimates_and_repeat_policy() {
     check(estimate.content_seconds<estimate.packet_seconds && estimate.packet_seconds<estimate.total_seconds,
           "content packet and total airtimes kept distinct");
     check(estimate.memory_supported && estimate.repeatable_allowed,"ordinary transfer estimate supported");
+    auto tiny_dsp=value;tiny_dsp.dsp_workspace_bytes=256*1024;tiny_dsp.modem.spreading_factor=16;
+    auto tiny_message=message;tiny_message.repeatable=false;tiny_message.data={'x'};
+    const auto independent=transfer::estimate(tiny_message,tiny_dsp);
+    check(!independent.memory_supported && independent.batch_memory_supported,
+          "batch PCM feasibility is independent of streaming receiver workspace");
+    check(!transfer::transmit(tiny_message,tiny_dsp).empty(),"independently feasible batch actually transmits");
     auto slow=value;slow.modem.spreading_factor=16384;
     auto beacon=message;beacon.data={1};
     const auto beacon_estimate=transfer::estimate(beacon,slow);
     check(beacon_estimate.content_seconds>2 && beacon_estimate.repeatable_allowed,"one-byte repeatability floor for slow beacons");
-    check(!beacon_estimate.memory_supported,"estimator detects unbufferable slow waveform without allocating it");
+    check(beacon_estimate.memory_supported && !beacon_estimate.batch_memory_supported,
+          "slow streaming remains feasible independently of unbufferable PCM duration");
     transfer::pack(beacon,slow);
     beacon.data={1,2};
     check(!transfer::estimate(beacon,slow).repeatable_allowed,"larger slow messages exceed content airtime cap");
@@ -105,7 +116,7 @@ void test_airtime_estimates_and_repeat_policy() {
     auto boundary_options=value;
     boundary_options.fec=FecMode::off;
     boundary_options.compression=false;
-    auto boundary=message;boundary.data.resize(250);
+    auto boundary=message;boundary.data.resize(500);
     const auto exact_limit=transfer::estimate(boundary,boundary_options);
     check(exact_limit.content_seconds==2 && exact_limit.repeatable_allowed,"inclusive two-second content boundary");
     boundary.data.push_back(0);
@@ -113,6 +124,7 @@ void test_airtime_estimates_and_repeat_policy() {
     boundary.kind=MessageKind::file;
     boundary.filename=std::string(220,'x');
     boundary.data.resize(10);
+    boundary_options.modem.spreading_factor=2;
     const auto metadata=transfer::estimate(boundary,boundary_options);
     check(metadata.packet_seconds>2 && metadata.content_seconds<2 && metadata.repeatable_allowed,
           "large fixed metadata does not consume repeatable content allowance");
@@ -190,6 +202,30 @@ void test_simulation_validation_and_cancellation() {
             "cancel from progress callback");
     check(visits == 1, "cancellation stops further candidate attempts");
 }
+void test_valid_packet_ignores_trailing_capture() {
+    auto value=options();
+    value.modem.sample_rate=96000;
+    value.modem.bandwidth_hz=24000;
+    value.modem.carrier_hz=13000;
+    value.content_limit=1;
+    value.fec=FecMode::off;
+    auto sent=sample();sent.data={'x'};
+    auto samples=transfer::transmit(sent,value);
+    samples.resize(samples.size()+12*value.modem.sample_rate,0);
+    const auto result=transfer::receive(samples,value);
+    check(result.packet.message.data==sent.data,"valid short packet survives a long trailing capture without caching noise or preamble");
+}
+void test_full_content_capacity_with_independent_scratch() {
+    auto value=options();value.content_limit=1024*1024;
+    auto sent=sample();sent.repeatable=false;sent.data.resize(value.content_limit,0x73);
+    for(const auto mode:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        value.fec=mode;
+        const auto result=transfer::unpack(transfer::pack(sent,value),value);
+        check(result.message.data==sent.data,"full advertised content capacity remains usable with every FEC mode");
+    }
+    sent.data.push_back(0);
+    rejects([&]{transfer::pack(sent,value);},"one byte beyond actual content capacity rejected");
+}
 }
 int main() {
     try {
@@ -199,6 +235,8 @@ int main() {
         test_complete_frame_encryption_and_spreading();
         test_timing_search_and_progress();
         test_simulation_validation_and_cancellation();
+        test_valid_packet_ignores_trailing_capture();
+        test_full_content_capacity_with_independent_scratch();
         std::cout << "transfer tests passed\n";
         return 0;
     } catch (const std::exception& error) {

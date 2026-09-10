@@ -29,9 +29,10 @@ using namespace datapump;
 using namespace datapump::gui::widgets;
 using Steady=std::chrono::steady_clock;
 constexpr const char* smoke_text="CQ CQ - continuous reception\nClipboard caf\xc3\xa9 \xf0\x9f\x8c\x8d verified.\n"
-    "This message passes through the sampled audio receiver while the waterfall keeps scrolling. "
+    "This message passes through the noisy symbol receiver while the waterfall keeps scrolling. "
     "Text first appears as pending, then becomes available to copy after the complete packet "
     "has passed error correction and integrity checks.";
+const Bytes smoke_file_bytes{0,1,2,3,0xff,0xc0,0x80,'D','a','t','a',' ','P','u','m','p','\n'};
 
 std::string path_text(const std::filesystem::path& path) {
     const auto text=path.u8string(); return {text.begin(),text.end()};
@@ -125,7 +126,7 @@ public:
             if (!app.attachment_) app.dirty_estimate();
         },this);
         qr_=new QrPreview;
-        attach_=button("Attach file / image...",[this] { choose_attachment(); });
+        attach_=button("Attach file",[this] { choose_attachment(); });
         use_text_=button("Use text",[this] { attachment_.reset(); attachment_path_.clear(); compose_label_->copy_label("Message"); dirty_estimate(); });
         send_key_=new Fl_Choice(0,0,1,1); send_key_->add("on Enter|on Ctrl+Enter"); send_key_->value(0);
         transmit_=button("Transmit",[this] { transmit(); });
@@ -264,9 +265,8 @@ private:
             result.simulation_snr_db=budget.sample_snr_db;
             simulation_channel_snr_=budget.snr_db;
         }
-        // GUI smoke uses ordinary media time too. A faster source could finish
-        // a short packet before instrumented DSP produces a separate preview.
-        result.simulation_speed=1;
+        result.content_limit=default_memory_limit;
+        result.dsp_workspace_bytes=64*1024*1024;
         tuning_explanation_=plan.explanation; target_supported_=plan.target_supported;
         return result;
     }
@@ -307,7 +307,7 @@ private:
         }
     }
     void choose_attachment() {
-        if (auto path=choose_path(false,"Attach a file or saved screenshot")) {
+        if (auto path=choose_path(false,"Attach file")) {
             pending_file_=*path; file_loading_=true; notice("Reading attached content..."); dirty_estimate();
         }
     }
@@ -383,7 +383,7 @@ private:
             estimate_=result.estimate; estimated_revision_=revision_;
             const auto& estimate=*estimate_;
             std::string text="TX "+seconds_text(estimate.total_seconds)+" / content "+seconds_text(estimate.content_seconds);
-            if (!estimate.memory_supported) text="Beyond memory limit: "+seconds_text(estimate.total_seconds);
+            if (!estimate.memory_supported) text="Content / DSP budget exceeded: "+seconds_text(estimate.total_seconds);
             else if (repeatable_->value() && !estimate.repeatable_allowed) text="Repeatable content exceeds 2 s: "+seconds_text(estimate.content_seconds);
             airtime_->copy_label(text.c_str());
             airtime_->tooltip("Total includes preamble, framing and error correction. Repeatable permits at most two seconds of encoded content, or an original payload of at most one byte.");
@@ -395,36 +395,44 @@ private:
         if (key_load_failed_) throw Error("Choose a working keyfile or explicitly select an existing key entry before transmitting");
         if (!settings_valid_) throw Error("Correct the modem settings before transmitting");
         if (!estimate_ || estimated_revision_!=revision_) throw Error("Wait for the current airtime calculation");
-        if (!estimate_->memory_supported) throw Error("This transmission exceeds the current memory limit");
+        if (!estimate_->memory_supported) throw Error("This transmission exceeds the content or streaming DSP budget");
         if (repeatable_->value() && !estimate_->repeatable_allowed) throw Error("Repeatable content must fit two seconds, unless its original payload is at most one byte");
-        if (gate_.remaining().count()>0) throw Error("The six-second transmit cooldown is still active");
         auto payload=message();
-        gate_.started(); transmit_requested_=true; saw_transmitting_=false;
+        gate_.started(current_settings_.simulation,encrypted()); transmit_requested_=true; saw_transmitting_=false;
         try {
             // The receiver is continuous. The session handles pause/resume for
             // real playback, and mixes loopback into its regular input stream.
             session_.transmit(payload);
-        } catch (...) { transmit_requested_=false; gate_.finished(); throw; }
+        } catch (...) { transmit_requested_=false; gate_.abort_start(); throw; }
         notice(current_settings_.simulation?"Transmitting into the selected loopback channel...":"Transmitting audio...");
     }
     void refresh_files() {
+        const auto selected=file_browser_->value();
+        const auto old_id=selected>0 && static_cast<std::size_t>(selected)<=file_ids_.size()?file_ids_[static_cast<std::size_t>(selected-1)]:std::string{};
         file_browser_->clear();
-        for (const auto& packet:inbox_.items()) {
-            const auto id=gui::id_label(packet.message).substr(0,8);
-            const auto filename=packet.message.filename.empty()?"text-"+id+".txt":gui::display_label(packet.message.filename);
-            file_browser_->add((filename+"  ("+std::to_string(packet.message.data.size())+" B)").c_str());
+        file_ids_.clear();
+        for (const auto* packet:inbox_.file_items()) {
+            const auto id=gui::id_label(packet->message);
+            file_ids_.push_back(id);
+            const auto filename=packet->message.filename.empty()?"file-"+id.substr(0,8):gui::display_label(packet->message.filename);
+            file_browser_->add((filename+"  ("+std::to_string(packet->message.data.size())+" B)").c_str());
         }
-        if (!inbox_.items().empty()) file_browser_->select(static_cast<int>(inbox_.items().size()));
+        const auto prior=std::find(file_ids_.begin(),file_ids_.end(),old_id);
+        if (prior!=file_ids_.end()) file_browser_->select(static_cast<int>(std::distance(file_ids_.begin(),prior))+1);
+        else if (!file_ids_.empty()) file_browser_->select(static_cast<int>(file_ids_.size()));
     }
     const DecodedPacket* selected_file() const {
         const auto index=file_browser_->value();
-        return index>0 && static_cast<std::size_t>(index)<=inbox_.items().size()?&inbox_.items()[static_cast<std::size_t>(index-1)]:nullptr;
+        if (index<=0 || static_cast<std::size_t>(index)>file_ids_.size()) return nullptr;
+        const auto& id=file_ids_[static_cast<std::size_t>(index-1)];
+        const auto found=std::find_if(inbox_.items().begin(),inbox_.items().end(),[&](const auto& item) { return gui::id_label(item.message)==id; });
+        return found!=inbox_.items().end()?&*found:nullptr;
     }
     void copy_message(const std::string& id) {
         const auto found=std::find_if(inbox_.items().begin(),inbox_.items().end(),[&](const auto& item) { return gui::id_label(item.message)==id; });
         if (found==inbox_.items().end()) throw Error("That received message has left the memory cache");
         const auto& bytes=found->message.data;
-        if (!gui::valid_clipboard_text(bytes) || bytes.size()>static_cast<std::size_t>(std::numeric_limits<int>::max())) throw Error("This message is a file; use Save selected");
+        if (found->message.kind!=MessageKind::text || !gui::valid_clipboard_text(bytes) || bytes.size()>static_cast<std::size_t>(std::numeric_limits<int>::max())) throw Error("This message is a file; use Save selected");
         Fl::copy(bytes.empty()?"":reinterpret_cast<const char*>(bytes.data()),static_cast<int>(bytes.size()),1);
         notice("Verified text copied to the clipboard.");
     }
@@ -437,11 +445,11 @@ private:
         const auto filename=selected->message.filename.empty()?"received.txt":selected->message.filename;
         if (auto path=choose_path(true,"Save verified received content",filename.c_str())) save_bytes(*path,bytes);
     }
-    void clear_received() { inbox_.clear(); signals_.clear(); file_browser_->clear(); signal_browser_->redraw(); notice("Received content cleared from memory."); }
+    void clear_received() { inbox_.clear(); signals_.clear(); file_browser_->clear(); file_ids_.clear(); signal_browser_->redraw(); notice("Received content cleared from memory."); }
     void update_controls() {
         const bool busy=transmit_requested_ || last_snapshot_.transmitting || closing_;
         for (auto widget:std::array<Fl_Widget*,8>{simulation_,key_browse_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_}) busy?widget->deactivate():widget->activate();
-        const auto remaining=gate_.remaining().count();
+        const auto remaining=gate_.remaining(current_settings_.simulation,encrypted()).count();
         const auto wait_seconds=remaining/1000+(remaining%1000!=0);
         const bool eligible=settings_valid_ && estimate_ && estimate_->memory_supported && (!repeatable_->value() || estimate_->repeatable_allowed);
         if (!busy && !key_loading_ && !key_load_failed_ && !file_loading_ && eligible && remaining==0) transmit_->activate(); else transmit_->deactivate();
@@ -463,21 +471,27 @@ private:
         }
         for (auto& received:snapshot.received) {
             if (smoke_.enabled && std::string(received.packet.message.data.begin(),received.packet.message.data.end())==smoke_text) {
-                smoke_packet_=received.packet; final_sequence_=snapshot.sequence;
+                smoke_packet_=received.packet;
             }
+            if (smoke_.enabled && received.packet.message.kind==MessageKind::file && received.packet.message.data==smoke_file_bytes)
+                smoke_file_packet_=received.packet;
             last_bit_rate_=received.diagnostics.bit_rate;
             inbox_.put(std::move(received.packet)); refresh_files();
         }
         for (const auto& signal:snapshot.signals) {
-            signals_.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id});
-            if (!signal.validated && pending_sequence_==0) pending_sequence_=snapshot.sequence;
+            const auto packet=std::find_if(inbox_.items().begin(),inbox_.items().end(),[&](const auto& item) { return gui::id_label(item.message)==signal.packet_id; });
+            const bool text_message=packet!=inbox_.items().end() && packet->message.kind==MessageKind::text;
+            signals_.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text_message});
+            if (!signal.validated && pending_sequence_==0) pending_sequence_=signal.sequence;
+            if (signal.validated && smoke_packet_ && signal.packet_id==gui::id_label(smoke_packet_->message)) final_sequence_=signal.sequence;
         }
         if (snapshot.transmitting) saw_transmitting_=true;
-        if (transmit_requested_ && !snapshot.transmitting && (saw_transmitting_ || (!snapshot.error.empty() && snapshot.error!=last_snapshot_.error))) {
+        if (transmit_requested_ && !snapshot.transmitting && snapshot.transmission_finished) {
             transmit_requested_=false; gate_.finished(); resumed_samples_=snapshot.samples_received;
         }
         const auto mode=snapshot.simulation?"Simulation / continuous receive":"Listening / "+std::string(*device_->value()?device_->value():"default");
-        mode_->copy_label(snapshot.transmitting?"Transmitting":mode.c_str());
+        const auto tx_mode="Transmitting "+std::to_string(static_cast<int>(std::clamp(snapshot.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(snapshot.transmission_seconds)+" media";
+        mode_->copy_label(snapshot.transmitting?tx_mode.c_str():mode.c_str());
         if (Steady::now()>=notice_until_) {
             const auto text=snapshot.error.empty()?snapshot.status:snapshot.error;
             status_->copy_label(text.c_str());
@@ -489,7 +503,7 @@ private:
         }
         std::ostringstream diagnostics;
         diagnostics<<std::fixed<<std::setprecision(1)<<last_bit_rate_<<" bit/s  |  "<<snapshot.samples_received<<" input samples  |  CPU "<<cpu_percent_<<"%";
-        if (snapshot.simulation) diagnostics<<"  |  Channel SNR "<<simulation_channel_snr_<<" dB";
+        if (snapshot.simulation) diagnostics<<"  |  Channel SNR "<<simulation_channel_snr_<<" dB / media "<<seconds_text(snapshot.virtual_seconds);
         if (!target_supported_) diagnostics<<"  |  "<<tuning_explanation_;
         diagnostics_->copy_label(diagnostics.str().c_str());
         last_snapshot_=std::move(snapshot);
@@ -519,9 +533,10 @@ private:
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
         } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting) {
-            if (!saw_transmitting_) throw Error("The normal transmit path was not observed");
+            if (!saw_transmitting_ && last_snapshot_.transmission_fraction<1) throw Error("The normal transmit path was not observed");
             if (!pending_sequence_ || pending_sequence_>=final_sequence_) throw Error("Pending signal updates did not precede verified reception");
             if (last_snapshot_.samples_received<=initial_samples_) throw Error("Simulation stopped continuous reception while transmitting");
+            if (!file_ids_.empty() || selected_file()) throw Error("Verified text appeared in the received file list");
             const auto id=gui::id_label(smoke_packet_->message);
             bool activated=false;
             for (std::size_t index=0;index<signals_.lines().size();++index)
@@ -530,23 +545,37 @@ private:
             Fl::paste(*clipboard_probe_,1); smoke_phase_=2;
         } else if (smoke_phase_==2 && clipboard_probe_->received) {
             if (*clipboard_probe_->received!=smoke_text) throw Error("Click-to-copy changed verified UTF-8 text");
-            std::filesystem::create_directories(smoke_.directory); const auto path=smoke_.directory/"received.txt";
-            save_bytes(path,smoke_packet_->message.data);
+            if (gate_.remaining(true,encrypted()).count()!=0) throw Error("Simulation applied a transmit cooldown");
+            attachment_=std::make_shared<const Bytes>(smoke_file_bytes); attachment_path_="payload.bin"; attachment_image_=false;
+            compose_label_->copy_label("Attached: payload.bin"); dirty_estimate(); smoke_phase_=3;
+        } else if (smoke_phase_==3 && estimate_) {
+            transmit_->do_callback(); smoke_phase_=4;
+        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting) {
+            if (file_ids_.size()!=1 || !selected_file() || selected_file()->message.data!=smoke_file_bytes)
+                throw Error("Received file selection did not exclude text");
+            const auto id=gui::id_label(smoke_file_packet_->message);
+            for (std::size_t index=0;index<signals_.lines().size();++index)
+                if (signals_.lines()[index].packet_id==id && signal_browser_->activate_line(index)) throw Error("A file signal was copyable as text");
+            const auto saved_bytes=selected_file()->message.data;
+            std::filesystem::create_directories(smoke_.directory); const auto path=smoke_.directory/"received.bin";
+            save_bytes(path,saved_bytes);
             std::ifstream input(path,std::ios::binary); const auto data=read_bounded(input,default_memory_limit);
-            if (data!=smoke_packet_->message.data) throw Error("Explicit save changed received bytes");
-            bool rejected=false; try { save_bytes(path,smoke_packet_->message.data); } catch (const Error&) { rejected=true; }
+            if (data!=smoke_file_bytes) throw Error("Explicit save changed received bytes");
+            bool rejected=false; try { save_bytes(path,saved_bytes); } catch (const Error&) { rejected=true; }
             if (!rejected) throw Error("Save overwrote an existing file");
             clear_->do_callback();
             if (!inbox_.items().empty() || !signals_.lines().empty()) throw Error("Clear left received content in memory");
-            inbox_.put(*smoke_packet_); refresh_files();
+            inbox_.put(*smoke_packet_); inbox_.put(*smoke_file_packet_); refresh_files();
             signals_.update({999999,1500,smoke_text,true,gui::id_label(smoke_packet_->message)});
-            resume_sequence_=last_snapshot_.sequence; smoke_phase_=3;
-        } else if (smoke_phase_==3 && last_snapshot_.running && !last_snapshot_.transmitting &&
+            signals_.update({1000000,1500,"payload.bin",true,gui::id_label(smoke_file_packet_->message),false});
+            use_text_->do_callback();
+            resume_sequence_=last_snapshot_.sequence; smoke_phase_=5;
+        } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting &&
                    last_snapshot_.sequence>resume_sequence_+2 && last_snapshot_.samples_received>resumed_samples_) {
-            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=4;
+            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=6;
             notice("Continuous GUI smoke passed: idle noise, live plots, streamed pending correction, loopback TX, clipboard, exclusive save, receive resume.",smoke_.hold_seconds+1);
             std::cout<<"Continuous native GUI smoke passed: idle noise, live plots, pending-to-verified signals, normal TX, clipboard, exclusive save, automatic receive resume."<<std::endl;
-        } else if (smoke_phase_==4 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
+        } else if (smoke_phase_==6 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
     SmokeOptions smoke_;
@@ -555,7 +584,8 @@ private:
     live::Snapshot last_snapshot_;
     gui::Inbox inbox_;
     gui::Signals signals_;
-    TransmitGate gate_;
+    gui::TransmissionPolicy gate_;
+    std::vector<std::string> file_ids_;
     std::vector<KeyEntry> keys_;
     std::shared_ptr<const Bytes> attachment_;
     std::filesystem::path attachment_path_,loaded_key_path_;
@@ -564,7 +594,7 @@ private:
     bool transmit_requested_=false,saw_transmitting_=false,target_supported_=true,saw_noise_change_=false,smoke_passed_=false;
     std::optional<std::filesystem::path> pending_key_,pending_file_;
     std::optional<transfer::Estimate> estimate_;
-    std::optional<DecodedPacket> smoke_packet_;
+    std::optional<DecodedPacket> smoke_packet_,smoke_file_packet_;
     std::uint64_t revision_=0,estimated_revision_=0,last_sequence_=0,initial_samples_=0,resumed_samples_=0,pending_sequence_=0,final_sequence_=0,resume_sequence_=0;
     int smoke_phase_=0;
     double last_bit_rate_=0,simulation_channel_snr_=0,cpu_percent_=0;
@@ -614,7 +644,7 @@ int main(int argc,char** argv) {
         for (int i=1;i<argc;++i) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
-            if (argument=="--version") { std::cout<<"Data Pump native GUI 0.1.0\n"; return 0; }
+            if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<'\n'; return 0; }
             if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS]]\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);

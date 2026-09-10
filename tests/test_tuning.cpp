@@ -42,14 +42,15 @@ void modes_and_tones() {
 }
 void snr_planning() {
     auto plan=tuning::resolve(1200,6,tuning::PatternMode::auto_pattern,false);
-    check(plan.config.spreading_factor==2048,"C/N0 integration selects sufficient finite spreading");
-    near(plan.required_spreading,std::pow(10.,.4)*600.,"required spreading from symbol energy");
-    near(plan.estimated_processing_gain_db,10*std::log10(2048.),"spreading gain estimate");
-    near(plan.estimated_symbol_snr_db,6+10*std::log10(2/modem::bit_rate(plan.config)),"C/N0 to symbol SNR");
+    check(plan.config.spreading_factor==16384,"C/N0 integration selects sufficient finite spreading");
+    near(plan.required_spreading,std::pow(10.,1.2)*600.,"required spreading from symbol energy");
+    near(plan.estimated_processing_gain_db,10*std::log10(16384.),"spreading gain estimate");
+    near(plan.estimated_symbol_snr_db,6+10*std::log10(modem::symbol_seconds(plan.config)),"C/N0 to symbol SNR");
     check(plan.target_supported && plan.estimated_symbol_snr_db>=plan.target_symbol_snr_db,"auto meets its stated engineering target");
-    plan=tuning::resolve(1200,-270,tuning::PatternMode::auto_keystream,true);
-    check(!plan.target_supported && plan.config.spreading_factor==16384 && plan.config.scramble,"extreme target honestly unsupported");
-    check(!plan.explanation.empty(),"unsupported target explained");
+    plan=tuning::resolve(1200,-20,tuning::PatternMode::auto_keystream,true);
+    check(plan.target_supported && plan.config.integration_seconds>16384./600 && plan.config.scramble,"automatic integration extends beyond the finite chip template");
+    check(plan.estimated_symbol_snr_db>=plan.target_symbol_snr_db,"long automatic integration meets its numeric target");
+    rejects([]{tuning::resolve(1200,-270,tuning::PatternMode::auto_keystream,true);},"duration beyond 64-bit sample counters is rejected explicitly");
     plan=tuning::resolve(1200,6,tuning::PatternMode::auto_keystream,false);
     check(!plan.config.scramble && plan.config.spreading_mode==modem::SpreadingMode::pattern,"no-key auto fallback");
     plan=tuning::resolve(1200,-60,tuning::PatternMode::tone_1,true);

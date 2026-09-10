@@ -2,17 +2,21 @@
 
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
-waveform simulation, and a documented versioned packet format. Received content
+waveform and accelerated channel simulation, and a documented versioned packet format. Received content
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.1.** The audio/packet/crypto
+**Status: working reference implementation, version 0.2.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
 RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
+
+Version 0.2 changes the audio waveform to differential phase-and-amplitude
+modulation with fixed-duration training. Both ends of an audio link need 0.2;
+the packet and keyfile formats remain compatible.
 
 ## Build and run
 
@@ -33,8 +37,8 @@ ctest --test-dir build --output-on-failure
 
 ./build/datapump-gui
 ./build/pump simulate --text 'CQ hello from Data Pump' --snr 12 --json
-./build/pump tx --input screenshot.png --kind screenshot --output transfer.wav
-./build/pump rx --input transfer.wav --save received.png
+./build/pump tx --input circuit.kicad_pcb --output transfer.wav
+./build/pump rx --input transfer.wav --save received.kicad_pcb
 ```
 
 The last command refuses to overwrite an existing file. `rx --json` returns
@@ -53,7 +57,9 @@ printf 'clipboard text' | ./build/pump tx --input - --output message.wav
 
 `listen` continuously receives from the operating system's default audio device;
 `--device` selects an override. Device enumeration is optional. Linux loads the common
-ALSA `libasound.so.2`; Windows uses the system WinMM audio API. WAV and simulation
+ALSA `libasound.so.2`; when the global default fails, it discovers a card default
+and, if needed, a format-converting endpoint on that card. Windows uses the system
+WinMM audio API. WAV and simulation
 operation work without audio hardware or the ALSA library. No radio is keyed or
 transmitted by the automated tests. Physical audio transfer and Windows hardware
 operation still require device testing. Use a capture long enough to contain the
@@ -81,8 +87,8 @@ glibc at least as new as the build computer; Windows needs its own build. See
 [offline installation](docs/offline-installation.md) for packaging, verification,
 and operating-system requirements.
 
-The console provides text composition and explicit clipboard copy, file and
-screenshot attachment, Level L QR previews, continuous audio reception, a scrolling
+The console provides text composition and explicit clipboard copy, file
+attachment, Level L QR previews, continuous audio reception, a scrolling
 frequency-labeled signal ticker, a false-color waterfall and live waveform,
 spectrum and constellation displays. It includes named shared-key selection and
 a bounded receive cache. WAV tools remain available through the CLI. It does not
@@ -92,15 +98,19 @@ ordinary image files; direct operating-system screenshot capture is not implemen
 Enter transmits audio; the checkbox changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
-updating while idle and the receiver decodes transmitted samples as they arrive.
+updating while idle. Transmissions run at CPU speed through noisy complex
+observations and the same symbol decoder, with virtual airtime reported separately.
+This accelerated channel assumes ideal carrier and symbol timing; raw PCM
+acquisition is tested separately and remains available in CLI WAV simulation.
 Real audio reception pauses during transmission and resumes afterward.
 Bandwidth and target C/N0 determine automatic integration length; forced pattern
 and tone modes are also available. Auto keystream is enabled with encryption.
-The editor shows estimated airtime and flags settings that exceed the current
-buffered modem's memory capacity. Compression is always chosen automatically.
+The editor shows estimated airtime. Streaming transmission and reception use
+bounded DSP storage independent of airtime. Compression is always chosen automatically.
 Provisional ticker text is distinguished from validated cache entries.
-The console enforces a six-second delay after transmission. CLI audio TX also waits six seconds after
-playback so sequential scripts inherit the delay; independent concurrent
+The console enforces a six-second delay after actual encrypted transmission;
+simulation and unencrypted transmissions have no cooldown. CLI encrypted audio
+TX also waits six seconds after playback so sequential scripts inherit the delay; independent concurrent
 processes are not globally coordinated.
 
 ## Shared keys and encrypted transfers
@@ -122,7 +132,7 @@ Optional external pads remain a CLI feature using `--pad path` at creation and l
 Keyfiles contain only this application's symmetric key sets. Never put
 signing keys or other applications' secrets in this format.
 
-AES-256-CTR encrypts the entire balanced training sequence, framed content,
+AES-256-CTR encrypts the entire known training sequence, framed content,
 HMAC-SHA256 tag, and Reed–Solomon bytes. Independent HKDF-derived keys separate
 the data, MAC, DSSS, scrambler, and reserved FHSS streams. All streams use the
 same candidate whole-second transmission anchor. Physical timing is refined to
@@ -158,11 +168,13 @@ printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 `status-rx` reports correlation with an already aligned known signal. It does not
 assert validated identity or implement continuous very-slow beacon monitoring.
 The reference modem supports 1.2/2.4/22.05/24kHz nominal bandwidth settings,
-1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
+forced lengths of 1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
 60% RS parity or no body FEC. The fixed bootstrap retains its protection even
 with `--fec off`; status mode is the route for truly overhead-free few-bit data.
 `--target-snr` is the desired C/N0 in dBHz. The planner uses symbol integration
-and a 10dB Es/N0 engineering target; this is not measured receiver sensitivity.
+and an 18dB Es/N0 engineering target for the shared 16-point differential
+phase-and-amplitude constellation. Automatic integration can extend beyond
+16,384 chips; this is not measured receiver sensitivity.
 `--snr` is simulated sample-power SNR in dB. Simulation presets instead specify
 transmit dBm and channel attenuation, with thermal noise at 290K and a 10dB
 receiver noise figure. Extremely weak presets may produce only noise.
@@ -172,11 +184,14 @@ airtime, excluding preamble and fixed framing, with a minimum one-byte allowance
 There is no 64KiB eligibility rule. This allowance does not override memory limits
 or establish that a setting can decode a particular channel.
 
-The default256MiB memory budget is checked by each codec's workspace estimator;
-it is not an operating-system process RSS cap. Rolling capture buffers, decoded packets,
-and caller-owned buffers can coexist. Large files and long recordings may be
-rejected before processing. There is no disk-backed receive cache, chunked file
-transport, or streaming multi-day integration in this release.
+The received text/file cache defaults to 256 MiB (`--cache-mb`); streaming DSP has
+a separate 64 MiB workspace (`--dsp-mb`, shared by the key/epoch receiver bank).
+Neither is a process RSS cap: encoded
+packets, codec workspaces and caller-owned buffers can coexist. Live audio and
+accelerated simulation never allocate PCM proportional to transmission duration.
+Explicit batch WAV operations still use `--memory-mb` and can reject recordings
+that exceed that workspace. There is no disk-backed receive cache or chunked file
+transport.
 
 ## Development and portability
 

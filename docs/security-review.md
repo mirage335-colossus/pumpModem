@@ -1,9 +1,13 @@
 # Implementation security review — 2026-09-10
 
-This is a focused source and behavior review of the version 0.1 implementation,
+This is a focused source and behavior review updated for the version 0.2 implementation,
 not an independent security audit or a claim that the original specification is
 fully implemented. The review covered cryptography, keyfile handling, packet
 release ordering, CLI output, GUI cache/clipboard boundaries, and QR rendering.
+Version 0.2's incremental DSP and differential 16-APSK waveform are a new audio
+implementation; the packet and keyfile formats are unchanged. Historical test
+results below do not establish validation of the new waveform. Current execution
+results are tracked separately in [validation.md](validation.md).
 
 ## Findings addressed during implementation
 
@@ -17,6 +21,10 @@ release ordering, CLI output, GUI cache/clipboard boundaries, and QR rendering.
 | The public packet header comment disagreed with the actual Reed-Solomon first root. | The comment now agrees with the implementation and protocol document: generator roots begin at alpha^0. |
 | Provisional live text could be mistaken for verified content. | Pending ticker rows cannot trigger normal clipboard copy or file saves; only complete FEC and digest/MAC verification populates the received cache. |
 | UTF-8 C1 controls could appear in named key labels. | Keyring names reject ASCII and C1 controls, malformed UTF-8, duplicates and out-of-bounds lengths. |
+| Text packets appeared in the received-file list. | The list projects only verified file/screenshot kinds; text stays available for exact ticker clipboard copy. File selection follows packet ID despite cache changes. |
+| Unit-circle constellation normalization hid transmitted amplitude information. | Shared 16-APSK carries amplitude and phase; measured amplitudes are retained and the GUI uses one common I/Q display scale. This is a signal-display correction, not an authentication mechanism. |
+| Long-tone waveform allocation confused content limits with DSP limits. | Streaming uses an independent bounded workspace and incrementally emitted/received data. Packet/cache limits remain content-based; batch PCM/WAV allocation remains separate. Regression tests explicitly distinguish streaming and batch eligibility. |
+| A very fast simulated transmission could finish between GUI polls and leave the UI busy. | A persistent terminal-state marker records completion/cancellation; ordered event serials preserve pending-before-final observations. |
 
 OSC52's clipboard behavior is documented in the primary
 [xterm control-sequence reference](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html).
@@ -24,7 +32,7 @@ The reproduction used a generated valid unkeyed packet carrying the sequence;
 the problem was its interpretation by terminal software, not a failure of the
 packet digest.
 
-## Verified security properties
+## Prior verification evidence and retained boundaries
 
 * CLI report and save operations occur only after full packet decoding,
   metadata checks, and digest/HMAC verification. Acquisition correlation or
@@ -54,7 +62,24 @@ packet digest.
   calls the C++ service directly; saves require an explicit path and
   exclusive creation.
 
-## Remaining validation boundaries
+## Version 0.2 checks and remaining validation boundaries
+
+The new GUI policy tests cover file-kind filtering, strict clipboard eligibility,
+one active transmission, and cooldown only for actual encrypted output. The
+regression suite covers long tones without duration-sized PCM, fractional-carrier
+24 kHz PCM reception, automatic integration beyond the previous ceiling and
+independent five-second training. Adding those tests is not a claim that they
+have passed on every target; execution evidence belongs in validation.md.
+
+The accelerated simulator assumes ideal carrier/symbol timing and adds noise to
+integrated observations. It shares waveform mapping and receiver decisions with
+PCM, but does not model arbitrary acquisition timing, drift, fading, multipath or
+hardware nonlinearities. Real reception uses a finite timing/key/epoch bank,
+bounded by configured workspace. Fixed five-second training does not gain energy
+when payload symbols become longer; blind protected-bootstrap acquisition avoids
+requiring a training match, with complete packet verification still mandatory.
+No acquired-score, constellation appearance
+or simulation pass constitutes packet authenticity or measured sensitivity.
 
 CTR keystream reuse still reveals relationships between reused plaintext
 positions; the independent HMAC does not restore confidentiality. There is no
@@ -70,7 +95,9 @@ Windows testing before claiming arbitrary Unicode path support. Linux hardware
 audio also requires device testing. File-save permissions outside the keyfile
 API follow the platform's normal creation policy and user configuration.
 
-The configured memory budget governs payload/cache and conservative operation
-workspaces; it is not a hard cap on process RSS. The DSP implementation is a
+The default 256 MiB content/cache limits are separate from the default 64 MiB
+streaming DSP workspace. Packet coding scratch has content-derived checks;
+batch PCM/WAV still requires complete vectors. These limits are not a hard cap
+on process RSS or CPU consumption. The DSP implementation is a
 reference modem and does not establish the sensitivity, capacity, regulatory
 classification, or hardware isolation claims of the original design document.

@@ -10,6 +10,7 @@
 #include <cmath>
 #include <complex>
 #include <functional>
+#include <iomanip>
 #include <optional>
 #include <sstream>
 
@@ -117,7 +118,7 @@ private:
             std::ostringstream caption; caption<<static_cast<int>(std::lround(line.frequency_hz))<<" Hz";
             fl_color(line.validated?fl_rgb_color(116,219,186):fl_rgb_color(232,182,91));
             fl_font(FL_HELVETICA_BOLD,12); fl_draw(caption.str().c_str(),x()+11,top+14);
-            fl_font(FL_HELVETICA,10); fl_draw(line.validated?"verified / click to copy":"pending / correcting",x()+11,top+28);
+            fl_font(FL_HELVETICA,10); fl_draw(line.validated?(line.text_message?"verified / click to copy":"verified file / see list"):"pending / correcting",x()+11,top+28);
             fl_push_clip(left,top,right-left,row_height-1);
             fl_font(FL_COURIER,15);
             const auto text=display_label(line.text);
@@ -191,16 +192,35 @@ private:
     void draw() override {
         fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),fl_rgb_color(15,24,34));
         const int left=x()+8,top=y()+8,width=w()-16,height=h()-16;
-        fl_color(fl_rgb_color(53,71,85)); fl_line(left,top+height/2,left+width,top+height/2);
         fl_push_clip(left,top,width,height);
-        fl_color(fl_rgb_color(91,216,202));
         if (is_constellation_) {
-            fl_line(left+width/2,top,left+width/2,top+height);
-            double scale=1e-8;
-            for (auto point:constellation_) scale=std::max({scale,std::abs(point.real()),std::abs(point.imag())});
-            for (auto point:constellation_) fl_rectf(left+width/2+static_cast<int>(point.real()/scale*width*.42),
-                top+height/2-static_cast<int>(point.imag()/scale*height*.42),2,2);
+            const int center_x=left+width/2,center_y=top+height/2;
+            const int radius=std::max(1,std::min(width-36,height-26)/2);
+            double scale=0;
+            for (auto point:constellation_) if (std::isfinite(std::abs(point))) scale=std::max(scale,std::abs(point));
+            if (scale==0) scale=1;
+            fl_color(fl_rgb_color(70,91,108));
+            fl_line(left,center_y,left+width,center_y); fl_line(center_x,top,center_x,top+height);
+            for (double fraction:{.5,1.0}) {
+                const auto ring=static_cast<int>(radius*fraction);
+                fl_arc(center_x-ring,center_y-ring,2*ring,2*ring,0,360);
+            }
+            // A single scale preserves differences between symbol amplitudes.
+            // No point is individually projected onto a unit circle.
+            for (auto point:constellation_) {
+                if (!std::isfinite(point.real()) || !std::isfinite(point.imag())) continue;
+                const int px=center_x+static_cast<int>(point.real()/scale*radius);
+                const int py=center_y-static_cast<int>(point.imag()/scale*radius);
+                fl_color(fl_rgb_color(18,72,70)); fl_pie(px-3,py-3,7,7,0,360);
+                fl_color(fl_rgb_color(133,255,222)); fl_pie(px-2,py-2,5,5,0,360);
+            }
+            fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(209,222,232));
+            fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
+            std::ostringstream amplitude; amplitude<<std::setprecision(2)<<scale/2<<" / "<<scale<<" amplitude";
+            fl_draw(amplitude.str().c_str(),left+3,top+height-1);
         } else if (!waveform_.empty()) {
+            fl_color(fl_rgb_color(53,71,85)); fl_line(left,top+height/2,left+width,top+height/2);
+            fl_color(fl_rgb_color(91,216,202));
             double scale=1e-12;
             for (auto value:waveform_) scale=std::max(scale,std::abs(static_cast<double>(value)));
             fl_begin_line();

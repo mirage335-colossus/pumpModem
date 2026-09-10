@@ -23,6 +23,31 @@ void Inbox::put(DecodedPacket packet) {
     items_.push_back(std::move(packet));
 }
 void Inbox::clear() noexcept { items_.clear(); used_ = 0; }
+std::vector<const DecodedPacket*> Inbox::file_items() const {
+    std::vector<const DecodedPacket*> files;
+    for (const auto& packet : items_) {
+        if (packet.message.kind == MessageKind::file || packet.message.kind == MessageKind::screenshot)
+            files.push_back(&packet);
+    }
+    return files;
+}
+
+void TransmissionPolicy::started(bool simulation, bool encrypted, Clock::time_point now) {
+    if (remaining(simulation, encrypted, now).count() > 0)
+        throw Error(active_ ? "A transmission is already active" : "The encrypted transmit cooldown is still active");
+    active_ = true;
+    active_encrypted_output_ = !simulation && encrypted;
+}
+void TransmissionPolicy::finished(Clock::time_point now) noexcept {
+    if (active_ && active_encrypted_output_) next_encrypted_ = now + std::chrono::seconds(6);
+    abort_start();
+}
+void TransmissionPolicy::abort_start() noexcept { active_ = false; active_encrypted_output_ = false; }
+std::chrono::milliseconds TransmissionPolicy::remaining(bool simulation, bool encrypted, Clock::time_point now) const noexcept {
+    if (active_) return std::chrono::milliseconds::max();
+    if (simulation || !encrypted || now >= next_encrypted_) return std::chrono::milliseconds::zero();
+    return std::chrono::ceil<std::chrono::milliseconds>(next_encrypted_ - now);
+}
 
 void Signals::update(SignalLine line) {
     if (line.text.size()>4096) line.text.resize(4096);
@@ -36,7 +61,7 @@ void Signals::update(SignalLine line) {
     }
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
-    if (index>=lines_.size() || !lines_[index].validated || lines_[index].packet_id.empty()) return std::nullopt;
+    if (index>=lines_.size() || !lines_[index].validated || !lines_[index].text_message || lines_[index].packet_id.empty()) return std::nullopt;
     return lines_[index].packet_id;
 }
 

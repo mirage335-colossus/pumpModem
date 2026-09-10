@@ -1,79 +1,84 @@
-# Local validation record
+# Local validation record — version 0.2
 
-Validated on Linux x86_64 with GCC 14.2, CMake 3.31, OpenSSL 3.5.7, and vendored
-FLTK 1.4.5. This records tests actually run; Windows CI is configured but was not
-run by this local environment. Python 3.13 is optional developer test tooling.
+Linux x86_64, GCC 14.2, CMake 3.31, OpenSSL 3.5.7 and vendored FLTK 1.4.5.
+Python is optional developer test tooling; it is not installed with the application.
 
-* Native GUI Release build: all 15 CTest suites passed, including native packaging
-  and relocation. The optional
-  Python CLI suite contains 17 integration
-  tests and exercises production-size 128 MiB keyfiles, real waveform transfer,
-  shared-clock search, invalid input, exclusive saves, and terminal boundaries.
-* Native GUI AddressSanitizer + UndefinedBehaviorSanitizer Debug build: all 13
-  application suites and the additional packaging-support fixture passed. The
-  actual GUI smoke workflow also passed under the sanitizers.
-  LeakSanitizer is disabled because ptrace prevents it from starting in the
-  test environment. No sanitizer errors were reported.
-* Reed–Solomon: frozen vectors and 300 deterministic randomized shortened-code
-  correction trials, checked malformed bootstrap fields, invalid metadata,
-  burst errors, and integrity/MAC rejection.
-* Modem: clean/noisy binary loopbacks, arbitrary sample delay, fixed carrier
-  offset, combined independently keyed DSSS/scrambler, ciphertext-like training,
-  wide-bandwidth preset, pure-noise/wrong-training rejection, malformed WAVs,
-  memory/finite-value bounds, and exact three-bit status.
-* Crypto: named multi-key collections, complete key-set restoration, legacy file
-  compatibility, encrypted names, invalid count/UTF-8/control rejection, and frozen independent vectors, purpose/time/key separation, random-access
-  offsets, deliberate CTR reuse plus independent MAC rejection, production
-  keyfile round trips, corrupted/wrong/missing pad/header/tag, exclusive creation.
-* Short-message compression: fixed three-bit prefix vectors, arbitrary byte
-  round trips, strict padding/truncation rejection and automatic smaller-form
-  selection. Partial previews tested before the footer, including interleaving
-  and all supported FEC modes.
-* Tuning/repeatability: all named pattern/tone and simulation modes, C/N0 and
-  noise-budget equations, exact estimate versus waveform duration, inclusive
-  two-second content limit, one-byte slow exception, and configurable airtime
-  policies allowing more than 64KiB.
-* Continuous session: changing idle noise/spectrum/baseband plots, provisional
-  text before verification with stable signal identity, consecutive packets,
-  encrypted automatic epochs, cancellation/reconfiguration, bounded receive
-  buffers and no delivery from unrecoverable noise.
-* QR: frozen matrix tests and independent ZXing-C++ decoding of exported PBMs
-  for short text, 500 ASCII characters, 500 four-byte Unicode characters, embedded
-  NUL, markup payloads, and multilingual text. The decoder is a test-only tool.
-* Windows audio contract: a fake WinMM backend compiles the actual Windows audio
-  branch on Linux and checks continuous queued buffers, error handling, timeouts,
-  and cleanup. This does not establish physical Windows device reliability.
-* Real native FLTK GUI under an isolated Xvfb display: continuous noisy simulation,
-  changing live plots/waterfall, pending text before final verification, normal
-  Transmit control, exact UTF-8 clipboard copy, exclusive save, cache clearing,
-  and automatic receive resume passed. The captured application was
-  visually checked at 1180 by 830 pixels.
-* A native CLI-only Release build with Python discovery explicitly disabled
-  passed all 10 C++ suites. Its installed directory was moved to a path containing
-  spaces; dependency closure, full inventory, and simulation passed with an empty
-  PATH and no runtime environment setup.
-* CMake packaging fixture: an executable depending on a shared library that in
-  turn depends on another shared library was installed and relocated. Both
-  indirect dependency resolution and isolated execution passed; modified files
-  and unlisted additions were rejected by inventory verification.
-* Complete native GUI installation relocated to a path containing spaces, with
-  its original pathname removed. CMake verified the inventory and native
-  dependency closure; the actual GUI workflow passed under Xvfb with an empty
-  PATH and no interpreter or runtime setup.
-* Native CPack TGZ and ZIP archives were generated, independently extracted, and
-  verified for the complete inventory, native dependency closure, isolated modem
-  execution, and GUI self-check. The archives are approximately 12 MiB each and
-  are available in `build-native/releases/` with names beginning
-  `DataPump-0.1.0-Linux-x86_64-native`.
+* Native GUI Release: all 18 CTest suites passed. The CLI suite contains 19
+  integration tests, including production 128 MiB keyfiles, encrypted WAV
+  transfers, terminal escaping, exclusive saves and full-capacity packet pipes.
+* AddressSanitizer + UndefinedBehaviorSanitizer Debug: all 17 suites passed.
+  The final live/tuning revisions and dependent CLI/GUI suites were rerun and
+  passed. LeakSanitizer is disabled because this host's ptrace environment
+  prevents it from starting; no ASan or UBSan errors were reported.
+* CLI-only Release with Python discovery explicitly disabled: all 15 C++/CMake
+  suites passed, including relocation. Dependent suites were rerun after the
+  final live/tuning revisions.
+* Streaming/transfer: forced tone 128/1024 operation remains eligible with an
+  8 MiB DSP workspace when full PCM would exceed the batch budget; live tone
+  1024/16384 roundtrips run in a 1 MiB workspace. Automatic integration exceeds
+  the former 16,384-chip ceiling, and training stays exactly five seconds.
+* Weak-channel model: fixed-ID messages at target C/N0 of -20 and -60 dB-Hz
+  decode with RS60 across seeds 1, 17 and 29 using the planned long integration.
+  The shorter 40 dB-Hz plan fails at the same noise levels. These are ideal-carrier,
+  matched-despreading integrated-AWGN tests, not measured radio sensitivity.
+* Physical PCM: 24 kHz bandwidth at 96 kHz sampling, a fractional 12,731.375 Hz
+  carrier and 137-sample delay roundtrip exactly. A separate tone-128 test removes
+  all training, substitutes noise and decodes with body FEC off. A streaming
+  encrypted 1,024-chip pattern test also recovers with obscured training, nearby
+  sample delay and -5 dB sample AWGN, without allocating a complete waveform.
+* Generic raw modem: binary and ciphertext-like training, delay, noise, a 3 Hz
+  static carrier offset, independent keyed spreading, WAV validation and active
+  cancellation pass. The generic known-training carrier search is distinct from
+  the streaming blind packet receiver's finite timing search.
+* Packet/resource regressions: trailing noise cannot discard a valid packet;
+  content at the configured capacity works with every FEC mode; batch and
+  streaming feasibility are independent; huge simulated idle intervals remain
+  cancellable. The bootstrap prefilter preserves every single-byte mutation
+  and 900 randomized 16-byte corruption trials while rejecting over 99% of
+  independent noise headers. Frozen RS vectors and correction trials still pass.
+* Continuous engine: all ten cases pass, covering idle plots, pending/final
+  identity, consecutive messages, encryption and named keys, epoch refresh,
+  cancellation, bounded long tones and three keys with 13 candidate epochs each
+  at the largest keyed template under the default DSP budget.
+* Audio: ALSA fixtures cover duplex default discovery, same-card conversion at
+  96 kHz, explicit-device failure, partial writes and streaming buffer lifetimes.
+  WinMM fixtures compile the actual Windows branch and check queued buffers,
+  cancellation, cleanup and underrun during a slow generation callback.
+* Actual device configuration: this machine's discovered analog default opened
+  at both 48 and 96 kHz using the new fallback. The probe submitted **zero PCM
+  samples** and recorded no microphone input. No physical audio transfer or
+  Windows driver reliability claim follows from this check.
 
-No live audio/radio transmission, thermal receiver measurements, near-capacity
-throughput measurements, multi-day integration, native Windows driver tests,
-or independent external security audit was performed. See requirements.md for
-the features that remain outside this reference implementation.
+The native GUI simulation smoke workflow checks changing plots/waterfall,
+pending-to-verified events, two consecutive transmissions without a simulation
+cooldown, exact UTF-8 clipboard text, text exclusion from the file list, exclusive
+binary save, cache clearing and receive resume. The application layout was
+visually inspected on an isolated 1400×1100 display. The final workflow passed
+in both Release and ASan/UBSan builds.
 
-To repeat the native GUI smoke test on Linux with a display or Xvfb available:
+The version 0.2.0 native installation was copied to a directory containing
+spaces and the original installation made unavailable. Its CLI simulation,
+GUI self-check and full GUI simulation workflow passed with an empty `PATH`,
+invalid Python paths and an empty `LD_LIBRARY_PATH`. The verifier confirmed
+the file inventory and application-library dependency closure, and rejected
+both modified and unrecorded files.
+
+An independent generated-PCM benchmark processed 7.509 seconds of 48 kHz noise
+in 5.000 seconds of wall time (1.502× real time) with one key and 13 epoch
+candidates after warmup. It does not benchmark every combination of bandwidth,
+keys or spreading settings. To repeat the same workload without audio hardware:
 
 ```sh
-xvfb-run -a ./build/datapump-gui --smoke-test
-xvfb-run -a cmake -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -P tests/package_native.cmake
+cmake --build build --target benchmark_receiver
+./build/benchmark_receiver
 ```
+
+Cryptographic frozen vectors, keyfile tamper/permission cases, Unicode handling
+and QR matrices remain covered by the automated suites. Independent ZXing QR
+decoding was performed for the unchanged QR implementation during version 0.1;
+that external decoder was not added as a runtime dependency.
+
+Live acquisition has finite carrier, timing and epoch hypotheses. Multi-day
+clock drift, arbitrary long encrypted-pattern start times, calibrated sensitivity,
+near-capacity throughput and native Windows hardware remain outside this local
+validation. See [modem.md](modem.md) and [requirements.md](requirements.md).

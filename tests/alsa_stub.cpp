@@ -1,0 +1,43 @@
+#include "alsa_stub.hpp"
+#include <algorithm>
+#include <cstdlib>
+#include <cstring>
+namespace alsa_test { State state; void reset(){state=State{};} }
+extern "C" {
+int snd_pcm_open(void** pcm,const char* name,int,int) {
+    auto& s=alsa_test::state;s.attempts.emplace_back(name);
+    if(std::find(s.available.begin(),s.available.end(),name)==s.available.end())return -2;
+    *pcm=reinterpret_cast<void*>(1);s.selected=name;++s.opens;++s.live;return 0;
+}
+int snd_pcm_set_params(void*,int,int,unsigned,unsigned rate,int,unsigned) {
+    auto& s=alsa_test::state;s.rate=rate;
+    return std::find(s.wrong_format.begin(),s.wrong_format.end(),s.selected)!=s.wrong_format.end()?-22:0;
+}
+long snd_pcm_readi(void*,void* buffer,unsigned long count) {
+    auto* pcm=static_cast<std::int16_t*>(buffer);
+    for(std::size_t i=0;i<count;++i)pcm[i]=static_cast<std::int16_t>((alsa_test::state.captured++)%32768);
+    return static_cast<long>(count);
+}
+long snd_pcm_writei(void*,const void* buffer,unsigned long count) {
+    auto& s=alsa_test::state;count=std::min(count,static_cast<unsigned long>(s.write_limit));
+    const auto* pcm=static_cast<const std::int16_t*>(buffer);s.played.insert(s.played.end(),pcm,pcm+count);
+    return static_cast<long>(count);
+}
+int snd_pcm_recover(void*,int,int){return -1;}
+int snd_pcm_drain(void*){return 0;}
+int snd_pcm_close(void*){++alsa_test::state.closes;--alsa_test::state.live;return 0;}
+int snd_pcm_wait(void*,int){return 1;}
+int snd_device_name_hint(int,const char*,void*** hints) {
+    auto& list=alsa_test::state.hints;
+    *hints=static_cast<void**>(std::calloc(list.size()+1,sizeof(void*)));
+    for(std::size_t i=0;i<list.size();++i)(*hints)[i]=&list[i];
+    return 0;
+}
+char* snd_device_name_get_hint(const void* hint,const char* id) {
+    const auto& item=*static_cast<const alsa_test::Hint*>(hint);
+    const auto& value=std::strcmp(id,"IOID")==0?item.io:item.name;
+    if(value.empty())return nullptr;
+    auto* result=static_cast<char*>(std::malloc(value.size()+1));std::memcpy(result,value.c_str(),value.size()+1);return result;
+}
+int snd_device_name_free_hint(void** hints){std::free(hints);return 0;}
+}

@@ -50,7 +50,7 @@ PatternMode parse_pattern_mode(std::string_view name) {
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption) {
     if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>192000)
         throw Error("automatic audio bandwidth must be 1..192000 Hz");
-    if(!std::isfinite(target_snr_db_hz)) throw Error("target C/N0 must be finite dB/Hz");
+    if(!std::isfinite(target_snr_db_hz)) throw Error("target C/N0 must be finite dB-Hz");
     const auto index=index_of(mode);
     Plan plan;
     plan.config.bandwidth_hz=bandwidth_hz;
@@ -60,7 +60,7 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     const bool tone=mode==PatternMode::auto_tone || index>=9;
     plan.config.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
     plan.config.scramble=mode==PatternMode::auto_keystream && encryption;
-    const double chip_seconds=2/modem::bit_rate(plan.config);
+    const double chip_seconds=modem::symbol_seconds(plan.config);
     const double exponent=(plan.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);
     plan.required_spreading=exponent>std::log10(std::numeric_limits<double>::max())?
         std::numeric_limits<double>::infinity():std::max(1.,std::pow(10.,exponent));
@@ -68,13 +68,19 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     else {
         const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),plan.required_spreading);
         plan.config.spreading_factor=found==automatic_lengths.end()?automatic_lengths.back():*found;
+        if(found==automatic_lengths.end()) {
+            const double seconds=std::pow(10.,(plan.target_symbol_snr_db-target_snr_db_hz)/10);
+            if(!std::isfinite(seconds))throw Error("requested integration exceeds numeric duration range");
+            plan.config.integration_seconds=seconds;
+            (void)modem::symbol_sample_count(plan.config);
+        }
     }
-    plan.estimated_processing_gain_db=10*std::log10(static_cast<double>(plan.config.spreading_factor));
-    plan.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(chip_seconds*plan.config.spreading_factor);
+    plan.estimated_processing_gain_db=10*std::log10(modem::symbol_seconds(plan.config)/chip_seconds);
+    plan.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(modem::symbol_seconds(plan.config));
     plan.target_supported=plan.estimated_symbol_snr_db+1e-10>=plan.target_symbol_snr_db;
     std::ostringstream explanation;
     explanation<<std::fixed<<std::setprecision(1)<<"C/N0 integration estimate: "<<plan.config.spreading_factor
-        <<" chips/symbol, estimated Es/N0 "<<plan.estimated_symbol_snr_db<<" dB; target "<<plan.target_symbol_snr_db<<" dB. ";
+        <<" template chips, "<<modem::symbol_seconds(plan.config)<<" seconds/symbol, estimated Es/N0 "<<plan.estimated_symbol_snr_db<<" dB; target "<<plan.target_symbol_snr_db<<" dB. ";
     if(!plan.target_supported) explanation<<"The selected finite spreading does not meet this target. ";
     if(mode==PatternMode::auto_keystream && !encryption) explanation<<"Without a key, auto-pattern is used. ";
     explanation<<"This is an engineering estimate, not measured decoder sensitivity; duration and memory are checked separately.";

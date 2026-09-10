@@ -17,7 +17,7 @@ std::span<const PatternMode> pattern_modes();
 struct Plan {
     modem::Config config;
     double estimated_processing_gain_db = 0;
-    double target_symbol_snr_db = 10;
+    double target_symbol_snr_db = 18;
     double estimated_symbol_snr_db = 0;
     double required_spreading = 1;
     bool target_supported = false;

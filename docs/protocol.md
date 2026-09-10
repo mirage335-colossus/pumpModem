@@ -9,6 +9,11 @@ Version 2 adds a variable-length short-payload prefix code. The framing, metadat
 integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
 versions; an older decoder that accepts only version 1 cannot read version 2.
 
+Application release 0.2 changes the audio waveform to shared differential
+16-APSK and independently timed training. Its audio is incompatible with release
+0.1. This does not change either packet version or the existing keyfile formats;
+audio waveform versions and packet codec versions are separate concepts.
+
 The audio synchronization preamble is outside the packet codec. It is neither
 covered by packet Reed–Solomon coding nor by the packet digest/MAC. When
 encryption is enabled, the transmitter encrypts the complete modem frame,
@@ -89,9 +94,12 @@ the flag independently of a local channel's speed.
 
 `transfer::estimate` reports content airtime, complete packet airtime, and total
 airtime including the preamble separately. Its repeatability result is separate
-from waveform/acquisition memory feasibility. A fixed-size preamble may occupy a
-long time at a slow rate, and a repeatable message need not fit a buffered audio
-operation. The one-byte floor does not bypass memory checks or add a repeater.
+from streaming DSP and content feasibility. The default preamble occupies five
+seconds independently of payload symbol duration. Streaming operations retain
+bounded DSP state, while legacy batch PCM/WAV operations can still exceed their
+separate full-waveform budget. `memory_supported` reports streaming feasibility;
+`batch_memory_supported` reports the latter boundary. The one-byte floor does
+not bypass content, DSP or numeric-range checks and does not add a repeater.
 
 The canonical input to the digest/MAC is the 40-byte bootstrap concatenated with
 the entire body except its final 32-byte tag. Unkeyed packets use SHA-256; this
@@ -224,7 +232,11 @@ payload length, and 4096 bytes for fixed decoding scratch. The caller-owned inpu
 buffer is excluded. Checked size arithmetic rejects integer overflow, and
 metadata and dictionary expansion have separate small bounds. Consequently the
 maximum payload is below the configured memory limit; applications should also
-budget audio buffers and their received-message cache.
+budget their received-message cache. The streaming transfer service separates
+application `content_limit` (default 256 MiB) from `dsp_workspace_bytes` (default
+64 MiB) and derives checked packet scratch bounds from the content limit. Long
+payload symbol durations do not allocate correspondingly long audio buffers.
+These are distinct bounds rather than a single cap on total process memory.
 
 Encoding also checks its memory budget before allocating payload-sized copies.
 Its conservative budget uses the uncompressed size and includes the caller's
@@ -244,3 +256,6 @@ The codec performs no filesystem
 or clipboard writes; a user interface must require an explicit save destination
 and must render received text as data. Callsign and grid fields are descriptive
 metadata, not authenticated personal identities in unkeyed mode.
+The native GUI copies only verified text with strict UTF-8 validation. Its file
+list contains verified file and screenshot kinds only; even an ASCII file is
+saved explicitly rather than treated as ticker clipboard text.

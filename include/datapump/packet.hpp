@@ -44,6 +44,12 @@ DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options = {}
                             std::size_t max_memory = default_memory_limit);
 // Incomplete prefixes return nullopt; invalid or oversized complete prefixes throw.
 // Trailing demodulator bytes do not contribute to the packet length.
+// Cheap necessary condition on the decrypted systematic header. False proves
+// that more than sixteen distinct bytes contradict mandatory constraints, so
+// RS(72,40) cannot recover a valid header under this memory bound. True does not
+// validate anything; incomplete headers conservatively return true.
+bool packet_bootstrap_possible(const Bytes& prefix,
+                               std::size_t max_memory = default_memory_limit);
 std::optional<std::size_t> packet_frame_size(const Bytes& prefix,
                                            std::size_t max_memory = default_memory_limit);
 bool safe_filename(const std::string& name);

@@ -16,4 +16,9 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
 using CaptureCallback = std::function<bool(std::span<const float>)>;
 void capture(std::uint32_t rate, const std::string& device,
              const CaptureCallback& on_chunk, std::stop_token stop = {});
+// Generate bounded PCM chunks while keeping one output device open. A zero
+// count finishes playback; counts must not exceed the supplied span.
+using PlaybackCallback = std::function<std::size_t(std::span<float>)>;
+void playback(std::uint32_t rate, const std::string& device,
+              const PlaybackCallback& next_samples, std::stop_token stop = {});
 }

@@ -17,6 +17,8 @@ struct RepeatPolicy {
 };
 struct Options {
     modem::Config modem;
+    std::size_t content_limit = default_memory_limit;
+    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
     FecMode fec = FecMode::rs20;
     bool compression = true;
     std::optional<Crypto> key;
@@ -31,6 +33,7 @@ struct Estimate {
     double content_seconds = 0;
     double total_seconds = 0;
     bool memory_supported = false;
+    bool batch_memory_supported = false;
     bool repeatable_allowed = false;
     std::size_t waveform_samples = 0;
 };
@@ -44,10 +47,15 @@ struct Received {
 };
 using Progress = std::function<void(std::uint64_t)>;
 
+// Separate codec scratch from the amount of application content admitted.
+// Covers the largest supported RS overhead, temporary copies and metadata.
+std::size_t packet_workspace_limit(std::size_t content_limit);
+
 // Callbacks own their key material and remain valid after Options is destroyed.
 PacketOptions packet_options(const Options& options, std::uint64_t timestamp);
 modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
 Bytes pack(const Message& message, const Options& options);
+Bytes transmission_wire(const Message& message, const Options& options);
 DecodedPacket unpack(const Bytes& wire, const Options& options);
 std::vector<float> transmit(const Message& message, const Options& options,
                             std::stop_token stop = {});
