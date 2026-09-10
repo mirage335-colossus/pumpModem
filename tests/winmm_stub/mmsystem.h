@@ -1,7 +1,9 @@
 #pragma once
 #include "windows.h"
+#include <algorithm>
 #include <cstddef>
 #include <deque>
+#include <functional>
 #include <vector>
 #include <stdexcept>
 using MMRESULT=UINT;
@@ -25,6 +27,8 @@ struct State {
     std::size_t captured=0;
     std::deque<WAVEHDR*> pending;
     std::vector<std::int16_t> played;
+    std::function<void()> before_wait;
+    DWORD maximum_wait=0;
 };
 inline State state;
 inline bool fail(Failure failure) { if(state.failure!=failure) return false;state.failure=Failure::None;return true; }
@@ -60,6 +64,8 @@ inline BOOL CloseHandle(HANDLE) {--winmm_test::state.events;return 1;}
 inline DWORD WaitForSingleObject(HANDLE,DWORD timeout) {
     auto& s=winmm_test::state;
     if(timeout==0 || timeout>3000) throw std::runtime_error("unbounded audio wait");
+    s.maximum_wait=std::max(s.maximum_wait,timeout);
+    if(s.before_wait) s.before_wait();
     if(s.timeout) return WAIT_TIMEOUT;
     if(s.pending.empty()) throw std::runtime_error("wait with no pending audio");
     auto* h=s.pending.front();s.pending.pop_front();

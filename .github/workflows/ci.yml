@@ -9,17 +9,37 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        sanitizers: ["OFF", "ON"]
+        include:
+          - sanitizers: "OFF"
+            build_type: Release
+            portable: "ON"
+          - sanitizers: "ON"
+            build_type: Debug
+            portable: "OFF"
     steps:
       - uses: actions/checkout@v4
-      - run: sudo apt-get update && sudo apt-get install -y libssl-dev python3-tk xvfb xauth
-      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }}
+      - name: Prepare native build toolchain
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev zlib1g-dev libzstd-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth
+      - name: Configure without Python
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }} -DDATAPUMP_PORTABLE=${{ matrix.portable }} -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
       - run: cmake --build build --parallel
       - run: ctest --test-dir build --output-on-failure --parallel 2
-      - run: xvfb-run -a python3 tests/gui_smoke.py --pump build/pump
-      - name: Verify offline relocation and GUI
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+      - name: Exercise native desktop workflow
+        run: xvfb-run -a ./build/datapump-gui --smoke-test
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+      - name: Optional developer CLI regression tests
+        run: python3 tests/test_cli.py build/pump
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+      - name: Verify relocated native GUI and package inventory
         if: matrix.sanitizers == 'OFF'
-        run: xvfb-run -a python3 tests/portable_smoke.py --pump build/pump --gui-smoke
+        run: xvfb-run -a cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
+      - name: Create native archives
+        if: matrix.sanitizers == 'OFF'
+        run: cmake --build build --target package
   windows:
     runs-on: windows-latest
     steps:
@@ -27,8 +47,13 @@ jobs:
       - run: vcpkg install openssl:x64-windows-static
       - name: Configure static OpenSSL and CRT
         shell: pwsh
-        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
       - run: cmake --build build --config Release --parallel
       - run: ctest --test-dir build -C Release --output-on-failure --parallel 2
-      - name: Verify offline Windows runtime relocation
-        run: python tests/portable_smoke.py --pump build/Release/pump.exe
+      - name: Exercise native desktop workflow
+        run: ./build/Release/datapump-gui.exe --smoke-test
+      - name: Verify native Windows package relocation
+        shell: pwsh
+        run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
+      - name: Create native archives
+        run: cmake --build build --config Release --target package

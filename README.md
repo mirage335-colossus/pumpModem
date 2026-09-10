@@ -1,7 +1,7 @@
 # Data Pump
 
 A C++20 audio modem for moving clipboard text, screenshots, and files between
-computers. It includes a compiled CLI, a thin Python/Tk desktop console, real
+computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform simulation, and a documented versioned packet format. Received content
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
@@ -16,16 +16,22 @@ coverage and boundaries. No unimplemented control is presented as functioning.
 
 ## Build and run
 
-The CLI needs a C++20 compiler, CMake 3.20+, and OpenSSL 3 development files.
-There is no dependency download during CMake configuration. QR encoding is
-vendored with its MIT license. On Debian/Ubuntu, the usual build packages are
-`build-essential cmake libssl-dev`.
+Build with a C++20 compiler, CMake 3.21+, OpenSSL 3 development files, and the
+platform's desktop development libraries. The complete FLTK 1.4.5 source and QR
+encoder are vendored. CMake does not fetch dependencies. On Debian/Ubuntu, build
+packages are `build-essential cmake libssl-dev zlib1g-dev libzstd-dev libx11-dev
+libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev`.
+These are build-machine requirements; a packaged installation includes its
+application libraries. Python and Tk are not required to build, package, or run
+the software. If Python is available, CTest can also run optional CLI integration
+tests.
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
+./build/datapump-gui
 ./build/pump simulate --text 'CQ hello from Data Pump' --snr 12 --json
 ./build/pump tx --input screenshot.png --kind screenshot --output transfer.wav
 ./build/pump rx --input transfer.wav --save received.png
@@ -54,34 +60,26 @@ complete five-second training sequence and packet.
 
 ## Desktop console
 
-For a copyable installation, make a portable bundle on a working computer:
+The desktop application is a compiled executable linked to the same C++ transfer
+service as the CLI. FLTK and OpenSSL are linked statically by default. For a
+copyable installation, install or package a release build:
 
 ```sh
-python3 tools/bundle_portable.py --pump build/pump --output build/DataPump-portable
-./build/DataPump-portable/datapump-gui --self-check
-./build/DataPump-portable/datapump-gui
+cmake --install build --prefix "$PWD/build/DataPump-portable"
+./build/DataPump-portable/bin/datapump-gui --self-check
+./build/DataPump-portable/bin/datapump-gui
+cmake --build build --target package
 ```
 
 Copy that **entire directory** to another compatible computer and use its
-`datapump-gui` launcher (`datapump-gui.cmd` on Windows). The bundle carries its
-own Python, standard library, Tk, Tcl/Tk resources, and native application
-dependencies. The destination needs no Python installation, package manager,
-virtual environment, or internet access. Linux bundles require the same CPU
-architecture and a compatible Linux desktop with glibc at least as new as the
-build computer; Windows needs its own Windows bundle. See
-[offline installation](docs/offline-installation.md) for packaging, local runtime
-overlays, verification, and operating-system dependencies.
+`bin/datapump-gui` executable (`bin/datapump-gui.exe` on Windows). Remaining
+native application libraries are collected during installation. The destination
+needs no interpreter, package manager, environment setup, or internet access.
+Linux bundles require the same CPU architecture and a compatible desktop with
+glibc at least as new as the build computer; Windows needs its own build. See
+[offline installation](docs/offline-installation.md) for packaging, verification,
+and operating-system requirements.
 
-For development directly from source:
-
-```sh
-python3 gui/datapump_gui.py --pump build/pump
-```
-
-Source execution and bundle creation need an existing Python 3.10+ runtime with
-Tk available locally. An already unpacked matching runtime can supply Tk when
-it is absent from the build computer's Python installation. No runtime package
-is fetched by the bundler. The CLI itself needs no Python.
 The console provides text composition and explicit clipboard copy, file and
 screenshot attachment, Level L QR previews, audio capture/playback, WAV import/
 export, seeded simulation, waveform/spectrum/constellation diagnostics, shared
@@ -180,17 +178,22 @@ For Windows, use a C++20 Visual Studio toolchain and OpenSSL 3 (for example the
 Windows code is maintained alongside Linux code but cannot be hardware-verified
 by the Linux test environment. MSVC builds embed a UTF-8 process manifest for
 Windows10 version1903 or newer; non-ASCII paths on older Windows are unsupported.
-Ordinary CPack packages and `cmake --install build` install the executable and
-GUI source launcher; these require host runtimes and do not contain Python/Tk.
-Use the [portable bundler](docs/offline-installation.md) for an installation that
-can be copied to compatible computers without fetching dependencies.
+`DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. CMake installation
+and CPack TGZ/ZIP archives include both native executables and collected runtime
+libraries. Use `-DDATAPUMP_BUILD_GUI=OFF` for a CLI-only build, or
+`-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE` to disable the optional Python tests.
+See [offline installation](docs/offline-installation.md) for copy and verification
+commands.
 
 The source is separated into packet coding, cryptography, DSP/WAV, audio devices,
-runtime policy, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),
+runtime policy, a shared transfer service, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),
 [modem](docs/modem.md), [QR](docs/qr.md), and
 [release disclaimer](docs/disclaimer.md). The [validation record](docs/validation.md)
 lists the tests actually run. The supplied design is preserved in
 [original-specification.md](docs/original-specification.md) as source material,
 not as a claim that every requested feature or assertion is implemented.
 
-Licensed under MIT; the vendored QR encoder retains its own MIT copyright notice.
+Application code is licensed under MIT; the vendored QR encoder retains its own
+MIT notice. Data Pump is based in part on the work of the FLTK project. Its
+license and static-linking exception, OpenSSL notices, and collected runtime
+notices accompany the installation.

@@ -4,6 +4,7 @@
 #include "datapump/packet.hpp"
 #include "datapump/qr.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/transfer.hpp"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -85,7 +86,7 @@ Examples:
   pump rx --input transfer.wav --save received.png
   pump tx --text "hello" --device default
   pump rx --device default --seconds 30 --json
-GUI: python3 gui/datapump_gui.py --pump build/pump
+GUI: datapump-gui
 )HELP";
 
 class Args {
@@ -188,28 +189,21 @@ std::optional<Crypto> key(const Args& a) {
     if(!a.has("keyfile")) {if(a.has("pad")) throw Error("--pad requires --keyfile");return std::nullopt;}
     return load_keyfile(a.get("keyfile"),a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
 }
-PacketOptions packet_options(const Args& a,const std::optional<Crypto>& k,std::uint64_t timestamp) {
-    PacketOptions options;
+transfer::Options transfer_options(const Args& a,const modem::Config& c,const std::optional<Crypto>& k,std::uint64_t timestamp) {
+    transfer::Options options;
+    options.modem=c;
+    options.key=k;
+    options.timestamp=timestamp;
+    const auto window=a.integer("search-seconds",6);
+    if(window>32768) throw Error("clock drift search exceeds32768 seconds");
+    options.search_seconds=static_cast<unsigned>(window);
     auto fec=a.get("fec","20");
     if(fec=="20") options.fec=FecMode::rs20;
     else if(fec=="60") options.fec=FecMode::rs60;
     else if(fec=="off") options.fec=FecMode::off;
     else throw Error("fec must be20,60,or off");
     options.compression=!a.has("no-compression");
-    if(k) {
-        auto context=[timestamp](const Bytes& data) {
-            Bytes bound{'D','P','-','E','P','O','C','H',1};
-            for(int i=7;i>=0;--i) bound.push_back(static_cast<std::uint8_t>(timestamp>>(i*8)));
-            bound.insert(bound.end(),data.begin(),data.end());return bound;
-        };
-        options.authenticator=[&k,context](const Bytes& data){return k->mac(context(data));};
-        options.verifier=[&k,context](const Bytes& data,const Bytes& tag){return k->verify(context(data),tag);};
-    }
     return options;
-}
-void seed_config(modem::Config& c,const std::optional<Crypto>& k,std::uint64_t timestamp) {
-    if(k && c.scramble) {auto seed=k->stream(StreamPurpose::Scrambler,timestamp,0,32);std::copy(seed.begin(),seed.end(),c.spreading_seed.begin());}
-    if(k && c.dsss) {auto seed=k->stream(StreamPurpose::Dsss,timestamp,0,32);std::copy(seed.begin(),seed.end(),c.dsss_seed.begin());}
 }
 Bytes input_bytes(const Args& a) {
     auto path=a.get("input","-");
@@ -287,35 +281,11 @@ void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& 
         else std::cout.write(reinterpret_cast<const char*>(m.data.data()),static_cast<std::streamsize>(m.data.size()));
     }
 }
-struct Reception {DecodedPacket packet;modem::Diagnostics diagnostics;std::uint64_t timestamp;};
-Reception receive(const Args& a,const std::vector<float>& samples,modem::Config c,
-                  const std::optional<Crypto>& k,std::uint64_t center) {
-    auto window=a.integer("search-seconds",6);
-    if(window>32768) throw Error("clock drift search exceeds32768 seconds");
-    auto candidates=drift_candidates(center,static_cast<unsigned>(window),k.has_value());
-    if(!k) candidates={center};
-    std::string last_error;
-    for(auto timestamp:candidates) {
-        if(a.has("progress")) std::cerr<<"Searching epoch "<<timestamp<<"\n";
-        try {
-            seed_config(c,k,timestamp);
-            auto training=modem::preamble(c);
-            auto expected=k?k->xor_data(training,timestamp):training;
-            auto result=modem::demodulate(samples,c,expected);
-            if(result.bytes.size()<training.size()) throw Error("truncated training sequence");
-            auto plain=k?k->xor_data(result.bytes,timestamp):std::move(result.bytes);
-            Bytes frame(plain.begin()+static_cast<std::ptrdiff_t>(training.size()),plain.end());
-            auto decoded=decode_packet(frame,packet_options(a,k,timestamp),budget(a));
-            return {std::move(decoded),std::move(result.diagnostics),timestamp};
-        } catch(const Error& e) {last_error=e.what();}
-    }
-    throw Error("no validated packet in timing search: "+last_error);
-}
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");
     Bytes bits;
     for(char c:input) {if(c!='0' && c!='1')throw Error("status bits must contain only0 and1");bits.push_back(static_cast<std::uint8_t>(c-'0'));}
-    if(k) {auto stream=k->stream(StreamPurpose::Data,time,0,(bits.size()+7)/8);for(std::size_t i=0;i<bits.size();++i)bits[i]^=(stream[i/8]>>(7-i%8))&1;}
+    if(k) {auto stream=k->stream(StreamPurpose::Data,time,0,(bits.size()+7)/8);for(std::size_t i=0;i<bits.size();++i)bits[i]^=static_cast<std::uint8_t>((stream[i/8]>>(7-i%8))&1);}
     return bits;
 }
 }
@@ -343,21 +313,23 @@ int main(int argc,char** argv) {
             std::cerr<<"Created symmetric keyfile: "<<a.get("output")<<'\n';return 0;
         }
         if(a.command=="devices") {
-            for(const auto& d:audio::devices()) std::cout<<d.id<<'\t'<<d.description<<'\n';return 0;
+            for(const auto& d:audio::devices()) std::cout<<d.id<<'\t'<<d.description<<'\n';
+            return 0;
         }
         const std::set<std::string> commands={"pack","unpack","tx","rx","simulate","status-tx","status-rx"};
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
         auto c=config(a);auto timestamp=epoch(a);auto k=key(a);
+        auto settings=transfer_options(a,c,k,timestamp);
+        transfer::Progress progress;
+        if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="pack") {
-            auto frame=encode_packet(message(a),packet_options(a,k,timestamp),budget(a));
-            output_bytes(a,k?k->xor_data(frame,timestamp):frame);return 0;
+            output_bytes(a,transfer::pack(message(a),settings));return 0;
         }
         if(a.command=="unpack") {
-            auto bytes=input_bytes(a);if(k) bytes=k->xor_data(bytes,timestamp);
-            report(a,decode_packet(bytes,packet_options(a,k,timestamp),budget(a)),{},timestamp);return 0;
+            report(a,transfer::unpack(input_bytes(a),settings),{},timestamp);return 0;
         }
         if(a.command=="status-tx" || a.command=="status-rx") {
-            seed_config(c,k,timestamp);auto bits=status_bits(a,k,timestamp);
+            c=transfer::seeded_config(settings,timestamp);auto bits=status_bits(a,k,timestamp);
             if(a.command=="status-tx") {
                 if(!a.has("output") && !a.has("device")) throw Error("status-tx requires --output or --device");
                 output_wave(a,modem::modulate_status(bits,c),c);
@@ -372,27 +344,32 @@ int main(int argc,char** argv) {
             std::vector<float> samples;
             if(a.has("device")) {if(a.has("input"))throw Error("choose --input WAV or --device");samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a));}
             else {auto wav=input_wav(a);c.sample_rate=wav.sample_rate;modem::validate(c);samples=std::move(wav.samples);}
-            auto result=receive(a,samples,c,k,timestamp);report(a,result.packet,result.diagnostics,result.timestamp);return 0;
+            settings.modem=c;
+            auto result=transfer::receive(samples,settings,progress);report(a,result.packet,result.diagnostics,result.timestamp);return 0;
         }
         if(a.command=="tx" && !a.has("output") && !a.has("device")) throw Error("tx requires --output WAV or explicit --device");
         if(a.command=="simulate" && a.has("device")) throw Error("simulation uses in-memory loopback; omit --device");
-        seed_config(c,k,timestamp);
-        auto frame=encode_packet(message(a),packet_options(a,k,timestamp),budget(a));
-        auto wire=modem::preamble(c);wire.insert(wire.end(),frame.begin(),frame.end());
-        if(k) wire=k->xor_data(wire,timestamp);
-        auto samples=modem::modulate(wire,c);
         if(a.command=="tx") {
+            const auto samples=transfer::transmit(message(a),settings);
             output_wave(a,samples,c);
-            std::cerr<<"Transmitted "<<frame.size()<<" frame bytes, "<<samples.size()/static_cast<double>(c.sample_rate)
+            const auto total_bytes=static_cast<std::size_t>(std::llround(static_cast<double>(samples.size())*modem::bit_rate(c)/(8.0*c.sample_rate)));
+            const auto frame_bytes=total_bytes-modem::preamble(c).size();
+            std::cerr<<"Transmitted "<<frame_bytes<<" frame bytes, "<<static_cast<double>(samples.size())/c.sample_rate
                      <<" seconds; start epoch "<<timestamp<<'\n';return 0;
         }
         modem::ChannelConfig channel;
         channel.snr_db=a.number("snr",20);channel.seed=a.integer("seed",1);
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
-        auto noisy=modem::simulate(samples,c,channel);
-        if(a.has("output")) output_wave(a,noisy,c);
-        auto result=receive(a,noisy,c,k,timestamp);report(a,result.packet,result.diagnostics,result.timestamp);
+        const auto outgoing=message(a);
+        transfer::Received result;
+        if(a.has("output")) {
+            const auto samples=transfer::transmit(outgoing,settings);
+            const auto noisy=modem::simulate(samples,transfer::seeded_config(settings,timestamp),channel);
+            output_wave(a,noisy,c);
+            result=transfer::receive(noisy,settings,progress);
+        } else result=transfer::simulate(outgoing,settings,channel,progress);
+        report(a,result.packet,result.diagnostics,result.timestamp);
         return 0;
     } catch(const std::exception& e) {std::cerr<<"pump: "<<e.what()<<'\n';return 2;}
 }

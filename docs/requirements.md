@@ -5,8 +5,8 @@ the entire original design. Tests are in `tests/` and run with CTest.
 
 | Requirement | Implemented behavior / current boundary |
 |---|---|
-| Linux and Windows portable compiled modem | C++20 CLI, OpenSSL3; Linux ALSA dynamically optional, Windows WinMM; GUI separately uses Python/Tk. Linux built/tested; Windows hardware verification pending. |
-| Offline installation transfer | Complete-directory bundle with its own interpreter, standard library, Tk/Tcl scripts, and native dependency collection. No package download or virtual-environment repair at the destination. Linux relocation and actual GUI tested with empty PATH and poisoned host settings. Windows PE collection tested with fixtures; native Windows validation pending. See offline-installation.md for OS/CPU/glibc limits. |
+| Linux and Windows portable compiled modem | C++20 CLI and native C++/FLTK GUI sharing the same transfer service, OpenSSL3; Linux ALSA dynamically optional, Windows WinMM. No Python/Tk build or runtime dependency. Linux built/tested; native Windows and hardware verification pending. |
+| Offline installation transfer | CMake/CPack installs compiled executables and collects native application libraries. FLTK/OpenSSL and release C++ runtimes default to static linking; no interpreter, package manager, or dependency fetch is needed at the destination. Linux native CLI, actual GUI, and transitive shared-library relocation tested with empty PATH. See offline-installation.md for OS/CPU/glibc limits and validation.md for results. |
 | Clipboard/text/screenshots/files | Text stdin/stdout and GUI clipboard copy; arbitrary binary files/images; screenshot files attachable. No native screenshot capture. |
 | Interface isolation | Input only PCM WAV or explicitly selected analog audio device; no USB protocol, raw serial, Ethernet, routing, shell execution of content, or network listener. Hardware isolation is not guaranteed by software. |
 | Receive cache256MB | Bounded in-memory GUI/C++ cache, replacement/eviction, explicit exclusive save. Codec workspaces have separate checks; not a total RSS promise. |

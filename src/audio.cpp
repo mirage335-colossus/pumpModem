@@ -16,6 +16,9 @@
 
 namespace datapump::audio {
 namespace {
+void check_cancelled(std::stop_token stop) {
+    if(stop.stop_requested()) throw Error("audio operation cancelled");
+}
 std::size_t sample_count(double seconds,std::uint32_t rate,std::size_t memory_limit) {
     if(!std::isfinite(seconds) || seconds<=0 || rate<8000 || rate>192000 ||
         seconds*rate>static_cast<double>(memory_limit/sizeof(float)))
@@ -81,31 +84,41 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device) {
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop) {
+    check_cancelled(stop);
     Alsa api; Stream stream(api,device,0,rate);
     std::vector<std::int16_t> block(4096);
+    const auto chunk_limit=std::min<std::size_t>(block.size(),rate/20);
     std::size_t offset=0;
     unsigned failures=0;
     while(offset<samples.size()) {
-        auto count=std::min(block.size(),samples.size()-offset);
+        check_cancelled(stop);
+        auto count=std::min(chunk_limit,samples.size()-offset);
         for(std::size_t i=0;i<count;++i) {
             if(!std::isfinite(samples[offset+i])) throw Error("nonfinite transmit sample");
             block[i]=static_cast<std::int16_t>(std::clamp(samples[offset+i],-1.0f,1.0f)*32767);
         }
         auto n=api.write(stream.pcm,block.data(),count);
+        check_cancelled(stop);
         if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio playback failed");}
         else if(n==0) throw Error("audio playback stalled");
         else {offset+=static_cast<std::size_t>(n);failures=0;}
     }
+    check_cancelled(stop);
     if(api.drain(stream.pcm)<0) throw Error("audio playback drain failed");
+    check_cancelled(stop);
 }
-std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit) {
+std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop) {
+    check_cancelled(stop);
     std::vector<float> samples(sample_count(seconds,rate,memory_limit));
     Alsa api; Stream stream(api,device,1,rate);
     std::vector<std::int16_t> block(4096);
+    const auto chunk_limit=std::min<std::size_t>(block.size(),rate/20);
     std::size_t offset=0;unsigned failures=0;
     while(offset<samples.size()) {
-        auto n=api.read(stream.pcm,block.data(),std::min(block.size(),samples.size()-offset));
+        check_cancelled(stop);
+        auto n=api.read(stream.pcm,block.data(),std::min(chunk_limit,samples.size()-offset));
+        check_cancelled(stop);
         if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio capture failed");}
         else if(n==0) throw Error("audio capture stalled");
         else {for(long i=0;i<n;++i) samples[offset++]=block[static_cast<std::size_t>(i)]/32768.0f;failures=0;}
@@ -177,15 +190,20 @@ struct WaveSession {
             prepared[i]=true;
         }
     }
-    void wait(WAVEHDR& header) {
+    void wait(WAVEHDR& header,std::stop_token stop) {
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+        DWORD timeout_budget=3000;
         while(!(header.dwFlags&WHDR_DONE)) {
+            check_cancelled(stop);
             const auto remaining=std::chrono::duration_cast<std::chrono::milliseconds>(deadline-std::chrono::steady_clock::now()).count();
-            if(remaining<=0) throw Error("audio device completion timed out");
-            const auto result=WaitForSingleObject(event,static_cast<DWORD>(remaining));
-            if(result==WAIT_TIMEOUT) throw Error("audio device completion timed out");
+            if(remaining<=0 || timeout_budget==0) throw Error("audio device completion timed out");
+            const auto duration=std::min<DWORD>({static_cast<DWORD>(remaining),timeout_budget,50});
+            const auto result=WaitForSingleObject(event,duration);
+            check_cancelled(stop);
+            if(result==WAIT_TIMEOUT) {timeout_budget-=duration;continue;}
             if(result!=WAIT_OBJECT_0) throw Error("audio completion event failed");
         }
+        check_cancelled(stop);
     }
     void finish() {
         mm_check(output ? waveOutReset(output) : waveInReset(input),"audio reset failed");
@@ -211,7 +229,8 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device) {
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop) {
+    check_cancelled(stop);
     // Check the entire input before any samples reach the playback device.
     for(auto value:samples) if(!std::isfinite(value)) throw Error("nonfinite transmit sample");
     WaveSession session(false,rate,device);
@@ -220,6 +239,7 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
     std::size_t offset=0;
     std::array<bool,2> queued{};
     const auto enqueue=[&](std::size_t slot) {
+        check_cancelled(stop);
         const auto count=std::min(WaveSession::block_samples,samples.size()-offset);
         if(!count) return;
         for(std::size_t i=0;i<count;++i)
@@ -234,8 +254,9 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
     if(queued[0]) mm_check(waveOutRestart(session.output),"waveOut restart failed");
     std::size_t slot=0;
     while(queued[0] || queued[1]) {
+        check_cancelled(stop);
         if(queued[slot]) {
-            session.wait(session.headers[slot]);
+            session.wait(session.headers[slot],stop);
             queued[slot]=false;
             if(offset<samples.size()) {
                 if(queued[1-slot] && (session.headers[1-slot].dwFlags&WHDR_DONE))
@@ -247,7 +268,8 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
     }
     session.finish();
 }
-std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit) {
+std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop) {
+    check_cancelled(stop);
     std::vector<float> result(sample_count(seconds,rate,memory_limit));
     WaveSession session(true,rate,device);
     session.prepare();
@@ -256,8 +278,9 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
     mm_check(waveInStart(session.input),"waveIn start failed");
     std::size_t offset=0,slot=0;
     while(offset<result.size()) {
+        check_cancelled(stop);
         auto& header=session.headers[slot];
-        session.wait(header);
+        session.wait(header,stop);
         if(header.dwBytesRecorded>header.dwBufferLength || header.dwBytesRecorded%sizeof(std::int16_t)!=0)
             throw Error("waveIn returned invalid audio size");
         const auto count=std::min(static_cast<std::size_t>(header.dwBytesRecorded/sizeof(std::int16_t)),result.size()-offset);

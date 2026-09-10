@@ -1,171 +1,164 @@
-# Offline, copyable installations
+# Native offline installation
 
-A working Data Pump installation must be movable without downloading packages.
-The portable bundle is the distribution format for this: it includes the modem,
-GUI, and their application runtimes in one relocatable directory. Copy the whole
-directory or archive it for transfer. There is no installation or environment
-creation step on the destination.
+Data Pump's desktop application and CLI are C++ executables. Python, Tk, virtual
+environments, and package downloads are absent from the application installation.
+A working installation can be copied as one directory to another compatible
+computer and run immediately.
 
-The Python/Tk GUI uses the Python standard library only. It has no pip packages.
-Python, its native extension modules, Tcl/Tk, and Tcl/Tk's script resources are
-copied into the bundle. Copying only the GUI scripts or a virtual environment
-does not provide an equivalent installation.
+The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder is
+also vendored. CMake uses these local sources and an already installed C++
+toolchain, OpenSSL development files, and desktop development libraries. There is
+no `FetchContent`, runtime bootstrap, or dependency download during configuration,
+compilation, installation, or packaging.
 
-## Create a bundle from local files
+## Build and package
 
-Build and test the compiled modem first, using an existing toolchain. Then run
-the bundler from the repository root on the computer holding the working runtime.
-Linux packaging uses the local `ldd` tool to resolve native dependencies:
+From the repository root, using the build dependencies listed in the README:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
 cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 
-python3 tools/bundle_portable.py \
-  --pump build/pump \
-  --output build/DataPump-portable
+cmake --install build --prefix "$PWD/build/DataPump-portable"
+./build/DataPump-portable/bin/datapump-gui --self-check
+./build/DataPump-portable/bin/datapump-gui
 
-./build/DataPump-portable/datapump-gui --self-check
-./build/DataPump-portable/datapump-gui
+cmake --build build --target package
 ```
 
-`--output` must name a new directory. `--python /path/to/python3` selects another
-existing interpreter to package; otherwise the bundler uses the interpreter
-running it. Use a full Python installation with Tk, not an environment containing
-links to a runtime you do not have. All source files must already be available
-locally. The bundler does not run a package manager or download anything.
-If packaging fails, the output directory is marked `BUILD-INCOMPLETE.txt` and
-must not be distributed as a working installation. Correct the missing local
-runtime files and retry with a new output directory.
+The Python switch demonstrates that the complete native build needs no Python.
+Omit it if you want CTest to run additional Python CLI integration tests when an
+interpreter is already available. Those tests are developer tooling and are not
+installed.
 
-If Python's Tk modules are present in a locally unpacked distribution tree,
-supply that tree as an overlay:
+Both `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. Setting the GUI
+option to `OFF` creates a CLI-only package. Setting the portable option to `OFF`
+disables runtime collection and creates an installation for systems where native
+libraries are managed separately; use the default for copyable installations.
 
-```sh
-python3 tools/bundle_portable.py \
-  --pump build/pump \
-  --python /usr/bin/python3 \
-  --runtime-overlay /path/to/unpacked-runtime \
-  --output build/DataPump-portable
+FLTK is linked statically. Portable builds default to static OpenSSL, the static
+MSVC runtime on Windows, and static GCC C++ support libraries on Linux release
+builds. Remaining native dependencies are discovered recursively from the
+compiled executables and copied by CMake. Packaging uses the toolchain's local
+`objdump` or `dumpbin`, with no Python packaging tools. Missing or conflicting
+native dependencies cause installation to fail; do not distribute a partially
+installed directory after an error.
+
+Additional native-library search directories can be supplied with
+`-DDATAPUMP_RUNTIME_DIRS="/local/path/one;/local/path/two"`. Runtime notices are
+collected from local package metadata where available, including the static
+OpenSSL and GCC runtime inputs. For a custom toolchain or dependency distribution,
+provide its accompanying notices with
+`-DDATAPUMP_EXTRA_LICENSES="/local/license-one;/local/license-two"`.
+
+For Windows, use a Windows C++20 toolchain and an already available static OpenSSL
+installation. The README's Visual Studio/vcpkg configuration uses the
+`x64-windows-static` triplet. After configuring:
+
+```powershell
+cmake --build build --config Release --parallel
+ctest --test-dir build -C Release --output-on-failure
+cmake --install build --config Release --prefix "$PWD/DataPump-portable"
+& ./DataPump-portable/bin/datapump-gui.exe --self-check
+& ./DataPump-portable/bin/datapump-gui.exe
+cmake --build build --config Release --target package
 ```
 
-For example, a Linux overlay can contain
-`usr/lib/python3.13/tkinter/`,
-`usr/lib/python3.13/lib-dynload/_tkinter.cpython-313-x86_64-linux-gnu.so`,
-`usr/lib/x86_64-linux-gnu/libtcl8.6.so`,
-`usr/lib/x86_64-linux-gnu/libtk8.6.so`, and
-`usr/share/tcltk/{tcl8.6,tk8.6}/`, together with the distribution's copyright
-notices. The Python ABI, CPU architecture, and Tcl/Tk binaries and resource
-versions must match. An overlay is a source of existing files, not a request to
-fetch or install packages.
+Keep build toolchains and dependency source/development packages locally if you
+also need to rebuild offline. Transferring an existing working installation does
+not require those build tools or source packages.
 
-On Windows, run the bundler on Windows with a full local Python installation
-that includes Tcl/Tk:
+## Copy and run
 
-```bat
-python tools\bundle_portable.py --pump build\Release\pump.exe --output build\DataPump-portable
-build\DataPump-portable\datapump-gui.cmd --self-check
-build\DataPump-portable\datapump-gui.cmd
-```
-
-Use the supported Windows build described in the main README. A Linux bundle
-cannot supply a Windows runtime, and a Windows bundle cannot supply a Linux one.
-
-## Transfer and run
-
-Copy the entire `DataPump-portable` directory to the destination, including
-`runtime`, `app`, `bin`, `licenses`, and `manifest.json`. Preserve executable
-permissions when copying a Linux bundle. An archive is convenient for removable
-media:
-
-```sh
-tar -C build -czf build/DataPump-portable.tar.gz DataPump-portable
-```
-
-On the destination, extract it anywhere you can read and execute files:
-
-```sh
-tar -xzf DataPump-portable.tar.gz
-./DataPump-portable/datapump-gui --self-check
-./DataPump-portable/datapump-gui
-./DataPump-portable/pump simulate --text 'offline copy works' --snr 12 --json
-```
-
-These commands use the copied runtimes. Python does not need to be on the
-destination's `PATH`. The launchers locate files relative to their own bundle,
-so changing the parent directory does not require regeneration. Launch the
-root-level `pump`, `python`, and `datapump-gui` wrappers (`.cmd` on Windows),
-rather than executables inside `bin` or `runtime`.
-
-`datapump-gui --self-check` verifies the inventory and file hashes, imports the
-GUI's Python dependencies, starts Tcl, and checks the bundled modem. It does not
-need a display or transmit audio. Start the GUI to verify the destination's
-display, clipboard, and font integration; test actual audio separately when
-using audio hardware. A successful headless check does not test that hardware.
-
-Keep a known working archive before replacing an installation. Updating means
-building and checking a new complete bundle and copying it alongside the old
-one. Avoid combining files from different Python or Tcl/Tk versions. Shared
-keyfiles and user data are separate from the application bundle and are not
-automatically collected by packaging.
-
-## Contents and operating-system boundary
+Copy the entire `DataPump-portable` directory, or extract a CPack TGZ/ZIP archive
+on the destination. Preserve executable permissions on Linux. The layout is:
 
 | Location | Contents |
 | --- | --- |
-| Root launchers | Relocatable CLI, bundled Python, and GUI entry points |
-| `bin/` | Compiled modem executable and its Windows native dependencies |
-| `app/` | GUI scripts and bundle bootstrap |
-| `runtime/python/` | Python interpreter, standard library, native extensions, and Windows Python dependencies |
-| `runtime/lib/` | Collected Linux native dependencies |
-| `runtime/tcl/` | Tcl/Tk script resources on both platforms |
-| `manifest.json` | Bundle metadata and file checksums |
-| `licenses/` | Collected application and runtime notices |
+| `bin/datapump-gui` | Native desktop application; `.exe` on Windows |
+| `bin/pump` | Native command-line modem; `.exe` on Windows |
+| `lib/` | Collected Linux shared libraries |
+| `bin/*.dll` | Any remaining Windows application DLLs |
+| `share/doc/datapump/` | Documentation, licenses, dependency provenance, and notices |
+| `manifest.sha256` | Checksums of the complete installed file inventory |
 
-Linux dependency collection follows the modem, Python, and Python extension
-libraries. The builder checks the copied binaries' dependency resolution and
-rejects native dependencies that still resolve to source files outside the
-bundle. The headless check also verifies where its native libraries were loaded.
-The bundle uses the destination's glibc and ELF loader as an explicit
-platform requirement, along with the rest of glibc's library family. Build on the
-oldest Linux platform you intend to support, using the same CPU architecture as
-the destination. The destination must have glibc at least as new as the build
-computer and a compatible kernel. This is not a cross-platform executable or a
-replacement for an operating system.
+Run the installed executables directly:
 
-The destination provides its desktop/display server, installed fonts, and audio
-devices, drivers, and configuration. Linux bundles carry the locally discovered
-ALSA library and its configuration resources, plus plugins when present. Live
-audio still needs a functioning audio system on the destination; WAV and
-simulation do not need audio hardware. These are operating-system services,
-separate from the copied Python/Tk runtime. A minimal server without a desktop
-can run the headless check and CLI but cannot display a Tk window.
+```sh
+./DataPump-portable/bin/datapump-gui
+./DataPump-portable/bin/pump simulate --text 'offline transfer' --snr 18 --json
+```
 
-Windows packaging reads ordinary and delay-load PE imports and recursively
-copies their DLL dependencies. Python and the modem have separate dependency
-directories, allowing their private runtimes to coexist. Private DLLs beside an
-application or in its explicitly supplied runtime directories take precedence
-over other installed versions on `PATH` or in `System32`. Conflicting private
-copies cause packaging to fail. Visual C++ runtime DLLs such as `MSVCP140.dll`
-and `VCRUNTIME140.dll` are copied even when their source is `System32`; their
-presence on the build computer is not treated as proof of destination support.
+Linux executables find bundled libraries relative to their own directory, and
+the search path also applies to indirect dependencies. Copied libraries have
+their original runtime search paths removed. Native-library symlinks are copied
+as owned files, so no link points back to the source computer. Windows locates
+the application's remaining DLLs beside its executables. Moving the installation
+does not require an environment variable, launcher script, registry entry, or
+regeneration step.
 
-Windows 10 system DLLs and API sets form the Windows platform baseline and are
-not copied. Bundles require the matching CPU architecture, Windows 10 version
-1903 or newer for the modem's Unicode path support, and any additional Windows
-version requirements of the selected Python runtime. The PE parser and collector
-have automated synthetic PE32/PE32+ fixture tests. Actual Windows packaging,
-runtime relocation, and hardware operation have not been validated by the Linux
-test environment.
+Archive a known working installation before updating. Install and check a new
+complete release alongside it; avoid mixing executable and library files from
+different builds. User files, shared keys, and optional pads are separate from
+the application and are not automatically collected by packaging.
 
-The manifest records the packaged contents. File hashes detect missing or
-changed files relative to that manifest; they are not a digital signature.
-Retain the runtime notices when copying the bundle. If you supply a custom
-Python or native-library distribution, keep its accompanying license and source
-materials with your distribution as appropriate to those components.
+## Platform requirements
 
-Ordinary CPack archives and `cmake --install` remain available for machines where
-the runtimes are already managed separately. Those packages contain the GUI
-source launcher, not this complete Python/Tk runtime. Use the portable bundler
-for the offline copy workflow described here.
+Build a separate package for each operating system and CPU architecture. Linux
+packages use the target's glibc family and ELF loader. The destination must have
+glibc at least as new as the build computer, plus a compatible kernel; build on
+the oldest platform you intend to support. The package includes application
+libraries such as X11/font libraries, while the destination supplies its display
+server, fonts, and desktop session.
+
+Windows system DLLs and API sets are an operating-system requirement. Visual C++
+redistributable DLLs are not excluded merely because they happen to reside in
+System32; the default static CRT avoids requiring their installation. The modem's
+Unicode path support requires Windows 10 version 1903 or newer. Windows code and
+CI configuration require actual Windows validation before a Windows release is
+declared verified.
+
+The locally available ALSA shared library is included in Linux packages even
+though audio loads it dynamically. The destination still supplies its audio
+configuration, plugins, devices, and drivers. If no ALSA library was available
+when packaging, live audio can use an existing compatible system ALSA library;
+otherwise it reports that audio is unavailable. WAV transfer and simulation
+remain available without audio hardware. Windows uses its native WinMM service.
+
+## Verify a copied installation
+
+`bin/datapump-gui --self-check` runs native application checks without opening a
+window. Opening the application verifies display integration; `--smoke-test`
+exercises its native GUI workflow and needs a desktop display. Neither test
+transmits live audio.
+
+On Linux, inventory verification can also use the operating system's checksum
+tool from inside the copied directory:
+
+```sh
+cd DataPump-portable
+sha256sum -c manifest.sha256
+```
+
+The manifest detects missing or changed files relative to the included inventory;
+it is not a signature or proof of a publisher's identity. Keep all notices with
+the installation.
+
+Developers can verify the complete inventory, native dependency resolution, and
+isolated execution with the repository's CMake scripts:
+
+```sh
+cmake -DPACKAGE_ROOT=/absolute/path/to/DataPump-portable \
+  -DBUILD_DIR=/absolute/path/to/build -P tools/verify-native-package.cmake
+cmake -DBUILD_DIR=/absolute/path/to/build -DGUI_SMOKE=ON \
+  -P tests/package_native.cmake
+```
+
+The relocation test copies an installation to a path containing spaces, removes
+its original pathname, clears `PATH` and runtime overrides, verifies that every
+application dependency resolves within the copy, runs the modem and GUI checks,
+and confirms that file tampering and unlisted additions are rejected. On Linux,
+run the GUI test under an existing desktop or `xvfb-run -a`. CMake and these test
+scripts are not required to run the transferred software.

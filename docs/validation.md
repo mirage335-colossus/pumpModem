@@ -1,13 +1,17 @@
 # Local validation record
 
-Validated on Linux x86_64 with GCC 14.2, CMake 3.31, OpenSSL 3.5.7 and Python 3.13.
-This records tests actually run; Windows CI is configured but was not run by this
-local environment.
+Validated on Linux x86_64 with GCC 14.2, CMake 3.31, OpenSSL 3.5.7, and vendored
+FLTK 1.4.5. This records tests actually run; Windows CI is configured but was not
+run by this local environment. Python 3.13 is optional developer test tooling.
 
-* Release build: all 10 CTest suites passed. The CLI suite contains 14 integration
+* Native GUI Release build: all 12 CTest suites passed, including native packaging
+  and relocation. The optional
+  Python CLI suite contains 14 integration
   tests and exercises production-size 128 MiB keyfiles, real waveform transfer,
   shared-clock search, invalid input, exclusive saves, and terminal boundaries.
-* AddressSanitizer + UndefinedBehaviorSanitizer Debug build: all 8 suites passed.
+* Native GUI AddressSanitizer + UndefinedBehaviorSanitizer Debug build: all 10
+  application suites and the additional packaging-support fixture passed. The
+  actual GUI smoke workflow also passed under the sanitizers.
   LeakSanitizer is disabled because ptrace prevents it from starting in the
   test environment. No sanitizer errors were reported.
 * Reed–Solomon: frozen vectors and 300 deterministic randomized shortened-code
@@ -26,25 +30,36 @@ local environment.
 * Windows audio contract: a fake WinMM backend compiles the actual Windows audio
   branch on Linux and checks continuous queued buffers, error handling, timeouts,
   and cleanup. This does not establish physical Windows device reliability.
-* Real Tk GUI under an isolated Xvfb display: actual CLI simulation, receive
-  display, QR update/render including the 500 Unicode limit, exact clipboard copy,
-  explicit save, clear cache, and visible controls/plots. The screenshot in
-  `build/gui-preview.png` is a capture of the running application.
-* CMake install and CPack TGZ/ZIP generation completed successfully.
-* Offline runtime: Linux bundle moved into a new directory containing spaces,
-  original path removed, PATH emptied, host Python/Tk settings poisoned. Copied
-  Python, Tcl modules, native-library origins, actual GUI/clipboard/QR/save workflow,
-  CLI simulation, unchanged inventory, and deliberate corruption detection passed.
-  The packaging helper has 10 unit tests; Windows PE parsing and recursive DLL
-  collection have 14 fixture tests, with no native Windows execution claim.
+* Real native FLTK GUI under an isolated Xvfb display: shared C++ simulation,
+  receive display, QR rendering, exact UTF-8 clipboard copy, exclusive save,
+  cache clearing, and visible controls/plots passed. The captured application was
+  visually checked at 1180 by 880 pixels.
+* A native CLI-only Release build with Python discovery explicitly disabled
+  passed all 7 C++ suites. Its installed directory was moved to a path containing
+  spaces; dependency closure, full inventory, and simulation passed with an empty
+  PATH and no runtime environment setup.
+* CMake packaging fixture: an executable depending on a shared library that in
+  turn depends on another shared library was installed and relocated. Both
+  indirect dependency resolution and isolated execution passed; modified files
+  and unlisted additions were rejected by inventory verification.
+* Complete native GUI installation relocated to a path containing spaces, with
+  its original pathname removed. CMake verified the inventory and native
+  dependency closure; the actual GUI workflow passed under Xvfb with an empty
+  PATH and no interpreter or runtime setup.
+* Native CPack TGZ and ZIP archives were generated, independently extracted, and
+  verified for the complete inventory, native dependency closure, isolated modem
+  execution, and GUI self-check. The archives are approximately 12 MiB each and
+  are available in `build-native/releases/` with names beginning
+  `DataPump-0.1.0-Linux-x86_64-native`.
 
 No live audio/radio transmission, thermal receiver measurements, near-capacity
 throughput measurements, multi-day integration, native Windows driver tests,
 or independent external security audit was performed. See requirements.md for
 the features that remain outside this reference implementation.
 
-To repeat the optional GUI smoke test on Linux with Tk and Xvfb installed:
+To repeat the native GUI smoke test on Linux with a display or Xvfb available:
 
 ```sh
-xvfb-run -a python3 tests/gui_smoke.py --pump build/pump
+xvfb-run -a ./build/datapump-gui --smoke-test
+xvfb-run -a cmake -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -P tests/package_native.cmake
 ```
