@@ -53,6 +53,17 @@ void test_rs() {
     }
 }
 void test_compression() {
+    // Frozen prefix-code vector: 000 space, 001 e, 010 t, then zero padding.
+    check(packet_codec::compress_short_v2(Bytes{' ', 'e', 't'}) == Bytes({0x05, 0x00}), "three-bit frequent byte codes");
+    check(packet_codec::compress_short_v2(Bytes(80, 'e')).size() == 30, "common bytes use exactly three bits");
+    for (std::size_t length=0; length<256; ++length) {
+        Bytes input(length);
+        for (std::size_t i=0;i<length;++i) input[i]=static_cast<std::uint8_t>(i+length);
+        check(packet_codec::decompress_short_v2(packet_codec::compress_short_v2(input),length)==input,"prefix code preserves every byte");
+    }
+    rejects([] { packet_codec::decompress_short_v2({},1); }, "prefix truncation rejected");
+    rejects([] { packet_codec::decompress_short_v2(Bytes{0xff},1); }, "partial literal rejected");
+    rejects([] { packet_codec::decompress_short_v2(Bytes{1},1); }, "nonzero prefix padding rejected");
     const auto common = text_message("the message is received and the station is ready for the next message\n").data;
     const auto compressed = packet_codec::compress_short(common);
     check(compressed.size() < common.size(), "common text compression");
@@ -68,6 +79,30 @@ void test_compression() {
     rejects([&] { packet_codec::decompress_short(invalid, common.size()); }, "reject trailing compressed bytes");
     rejects([] { packet_codec::decompress_short({}, 1); }, "reject compressed truncation");
     rejects([] { packet_codec::decompress_short({}, 256); }, "bound compressed allocation");
+}
+void test_partial_preview() {
+    for (auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        for (const auto& content:{std::string(100,'e'),std::string("Hello, this is progressively received text."),std::string(600,'x')}) {
+            auto message=text_message(content); message.callsign="N0CALL";
+            PacketOptions options; options.fec=fec;
+            const auto wire=encode_packet(message,options);
+            bool saw_partial=false;
+            for (std::size_t n=0;n<wire.size();++n) {
+                auto preview=preview_packet_partial(Bytes(wire.begin(),wire.begin()+static_cast<std::ptrdiff_t>(n)));
+                if (preview && !preview->message.data.empty()) {
+                    check(preview->wire_size==wire.size(),"preview frame extent");
+                    check(preview->message.data.size()<=message.data.size(),"bounded preview output");
+                    check(std::equal(preview->message.data.begin(),preview->message.data.end(),message.data.begin()),"preview matches actual content prefix");
+                    saw_partial=true;
+                }
+            }
+            check(saw_partial,"text visible before final validation/footer");
+            check(decode_packet(wire,options).message.data==message.data,"final corrected content preserved");
+        }
+    }
+    auto damaged=encode_packet(text_message("hello")); damaged[0]^=0xff;
+    check(preview_packet_partial(damaged).has_value(),"preview corrects protected bootstrap");
+    check(!preview_packet_partial(Bytes(1000,0xff)).has_value(),"invalid preview cannot manufacture metadata");
 }
 void test_packets() {
     for (const auto mode : {FecMode::off, FecMode::rs20, FecMode::rs60}) {
@@ -240,7 +275,7 @@ void test_adversarial_metadata() {
 }
 int main() {
     try {
-        test_rs(); test_compression(); test_packets(); test_corruption(); test_authentication(); test_filenames(); test_adversarial_metadata();
+        test_rs(); test_compression(); test_partial_preview(); test_packets(); test_corruption(); test_authentication(); test_filenames(); test_adversarial_metadata();
         std::cout << "packet tests passed\n";
         return 0;
     } catch (const std::exception& error) {

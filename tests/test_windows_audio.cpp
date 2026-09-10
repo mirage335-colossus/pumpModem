@@ -29,6 +29,17 @@ int main() {
         require(captured.size()==16000,"capture duration changed");
         for(std::size_t i=0;i<captured.size();++i)require(captured[i]==static_cast<float>(i)/32768,"capture reordered samples");
         clean();
+        fake::reset();std::size_t streamed=0,chunks=0;
+        audio::capture(16000,"default",[&](std::span<const float> chunk) {
+            require(chunk.size()<=800,"continuous capture chunk exceeds 50ms");
+            require(fake::state.opened==1 && fake::state.open_calls==1,"continuous capture reopened the device");
+            require(fake::state.pending.size()==2,"capture callback ran without two queued buffers");
+            for(auto value:chunk)require(value==static_cast<float>((streamed++)%32768)/32768,"streaming capture lost/reordered samples");
+            return ++chunks<80;
+        });
+        require(fake::state.selected_device==WAVE_MAPPER,"default capture did not use the OS default device");
+        require(streamed==64000 && !fake::state.gap,"continuous capture inserted a gap");clean();
+        fake::reset();rejects([&]{audio::capture(16000,"default",[](std::span<const float>)->bool {throw datapump::Error("callback failed");});});
         for(auto failure:{fake::Failure::Prepare,fake::Failure::Write,fake::Failure::Restart,fake::Failure::Release,fake::Failure::Close}) {
             fake::reset();fake::state.failure=failure;rejects([&]{audio::play(samples,48000,"default");});
         }

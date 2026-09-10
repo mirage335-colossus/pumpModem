@@ -23,7 +23,8 @@ enum class Failure { None,Prepare,Write,Add,Start,Restart,Stop,Release,Close };
 struct State {
     Failure failure=Failure::None;
     bool recording=false,paused=false,started=false,timeout=false,gap=false,bad_capture_length=false;
-    unsigned events=0,opened=0,prepared=0,resets=0,writes=0,initial_queue=0;
+    unsigned events=0,opened=0,open_calls=0,prepared=0,resets=0,writes=0,initial_queue=0;
+    UINT selected_device=0;
     std::size_t captured=0;
     std::deque<WAVEHDR*> pending;
     std::vector<std::int16_t> played;
@@ -81,12 +82,13 @@ inline UINT waveInGetNumDevs(){return 0;}
 inline UINT waveOutGetNumDevs(){return 0;}
 inline MMRESULT waveInGetDevCapsA(UINT,WAVEINCAPSA*,UINT){return 0;}
 inline MMRESULT waveOutGetDevCapsA(UINT,WAVEOUTCAPSA*,UINT){return 0;}
-inline MMRESULT waveOutOpen(HWAVEOUT* h,UINT,const WAVEFORMATEX*,DWORD_PTR,DWORD_PTR,DWORD flags) {
+inline MMRESULT waveOutOpen(HWAVEOUT* h,UINT device,const WAVEFORMATEX*,DWORD_PTR,DWORD_PTR,DWORD flags) {
     if(flags!=CALLBACK_EVENT) throw std::runtime_error("event callback required");
-    *h=reinterpret_cast<HWAVEOUT>(1);++winmm_test::state.opened;winmm_test::state.recording=false;return 0;
+    *h=reinterpret_cast<HWAVEOUT>(1);++winmm_test::state.opened;++winmm_test::state.open_calls;
+    winmm_test::state.selected_device=device;winmm_test::state.recording=false;return 0;
 }
-inline MMRESULT waveInOpen(HWAVEIN* h,UINT,const WAVEFORMATEX* f,DWORD_PTR c,DWORD_PTR d,DWORD flags) {
-    auto result=waveOutOpen(h,0,f,c,d,flags);winmm_test::state.recording=true;return result;
+inline MMRESULT waveInOpen(HWAVEIN* h,UINT device,const WAVEFORMATEX* f,DWORD_PTR c,DWORD_PTR d,DWORD flags) {
+    auto result=waveOutOpen(h,device,f,c,d,flags);winmm_test::state.recording=true;return result;
 }
 inline MMRESULT waveOutPrepareHeader(HWAVEOUT,WAVEHDR* h,UINT){return winmm_test::prepare(h);}
 inline MMRESULT waveInPrepareHeader(HWAVEIN,WAVEHDR* h,UINT){return winmm_test::prepare(h);}

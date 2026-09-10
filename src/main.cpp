@@ -5,10 +5,13 @@
 #include "datapump/qr.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/transfer.hpp"
+#include "datapump/tuning.hpp"
+#include "datapump/live.hpp"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -32,10 +35,13 @@ const char* usage=R"HELP(Data Pump 0.1 — civilian audio text and file modem
 
 Usage: pump COMMAND [OPTIONS]
   simulate     Encode, modulate, add seeded AWGN, acquire, correct and verify
+  listen       Continuous live receiver (or noise/loopback with --simulation)
+  estimate     Calculate exact message airtime without creating a waveform
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
   pack/unpack  Framed packet byte streams, for external tools; no device I/O
   keygen       Create an owner-only 128 MiB symmetric keyfile (--output)
+  keys         List the named key sets in --keyfile
   devices      Enumerate local audio devices
   status-tx    Transmit exact few-bit callsign to WAV, without packet overhead
   status-rx    Correlate a known few-bit callsign in WAV; not authenticated
@@ -53,26 +59,31 @@ Input/output:
 
 Modem:
   --bw HZ               Nominal bandwidth, default1200 (also 1.2kHz etc.)
-  --sample-rate HZ      Default48000 (96000 when bandwidth exceeds22050)
+  --sample-rate HZ      Manual sample rate, 8000..384000; default48000
   --carrier HZ          Default1500 (bandwidth/2+1000 for wide bandwidths)
   --spreading N         Chips per dibit, 1..16384; default1
+  --target-snr DBHZ     Automatic integration target C/N0; default40
+  --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Independent encrypted direct-sequence spreading
   --fec 20|60|off        Reed-Solomon parity overhead, default20
-  --no-compression      Disable short-text dictionary compression
+  --no-compression      Diagnostic override; normal compression is automatic
   --memory-mb N         Buffer budget, default256 MiB
   --keyfile PATH        Symmetric keyfile; encrypted preamble, frame, FEC
+  --key-name NAME       Select a named key set (default: first)
+  --key-names A,B,C     Names to create with keygen (default: Default)
   --pad PATH            Required external >1GiB pad when bound to keyfile
   --time SECONDS        Shared start epoch; default current UNIX second
   --search-seconds N    RX epoch trials ±N seconds, nearest first; default6
   --progress            Emit timing-search progress to stderr
 
 Audio/simulation:
-  --device ID           Explicit live audio device, e.g. default
+  --device ID           OS audio endpoint; listen automatically uses default
   --device-type audio   Analog audio input only; no network/raw serial input
-  --seconds N           Recording duration; default15
+  --seconds N           RX recording duration(default15); listen limit(default0)
   --tx-delay N          Delay after live TX completes; default6 seconds
   --snr DB              Simulator measured signal/noise power ratio; default20
+  --simulation PRESET   e.g. "3dBm -120dB": TX power and channel attenuation
   --seed N --delay-samples N --frequency-offset HZ
 
 Very slow status:
@@ -97,7 +108,8 @@ public:
         const std::set<std::string> booleans={"json","repeatable","no-compression","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
-            "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format"};
+            "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
+            "target-snr","pattern","simulation","key-name","key-names"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -142,13 +154,16 @@ public:
         const auto reject=[this](std::initializer_list<const char*> names,const std::string& reason) {
             for(const auto name:names) if(has(name)) throw Error("--"+std::string(name)+" "+reason);
         };
-        if(command=="qr") reject({"keyfile","pad","scramble","dsss","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
+        if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
         if(command=="rx" || command=="unpack" || command=="status-rx") {
             reject({"output"},"is not a receive output; use --save PATH for verified text/files");
             reject({"text"},"is a transmit input; use --input for reception");
         }
         if(command!="rx" && command!="unpack") reject({"save"},"is only valid for rx/unpack");
-        if(command!="tx" && command!="rx" && command!="status-tx") reject({"device"},"is only valid for explicit live audio tx/rx/status-tx");
+        if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
+        if(command!="keygen") reject({"key-names"},"is only valid for keygen");
+        if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
+        if(command=="listen") reject({"snr","frequency-offset","delay-samples","output","tx-delay"},"is not a listen option; choose a simulation preset for its continuous channel");
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
 };
@@ -167,16 +182,24 @@ std::size_t budget(const Args& a) {
 modem::Config config(const Args& a) {
     modem::Config c;
     c.bandwidth_hz=a.number("bw",1200);
-    auto rate=a.integer("sample-rate",c.bandwidth_hz>22050?96000:48000);
-    if(rate>192000) throw Error("sample rate exceeds192000");
+    const bool automatic=a.has("target-snr") || a.has("pattern");
+    if(automatic) {
+        if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate") || a.has("carrier"))
+            throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate/carrier");
+        const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",40),
+            tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
+        c=plan.config;
+        if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
+    }
+    auto rate=a.integer("sample-rate",automatic?c.sample_rate:c.bandwidth_hz>22050?96000:48000);
+    if(rate>384000) throw Error("sample rate exceeds384000");
     c.sample_rate=static_cast<std::uint32_t>(rate);
-    c.carrier_hz=a.number("carrier",c.bandwidth_hz>2400?c.bandwidth_hz/2+1000:1500);
-    auto spreading=a.integer("spreading",1);
+    c.carrier_hz=a.number("carrier",automatic?c.carrier_hz:c.bandwidth_hz>2400?c.bandwidth_hz/2+1000:1500);
+    auto spreading=a.integer("spreading",c.spreading_factor);
     if(spreading==0 || spreading>16384) throw Error("spreading must be1..16384");
     c.spreading_factor=static_cast<unsigned>(spreading);
     c.memory_limit=budget(a);
-    c.scramble=a.has("scramble");
-    c.dsss=a.has("dsss");
+    if(!automatic) {c.scramble=a.has("scramble");c.dsss=a.has("dsss");}
     if((a.has("scramble") || a.has("dsss")) && !a.has("keyfile")) throw Error("encrypted spreading requires --keyfile");
     if(a.get("device-type","audio")!="audio") throw Error("this build supports analog audio only; SDR and IC-7100 frontends are not implemented");
     modem::validate(c);return c;
@@ -186,8 +209,11 @@ std::uint64_t epoch(const Args& a) {
         std::chrono::system_clock::now().time_since_epoch()).count()));
 }
 std::optional<Crypto> key(const Args& a) {
-    if(!a.has("keyfile")) {if(a.has("pad")) throw Error("--pad requires --keyfile");return std::nullopt;}
-    return load_keyfile(a.get("keyfile"),a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
+    if(!a.has("keyfile")) {if(a.has("pad") || a.has("key-name")) throw Error("--pad/--key-name requires --keyfile");return std::nullopt;}
+    auto entries=load_keyring(a.get("keyfile"),a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
+    if(!a.has("key-name")) return entries.front().key;
+    for(const auto& entry:entries) if(entry.name==a.get("key-name")) return entry.key;
+    throw Error("key set not found: "+a.get("key-name"));
 }
 transfer::Options transfer_options(const Args& a,const modem::Config& c,const std::optional<Crypto>& k,std::uint64_t timestamp) {
     transfer::Options options;
@@ -224,7 +250,6 @@ Message message(const Args& a) {
     else throw Error("unknown message kind");
     if(m.kind!=MessageKind::text) m.filename=a.get("filename",std::filesystem::path(a.get("input")).filename().string());
     m.callsign=a.get("callsign");m.grid=a.get("grid");m.repeatable=a.has("repeatable");
-    if(m.repeatable && m.data.size()>65536) throw Error("repeatable transfers are limited to64KiB");
     if(m.data.size()>budget(a)) throw Error("message exceeds memory budget");
     return m;
 }
@@ -288,6 +313,61 @@ Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t tim
     if(k) {auto stream=k->stream(StreamPurpose::Data,time,0,(bits.size()+7)/8);for(std::size_t i=0;i<bits.size();++i)bits[i]^=static_cast<std::uint8_t>((stream[i/8]>>(7-i%8))&1);}
     return bits;
 }
+volatile std::sig_atomic_t interrupted=0;
+void interrupt_handler(int) {interrupted=1;}
+void listen(const Args& a,const transfer::Options& options) {
+    live::Settings settings;
+    settings.transfer=options;
+    if(!a.has("time")) settings.transfer.timestamp=0;
+    settings.device=a.get("device","default");
+    if(a.has("simulation")) {
+        const auto preset=tuning::parse_simulation_preset(a.get("simulation"));
+        settings.simulation=preset.enabled;
+        if(preset.enabled) settings.simulation_snr_db=tuning::link_budget(preset,
+            options.modem.bandwidth_hz,options.modem.sample_rate).sample_snr_db;
+    }
+    settings.simulation_seed=a.integer("seed",1);
+    if(a.has("keyfile") && !a.has("key-name")) {
+        for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
+            std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
+    }
+    const auto seconds=a.number("seconds",0);
+    if(seconds<0 || seconds>86400) throw Error("listen seconds must be 0..86400 (0 means continuous)");
+    std::optional<Message> outgoing;
+    if(a.has("text") || a.has("input")) outgoing=message(a);
+    live::Session session;
+    session.start(settings);
+    if(outgoing) session.transmit(*outgoing);
+    interrupted=0;
+    const auto previous=std::signal(SIGINT,interrupt_handler);
+    struct RestoreSignal {decltype(previous) handler;~RestoreSignal(){std::signal(SIGINT,handler);}} restore{previous};
+    const auto started=std::chrono::steady_clock::now();
+    std::string last_error;
+    while(!interrupted) {
+        const auto snapshot=session.snapshot();
+        if(snapshot.error!=last_error) {
+            last_error=snapshot.error;
+            if(!last_error.empty()) std::cerr<<"pump: "<<last_error<<'\n';
+        }
+        if(a.has("json") && a.has("progress")) {
+            std::cout<<"{\"event\":\"signal\",\"sequence\":"<<snapshot.sequence
+                <<",\"samples_received\":"<<snapshot.samples_received
+                <<",\"simulation\":"<<(snapshot.simulation?"true":"false")
+                <<",\"transmitting\":"<<(snapshot.transmitting?"true":"false")<<"}\n";
+            for(const auto& signal:snapshot.signals) if(!signal.validated) {
+                const Bytes text(signal.text.begin(),signal.text.end());
+                std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
+                    <<",\"data_base64\":\""<<base64_encode(text)<<"\"}\n";
+            }
+        }
+        for(const auto& received:snapshot.received) report(a,received.packet,received.diagnostics,received.timestamp);
+        std::cout.flush();
+        if(!snapshot.running && !snapshot.error.empty()) throw Error(snapshot.error);
+        if(seconds>0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()>=seconds) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+    session.stop();
+}
 }
 
 int main(int argc,char** argv) {
@@ -309,19 +389,47 @@ int main(int argc,char** argv) {
         }
         if(a.command=="keygen") {
             if(!a.has("output")) throw Error("keygen requires --output PATH");
-            create_keyfile(a.get("output"),a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
+            std::vector<std::string> names;
+            std::istringstream input(a.get("key-names","Default"));
+            std::string name;
+            while(std::getline(input,name,',')) names.push_back(name);
+            if(a.get("key-names").ends_with(',')) throw Error("key names must not be empty");
+            create_keyring(a.get("output"),names,a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
             std::cerr<<"Created symmetric keyfile: "<<a.get("output")<<'\n';return 0;
+        }
+        if(a.command=="keys") {
+            if(!a.has("keyfile")) throw Error("keys requires --keyfile PATH");
+            for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
+                std::optional<std::filesystem::path>(a.get("pad")):std::nullopt))
+                std::cout<<entry.name<<'\n';
+            return 0;
         }
         if(a.command=="devices") {
             for(const auto& d:audio::devices()) std::cout<<d.id<<'\t'<<d.description<<'\n';
             return 0;
         }
-        const std::set<std::string> commands={"pack","unpack","tx","rx","simulate","status-tx","status-rx"};
+        const std::set<std::string> commands={"pack","unpack","tx","rx","simulate","status-tx","status-rx","estimate","listen"};
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
         auto c=config(a);auto timestamp=epoch(a);auto k=key(a);
         auto settings=transfer_options(a,c,k,timestamp);
         transfer::Progress progress;
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
+        if(a.command=="estimate") {
+            const auto result=transfer::estimate(message(a),settings);
+            std::cout<<"{\"packet_bytes\":"<<result.packet_bytes<<",\"content_bytes\":"<<result.content_bytes
+                <<",\"packet_seconds\":"<<result.packet_seconds<<",\"content_seconds\":"<<result.content_seconds
+                <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
+                <<",\"spreading\":"<<c.spreading_factor
+                <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")
+                <<",\"memory_supported\":"<<(result.memory_supported?"true":"false");
+            if(a.has("target-snr") || a.has("pattern")) {
+                const auto snr=a.number("target-snr",40)+10*std::log10(2/modem::bit_rate(c));
+                std::cout<<",\"estimated_symbol_snr_db\":"<<snr<<",\"target_supported\":"<<(snr+1e-10>=10?"true":"false");
+            }
+            std::cout<<"}\n";
+            return 0;
+        }
+        if(a.command=="listen") {listen(a,settings);return 0;}
         if(a.command=="pack") {
             output_bytes(a,transfer::pack(message(a),settings));return 0;
         }
@@ -359,6 +467,10 @@ int main(int argc,char** argv) {
         }
         modem::ChannelConfig channel;
         channel.snr_db=a.number("snr",20);channel.seed=a.integer("seed",1);
+        if(a.has("simulation")) {
+            if(a.has("snr")) throw Error("choose --simulation preset or --snr");
+            channel.snr_db=tuning::link_budget(tuning::parse_simulation_preset(a.get("simulation")),c.bandwidth_hz,c.sample_rate).sample_snr_db;
+        }
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
         const auto outgoing=message(a);

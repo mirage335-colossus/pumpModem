@@ -1,10 +1,13 @@
-# Data Pump packet format, version 1
+# Data Pump packet format, versions 1 and 2
 
 This document specifies the implemented packet codec. It is a versioned project
 format, not a claim of compatibility with an existing radio modem. Integers use
 network byte order. A packet has no destination, source address, route, or hop
 field. Optional callsign and grid strings describe content and are never used for
 routing. Content is text, a file, or a screenshot; receiving does not execute it.
+Version 2 adds a variable-length short-payload prefix code. The framing, metadata,
+integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
+versions; an older decoder that accepts only version 1 cannot read version 2.
 
 The audio synchronization preamble is outside the packet codec. It is neither
 covered by packet Reed–Solomon coding nor by the packet digest/MAC. When
@@ -21,7 +24,7 @@ RS(72,40) codeword with 32 parity bytes. Its first 40 bytes are systematic data:
 | Byte offset | Bytes | Meaning |
 | --- | ---: | --- |
 | 0 | 4 | ASCII `DP01` |
-| 4 | 1 | Format version, `1` |
+| 4 | 1 | Format version, `1` legacy dictionary or `2` variable-length prefix code |
 | 5 | 1 | Body FEC: `0` off, `1` 20%, `2` 60% |
 | 6 | 1 | Flags: bit 0 dictionary compression, bit 1 keyed MAC, bit 2 request repeat |
 | 7 | 1 | Content kind: `0` text, `1` file, `2` screenshot |
@@ -64,6 +67,32 @@ an external application; the library does not retransmit or implement a
 repeater. The independent ID checksum is checked even when the full body digest
 is valid.
 
+Repeatability is a shared transfer-service policy, not an extra packet-size field
+or a raw-byte limit. With the selected compression and FEC options, the service
+encodes both the complete message and a baseline message with identical metadata,
+kind, identifier, and repeat flag but an empty payload:
+
+```text
+content_bytes   = max(0, full_packet_bytes - empty_payload_packet_bytes)
+content_seconds = content_bytes * 8 / actual_modem_bit_rate
+repeat_allowed  = content_seconds <= 2 OR original_payload_bytes <= 1
+```
+
+The subtraction excludes the fixed bootstrap, ID, metadata, tag, and their fixed
+FEC cost while including incremental payload coding/parity and actual compression.
+The preamble is outside both packets and never consumes this allowance. There is
+no 64 KiB limit. The threshold and one-byte floor are configurable through
+`transfer::RepeatPolicy`; the defaults above preserve a repeatable one-byte
+distress message even at an extremely slow symbol rate. `pack` and `transmit`
+reject a requested repeat flag when this policy fails. The codec can still decode
+the flag independently of a local channel's speed.
+
+`transfer::estimate` reports content airtime, complete packet airtime, and total
+airtime including the preamble separately. Its repeatability result is separate
+from waveform/acquisition memory feasibility. A fixed-size preamble may occupy a
+long time at a slow rate, and a repeatable message need not fit a buffered audio
+operation. The one-byte floor does not bypass memory checks or add a repeater.
+
 The canonical input to the digest/MAC is the 40-byte bootstrap concatenated with
 the entire body except its final 32-byte tag. Unkeyed packets use SHA-256; this
 detects corruption but does not authenticate a sender. Keyed packets use the
@@ -71,6 +100,9 @@ provided 32-byte MAC callback. A receiver configured with a verifier rejects
 unkeyed packets; a receiver without one rejects keyed packets. Successful Reed–
 Solomon correction alone never releases a validated message. The decoder also
 requires the full digest or MAC and all metadata checks to pass.
+The shared transfer service's keyed callback also prepends ASCII `DP-EPOCH`,
+the byte `01`, and the eight-byte big-endian candidate timestamp to this canonical input. A frame
+therefore cannot pass that service's MAC check under a different candidate epoch.
 
 ## Reed–Solomon and interleaving
 
@@ -106,7 +138,15 @@ arbitrary binary data remain lossless. It uses compression only when the encoded
 byte sequence is strictly shorter; all other payloads are stored verbatim. The
 flag and both lengths are authenticated in the bootstrap.
 
-Tokens are packed most-significant bit first:
+The encoder tries both codecs and chooses version 2 only when its whole-byte
+output is strictly shorter than version 1. Ties retain version 1. If neither
+codec saves a byte, the payload is uncompressed and the encoder emits version 1.
+The receiver selects the compressed representation from the authenticated
+version byte. An uncompressed payload has the same meaning in either version.
+
+### Version 1 dictionary tokens
+
+Tokens in both versions are packed most-significant bit first:
 
 | Prefix | Following bits | Meaning |
 | --- | --- | --- |
@@ -138,6 +178,43 @@ the authenticated original byte length. Up to seven trailing zero padding bits
 are allowed; extra bytes, nonzero padding, reserved tokens, truncation, and
 expansion beyond the declared length are rejected. This is a deliberately
 small, fixed dictionary, not a claim of a statistically optimal compressor.
+
+### Version 2 variable-length prefix tokens
+
+Version 2 gives short prefix codes to thirteen frequent ASCII bytes. It reuses
+the exact 64-entry dictionary above and has a literal escape for every other
+byte. There is no transmitted model or runtime-trained dictionary.
+
+| Prefix | Following bits | Meaning |
+| --- | --- | --- |
+| `000`, `001`, `010`, `011`, `100` | None | Space, `e`, `t`, `a`, `o`, respectively |
+| `1010`, `1011` | None | `i`, `n` |
+| `11000`, `11001`, `11010`, `11011` | None | `s`, `h`, `r`, `d` |
+| `11100`, `11101` | None | `l`, `u` |
+| `111100` | 6-bit index | Dictionary entry, 12 bits in total |
+| `111101` | None | Reserved, rejected |
+| `11111` | 8-bit value | Literal byte, 13 bits in total |
+
+The encoder uses dynamic programming over the at-most-255-byte input to minimize
+bit count across byte and phrase tokens. Equal-cost choices retain the byte
+token, or the earlier dictionary index when multiple phrases improve on it.
+The verified original length ends decoding; there is no end marker. Both
+versions reject expansion beyond that length, truncation, extra whole bytes,
+and nonzero padding. For example,
+the bytes space, `e`, `t` encode as `000 001 010` plus seven padding zeros, yielding
+`05 00` in hexadecimal. Eighty `e` bytes occupy thirty encoded bytes. This example
+demonstrates the three-bit common-byte code and does not promise a three-bit
+average for general text, Unicode, or binary data.
+
+## Provisional packet previews
+
+`preview_packet_partial` offers a bounded best-effort view of incomplete hard
+bytes after a usable bootstrap and metadata prefix are available. It can expose
+complete tokens from an incomplete version 1 or 2 compressed stream. These bytes
+have not passed final integrity/authentication and may change after further FEC
+correction or complete decoding. A preview must remain visibly provisional and
+must not become a verified cache entry, save result, clipboard result, or repeat
+request. `decode_packet` remains the only validated-message boundary.
 
 ## Resource and attachment validation
 

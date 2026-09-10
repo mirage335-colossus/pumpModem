@@ -36,6 +36,18 @@ int main() {
         check(gui::valid_clipboard_text({}));
         check(gui::display_label("name\n\tlabel")=="name  label");
         check(gui::id_label(packet(0xab,0).message).substr(0,2)=="ab");
+        gui::Signals signals;
+        signals.update({7,1500,"uncertain tezt",false,{}});
+        check(!signals.copy_id(0));
+        signals.update({7,1500,"corrected text",false,{}});
+        check(signals.lines().size()==1 && signals.lines()[0].text=="corrected text");
+        signals.update({7,1500,"corrected text",true,"verified-id"});
+        check(signals.copy_id(0)=="verified-id");
+        signals.update({7,1500,"late unvalidated text",false,{}});
+        check(signals.lines()[0].text=="corrected text" && signals.copy_id(0)=="verified-id");
+        for (std::uint64_t id=8;id<80;++id) signals.update({id,1500,std::string(5000,'a'),false,{}});
+        check(signals.lines().size()==64 && signals.lines().back().text.size()==4096);
+        signals.clear(); check(signals.lines().empty());
         std::cout<<"Native GUI policy tests passed\n";
     } catch (const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

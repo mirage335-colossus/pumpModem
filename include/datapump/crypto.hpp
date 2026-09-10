@@ -33,6 +33,8 @@ public:
                 std::span<const std::uint8_t> tag) const;
 
 private:
+    friend struct KeyringAccess;
+    Crypto() = default;
     std::array<std::array<std::uint8_t, 32>, 5> keys_{};
 };
 
@@ -42,6 +44,15 @@ inline constexpr std::uint64_t minimum_keyfile_pad_bytes = 1024ULL * 1024 * 1024
 void create_keyfile(const std::filesystem::path& path,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 Crypto load_keyfile(const std::filesystem::path& path,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+
+struct KeyEntry { std::string name; Crypto key; };
+// Version 2 stores multiple independent named key sets in one authenticated,
+// encrypted payload behind the same 128 MiB random header. Legacy v1 files
+// load as one entry named "Default". No plaintext key export is exposed.
+void create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 
 namespace testing {
@@ -54,6 +65,11 @@ struct KeyfilePolicy {
 void create_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 Crypto load_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+void create_keyring(const std::filesystem::path& path, const std::vector<std::string>& names,
+                    const KeyfilePolicy& policy,
+                    const std::optional<std::filesystem::path>& pad = std::nullopt);
+std::vector<KeyEntry> load_keyring(const std::filesystem::path& path, const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad = std::nullopt);
 } // namespace testing
 

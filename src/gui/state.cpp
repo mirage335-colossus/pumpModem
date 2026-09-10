@@ -24,6 +24,22 @@ void Inbox::put(DecodedPacket packet) {
 }
 void Inbox::clear() noexcept { items_.clear(); used_ = 0; }
 
+void Signals::update(SignalLine line) {
+    if (line.text.size()>4096) line.text.resize(4096);
+    const auto found=std::find_if(lines_.begin(),lines_.end(),[&](const auto& item) { return item.id==line.id; });
+    if (found!=lines_.end()) {
+        if (found->validated && !line.validated) return;
+        *found=std::move(line);
+    } else {
+        if (lines_.size()>=64) lines_.pop_front();
+        lines_.push_back(std::move(line));
+    }
+}
+std::optional<std::string> Signals::copy_id(std::size_t index) const {
+    if (index>=lines_.size() || !lines_[index].validated || lines_[index].packet_id.empty()) return std::nullopt;
+    return lines_[index].packet_id;
+}
+
 bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept {
     for (std::size_t i = 0; i < bytes.size();) {
         const auto first = bytes[i++];

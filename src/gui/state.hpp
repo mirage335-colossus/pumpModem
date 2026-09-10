@@ -2,6 +2,7 @@
 
 #include "datapump/packet.hpp"
 #include <deque>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -19,6 +20,25 @@ private:
     std::size_t capacity_;
     std::size_t used_ = 0;
     std::deque<DecodedPacket> items_;
+};
+
+struct SignalLine {
+    std::uint64_t id = 0;
+    double frequency_hz = 0;
+    std::string text;
+    bool validated = false;
+    std::string packet_id;
+};
+// Pending decoder observations can be replaced as more symbols/parity arrive.
+// Only a final verified observation can provide a clipboard lookup identity.
+class Signals {
+public:
+    void update(SignalLine line);
+    void clear() noexcept { lines_.clear(); }
+    const std::deque<SignalLine>& lines() const noexcept { return lines_; }
+    std::optional<std::string> copy_id(std::size_t index) const;
+private:
+    std::deque<SignalLine> lines_;
 };
 
 // Clipboard text is UTF-8, with no embedded zero byte. Binary messages can

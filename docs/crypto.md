@@ -1,4 +1,4 @@
-# Symmetric cryptography and keyfile format, version 1
+# Symmetric cryptography and keyfiles
 
 The implementation uses OpenSSL 3 for all cryptographic primitives: HKDF-SHA256,
 AES-256-CTR, HMAC-SHA256, AES-256-GCM, SHA256, and operating-system-seeded private
@@ -51,7 +51,44 @@ MAC key. HMAC still rejects altered authenticated content. This is not a claim
 that CTR reuse preserves confidentiality. Use transmission spacing and coordinate
 large transfers sharing a key.
 
-## Keyfile binary layout
+## Named key sets: keyfile version 2
+
+New CLI keyfiles use `DPMKEY02`. The GUI and CLI load all named sets from one
+file. Each set stores the complete five 32-byte purpose keys, in the order data,
+DSSS, scrambler, FHSS, MAC; restoring a set reproduces those exact keys.
+
+```sh
+pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
+pump keys --keyfile shared.key
+pump simulate --text 'hello' --keyfile shared.key --key-name Portable --json
+```
+
+The 48-byte prefix retains the version-1 header length, optional pad length and
+flag, and nonce positions. Bytes 25–27 are zero; bytes 28–31 contain the number
+of entries (BE32, 1–128); bytes 44–47 contain the encrypted payload length
+(BE32). The prefix is followed by exactly 128 MiB of random header, the encrypted
+key-set payload, and a 16-byte GCM tag. Each plaintext entry is a BE16 name length,
+1–64 bytes of printable UTF-8 name, then 160 bytes of purpose keys. Names must be
+unique. Parsing rejects impossible counts/lengths before allocation, and releases
+keys only after authentication and complete validation.
+
+```
+digest = SHA256("datapump/v2/keyfile-hash" || prefix48 || random_header || pad)
+wrapping_key = HKDF(digest, "datapump/v2/keyfile-wrap")
+```
+
+HKDF retains the salt defined above. AES-256-GCM authenticates the entire prefix
+as associated data and encrypts the complete named collection. Temporary
+plaintext key-set buffers are cleansed even when loading fails. The optional
+external pad is retained for old workflows through the CLI; ordinary keyfiles
+need only the single file. The GUI has no separate pad field.
+
+Version-1 keyfiles remain readable as one set named `Default`. The legacy C++
+`load_keyfile` entry point selects the first set from either version. New code
+can use `load_keyring` to receive all sets. Creation remains exclusive: a new
+collection is written to a new pathname; there is no in-place keyfile editor.
+
+## Legacy keyfile binary layout (version 1)
 
 Integer fields are big-endian. No padding or trailing bytes are allowed.
 

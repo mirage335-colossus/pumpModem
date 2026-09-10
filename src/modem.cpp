@@ -19,6 +19,12 @@ constexpr double tau = 2 * std::numbers::pi;
 constexpr double amplitude = 0.7;
 constexpr std::array<Complex, 4> shifts{{{1,0}, {0,1}, {0,-1}, {-1,0}}};
 void check(bool ok, const char* message) { if (!ok) throw Error(message); }
+void check_cancelled(const std::stop_token& stop) {
+    if (stop.stop_requested()) throw Error("modem operation cancelled");
+}
+void periodic_cancel(std::size_t position, const std::stop_token& stop) {
+    if ((position & 4095U) == 0) check_cancelled(stop);
+}
 std::size_t product(std::size_t a, std::size_t b, std::size_t limit) {
     check(b == 0 || a <= limit / b, "modem memory limit exceeded");
     return a * b;
@@ -33,60 +39,82 @@ std::size_t chip_samples(const Config& c) {
     return static_cast<std::size_t>(std::llround(c.sample_rate / (c.bandwidth_hz / 2) / 4)) * 4;
 }
 std::size_t symbol_samples(const Config& c) { return chip_samples(c) * c.spreading_factor; }
-void finite_samples(std::span<const float> samples, std::size_t limit) {
+void finite_samples(std::span<const float> samples, std::size_t limit, std::stop_token stop = {}) {
     product(samples.size(), sizeof(float), limit);
-    for (float v : samples) check(std::isfinite(v), "non-finite audio sample");
+    for (std::size_t i = 0; i < samples.size(); ++i) {
+        periodic_cancel(i, stop);
+        check(std::isfinite(samples[i]), "non-finite audio sample");
+    }
 }
-std::vector<int> signs(std::size_t chips, const Config& c) {
+std::vector<int> signs(std::size_t chips, const Config& c, std::stop_token stop = {}) {
+    check_cancelled(stop);
     product(chips, sizeof(int) + 1, c.memory_limit);
     std::vector<int> out(chips, 1);
     if (c.scramble) {
         Crypto crypto(c.spreading_seed);
         auto stream = crypto.stream(StreamPurpose::Scrambler, 0, 0, (chips + 7) / 8);
-        for (std::size_t i = 0; i < chips; ++i)
+        for (std::size_t i = 0; i < chips; ++i) {
+            periodic_cancel(i, stop);
             out[i] = ((stream[i / 8] >> (i % 8)) & 1) ? -1 : 1;
-    } else if (c.spreading_factor > 1) {
+        }
+    } else if (c.spreading_factor > 1 && c.spreading_mode == SpreadingMode::pattern) {
         constexpr std::array<int, 8> pattern{1, 1, -1, 1, -1, -1, 1, -1};
-        for (std::size_t i = 0; i < chips; ++i) out[i] = pattern[(i % c.spreading_factor) % pattern.size()];
+        for (std::size_t i = 0; i < chips; ++i) {
+            periodic_cancel(i, stop);
+            out[i] = pattern[(i % c.spreading_factor) % pattern.size()];
+        }
     }
     if (c.dsss) {
         Crypto crypto(c.dsss_seed);
         auto stream = crypto.stream(StreamPurpose::Dsss, 0, 0, (chips + 7) / 8);
-        for (std::size_t i = 0; i < chips; ++i)
+        for (std::size_t i = 0; i < chips; ++i) {
+            periodic_cancel(i, stop);
             if ((stream[i / 8] >> (i % 8)) & 1) out[i] = -out[i];
+        }
     }
     return out;
 }
-std::vector<Complex> phases(std::span<const std::uint8_t> bytes) {
+std::vector<Complex> phases(std::span<const std::uint8_t> bytes, std::stop_token stop = {}) {
     std::vector<Complex> out;
     out.reserve(bytes.size() * 4);
     Complex phase{1, 0};
-    for (auto byte : bytes) for (int shift = 6; shift >= 0; shift -= 2) {
-        phase *= shifts[(byte >> shift) & 3];
-        out.push_back(phase);
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        periodic_cancel(i, stop);
+        for (int shift = 6; shift >= 0; shift -= 2) {
+            phase *= shifts[(bytes[i] >> shift) & 3];
+            out.push_back(phase);
+        }
     }
     return out;
 }
-void fft(std::vector<Complex>& data, bool inverse) {
+void fft(std::vector<Complex>& data, bool inverse, std::stop_token stop = {}) {
+    check_cancelled(stop);
     const std::size_t n = data.size();
     for (std::size_t i = 1, j = 0; i < n; ++i) {
+        periodic_cancel(i, stop);
         std::size_t bit = n >> 1;
         for (; j & bit; bit >>= 1) j ^= bit;
         j ^= bit;
         if (i < j) std::swap(data[i], data[j]);
     }
     for (std::size_t length = 2; length <= n; length *= 2) {
+        check_cancelled(stop);
         const Complex root = std::polar(1.0, (inverse ? tau : -tau) / static_cast<double>(length));
         for (std::size_t i = 0; i < n; i += length) {
+            periodic_cancel(i, stop);
             Complex w{1, 0};
             for (std::size_t j = 0; j < length / 2; ++j) {
+                periodic_cancel(i + j, stop);
                 Complex u = data[i+j], v = data[i+j+length/2] * w;
                 data[i+j] = u + v; data[i+j+length/2] = u - v; w *= root;
             }
         }
         if (length == n) break;
     }
-    if (inverse) for (auto& v : data) v /= static_cast<double>(n);
+    if (inverse) for (std::size_t i = 0; i < n; ++i) {
+        periodic_cancel(i, stop);
+        data[i] /= static_cast<double>(n);
+    }
 }
 std::size_t fft_size(std::size_t minimum, std::size_t limit, std::size_t bytes_per_item) {
     std::size_t n = 1;
@@ -96,7 +124,8 @@ std::size_t fft_size(std::size_t minimum, std::size_t limit, std::size_t bytes_p
 }
 // Integrate over one chip, sampled four times per chip. Mixing is phase blind:
 // absolute RF/audio phase is removed by differential matching below.
-std::vector<Complex> baseband(std::span<const float> samples, const Config& c) {
+std::vector<Complex> baseband(std::span<const float> samples, const Config& c, std::stop_token stop) {
+    check_cancelled(stop);
     const auto chip = chip_samples(c), stride = chip / 4;
     if (samples.size() < chip) return {};
     std::vector<Complex> out;
@@ -105,6 +134,7 @@ std::vector<Complex> baseband(std::span<const float> samples, const Config& c) {
     const auto step = std::polar(1.0, -tau * c.carrier_hz / c.sample_rate);
     Complex oscillator{1,0}, sum{};
     for (std::size_t i = 0; i < samples.size(); ++i) {
+        periodic_cancel(i, stop);
         auto x = static_cast<double>(samples[i]) * oscillator;
         oscillator *= step;
         sum += x - ring[i % chip]; ring[i % chip] = x;
@@ -113,30 +143,44 @@ std::vector<Complex> baseband(std::span<const float> samples, const Config& c) {
     }
     return out;
 }
-std::vector<Complex> differential(const std::vector<Complex>& x) {
+std::vector<Complex> differential(const std::vector<Complex>& x, std::stop_token stop) {
+    check_cancelled(stop);
     if (x.size() <= 4) return {};
     std::vector<Complex> out(x.size() - 4);
-    for (std::size_t i = 0; i < out.size(); ++i) out[i] = x[i+4] * std::conj(x[i]);
+    for (std::size_t i = 0; i < out.size(); ++i) {
+        periodic_cancel(i, stop);
+        out[i] = x[i+4] * std::conj(x[i]);
+    }
     return out;
 }
 struct Acquisition { std::size_t offset; double correlation; };
-Acquisition acquire(std::span<const float> samples, std::span<const float> reference, const Config& c) {
-    auto signal = differential(baseband(samples, c));
-    auto expected = differential(baseband(reference, c));
+Acquisition acquire(std::span<const float> samples, std::span<const float> reference, const Config& c, std::stop_token stop) {
+    auto signal = differential(baseband(samples, c, stop), stop);
+    auto expected = differential(baseband(reference, c, stop), stop);
     check(!expected.empty() && signal.size() >= expected.size(), "capture shorter than preamble");
     const auto signal_count = signal.size(), expected_count = expected.size();
     // Two FFT buffers plus signal energy prefix, temporary baseband, and audio.
     const auto n = fft_size(signal_count + expected_count - 1, c.memory_limit, 80);
     std::vector<double> energy(signal_count + 1);
-    for (std::size_t i = 0; i < signal_count; ++i) energy[i+1] = energy[i] + std::norm(signal[i]);
+    for (std::size_t i = 0; i < signal_count; ++i) {
+        periodic_cancel(i, stop);
+        energy[i+1] = energy[i] + std::norm(signal[i]);
+    }
     double reference_energy = 0;
-    for (auto x : expected) reference_energy += std::norm(x);
+    for (std::size_t i = 0; i < expected.size(); ++i) {
+        periodic_cancel(i, stop);
+        reference_energy += std::norm(expected[i]);
+    }
     signal.resize(n); expected.resize(n);
-    fft(signal, false); fft(expected, false);
-    for (std::size_t i = 0; i < n; ++i) signal[i] *= std::conj(expected[i]);
-    fft(signal, true);
+    fft(signal, false, stop); fft(expected, false, stop);
+    for (std::size_t i = 0; i < n; ++i) {
+        periodic_cancel(i, stop);
+        signal[i] *= std::conj(expected[i]);
+    }
+    fft(signal, true, stop);
     Acquisition best{0, 0};
     for (std::size_t offset = 0; offset + expected_count <= signal_count; ++offset) {
+        periodic_cancel(offset, stop);
         const double denominator = std::sqrt(reference_energy * std::max(0.0, energy[offset+expected_count]-energy[offset]));
         const double score = denominator > 1e-20 ? std::abs(signal[offset]) / denominator : 0;
         if (score > best.correlation) best = {offset * (chip_samples(c) / 4), score};
@@ -145,14 +189,17 @@ Acquisition acquire(std::span<const float> samples, std::span<const float> refer
     return best;
 }
 std::vector<Complex> symbols(std::span<const float> samples, std::size_t offset,
-                             std::size_t count, const Config& c, const std::vector<int>& code) {
+                             std::size_t count, const Config& c, const std::vector<int>& code, std::stop_token stop) {
+    check_cancelled(stop);
     const auto chip = chip_samples(c), duration = symbol_samples(c);
     std::vector<Complex> out(count);
     auto oscillator = std::polar(1.0, -tau * c.carrier_hz * static_cast<double>(offset) / c.sample_rate);
     const auto step = std::polar(1.0, -tau * c.carrier_hz / c.sample_rate);
     for (std::size_t j = 0; j < count; ++j) {
+        periodic_cancel(j, stop);
         Complex sum{}; std::size_t actual = 0;
         for (std::size_t k = 0; k < duration && offset < samples.size(); ++k, ++offset) {
+            periodic_cancel(offset, stop);
             sum += static_cast<double>(samples[offset]) * oscillator * static_cast<double>(code[j*c.spreading_factor+k/chip]);
             oscillator *= step; ++actual;
         }
@@ -161,11 +208,12 @@ std::vector<Complex> symbols(std::span<const float> samples, std::size_t offset,
     return out;
 }
 struct Fit { double score; double rotation; Complex gain; };
-Fit fit(const std::vector<Complex>& received, const std::vector<Complex>& expected) {
+Fit fit(const std::vector<Complex>& received, const std::vector<Complex>& expected, std::stop_token stop) {
     // Regress the unwrapped phase of known training symbols. Averaging raw
     // adjacent products biases long-preamble timing toward accidental noise.
     double sx = 0, sy = 0, sxx = 0, sxy = 0, previous = 0, unwrapped = 0;
     for (std::size_t i = 0; i < expected.size(); ++i) {
+        periodic_cancel(i, stop);
         const double phase = std::arg(received[i] * std::conj(expected[i]));
         if (i == 0) unwrapped = phase;
         else unwrapped += std::remainder(phase - previous, tau);
@@ -178,6 +226,7 @@ Fit fit(const std::vector<Complex>& received, const std::vector<Complex>& expect
     const double angle = denominator > 0 ? (n*sxy - sx*sy) / denominator : 0;
     Complex sum{}; double energy = 0;
     for (std::size_t i = 0; i < expected.size(); ++i) {
+        periodic_cancel(i, stop);
         sum += received[i] * std::conj(expected[i]) * std::polar(1.0, -angle * static_cast<double>(i));
         energy += std::norm(received[i]);
     }
@@ -211,11 +260,40 @@ void validate(const Config& c) {
     check(std::isfinite(c.training_seconds) && c.training_seconds >= 5 && c.training_seconds <= 32768,
           "training must last 5..32768 seconds");
     check(c.spreading_factor >= 1 && c.spreading_factor <= 16384, "spreading factor must be 1..16384");
+    check(c.spreading_mode == SpreadingMode::pattern || c.spreading_mode == SpreadingMode::tone,"unknown spreading mode");
+    check(c.spreading_mode != SpreadingMode::tone || !c.scramble,"tone mode cannot enable pattern keystream scrambling");
     check(c.memory_limit >= 1024, "modem memory limit must be at least 1024 bytes");
     check(chip_samples(c) >= 4, "chip sampling is too fast");
     product(chip_samples(c), c.spreading_factor, std::numeric_limits<std::size_t>::max());
 }
 double bit_rate(const Config& c) { validate(c); return 2.0 * c.sample_rate / static_cast<double>(symbol_samples(c)); }
+std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
+    validate(c);
+    const auto symbols=product(wire_bytes,4,std::numeric_limits<std::size_t>::max());
+    return product(symbols,symbol_samples(c),std::numeric_limits<std::size_t>::max());
+}
+bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Config& c) {
+    validate(c);
+    try {
+        check(preamble_bytes>0 && wire_bytes>=preamble_bytes,"invalid estimated training length");
+        const auto symbols=product(wire_bytes,4,c.memory_limit);
+        const auto samples=waveform_sample_count(wire_bytes,c);
+        const auto training_symbols=product(preamble_bytes,4,c.memory_limit);
+        const auto training_samples=waveform_sample_count(preamble_bytes,c);
+        const auto spread_chips=product(symbols,c.spreading_factor,c.memory_limit);
+        budget(c.memory_limit,{{samples,sizeof(float)},{symbols,sizeof(Complex)},{spread_chips,sizeof(int)},{(spread_chips+7)/8,1}});
+        const auto chip=chip_samples(c),stride=chip/4;
+        const auto signal_bins=(samples-chip)/stride+1,training_bins=(training_samples-chip)/stride+1;
+        const auto fft_count=fft_size(signal_bins+training_bins,c.memory_limit,sizeof(Complex));
+        budget(c.memory_limit,{{samples,sizeof(float)},{training_samples,sizeof(float)},{fft_count,64},{chip,sizeof(Complex)}});
+        // acquire() also checks an 80-byte bound on the slightly shorter
+        // differential correlation FFT, before allocating its work buffers.
+        fft_size(signal_bins+training_bins-9,c.memory_limit,80);
+        budget(c.memory_limit,{{samples,sizeof(float)},{training_samples,sizeof(float)},
+                              {symbols,sizeof(Complex)},{training_symbols,sizeof(Complex)*2},{spread_chips,sizeof(int)+1}});
+        return true;
+    } catch(const Error&) {return false;}
+}
 Bytes preamble(const Config& c) {
     validate(c);
     const auto length = std::max<std::size_t>(12, static_cast<std::size_t>(std::ceil(c.training_seconds * bit_rate(c) / 8)));
@@ -225,27 +303,31 @@ Bytes preamble(const Config& c) {
     for (std::size_t i = 0; i < length; ++i) out[i] = text[i % text.size()];
     return out;
 }
-std::vector<float> modulate(std::span<const std::uint8_t> bytes, const Config& c) {
+std::vector<float> modulate(std::span<const std::uint8_t> bytes, const Config& c, std::stop_token stop) {
+    check_cancelled(stop);
     validate(c);
     const auto count = product(bytes.size(), 4, c.memory_limit);
     const auto chip = chip_samples(c), duration = symbol_samples(c);
     const auto sample_count = product(count, duration, c.memory_limit / sizeof(float));
     budget(c.memory_limit, {{sample_count,sizeof(float)}, {count,sizeof(Complex)},
                              {count*c.spreading_factor,sizeof(int)}, {(count*c.spreading_factor+7)/8,1}});
-    const auto code = signs(count * c.spreading_factor, c);
-    const auto phase = phases(bytes);
+    const auto code = signs(count * c.spreading_factor, c, stop);
+    const auto phase = phases(bytes, stop);
     std::vector<float> out(sample_count);
     const auto step = std::polar(1.0, tau * c.carrier_hz / c.sample_rate);
     Complex oscillator{1, 0};
     for (std::size_t i = 0; i < sample_count; ++i) {
+        periodic_cancel(i, stop);
         out[i] = static_cast<float>(amplitude * (phase[i / duration] * oscillator).real() * code[i / chip]);
         oscillator *= step;
     }
+    check_cancelled(stop);
     return out;
 }
 DecodeResult demodulate(std::span<const float> samples, const Config& c,
-                        std::span<const std::uint8_t> expected_preamble) {
-    validate(c); finite_samples(samples, c.memory_limit);
+                        std::span<const std::uint8_t> expected_preamble, std::stop_token stop) {
+    check_cancelled(stop);
+    validate(c); finite_samples(samples, c.memory_limit, stop);
     check(!expected_preamble.empty(), "expected preamble is required");
     const auto duration = symbol_samples(c), chip = chip_samples(c);
     const auto training_symbols = product(expected_preamble.size(),4,c.memory_limit);
@@ -264,21 +346,22 @@ DecodeResult demodulate(std::span<const float> samples, const Config& c,
     budget(c.memory_limit, {{samples.size(),sizeof(float)}, {training_samples,sizeof(float)},
                              {maximum_symbols,sizeof(Complex)}, {training_symbols,sizeof(Complex)*2},
                              {maximum_symbols*c.spreading_factor,sizeof(int)+1}});
-    const auto reference = modulate(expected_preamble, c);
-    const auto acquired = acquire(samples, reference, c);
-    const auto expected = phases(expected_preamble);
-    const auto code = signs(((samples.size() + duration / 2) / duration) * c.spreading_factor, c);
+    const auto reference = modulate(expected_preamble, c, stop);
+    const auto acquired = acquire(samples, reference, c, stop);
+    const auto expected = phases(expected_preamble, stop);
+    const auto code = signs(((samples.size() + duration / 2) / duration) * c.spreading_factor, c, stop);
     auto radius = chip / 4;
     Fit best{0,0,{}}; std::size_t start = acquired.offset;
     // Hierarchical refinement bounds trial count even for multi-second chips.
     // Each stage evaluates at most 17 candidates, ending at single samples.
     for (;;) {
+        check_cancelled(stop);
         const auto step = std::max<std::size_t>(1,radius/8);
         const auto low = start > radius ? start-radius : 0;
         const auto high = std::min(start+radius,samples.size()-reference.size());
         for (std::size_t trial = low;; trial = std::min(high,trial+step)) {
-            const auto received = symbols(samples,trial,expected.size(),c,code);
-            const auto candidate = fit(received,expected);
+            const auto received = symbols(samples,trial,expected.size(),c,code,stop);
+            const auto candidate = fit(received,expected,stop);
             if (candidate.score > best.score) { best = candidate; start = trial; }
             if (trial == high) break;
         }
@@ -287,12 +370,13 @@ DecodeResult demodulate(std::span<const float> samples, const Config& c,
     }
     check(best.score >= .60, "preamble does not validate after timing search");
     const auto count = ((samples.size() - start + chip / 2) / duration / 4) * 4;
-    auto received = symbols(samples, start, count, c, code);
+    auto received = symbols(samples, start, count, c, code, stop);
     DecodeResult out;
     out.bytes.resize(count / 4);
     Complex previous = best.gain;
     double error_energy = 0, signal_energy = 0;
     for (std::size_t j = 0; j < count; ++j) {
+        periodic_cancel(j, stop);
         const auto point = received[j] * std::polar(1.0, -best.rotation * static_cast<double>(j));
         const auto delta = point * std::conj(previous);
         unsigned closest = 0; double distance = -std::numeric_limits<double>::infinity();
@@ -316,6 +400,7 @@ DecodeResult demodulate(std::span<const float> samples, const Config& c,
     const auto display_stride = std::max<std::size_t>(1, samples.size() / 2048);
     for (std::size_t i = 0; i < samples.size() && out.diagnostics.waveform.size() < 2048; i += display_stride)
         out.diagnostics.waveform.push_back(samples[i]);
+    check_cancelled(stop);
     return out;
 }
 std::vector<float> simulate(std::span<const float> samples, const Config& c, const ChannelConfig& channel) {

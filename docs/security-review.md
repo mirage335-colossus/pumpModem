@@ -15,6 +15,8 @@ release ordering, CLI output, GUI cache/clipboard boundaries, and QR rendering.
 | The GUI retained large diagnostic float arrays for every cached tiny packet while accounting only payload bytes. | Diagnostic arrays are removed from cached packets; the latest received result supplies the plots. |
 | Large Unicode QR messages could lose their quiet zone on the original 150-pixel canvas. | The canvas accommodates 185 modules, including the four-module quiet zone for every supported QR version. |
 | The public packet header comment disagreed with the actual Reed-Solomon first root. | The comment now agrees with the implementation and protocol document: generator roots begin at alpha^0. |
+| Provisional live text could be mistaken for verified content. | Pending ticker rows cannot trigger normal clipboard copy or file saves; only complete FEC and digest/MAC verification populates the received cache. |
+| UTF-8 C1 controls could appear in named key labels. | Keyring names reject ASCII and C1 controls, malformed UTF-8, duplicates and out-of-bounds lengths. |
 
 OSC52's clipboard behavior is documented in the primary
 [xterm control-sequence reference](https://invisible-island.net/xterm/ctlseqs/ctlseqs.html).
@@ -48,8 +50,8 @@ packet digest.
   LeakSanitizer was disabled because it cannot run under this environment's
   ptrace arrangement.
 * No network listener, automatic received-file execution, automatic attachment
-  opening, or implicit received-filename write path was found. GUI subprocesses
-  use an argument array without a shell; saves require an explicit path and
+  opening, or implicit received-filename write path was found. The native GUI
+  calls the C++ service directly; saves require an explicit path and
   exclusive creation.
 
 ## Remaining validation boundaries

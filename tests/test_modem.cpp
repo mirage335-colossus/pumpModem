@@ -1,11 +1,14 @@
 #include "datapump/modem.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <random>
 #include <sstream>
 #include <stdexcept>
+#include <stop_token>
+#include <thread>
 
 using namespace datapump;
 namespace m = datapump::modem;
@@ -19,8 +22,51 @@ Bytes message(const m::Config& c) {
     for (unsigned i = 0; i < 256; ++i) data.push_back(static_cast<std::uint8_t>(i));
     return data;
 }
+void cancellation() {
+    m::Config config;
+    const auto training = m::preamble(config);
+    std::stop_source stopped;
+    stopped.request_stop();
+    const auto require_cancelled = [](auto operation) {
+        try { operation(); }
+        catch (const Error& error) {
+            require(std::string_view(error.what()) == "modem operation cancelled", "cancellation must be distinguishable from decode failure");
+            return;
+        }
+        throw std::runtime_error("cancelled modem operation completed");
+    };
+    require_cancelled([&] { m::modulate(training, config, stopped.get_token()); });
+    require_cancelled([&] { m::demodulate({}, config, training, stopped.get_token()); });
+
+    // A bounded but long enough capture keeps acquisition busy after a
+    // concurrent request. It must unwind from active DSP work, not just reject
+    // a token that was already stopped when the call began.
+    std::vector<float> long_capture(8 * 1024 * 1024, 0);
+    config.memory_limit = 128 * 1024 * 1024;
+    std::stop_source during_decode;
+    std::jthread cancel_decode([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        during_decode.request_stop();
+    });
+    const auto decode_start = std::chrono::steady_clock::now();
+    require_cancelled([&] { m::demodulate(long_capture, config, training, during_decode.get_token()); });
+    require(std::chrono::steady_clock::now() - decode_start < std::chrono::seconds(2),
+            "active acquisition cancellation exceeded bounded grace period");
+
+    Bytes long_message(24000, 0x37);
+    std::stop_source during_encode;
+    std::jthread cancel_encode([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        during_encode.request_stop();
+    });
+    const auto encode_start = std::chrono::steady_clock::now();
+    require_cancelled([&] { m::modulate(long_message, config, during_encode.get_token()); });
+    require(std::chrono::steady_clock::now() - encode_start < std::chrono::seconds(2),
+            "active modulation cancellation exceeded bounded grace period");
+}
 int main() {
     try {
+        cancellation();
         m::Config c;
         const auto pre = m::preamble(c);
         const auto data = message(c);

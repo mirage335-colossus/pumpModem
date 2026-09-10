@@ -6,6 +6,7 @@
 #include <memory>
 #include <thread>
 #include <chrono>
+#include <cerrno>
 #ifdef _WIN32
 #define NOMINMAX
 #include <windows.h>
@@ -20,7 +21,7 @@ void check_cancelled(std::stop_token stop) {
     if(stop.stop_requested()) throw Error("audio operation cancelled");
 }
 std::size_t sample_count(double seconds,std::uint32_t rate,std::size_t memory_limit) {
-    if(!std::isfinite(seconds) || seconds<=0 || rate<8000 || rate>192000 ||
+    if(!std::isfinite(seconds) || seconds<=0 || rate<8000 || rate>384000 ||
         seconds*rate>static_cast<double>(memory_limit/sizeof(float)))
         throw Error("audio duration/sample rate exceeds memory budget or valid range");
     return static_cast<std::size_t>(seconds*rate);
@@ -42,6 +43,7 @@ struct Alsa {
     int (*hint)(int,const char*,void***)=nullptr;
     char* (*get_hint)(const void*,const char*)=nullptr;
     int (*free_hint)(void**)=nullptr;
+    int (*wait)(PCM*,int)=nullptr;
     template<class T> void symbol(T& target,const char* name) {
         target=reinterpret_cast<T>(dlsym(library,name));
         if(!target) throw Error(std::string("ALSA missing symbol: ")+name);
@@ -55,15 +57,16 @@ struct Alsa {
             symbol(recover,"snd_pcm_recover");symbol(drain,"snd_pcm_drain");symbol(close,"snd_pcm_close");
             symbol(hint,"snd_device_name_hint");symbol(get_hint,"snd_device_name_get_hint");
             symbol(free_hint,"snd_device_name_free_hint");
+            symbol(wait,"snd_pcm_wait");
         } catch(...) {dlclose(library);throw;}
     }
     ~Alsa(){dlclose(library);}
 };
 struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
-    Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate):api(a) {
-        if(rate<8000 || rate>192000) throw Error("invalid audio sample rate");
-        if(api.open(&pcm,device.c_str(),direction,0)<0) throw Error("cannot open audio device: "+device);
+    Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,bool nonblocking=false):api(a) {
+        if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
+        if(api.open(&pcm,device.empty()?"default":device.c_str(),direction,nonblocking?1:0)<0) throw Error("cannot open audio device: "+device);
         // ALSA S16_LE=2, RW_INTERLEAVED=3, mono, 100ms latency.
         if(api.set_params(pcm,2,3,1,rate,1,100000)<0) {
             api.close(pcm);pcm=nullptr;throw Error("audio device rejected PCM16 mono format");
@@ -111,29 +114,53 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
 std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop) {
     check_cancelled(stop);
     std::vector<float> samples(sample_count(seconds,rate,memory_limit));
-    Alsa api; Stream stream(api,device,1,rate);
+    if(samples.empty()) return samples;
+    std::size_t offset=0;
+    capture(rate,device,[&](std::span<const float> chunk) {
+        const auto count=std::min(chunk.size(),samples.size()-offset);
+        std::copy_n(chunk.begin(),count,samples.begin()+static_cast<std::ptrdiff_t>(offset));
+        offset+=count;
+        return offset<samples.size();
+    },stop);
+    return samples;
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop) {
+    check_cancelled(stop);
+    if(!on_chunk) throw Error("capture callback is required");
+    Alsa api; Stream stream(api,device,1,rate,true);
     std::vector<std::int16_t> block(4096);
     const auto chunk_limit=std::min<std::size_t>(block.size(),rate/20);
-    std::size_t offset=0;unsigned failures=0;
-    while(offset<samples.size()) {
+    std::vector<float> converted(chunk_limit);
+    unsigned failures=0;
+    while(true) {
         check_cancelled(stop);
-        auto n=api.read(stream.pcm,block.data(),std::min(chunk_limit,samples.size()-offset));
+        auto n=api.read(stream.pcm,block.data(),chunk_limit);
         check_cancelled(stop);
+        if(n==-EAGAIN) {
+            const auto waited=api.wait(stream.pcm,20);
+            if(waited<0 && (++failures>8 || api.recover(stream.pcm,waited,1)<0))
+                throw Error("audio capture wait failed");
+            continue;
+        }
         if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio capture failed");}
         else if(n==0) throw Error("audio capture stalled");
-        else {for(long i=0;i<n;++i) samples[offset++]=block[static_cast<std::size_t>(i)]/32768.0f;failures=0;}
+        else {
+            if(static_cast<std::size_t>(n)>chunk_limit) throw Error("audio capture returned invalid sample count");
+            for(std::size_t i=0;i<static_cast<std::size_t>(n);++i) converted[i]=block[i]/32768.0f;
+            failures=0;
+            if(!on_chunk(std::span<const float>(converted.data(),static_cast<std::size_t>(n)))) break;
+        }
     }
-    return samples;
 }
 #else
 namespace {
 WAVEFORMATEX format(std::uint32_t rate) {
-    if(rate<8000 || rate>192000) throw Error("invalid audio sample rate");
+    if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
     WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=1;f.nSamplesPerSec=rate;
     f.wBitsPerSample=16;f.nBlockAlign=2;f.nAvgBytesPerSec=rate*2;return f;
 }
 UINT device_id(const std::string& device) {
-    if(device=="default") return WAVE_MAPPER;
+    if(device.empty() || device=="default") return WAVE_MAPPER;
     std::size_t end=0; unsigned long id;
     try {id=std::stoul(device,&end);} catch(...) {throw Error("Windows audio device must be default or a numeric ID");}
     if(end!=device.size() || id>65535) throw Error("invalid Windows audio device ID");
@@ -271,30 +298,45 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
 std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop) {
     check_cancelled(stop);
     std::vector<float> result(sample_count(seconds,rate,memory_limit));
+    if(result.empty()) return result;
+    std::size_t offset=0;
+    capture(rate,device,[&](std::span<const float> chunk) {
+        const auto count=std::min(chunk.size(),result.size()-offset);
+        std::copy_n(chunk.begin(),count,result.begin()+static_cast<std::ptrdiff_t>(offset));
+        offset+=count;
+        return offset<result.size();
+    },stop);
+    return result;
+}
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop) {
+    check_cancelled(stop);
+    if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
     session.prepare();
-    for(auto& header:session.headers)
+    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_samples,rate/20);
+    std::vector<float> converted(chunk_samples);
+    for(auto& header:session.headers) {
+        header.dwBufferLength=static_cast<DWORD>(chunk_samples*sizeof(std::int16_t));
         mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn queue failed");
+    }
     mm_check(waveInStart(session.input),"waveIn start failed");
-    std::size_t offset=0,slot=0;
-    while(offset<result.size()) {
+    std::size_t slot=0;
+    while(true) {
         check_cancelled(stop);
         auto& header=session.headers[slot];
         session.wait(header,stop);
         if(header.dwBytesRecorded>header.dwBufferLength || header.dwBytesRecorded%sizeof(std::int16_t)!=0)
             throw Error("waveIn returned invalid audio size");
-        const auto count=std::min(static_cast<std::size_t>(header.dwBytesRecorded/sizeof(std::int16_t)),result.size()-offset);
+        const auto count=static_cast<std::size_t>(header.dwBytesRecorded/sizeof(std::int16_t));
         if(!count) throw Error("waveIn capture stalled");
-        for(std::size_t i=0;i<count;++i) result[offset++]=session.pcm[slot][i]/32768.0f;
-        if(offset<result.size()) {
-            if(session.headers[1-slot].dwFlags&WHDR_DONE) throw Error("audio capture overrun");
-            mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn requeue failed");
-        }
+        for(std::size_t i=0;i<count;++i) converted[i]=session.pcm[slot][i]/32768.0f;
+        if(session.headers[1-slot].dwFlags&WHDR_DONE) throw Error("audio capture overrun");
+        mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn requeue failed");
+        if(!on_chunk(std::span<const float>(converted.data(),count))) break;
         slot=1-slot;
     }
     mm_check(waveInStop(session.input),"waveIn stop failed");
     session.finish();
-    return result;
 }
 
 #endif

@@ -1,6 +1,8 @@
 #include "datapump/transfer.hpp"
 #include <algorithm>
+#include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <string>
 
@@ -64,11 +66,58 @@ void test_shared_packet_pipeline() {
     }
     auto oversize = message;
     oversize.data.resize(65537);
-    rejects([&] { transfer::pack(oversize, options()); }, "repeatable cap enforced by shared service");
-    rejects([&] { transfer::transmit(oversize, options()); }, "repeatable cap enforced for audio");
+    rejects([&] { transfer::pack(oversize, options()); }, "repeatable airtime enforced by shared service");
+    rejects([&] { transfer::transmit(oversize, options()); }, "repeatable airtime enforced for audio");
     auto small = options();
     small.modem.memory_limit = 1024;
     rejects([&] { transfer::pack(message, small); }, "shared packet memory budget");
+}
+void test_airtime_estimates_and_repeat_policy() {
+    auto value=options();
+    const auto message=sample();
+    const auto estimate=transfer::estimate(message,value);
+    const auto samples=transfer::transmit(message,value);
+    check(estimate.waveform_samples==samples.size(),"estimate has exact quantized sample count");
+    check(std::abs(estimate.total_seconds-static_cast<double>(samples.size())/value.modem.sample_rate)<1e-9,
+          "estimated airtime matches actual modulation");
+    check(estimate.packet_bytes==transfer::pack(message,value).size(),"estimated encoded packet length");
+    auto empty=message;empty.data.clear();
+    const auto overhead=transfer::estimate(empty,value);
+    check(estimate.content_bytes==estimate.packet_bytes-overhead.packet_bytes,"repeat accounting excludes all fixed framing and metadata");
+    check(estimate.content_seconds<estimate.packet_seconds && estimate.packet_seconds<estimate.total_seconds,
+          "content packet and total airtimes kept distinct");
+    check(estimate.memory_supported && estimate.repeatable_allowed,"ordinary transfer estimate supported");
+    auto slow=value;slow.modem.spreading_factor=16384;
+    auto beacon=message;beacon.data={1};
+    const auto beacon_estimate=transfer::estimate(beacon,slow);
+    check(beacon_estimate.content_seconds>2 && beacon_estimate.repeatable_allowed,"one-byte repeatability floor for slow beacons");
+    check(!beacon_estimate.memory_supported,"estimator detects unbufferable slow waveform without allocating it");
+    transfer::pack(beacon,slow);
+    beacon.data={1,2};
+    check(!transfer::estimate(beacon,slow).repeatable_allowed,"larger slow messages exceed content airtime cap");
+    rejects([&]{transfer::pack(beacon,slow);},"repeatable service applies content airtime cap");
+    auto fast=value;
+    fast.modem.sample_rate=384000;fast.modem.bandwidth_hz=192000;fast.modem.carrier_hz=96000;
+    fast.fec=FecMode::off;fast.repeat_policy.maximum_seconds=4;
+    auto large=message;large.data.resize(65537);
+    check(transfer::estimate(large,fast).repeatable_allowed,"over 64KiB allowed when configured content airtime fits");
+    check(!transfer::pack(large,fast).empty(),"removed arbitrary byte cap");
+    auto boundary_options=value;
+    boundary_options.fec=FecMode::off;
+    boundary_options.compression=false;
+    auto boundary=message;boundary.data.resize(250);
+    const auto exact_limit=transfer::estimate(boundary,boundary_options);
+    check(exact_limit.content_seconds==2 && exact_limit.repeatable_allowed,"inclusive two-second content boundary");
+    boundary.data.push_back(0);
+    check(!transfer::estimate(boundary,boundary_options).repeatable_allowed,"one byte over airtime boundary rejected");
+    boundary.kind=MessageKind::file;
+    boundary.filename=std::string(220,'x');
+    boundary.data.resize(10);
+    const auto metadata=transfer::estimate(boundary,boundary_options);
+    check(metadata.packet_seconds>2 && metadata.content_seconds<2 && metadata.repeatable_allowed,
+          "large fixed metadata does not consume repeatable content allowance");
+    boundary_options.repeat_policy.maximum_seconds=std::numeric_limits<double>::quiet_NaN();
+    rejects([&]{transfer::estimate(boundary,boundary_options);},"invalid airtime policy rejected");
 }
 void test_complete_frame_encryption_and_spreading() {
     auto value = options(true);
@@ -146,6 +195,7 @@ int main() {
     try {
         test_callback_lifetime_and_epoch_binding();
         test_shared_packet_pipeline();
+        test_airtime_estimates_and_repeat_policy();
         test_complete_frame_encryption_and_spreading();
         test_timing_search_and_progress();
         test_simulation_validation_and_cancellation();

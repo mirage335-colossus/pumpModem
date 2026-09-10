@@ -46,12 +46,13 @@ detection, not sender authentication.
 ```sh
 printf 'clipboard text' | ./build/pump tx --input - --output message.wav
 ./build/pump rx --input message.wav
-./build/pump devices
 ./build/pump tx --text 'hello' --device default
-./build/pump rx --device default --seconds 30 --json
+./build/pump listen --json
+./build/pump listen --simulation '3dBm -120dB' --text 'hello' --json
 ```
 
-Live audio explicitly requires `--device`. Linux dynamically loads the common
+`listen` continuously receives from the operating system's default audio device;
+`--device` selects an override. Device enumeration is optional. Linux loads the common
 ALSA `libasound.so.2`; Windows uses the system WinMM audio API. WAV and simulation
 operation work without audio hardware or the ALSA library. No radio is keyed or
 transmitted by the automated tests. Physical audio transfer and Windows hardware
@@ -81,33 +82,44 @@ glibc at least as new as the build computer; Windows needs its own build. See
 and operating-system requirements.
 
 The console provides text composition and explicit clipboard copy, file and
-screenshot attachment, Level L QR previews, audio capture/playback, WAV import/
-export, seeded simulation, waveform/spectrum/constellation diagnostics, shared
-key selection, and a bounded receive cache. It does not open received files or
-execute received content. Captured screenshots can be attached as ordinary image
-files; direct operating-system screenshot capture is not implemented.
+screenshot attachment, Level L QR previews, continuous audio reception, a scrolling
+frequency-labeled signal ticker, a false-color waterfall and live waveform,
+spectrum and constellation displays. It includes named shared-key selection and
+a bounded receive cache. WAV tools remain available through the CLI. It does not
+open received files or execute received content. Screenshots can be attached as
+ordinary image files; direct operating-system screenshot capture is not implemented.
 
 Enter transmits audio; the checkbox changes this to Ctrl+Enter. Normal
-transmission is the default, and simulation is a separate explicit button.
-Encrypted pattern and DSSS controls are disabled until a keyfile is selected.
-The console runs one modem operation at a time and enforces a six-second delay
-after successful transmission. CLI audio TX also waits six seconds after
+transmission is the default. Selecting a simulation preset switches the same
+receiver and Transmit control to a continuous noisy channel: the plots keep
+updating while idle and the receiver decodes transmitted samples as they arrive.
+Real audio reception pauses during transmission and resumes afterward.
+Bandwidth and target C/N0 determine automatic integration length; forced pattern
+and tone modes are also available. Auto keystream is enabled with encryption.
+The editor shows estimated airtime and flags settings that exceed the current
+buffered modem's memory capacity. Compression is always chosen automatically.
+Provisional ticker text is distinguished from validated cache entries.
+The console enforces a six-second delay after transmission. CLI audio TX also waits six seconds after
 playback so sequential scripts inherit the delay; independent concurrent
 processes are not globally coordinated.
 
 ## Shared keys and encrypted transfers
 
 ```sh
-./build/pump keygen --output shared.key
+./build/pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
+./build/pump keys --keyfile shared.key
 ./build/pump tx --text 'private clipboard' --keyfile shared.key \
   --time 1800000000 --output encrypted.wav
 ./build/pump rx --input encrypted.wav --keyfile shared.key \
   --time 1800000002 --search-seconds 2 --json
 ```
 
-The keyfile has a 128MiB random header. To bind it to an existing random pad
-larger than 1GiB, supply `--pad path` at creation and every subsequent load.
-Keyfiles contain only this application's symmetric master secret. Never put
+The keyfile has a 128MiB random header whose hash derives the key that encrypts
+the appended named collection. Each entry stores all five purpose keys. The GUI
+selects one for transmission and tries loaded keys on reception; CLI selection uses
+`--key-name Portable`. Legacy single-key files load as `Default`.
+Optional external pads remain a CLI feature using `--pad path` at creation and load.
+Keyfiles contain only this application's symmetric key sets. Never put
 signing keys or other applications' secrets in this format.
 
 AES-256-CTR encrypts the entire balanced training sequence, framed content,
@@ -131,6 +143,9 @@ See [cryptography](docs/crypto.md) and [security boundaries](docs/security.md).
 # Packet bytes on stdout; useful for testing and external scripting.
 printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 
+# Automatic tuning and exact airtime, without allocating audio.
+./build/pump estimate --text 'CQ hello' --bw 1200 --target-snr 40 --pattern auto-pattern
+
 # Optical transfer, UTF-8, up to500 Unicode characters.
 ./build/pump qr --text 'clipboard text' --output clipboard.svg
 ./build/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
@@ -146,10 +161,19 @@ The reference modem supports 1.2/2.4/22.05/24kHz nominal bandwidth settings,
 1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
 60% RS parity or no body FEC. The fixed bootstrap retains its protection even
 with `--fec off`; status mode is the route for truly overhead-free few-bit data.
-`--snr` is simulated sample-power SNR in dB, not a dB/Hz receiver squelch setting.
+`--target-snr` is the desired C/N0 in dBHz. The planner uses symbol integration
+and a 10dB Es/N0 engineering target; this is not measured receiver sensitivity.
+`--snr` is simulated sample-power SNR in dB. Simulation presets instead specify
+transmit dBm and channel attenuation, with thermal noise at 290K and a 10dB
+receiver noise figure. Extremely weak presets may produce only noise.
+
+Repeatable eligibility is at most two seconds of incremental encoded content
+airtime, excluding preamble and fixed framing, with a minimum one-byte allowance.
+There is no 64KiB eligibility rule. This allowance does not override memory limits
+or establish that a setting can decode a particular channel.
 
 The default256MiB memory budget is checked by each codec's workspace estimator;
-it is not an operating-system process RSS cap. Finite captures, decoded packets,
+it is not an operating-system process RSS cap. Rolling capture buffers, decoded packets,
 and caller-owned buffers can coexist. Large files and long recordings may be
 rejected before processing. There is no disk-backed receive cache, chunked file
 transport, or streaming multi-day integration in this release.

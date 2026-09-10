@@ -160,7 +160,7 @@ Header read_header(const Bytes& wire, std::size_t max_memory) {
     result.corrected = packet_codec::rs_correct(result.bytes, header_parity);
     result.bytes.resize(header_size);
     const auto& h = result.bytes;
-    if (h[0] != 'D' || h[1] != 'P' || h[2] != '0' || h[3] != '1' || h[4] != 1 ||
+    if (h[0] != 'D' || h[1] != 'P' || h[2] != '0' || h[3] != '1' || (h[4] != 1 && h[4] != 2) ||
         h[34] != 0 || h[35] != 0 || integer(h, 32, 2) != tag_size ||
         integer(h, 36, 4) != crc32(h.data(), 36)) throw Error("Invalid packet bootstrap");
     result.fec = static_cast<FecMode>(h[5]);
@@ -272,9 +272,86 @@ struct BitReader {
         return value;
     }
 };
+constexpr std::string_view frequent_bytes=" etaoinshrdlu";
+struct PrefixCode { unsigned bits; unsigned length; };
+constexpr std::array<PrefixCode,13> byte_codes{{
+    {0,3},{1,3},{2,3},{3,3},{4,3},{10,4},{11,4},
+    {24,5},{25,5},{26,5},{27,5},{28,5},{29,5}}};
+static_assert(frequent_bytes.size()==byte_codes.size());
+
+Bytes decode_short_prefix(const Bytes& encoded,std::size_t original_size,bool modern,bool partial) {
+    if (original_size>=256 || encoded.size()>415) throw Error("Invalid short prefix stream size");
+    BitReader reader{encoded}; Bytes result; result.reserve(original_size);
+    while (result.size()<original_size) {
+        try {
+            if (!modern) {
+                const auto tag=reader.get(2);
+                if (tag==0) result.push_back(static_cast<std::uint8_t>(alphabet[reader.get(5)]));
+                else if (tag==2) result.push_back(static_cast<std::uint8_t>(reader.get(8)));
+                else if (tag==1) {
+                    const auto word=dictionary[reader.get(6)];
+                    if (word.size()>original_size-result.size()) throw Error("Dictionary expansion exceeds declared length");
+                    result.insert(result.end(),word.begin(),word.end());
+                } else throw Error("Reserved dictionary token");
+            } else {
+                const auto first=reader.get(3);
+                if (first<5) result.push_back(static_cast<std::uint8_t>(frequent_bytes[first]));
+                else if (first==5) result.push_back(static_cast<std::uint8_t>(frequent_bytes[5+reader.get(1)]));
+                else if (first==6) result.push_back(static_cast<std::uint8_t>(frequent_bytes[7+reader.get(2)]));
+                else {
+                    const auto tail=reader.get(2);
+                    if (tail<2) result.push_back(static_cast<std::uint8_t>(frequent_bytes[11+tail]));
+                    else if (tail==3) result.push_back(static_cast<std::uint8_t>(reader.get(8)));
+                    else {
+                        // 111100 is a phrase; 111101 is reserved for extensions.
+                        if (reader.get(1)!=0) throw Error("Reserved prefix token");
+                        const auto word=dictionary[reader.get(6)];
+                        if (word.size()>original_size-result.size()) throw Error("Dictionary expansion exceeds declared length");
+                        result.insert(result.end(),word.begin(),word.end());
+                    }
+                }
+            }
+        } catch (const Error&) { if (partial) return result; throw; }
+    }
+    if (!partial) {
+        const auto remaining=encoded.size()*8-reader.position;
+        if (remaining>7 || (remaining && reader.get(static_cast<unsigned>(remaining))!=0))
+            throw Error("Noncanonical prefix padding");
+    }
+    return result;
+}
 }
 
 namespace packet_codec {
+Bytes compress_short_v2(const Bytes& input) {
+    if (input.size()>=256) throw Error("Prefix compression is limited to short messages");
+    std::array<std::size_t,256> cost{},choice{};
+    for (std::size_t i=input.size();i-->0;) {
+        const auto index=frequent_bytes.find(static_cast<char>(input[i]));
+        cost[i]=(index==std::string_view::npos?13:byte_codes[index].length)+cost[i+1];
+        choice[i]=dictionary.size();
+        for (std::size_t word=0;word<dictionary.size();++word) {
+            const auto token=dictionary[word];
+            if (token.size()<=input.size()-i && std::equal(token.begin(),token.end(),input.begin()+static_cast<std::ptrdiff_t>(i)) &&
+                12+cost[i+token.size()]<cost[i]) { cost[i]=12+cost[i+token.size()]; choice[i]=word; }
+        }
+    }
+    BitWriter writer;
+    for (std::size_t i=0;i<input.size();) {
+        if (choice[i]<dictionary.size()) {
+            writer.put(60,6); writer.put(static_cast<unsigned>(choice[i]),6); i+=dictionary[choice[i]].size();
+        } else {
+            const auto index=frequent_bytes.find(static_cast<char>(input[i]));
+            if (index==std::string_view::npos) {writer.put(31,5);writer.put(input[i],8);}
+            else {writer.put(byte_codes[index].bits,byte_codes[index].length);}
+            ++i;
+        }
+    }
+    return writer.bytes;
+}
+Bytes decompress_short_v2(const Bytes& encoded,std::size_t original_size) {
+    return decode_short_prefix(encoded,original_size,true,false);
+}
 Bytes rs_encode(const Bytes& data, std::size_t parity_symbols) {
     if (data.empty() || parity_symbols == 0 || parity_symbols >= 255 || data.size() > 255 - parity_symbols)
         throw Error("Invalid Reed-Solomon block dimensions");
@@ -446,10 +523,14 @@ Bytes encode_packet(const Message& message, const PacketOptions& options, std::s
                                   add_size(message.data.size(), 4096));
     if (working > max_memory) throw Error("Packet exceeds encoder working memory limit");
     Bytes payload = message.data;
+    std::uint8_t version=1;
     std::uint8_t flags = message.repeatable ? repeat_flag : 0;
     if (options.compression && !payload.empty() && payload.size() < 256) {
         auto compressed = packet_codec::compress_short(payload);
+        auto prefix_compressed = packet_codec::compress_short_v2(payload);
+        if (prefix_compressed.size()<compressed.size()) {compressed=std::move(prefix_compressed);version=2;}
         if (compressed.size() < payload.size()) { payload = std::move(compressed); flags |= compressed_flag; }
+        else version=1;
     }
     if (options.authenticator) flags |= authenticated_flag;
     auto identifier = message.id;
@@ -469,7 +550,7 @@ Bytes encode_packet(const Message& message, const PacketOptions& options, std::s
     const auto payload_size = payload.size();
     payload = Bytes{};
     Bytes header(header_size);
-    header[0] = 'D'; header[1] = 'P'; header[2] = '0'; header[3] = '1'; header[4] = 1;
+    header[0] = 'D'; header[1] = 'P'; header[2] = '0'; header[3] = '1'; header[4] = version;
     header[5] = static_cast<std::uint8_t>(options.fec); header[6] = flags; header[7] = static_cast<std::uint8_t>(message.kind);
     put_integer(header, 8, add_size(body.size(), tag_size), 8);
     put_integer(header, 16, message.data.size(), 8);
@@ -495,6 +576,51 @@ Bytes encode_packet(const Message& message, const PacketOptions& options, std::s
 std::optional<std::size_t> packet_frame_size(const Bytes& prefix, std::size_t max_memory) {
     if (prefix.size() < packet_prefix_size) return std::nullopt;
     return read_header(prefix, max_memory).wire_length;
+}
+
+std::optional<PacketPreview> preview_packet_partial(const Bytes& wire,std::size_t max_memory) {
+    if (wire.size()<packet_prefix_size) return std::nullopt;
+    try {
+        const auto header=read_header(wire,max_memory);
+        const auto metadata_size=header.body_length-header.payload_length-tag_size;
+        // Display a bounded prefix, never allocate the declared full body here.
+        const auto limit=std::min(header.body_length-tag_size,metadata_size+std::size_t{65536});
+        Bytes body; body.reserve(limit);
+        if (header.fec==FecMode::off) {
+            const auto count=std::min(limit,wire.size()-packet_prefix_size);
+            body.insert(body.end(),wire.begin()+packet_prefix_size,wire.begin()+static_cast<std::ptrdiff_t>(packet_prefix_size+count));
+        } else {
+            const auto capacity=block_capacity(header.fec);
+            const auto rows=(header.body_length+capacity-1)/capacity;
+            const auto last_count=header.body_length-(rows-1)*capacity;
+            const auto last_width=last_count+parity_count(last_count,header.fec);
+            for (std::size_t i=0;i<limit;++i) {
+                const auto row=i/capacity,column=i%capacity;
+                const auto position=column<last_width?column*rows+row:
+                    last_width*rows+(column-last_width)*(rows-1)+row;
+                if (position>=wire.size()-packet_prefix_size) break;
+                body.push_back(wire[packet_prefix_size+position]);
+            }
+        }
+        if (body.size()<metadata_size) return std::nullopt;
+        PacketPreview result; result.wire_size=header.wire_length;
+        auto& message=result.message; message.kind=header.kind;
+        message.repeatable=(header.flags&repeat_flag)!=0;
+        std::copy_n(body.begin(),message.id.size(),message.id.begin());
+        if (integer(body,16,4)!=id_checksum(message.id,message.repeatable)) return std::nullopt;
+        const auto filename=bounded_integer(body,20,2,255),callsign=bounded_integer(body,22,2,64),grid=bounded_integer(body,24,2,32);
+        if (body_metadata_size+filename+callsign+grid!=metadata_size) return std::nullopt;
+        const auto string_at=[&](std::size_t begin,std::size_t length) {
+            return std::string(body.begin()+static_cast<std::ptrdiff_t>(begin),body.begin()+static_cast<std::ptrdiff_t>(begin+length));
+        };
+        message.filename=string_at(body_metadata_size,filename);
+        message.callsign=string_at(body_metadata_size+filename,callsign);
+        message.grid=string_at(body_metadata_size+filename+callsign,grid);
+        validate_metadata(message);
+        Bytes payload(body.begin()+static_cast<std::ptrdiff_t>(metadata_size),body.end());
+        message.data=(header.flags&compressed_flag)?decode_short_prefix(payload,header.original_length,header.bytes[4]==2,true):std::move(payload);
+        return result;
+    } catch (const Error&) { return std::nullopt; }
 }
 
 DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options, std::size_t max_memory) {
@@ -535,7 +661,8 @@ DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options, std
     message.grid = string_at(body_metadata_size + filename_length + callsign_length, grid_length);
     validate_metadata(message);
     Bytes payload(body.begin() + static_cast<std::ptrdiff_t>(payload_offset), body.begin() + static_cast<std::ptrdiff_t>(content_end));
-    message.data = (header.flags & compressed_flag) != 0 ? packet_codec::decompress_short(payload, header.original_length) : std::move(payload);
+    message.data = (header.flags & compressed_flag) != 0 ?
+        (header.bytes[4]==2?packet_codec::decompress_short_v2(payload,header.original_length):packet_codec::decompress_short(payload, header.original_length)) : std::move(payload);
     result.consumed_bytes = header.wire_length;
     result.authenticated = authenticated;
     return result;

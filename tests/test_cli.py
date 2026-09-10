@@ -36,7 +36,7 @@ class CommandTests(PumpCase):
         self.run_pump("simulate", "--text", "x", "--snr", "nan", ok=False)
         self.run_pump("tx", "--text", "x", ok=False)
         self.run_pump("simulate", "--text", "x", "--bw", "0", ok=False)
-        for options in (("--sample-rate", "0"), ("--sample-rate", "192001"),
+        for options in (("--sample-rate", "0"), ("--sample-rate", "384001"),
                         ("--spreading", "0"), ("--spreading", "16385"),
                         ("--carrier", "nan"), ("--carrier", "inf"),
                         ("--fec", "21"), ("--memory-mb", "4097"),
@@ -162,19 +162,51 @@ class CommandTests(PumpCase):
         self.run_pump("simulate", "--text", "x", "--memory-mb", "1", ok=False)
         self.run_pump("rx", "--device-type", "ethernet", ok=False)
 
+    def test_automatic_tuning_and_estimate(self):
+        normal = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "40").stdout)
+        slow = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "6").stdout)
+        self.assertGreater(slow["spreading"], normal["spreading"])
+        self.assertGreater(slow["total_seconds"], normal["total_seconds"])
+        self.assertGreater(normal["total_seconds"], normal["content_seconds"])
+        self.assertTrue(normal["repeatable_allowed"])
+        compressed = json.loads(self.run_pump("estimate", "--text", "e" * 80).stdout)
+        raw = json.loads(self.run_pump("estimate", "--text", "e" * 80, "--no-compression").stdout)
+        self.assertLess(compressed["packet_bytes"], raw["packet_bytes"])
+        self.run_pump("estimate", "--text", "x", "--pattern", "bad", ok=False)
+        self.run_pump("estimate", "--text", "x", "--target-snr", "40", "--spreading", "2", ok=False)
+        self.run_pump("estimate", "--text", "x", "--target-snr", "37.5", "--bw", "3000", "--sample-rate", "8000", ok=False)
+        unsupported = json.loads(self.run_pump("estimate", "--text", "!", "--target-snr", "-270").stdout)
+        self.assertFalse(unsupported["target_supported"])
+        result = self.run_pump("simulate", "--text", "tone test", "--pattern", "tone-3",
+                               "--simulation", "3dBm -120dB", "--json", "--bw", "1000")
+        self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"tone test")
+
+    def test_continuous_simulation(self):
+        result = self.run_pump("listen", "--simulation", "3dBm -120dB", "--text", "stream",
+                               "--seconds", "10", "--json", "--progress", *AUDIO)
+        events = [json.loads(line) for line in result.stdout.splitlines()]
+        frames = [event for event in events if event.get("event") == "signal"]
+        self.assertGreater(len(frames), 10)
+        self.assertGreater(frames[-1]["samples_received"], frames[2]["samples_received"])
+        verified = [event for event in events if event.get("validated")]
+        self.assertEqual(len(verified), 1)
+        self.assertEqual(base64.b64decode(verified[0]["data_base64"]), b"stream")
+
     def test_packet_boundaries_and_metadata(self):
         for length in (0, 1, 255, 256, 257):
             with self.subTest(length=length):
                 data = bytes(index % 256 for index in range(length))
                 packed = self.run_pump("pack", "--input", "-", data=data).stdout
                 self.assertEqual(self.run_pump("unpack", "--input", "-", data=packed).stdout, data)
-        data = b"a" * 65536
+        data = b"a" * 100
         packet = self.run_pump("pack", "--input", "-", "--repeatable", data=data).stdout
         decoded = json.loads(self.run_pump("unpack", "--json", data=packet).stdout)
         self.assertEqual(base64.b64decode(decoded["data_base64"]), data)
         self.assertTrue(decoded["repeatable"])
         self.assertRegex(decoded["id"], r"^[0-9a-f]{32}$")
-        self.run_pump("pack", "--repeatable", data=data + b"a", ok=False)
+        self.run_pump("pack", "--repeatable", data=b"a" * 65537, ok=False)
+        self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!" )
+        self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!?", ok=False)
         self.run_pump("pack", "--memory-mb", "1", data=b"a" * (1024 * 1024 + 1), ok=False)
         self.run_pump("pack", "--memory-mb", "1", data=b"a" * (200 * 1024), ok=False)
 
@@ -266,18 +298,18 @@ class EncryptedCommandTests(PumpCase):
         cls.key = cls.root / "shared.key"
         cls.other_key = cls.root / "other.key"
         for key in (cls.key, cls.other_key):
-            result = subprocess.run([PUMP, "keygen", "--output", str(key)], capture_output=True, timeout=90)
+            result = subprocess.run([PUMP, "keygen", "--output", str(key), "--key-names", "Default,Backup"], capture_output=True, timeout=90)
             if result.returncode:
                 raise RuntimeError(result.stderr.decode(errors="replace"))
 
     def test_production_keyfile_and_exclusive_creation(self):
-        self.assertEqual(self.key.stat().st_size, 128 * 1024 * 1024 + 96)
+        self.assertEqual(self.key.stat().st_size, 128 * 1024 * 1024 + 48 + 16 + 2 * (2 + 160) + 7 + 6)
         if os.name != "nt":
             self.assertEqual(stat.S_IMODE(self.key.stat().st_mode), 0o600)
         with self.key.open("rb") as source:
             prefix = source.read(48)
             random_header_sample = source.read(1024)
-        self.assertEqual(prefix[:8], b"DPMKEY01")
+        self.assertEqual(prefix[:8], b"DPMKEY02")
         self.assertEqual(int.from_bytes(prefix[8:16], "big"), 128 * 1024 * 1024)
         self.assertGreater(len(set(random_header_sample)), 128)
         self.run_pump("keygen", "--output", self.key, ok=False)
@@ -287,6 +319,16 @@ class EncryptedCommandTests(PumpCase):
         truncated.write_bytes(prefix + random_header_sample)
         self.run_pump("pack", "--text", "x", "--keyfile", truncated, ok=False)
         self.run_pump("pack", "--text", "x", "--pad", self.key, ok=False)
+
+    def test_named_key_selection(self):
+        self.assertEqual(self.run_pump("keys", "--keyfile", self.key).stdout, b"Default\nBackup\n")
+        packet = self.run_pump("pack", "--text", "second key", "--keyfile", self.key,
+                               "--key-name", "Backup", "--time", EPOCH).stdout
+        decoded = self.run_pump("unpack", "--keyfile", self.key, "--key-name", "Backup",
+                                "--time", EPOCH, data=packet)
+        self.assertEqual(decoded.stdout, b"second key")
+        self.run_pump("unpack", "--keyfile", self.key, "--key-name", "Default", "--time", EPOCH, data=packet, ok=False)
+        self.run_pump("pack", "--keyfile", self.key, "--key-name", "missing", "--text", "x", ok=False)
 
     def test_encrypted_noisy_simulation_all_layers(self):
         result = self.run_pump("simulate", "--text", "Secure café 🌍", "--keyfile", self.key,

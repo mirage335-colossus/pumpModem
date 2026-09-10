@@ -1,0 +1,108 @@
+#include "datapump/tuning.hpp"
+#include <algorithm>
+#include <array>
+#include <cmath>
+#include <iomanip>
+#include <limits>
+#include <sstream>
+
+namespace datapump::tuning {
+namespace {
+constexpr std::array modes{
+    PatternMode::auto_keystream,PatternMode::auto_pattern,PatternMode::auto_tone,
+    PatternMode::pattern_3,PatternMode::pattern_4,PatternMode::pattern_6,PatternMode::pattern_8,PatternMode::pattern_12,PatternMode::pattern_16,
+    PatternMode::tone_1,PatternMode::tone_2,PatternMode::tone_3,PatternMode::tone_4,PatternMode::tone_8,PatternMode::tone_32,
+    PatternMode::tone_128,PatternMode::tone_1024,PatternMode::tone_4096,PatternMode::tone_16384};
+constexpr std::array<std::string_view,19> names{
+    "auto-keystream","auto-pattern","auto-tone","pattern-3","pattern-4","pattern-6","pattern-8","pattern-12","pattern-16",
+    "tone-1","tone-2","tone-3","tone-4","tone-8","tone-32","tone-128","tone-1024","tone-4096","tone-16384"};
+constexpr std::array<unsigned,19> lengths{0,0,0,3,4,6,8,12,16,1,2,3,4,8,32,128,1024,4096,16384};
+constexpr std::array<unsigned,18> automatic_lengths{1,2,3,4,6,8,12,16,32,64,128,256,512,1024,2048,4096,8192,16384};
+constexpr std::array presets{
+    SimulationPreset{"no",false,0,0},SimulationPreset{"3dBm -6dB",true,3,-6},
+    SimulationPreset{"3dBm -60dB",true,3,-60},SimulationPreset{"3dBm -90dB",true,3,-90},
+    SimulationPreset{"3dBm -120dB",true,3,-120},SimulationPreset{"3dBm -170dB",true,3,-170},
+    SimulationPreset{"3dBm -200dB",true,3,-200},SimulationPreset{"3dBm -230dB",true,3,-230},
+    SimulationPreset{"50dBm -200dB",true,50,-200},SimulationPreset{"50dBm -270dB",true,50,-270},
+    SimulationPreset{"70dBm -250dB",true,70,-250}};
+std::size_t index_of(PatternMode mode) {
+    const auto found=std::find(modes.begin(),modes.end(),mode);
+    if(found==modes.end()) throw Error("unknown pattern mode");
+    return static_cast<std::size_t>(found-modes.begin());
+}
+std::string normalized(std::string_view name) {
+    std::string result;
+    for(auto character:name) {
+        if(character==' ' || character=='\t') continue;
+        if(character>='A' && character<='Z') character=static_cast<char>(character-'A'+'a');
+        result+=character;
+    }
+    return result;
+}
+}
+std::span<const PatternMode> pattern_modes(){return modes;}
+std::string_view pattern_mode_name(PatternMode mode){return names[index_of(mode)];}
+PatternMode parse_pattern_mode(std::string_view name) {
+    const auto found=std::find(names.begin(),names.end(),name);
+    if(found==names.end()) throw Error("unknown pattern mode: "+std::string(name));
+    return modes[static_cast<std::size_t>(found-names.begin())];
+}
+Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption) {
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>192000)
+        throw Error("automatic audio bandwidth must be 1..192000 Hz");
+    if(!std::isfinite(target_snr_db_hz)) throw Error("target C/N0 must be finite dB/Hz");
+    const auto index=index_of(mode);
+    Plan plan;
+    plan.config.bandwidth_hz=bandwidth_hz;
+    plan.config.sample_rate=bandwidth_hz<=22050?48000:bandwidth_hz<=47000?96000:bandwidth_hz<=95000?192000:384000;
+    const double spare=static_cast<double>(plan.config.sample_rate)/2-bandwidth_hz;
+    plan.config.carrier_hz=bandwidth_hz<=2400?1500:bandwidth_hz/2+std::min(1000.,spare/2);
+    const bool tone=mode==PatternMode::auto_tone || index>=9;
+    plan.config.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
+    plan.config.scramble=mode==PatternMode::auto_keystream && encryption;
+    const double chip_seconds=2/modem::bit_rate(plan.config);
+    const double exponent=(plan.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);
+    plan.required_spreading=exponent>std::log10(std::numeric_limits<double>::max())?
+        std::numeric_limits<double>::infinity():std::max(1.,std::pow(10.,exponent));
+    if(lengths[index]) plan.config.spreading_factor=lengths[index];
+    else {
+        const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),plan.required_spreading);
+        plan.config.spreading_factor=found==automatic_lengths.end()?automatic_lengths.back():*found;
+    }
+    plan.estimated_processing_gain_db=10*std::log10(static_cast<double>(plan.config.spreading_factor));
+    plan.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(chip_seconds*plan.config.spreading_factor);
+    plan.target_supported=plan.estimated_symbol_snr_db+1e-10>=plan.target_symbol_snr_db;
+    std::ostringstream explanation;
+    explanation<<std::fixed<<std::setprecision(1)<<"C/N0 integration estimate: "<<plan.config.spreading_factor
+        <<" chips/symbol, estimated Es/N0 "<<plan.estimated_symbol_snr_db<<" dB; target "<<plan.target_symbol_snr_db<<" dB. ";
+    if(!plan.target_supported) explanation<<"The selected finite spreading does not meet this target. ";
+    if(mode==PatternMode::auto_keystream && !encryption) explanation<<"Without a key, auto-pattern is used. ";
+    explanation<<"This is an engineering estimate, not measured decoder sensitivity; duration and memory are checked separately.";
+    plan.explanation=explanation.str();
+    modem::validate(plan.config);
+    return plan;
+}
+std::span<const SimulationPreset> simulation_presets(){return presets;}
+SimulationPreset parse_simulation_preset(std::string_view name) {
+    const auto wanted=normalized(name);
+    if(wanted=="off") return presets[0];
+    for(const auto& preset:presets) if(normalized(preset.name)==wanted) return preset;
+    throw Error("unknown simulation preset: "+std::string(name));
+}
+LinkBudget link_budget(const SimulationPreset& preset,double bandwidth_hz,std::uint32_t sample_rate,double noise_figure_db) {
+    if(!preset.enabled) throw Error("simulation preset is disabled");
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<=0 || sample_rate<8000 ||
+       bandwidth_hz>static_cast<double>(sample_rate)/2 || !std::isfinite(noise_figure_db) || noise_figure_db<0 ||
+       !std::isfinite(preset.transmit_dbm) || !std::isfinite(preset.attenuation_db) || preset.attenuation_db>0)
+        throw Error("invalid simulation link budget");
+    constexpr double thermal_dbm_hz=-174;
+    const double density=thermal_dbm_hz+noise_figure_db;
+    LinkBudget result;
+    result.received_power_dbm=preset.transmit_dbm+preset.attenuation_db;
+    result.noise_power_dbm=density+10*std::log10(bandwidth_hz);
+    result.snr_db_hz=result.received_power_dbm-density;
+    result.snr_db=result.received_power_dbm-result.noise_power_dbm;
+    result.sample_snr_db=result.snr_db_hz-10*std::log10(static_cast<double>(sample_rate)/2);
+    return result;
+}
+}

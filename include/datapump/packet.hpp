@@ -48,6 +48,12 @@ std::optional<std::size_t> packet_frame_size(const Bytes& prefix,
                                            std::size_t max_memory = default_memory_limit);
 bool safe_filename(const std::string& name);
 
+// A bounded best-effort view of a partial frame. Never authenticated or safe
+// to save/copy as verified content; it is replaced by decode_packet's result.
+struct PacketPreview { Message message; std::size_t wire_size = 0; };
+std::optional<PacketPreview> preview_packet_partial(const Bytes& wire,
+                    std::size_t max_memory = default_memory_limit);
+
 namespace packet_codec {
 // Shortened systematic RS over GF(256), polynomial 0x11d, first root alpha^0 = 1.
 Bytes rs_encode(const Bytes& data, std::size_t parity_symbols);
@@ -55,5 +61,9 @@ std::size_t rs_correct(Bytes& codeword, std::size_t parity_symbols);
 // The caller retains the original size; encoded bytes are MSB-first with zero padding.
 Bytes compress_short(const Bytes& input);
 Bytes decompress_short(const Bytes& encoded, std::size_t original_size);
+// Version 2 prefix code: common bytes use 3 bits, less common bytes and fixed
+// dictionary phrases use longer codes. Legacy decoding remains available.
+Bytes compress_short_v2(const Bytes& input);
+Bytes decompress_short_v2(const Bytes& encoded, std::size_t original_size);
 }
 }

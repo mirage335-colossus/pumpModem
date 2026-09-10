@@ -14,6 +14,7 @@
 #include <fstream>
 #include <limits>
 #include <memory>
+#include <set>
 #include <string_view>
 
 #ifdef _WIN32
@@ -30,6 +31,19 @@
 #endif
 
 namespace datapump {
+// Only the authenticated keyfile codec serializes complete purpose-key sets.
+// The public API exposes operations, never raw secret material.
+struct KeyringAccess {
+    static constexpr std::size_t bytes=5*32;
+    static void encode(const Crypto& key,std::span<std::uint8_t> output) {
+        for(std::size_t i=0;i<5;++i) std::copy(key.keys_[i].begin(),key.keys_[i].end(),output.begin()+static_cast<std::ptrdiff_t>(i*32));
+    }
+    static Crypto decode(std::span<const std::uint8_t> input) {
+        Crypto key;
+        for(std::size_t i=0;i<5;++i) std::copy_n(input.begin()+static_cast<std::ptrdiff_t>(i*32),32,key.keys_[i].begin());
+        return key;
+    }
+};
 namespace {
 using View = std::span<const std::uint8_t>;
 using MdContext = std::unique_ptr<EVP_MD_CTX, decltype(&EVP_MD_CTX_free)>;
@@ -326,6 +340,134 @@ Crypto load_keyfile_impl(const std::filesystem::path& path, const testing::Keyfi
     auto master = unwrap_key(wrapping_key.bytes, std::span(prefix).subspan(32, 12), prefix, wrapped);
     return Crypto(master.bytes);
 }
+
+struct SecretBytes {
+    Bytes bytes;
+    explicit SecretBytes(std::size_t count):bytes(count){}
+    SecretBytes(const SecretBytes&)=delete;
+    ~SecretBytes(){OPENSSL_cleanse(bytes.data(),bytes.size());}
+};
+bool valid_key_name(std::string_view name) {
+    if(name.empty() || name.size()>64) return false;
+    for(std::size_t i=0;i<name.size();) {
+        const auto first=static_cast<std::uint8_t>(name[i++]);
+        if(first<32 || first==127) return false;
+        if(first<128) continue;
+        unsigned count;std::uint32_t value,minimum;
+        if(first>=0xc2 && first<=0xdf){count=1;value=first&31;minimum=0x80;}
+        else if(first>=0xe0 && first<=0xef){count=2;value=first&15;minimum=0x800;}
+        else if(first>=0xf0 && first<=0xf4){count=3;value=first&7;minimum=0x10000;}
+        else return false;
+        if(count>name.size()-i) return false;
+        while(count--){const auto next=static_cast<std::uint8_t>(name[i++]);if((next&0xc0)!=0x80)return false;value=(value<<6)|(next&63);}
+        if(value<minimum || value>0x10ffff || (value>=0xd800 && value<=0xdfff) || (value>=0x80 && value<=0x9f))return false;
+    }
+    return true;
+}
+void put32(std::span<std::uint8_t> output,std::uint32_t value) {
+    for(unsigned i=0;i<4;++i) output[3-i]=static_cast<std::uint8_t>(value>>(i*8));
+}
+std::uint32_t get32(View input) {
+    std::uint32_t value=0;for(unsigned i=0;i<4;++i)value=(value<<8)|input[i];return value;
+}
+constexpr std::array<std::uint8_t,8> ring_magic{'D','P','M','K','E','Y','0','2'};
+constexpr std::string_view ring_hash_domain="datapump/v2/keyfile-hash";
+constexpr std::string_view ring_wrap_domain="datapump/v2/keyfile-wrap";
+
+Bytes wrap_payload(View key,View nonce,View prefix,View plain) {
+    CipherContext context(EVP_CIPHER_CTX_new(),EVP_CIPHER_CTX_free);
+    require(context && EVP_EncryptInit_ex(context.get(),EVP_aes_256_gcm(),nullptr,key.data(),nonce.data())==1,"keyring encryption initialization failed");
+    int count=0;
+    require(EVP_EncryptUpdate(context.get(),nullptr,&count,prefix.data(),static_cast<int>(prefix.size()))==1,"keyring associated data failed");
+    Bytes encrypted(plain.size()+16);
+    require(EVP_EncryptUpdate(context.get(),encrypted.data(),&count,plain.data(),static_cast<int>(plain.size()))==1 && count==static_cast<int>(plain.size()),"keyring encryption failed");
+    require(EVP_EncryptFinal_ex(context.get(),encrypted.data()+plain.size(),&count)==1 && count==0,"keyring encryption finalization failed");
+    require(EVP_CIPHER_CTX_ctrl(context.get(),EVP_CTRL_GCM_GET_TAG,16,encrypted.data()+plain.size())==1,"keyring tag failed");
+    return encrypted;
+}
+void unwrap_payload(View key,View nonce,View prefix,View encrypted,std::span<std::uint8_t> plain) {
+    CipherContext context(EVP_CIPHER_CTX_new(),EVP_CIPHER_CTX_free);
+    require(context && EVP_DecryptInit_ex(context.get(),EVP_aes_256_gcm(),nullptr,key.data(),nonce.data())==1,"keyring decryption initialization failed");
+    int count=0;
+    require(EVP_DecryptUpdate(context.get(),nullptr,&count,prefix.data(),static_cast<int>(prefix.size()))==1,"keyring associated data failed");
+    require(EVP_DecryptUpdate(context.get(),plain.data(),&count,encrypted.data(),static_cast<int>(plain.size()))==1 && count==static_cast<int>(plain.size()),"keyring decryption failed");
+    require(EVP_CIPHER_CTX_ctrl(context.get(),EVP_CTRL_GCM_SET_TAG,16,const_cast<std::uint8_t*>(encrypted.data()+plain.size()))==1,"keyring tag initialization failed");
+    std::array<std::uint8_t,16> final{};
+    require(EVP_DecryptFinal_ex(context.get(),final.data(),&count)==1 && count==0,"keyring authentication failed: wrong pad or corrupted keyfile");
+}
+void create_keyring_impl(const std::filesystem::path& path,const std::vector<std::string>& names,
+                        const testing::KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad) {
+    validate_policy(policy);
+    require(!names.empty() && names.size()<=128,"keyring must contain 1..128 named key sets");
+    std::set<std::string> unique;std::size_t length=0;
+    for(const auto& name:names) {
+        require(valid_key_name(name),"key names must be 1..64 bytes of printable UTF-8");
+        require(unique.insert(name).second,"duplicate key name");
+        length+=2+name.size()+KeyringAccess::bytes;
+    }
+    SecretBytes plaintext(length);
+    std::size_t offset=0;
+    for(const auto& name:names) {
+        plaintext.bytes[offset++]=0;plaintext.bytes[offset++]=static_cast<std::uint8_t>(name.size());
+        std::copy(name.begin(),name.end(),plaintext.bytes.begin()+static_cast<std::ptrdiff_t>(offset));offset+=name.size();
+        const auto key=Crypto::random();
+        KeyringAccess::encode(key,std::span(plaintext.bytes).subspan(offset,KeyringAccess::bytes));offset+=KeyringAccess::bytes;
+    }
+    const auto pad_length=pad_size(pad,policy);
+    std::array<std::uint8_t,prefix_size> prefix{};
+    std::copy(ring_magic.begin(),ring_magic.end(),prefix.begin());
+    put_u64(std::span(prefix).subspan(8,8),policy.header_bytes);
+    put_u64(std::span(prefix).subspan(16,8),pad_length);prefix[24]=pad?1:0;
+    put32(std::span(prefix).subspan(28,4),static_cast<std::uint32_t>(names.size()));
+    random_fill(std::span(prefix).subspan(32,12));
+    put32(std::span(prefix).subspan(44,4),static_cast<std::uint32_t>(length));
+    Hash hash;hash.update(view(ring_hash_domain));hash.update(prefix);
+    auto output=exclusive_output(path);write_exact(output.get(),prefix);
+    Secret<chunk_size> buffer;
+    for(auto remaining=policy.header_bytes;remaining;) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,buffer.bytes.size()));
+        auto part=std::span(buffer.bytes).first(count);random_fill(part);hash.update(part);write_exact(output.get(),part);remaining-=count;
+    }
+    hash_pad(hash,pad,pad_length);auto hashed=hash.finish();auto wrapping=hkdf(hashed.bytes,view(ring_wrap_domain));
+    const auto encrypted=wrap_payload(wrapping.bytes,std::span(prefix).subspan(32,12),prefix,plaintext.bytes);
+    write_exact(output.get(),encrypted);flush_file(output);
+}
+std::vector<KeyEntry> load_keyring_impl(const std::filesystem::path& path,const testing::KeyfilePolicy& policy,
+                                      const std::optional<std::filesystem::path>& pad) {
+    validate_policy(policy);
+    const auto length=regular_file_size(path);
+    require(length>=prefix_size,"invalid keyfile length");
+    std::ifstream input(path,std::ios::binary);require(static_cast<bool>(input),"cannot open keyfile");
+    std::array<std::uint8_t,prefix_size> prefix{};read_exact(input,prefix);
+    if(std::equal(keyfile_magic.begin(),keyfile_magic.end(),prefix.begin()))return {{"Default",load_keyfile_impl(path,policy,pad)}};
+    require(std::equal(ring_magic.begin(),ring_magic.end(),prefix.begin()),"unsupported keyfile format");
+    require(get_u64(std::span(prefix).subspan(8,8))==policy.header_bytes,"invalid keyfile header size");
+    require(prefix[24]<=1 && prefix[25]==0 && prefix[26]==0 && prefix[27]==0,"unsupported keyring flags");
+    const auto count=get32(std::span(prefix).subspan(28,4)),payload_length=get32(std::span(prefix).subspan(44,4));
+    require(count>=1 && count<=128 && payload_length>=count*(2+1+KeyringAccess::bytes) && payload_length<=count*(2+64+KeyringAccess::bytes),"invalid keyring dimensions");
+    require(length==prefix_size+policy.header_bytes+payload_length+16,"invalid keyring length");
+    require((prefix[24]!=0)==pad.has_value(),prefix[24]?"this keyfile requires an optional external pad (CLI --pad)":"this keyfile does not use a pad");
+    const auto pad_length=pad_size(pad,policy);
+    require(get_u64(std::span(prefix).subspan(16,8))==pad_length,"pad length does not match keyfile");
+    Hash hash;hash.update(view(ring_hash_domain));hash.update(prefix);Secret<chunk_size> buffer;
+    for(auto remaining=policy.header_bytes;remaining;) {
+        const auto size=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,buffer.bytes.size()));
+        auto part=std::span(buffer.bytes).first(size);read_exact(input,part);hash.update(part);remaining-=size;
+    }
+    Bytes encrypted(payload_length+16);read_exact(input,encrypted);require_end(input);hash_pad(hash,pad,pad_length);
+    auto hashed=hash.finish();auto wrapping=hkdf(hashed.bytes,view(ring_wrap_domain));SecretBytes plaintext(payload_length);
+    unwrap_payload(wrapping.bytes,std::span(prefix).subspan(32,12),prefix,encrypted,plaintext.bytes);
+    std::vector<KeyEntry> entries;entries.reserve(count);std::set<std::string> names;std::size_t offset=0;
+    for(std::uint32_t i=0;i<count;++i) {
+        require(plaintext.bytes.size()-offset>=2,"truncated key entry");
+        const std::size_t name_length=(static_cast<std::size_t>(plaintext.bytes[offset])<<8)|plaintext.bytes[offset+1];offset+=2;
+        require(name_length<=64 && plaintext.bytes.size()-offset>=name_length+KeyringAccess::bytes,"truncated named key set");
+        const std::string name(plaintext.bytes.begin()+static_cast<std::ptrdiff_t>(offset),plaintext.bytes.begin()+static_cast<std::ptrdiff_t>(offset+name_length));offset+=name_length;
+        require(valid_key_name(name) && names.insert(name).second,"invalid or duplicate key identity");
+        entries.push_back({name,KeyringAccess::decode(std::span(plaintext.bytes).subspan(offset,KeyringAccess::bytes))});offset+=KeyringAccess::bytes;
+    }
+    require(offset==plaintext.bytes.size(),"trailing keyring data");return entries;
+}
 } // namespace
 
 Crypto::Crypto(std::span<const std::uint8_t> master_key) {
@@ -423,8 +565,10 @@ void create_keyfile(const std::filesystem::path& path, const std::optional<std::
     create_keyfile_impl(path, normal_policy, pad);
 }
 Crypto load_keyfile(const std::filesystem::path& path, const std::optional<std::filesystem::path>& pad) {
-    return load_keyfile_impl(path, normal_policy, pad);
+    return load_keyring_impl(path, normal_policy, pad).front().key;
 }
+void create_keyring(const std::filesystem::path& path,const std::vector<std::string>& names,const std::optional<std::filesystem::path>& pad) {create_keyring_impl(path,names,normal_policy,pad);}
+std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,const std::optional<std::filesystem::path>& pad) {return load_keyring_impl(path,normal_policy,pad);}
 namespace testing {
 void create_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad) {
@@ -432,7 +576,9 @@ void create_keyfile(const std::filesystem::path& path, const KeyfilePolicy& poli
 }
 Crypto load_keyfile(const std::filesystem::path& path, const KeyfilePolicy& policy,
                     const std::optional<std::filesystem::path>& pad) {
-    return load_keyfile_impl(path, policy, pad);
+    return load_keyring_impl(path, policy, pad).front().key;
 }
+void create_keyring(const std::filesystem::path& path,const std::vector<std::string>& names,const KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad) {create_keyring_impl(path,names,policy,pad);}
+std::vector<KeyEntry> load_keyring(const std::filesystem::path& path,const KeyfilePolicy& policy,const std::optional<std::filesystem::path>& pad) {return load_keyring_impl(path,policy,pad);}
 } // namespace testing
 } // namespace datapump

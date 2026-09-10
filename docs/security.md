@@ -3,8 +3,8 @@
 Data Pump decodes analog audio into deliberately limited application content.
 No decoded address selects a network endpoint. No received command is executed,
 no received filename selects a write path, and no received file is auto-opened.
-The GUI subprocess invocation uses an argument array without a shell. File saves
-require a user-selected path and exclusive creation.
+The native GUI calls the C++ transfer service directly without a subprocess or
+shell. File saves require a user-selected path and exclusive creation.
 
 The protected computer still trusts its audio/ADC hardware, firmware, operating
 system drivers, and application runtime. Audio modulation does not prove the
@@ -21,6 +21,12 @@ attacker can generate new valid unencrypted packets. HMAC-SHA256 with a separate
 key authenticates encrypted frame metadata and payload. The CLI includes a
 versioned domain and candidate timestamp in HMAC input. Physical training is not
 part of the authenticated user message and is not signed.
+
+The live ticker can display provisional text before the footer arrives. This is
+explicitly unvalidated: partial bootstrap correction and metadata checks do not
+establish integrity or authentication. Only a complete verified frame enters the
+received-message cache and normal save/copy workflow. Diagnostic CLI previews
+likewise carry `validated:false` and are base64 encoded.
 
 Text written directly to a terminal escapes control characters that could
 otherwise manipulate terminal state or clipboard selections. Redirected stdout
@@ -54,7 +60,7 @@ persist content outside the application. Key buffers are cleansed where
 practical; the entire process memory is not locked or scrubbed. Very large
 captures or inputs are bounded and can be rejected before processing. The
 configured workspace limits are conservative per operation, not a total process
-resource sandbox. This release has no receiving daemon, network API, built-in
+resource sandbox. Continuous reception is local audio only; there is no network API, built-in
 repeater, or automatic radio-control channel.
 
 Automated tests and review do not substitute for an independent security audit.
