@@ -1,9 +1,9 @@
-# Audio modem reference, waveform version 0.2
+# Audio modem reference, waveform version 0.3
 
-Version 0.2 uses a shared differential 16-APSK waveform for PCM and continuous
-operation. Its two amplitude rings (0.35 and 0.7) and eight Gray-coded differential phase positions carry
-four bits per payload symbol. The 0.2 waveform is incompatible with the former
-0.1 DQPSK waveform. Packet versions 1 and 2, and the existing keyfile formats,
+Version 0.3 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+continuous operation. The selected profile carries two through six bits per
+payload symbol, with both amplitude and phase modulation. Audio peers require
+matching 0.3 modem settings. Packet versions 1 and 2, and the existing keyfile formats,
 remain unchanged; changing the waveform does not migrate or regenerate keys.
 
 This is a reference modem. It does not establish near-capacity throughput,
@@ -13,19 +13,33 @@ The regression suite is described below; current execution results belong in
 
 ## Timing, training, and spreading
 
-The default physical configuration is mono 48 kHz audio, a 1,500 Hz carrier and
-1,200 Hz nominal bandwidth. The nominal chip rate is bandwidth / 2; the actual
-chip duration is quantized to the PCM sample grid. `symbol_seconds` and
-`symbol_sample_count` expose actual payload timing. Bit rate is four divided by
-payload symbol duration, before packet and training overhead.
+The default internal configuration is mono 48 kHz PCM, a 1,500 Hz carrier and
+1,200 Hz nominal bandwidth. The modem's nominal chip rate is bandwidth / 2.
+`symbol_seconds` is the bandwidth-derived duration (or explicit integration),
+independent of the hardware clock. `symbol_sample_count` rounds that duration
+up once to an internal PCM sample; exact airtime estimates include this rounding.
+The nominal gross bit rate is selected bits per symbol divided by nominal symbol
+duration, before packet and training overhead. Audio conversion does not alter
+these modem settings or rates.
 
-Bytes are sent high nibble first. A nibble's high bit selects radius 0.35 (zero)
-or 0.7 (one); its low three bits select a differential phase step in multiples of
-pi/4 using `[0, 1, 3, 2, 7, 6, 4, 5]`. Phase starts at zero and continues across
-the training/payload boundary. The PCM carrier is the real component of this
-complex symbol times the carrier oscillator, with the configured chip sign.
+Bytes are sent most-significant bits first. Two-bit and three-bit profiles use
+two amplitude rings and two/four differential phases; four through six-bit
+profiles retain eight phases and use two/four/eight amplitude rings. Phase and
+amplitude indexes use Gray adjacency. For `R` rings, the radius increment is
+`sqrt(0.30625 / ((R+1)*(2*R+1)/6))`. Every equiprobable constellation therefore
+has mean complex power 0.30625 and real carrier power 0.153125; peak amplitude
+stays below one. The original four-bit map uses radii 0.35 and 0.7 and phase-step
+indexes `[0, 1, 3, 2, 7, 6, 4, 5]`. Phase continues across the training/payload
+boundary. PCM is the real component of the complex symbol times the carrier
+oscillator and configured chip sign.
 
-The 32-byte known preamble occupies 64 independently timed training symbols. Its duration is five seconds,
+The fixed 72-byte protected bootstrap and the remaining packet body each finish
+on a symbol boundary. Unused bits are zero padding, excluded from decoded bytes.
+The five-bit profile needs padding at the bootstrap boundary. `payload_symbol_count`
+includes both boundaries; repeatable airtime counts the incremental symbols
+relative to an empty packet with the same metadata.
+
+The 32-byte known preamble always uses 64 independently timed 16-APSK training symbols. Its duration is five seconds,
 quantized to the sample grid, independently of payload symbol duration. A payload
 symbol longer than five seconds does not lengthen the preamble to one or more
 whole payload symbols. The transmitter and receiver use the same training
@@ -67,10 +81,27 @@ part of the transmitted information.
 
 Pulse shapes are rectangular. Their sidelobes extend outside nominal bandwidth;
 there is no certified occupied-bandwidth mask. Carrier and nominal bandwidth
-must fit between DC and Nyquist. The 24 kHz GUI preset uses 96 kHz sampling and a
-fitting carrier. A carrier need not complete an integer number of cycles in a
-chip. Sampling clocks, analog filtering and hardware frequency response still
-require device-level validation.
+must fit inside the internal DSP passband. The 24 kHz GUI preset uses a 96 kHz
+internal clock and a fitting carrier. That clock is not a sound-card requirement.
+A carrier need not complete an integer number of cycles in a chip.
+
+Audio I/O first tries the internal rate on the selected endpoint, then other
+supported rates, preferring higher clocks to preserve passband. Explicit device
+identity and default-card discovery are preserved. ALSA software resampling and
+WinMM ACM conversion are disabled during this negotiation. A bounded Blackman-
+windowed sinc converter connects the selected hardware clock to the internal
+clock, preserving phase, duration and callback continuity. It uses 256
+interpolated fractional phases. For unequal rates, its declared flat passband is
+0.42 times the lower rate and its transition rolls off before Nyquist. Equal-rate
+conversion is bit-exact and reports the Nyquist bound of 0.5 times the rate.
+Finite streams produce `ceil(input_count * output_rate / input_rate)`
+samples, with zero extension at their boundaries. Converter memory depends on
+rate ratio, never transmission duration, and is included in live DSP accounting.
+
+Interpolation cannot restore frequencies beyond hardware Nyquist or compensate
+unknown analog filtering. The GUI shows the negotiated clock and indicates when
+the selected band exceeds the converter's usable passband. Oscillator drift and
+physical microphone/speaker frequency response still need device-level validation.
 
 ## Automatic signal planning
 
@@ -78,20 +109,36 @@ require device-level validation.
 key availability. C/N0 is signal power divided by noise power in a 1 Hz reference
 bandwidth. For channel bandwidth `B`, `SNR_B = C/N0 - 10 log10(B)`.
 
-The planner chooses a fitting sample rate and carrier, and estimates the payload
-integration needed for an 18 dB symbol-energy target:
+The planner chooses an internal sample rate/carrier and evaluates all supported
+constellations. For each profile it estimates the integration needed for a
+geometry-based noise margin, then chooses the highest gross bit rate among the
+profiles meeting that margin. Larger amplitude alphabets increase density
+without narrowing the phase spacing beyond eight positions. Six bits per symbol
+still requires at least two symbols for an isolated byte; all profiles retain
+at least four distinct signals for short content.
 
 ```text
-required_symbol_seconds = 10^((18 - C/N0) / 10)
-estimated_Es/N0          = C/N0 + 10 log10(actual_symbol_seconds)
-bit_rate                = 4 / actual_symbol_seconds
+angular_distance        = sqrt(2) * radius_increment * sin(pi / phase_count - pi / 64)
+distance                = min(radius_increment, angular_distance)
+target_Es/N0_dB          = 10 log10(2 * 3.2^2 * 0.30625 / distance^2)
+required_symbol_seconds = 10^((target_Es/N0_dB - C/N0) / 10)
+estimated_Es/N0_dB       = C/N0 + 10 log10(symbol_seconds)
+bit_rate                = selected_bits / symbol_seconds
 ```
 
-Chip quantization and the chosen explicit or automatic mode determine the actual
-duration. A weaker automatic target increases duration, potentially far beyond
-the named chip factors. An explicit mode retains its duration and reports
-whether it meets the estimate. Unsupported numeric configurations fail or report
-an unsupported target; they do not silently establish successful reception.
+This conservative geometric model uses the worst inner-ring angular distance,
+differential phase noise and a 3.2-sigma half-distance margin. It reserves
+2.8125 degrees of drift per symbol; the narrowest phase decision half-width is
+22.5 degrees. This is a design margin, not a carrier/clock tracking algorithm.
+For sufficiently long symbols even small frequency errors exceed it.
+
+Automatic modes choose finite pattern factors or longer integration as necessary.
+Weak C/N0 favors smaller constellations and shorter integration than a fixed dense
+profile would require. Forced modes preserve their selected duration and choose
+the fastest supported constellation that meets the margin; if none can, the
+planner retains the most robust profile and reports the unmet target. Numeric
+limits are checked. This is optimization over the implemented profile set, not a
+proof of capacity-optimal throughput or calibrated packet error rate.
 
 These estimates concern payload integration, not guaranteed acquisition or a
 measured error rate. In particular, making payload symbols arbitrarily long
@@ -117,6 +164,13 @@ It does not require the five-second training bytes to be observable. Full packet
 digest/MAC verification is still mandatory; bootstrap acceptance is not final
 content validation. PCM mixing solves the I/Q Gram system so it does not assume
 an integer number of carrier cycles per integration.
+Dense profiles first screen amplitude-lattice residuals using three times the
+radial noise standard deviation at the planner's geometric margin. Bounded gain
+hypotheses consider every possible highest occupied ring; full protected-header
+validation resolves the ambiguity when outer rings are absent. This keeps idle
+noise fitting inexpensive. The screen is designed for the stated AWGN margin;
+it is not a guarantee that every impulsively corrupted, otherwise RS-correctable
+waveform will be acquired.
 Keyed continuous reception builds a bounded bank of loaded-key and candidate-
 epoch receivers. The default search is plus or minus six whole seconds; the live
 API accepts at most 60 seconds in either direction and 128 loaded keys, with the
@@ -152,6 +206,8 @@ Idle noise plots update about 20 times per second. The constellation uses one
 shared display scale and retains relative amplitudes. Its axes and amplitude
 rings are display aids, not a calibration certificate. Decoder diagnostics and
 acquisition scores are evidence of signal processing, never packet authenticity.
+Positive rates too small for decimal display use scientific notation instead of
+rounding to `0.0 bit/s`.
 
 Pending ticker observations can change as additional bytes and parity arrive.
 They stay visibly provisional and cannot trigger clipboard copy or file save.
@@ -180,6 +236,15 @@ every sample of a very long tone. It is not a substitute
 for raw PCM acquisition tests, and does not model arbitrary timing offsets,
 resampling drift, phase noise, multipath, nonlinear hardware or interference.
 Plots use bounded signal/noise previews rather than a retained whole transmission.
+Twenty-four spectrum rows are captured by media position between one-quarter
+and one-half of the payload, independent of GUI polling. On simulation completion,
+the waveform and spectrum show the payload-midpoint sample for two wall-clock
+seconds. A bounded transmitter segment history reconstructs the actual local
+waveform, including carrier phase and spreading, with independent display noise.
+The constellation uses accumulated receiver observations (up to 2,048 points),
+not transmitted ideal points. After the hold, live waveform/waterfall updates
+resume while the received constellation persists until the next transmission
+or configuration. Background simulation reception continues throughout the hold.
 The packet is still decoded and validated; transmitted application bytes are not
 inserted directly into the receive cache.
 
@@ -206,13 +271,13 @@ presets may fail decoding.
 
 The legacy `transfer::transmit`/`receive`, `modem::simulate` and WAV interfaces
 operate on complete PCM vectors and retain their batch allocation checks.
-They use the shared 0.2 waveform; streaming support does not make an arbitrarily
+They use the shared 0.3 waveform; streaming support does not make an arbitrarily
 large WAV fit in memory. The sample-domain channel can add leading delay, AWGN
 and a fixed frequency shift. This path tests effects excluded by the accelerated
 ideal-timing model.
 
 The generic raw-byte `modem::demodulate` API uses known-training timing and
-constant carrier-offset acquisition with the shared 16-APSK quantizer. Normal
+constant carrier-offset acquisition with the shared adaptive APSK quantizer. Normal
 packet `transfer::receive` and live reception use protected-bootstrap streaming
 acquisition instead. Thus obscured-training packet recovery does not imply that
 the generic raw-byte API can acquire arbitrary bytes without known training.

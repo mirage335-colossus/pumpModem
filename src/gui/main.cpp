@@ -252,7 +252,6 @@ private:
         const auto modes=tuning::pattern_modes();
         const auto mode=modes[static_cast<std::size_t>(std::max(0,pattern_->value()))];
         const auto plan=tuning::resolve(bandwidth(bandwidth_->value()),number(snr_->value(),"Target SNR"),mode,encrypted());
-        last_bit_rate_=modem::bit_rate(plan.config);
         result.transfer.modem=plan.config; result.transfer.timestamp=0;
         result.transfer.fec=fec_->value()==0?FecMode::rs20:fec_->value()==1?FecMode::rs60:FecMode::off;
         if (encrypted()) result.transfer.key=keys_[static_cast<std::size_t>(key_entry_->value()-1)].key;
@@ -273,7 +272,7 @@ private:
     void settings_changed() {
         dirty_estimate();
         try {
-            current_settings_=settings(); settings_valid_=true;
+            current_settings_=settings(); settings_valid_=true; plot_policy_.reset();
             if (session_started_) session_.configure(current_settings_);
         } catch (...) {
             settings_valid_=false; airtime_->copy_label("Invalid modem settings"); throw;
@@ -460,22 +459,30 @@ private:
         if (attachment_) use_text_->activate(); else use_text_->deactivate();
     }
     void accept_snapshot(live::Snapshot snapshot) {
+        const auto plot_update=plot_policy_.observe(snapshot.sequence,snapshot.transmission_id,snapshot.simulation_review);
         if (snapshot.sequence!=last_sequence_) {
             last_sequence_=snapshot.sequence;
             if (!snapshot.waveform.empty()) {
                 if (first_noise_.empty()) first_noise_=snapshot.waveform;
                 else if (first_noise_!=snapshot.waveform) saw_noise_change_=true;
             }
-            waterfall_->push(snapshot.spectrum_db,snapshot.spectrum_bin_hz);
+        }
+        if (plot_update.restore_waterfall) {
+            if (!snapshot.simulation_waterfall.empty()) waterfall_->restore(snapshot.simulation_waterfall,snapshot.simulation_waterfall_bin_hz);
+            else waterfall_->restore({snapshot.spectrum_db},snapshot.spectrum_bin_hz);
+        } else if (plot_update.append_waterfall) waterfall_->push(snapshot.spectrum_db,snapshot.spectrum_bin_hz);
+        if (plot_update.update_plots) {
             waveform_->update(snapshot.waveform,snapshot.constellation); constellation_->update(snapshot.waveform,snapshot.constellation);
         }
+        waveform_label_->copy_label(snapshot.simulation_review?"Simulation sample":"Live waveform");
+        waterfall_label_->copy_label(snapshot.simulation_review?"Simulation waterfall":"Spectrum / amplitude waterfall");
+        constellation_label_->copy_label(snapshot.constellation_retained?"Received constellation":"Phase / amplitude constellation");
         for (auto& received:snapshot.received) {
             if (smoke_.enabled && std::string(received.packet.message.data.begin(),received.packet.message.data.end())==smoke_text) {
                 smoke_packet_=received.packet;
             }
             if (smoke_.enabled && received.packet.message.kind==MessageKind::file && received.packet.message.data==smoke_file_bytes)
                 smoke_file_packet_=received.packet;
-            last_bit_rate_=received.diagnostics.bit_rate;
             inbox_.put(std::move(received.packet)); refresh_files();
         }
         for (const auto& signal:snapshot.signals) {
@@ -502,8 +509,18 @@ private:
             cpu_clock_=std::clock(); cpu_time_=Steady::now();
         }
         std::ostringstream diagnostics;
-        diagnostics<<std::fixed<<std::setprecision(1)<<last_bit_rate_<<" bit/s  |  "<<snapshot.samples_received<<" input samples  |  CPU "<<cpu_percent_<<"%";
+        diagnostics<<gui::format_bit_rate(modem::bit_rate(current_settings_.transfer.modem))<<"  |  "<<snapshot.samples_received
+                   <<" input samples  |  CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent_<<"%";
         if (snapshot.simulation) diagnostics<<"  |  Channel SNR "<<simulation_channel_snr_<<" dB / media "<<seconds_text(snapshot.virtual_seconds);
+        else if (snapshot.hardware_sample_rate) diagnostics<<"  |  Hardware "<<snapshot.hardware_sample_rate/1000.0<<" kHz";
+        const auto upper_edge=current_settings_.transfer.modem.carrier_hz+current_settings_.transfer.modem.bandwidth_hz/2;
+        if (!snapshot.simulation && snapshot.audio_passband_hz>0 && upper_edge>snapshot.audio_passband_hz) {
+            diagnostics<<"  |  Audio passband exceeded";
+            std::ostringstream details;
+            details<<std::setprecision(4)<<"Requested upper band edge: "<<upper_edge/1000<<" kHz. Audio path usable passband: "
+                   <<snapshot.audio_passband_hz/1000<<" kHz. Reduce bandwidth or select a wider-band device.";
+            diagnostics_->copy_tooltip(details.str().c_str());
+        } else diagnostics_->tooltip(nullptr);
         if (!target_supported_) diagnostics<<"  |  "<<tuning_explanation_;
         diagnostics_->copy_label(diagnostics.str().c_str());
         last_snapshot_=std::move(snapshot);
@@ -526,13 +543,42 @@ private:
         closing_=true; session_.stop(); preparation_.request_stop();
         if (!preparing_) window_->hide(); else notice("Closing after the current file operation stops...");
     }
+    void inspect_smoke_review() {
+        if (last_snapshot_.simulation_review) {
+            if (!last_snapshot_.transmission_id || !last_snapshot_.constellation_retained ||
+                last_snapshot_.simulation_waterfall.empty() || constellation_->points().size()<32)
+                throw Error("Simulation review did not retain measured plots");
+            if (std::string(waveform_label_->label())!="Simulation sample" ||
+                std::string(constellation_label_->label())!="Received constellation")
+                throw Error("Simulation review labels did not identify held samples");
+            if (smoke_review_id_!=last_snapshot_.transmission_id) {
+                smoke_review_id_=last_snapshot_.transmission_id;
+                smoke_review_revision_=waterfall_->revision(); smoke_review_polls_=1;
+                smoke_review_waveform_=waveform_->samples(); smoke_review_constellation_=constellation_->points();
+                smoke_review_resumed_=false;
+            } else {
+                if (waterfall_->revision()!=smoke_review_revision_ || waveform_->samples()!=smoke_review_waveform_ ||
+                    constellation_->points()!=smoke_review_constellation_)
+                    throw Error("Held simulation plots changed or appended duplicate waterfall rows");
+                ++smoke_review_polls_;
+            }
+        } else if (smoke_review_id_ && last_snapshot_.transmission_id==smoke_review_id_ &&
+                   !last_snapshot_.transmitting && last_snapshot_.constellation_retained) {
+            if (constellation_->points()!=smoke_review_constellation_ ||
+                std::string(constellation_label_->label())!="Received constellation")
+                throw Error("The received constellation was lost when live samples resumed");
+            if (waveform_->samples()!=smoke_review_waveform_ && waterfall_->revision()>smoke_review_revision_)
+                smoke_review_resumed_=true;
+        }
+    }
     void advance_smoke() {
         if (Steady::now()-smoke_started_>std::chrono::seconds(100)) throw Error("Continuous native GUI smoke timed out");
+        inspect_smoke_review();
         if (smoke_phase_==0 && estimate_ && saw_noise_change_ && waterfall_->rows()>=3 && last_snapshot_.samples_received>0) {
             if (!last_snapshot_.simulation) throw Error("Smoke attempted to use an actual audio device");
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
-        } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting) {
+        } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_review) {
             if (!saw_transmitting_ && last_snapshot_.transmission_fraction<1) throw Error("The normal transmit path was not observed");
             if (!pending_sequence_ || pending_sequence_>=final_sequence_) throw Error("Pending signal updates did not precede verified reception");
             if (last_snapshot_.samples_received<=initial_samples_) throw Error("Simulation stopped continuous reception while transmitting");
@@ -543,14 +589,14 @@ private:
                 if (signals_.lines()[index].packet_id==id) activated=signal_browser_->activate_line(index);
             if (!activated) throw Error("Verified signal was not available for click-to-copy");
             Fl::paste(*clipboard_probe_,1); smoke_phase_=2;
-        } else if (smoke_phase_==2 && clipboard_probe_->received) {
+        } else if (smoke_phase_==2 && clipboard_probe_->received && smoke_review_polls_>=3) {
             if (*clipboard_probe_->received!=smoke_text) throw Error("Click-to-copy changed verified UTF-8 text");
             if (gate_.remaining(true,encrypted()).count()!=0) throw Error("Simulation applied a transmit cooldown");
             attachment_=std::make_shared<const Bytes>(smoke_file_bytes); attachment_path_="payload.bin"; attachment_image_=false;
             compose_label_->copy_label("Attached: payload.bin"); dirty_estimate(); smoke_phase_=3;
         } else if (smoke_phase_==3 && estimate_) {
             transmit_->do_callback(); smoke_phase_=4;
-        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting) {
+        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_review) {
             if (file_ids_.size()!=1 || !selected_file() || selected_file()->message.data!=smoke_file_bytes)
                 throw Error("Received file selection did not exclude text");
             const auto id=gui::id_label(smoke_file_packet_->message);
@@ -570,11 +616,11 @@ private:
             signals_.update({1000000,1500,"payload.bin",true,gui::id_label(smoke_file_packet_->message),false});
             use_text_->do_callback();
             resume_sequence_=last_snapshot_.sequence; smoke_phase_=5;
-        } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting &&
+        } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting && smoke_review_resumed_ &&
                    last_snapshot_.sequence>resume_sequence_+2 && last_snapshot_.samples_received>resumed_samples_) {
             smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=6;
-            notice("Continuous GUI smoke passed: idle noise, live plots, streamed pending correction, loopback TX, clipboard, exclusive save, receive resume.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: idle noise, live plots, pending-to-verified signals, normal TX, clipboard, exclusive save, automatic receive resume."<<std::endl;
+            notice("GUI smoke passed: reception, text/file loopback, clipboard, save, held simulation plots and live resume.",smoke_.hold_seconds+1);
+            std::cout<<"Continuous native GUI smoke passed: idle noise, pending-to-verified signals, normal TX, clipboard, exclusive save, simulation review and retained constellation after live resume."<<std::endl;
         } else if (smoke_phase_==6 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
@@ -585,6 +631,7 @@ private:
     gui::Inbox inbox_;
     gui::Signals signals_;
     gui::TransmissionPolicy gate_;
+    gui::PlotReviewPolicy plot_policy_;
     std::vector<std::string> file_ids_;
     std::vector<KeyEntry> keys_;
     std::shared_ptr<const Bytes> attachment_;
@@ -596,8 +643,13 @@ private:
     std::optional<transfer::Estimate> estimate_;
     std::optional<DecodedPacket> smoke_packet_,smoke_file_packet_;
     std::uint64_t revision_=0,estimated_revision_=0,last_sequence_=0,initial_samples_=0,resumed_samples_=0,pending_sequence_=0,final_sequence_=0,resume_sequence_=0;
+    std::uint64_t smoke_review_id_=0,smoke_review_revision_=0;
+    unsigned smoke_review_polls_=0;
+    bool smoke_review_resumed_=false;
+    std::vector<float> smoke_review_waveform_;
+    std::vector<std::complex<double>> smoke_review_constellation_;
     int smoke_phase_=0;
-    double last_bit_rate_=0,simulation_channel_snr_=0,cpu_percent_=0;
+    double simulation_channel_snr_=0,cpu_percent_=0;
     std::string tuning_explanation_,notice_;
     std::vector<float> first_noise_;
     Steady::time_point estimate_requested_{},notice_until_{},smoke_started_{},smoke_finished_{},cpu_time_=Steady::now();

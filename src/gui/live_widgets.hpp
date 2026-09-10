@@ -140,6 +140,7 @@ public:
     Waterfall() : Fl_Widget(0,0,1,1) {}
     void push(const std::vector<double>& bins,double bin_hz) {
         if (bins.empty()) return;
+        overview_=false;
         auto ordered=bins;
         const auto median=ordered.begin()+static_cast<std::ptrdiff_t>(ordered.size()/2);
         std::nth_element(ordered.begin(),median,ordered.end());
@@ -151,9 +152,16 @@ public:
             row[i]=static_cast<unsigned char>(normalized*255);
         }
         if (history_.size()>=160) history_.pop_front();
-        history_.push_back(std::move(row)); max_hz_=bin_hz*static_cast<double>(bins.size()-1); redraw();
+        history_.push_back(std::move(row)); max_hz_=bin_hz*static_cast<double>(bins.size()-1); ++revision_; redraw();
+    }
+    void restore(const std::vector<std::vector<double>>& rows,double bin_hz) {
+        history_.clear(); ++revision_;
+        for (const auto& row:rows) push(row,bin_hz);
+        overview_=true;
+        redraw();
     }
     std::size_t rows() const { return history_.size(); }
+    std::uint64_t revision() const { return revision_; }
 private:
     static unsigned char channel(double value) { return static_cast<unsigned char>(std::clamp(value,0.0,1.0)*255); }
     void draw() override {
@@ -161,8 +169,9 @@ private:
         const int width=std::max(1,w()-4),height=std::max(1,h()-24);
         std::vector<unsigned char> pixels(static_cast<std::size_t>(width*height*3),0);
         for (int py=0;py<height;++py) {
-            const int source=static_cast<int>(history_.size())-height+py;
-            if (source<0) continue;
+            const int source=overview_?static_cast<int>(static_cast<std::size_t>(py)*history_.size()/static_cast<std::size_t>(height)):
+                static_cast<int>(history_.size())-height+py;
+            if (source<0 || static_cast<std::size_t>(source)>=history_.size()) continue;
             const auto& row=history_[static_cast<std::size_t>(source)];
             for (int px=0;px<width;++px) {
                 const double value=static_cast<double>(row[static_cast<std::size_t>(px)*row.size()/static_cast<std::size_t>(width)])/255;
@@ -179,6 +188,8 @@ private:
     }
     std::deque<std::vector<unsigned char>> history_;
     double max_hz_=0;
+    std::uint64_t revision_=0;
+    bool overview_=false;
 };
 
 class LivePlot : public Fl_Widget {
@@ -188,6 +199,8 @@ public:
         waveform_=waveform; constellation_=constellation; redraw();
     }
     bool populated() const { return !waveform_.empty(); }
+    const std::vector<float>& samples() const { return waveform_; }
+    const std::vector<std::complex<double>>& points() const { return constellation_; }
 private:
     void draw() override {
         fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),fl_rgb_color(15,24,34));

@@ -20,6 +20,8 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t plot_size = 2048;
 constexpr std::size_t maximum_events = 64;
+constexpr std::size_t review_rows = 24;
+constexpr std::size_t review_bins = 257;
 double epoch_now() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
 }
@@ -39,9 +41,16 @@ std::string display_text(const Message& message) {
 constexpr std::size_t default_workspace = 64 * 1024 * 1024;
 constexpr std::size_t minimum_workspace = 512 * 1024;
 constexpr std::size_t plot_workspace = plot_size * (sizeof(float) + sizeof(double) + 3 * sizeof(std::complex<double>)) +
-                                       512 * sizeof(modem::SymbolObservation);
+                                       512 * sizeof(modem::SymbolObservation) +
+                                       2 * review_rows * review_bins * sizeof(double) +
+                                       2 * (plot_size * sizeof(float) + (plot_size / 2 + 1) * sizeof(double));
+std::size_t audio_reserve(const Settings& value) {
+    return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
+}
 std::size_t bank_capacity(const Settings& value) {
-    return value.dsp_workspace_bytes - value.dsp_workspace_bytes / 8 - value.dsp_workspace_bytes / 4 - plot_workspace;
+    const auto reserved = value.dsp_workspace_bytes / 8 + value.dsp_workspace_bytes / 4 + plot_workspace + audio_reserve(value);
+    if (reserved >= value.dsp_workspace_bytes) throw Error("DSP workspace cannot hold the audio and plot buffers");
+    return value.dsp_workspace_bytes - reserved;
 }
 std::size_t packet_budget(std::size_t content) {
     return transfer::packet_workspace_limit(content);
@@ -55,6 +64,7 @@ Settings normalized(Settings value) {
     if (!value.content_limit) throw Error("received content cache must have a positive capacity");
     (void)packet_budget(value.content_limit);
     if (value.dsp_workspace_bytes < minimum_workspace) throw Error("streaming DSP workspace must be at least 512 KiB");
+    (void)bank_capacity(value);
     if (!std::isfinite(value.simulation_snr_db) || std::abs(value.simulation_snr_db) > 200)
         throw Error("simulation sample SNR must be finite and between -200 and 200 dB");
     if (value.receive_keys.size() > 128) throw Error("continuous receiver supports at most 128 loaded keys");
@@ -126,6 +136,9 @@ struct Session::Impl {
         std::uint64_t generation = 0, serial = 0;
         std::uint64_t tail_remaining = 0;
         bool tail_started = false;
+        Plots review_sample;
+        std::vector<std::vector<double>> review_waterfall;
+        double review_fraction = 0;
         std::stop_token stop;
     };
     struct AudioBlock { std::vector<float> samples; std::uint64_t revision; };
@@ -161,7 +174,9 @@ struct Session::Impl {
     std::shared_ptr<Prepared> ready;
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
+    std::size_t audio_bytes = 0;
     std::vector<std::complex<double>> last_receiver_constellation;
+    Clock::time_point review_until{};
     std::vector<std::pair<std::string, std::uint64_t>> signal_ids;
     std::stop_source capture_stop, tx_stop, decode_stop;
     std::jthread source, encoder, decoder;
@@ -194,8 +209,9 @@ struct Session::Impl {
         decode_stop = std::stop_source{};
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
-        input_bytes = receiver_bytes = received_bytes = 0;
+        input_bytes = receiver_bytes = received_bytes = audio_bytes = 0;
         last_receiver_constellation.clear();
+        review_until = {};
         signal_ids.clear();
         current = {}; current.running = true; current.simulation = settings.simulation;
         current.status = idle_status(); changed.notify_all();
@@ -208,6 +224,15 @@ struct Session::Impl {
         current.samples_received += samples;
         current.virtual_seconds = static_cast<double>(current.samples_received) / settings.transfer.modem.sample_rate;
     }
+    void audio_format(const audio::StreamFormat& format, std::uint64_t version) {
+        std::lock_guard lock(mutex);
+        if (!current.running || generation != version) return;
+        if (format.workspace_bytes > audio_reserve(settings))
+            throw Error("sample-rate conversion exceeds the audio workspace reservation; increase DSP capacity");
+        current.hardware_sample_rate = format.hardware_rate;
+        current.audio_passband_hz = format.usable_passband_hz;
+        audio_bytes = format.workspace_bytes;
+    }
     void publish(std::span<const float> samples, const modem::Config& config, std::uint64_t version,
                  Clock::time_point& last_plot, bool force = false) {
         if (!force && Clock::now() - last_plot < std::chrono::milliseconds(50)) return;
@@ -215,10 +240,45 @@ struct Session::Impl {
         auto measured = plots(std::vector<float>(tail.begin(), tail.end()), config);
         std::lock_guard lock(mutex);
         if (!current.running || generation != version) return;
+        if (current.simulation_review) {
+            if (Clock::now() < review_until) { last_plot = Clock::now(); return; }
+            current.simulation_review = false;
+        }
         current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
-        current.constellation = std::move(measured.constellation);
+        if (!current.constellation_retained) current.constellation = std::move(measured.constellation);
         current.spectrum_bin_hz = static_cast<double>(config.sample_rate) / plot_size;
         ++current.sequence; last_plot = Clock::now();
+    }
+    // Select the review by media position, not wall-clock/UI polling. Uniform
+    // observations are small enough to capture a genuine payload-midpoint
+    // sample even when an entire simulation finishes between two GUI polls.
+    void collect_review(Prepared& wave, const modem::Config& config, double sigma,
+                        std::mt19937_64& random, std::normal_distribution<double>& normal) {
+        if (wave.tail_started || wave.review_waterfall.size() == review_rows) return;
+        const auto training = modem::training_sample_count(config);
+        const auto total = wave.transmitter->total_samples();
+        if (total <= training || wave.transmitter->samples_emitted() <= training) return;
+        const auto fraction = static_cast<long double>(wave.transmitter->samples_emitted() - training) /
+                              static_cast<long double>(total - training);
+        const auto target = [&](std::size_t row) {
+            return .25L + .25L * static_cast<long double>(row) / static_cast<long double>(review_rows - 1);
+        };
+        if (fraction < target(wave.review_waterfall.size())) return;
+        std::vector<float> preview(plot_size);
+        wave.transmitter->preview_last(preview);
+        for (auto& sample : preview) sample += static_cast<float>(normal(random) * sigma);
+        auto measured = plots(std::move(preview), config);
+        std::vector<double> compact(review_bins);
+        for (std::size_t i = 0; i < compact.size(); ++i) {
+            const auto begin = i * 4;
+            const auto end = std::min(begin + 4, measured.spectrum.size());
+            compact[i] = *std::max_element(measured.spectrum.begin() + static_cast<std::ptrdiff_t>(begin),
+                                            measured.spectrum.begin() + static_cast<std::ptrdiff_t>(end));
+        }
+        do { wave.review_waterfall.push_back(compact); }
+        while (wave.review_waterfall.size() < review_rows && fraction >= target(wave.review_waterfall.size()));
+        wave.review_fraction = static_cast<double>(fraction);
+        wave.review_sample = std::move(measured);
     }
     void enqueue_audio(std::span<const float> samples, std::uint64_t version) {
         std::lock_guard lock(mutex);
@@ -233,7 +293,7 @@ struct Session::Impl {
         if (decoding_bytes + bytes > queue_limit) return;
         input.push_back({std::vector<float>(samples.begin(), samples.end()), receive_revision});
         input_bytes += bytes; current.buffered_samples = input_bytes / sizeof(float);
-        current.dsp_buffered_bytes = input_bytes + decoding_bytes + receiver_bytes + plot_workspace;
+        current.dsp_buffered_bytes = input_bytes + decoding_bytes + receiver_bytes + audio_bytes + plot_workspace;
         changed.notify_all();
     }
     void discontinuity() {
@@ -307,7 +367,8 @@ struct Session::Impl {
         if (std::any_of(bank.receivers.begin(), bank.receivers.end(), [](const auto& receiver) {
             return receiver.modem->synchronized();
         })) return;
-        const auto bootstrap_seconds = 5 + packet_prefix_size * 8 / modem::bit_rate(value.transfer.modem);
+        const auto bootstrap_seconds = 5 + static_cast<double>(modem::payload_symbol_count(packet_prefix_size, value.transfer.modem)) *
+                                           modem::symbol_seconds(value.transfer.modem);
         // A noise-hidden start cannot supply a trustworthy epoch. Long blind
         // integrations retain a finite admitted bank for one bootstrap span;
         // they cannot admit every wall-clock epoch without unbounded state.
@@ -416,7 +477,7 @@ struct Session::Impl {
         std::lock_guard lock(mutex);
         if (current.running && generation == version) {
             receiver_bytes = bank.working_bytes;
-            current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + plot_workspace + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
+            current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }
     }
     void complete_tx(const Prepared& wave, const std::string& error = {}) {
@@ -426,7 +487,22 @@ struct Session::Impl {
         current.transmission_finished = queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
         current.status = idle_status();
         if (!error.empty()) current.error = error;
-        else if (!wave.stop.stop_requested()) current.transmission_fraction = 1;
+        else if (!wave.stop.stop_requested()) {
+            current.transmission_fraction = 1;
+            if (settings.simulation && !wave.review_sample.waveform.empty() && queued.empty()) {
+                current.waveform = wave.review_sample.waveform;
+                current.spectrum_db = wave.review_sample.spectrum;
+                current.constellation_retained = !last_receiver_constellation.empty();
+                current.constellation = current.constellation_retained ? last_receiver_constellation : wave.review_sample.constellation;
+                current.spectrum_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / plot_size;
+                current.simulation_waterfall = wave.review_waterfall;
+                current.simulation_waterfall_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
+                current.simulation_sample_fraction = wave.review_fraction;
+                current.simulation_review = true;
+                review_until = Clock::now() + std::chrono::seconds(2);
+                ++current.sequence;
+            }
+        }
         changed.notify_all();
     }
     void progress(const Prepared& wave, const Settings& value) {
@@ -498,6 +574,7 @@ struct Session::Impl {
                                 const auto count = std::min(quantum, wave->tail_remaining);
                                 clean = modem::SymbolObservation{{}, count}; wave->tail_remaining -= count;
                             }
+                            collect_review(*wave, value.transfer.modem, sigma, plot_random, plot_normal);
                             samples += clean->sample_count;
                             observations.push_back(modem::add_awgn(*clean, value.simulation_snr_db, random));
                         }
@@ -545,7 +622,7 @@ struct Session::Impl {
                         account(count, version); progress(*wave, value);
                         publish(output.first(count), value.transfer.modem, version, last_plot);
                         return count;
-                    }, wave->stop);
+                    }, wave->stop, [&](const auto& format) { audio_format(format, version); });
                     discontinuity(); complete_tx(*wave); wave.reset(); continue;
                 }
                 {
@@ -557,7 +634,7 @@ struct Session::Impl {
                     enqueue_audio(chunk, version);
                     std::lock_guard lock(mutex);
                     return current.running && generation == version && !ready;
-                }, capture_token);
+                }, capture_token, [&](const auto& format) { audio_format(format, version); });
             } catch (const std::exception& exception) {
                 simulation_bank.reset();
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
@@ -581,6 +658,10 @@ struct Session::Impl {
                 if (stop.stop_requested()) break;
                 message = std::move(queued.front()); queued.pop_front(); value = settings;
                 version = generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
+                current.transmission_id = serial;
+                current.simulation_review = current.constellation_retained = false;
+                current.simulation_waterfall.clear(); current.simulation_sample_fraction = 0;
+                last_receiver_constellation.clear(); review_until = {};
                 tx_busy = true; current.transmitting = true; current.transmission_finished = false;
                 current.transmission_fraction = current.transmission_seconds = 0;
                 current.status = "Preparing packet; no complete waveform allocation";
@@ -657,12 +738,16 @@ void Session::transmit(const Message& message) {
     impl_->queued.push_back(message); impl_->current.transmitting = true;
     impl_->current.transmission_finished = impl_->current.transmission_cancelled = false;
     impl_->current.transmission_fraction = impl_->current.transmission_seconds = 0;
+    impl_->current.simulation_review = impl_->current.constellation_retained = false;
+    impl_->current.simulation_waterfall.clear(); impl_->current.simulation_sample_fraction = 0;
+    impl_->last_receiver_constellation.clear(); impl_->review_until = {};
     impl_->current.error.clear(); impl_->changed.notify_all();
 }
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);
     impl_->tx_stop.request_stop(); ++impl_->tx_serial; impl_->queued.clear(); impl_->ready.reset(); impl_->tx_busy = false;
     impl_->current.transmitting = false; impl_->current.transmission_finished = true; impl_->current.transmission_cancelled = true;
+    impl_->current.simulation_review = false;
     impl_->current.status = impl_->idle_status(); impl_->changed.notify_all();
 }
 Snapshot Session::snapshot() {

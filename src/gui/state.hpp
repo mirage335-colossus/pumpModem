@@ -41,6 +41,23 @@ private:
     Clock::time_point next_encrypted_{};
 };
 
+struct PlotUpdate {
+    bool update_plots = false;
+    bool append_waterfall = false;
+    bool restore_waterfall = false;
+};
+// Frozen review frames are displayed once, without pretending that duplicate
+// waterfall rows represent newly sampled audio.
+class PlotReviewPolicy {
+public:
+    PlotUpdate observe(std::uint64_t sequence, std::uint64_t transmission_id, bool review);
+    void reset() noexcept { *this = {}; }
+private:
+    std::optional<std::uint64_t> sequence_, restored_transmission_;
+    bool reviewing_ = false;
+};
+std::string format_bit_rate(double bits_per_second);
+
 struct SignalLine {
     std::uint64_t id = 0;
     double frequency_hz = 0;

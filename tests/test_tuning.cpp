@@ -1,8 +1,11 @@
 #include "datapump/tuning.hpp"
+#include "../src/constellation.hpp"
 #include <algorithm>
+#include <bit>
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <stdexcept>
 
 using namespace datapump;
@@ -42,9 +45,9 @@ void modes_and_tones() {
 }
 void snr_planning() {
     auto plan=tuning::resolve(1200,6,tuning::PatternMode::auto_pattern,false);
-    check(plan.config.spreading_factor==16384,"C/N0 integration selects sufficient finite spreading");
-    near(plan.required_spreading,std::pow(10.,1.2)*600.,"required spreading from symbol energy");
-    near(plan.estimated_processing_gain_db,10*std::log10(16384.),"spreading gain estimate");
+    check(plan.config.constellation_bits<=3,"weak links choose a sparse efficient constellation");
+    near(plan.required_spreading,std::pow(10.,(plan.target_symbol_snr_db-6)/10)*600.,"required spreading from selected symbol energy");
+    near(plan.estimated_processing_gain_db,10*std::log10(static_cast<double>(plan.config.spreading_factor)),"spreading gain estimate");
     near(plan.estimated_symbol_snr_db,6+10*std::log10(modem::symbol_seconds(plan.config)),"C/N0 to symbol SNR");
     check(plan.target_supported && plan.estimated_symbol_snr_db>=plan.target_symbol_snr_db,"auto meets its stated engineering target");
     plan=tuning::resolve(1200,-20,tuning::PatternMode::auto_keystream,true);
@@ -58,6 +61,66 @@ void snr_planning() {
     rejects([]{tuning::resolve(0,6,tuning::PatternMode::auto_pattern,false);},"invalid bandwidth");
     rejects([]{tuning::resolve(1000000,6,tuning::PatternMode::auto_pattern,false);},"unsupported audio bandwidth");
     rejects([]{tuning::resolve(1200,std::numeric_limits<double>::quiet_NaN(),tuning::PatternMode::auto_pattern,false);},"invalid target SNR");
+}
+void adaptive_geometry_and_rates() {
+    for(unsigned bits=2;bits<=6;++bits) {
+        const auto points=1U<<bits;double energy=0;
+        std::vector<std::complex<double>> constellation;
+        for(unsigned value=0;value<points;++value) {
+            const auto point=modem::detail::mapped(value,bits,{1,0});energy+=std::norm(point);constellation.push_back(point);
+            // A seven-degree inter-symbol phase drift remains safely within
+            // every supported phase cell, including the dense amplitude rings.
+            const auto drifted=point*std::polar(1.,7*std::numbers::pi/180);
+            check(modem::detail::decision(drifted,{1,0},1,bits)==value,"phase drift changed a symbol decision");
+        }
+        for(unsigned ring=1;ring<modem::detail::rings(bits);++ring) {
+            const auto previous=modem::detail::decision({modem::detail::radius_step(bits)*ring,0},{1,0},1,bits);
+            const auto next=modem::detail::decision({modem::detail::radius_step(bits)*(ring+1),0},{1,0},1,bits);
+            check(std::popcount(previous^next)==1,"adjacent amplitude rings need Gray coding");
+        }
+        near(energy/points,2*modem::nominal_signal_power,"adaptive profiles preserve common transmitted average power");
+        check(modem::detail::rings(bits)>=2 && (1U<<modem::detail::phase_bits(bits))<=8,"all profiles use amplitude and bounded phase density");
+        for(std::size_t i=0;i<constellation.size();++i)for(std::size_t j=i+1;j<constellation.size();++j)
+            check(std::abs(constellation[i]-constellation[j])>.01,"constellation contains overlapping points");
+        modem::Config config;config.constellation_bits=bits;
+        check(modem::payload_symbol_count(1,config)>=2,"one byte collapsed to one symbol");
+    }
+    // Exercise the planning margin independently of packet framing and gain
+    // fitting. Both differential observations contain independent AWGN, and
+    // each symbol includes the explicitly budgeted phase drift.
+    std::mt19937_64 random(7219);
+    for(unsigned bits=2;bits<=6;++bits) {
+        const auto ratio=std::pow(10.,tuning::constellation_target_symbol_snr_db(bits)/10);
+        std::normal_distribution<double> noise(0,std::sqrt(.30625/(2*ratio)));
+        unsigned errors=0;
+        for(unsigned i=0;i<30000;++i) {
+            const auto prior=modem::detail::mapped(static_cast<unsigned>(random()%(1U<<bits)),bits,{1,0});
+            const auto value=static_cast<unsigned>(random()%(1U<<bits));
+            const auto point=modem::detail::mapped(value,bits,prior)*std::polar(1.,std::numbers::pi/64);
+            const auto received=point+std::complex<double>{noise(random),noise(random)};
+            const auto preceding=prior+std::complex<double>{noise(random),noise(random)};
+            if(modem::detail::decision(received,preceding,1,bits)!=value)++errors;
+        }
+        check(errors<300,"geometry margin exceeds one-percent symbol errors in seeded AWGN/drift test");
+    }
+    const auto fast=tuning::resolve(2400,100,tuning::PatternMode::auto_tone,false);
+    check(fast.config.constellation_bits==6 && fast.config.spreading_factor==1,"strong links use the densest bounded constellation at full symbol rate");
+    near(modem::bit_rate(fast.config),7200,"high-C/N0 adaptive gross throughput");
+    const auto weak=tuning::resolve(2400,-20,tuning::PatternMode::auto_tone,false);
+    const auto weaker=tuning::resolve(2400,-30,tuning::PatternMode::auto_tone,false);
+    check(weak.config.constellation_bits<=3,"weak links favor useful rate over dense slow symbols");
+    near(modem::symbol_seconds(weaker.config)/modem::symbol_seconds(weak.config),10,"ten-dB weaker automatic mode integrates ten times longer");
+    auto clock=fast.config;clock.bandwidth_hz=1703;clock.spreading_factor=128;
+    clock.integration_seconds=0;
+    const auto seconds=modem::symbol_seconds(clock),rate=modem::bit_rate(clock);
+    for(const auto sample_rate:{44100U,48000U,96000U,192000U}) {
+        clock.sample_rate=sample_rate;
+        near(modem::symbol_seconds(clock),seconds,"nominal symbol clock depends only on bandwidth and spreading");
+        near(modem::bit_rate(clock),rate,"modem throughput depends on hardware sample rate");
+        const auto rendered=static_cast<double>(modem::symbol_sample_count(clock))/sample_rate;
+        check(rendered>=seconds-1e-12 && rendered-seconds<=1./sample_rate,"PCM boundary quantization exceeds one sample");
+    }
+    clock.constellation_bits=7;rejects([&]{modem::validate(clock);},"unbounded phase/amplitude density accepted");
 }
 void physical_simulation_presets() {
     check(tuning::simulation_presets().size()==11,"all specified simulation presets");
@@ -91,6 +154,6 @@ void sizing_and_validation() {
 }
 }
 int main() {
-    try {modes_and_tones();snr_planning();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_tones();snr_planning();adaptive_geometry_and_rates();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

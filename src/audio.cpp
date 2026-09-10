@@ -1,4 +1,5 @@
 #include "datapump/audio.hpp"
+#include "datapump/resampler.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -27,6 +28,70 @@ std::size_t sample_count(double seconds,std::uint32_t rate,std::size_t memory_li
         throw Error("audio duration/sample rate exceeds memory budget or valid range");
     return static_cast<std::size_t>(seconds*rate);
 }
+std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
+    if(logical_rate<8000 || logical_rate>384000)throw Error("invalid audio sample rate");
+    constexpr std::array<std::uint32_t,13> common{8000,11025,16000,22050,24000,32000,44100,48000,88200,96000,176400,192000,384000};
+    std::vector<std::uint32_t> result{logical_rate};
+    // Preserve physical passband when a faster device clock is available.
+    for(const auto rate:common)if(rate>logical_rate)result.push_back(rate);
+    for(auto it=common.rbegin();it!=common.rend();++it)if(*it<logical_rate)result.push_back(*it);
+    return result;
+}
+void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback) {
+    if(callback)callback({logical,hardware,(logical==hardware?.5:.42)*std::min(logical,hardware),workspace});
+}
+class PlaybackSource {
+    const PlaybackCallback& next_;
+    std::stop_token stop_;
+    Resampler converter_;
+    std::vector<float> input_;
+    std::size_t position_=0, count_=0;
+    bool eof_=false;
+public:
+    PlaybackSource(std::uint32_t logical,std::uint32_t hardware,const PlaybackCallback& next,std::stop_token stop)
+        :next_(next),stop_(stop),converter_(logical,hardware),input_(std::min<std::size_t>(4096,logical/20)){}
+    std::size_t workspace_bytes() const {return sizeof(*this)+converter_.workspace_bytes()+input_.capacity()*sizeof(float);}
+    std::size_t read(std::span<float> output) {
+        std::size_t written=0;
+        while(written<output.size() && !converter_.finished()) {
+            check_cancelled(stop_);
+            if(position_==count_ && !eof_) {
+                count_=next_(input_);position_=0;
+                check_cancelled(stop_);
+                if(count_>input_.size())throw Error("playback callback returned invalid sample count");
+                eof_=count_==0;
+            }
+            const auto progress=converter_.process(std::span<const float>(input_.data()+position_,count_-position_),output.subspan(written),eof_);
+            position_+=progress.consumed;written+=progress.produced;
+        }
+        return written;
+    }
+};
+class CaptureSink {
+    const CaptureCallback& next_;
+    std::stop_token stop_;
+    Resampler converter_;
+    std::vector<float> output_;
+public:
+    CaptureSink(std::uint32_t logical,std::uint32_t hardware,const CaptureCallback& next,std::stop_token stop)
+        :next_(next),stop_(stop),converter_(hardware,logical),output_(std::min<std::size_t>(4096,logical/20)){}
+    std::size_t workspace_bytes() const {return sizeof(*this)+converter_.workspace_bytes()+output_.capacity()*sizeof(float);}
+    bool write(std::span<const float> input) {
+        std::size_t consumed=0;
+        while(true) {
+            check_cancelled(stop_);
+            const auto progress=converter_.process(input.subspan(consumed),output_);
+            consumed+=progress.consumed;
+            if(progress.produced) {
+                const bool keep=next_(std::span<const float>(output_.data(),progress.produced));
+                check_cancelled(stop_);
+                if(!keep)return false;
+            }
+            check_cancelled(stop_);
+            if(consumed==input.size() && progress.produced<output_.size())return true;
+        }
+    }
+};
 }
 #ifndef _WIN32
 namespace {
@@ -65,17 +130,22 @@ struct Alsa {
 };
 struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
+    std::uint32_t hardware_rate=0;
     Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,bool nonblocking=false):api(a) {
-        if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
+        const auto rates=rate_candidates(rate);
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
         const auto try_device=[&](const std::string& name) {
-            if(!attempted.empty())attempted+=", ";
-            attempted+=name;
-            if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
-            // ALSA plug/default endpoints may convert to the hardware format.
-            if(api.set_params(pcm,2,3,1,rate,1,100000)>=0)return true;
-            api.close(pcm);pcm=nullptr;return false;
+            for(const auto candidate:rates) {
+                if(!attempted.empty())attempted+=", ";
+                attempted+=name+"@"+std::to_string(candidate)+"Hz";
+                if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
+                // Let the application own rate conversion: an accepted ALSA
+                // rate is the selected endpoint's clock, not a modem setting.
+                if(api.set_params(pcm,2,3,1,candidate,0,100000)>=0) {hardware_rate=candidate;return true;}
+                api.close(pcm);pcm=nullptr;
+            }
+            return false;
         };
         if(try_device(requested))return;
         if(requested=="default") {
@@ -134,17 +204,19 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     Alsa api; Stream stream(api,device,0,rate);
+    PlaybackSource source(rate,stream.hardware_rate,next_samples,stop);
     std::vector<std::int16_t> block(4096);
-    const auto chunk_limit=std::min<std::size_t>(block.size(),rate/20);
+    const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
     std::vector<float> samples(chunk_limit);
+    report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float),on_format);
     unsigned failures=0;
     while(true) {
         check_cancelled(stop);
-        const auto count=next_samples(samples);
+        const auto count=source.read(samples);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count)break;
         for(std::size_t i=0;i<count;++i) {
@@ -165,7 +237,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     if(api.drain(stream.pcm)<0) throw Error("audio playback drain failed");
     check_cancelled(stop);
 }
-std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop) {
+std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     std::vector<float> samples(sample_count(seconds,rate,memory_limit));
     if(samples.empty()) return samples;
@@ -175,16 +247,18 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
         std::copy_n(chunk.begin(),count,samples.begin()+static_cast<std::ptrdiff_t>(offset));
         offset+=count;
         return offset<samples.size();
-    },stop);
+    },stop,std::move(on_format));
     return samples;
 }
-void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop) {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     Alsa api; Stream stream(api,device,1,rate,true);
+    CaptureSink sink(rate,stream.hardware_rate,on_chunk,stop);
     std::vector<std::int16_t> block(4096);
-    const auto chunk_limit=std::min<std::size_t>(block.size(),rate/20);
+    const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
     std::vector<float> converted(chunk_limit);
+    report_format(rate,stream.hardware_rate,sink.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+converted.capacity()*sizeof(float),on_format);
     unsigned failures=0;
     while(true) {
         check_cancelled(stop);
@@ -202,7 +276,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
             if(static_cast<std::size_t>(n)>chunk_limit) throw Error("audio capture returned invalid sample count");
             for(std::size_t i=0;i<static_cast<std::size_t>(n);++i) converted[i]=block[i]/32768.0f;
             failures=0;
-            if(!on_chunk(std::span<const float>(converted.data(),static_cast<std::size_t>(n)))) break;
+            if(!sink.write(std::span<const float>(converted.data(),static_cast<std::size_t>(n)))) break;
         }
     }
 }
@@ -231,21 +305,28 @@ struct WaveSession {
     HWAVEOUT output=nullptr;
     HWAVEIN input=nullptr;
     HANDLE event=nullptr;
+    std::uint32_t hardware_rate=0;
     std::array<std::array<std::int16_t,block_samples>,2> pcm{};
     std::array<WAVEHDR,2> headers{};
     std::array<bool,2> prepared{};
     WaveSession(bool recording,std::uint32_t rate,const std::string& device) {
-        const auto f=format(rate);
+        const auto rates=rate_candidates(rate);
         const auto id=device_id(device);
         event=CreateEventA(nullptr,FALSE,FALSE,nullptr);
         if(!event) throw Error("cannot create audio completion event");
         const auto callback=reinterpret_cast<DWORD_PTR>(event);
-        const auto result=recording ? waveInOpen(&input,id,&f,callback,0,CALLBACK_EVENT)
-                                    : waveOutOpen(&output,id,&f,callback,0,CALLBACK_EVENT);
-        if(result!=MMSYSERR_NOERROR) {
-            CloseHandle(event);event=nullptr;
-            throw Error(recording ? "cannot open waveIn device" : "cannot open waveOut device");
+        for(const auto candidate:rates) {
+            const auto f=format(candidate);
+            // Keep rate conversion at our bounded PCM boundary. Otherwise ACM
+            // may accept an unsupported candidate by converting it silently.
+            constexpr DWORD flags=CALLBACK_EVENT|WAVE_FORMAT_DIRECT;
+            const auto result=recording ? waveInOpen(&input,id,&f,callback,0,flags)
+                                        : waveOutOpen(&output,id,&f,callback,0,flags);
+            if(result==MMSYSERR_NOERROR){hardware_rate=candidate;return;}
+            input=nullptr;output=nullptr;
         }
+        CloseHandle(event);event=nullptr;
+        throw Error(recording ? "cannot open waveIn device at a supported sample rate" : "cannot open waveOut device at a supported sample rate");
     }
     WaveSession(const WaveSession&)=delete;
     WaveSession& operator=(const WaveSession&)=delete;
@@ -310,19 +391,21 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
+    PlaybackSource source(rate,session.hardware_rate,next_samples,stop);
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
-    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_samples,rate/20));
+    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_samples,session.hardware_rate/20));
+    report_format(rate,session.hardware_rate,source.workspace_bytes()+sizeof(session)+samples.capacity()*sizeof(float),on_format);
     bool finished=false,started=false;
     std::array<bool,2> queued{};
     const auto enqueue=[&](std::size_t slot) {
         check_cancelled(stop);
         if(finished)return;
-        const auto count=next_samples(samples);
+        const auto count=source.read(samples);
         check_cancelled(stop);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){finished=true;return;}
@@ -354,7 +437,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     }
     session.finish();
 }
-std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop) {
+std::vector<float> record(double seconds,std::uint32_t rate,const std::string& device,std::size_t memory_limit,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     std::vector<float> result(sample_count(seconds,rate,memory_limit));
     if(result.empty()) return result;
@@ -364,16 +447,18 @@ std::vector<float> record(double seconds,std::uint32_t rate,const std::string& d
         std::copy_n(chunk.begin(),count,result.begin()+static_cast<std::ptrdiff_t>(offset));
         offset+=count;
         return offset<result.size();
-    },stop);
+    },stop,std::move(on_format));
     return result;
 }
-void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop) {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& on_chunk,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     if(!on_chunk) throw Error("capture callback is required");
     WaveSession session(true,rate,device);
+    CaptureSink sink(rate,session.hardware_rate,on_chunk,stop);
     session.prepare();
-    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_samples,rate/20);
+    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_samples,session.hardware_rate/20);
     std::vector<float> converted(chunk_samples);
+    report_format(rate,session.hardware_rate,sink.workspace_bytes()+sizeof(session)+converted.capacity()*sizeof(float),on_format);
     for(auto& header:session.headers) {
         header.dwBufferLength=static_cast<DWORD>(chunk_samples*sizeof(std::int16_t));
         mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn queue failed");
@@ -391,7 +476,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
         for(std::size_t i=0;i<count;++i) converted[i]=session.pcm[slot][i]/32768.0f;
         if(session.headers[1-slot].dwFlags&WHDR_DONE) throw Error("audio capture overrun");
         mm_check(waveInAddBuffer(session.input,&header,sizeof(WAVEHDR)),"waveIn requeue failed");
-        if(!on_chunk(std::span<const float>(converted.data(),count))) break;
+        if(!sink.write(std::span<const float>(converted.data(),count))) break;
         slot=1-slot;
     }
     mm_check(waveInStop(session.input),"waveIn stop failed");
@@ -399,7 +484,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 
 #endif
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop) {
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format) {
     check_cancelled(stop);
     for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
     std::size_t offset=0;
@@ -407,6 +492,6 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
         const auto count=std::min(chunk.size(),samples.size()-offset);
         std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
         offset+=count;return count;
-    },stop);
+    },stop,std::move(on_format));
 }
 }

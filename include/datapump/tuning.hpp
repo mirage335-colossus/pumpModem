@@ -17,7 +17,7 @@ std::span<const PatternMode> pattern_modes();
 struct Plan {
     modem::Config config;
     double estimated_processing_gain_db = 0;
-    double target_symbol_snr_db = 18;
+    double target_symbol_snr_db = 0;
     double estimated_symbol_snr_db = 0;
     double required_spreading = 1;
     bool target_supported = false;
@@ -25,6 +25,8 @@ struct Plan {
 };
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
+// Conservative differential phase/amplitude geometry target, not measured BER.
+double constellation_target_symbol_snr_db(unsigned bits);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
              bool encryption);
 struct SimulationPreset {

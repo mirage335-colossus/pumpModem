@@ -1,5 +1,6 @@
 #include "../src/gui/state.hpp"
 #include <iostream>
+#include <limits>
 
 using namespace datapump;
 void check(bool value) { if (!value) throw Error("Native GUI policy test failed"); }
@@ -83,6 +84,30 @@ int main() {
         policy.started(false,true,time+std::chrono::seconds(9));
         policy.abort_start();
         check(policy.remaining(false,true,time+std::chrono::seconds(9)).count()==0);
+        check(gui::format_bit_rate(1200)=="1.2 kbit/s");
+        check(gui::format_bit_rate(.025)=="0.025 bit/s");
+        check(gui::format_bit_rate(6.34e-9)=="6.34e-09 bit/s");
+        check(gui::format_bit_rate(std::numeric_limits<double>::denorm_min()).find("e-")!=std::string::npos);
+        check(gui::format_bit_rate(0)=="0 bit/s");
+        check(gui::format_bit_rate(std::numeric_limits<double>::quiet_NaN())=="Unavailable");
+        gui::PlotReviewPolicy plots;
+        auto change=plots.observe(1,0,false);
+        check(change.update_plots && change.append_waterfall && !change.restore_waterfall);
+        change=plots.observe(1,0,false);
+        check(!change.update_plots && !change.append_waterfall && !change.restore_waterfall);
+        change=plots.observe(2,1,true);
+        check(change.update_plots && !change.append_waterfall && change.restore_waterfall);
+        change=plots.observe(3,1,true); // The source clock can advance during review.
+        check(!change.update_plots && !change.append_waterfall && !change.restore_waterfall);
+        change=plots.observe(4,1,false);
+        check(change.update_plots && change.append_waterfall && !change.restore_waterfall);
+        change=plots.observe(5,1,true);
+        check(change.update_plots && !change.append_waterfall && !change.restore_waterfall);
+        change=plots.observe(6,2,true);
+        check(change.update_plots && !change.append_waterfall && change.restore_waterfall);
+        plots.reset();
+        change=plots.observe(6,2,true);
+        check(change.update_plots && change.restore_waterfall);
         std::cout<<"Native GUI policy tests passed\n";
     } catch (const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }

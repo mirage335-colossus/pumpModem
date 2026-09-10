@@ -24,6 +24,8 @@ public:
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
+    // Reconstruct the actual recent PCM, including spreading and carrier phase.
+    // At most 2048 samples; any portion before the transmission is zero-filled.
     void preview_last(std::span<float> output) const;
 private:
     struct Impl;

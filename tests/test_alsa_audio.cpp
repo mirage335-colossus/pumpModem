@@ -1,6 +1,8 @@
 #include "datapump/audio.hpp"
 #include "alsa_stub.hpp"
 #include <algorithm>
+#include <cmath>
+#include <numbers>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -24,7 +26,7 @@ int main(){try{
     f::state.available={"default","default:CARD=Bad","default:CARD=Good"};
     f::state.wrong_format={"default","default:CARD=Bad"};
     a::play(std::vector<float>(100,.25f),96000,"default");
-    check(f::state.selected=="default:CARD=Good" && f::state.rate==96000 && f::state.opens==3 && f::state.closes==3,"24k bandwidth sample rate must try a compatible default format");
+    check(f::state.selected=="default:CARD=Good" && f::state.rate==96000 && f::state.opens==f::state.closes,"24k bandwidth sample rate must try a compatible default format");
     f::reset();f::state.hints={{"plughw:CARD=HDMI,DEV=0","Output"},{"default:CARD=Generic_1",""},{"plughw:CARD=Generic_1,DEV=0",""}};
     f::state.available={"default:CARD=Generic_1","plughw:CARD=HDMI,DEV=0","plughw:CARD=Generic_1,DEV=0"};
     f::state.wrong_format={"default:CARD=Generic_1"};
@@ -46,5 +48,42 @@ int main(){try{
     f::reset();f::state.available={"default"};rejects([&]{a::playback(48000,"default",[](std::span<float> chunk){return chunk.size()+1;});});
     f::reset();f::state.available={"default"};rejects([&]{a::playback(48000,"default",[](std::span<float> chunk){chunk[0]=std::numeric_limits<float>::quiet_NaN();return 1;});});
     check(f::state.played.empty(),"invalid generated samples were played");
+    // Rate selection belongs to the sound-card boundary, not the DSP clock.
+    for(const unsigned hardware:{44100u,48000u,96000u}) {
+        constexpr unsigned logical=96000;
+        f::reset();f::state.available={"explicit-card"};f::state.supported_rates={hardware};
+        a::StreamFormat observed;
+        std::vector<float> tone(logical/5+17);
+        for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/logical));
+        a::play(tone,logical,"explicit-card",{},[&](const auto& info){observed=info;});
+        check(observed.logical_rate==logical && observed.hardware_rate==hardware,"negotiated clock metadata missing");
+        check(observed.usable_passband_hz<=hardware*.5,"reported recoverable spectrum above hardware Nyquist");
+        check(observed.workspace_bytes>0 && observed.workspace_bytes<512*1024,"converter workspace metadata invalid");
+        check(f::state.played.size()==(tone.size()*hardware+logical-1)/logical,"playback resampling changed duration/EOF");
+        check(std::all_of(f::state.attempts.begin(),f::state.attempts.end(),[](const auto& id){return id=="explicit-card";}),"rate negotiation changed an explicit device");
+        double error=0;
+        for(std::size_t i=100;i+100<f::state.played.size();++i)
+            error=std::max(error,std::abs(f::state.played[i]/32767.-.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/hardware)));
+        check(error<.00015,"negotiated playback altered tone phase/amplitude");
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};
+        f::state.sample=[](std::size_t index,unsigned clock){return static_cast<std::int16_t>(16000*std::sin(2*std::numbers::pi*1700*static_cast<double>(index)/clock));};
+        const auto receive=a::record(.2,logical,"default",1024*1024,{},[&](const auto& info){observed=info;});
+        check(receive.size()==19200 && observed.hardware_rate==hardware,"capture clock conversion changed logical duration");
+        error=0;
+        for(std::size_t i=200;i<receive.size();++i)
+            error=std::max(error,std::abs(receive[i]-(16000./32768)*std::sin(2*std::numbers::pi*1700*static_cast<double>(i)/logical)));
+        check(error<.00015,"capture conversion altered logical sample timestamps");
+        check(f::state.live==0,"resampled capture leaked stream");
+    }
+    f::reset();f::state.available={"default"};f::state.supported_rates={48000,192000};
+    a::play(std::vector<float>(100),96000,"default");
+    check(f::state.rate==192000,"negotiation reduced passband despite an available higher hardware clock");
+    f::reset();f::state.available={"default"};f::state.supported_rates={44100};
+    std::stop_source cancelled;
+    rejects([&]{a::playback(96000,"default",[&](std::span<float> values){cancelled.request_stop();std::fill(values.begin(),values.end(),.1f);return values.size();},cancelled.get_token());});
+    check(f::state.played.empty(),"resampling played PCM after producer cancellation");
+    f::reset();f::state.available={"default"};f::state.supported_rates={44100};
+    std::stop_source capture_cancel;
+    rejects([&]{a::capture(96000,"default",[&](std::span<const float> values){check(values.size()<=4096,"capture resampling exceeded bounded callback size");capture_cancel.request_stop();return false;},capture_cancel.get_token());});
     std::cout<<"ALSA default resolution and streaming tests passed\n";return 0;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

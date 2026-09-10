@@ -42,9 +42,11 @@ Estimate estimate_encoded(const Message& message, const Options& options, std::s
     Estimate result;
     result.packet_bytes = frame_size;
     result.content_bytes = frame_size > overhead ? frame_size - overhead : 0;
-    const auto rate = modem::bit_rate(options.modem);
-    result.packet_seconds = static_cast<double>(frame_size) * 8 / rate;
-    result.content_seconds = static_cast<double>(result.content_bytes) * 8 / rate;
+    const auto symbols = modem::payload_symbol_count(frame_size, options.modem);
+    const auto overhead_symbols = modem::payload_symbol_count(overhead, options.modem);
+    const auto symbol_seconds = static_cast<double>(modem::symbol_sample_count(options.modem)) / options.modem.sample_rate;
+    result.packet_seconds = static_cast<double>(symbols) * symbol_seconds;
+    result.content_seconds = static_cast<double>(symbols > overhead_symbols ? symbols - overhead_symbols : 0) * symbol_seconds;
     result.repeatable_allowed = message.data.size() <= options.repeat_policy.minimum_payload_bytes ||
                                result.content_seconds <= options.repeat_policy.maximum_seconds;
     const auto training_bytes = modem::preamble(options.modem).size();

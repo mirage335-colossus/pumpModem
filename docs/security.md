@@ -5,7 +5,7 @@ No decoded address selects a network endpoint. No received command is executed,
 no received filename selects a write path, and no received file is auto-opened.
 The native GUI calls the C++ transfer service directly without a subprocess or
 shell. File saves require a user-selected path and exclusive creation.
-Release 0.2 changes the physical waveform from DQPSK to differential 16-APSK;
+Release 0.3 uses adaptive differential APSK and symbol-boundary padding;
 packet integrity/authentication and existing keyfile formats are unchanged.
 
 The protected computer still trusts its audio/ADC hardware, firmware, operating

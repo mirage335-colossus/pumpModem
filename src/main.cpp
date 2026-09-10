@@ -32,7 +32,7 @@
 
 using namespace datapump;
 #ifndef DATAPUMP_VERSION
-#define DATAPUMP_VERSION "0.2.0"
+#define DATAPUMP_VERSION "0.3.0"
 #endif
 namespace {
 const char* usage=R"HELP(Data Pump 0.2 — civilian audio text and file modem
@@ -446,6 +446,7 @@ int main(int argc,char** argv) {
                 <<",\"packet_seconds\":"<<result.packet_seconds<<",\"content_seconds\":"<<result.content_seconds
                 <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
                 <<",\"spreading\":"<<c.spreading_factor
+                <<",\"constellation_bits\":"<<c.constellation_bits
                 <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")
                 <<",\"memory_supported\":"<<(result.memory_supported?"true":"false")
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");

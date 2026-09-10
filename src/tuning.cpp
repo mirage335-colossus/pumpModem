@@ -1,4 +1,5 @@
 #include "datapump/tuning.hpp"
+#include "constellation.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -47,45 +48,76 @@ PatternMode parse_pattern_mode(std::string_view name) {
     if(found==names.end()) throw Error("unknown pattern mode: "+std::string(name));
     return modes[static_cast<std::size_t>(found-names.begin())];
 }
+double constellation_target_symbol_snr_db(unsigned bits) {
+    if(bits<2 || bits>6)throw Error("constellation must carry 2..6 bits per symbol");
+    const double spacing=modem::detail::radius_step(bits);
+    const double phases=1U<<modem::detail::phase_bits(bits);
+    // Use the worst inner-ring angular separation, including the extra noise
+    // of differential phase detection, and reserve 2.8125 degrees for phase
+    // drift per symbol. A 3.2-sigma half-distance is an engineering design
+    // margin, not a claim of calibrated packet error rate.
+    const double angular=std::sqrt(2.)*spacing*std::sin(std::numbers::pi/phases-std::numbers::pi/64);
+    const double distance=std::min(spacing,angular);
+    return 10*std::log10(2*3.2*3.2*.30625/(distance*distance));
+}
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption) {
     if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>192000)
         throw Error("automatic audio bandwidth must be 1..192000 Hz");
     if(!std::isfinite(target_snr_db_hz)) throw Error("target C/N0 must be finite dB-Hz");
     const auto index=index_of(mode);
-    Plan plan;
-    plan.config.bandwidth_hz=bandwidth_hz;
-    plan.config.sample_rate=bandwidth_hz<=22050?48000:bandwidth_hz<=47000?96000:bandwidth_hz<=95000?192000:384000;
-    const double spare=static_cast<double>(plan.config.sample_rate)/2-bandwidth_hz;
-    plan.config.carrier_hz=bandwidth_hz<=2400?1500:bandwidth_hz/2+std::min(1000.,spare/2);
+    modem::Config base;
+    base.bandwidth_hz=bandwidth_hz;
+    // This is an internal analysis/synthesis clock selected from bandwidth;
+    // audio endpoints independently negotiate and resample their hardware rate.
+    base.sample_rate=bandwidth_hz<=22050?48000:bandwidth_hz<=47000?96000:bandwidth_hz<=95000?192000:384000;
+    const double spare=static_cast<double>(base.sample_rate)/2-bandwidth_hz;
+    base.carrier_hz=bandwidth_hz<=2400?1500:bandwidth_hz/2+std::min(1000.,spare/2);
     const bool tone=mode==PatternMode::auto_tone || index>=9;
-    plan.config.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
-    plan.config.scramble=mode==PatternMode::auto_keystream && encryption;
-    const double chip_seconds=modem::symbol_seconds(plan.config);
-    const double exponent=(plan.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);
-    plan.required_spreading=exponent>std::log10(std::numeric_limits<double>::max())?
-        std::numeric_limits<double>::infinity():std::max(1.,std::pow(10.,exponent));
-    if(lengths[index]) plan.config.spreading_factor=lengths[index];
-    else {
-        const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),plan.required_spreading);
-        plan.config.spreading_factor=found==automatic_lengths.end()?automatic_lengths.back():*found;
-        if(found==automatic_lengths.end()) {
-            const double seconds=std::pow(10.,(plan.target_symbol_snr_db-target_snr_db_hz)/10);
-            if(!std::isfinite(seconds))throw Error("requested integration exceeds numeric duration range");
-            plan.config.integration_seconds=seconds;
-            (void)modem::symbol_sample_count(plan.config);
+    base.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
+    base.scramble=mode==PatternMode::auto_keystream && encryption;
+    const double chip_seconds=2/bandwidth_hz;
+    Plan plan;double best_rate=-1;bool any=false;
+    for(unsigned bits=2;bits<=6;++bits) {
+        Plan candidate;candidate.config=base;candidate.config.constellation_bits=bits;
+        candidate.target_symbol_snr_db=constellation_target_symbol_snr_db(bits);
+        const double exponent=(candidate.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);
+        candidate.required_spreading=exponent>std::log10(std::numeric_limits<double>::max())?
+            std::numeric_limits<double>::infinity():std::max(1.,std::pow(10.,exponent));
+        if(lengths[index])candidate.config.spreading_factor=lengths[index];
+        else {
+            const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),candidate.required_spreading);
+            candidate.config.spreading_factor=found==automatic_lengths.end()?automatic_lengths.back():*found;
+            if(found==automatic_lengths.end()) {
+                candidate.config.integration_seconds=std::pow(10.,(candidate.target_symbol_snr_db-target_snr_db_hz)/10);
+                if(!std::isfinite(candidate.config.integration_seconds))continue;
+            }
+        }
+        try{modem::validate(candidate.config);}catch(const Error&){continue;}
+        const double seconds=modem::symbol_seconds(candidate.config);
+        candidate.estimated_processing_gain_db=10*std::log10(seconds/chip_seconds);
+        candidate.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(seconds);
+        candidate.target_supported=candidate.estimated_symbol_snr_db+1e-10>=candidate.target_symbol_snr_db;
+        const auto rate=modem::bit_rate(candidate.config);
+        // Meet the margin first; among supported profiles maximize gross bit
+        // rate. For an impossible forced duration retain the most robust one.
+        if(!any || (candidate.target_supported && !plan.target_supported) ||
+           (candidate.target_supported==plan.target_supported &&
+             (candidate.target_supported?rate>best_rate:candidate.target_symbol_snr_db<plan.target_symbol_snr_db))) {
+            plan=std::move(candidate);best_rate=rate;any=true;
         }
     }
-    plan.estimated_processing_gain_db=10*std::log10(modem::symbol_seconds(plan.config)/chip_seconds);
-    plan.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(modem::symbol_seconds(plan.config));
-    plan.target_supported=plan.estimated_symbol_snr_db+1e-10>=plan.target_symbol_snr_db;
+    if(!any)throw Error("requested integration exceeds numeric duration range");
     std::ostringstream explanation;
-    explanation<<std::fixed<<std::setprecision(1)<<"C/N0 integration estimate: "<<plan.config.spreading_factor
-        <<" template chips, "<<modem::symbol_seconds(plan.config)<<" seconds/symbol, estimated Es/N0 "<<plan.estimated_symbol_snr_db<<" dB; target "<<plan.target_symbol_snr_db<<" dB. ";
-    if(!plan.target_supported) explanation<<"The selected finite spreading does not meet this target. ";
-    if(mode==PatternMode::auto_keystream && !encryption) explanation<<"Without a key, auto-pattern is used. ";
-    explanation<<"This is an engineering estimate, not measured decoder sensitivity; duration and memory are checked separately.";
+    explanation<<std::fixed<<std::setprecision(1)<<(1U<<plan.config.constellation_bits)<<"APSK ("
+        <<plan.config.constellation_bits<<" bits/symbol, "<<(1U<<modem::detail::phase_bits(plan.config.constellation_bits))
+        <<" phase positions, "<<modem::detail::rings(plan.config.constellation_bits)<<" amplitude rings): "
+        <<"maximum modeled throughput among supported profiles with a geometric noise/drift margin. "
+        <<plan.config.spreading_factor<<" template chips, "<<modem::symbol_seconds(plan.config)
+        <<" seconds/symbol, estimated Es/N0 "<<plan.estimated_symbol_snr_db<<" dB; target "<<plan.target_symbol_snr_db<<" dB. ";
+    if(!plan.target_supported)explanation<<"The selected forced duration does not meet this target. ";
+    if(mode==PatternMode::auto_keystream && !encryption)explanation<<"Without a key, auto-pattern is used. ";
+    explanation<<"Both endpoints derive the profile from matching bandwidth, C/N0 and pattern settings. These margins are engineering estimates, not measured decoder sensitivity.";
     plan.explanation=explanation.str();
-    modem::validate(plan.config);
     return plan;
 }
 std::span<const SimulationPreset> simulation_presets(){return presets;}

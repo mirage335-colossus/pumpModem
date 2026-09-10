@@ -1,6 +1,7 @@
 #include "datapump/modem.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
+#include "datapump/packet.hpp"
 #include "constellation.hpp"
 #include <algorithm>
 #include <bit>
@@ -38,7 +39,7 @@ void budget(std::size_t limit, std::initializer_list<std::pair<std::size_t,std::
     }
 }
 std::size_t chip_samples(const Config& c) {
-    return static_cast<std::size_t>(std::llround(c.sample_rate / (c.bandwidth_hz / 2) / 4)) * 4;
+    return static_cast<std::size_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
 }
 std::size_t symbol_samples(const Config& c) { return chip_samples(c) * c.spreading_factor; }
 void finite_samples(std::span<const float> samples, std::size_t limit, std::stop_token stop = {}) {
@@ -187,7 +188,8 @@ DecodeResult known_training(std::span<const float> samples,const Config& c,
     const auto count=remaining/duration+(remaining%duration!=0);
     auto oscillator=std::polar(1.,tau*(c.carrier_hz+frequency_offset)*static_cast<double>(start)/c.sample_rate);
     const auto rotation=std::polar(1.,tau*(c.carrier_hz+frequency_offset)/c.sample_rate);
-    double power=0,error=0;unsigned partial=0;
+    double power=0,error=0;unsigned partial=0,partial_bits=0;
+    const auto bootstrap_count=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
     for(std::size_t symbol=0;symbol<count;++symbol) {
         check_cancelled(stop);double xc=0,xs=0,cc=0,ss=0,cs=0;
         for(std::size_t i=0;i<duration;++i) {
@@ -199,10 +201,12 @@ DecodeResult known_training(std::span<const float> samples,const Config& c,
         const double determinant=cc*ss-cs*cs;
         check(determinant>1e-12,"carrier quadratures are singular");
         const Complex point{(xc*ss-xs*cs)/determinant,-(xs*cc-xc*cs)/determinant};
-        const auto bits=detail::nibble(point,previous,gain);
-        const auto ideal=std::polar(gain*((bits&8)? .7:.35),std::arg(previous)+tau*detail::phase_steps[bits&7]/8);
+        const auto bits=detail::decision(point,previous,gain,c.constellation_bits);
+        const auto ideal=gain*detail::mapped(bits,c.constellation_bits,previous);
         power+=std::norm(ideal);error+=std::norm(point-ideal);previous=point;
-        if((symbol&1)==0)partial=bits<<4;else result.bytes.push_back(static_cast<std::uint8_t>(partial|bits));
+        partial=(partial<<c.constellation_bits)|bits;partial_bits+=c.constellation_bits;
+        if(partial_bits>=8){partial_bits-=8;result.bytes.push_back(static_cast<std::uint8_t>(partial>>partial_bits));}
+        if(symbol+1==bootstrap_count){partial=0;partial_bits=0;}
         if(result.diagnostics.constellation.size()<2048)result.diagnostics.constellation.push_back(point/gain);
     }
     result.diagnostics.snr_db=10*std::log10(std::max(power,1e-20)/std::max(error,1e-20));
@@ -227,6 +231,7 @@ void discard(std::istream& in, std::size_t count) {
 }
 }
 void validate(const Config& c) {
+    check(c.constellation_bits>=2 && c.constellation_bits<=6,"constellation must carry 2..6 bits per symbol");
     check(c.sample_rate >= 8000 && c.sample_rate <= 384000, "sample rate must be 8000..384000 Hz");
     check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= c.sample_rate / 2.0,
           "bandwidth must be finite and within 1 Hz..Nyquist");
@@ -250,14 +255,26 @@ std::uint64_t symbol_sample_count(const Config& c) {
         check(samples>=4 && samples<static_cast<long double>(std::numeric_limits<std::uint64_t>::max()),"integration duration exceeds 64-bit sample counter");
         return static_cast<std::uint64_t>(samples);
     }
-    return static_cast<std::uint64_t>(chip_samples(c))*c.spreading_factor;
+    const long double samples=std::ceil(2.L*c.sample_rate*c.spreading_factor/c.bandwidth_hz);
+    check(samples>=4 && samples<static_cast<long double>(std::numeric_limits<std::uint64_t>::max()),"symbol duration exceeds 64-bit sample counter");
+    return static_cast<std::uint64_t>(samples);
 }
 std::uint64_t training_sample_count(const Config& c) { return static_cast<std::uint64_t>(c.sample_rate)*5; }
-double symbol_seconds(const Config& c) { validate(c); return static_cast<double>(symbol_sample_count(c))/c.sample_rate; }
-double bit_rate(const Config& c) { return bits_per_symbol/symbol_seconds(c); }
+double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
+double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }
+std::size_t payload_symbol_count(std::size_t payload_bytes,const Config& c) {
+    check(c.constellation_bits>=2 && c.constellation_bits<=6,"constellation must carry 2..6 bits per symbol");
+    const auto symbols=[&](std::size_t count) {
+        const auto bits=product(count,8,std::numeric_limits<std::size_t>::max()-c.constellation_bits+1);
+        return (bits+c.constellation_bits-1)/c.constellation_bits;
+    };
+    // Five-bit profiles explicitly pad the fixed 72-byte bootstrap boundary,
+    // preserving a byte-aligned header for blind acquisition and encrypted data.
+    return symbols(std::min(payload_bytes,packet_prefix_size))+symbols(payload_bytes>packet_prefix_size?payload_bytes-packet_prefix_size:0);
+}
 std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     validate(c);check(wire_bytes>=32,"16APSK wire requires the 32-byte training prefix");
-    const auto count=product(wire_bytes-32,2,std::numeric_limits<std::size_t>::max());
+    const auto count=payload_symbol_count(wire_bytes-32,c);
     const auto duration=symbol_sample_count(c);
     check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
     const auto payload=product(count,static_cast<std::size_t>(duration),std::numeric_limits<std::size_t>::max());

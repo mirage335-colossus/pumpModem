@@ -59,6 +59,17 @@ struct Snapshot {
     double transmission_fraction = 0;
     bool transmission_finished = true;
     bool transmission_cancelled = false;
+    // Completed simulations retain a payload-midpoint view for two wall-clock
+    // seconds. The accumulated receiver constellation then remains visible
+    // until another transmission or configuration replaces it.
+    std::uint64_t transmission_id = 0;
+    bool simulation_review = false;
+    bool constellation_retained = false;
+    double simulation_sample_fraction = 0;
+    std::vector<std::vector<double>> simulation_waterfall;
+    double simulation_waterfall_bin_hz = 0;
+    std::uint32_t hardware_sample_rate = 0;
+    double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
 };
 

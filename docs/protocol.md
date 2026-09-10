@@ -9,9 +9,9 @@ Version 2 adds a variable-length short-payload prefix code. The framing, metadat
 integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
 versions; an older decoder that accepts only version 1 cannot read version 2.
 
-Application release 0.2 changes the audio waveform to shared differential
-16-APSK and independently timed training. Its audio is incompatible with release
-0.1. This does not change either packet version or the existing keyfile formats;
+Application release 0.3 adds adaptive differential 4/8/16/32/64-APSK and
+symbol-boundary padding around the protected bootstrap. Audio peers require
+matching 0.3 modem settings. This does not change either packet version or the existing keyfile formats;
 audio waveform versions and packet codec versions are separate concepts.
 
 The audio synchronization preamble is outside the packet codec. It is neither

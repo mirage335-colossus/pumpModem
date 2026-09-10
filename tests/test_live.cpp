@@ -142,6 +142,46 @@ void test_encrypted_auto_epoch() {
           "selected second named key verifies actual encrypted continuous audio");
     check(final.received.front().timestamp > 1000000000, "zero timestamp selects the current epoch automatically");
 }
+void test_simulation_review_and_retained_constellation() {
+    live::Session session;
+    const auto value = settings();
+    session.start(value);
+    session.transmit(message(21, 96));
+    const auto held = wait_for(session, [](const auto& snapshot) {
+        return snapshot.transmission_finished && snapshot.transmission_fraction == 1;
+    });
+    check(held.simulation_review && held.transmission_id != 0, "completed simulation publishes a persistent review frame");
+    check(held.simulation_sample_fraction >= .5 && held.simulation_sample_fraction < .52,
+          "review waveform comes from the payload midpoint, not trailing silence");
+    check(held.simulation_waterfall.size() == 24 && held.simulation_waterfall.front().size() == 257,
+          "fast simulation retains a bounded spectrum history independent of GUI polling");
+    check(held.simulation_waterfall_bin_hz == value.transfer.modem.sample_rate / 512.0,
+          "review waterfall retains the correct frequency scale");
+    check(held.constellation_retained && held.constellation.size() > 100,
+          "review contains accumulated received symbol points");
+    check(held.constellation.size() <= 2048, "retained constellation stays bounded");
+    std::this_thread::sleep_for(100ms);
+    const auto during = session.snapshot();
+    check(during.simulation_review && during.sequence == held.sequence &&
+          during.waveform == held.waveform && during.spectrum_db == held.spectrum_db &&
+          during.constellation == held.constellation, "all review plots remain frozen while background reception continues");
+    check(during.samples_received > held.samples_received, "review does not pause the continuous receiver");
+    const auto resumed = wait_for(session, [](const auto& snapshot) { return !snapshot.simulation_review; }, 3s);
+    check(resumed.waveform != held.waveform && resumed.spectrum_db != held.spectrum_db,
+          "waveform and spectrum return to live samples after two seconds");
+    check(resumed.constellation_retained && resumed.constellation == held.constellation,
+          "received constellation accumulation survives the return to idle noise");
+    session.transmit(message(22, 96));
+    const auto next = session.snapshot();
+    check(!next.simulation_review && !next.constellation_retained,
+          "a new transmission immediately releases the preceding review");
+    const auto next_done = wait_for(session, [&](const auto& snapshot) {
+        return snapshot.transmission_finished && snapshot.transmission_id != held.transmission_id;
+    });
+    check(next_done.simulation_review, "consecutive simulation receives its own review identity");
+    session.configure(value);
+    check(!session.snapshot().constellation_retained, "configuration clears the old constellation");
+}
 void test_receive_authentication_policy() {
     auto value = settings();
     check(value.permits_plaintext(), "unkeyed channel permits plain packets");
@@ -293,6 +333,7 @@ int main() {
         run("idle noise and plots", test_idle_noise_and_plots);
         run("partial back-to-back reception", test_partial_back_to_back_and_resume);
         run("encrypted automatic epoch", test_encrypted_auto_epoch);
+        run("simulation review", test_simulation_review_and_retained_constellation);
         run("receive authentication policy", test_receive_authentication_policy);
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);

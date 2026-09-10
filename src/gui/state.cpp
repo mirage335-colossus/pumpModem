@@ -1,5 +1,9 @@
 #include "state.hpp"
 #include <algorithm>
+#include <cmath>
+#include <iomanip>
+#include <locale>
+#include <sstream>
 
 namespace datapump::gui {
 Inbox::Inbox(std::size_t capacity) : capacity_(capacity) {
@@ -47,6 +51,27 @@ std::chrono::milliseconds TransmissionPolicy::remaining(bool simulation, bool en
     if (active_) return std::chrono::milliseconds::max();
     if (simulation || !encrypted || now >= next_encrypted_) return std::chrono::milliseconds::zero();
     return std::chrono::ceil<std::chrono::milliseconds>(next_encrypted_ - now);
+}
+
+PlotUpdate PlotReviewPolicy::observe(std::uint64_t sequence, std::uint64_t transmission_id, bool review) {
+    const bool changed = !sequence_ || *sequence_ != sequence;
+    const bool restore = review && (!restored_transmission_ || *restored_transmission_ != transmission_id);
+    const bool update = restore || review != reviewing_ || (!review && changed);
+    sequence_ = sequence;
+    reviewing_ = review;
+    if (restore) restored_transmission_ = transmission_id;
+    return {update, !review && update, restore};
+}
+std::string format_bit_rate(double rate) {
+    if (!std::isfinite(rate) || rate < 0) return "Unavailable";
+    const char* unit = "bit/s";
+    if (rate >= 1e9) { rate /= 1e9; unit = "Gbit/s"; }
+    else if (rate >= 1e6) { rate /= 1e6; unit = "Mbit/s"; }
+    else if (rate >= 1e3) { rate /= 1e3; unit = "kbit/s"; }
+    std::ostringstream text;
+    text.imbue(std::locale::classic());
+    text << std::setprecision(3) << std::defaultfloat << rate << ' ' << unit;
+    return text.str();
 }
 
 void Signals::update(SignalLine line) {

@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.2.** The audio/packet/crypto
+**Status: working reference implementation, version 0.3.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,8 +14,8 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.2 changes the audio waveform to differential phase-and-amplitude
-modulation with fixed-duration training. Both ends of an audio link need 0.2;
+Version 0.3 adds adaptive differential phase-and-amplitude constellations and
+symbol-boundary padding. Both ends of an audio link need 0.3 with matching modem settings;
 the packet and keyfile formats remain compatible.
 
 ## Build and run
@@ -100,10 +100,13 @@ transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
 updating while idle. Transmissions run at CPU speed through noisy complex
 observations and the same symbol decoder, with virtual airtime reported separately.
+On completion, the plots hold a payload-midpoint sample for two seconds. The
+received constellation dots remain accumulated after live waveform and waterfall
+updates resume, until the next transmission or settings change.
 This accelerated channel assumes ideal carrier and symbol timing; raw PCM
 acquisition is tested separately and remains available in CLI WAV simulation.
 Real audio reception pauses during transmission and resumes afterward.
-Bandwidth and target C/N0 determine automatic integration length; forced pattern
+Bandwidth and target C/N0 determine constellation size and automatic integration length; forced pattern
 and tone modes are also available. Auto keystream is enabled with encryption.
 The editor shows estimated airtime. Streaming transmission and reception use
 bounded DSP storage independent of airtime. Compression is always chosen automatically.
@@ -171,10 +174,19 @@ The reference modem supports 1.2/2.4/22.05/24kHz nominal bandwidth settings,
 forced lengths of 1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
 60% RS parity or no body FEC. The fixed bootstrap retains its protection even
 with `--fec off`; status mode is the route for truly overhead-free few-bit data.
-`--target-snr` is the desired C/N0 in dBHz. The planner uses symbol integration
-and an 18dB Es/N0 engineering target for the shared 16-point differential
-phase-and-amplitude constellation. Automatic integration can extend beyond
-16,384 chips; this is not measured receiver sensitivity.
+`--target-snr` is the desired C/N0 in dBHz. The planner maximizes modeled throughput
+across 4/8/16/32/64-point phase-and-amplitude constellations with geometry-based
+noise and drift margins. It caps phase density at eight positions and payload
+density at six bits per symbol, preserving at least two symbols for one byte.
+Automatic integration can extend beyond 16,384 chips; this is not measured
+receiver sensitivity or a capacity optimum.
+
+Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
+endpoints negotiate a supported clock and use a bounded band-limited converter
+to/from the modem's internal clock. Different 44.1/48/96 kHz cards can share the
+same modem settings. Conversion cannot restore frequencies outside the physical
+card's passband. The GUI indicates when the selected band exceeds the converter's
+usable passband; actual analog response remains device-dependent.
 `--snr` is simulated sample-power SNR in dB. Simulation presets instead specify
 transmit dBm and channel attenuation, with thermal noise at 290K and a 10dB
 receiver noise figure. Extremely weak presets may produce only noise.

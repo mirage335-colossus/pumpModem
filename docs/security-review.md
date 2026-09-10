@@ -1,10 +1,10 @@
 # Implementation security review — 2026-09-10
 
-This is a focused source and behavior review updated for the version 0.2 implementation,
+This is a focused source and behavior review updated for the version 0.3 implementation,
 not an independent security audit or a claim that the original specification is
 fully implemented. The review covered cryptography, keyfile handling, packet
 release ordering, CLI output, GUI cache/clipboard boundaries, and QR rendering.
-Version 0.2's incremental DSP and differential 16-APSK waveform are a new audio
+Version 0.3's incremental DSP and adaptive differential APSK waveforms are a new audio
 implementation; the packet and keyfile formats are unchanged. Historical test
 results below do not establish validation of the new waveform. Current execution
 results are tracked separately in [validation.md](validation.md).
@@ -22,7 +22,7 @@ results are tracked separately in [validation.md](validation.md).
 | Provisional live text could be mistaken for verified content. | Pending ticker rows cannot trigger normal clipboard copy or file saves; only complete FEC and digest/MAC verification populates the received cache. |
 | UTF-8 C1 controls could appear in named key labels. | Keyring names reject ASCII and C1 controls, malformed UTF-8, duplicates and out-of-bounds lengths. |
 | Text packets appeared in the received-file list. | The list projects only verified file/screenshot kinds; text stays available for exact ticker clipboard copy. File selection follows packet ID despite cache changes. |
-| Unit-circle constellation normalization hid transmitted amplitude information. | Shared 16-APSK carries amplitude and phase; measured amplitudes are retained and the GUI uses one common I/Q display scale. This is a signal-display correction, not an authentication mechanism. |
+| Unit-circle constellation normalization hid transmitted amplitude information. | Shared APSK carries amplitude and phase; measured amplitudes are retained and the GUI uses one common I/Q display scale. This is a signal-display correction, not an authentication mechanism. |
 | Long-tone waveform allocation confused content limits with DSP limits. | Streaming uses an independent bounded workspace and incrementally emitted/received data. Packet/cache limits remain content-based; batch PCM/WAV allocation remains separate. Regression tests explicitly distinguish streaming and batch eligibility. |
 | A very fast simulated transmission could finish between GUI polls and leave the UI busy. | A persistent terminal-state marker records completion/cancellation; ordered event serials preserve pending-before-final observations. |
 
@@ -62,7 +62,7 @@ packet digest.
   calls the C++ service directly; saves require an explicit path and
   exclusive creation.
 
-## Version 0.2 checks and remaining validation boundaries
+## Version 0.3 checks and remaining validation boundaries
 
 The new GUI policy tests cover file-kind filtering, strict clipboard eligibility,
 one active transmission, and cooldown only for actual encrypted output. The
@@ -70,6 +70,12 @@ regression suite covers long tones without duration-sized PCM, fractional-carrie
 24 kHz PCM reception, automatic integration beyond the previous ceiling and
 independent five-second training. Adding those tests is not a claim that they
 have passed on every target; execution evidence belongs in validation.md.
+
+Adaptive profiles use two through six bits per symbol with geometry-based noise
+and drift margins; they do not change cryptographic validation. Symbol padding
+is removed before packet decoding. Hardware rate conversion uses bounded filter
+state and exposes its physical passband. Simulation review retains only bounded
+diagnostics, with received observations distinct from transmitted ideal symbols.
 
 The accelerated simulator assumes ideal carrier/symbol timing and adds noise to
 integrated observations. It shares waveform mapping and receiver decisions with

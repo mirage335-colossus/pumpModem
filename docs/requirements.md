@@ -1,8 +1,8 @@
 # Implementation coverage
 
-This matrix records version 0.2 behavior and its limits. It is not acceptance of
-all performance and hardware claims in the original design. The 0.2 waveform is
-incompatible with 0.1; packet versions 1/2 and existing keyfiles are unchanged.
+This matrix records version 0.3 behavior and its limits. It is not acceptance of
+all performance and hardware claims in the original design. Adaptive audio peers
+need matching 0.3 settings; packet versions 1/2 and existing keyfiles are unchanged.
 [Test execution results](validation.md) distinguish measured results from design
 and source-level checks.
 
@@ -20,15 +20,15 @@ and source-level checks.
 | Cipher streams | AES-256-CTR, HKDF purpose/epoch separation and independent HMAC. Data, DSSS and Scrambler purposes are connected; FHSS purpose is reserved without RF hopping. |
 | Time and key search | Finite timing hypotheses at one configured carrier. Live receiver bank covers loaded keys and whole-second candidate epochs, default ±6 seconds, API maximum ±60 seconds subject to aggregate workspace. No unlimited clock search or nanosecond time discipline. |
 | Transmit policy | One active GUI TX. Six-second cooldown applies to actual encrypted output; simulation and plaintext output have no cooldown. This does not coordinate separate processes or hosts sharing a key. |
-| Phase and amplitude modulation | Shared differential 16-APSK with two amplitude rings, eight phase positions and four bits per payload symbol. Independent keyed spreading layers and exact named pattern/tone choices remain. No rotating high-order lookup, trellis decoder or adaptive rate selection. |
-| Automatic weak-signal duration | Bandwidth and target C/N0 determine sample/carrier settings and estimated integration for an 18 dB symbol-energy target. Automatic duration can exceed the largest named 16,384-chip tone. Blind protected-bootstrap acquisition avoids a mandatory five-second training gate. Finite numeric/workspace/timing limits remain; no measured sensitivity guarantee. |
+| Phase and amplitude modulation | Shared differential 4/8/16/32/64-APSK with two through eight amplitude rings, at most eight phase positions and two through six bits per symbol. Equal average power and Gray adjacency across profiles. Independent keyed spreading and named pattern/tone choices remain. |
+| Automatic weak-signal duration | Bandwidth and target C/N0 determine constellation density and integration using geometric noise/drift margins. The highest modeled rate meeting the margin wins. Automatic duration can exceed 16,384 chips. Blind protected-bootstrap acquisition avoids a mandatory five-second training gate. Finite numeric/workspace/timing limits remain. |
 | Long-tone memory behavior | Continuous TX/RX and accelerated simulation process bounded chunks/integrals, retaining packet content separately. They do not allocate PCM for the full duration. Legacy WAV/vector operations remain batch and can reject large waveforms. |
-| Near-best throughput | Not established. Four bits per symbol before overhead, with longer integration reducing throughput. No capacity benchmark, LDPC, equalizer, adaptive QAM/APSK, clock-resampling tracker or measured RF sensitivity. |
-| Bandwidth | Nominal 1..192000 Hz planning selects 48/96/192/384 kHz sampling and a fitting carrier; the 24 kHz preset uses 96 kHz sampling. Rectangular pulses have sidelobes, without a certified spectral mask. |
+| Near-best throughput | Planner maximizes gross rate over the supported APSK profiles with explicit engineering margins. At least two symbols carry one byte; phase density stays bounded. Capacity optimality and calibrated sensitivity are not established. No LDPC, adaptive equalizer or oscillator drift tracker. |
+| Bandwidth | Nominal 1..192000 Hz planning sets the internal clock and carrier independently of hardware. Audio negotiates the selected card's supported rate and performs bounded band-limited interpolation/decimation. The GUI exposes physical passband limits. Rectangular pulses retain sidelobes, without a certified spectral mask. |
 | Few-bit status | Exact overhead-free DBPSK and known aligned correlation. No authenticated identity, unknown-beacon discovery or automatic normal/distress monitor. Long integration alone does not establish reliable day-long reception. |
 | Multi-signal reception | Continuous sequential reception at the selected carrier with a finite acquisition/key/epoch bank. No whole-band simultaneous decoder or RF retuning control. |
 | Provisional text | Incomplete corrected frames can produce bounded mutable previews. Pending rows remain labelled and cannot trigger copy/save. Only full packet verification supplies received content. |
-| Diagnostics | Continuous waveform, FFT waterfall, amplitude-preserving constellation, frequency-labelled scrolling text, rate/CPU and virtual-time progress. Larger constellation points share I/Q scale and labelled rings. No second synchronized scrambler constellation. |
+| Diagnostics | Continuous waveform, FFT waterfall, amplitude-preserving constellation, frequency-labelled scrolling text, nonzero slow-rate formatting and rate/CPU/virtual-time progress. Simulation holds a payload-midpoint frame for two seconds and retains up to 2,048 received constellation points afterward. No second synchronized scrambler constellation. |
 | Simulation | CPU-bounded virtual time with shared waveform/decoder and integrated AWGN. Ideal carrier and symbol timing; no wall-clock wait proportional to tone length. Idle noise continues and actual capture resumes after hardware TX. Named dBm/attenuation presets use -174 dBm/Hz plus 10 dB noise figure, normalized to Fs/2. |
 | Physical channel effects | Separate raw PCM tests and batch channel cover arbitrary sample delay and fixed frequency shift. Accelerated simulation excludes arbitrary timing errors, fading, resampling drift and hardware nonlinearities. Extreme presets can fail. |
 | QR Level L | Vendored encoder, UTF-8 ECI, up to 500 Unicode scalars; compose preview and SVG/PBM CLI output. Independent decoding history is recorded in validation results. |

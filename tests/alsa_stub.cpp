@@ -10,12 +10,17 @@ int snd_pcm_open(void** pcm,const char* name,int,int) {
     *pcm=reinterpret_cast<void*>(1);s.selected=name;++s.opens;++s.live;return 0;
 }
 int snd_pcm_set_params(void*,int,int,unsigned,unsigned rate,int,unsigned) {
-    auto& s=alsa_test::state;s.rate=rate;
+    auto& s=alsa_test::state;s.rate=rate;s.configured.emplace_back(s.selected,rate);
+    if(!s.supported_rates.empty() && std::find(s.supported_rates.begin(),s.supported_rates.end(),rate)==s.supported_rates.end())return -22;
     return std::find(s.wrong_format.begin(),s.wrong_format.end(),s.selected)!=s.wrong_format.end()?-22:0;
 }
 long snd_pcm_readi(void*,void* buffer,unsigned long count) {
     auto* pcm=static_cast<std::int16_t*>(buffer);
-    for(std::size_t i=0;i<count;++i)pcm[i]=static_cast<std::int16_t>((alsa_test::state.captured++)%32768);
+    auto& s=alsa_test::state;
+    for(std::size_t i=0;i<count;++i) {
+        pcm[i]=s.sample?s.sample(s.captured,s.rate):static_cast<std::int16_t>(s.captured%32768);
+        ++s.captured;
+    }
     return static_cast<long>(count);
 }
 long snd_pcm_writei(void*,const void* buffer,unsigned long count) {

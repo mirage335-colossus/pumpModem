@@ -2,14 +2,18 @@
 #include "datapump/transfer.hpp"
 #include <chrono>
 #include <iostream>
+#include <string_view>
 #include <thread>
 
 // Generated PCM only: this benchmark never opens an audio device. Run without
 // other CPU-heavy work; its result is a measurement, not a portable test limit.
-int main() {
+int main(int argc, char** argv) {
     using namespace datapump;
     try {
         transfer::Options options;
+        if (argc > 2 || (argc == 2 && (std::string_view(argv[1]).size() != 1 || argv[1][0] < '2' || argv[1][0] > '6')))
+            throw Error("usage: benchmark_receiver [bits-per-symbol: 2..6]");
+        if (argc == 2) options.modem.constellation_bits = static_cast<unsigned>(argv[1][0] - '0');
         options.key.emplace(Bytes(32, 0x37));
         options.timestamp = 1800000000;
         std::vector<std::unique_ptr<modem::StreamingReceiver>> bank;
@@ -45,7 +49,7 @@ int main() {
         catch (const Error&) { if (!stop.stop_requested()) throw; }
         const auto wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         const double media = static_cast<double>(samples) / options.modem.sample_rate;
-        std::cout << "13 keyed epochs, 48 kHz generated PCM: " << media << " media seconds / "
+        std::cout << options.modem.constellation_bits << " bits/symbol, 13 keyed epochs, 48 kHz generated PCM: " << media << " media seconds / "
                   << wall << " wall seconds = " << media / wall << "x real time\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

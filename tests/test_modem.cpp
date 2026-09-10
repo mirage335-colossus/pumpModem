@@ -67,6 +67,14 @@ void cancellation() {
 int main() {
     try {
         cancellation();
+        for(unsigned bits=2;bits<=6;++bits)for(const auto payload_bytes:{1U,71U,72U,73U,129U}) {
+            m::Config adaptive;adaptive.constellation_bits=bits;
+            auto training=m::preamble(adaptive),wire=training;
+            for(unsigned i=0;i<payload_bytes;++i)wire.push_back(static_cast<std::uint8_t>(i*37+bits));
+            const auto samples=m::modulate(wire,adaptive);
+            require(m::demodulate(samples,adaptive,training).bytes==wire,"adaptive raw PCM byte/padding roundtrip");
+            require(samples.size()==m::training_sample_count(adaptive)+m::payload_symbol_count(payload_bytes,adaptive)*m::symbol_sample_count(adaptive),"adaptive PCM sample count mismatch");
+        }
         m::Config c;
         const auto pre = m::preamble(c);
         const auto data = message(c);
@@ -156,7 +164,7 @@ int main() {
         rejects([&] { (void)m::read_wav(huge); }, "oversized data chunk accepted");
         const Bytes status{1,0,1};
         auto status_wave = m::modulate_status(status, c);
-        require(status_wave.size() == static_cast<std::size_t>(std::llround(3 * c.sample_rate / (m::bit_rate(c) / m::bits_per_symbol))), "three bit status padded");
+        require(status_wave.size() == static_cast<std::size_t>(std::llround(3 * c.sample_rate / (m::bit_rate(c) / c.constellation_bits))), "three bit status padded");
         require(m::detect_status(status_wave, status, c) > .99, "status correlation");
         std::cout << "modem tests passed\n";
         return 0;

@@ -148,6 +148,29 @@ void test_complete_frame_encryption_and_spreading() {
     const auto received = transfer::receive(expected, value);
     check(received.packet.message.data == sample().data && received.packet.authenticated, "encrypted spread waveform roundtrip");
 }
+void test_adaptive_symbol_airtime_and_padding() {
+    for (const auto bits : {2U, 3U, 4U, 5U, 6U}) {
+        auto value = options();
+        value.modem.constellation_bits = bits;
+        value.fec = FecMode::off;
+        value.compression = false;
+        auto payload = sample();
+        payload.repeatable = false;
+        payload.data = {0x4d};
+        const auto estimated = transfer::estimate(payload, value);
+        const auto samples = transfer::transmit(payload, value);
+        check(estimated.waveform_samples == samples.size(), "adaptive symbol padding is included in sample estimates");
+        check(std::abs(estimated.total_seconds - static_cast<double>(samples.size()) / value.modem.sample_rate) < 1e-10,
+              "adaptive airtime estimate matches actual PCM duration");
+        auto empty = payload;
+        empty.data.clear();
+        const auto overhead = transfer::estimate(empty, value);
+        check(std::abs(estimated.content_seconds - (estimated.packet_seconds - overhead.packet_seconds)) < 1e-10,
+              "repeat allowance counts incremental symbols including final padding");
+        const auto received = transfer::receive(samples, value);
+        check(received.packet.message.data == payload.data, "short payload is exact across all adaptive constellation sizes");
+    }
+}
 void test_timing_search_and_progress() {
     const auto sender = options(true);
     const auto samples = transfer::transmit(sample(), sender);
@@ -233,6 +256,7 @@ int main() {
         test_shared_packet_pipeline();
         test_airtime_estimates_and_repeat_policy();
         test_complete_frame_encryption_and_spreading();
+        test_adaptive_symbol_airtime_and_padding();
         test_timing_search_and_progress();
         test_simulation_validation_and_cancellation();
         test_valid_packet_ignores_trailing_capture();

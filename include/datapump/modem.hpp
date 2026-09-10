@@ -10,14 +10,15 @@
 #include <vector>
 
 namespace datapump::modem {
-inline constexpr unsigned bits_per_symbol = 4;
 inline constexpr double nominal_signal_power = 0.153125;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
+    // Internal DSP clock, independent of the hardware audio endpoint clock.
     std::uint32_t sample_rate = 48000;
+    unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
     double carrier_hz = 1500;
     double bandwidth_hz = 1200;
-    double training_seconds = 5; // The 0.2 physical format requires exactly five seconds.
+    double training_seconds = 5; // The physical format requires exactly five seconds.
     unsigned spreading_factor = 1;
     // Automatic plans can request integration beyond the named chip factors.
     // Zero retains spreading_factor * quantized chip duration.
@@ -51,6 +52,7 @@ double bit_rate(const Config& config);
 double symbol_seconds(const Config& config);
 std::uint64_t symbol_sample_count(const Config& config);
 std::uint64_t training_sample_count(const Config& config);
+std::size_t payload_symbol_count(std::size_t payload_bytes, const Config& config);
 std::size_t waveform_sample_count(std::size_t wire_bytes, const Config& config);
 // Checks modulation and acquisition working buffers without allocating either.
 bool memory_supported(std::size_t wire_bytes, std::size_t preamble_bytes,
