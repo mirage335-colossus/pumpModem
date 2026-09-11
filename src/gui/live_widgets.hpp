@@ -194,7 +194,7 @@ private:
 class LivePlot : public Fl_Widget {
 public:
     explicit LivePlot(bool constellation) : Fl_Widget(0,0,1,1),is_constellation_(constellation) {
-        if (!constellation) tooltip("Latest sampled waveform. Wheel to zoom the timebase; double-click to restore twelve carrier cycles. Dots are actual samples.");
+        if (!constellation) tooltip("Band-limited reconstruction of captured PCM, with actual sample dots. Wheel to zoom; double-click to restore four carrier cycles. Overview preserves sample peaks.");
     }
     void update(const std::vector<float>& waveform,const std::vector<std::complex<double>>& constellation,
                 const modem::Config& config,bool symbols=false) {
@@ -250,18 +250,26 @@ private:
                 fl_draw(caption.str().c_str(),left+3,top+height-15);
             }
         } else if (!waveform_.empty()) {
-            const auto view=plots::waveform_window(waveform_,config_,zoom_);
+            const auto view=plots::waveform_window(waveform_,config_,zoom_,plots::waveform_kernel_radius);
+            const auto trace=plots::waveform_reconstruction(waveform_,static_cast<std::size_t>(view.data()-waveform_.data()),
+                                                           view.size(),static_cast<std::size_t>(std::max(1,width)));
             const auto trace_height=height-17;
             const auto mid=top+trace_height*.5;
             fl_color(fl_rgb_color(53,71,85)); fl_line(left,static_cast<int>(mid),left+width,static_cast<int>(mid));
             fl_color(fl_rgb_color(91,216,202));
             double scale=1e-12;
             for (auto value:waveform_) scale=std::max(scale,std::abs(static_cast<double>(value)));
+            for (auto value:trace) scale=std::max(scale,std::abs(value));
             const auto screen_y=[&](double value) { return mid-value/scale*trace_height*.43; };
             if (view.size()<=static_cast<std::size_t>(std::max(1,width))) {
                 const auto screen_x=[&](std::size_t i) { return left+static_cast<double>(i)*std::max(0,width-1)/static_cast<double>(std::max<std::size_t>(1,view.size()-1)); };
                 fl_begin_line();
-                for (std::size_t i=0;i<view.size();++i) fl_vertex(screen_x(i),screen_y(view[i]));
+                if (trace.empty()) {
+                    for (std::size_t i=0;i<view.size();++i) fl_vertex(screen_x(i),screen_y(view[i]));
+                } else {
+                    for (std::size_t i=0;i<trace.size();++i)
+                        fl_vertex(left+static_cast<double>(i)*std::max(0,width-1)/static_cast<double>(trace.size()-1),screen_y(trace[i]));
+                }
                 fl_end_line();
                 if (view.size()*4<static_cast<std::size_t>(width))
                     for (std::size_t i=0;i<view.size();++i) fl_rectf(static_cast<int>(screen_x(i))-1,static_cast<int>(screen_y(view[i]))-1,2,2);
@@ -276,7 +284,7 @@ private:
             const auto seconds=static_cast<double>(view.size()-1)/config_.sample_rate;
             std::ostringstream caption;
             caption<<std::setprecision(3)<<seconds*(seconds<.001?1e6:1000)<<(seconds<.001?" us":" ms")
-                   <<" / "<<view.size()<<" samples";
+                   <<" / "<<view.size()<<" samples"<<(trace.empty()?"":" / reconstructed");
             fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(176,193,202));
             fl_draw(caption.str().c_str(),left+2,top+height-1);
         }

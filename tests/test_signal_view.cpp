@@ -1,5 +1,6 @@
 #include "../src/signal_view.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/resampler.hpp"
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -15,8 +16,7 @@ std::vector<float> tone(std::uint64_t start, std::size_t size, const modem::Conf
     return result;
 }
 void actual_default_clock_carrier() {
-    const modem::Config config;
-    check(config.sample_rate==4800 && config.carrier_hz==900,"default carrier fixture no longer exercises the bandwidth-derived clock");
+    modem::Config config; config.sample_rate=4800; config.carrier_hz=900;
     // Zero symbols retain the inner16APSK radius and phase, so the actual
     // transmitter must deliver a pure carrier through its training/data edge.
     modem::StreamingTransmitter source(Bytes(256,0),config);
@@ -55,9 +55,37 @@ void actual_default_clock_carrier() {
     check(first.waveform!=second.waveform,"carrier fixture did not advance to a distinct sampled phase");
     check(std::abs(first.spectrum[384]-second.spectrum[384])<.001,"continuous carrier changed waterfall power between frames");
 }
+void fractional_carrier_capture() {
+    modem::Config config;config.sample_rate=6000;config.carrier_hz=1573;config.bandwidth_hz=1100;
+    for(const auto hardware:{44100U,48000U}) {
+        auto card=config;card.sample_rate=hardware;
+        const auto input=tone(0,hardware,card);
+        audio::Resampler converter(hardware,config.sample_rate);
+        live::detail::SignalWindow window;
+        std::array<float,211> output{};
+        std::size_t consumed=0;
+        while(consumed<input.size()) {
+            const auto count=std::min(input.size()-consumed,1+(consumed*37)%551);
+            const auto progress=converter.process(std::span(input).subspan(consumed,count),output,false);
+            check(progress.consumed || progress.produced,"capture conversion stalled");
+            consumed+=progress.consumed;
+            window.push(std::span(output).first(progress.produced));
+        }
+        const auto frame=window.frame(config);
+        const auto start=window.samples_seen()-frame.waveform.size();
+        const auto expected=tone(start,frame.waveform.size(),config);
+        for(std::size_t i=0;i<expected.size();++i)
+            check(std::abs(frame.waveform[i]-expected[i])<1e-5,"card-to-plot conversion distorted a received tone");
+        check(frame.constellation.size()>16,"received tone diagnostics lost their observations");
+        for(const auto point:frame.constellation)
+            check(std::abs(point-std::polar(.7,.31))<1e-5,
+                  "fractional-cycle capture windows distort measured I/Q amplitude and phase");
+    }
+}
 }
 int main() {
     try {
+        fractional_carrier_capture();
         actual_default_clock_carrier();
         modem::Config config; config.sample_rate=8000; config.bandwidth_hz=1000; config.carrier_hz=1500;
         const auto samples=tone(0,16000,config);

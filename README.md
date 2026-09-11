@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.1.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,11 +14,12 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.5 adds an automatic waveform timebase, a consistent waterfall color
-scale, accumulated transmit-symbol diagnostics, and GUI keyfile generation.
-Audio frames are whitened to reduce data-dependent constellation bias. Both ends
-of an audio link need matching 0.5 settings; the packet and keyfile formats are
-unchanged. Bandwidth-derived clocks and oscillator impairments remain as in 0.4.
+Version 0.5.1 reconstructs the displayed waveform from captured PCM samples and
+centers narrow audio modes at 1500 Hz. Receive integrations preserve chip and
+symbol boundaries at the new internal clocks. The 0.5 audio whitening, GUI
+keyfile tools and packet/keyfile formats remain unchanged. Both audio endpoints
+must use matching carrier and modem settings; narrow automatic defaults differ
+from 0.5.0.
 
 ## Build and run
 
@@ -99,7 +100,7 @@ ordinary image files; direct operating-system screenshot capture is not implemen
 
 The **Keyfile** menu opens existing files, generates and saves a new 128 MiB
 keyfile with named entries in the background, or opens the loaded file's folder.
-Existing files are never overwritten. The waveform defaults to twelve carrier
+Existing files are never overwritten. The waveform defaults to four carrier
 cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
 retains every FFT bin through peak pooling and uses one labeled color scale for
 its entire history. Click it to clear the history and reset that scale.
@@ -196,8 +197,9 @@ receiver sensitivity or a capacity optimum.
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
 to/from the modem's internal clock. For bandwidth `B`, the internal sample rate
-is `max(64, ceil(4B))` samples/second and the carrier is `0.75B`. The 64 Hz floor
-preserves the fixed training schedule at very narrow bandwidths. Large downsampling
+is `max(6000, ceil(4B))` samples/second and the carrier is `max(1500, 0.75B)` Hz.
+The 6 kHz floor represents the real 1500 Hz audio carrier at narrow bandwidths;
+symbol timing and integration remain based on bandwidth. Large downsampling
 ratios use bounded filter stages. Different 44.1/48/96 kHz cards can share the
 same modem settings. Conversion cannot restore frequencies outside the physical
 card's passband. Live GUI audio rejects a selected band that exceeds the converter's

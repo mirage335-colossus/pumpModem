@@ -32,7 +32,7 @@
 
 using namespace datapump;
 #ifndef DATAPUMP_VERSION
-#define DATAPUMP_VERSION "0.5.0"
+#define DATAPUMP_VERSION "0.5.1"
 #endif
 namespace {
 const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text and file modem
@@ -63,8 +63,8 @@ Input/output:
 
 Modem:
   --bw HZ               Nominal bandwidth, default1200 (also 1.2kHz etc.)
-  --sample-rate HZ      Internal DSP clock, 64..120000000; default max(64,4*bw)
-  --carrier HZ          Default 0.75*bw; hardware rate negotiated independently
+  --sample-rate HZ      Internal DSP clock, 64..120000000; default max(6000,4*bw)
+  --carrier HZ          Default max(1500,0.75*bw); explicit overrides stay available
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
   --target-snr DBHZ     Automatic target C/N0; default40, auto unless manual controls
   --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N

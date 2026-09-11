@@ -42,8 +42,8 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
         const double factor=(i==0 || i==signal_window_size/2)?1.:2.;
         result.spectrum.push_back(20*std::log10(std::max(1e-12,std::abs(bins[i])*factor/std::max(1.,weight))));
     }
-    const auto full_chip=std::max<std::size_t>(4,static_cast<std::size_t>(
-        std::llround(static_cast<double>(config.sample_rate)/(config.bandwidth_hz/2)/4))*4);
+    const auto full_chip=std::max<std::size_t>(2,static_cast<std::size_t>(
+        std::ceil(2.*config.sample_rate/config.bandwidth_hz)));
     const auto chip=std::min(full_chip,std::max<std::size_t>(1,samples.size()/16));
     const auto skip=static_cast<std::size_t>((chip-first_sample%chip)%chip);
     const auto angle=std::remainder(-2*std::numbers::pi_v<long double>*config.carrier_hz*
@@ -52,9 +52,18 @@ SignalPlots signal_plots(std::span<const float> samples,const modem::Config& con
     auto oscillator=std::polar(1.,static_cast<double>(angle));
     const auto step=std::polar(1.,-2*std::numbers::pi*config.carrier_hz/config.sample_rate);
     for (std::size_t begin=skip;begin+chip<=samples.size();begin+=chip) {
-        std::complex<double> point{};
-        for (std::size_t j=0;j<chip;++j) { point+=static_cast<double>(samples[begin+j])*oscillator; oscillator*=step; }
-        result.constellation.push_back(point*(2./static_cast<double>(chip)));
+        double xc=0,xs=0,cc=0,ss=0,cs=0;
+        for (std::size_t j=0;j<chip;++j) {
+            const auto c=oscillator.real(),s=oscillator.imag();
+            const auto sample=static_cast<double>(samples[begin+j]);
+            xc+=sample*c;xs+=sample*s;cc+=c*c;ss+=s*s;cs+=c*s;oscillator*=step;
+        }
+        // A captured window need not contain an integer number of half-cycles.
+        // Fit both real carrier bases rather than assuming their cross-term is
+        // zero, which otherwise makes a clean received carrier trace an ellipse.
+        const auto determinant=cc*ss-cs*cs;
+        if(determinant>1e-12*(cc+ss)*(cc+ss))
+            result.constellation.emplace_back((xc*ss-xs*cs)/determinant,(xs*cc-xc*cs)/determinant);
     }
     return result;
 }

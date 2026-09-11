@@ -14,9 +14,9 @@ inline constexpr double nominal_signal_power = 0.153125;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
     // Internal DSP clock, independent of the hardware audio endpoint clock.
-    std::uint32_t sample_rate = 4800;
+    std::uint32_t sample_rate = 6000;
     unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
-    double carrier_hz = 900;
+    double carrier_hz = 1500;
     double bandwidth_hz = 1200;
     double training_seconds = 5; // The physical format requires exactly five seconds.
     unsigned spreading_factor = 1;

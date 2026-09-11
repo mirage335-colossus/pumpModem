@@ -28,9 +28,10 @@ struct Plan {
 // Conservative differential phase/amplitude geometry target, not measured BER.
 double constellation_target_symbol_snr_db(unsigned bits);
 inline constexpr double maximum_bandwidth_hz = 30000000;
-// Internal real-PCM clock: four samples per hertz of occupied bandwidth, with
-// only the 64 Hz floor needed to sample the fixed five-second training frame.
-// Hardware/SDR clocks are negotiated independently at the endpoint boundary.
+// Automatic real-PCM plans center narrow audio bands at 1500 Hz. Wider bands
+// retain the 0.75 * bandwidth carrier. The logical clock covers both the band
+// and carrier with four samples per hertz, keeping the nominal upper edge in
+// the resampler's flat passband. Hardware clocks are negotiated independently.
 std::uint32_t recommended_sample_rate(double bandwidth_hz);
 double recommended_carrier_hz(double bandwidth_hz);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,

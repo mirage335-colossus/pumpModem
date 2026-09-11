@@ -164,7 +164,7 @@ public:
         bandwidth_=new Fl_Input_Choice(0,0,1,1,"Bandwidth");
         for (const auto* item:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","24 kHz","1 MHz","30 MHz"}) bandwidth_->add(item);
         bandwidth_->value("1.2 kHz");
-        bandwidth_->tooltip("1 Hz to 30 MHz. Internal DSP clock follows bandwidth; MHz plans require simulation or a future SDR frontend.");
+        bandwidth_->tooltip("1 Hz to 30 MHz. Narrow audio modes use a 1500 Hz carrier. DSP clock fits bandwidth and carrier; MHz plans require simulation or a future SDR frontend.");
         snr_=new Fl_Input_Choice(0,0,1,1,"Target SNR dB / 1 Hz");
         for (auto value:{"40","6","-6","-60"}) snr_->add(value);
         snr_->value("40");
@@ -600,6 +600,7 @@ private:
         if (snapshot.simulation) diagnostics<<"  |  Channel SNR "<<simulation_channel_snr_<<" dB / media "<<seconds_text(snapshot.virtual_seconds);
         else if (snapshot.hardware_sample_rate) diagnostics<<"  |  Hardware "<<snapshot.hardware_sample_rate/1000.0<<" kHz";
         diagnostics<<"  |  DSP "<<current_settings_.transfer.modem.sample_rate<<" Hz";
+        diagnostics<<"  |  Carrier "<<std::defaultfloat<<std::setprecision(6)<<current_settings_.transfer.modem.carrier_hz<<" Hz";
         const auto upper_edge=current_settings_.transfer.modem.carrier_hz+current_settings_.transfer.modem.bandwidth_hz/2;
         if (!snapshot.simulation && snapshot.audio_passband_hz>0 && upper_edge>snapshot.audio_passband_hz) {
             diagnostics<<"  |  Audio passband exceeded";

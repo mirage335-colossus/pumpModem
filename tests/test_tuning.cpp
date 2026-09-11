@@ -1,4 +1,5 @@
 #include "datapump/tuning.hpp"
+#include "datapump/transfer.hpp"
 #include "../src/constellation.hpp"
 #include <algorithm>
 #include <bit>
@@ -63,13 +64,15 @@ void snr_planning() {
     rejects([]{tuning::resolve(1200,std::numeric_limits<double>::quiet_NaN(),tuning::PatternMode::auto_pattern,false);},"invalid target SNR");
 }
 void bandwidth_derived_clocks() {
-    for(const double bandwidth:{1.,16.,100.,1200.,2400.,24000.,192000.,1000000.,30000000.}) {
+    for(const double bandwidth:{1.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
         const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_tone,false);
-        const auto expected=static_cast<std::uint32_t>(std::max(64.,std::ceil(4*bandwidth)));
-        check(plan.config.sample_rate==expected,"internal sample clock must scale with occupied bandwidth");
-        near(plan.config.carrier_hz,.75*bandwidth,"carrier scales with bandwidth");
+        const auto carrier=std::max(1500.,.75*bandwidth);
+        const auto expected=static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth,4*carrier)));
+        check(plan.config.sample_rate==expected,"internal sample clock must cover occupied bandwidth and the audio carrier");
+        near(plan.config.carrier_hz,carrier,"low-bandwidth audio must use a usable carrier");
+        check(plan.config.carrier_hz-bandwidth/2>=300,"automatic audio band extends below the usable audio range");
         check(plan.config.carrier_hz+bandwidth/2<.42*plan.config.sample_rate,"internal spectrum must fit the conversion passband");
-        check(modem::training_sample_count(plan.config)>=64*5,"fixed training remains sampled at low bandwidth");
+        check(modem::training_sample_count(plan.config)==5ULL*plan.config.sample_rate,"carrier changes must preserve the fixed training duration");
         near(modem::bit_rate(plan.config),3*bandwidth,"strong channel throughput scales without an audio-rate ceiling");
         const auto budget=tuning::link_budget(tuning::simulation_presets()[1],bandwidth,plan.config.sample_rate);
         check(std::isfinite(budget.sample_snr_db),"low and SDR-rate clocks need valid link budgets");
@@ -77,7 +80,35 @@ void bandwidth_derived_clocks() {
     const auto config=tuning::resolve(100,100,tuning::PatternMode::auto_tone,false).config;
     const auto training=modem::preamble(config);
     auto wire=training;wire.insert(wire.end(),{0,0xff,0x35,0xa8});
-    check(modem::demodulate(modem::modulate(wire,config),config,training).bytes==wire,"sub-audio internal clock preserves packet symbols");
+    check(modem::demodulate(modem::modulate(wire,config),config,training).bytes==wire,"narrow audio passband preserves packet symbols");
+    const modem::Config defaults;
+    near(defaults.carrier_hz,tuning::recommended_carrier_hz(defaults.bandwidth_hz),"raw default carrier differs from the automatic carrier");
+    check(defaults.sample_rate==tuning::recommended_sample_rate(defaults.bandwidth_hz),"raw default clock differs from the automatic clock");
+}
+void audio_passband_packet_roundtrips() {
+    // These exercise actual real PCM, including non-integer carrier cycles
+    // per chip and the short symbols chosen for a strong 64-APSK channel.
+    // Integrated simulation alone cannot expose I/Q bin boundary errors.
+    const std::pair<double,tuning::PatternMode> cases[]{
+        {100,tuning::PatternMode::tone_1},{1200,tuning::PatternMode::tone_1},
+        {1200,tuning::PatternMode::pattern_3},{1499,tuning::PatternMode::tone_1},
+        {1499.25,tuning::PatternMode::tone_1},
+        {1703,tuning::PatternMode::pattern_3},{1800,tuning::PatternMode::tone_1}};
+    Message message;message.id[0]=17;
+    for(unsigned i=0;i<128;++i)message.data.push_back(static_cast<std::uint8_t>(i));
+    for(const auto& [bandwidth,mode]:cases) {
+        transfer::Options options;
+        options.modem=tuning::resolve(bandwidth,100,mode,false).config;
+        check(options.modem.constellation_bits==6,"strong audio fixture did not choose a dense constellation");
+        const auto samples=transfer::transmit(message,options);
+        try {
+            const auto decoded=transfer::receive(samples,options);
+            check(decoded.packet.message.data==message.data,"audio passband corrupted the packet payload");
+        } catch(const std::exception& error) {
+            throw std::runtime_error("audio passband "+std::to_string(bandwidth)+" Hz "+
+                std::string(tuning::pattern_mode_name(mode))+": "+error.what());
+        }
+    }
 }
 void adaptive_geometry_and_rates() {
     for(unsigned bits=2;bits<=6;++bits) {
@@ -171,6 +202,6 @@ void sizing_and_validation() {
 }
 }
 int main() {
-    try {modes_and_tones();snr_planning();adaptive_geometry_and_rates();bandwidth_derived_clocks();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_tones();snr_planning();adaptive_geometry_and_rates();bandwidth_derived_clocks();audio_passband_packet_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

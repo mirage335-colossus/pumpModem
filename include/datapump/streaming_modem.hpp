@@ -51,10 +51,12 @@ public:
     ~StreamingReceiver();
     StreamingReceiver(StreamingReceiver&&) noexcept;
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
+    // Choose PCM or integrated observations for a capture; reset before
+    // changing input kinds. Empty spans do not select an input kind.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
     Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
-    // End a finite capture: complete its partial I/Q bin, then observe up to
-    // one symbol of silence. This does not add transmitted framing or airtime.
+    // End a finite capture with at most one symbol of silence, completing
+    // partial candidate integrals without adding transmitted framing/airtime.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
     Diagnostics diagnostics() const;

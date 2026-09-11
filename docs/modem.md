@@ -1,10 +1,11 @@
-# Audio modem reference, application version 0.5
+# Audio modem reference, application version 0.5.1
 
-Version 0.5 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5.1 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
-matching 0.5 modem settings. Constellation mapping and symbol padding remain as
-in 0.3 and clock planning as in 0.4; 0.5 adds public audio-frame whitening. Packet versions
+matching carrier and modem settings. Version 0.5.1 raises narrow automatic audio
+carriers to 1500 Hz and corrects receive integration boundaries. Constellation
+mapping, symbol padding and the 0.5 public whitening mask are unchanged. Packet versions
 1 and 2 and existing keyfile formats remain unchanged; modem configuration changes
 do not migrate or regenerate keys.
 
@@ -15,13 +16,14 @@ The regression suite is described below; current execution results belong in
 
 ## Timing, training, and spreading
 
-The default internal configuration is mono 4,800 Hz PCM, a 900 Hz carrier and
+The default internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
 1,200 Hz nominal bandwidth. For nominal bandwidth `B` from 1 Hz through 30 MHz,
-the planner selects `Fs = max(64, ceil(4B))` and carrier `0.75B`. Thus narrow
-channels do not carry an unnecessary 48 kHz internal clock, while the 30 MHz
-plan uses 120 million internal samples/second. The 64 Hz floor preserves the
-fixed training schedule with at least four samples per training symbol. The
-range is a DSP configuration range; an SDR device backend is not implemented.
+the planner selects `Fs = max(6000, ceil(4B))` and carrier `max(1500, 0.75B)`.
+Narrow audio remains around a usable carrier rather than falling below 300 Hz.
+The 6 kHz floor is needed for this real-PCM carrier representation; it does not
+raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
+internal samples/second. Manual CLI carrier/sample-rate overrides remain available.
+The range is a DSP configuration range; an SDR device backend is not implemented.
 The modem's nominal chip rate is bandwidth / 2.
 `symbol_seconds` is the bandwidth-derived duration (or explicit integration),
 independent of the hardware clock. `symbol_sample_count` rounds that duration
@@ -259,13 +261,19 @@ uses one shared display scale and retains relative amplitudes. Its axes and ampl
 rings are display aids, not a calibration certificate. Decoder diagnostics and
 acquisition scores are evidence of signal processing, never packet authenticity.
 
-The waveform initially shows twelve carrier cycles from the latest buffer,
-with actual sample dots when space permits. The mouse wheel changes the
-timebase and double-click restores it. Zoomed-out views draw each pixel's
+The waveform initially shows four carrier cycles from the latest buffer.
+A bounded 64-tap Blackman-windowed sinc reconstructs the line between measured
+samples, which remain visible as dots. It does not synthesize a presumed carrier.
+Up to 32 captured guard samples on each side avoid edge extrapolation when
+available. The mouse wheel changes the timebase and double-click restores it.
+Zoomed-out views draw each pixel's
 minimum/maximum samples, preserving peaks without skipping input. The waterfall
 uses peak pooling over every FFT bin, and one labeled 100 dB color range for all
 retained rows. Large simulated noise can raise that shared range; a settings
 change or click clears it. Different frequency axes never share a history.
+Unlocked receive I/Q diagnostics fit both carrier bases, including their cross
+term, so a window containing fractional carrier cycles does not introduce an
+artificial amplitude or phase ellipse.
 
 Actual playback shows the transmitter's latest 2,048 payload symbols rather
 than only the symbols fitting in a 2,048-sample waveform. The fixed training is

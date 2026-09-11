@@ -31,7 +31,7 @@ class PumpCase(unittest.TestCase):
 class CommandTests(PumpCase):
     def test_help_and_invalid_options(self):
         self.assertIn(b"simulate", self.run_pump("--help").stdout)
-        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.5.0\n")
+        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.5.1\n")
         self.run_pump("simulate", "--text", "x", "--nonsense", "yes", ok=False)
         self.run_pump("simulate", "--text", "x", "--snr", "nan", ok=False)
         self.run_pump("tx", "--text", "x", ok=False)
@@ -62,14 +62,17 @@ class CommandTests(PumpCase):
         manual=json.loads(self.run_pump("estimate","--text","x","--spreading","1").stdout)
         self.assertEqual(manual["spreading"],1)
         self.assertEqual(manual["constellation_bits"],4)
-        for band, rate in (("100",400),("1.2kHz",4800),("30MHz",120000000)):
+        for band, rate, carrier in (("100",6000,1500),("1.2kHz",6000,1500),("30MHz",120000000,22500000)):
             plan=json.loads(self.run_pump("estimate","--text","x","--bw",band,"--target-snr","110").stdout)
             self.assertEqual(plan["sample_rate"],rate)
+            self.assertEqual(plan["carrier_hz"],carrier)
+        manual=json.loads(self.run_pump("estimate","--text","x","--bw","100","--sample-rate","400","--carrier","75").stdout)
+        self.assertEqual((manual["sample_rate"],manual["carrier_hz"]),(400,75))
         with tempfile.TemporaryDirectory() as folder:
             path = pathlib.Path(folder) / "low-rate.wav"
             self.run_pump("tx", "--text", "independent clock", "--bw", "100", "--output", path)
             with wave.open(str(path), "rb") as wav:
-                self.assertEqual(wav.getframerate(), 400)
+                self.assertEqual(wav.getframerate(), 6000)
             result = self.run_pump("rx", "--input", path, "--bw", "100", "--json")
             self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"independent clock")
         result = self.run_pump("simulate", "--text", "bad crystal", "--bw", "30MHz",

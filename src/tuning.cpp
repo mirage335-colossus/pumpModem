@@ -61,13 +61,13 @@ double constellation_target_symbol_snr_db(unsigned bits) {
     return 10*std::log10(2*3.2*3.2*.30625/(distance*distance));
 }
 std::uint32_t recommended_sample_rate(double bandwidth_hz) {
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
-        throw Error("modem bandwidth must be 1..30000000 Hz");
-    return static_cast<std::uint32_t>(std::max(64.,std::ceil(4*bandwidth_hz)));
+    const auto carrier=recommended_carrier_hz(bandwidth_hz);
+    return static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth_hz,4*carrier)));
 }
 double recommended_carrier_hz(double bandwidth_hz) {
-    (void)recommended_sample_rate(bandwidth_hz);
-    return .75*bandwidth_hz;
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
+        throw Error("modem bandwidth must be 1..30000000 Hz");
+    return std::max(1500.,.75*bandwidth_hz);
 }
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption) {
     const auto sample_rate=recommended_sample_rate(bandwidth_hz);
@@ -75,8 +75,8 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     const auto index=index_of(mode);
     modem::Config base;
     base.bandwidth_hz=bandwidth_hz;
-    // This is an internal analysis/synthesis clock selected from bandwidth;
-    // audio endpoints independently negotiate and resample their hardware rate.
+    // Real passband PCM must sample the carrier even when the message band is
+    // very narrow. Audio endpoints negotiate their hardware clock separately.
     base.sample_rate=sample_rate;
     base.carrier_hz=recommended_carrier_hz(bandwidth_hz);
     const bool tone=mode==PatternMode::auto_tone || index>=9;

@@ -36,9 +36,34 @@ std::vector<int> pattern(const Config& c) {
 bool packet_bootstrap(const Bytes& prefix) {
     try {return packet_bootstrap_possible(prefix) && packet_frame_size(prefix).has_value();}catch(const Error&){return false;}
 }
+struct PcmProjection {
+    double xc=0,xs=0,cc=0,ss=0,cs=0;
+    PcmProjection operator-(const PcmProjection& other)const {
+        return {xc-other.xc,xs-other.xs,cc-other.cc,ss-other.ss,cs-other.cs};
+    }
+    void add(const PcmProjection& other,double sign=1) {
+        xc+=sign*other.xc;xs+=sign*other.xs;
+        cc+=other.cc;ss+=other.ss;cs+=other.cs;
+    }
+    Complex value()const {
+        const auto determinant=cc*ss-cs*cs;
+        return determinant>1e-12?Complex{(xc*ss-xs*cs)/determinant,(xs*cc-xc*cs)/determinant}:Complex{};
+    }
+    static PcmProjection silence(std::uint64_t start,std::uint64_t count,const Config& config) {
+        // A zero-valued tail still contributes the oscillator's Gram matrix.
+        // Its closed form keeps finish bounded even for hour-long symbols.
+        const long double angle=static_cast<long double>(tau)*config.carrier_hz/config.sample_rate;
+        const auto length=static_cast<long double>(count);
+        const auto scale=std::sin(std::remainder(length*angle,static_cast<long double>(tau)))/std::sin(angle);
+        const auto phase=std::remainder((2*static_cast<long double>(start)+length-1)*angle,static_cast<long double>(tau));
+        const auto cosine=scale*std::cos(phase),sine=scale*std::sin(phase);
+        return {0,0,static_cast<double>((length+cosine)/2),static_cast<double>((length-cosine)/2),static_cast<double>(-sine/2)};
+    }
+};
 struct Candidate {
     std::uint64_t end=0,start=0;
     Complex sum{};
+    PcmProjection pcm_sum;
     std::vector<Complex> points;
     std::vector<double> ordered_radii;
     unsigned bits=4;
@@ -315,8 +340,8 @@ struct StreamingReceiver::Impl {
     Diagnostics diagnostic;
     std::size_t constellation_cursor=0;
     Complex oscillator{1,0};
-    double xc=0,xs=0,cc=0,ss=0,cs=0;
-    std::uint64_t pcm_count=0;
+    enum class Input { none,pcm,integrated };
+    Input input=Input::none;
     Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check):config(c),expected(std::move(pre)),validator(std::move(check)),workspace(budget) {
         validate(c);if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
         bootstrap_symbols=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
@@ -449,6 +474,42 @@ struct StreamingReceiver::Impl {
         if(!synced && selection_deadline && position>=selection_deadline)select(output);
         return output;
     }
+    template<class Projection>
+    Bytes feed_pcm(std::uint64_t count,const Projection& projection,bool split_chips,std::stop_token stop) {
+        cancelled(stop);
+        if(count>std::numeric_limits<std::uint64_t>::max()-position)throw Error("receiver sample counter overflow");
+        const auto finish=position+count;Bytes output;
+        const auto first=synced?selected:0,last=synced?selected+1:candidates.size();
+        for(std::size_t index=first;index<last;++index) {
+            if((index&15U)==0)cancelled(stop);
+            auto& candidate=candidates[index];auto cursor=std::max(position,candidate.start);
+            while(cursor<finish) {
+                cancelled(stop);
+                auto end=std::min(finish,candidate.end);
+                double sign=1;
+                if(split_chips) {
+                    const auto offset=cursor-candidate.start;
+                    sign=code[static_cast<std::size_t>((offset/chip)%code.size())];
+                    end=cursor+std::min(end-cursor,chip-offset%chip);
+                }
+                // De-spreading changes the two signal projections only: the
+                // sign appears twice in each Gram product and cancels out.
+                candidate.pcm_sum.add(projection(cursor-position,end-cursor),sign);
+                cursor=end;
+                if(cursor==candidate.end) {
+                    const auto value=candidate.pcm_sum.value();candidate.pcm_sum={};
+                    if(!std::isfinite(value.real()) || !std::isfinite(value.imag()))throw Error("integrated sample magnitude overflow");
+                    completed(index,value,output);
+                    candidate.start=candidate.end;
+                    if(symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
+                    candidate.end+=symbol;
+                }
+            }
+        }
+        position=finish;
+        if(!synced && selection_deadline && position>=selection_deadline)select(output);
+        return output;
+    }
 };
 StreamingReceiver::StreamingReceiver(Config c,Bytes pre,std::size_t workspace,BootstrapValidator validator):impl_(std::make_unique<Impl>(c,std::move(pre),workspace,std::move(validator))){}
 StreamingReceiver::~StreamingReceiver()=default;
@@ -468,38 +529,53 @@ std::size_t StreamingReceiver::working_bytes()const{
 }
 void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.expected,s.workspace,s.validator);impl_=std::move(fresh);}
 Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation> observations,std::stop_token stop) {
-    if(impl_->finished)throw Error("capture already finished; reset before appending input");
-    Bytes output;for(const auto& observation:observations){auto bytes=impl_->feed(observation,true,stop);output.insert(output.end(),bytes.begin(),bytes.end());}return output;
+    auto& s=*impl_;
+    if(s.finished)throw Error("capture already finished; reset before appending input");
+    if(observations.empty())return {};
+    cancelled(stop);
+    if(s.input==Impl::Input::pcm)throw Error("cannot mix PCM and integrated input; reset receiver first");
+    s.input=Impl::Input::integrated;
+    Bytes output;for(const auto& observation:observations){auto bytes=s.feed(observation,true,stop);output.insert(output.end(),bytes.begin(),bytes.end());}return output;
 }
 Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop) {
     auto& s=*impl_;Bytes output;
     if(s.finished)throw Error("capture already finished; reset before appending input");
-    // Solve the real I/Q Gram system instead of assuming an integer number of
-    // carrier cycles per integration. Chunk boundaries do not reset the sums.
-    const auto quantum=std::max<std::uint64_t>(4,std::min<std::uint64_t>(s.chip/4,256));
+    if(samples.empty())return {};
+    cancelled(stop);
+    if(s.input==Impl::Input::integrated)throw Error("cannot mix PCM and integrated input; reset receiver first");
+    s.input=Impl::Input::pcm;
+    // Prefix sums let each timing candidate integrate its exact chip edges
+    // without repeating the oscillator work for every candidate and sample.
+    // Solving shorter arbitrary quanta first mixes adjacent symbol values;
+    // solve the full candidate symbol's Gram system only after de-spreading.
+    constexpr std::size_t block_size=256;
+    std::array<PcmProjection,block_size+1> prefix{};
     const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
-    for(std::size_t i=0;i<samples.size();++i) {
-        if((i&4095U)==0)cancelled(stop);
-        if(!std::isfinite(samples[i]))throw Error("non-finite audio sample");
-        const auto c=s.oscillator.real(),q=-s.oscillator.imag();s.oscillator*=step;
-        s.xc+=samples[i]*c;s.xs+=samples[i]*q;s.cc+=c*c;s.ss+=q*q;s.cs+=c*q;
-        if(++s.pcm_count<quantum)continue;
-        const auto determinant=s.cc*s.ss-s.cs*s.cs;
-        const Complex value=determinant>1e-12?Complex{(s.xc*s.ss-s.xs*s.cs)/determinant,(s.xs*s.cc-s.xc*s.cs)/determinant}:Complex{};
-        auto bytes=s.feed({value,s.pcm_count},false,stop);output.insert(output.end(),bytes.begin(),bytes.end());
-        s.xc=s.xs=s.cc=s.ss=s.cs=0;s.pcm_count=0;
+    for(std::size_t offset=0;offset<samples.size();) {
+        cancelled(stop);
+        const auto count=std::min(block_size,samples.size()-offset);
+        prefix[0]={};
+        for(std::size_t i=0;i<count;++i) {
+            const auto sample=samples[offset+i];
+            if(!std::isfinite(sample))throw Error("non-finite audio sample");
+            const auto c=s.oscillator.real(),q=-s.oscillator.imag();s.oscillator*=step;
+            prefix[i+1]=prefix[i];prefix[i+1].add({sample*c,sample*q,c*c,q*q,c*q});
+        }
+        auto bytes=s.feed_pcm(count,[&](std::uint64_t begin,std::uint64_t length){
+            return prefix[static_cast<std::size_t>(begin+length)]-prefix[static_cast<std::size_t>(begin)];
+        },true,stop);
+        output.insert(output.end(),bytes.begin(),bytes.end());offset+=count;
     }
     return output;
 }
 Bytes StreamingReceiver::finish(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)return {};
     Bytes output;
-    if(s.pcm_count) {
-        const auto determinant=s.cc*s.ss-s.cs*s.cs;
-        const Complex value=determinant>1e-12?Complex{(s.xc*s.ss-s.xs*s.cs)/determinant,(s.xs*s.cc-s.xc*s.cs)/determinant}:Complex{};
-        output=s.feed({value,s.pcm_count},false,stop);s.pcm_count=0;
-    }
-    const auto tail=s.feed({{},s.symbol},true,stop);output.insert(output.end(),tail.begin(),tail.end());s.finished=true;
+    if(s.input==Impl::Input::pcm)output=s.feed_pcm(s.symbol,[&](std::uint64_t begin,std::uint64_t length){
+        return PcmProjection::silence(s.position+begin,length,s.config);
+    },false,stop);
+    else output=s.feed({{},s.symbol},true,stop);
+    s.finished=true;
     return output;
 }
 SymbolObservation add_awgn(SymbolObservation observation,double sample_snr_db,std::mt19937_64& random) {

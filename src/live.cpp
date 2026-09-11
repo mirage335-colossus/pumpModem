@@ -563,7 +563,7 @@ struct Session::Impl {
                 }
                 if (wave && wave->stop.stop_requested()) {
                     wave.reset();
-                    if (simulation_bank) simulation_bank->admission_epoch.reset();
+                    simulation_bank.reset(); simulation_channel.reset();
                 }
                 if (!wave && ready) {
                     wave = std::move(ready); new_burst = true; last_receiver_constellation.clear();
@@ -644,7 +644,10 @@ struct Session::Impl {
                         }
                         if (wave->tail_started && !wave->tail_remaining) {
                             complete_tx(*wave); wave.reset();
-                            simulation_bank->admission_epoch.reset();
+                            // Burst observations and idle PCM use different
+                            // integration domains; begin fresh acquisition
+                            // before returning to continuous idle reception.
+                            simulation_bank.reset(); simulation_channel.reset();
                         }
                         // The media clock advances only by processed quanta;
                         // yielding here keeps control/GUI threads responsive.

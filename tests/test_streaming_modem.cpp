@@ -9,6 +9,88 @@
 #include <chrono>
 #include <thread>
 using namespace datapump;
+void receiver_input_modes() {
+    modem::Config config;
+    modem::StreamingReceiver receiver(config,modem::preamble(config));
+    const std::array<modem::SymbolObservation,1> integrated{{{{.1,.2},1}}};
+    const std::array<float,1> pcm{.1F};
+    receiver.push({});receiver.push_symbols(integrated);receiver.push({});
+    bool rejected=false;try{receiver.push(pcm);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("receiver silently mixed integrated and PCM partial symbols");
+    receiver.reset();receiver.push_symbols({});receiver.push(pcm);receiver.push_symbols({});
+    rejected=false;try{receiver.push_symbols(integrated);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("receiver silently mixed PCM and integrated partial symbols");
+    receiver.reset();receiver.push_symbols(integrated);receiver.finish();
+}
+void exact_pcm_boundaries() {
+    // Ten- and nine-sample chips are deliberately not multiples of a four
+    // sample I/Q integration quantum. Dense symbols must retain their exact
+    // chip and symbol boundaries, including across arbitrary input chunks.
+    for(const double bandwidth:{1200.,1499.,1499.25,1703.})
+        for(unsigned bits=4;bits<=6;++bits)for(unsigned mode=0;mode<2;++mode) {
+        modem::Config config;config.bandwidth_hz=bandwidth;
+        config.sample_rate=static_cast<unsigned>(std::ceil(std::max(6000.,4*bandwidth)));
+        config.carrier_hz=1500;config.constellation_bits=bits;
+        config.spreading_mode=mode?modem::SpreadingMode::pattern:modem::SpreadingMode::tone;
+        config.spreading_factor=mode?3:1;
+        Message message;message.kind=MessageKind::file;message.filename="boundary.bin";message.id[0]=37;
+        for(unsigned i=0;i<131;++i)message.data.push_back(static_cast<std::uint8_t>(i*71+19));
+        PacketOptions options;options.fec=bits==5?FecMode::off:FecMode::rs60;
+        const auto frame=encode_packet(message,options);
+        auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
+        const Crypto key(Bytes(32,0x3d));constexpr std::uint64_t epoch=1800000000;
+        auto wire=key.xor_data(plain,epoch);
+        // Fixed zero training ends on phase zero, giving the undelayed case
+        // a known reference for a completely byte-exact pre-FEC comparison.
+        std::fill_n(wire.begin(),32,0);
+        for(const unsigned delay:{0U,17U}) {
+            modem::StreamingTransmitter source(wire,config);
+            modem::StreamingReceiver receiver(config,Bytes(wire.begin(),wire.begin()+32),8*1024*1024,[&](const Bytes& prefix){
+                // Isolate exact PCM boundaries from blind acquisition's
+                // training-edge aliases, whose first two symbol decisions
+                // can need bootstrap FEC. Other tests exercise that policy.
+                if(prefix.size()!=packet_prefix_size)return false;
+                for(std::size_t i=0;i<prefix.size();++i) {
+                    const unsigned reference_bits=(delay || mode) && i==0?7U<<(8-bits):0;
+                    if(((prefix[i]^wire[32+i])&~reference_bits)!=0)return false;
+                }
+                return true;
+            });
+            receiver.push(std::vector<float>(delay));
+            constexpr std::array<std::size_t,6> partitions{1,13,257,511,7,96};
+            std::array<float,511> block{};Bytes received;std::size_t partition=0;
+            while(!source.finished()) {
+                const auto count=source.read(std::span(block).first(partitions[partition++%partitions.size()]));
+                const auto bytes=receiver.push(std::span(block).first(count));received.insert(received.end(),bytes.begin(),bytes.end());
+            }
+            const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+            const auto context=" at "+std::to_string(bandwidth)+" Hz, "+std::to_string(bits)+" bits, mode "+std::to_string(mode)+", delay "+std::to_string(delay);
+            if(received.size()<wire.size())throw std::runtime_error("PCM boundary acquisition failed"+context);
+            for(std::size_t i=0;i<wire.size();++i) {
+                // Capture delay or a phase-inverted pattern timing alias
+                // leaves only the first symbol's differential phase unknown.
+                // Its amplitude, every later header bit and all body bytes
+                // must be exact before FEC. Undelayed tones compare every bit.
+                const unsigned reference_bits=(delay || mode) && i==32?7U<<(8-bits):0;
+                if(((wire[i]^received[i])&~reference_bits)!=0)
+                    throw std::runtime_error("PCM boundary changed wire byte "+std::to_string(i)+" ("+std::to_string(wire[i])+" to "+std::to_string(received[i])+", offset "+std::to_string(receiver.diagnostics().sample_offset)+") before error correction"+context);
+            }
+            received=key.xor_data(received,epoch);
+            try {
+                const auto decoded=decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(plain.size())),options);
+                if(decoded.message.data!=message.data)throw std::runtime_error("PCM boundary payload mismatch"+context);
+            } catch(const Error& error){throw std::runtime_error(std::string(error.what())+context);}
+            if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("PCM boundary integration exceeded workspace");
+        }
+    }
+    modem::Config slow;slow.spreading_factor=16384;slow.integration_seconds=3600;
+    modem::StreamingReceiver idle(slow,modem::preamble(slow));
+    idle.push(std::array<float,3>{.1F,.2F,-.1F});
+    const auto before=std::chrono::steady_clock::now();
+    if(!idle.finish().empty() || idle.synchronized() || std::chrono::steady_clock::now()-before>std::chrono::seconds(2))
+        throw std::runtime_error("PCM end-of-capture padding scales with an hour-long symbol");
+    if(!idle.finish().empty())throw std::runtime_error("PCM capture finish is not idempotent");
+}
 void transmitted_constellation_history() {
     modem::Config config;config.constellation_bits=6;
     auto wire=modem::preamble(config);
@@ -258,6 +340,8 @@ void recent_pcm_preview() {
 }
 int main() {
     try {
+        receiver_input_modes();
+        exact_pcm_boundaries();
         modem::Config config;
         config.spreading_mode=modem::SpreadingMode::tone;
         config.spreading_factor=1024;

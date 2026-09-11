@@ -5,6 +5,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <numbers>
 #include <stdexcept>
 
 using namespace datapump;
@@ -26,7 +27,7 @@ std::vector<float> convert(std::span<const float> input, std::uint32_t from, std
     }
     return result;
 }
-void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_card, unsigned bits) {
+void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_card, unsigned bits, bool voice_channel=false) {
     transfer::Options options;
     options.modem = tuning::resolve(bandwidth, 100, tuning::PatternMode::auto_tone, false).config;
     options.modem.constellation_bits = bits;
@@ -43,6 +44,19 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
     // The continuous analog channel has one physical timeline. Its two cards
     // sample that timeline at different rates; neither changes the modem plan.
     auto samples = convert(transfer::transmit(message, options), internal_rate, output_card);
+    if(voice_channel) {
+        // Four cascaded 300 Hz high-pass sections model a voice path that
+        // cannot use a sub-audio carrier. Preserve the actual channel phase
+        // and amplitude response; the packet must still validate afterward.
+        const auto coefficient=std::exp(-2*std::numbers::pi*300/output_card);
+        for(unsigned section=0;section<4;++section) {
+            double previous_input=0,previous_output=0;
+            for(auto& sample:samples) {
+                const auto output=coefficient*(previous_output+sample-previous_input);
+                previous_input=sample;previous_output=output;sample=static_cast<float>(output);
+            }
+        }
+    }
     samples = convert(samples, output_card, input_card);
     samples = convert(samples, input_card, internal_rate);
     const auto received = transfer::receive(samples, options);
@@ -55,7 +69,7 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
 int main() {
     try {
         roundtrip(1200, 44100, 48000, 4);
-        roundtrip(100, 48000, 44100, 4);
+        roundtrip(100, 48000, 44100, 4, true);
         roundtrip(2400, 48000, 44100, 4);
         roundtrip(2400, 44100, 96000, 6);
         // Wideband transport uses cards with enough physical passband. Rate

@@ -9,10 +9,12 @@ Version 2 adds a variable-length short-payload prefix code. The framing, metadat
 integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
 versions; an older decoder that accepts only version 1 cannot read version 2.
 
-Application release 0.5 retains differential 4/8/16/32/64-APSK and symbol-boundary
+Application release 0.5.1 retains differential 4/8/16/32/64-APSK and symbol-boundary
 padding around the protected bootstrap. It applies a public additive whitening
 mask to the audio frame after encryption, excluding the training. Audio peers
-require matching 0.5 modem settings; older audio decoders do not remove this mask.
+require matching modem settings and the 0.5 whitening mask. Release 0.5.1 changes
+narrow automatic audio defaults to a 1500 Hz carrier, so both endpoints must
+agree on the carrier and internal clock as well as bandwidth and pattern.
 This does not change either packet version or the existing keyfile formats;
 modem configuration and packet codec versions are separate concepts.
 

@@ -4,15 +4,78 @@
 
 using namespace datapump;
 void check(bool condition, const char* message) { if (!condition) throw Error(message); }
+namespace {
+void sampled_waveform_reconstruction() {
+    constexpr auto radius = gui::plots::waveform_kernel_radius;
+    constexpr std::size_t first = 100, count = 65, width = 400;
+    std::vector<float> source(256);
+    for (const auto frequency : {.03125, .1875, .25, .3125, .4}) {
+        for (std::size_t i = 0; i < source.size(); ++i)
+            source[i] = static_cast<float>(.7 * std::cos(2 * std::numbers::pi * frequency * static_cast<double>(i) + .31));
+        const auto trace = gui::plots::waveform_reconstruction(source, first, count, width);
+        check(trace.size() > count && trace.size() <= 2 * width + 1, "reconstruction must follow display resolution within a fixed bound");
+        const auto subdivisions = (trace.size() - 1) / (count - 1);
+        double largest_error = 0;
+        for (std::size_t i = 0; i < trace.size(); ++i) {
+            const auto time = static_cast<double>(first) + static_cast<double>(i) / static_cast<double>(subdivisions);
+            const auto expected = .7 * std::cos(2 * std::numbers::pi * frequency * time + .31);
+            largest_error = std::max(largest_error, std::abs(trace[i] - expected));
+        }
+        check(largest_error < .0001, "display reconstruction distorted a captured band-limited sinusoid");
+        for (std::size_t i = 0; i < count; ++i)
+            check(trace[i * subdivisions] == source[first + i], "reconstruction moved an actual sample knot");
+    }
+    modem::Config config;
+    config.sample_rate = 6000; config.carrier_hz = 1500;
+    const auto guarded = gui::plots::waveform_window(source, config, 1, radius);
+    check(guarded.size() == 17 && guarded.data() >= source.data() + radius && guarded.data() + guarded.size() == source.data() + source.size() - radius,
+          "visible reconstruction must use measured guard samples, without extrapolating its endpoints");
+    check(gui::plots::waveform_window(source, config, 100, radius).size() == source.size(),
+          "overview zoom must retain the full capture instead of cropping it for reconstruction");
+    std::fill(source.begin(), source.end(), .37f);
+    const auto dc = gui::plots::waveform_reconstruction(source, first, count, width);
+    for (const auto value : dc) check(std::abs(value - .37f) < 1e-7, "reconstruction changed a DC level");
+    for (const auto window_start : {std::size_t{0}, source.size() - count})
+        for (const auto value : gui::plots::waveform_reconstruction(source, window_start, count, width))
+            check(std::abs(value - .37f) < 1e-7, "partial capture boundary changed the trace gain");
+    const std::array<float, 2> partial{-.7f, .2f};
+    const auto startup = gui::plots::waveform_reconstruction(partial, 0, partial.size(), width);
+    check(startup.front() == partial.front() && startup.back() == partial.back(), "startup trace changed measured endpoints");
+    for (const auto value : startup) check(std::isfinite(value) && std::abs(value) <= .7f, "partial capture produced an invalid or unbounded trace");
+    std::fill(source.begin(), source.end(), 0);
+    source[first + count / 2] = 1;
+    const auto impulse = gui::plots::waveform_reconstruction(source, first, count, width);
+    check(*std::min_element(impulse.begin(), impulse.end()) < -.1, "sampled impulse lost its band-limited sidelobes");
+    const auto subdivisions = (impulse.size() - 1) / (count - 1);
+    for (std::size_t i = 0; i < count; ++i)
+        check(impulse[i * subdivisions] == source[first + i], "impulse sample was replaced by a manufactured carrier");
+    std::vector<float> other(source.size());
+    for (std::size_t i = 0; i < source.size(); ++i) other[i] = static_cast<float>(static_cast<int>((i * 37) % 101) - 50) / 64;
+    const auto noise = gui::plots::waveform_reconstruction(other, first, count, width);
+    for (std::size_t i = 0; i < source.size(); ++i) source[i] += other[i];
+    const auto combined = gui::plots::waveform_reconstruction(source, first, count, width);
+    for (std::size_t i = 0; i < combined.size(); ++i)
+        check(std::abs(combined[i] - impulse[i] - noise[i]) < 2e-7, "display reconstruction must preserve arbitrary captured signals linearly");
+    check(gui::plots::waveform_reconstruction(source, first, count, 16).empty(), "overview must retain raw sample envelopes instead of reconstructing subpixel cycles");
+    check(gui::plots::waveform_reconstruction(source, first, 2, 1000000).size() <= 8193, "extreme zoom exceeded the reconstruction allocation limit");
+    check(gui::plots::waveform_reconstruction({}, 0, 0, 100).empty(), "empty reconstruction must be harmless");
+    check(gui::plots::waveform_reconstruction(source, 0, 1, 100).empty(), "a single sample cannot define a reconstructed trace");
+    check(gui::plots::waveform_reconstruction(source, first, count, 0).empty(), "zero-width reconstruction must be harmless");
+}
+}
 int main() {
     try {
+        sampled_waveform_reconstruction();
         modem::Config config;
+        config.sample_rate = 4800; config.carrier_hz = 900;
         std::vector<float> wave(2048);
         for (std::size_t i = 0; i < wave.size(); ++i)
             wave[i] = static_cast<float>(.7 * std::cos(2 * std::numbers::pi * config.carrier_hz * static_cast<double>(i) / config.sample_rate));
         const auto view = gui::plots::waveform_window(wave, config);
-        check(view.size() == 65 && view.data() == wave.data() + wave.size() - view.size(),
-              "default display must show twelve carrier cycles without altering the latest samples");
+        check(view.size() == 23 && view.data() == wave.data() + wave.size() - view.size(),
+              "default display must show four carrier cycles without altering the latest samples");
+        check(gui::plots::waveform_window(wave, config, 3).size() == 65,
+              "timebase zoom must continue to expose the twelve-cycle sparse-sample fixture");
         check(gui::plots::waveform_window(wave, config, 100).size() == wave.size(), "zoom out must expose the full capture");
         config.sample_rate = 120000000; config.carrier_hz = 22500000;
         check(gui::plots::waveform_window(wave, config).size() == view.size(), "waveform timebase must follow bandwidth, not a fixed audio clock");

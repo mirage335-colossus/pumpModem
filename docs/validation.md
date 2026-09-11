@@ -1,9 +1,65 @@
-# Local validation record — version 0.5
+# Local validation record — version 0.5.1
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5 checks
+## Completed 0.5.1 checks
+
+* Native GUI Release: all **23 CTest suites passed**.
+* CLI-only Release with Python discovery explicitly disabled: all **19 suites
+  passed**, including relocation checks.
+* All **22 ASan/UBSan CTest suites passed**, including the separate dense PCM
+  boundary stress suite (302.93 seconds in Debug). LeakSanitizer is disabled
+  because this host's ptrace environment prevents it from starting.
+* The native GUI workflow passed in both Release and ASan/UBSan builds on a
+  private Xvfb display. It covered production keyfile generation and selection,
+  overwrite refusal, idle input, verified text/file reception, clipboard copying,
+  exclusive saves, held simulation diagnostics and all plots returning live.
+
+## Evidence for the 0.5.1 changes
+
+Automatic audio uses `carrier = max(1500, 0.75 * bandwidth)` Hz and
+`Fs = max(6000, ceil(4 * bandwidth))`. Nominal symbol timing still depends on
+bandwidth; hardware clocks remain separately negotiated. Tests cover planning
+from 1 Hz through 30 MHz, fractional bandwidths, manual CLI overrides and actual
+PCM packets at the new carrier/rate combinations. A 100 Hz packet also crosses
+four cascaded 300 Hz high-pass sections and separate 48/44.1 kHz conversions.
+
+The received-tone regression exercises the actual capture converter at both
+44.1 and 48 kHz with irregular input blocks. It checks sample values and fitted
+I/Q against a known 1573 Hz tone at a 6 kHz logical rate, within 1e-5. The old
+fractional-cycle I/Q fit fails this test. PCM acquisition now accumulates the
+carrier projections over each candidate's exact chip and symbol boundaries,
+then solves their Gram system. Dense 4/5/6-bit tone and pattern fixtures inspect
+wire bytes before packet error correction, including fractional-cycle chips and
+delayed, fragmented input. This focused fixture validates against the known
+bootstrap to separate integration accuracy from blind-acquisition startup
+aliases; normal transfer/live tests retain the real protected-bootstrap search.
+Undelayed tones compare every bit. Delayed/patterned cases exempt only the first
+symbol's unknown differential phase; its amplitude and all following bits must
+match before FEC.
+End-of-capture flushing remains bounded for hour-long
+symbols. Simulation receivers reset before switching back to idle PCM.
+
+The waveform now defaults to four carrier cycles, using captured guard samples
+and a bounded 64-tap Blackman-windowed sinc for the line between measured sample
+dots. Tests cover exact sample knots, DC gain, impulse response, linearity,
+allocation bounds, and reconstruction error below 1e-4 through 0.4 times the
+sample rate. The production-size plot was visually inspected on an isolated
+display. Dense overviews continue to show raw extrema.
+
+These are generated-signal, converter and software-driver tests. A physical
+audio link and an AC-versus-battery comparison have not been measured here.
+
+With other test/build workers stopped, the 6 kHz receiver bank with thirteen
+keyed epochs processed generated noise at 2.94x real time for the automatic
+three-bit profile and 8.33x for six bits. A continuous 1500 Hz carrier at amplitude
+0.35 measured 8.33x and 0.68x respectively. The dense six-bit carrier case is a
+known CPU limit: its ambiguous amplitude lattice keeps blind bootstrap searches
+busy. These single-host measurements do not establish battery-state performance
+or real-time operation for every signal/key-bank configuration.
+
+## Recorded 0.5 checks
 
 * Native GUI Release: all **23 CTest suites passed**.
 * CLI-only Release with Python discovery explicitly disabled: all **19 suites
@@ -45,7 +101,7 @@ ideal accelerated preview and actual PCM. The carrier FFT level matched its
 expected amplitude. The regression checks continuous frame phase, primary FFT
 power and suppression of aliased square-wave harmonics by more than 70 dB.
 
-The waveform view now defaults to twelve carrier cycles, retains actual sample
+The 0.5 waveform view defaulted to twelve carrier cycles, retained actual sample
 values, and uses extrema when zoomed out. Waterfall tests check peak preservation,
 a shared color scale, bounded history and clearing on frequency-axis changes.
 Independent enumeration confirmed that all 1,025 original FFT-bin positions map
