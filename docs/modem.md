@@ -1,10 +1,12 @@
-# Audio modem reference, waveform version 0.3
+# Audio modem reference, application version 0.5
 
-Version 0.3 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
-matching 0.3 modem settings. Packet versions 1 and 2, and the existing keyfile formats,
-remain unchanged; changing the waveform does not migrate or regenerate keys.
+matching 0.5 modem settings. Constellation mapping and symbol padding remain as
+in 0.3 and clock planning as in 0.4; 0.5 adds public audio-frame whitening. Packet versions
+1 and 2 and existing keyfile formats remain unchanged; modem configuration changes
+do not migrate or regenerate keys.
 
 This is a reference modem. It does not establish near-capacity throughput,
 calibrated radio sensitivity, a spectral mask, or low probability of intercept.
@@ -13,8 +15,14 @@ The regression suite is described below; current execution results belong in
 
 ## Timing, training, and spreading
 
-The default internal configuration is mono 48 kHz PCM, a 1,500 Hz carrier and
-1,200 Hz nominal bandwidth. The modem's nominal chip rate is bandwidth / 2.
+The default internal configuration is mono 4,800 Hz PCM, a 900 Hz carrier and
+1,200 Hz nominal bandwidth. For nominal bandwidth `B` from 1 Hz through 30 MHz,
+the planner selects `Fs = max(64, ceil(4B))` and carrier `0.75B`. Thus narrow
+channels do not carry an unnecessary 48 kHz internal clock, while the 30 MHz
+plan uses 120 million internal samples/second. The 64 Hz floor preserves the
+fixed training schedule with at least four samples per training symbol. The
+range is a DSP configuration range; an SDR device backend is not implemented.
+The modem's nominal chip rate is bandwidth / 2.
 `symbol_seconds` is the bandwidth-derived duration (or explicit integration),
 independent of the hardware clock. `symbol_sample_count` rounds that duration
 up once to an internal PCM sample; exact airtime estimates include this rounding.
@@ -55,6 +63,26 @@ b8 4d 03 e7 9a 61 35 cf 28 d0 7e 94 ab 16 f3 59
 The full preamble, framed packet and parity are encrypted together when a key is
 selected. The separate few-bit status API has no preamble.
 
+After private encryption, the audio transfer layer XORs the frame after its
+32-byte training prefix with a public whitening stream. This removes the strong
+amplitude/phase bias of structured headers without adding bytes or airtime.
+The protocol seed is the ASCII string `DataPump/audio/whitening/v0.5`, padded
+with zero bytes to 32 bytes, passed to `Crypto`. Use its `Scrambler` purpose,
+epoch zero and frame-relative byte offset; offset zero begins immediately after
+the training. The first 16 mask bytes are `fbd27bba1decfa41e9265d3cc2740276`.
+Both keyed and plain audio use this layer. Receiving removes whitening before
+private decryption, FEC and packet validation; XOR does not spread bit errors.
+Protected-bootstrap trials cache the combined mask once per candidate.
+`pack`/`unpack`, the raw-byte modem API, training and few-bit status are unchanged.
+
+Whitening is public and reversible. It does not add payload entropy, improve
+the modulation's intrinsic capacity, conceal repeated frames, or guarantee low
+probability of intercept. A finite short message need not visit every point,
+and the planner can select a smaller alphabet when its faster symbol rate wins.
+Point occupancy is also different from a white spectrum: this modem still uses
+rectangular pulses, whose sidelobes remain. Pulse shaping and its receiver
+filter must be designed together; see [Analog Devices AN-922](https://www.analog.com/en/resources/app-notes/an-922.html).
+
 The named choices are:
 
 | Mode | Behavior |
@@ -85,12 +113,16 @@ must fit inside the internal DSP passband. The 24 kHz GUI preset uses a 96 kHz
 internal clock and a fitting carrier. That clock is not a sound-card requirement.
 A carrier need not complete an integer number of cycles in a chip.
 
-Audio I/O first tries the internal rate on the selected endpoint, then other
-supported rates, preferring higher clocks to preserve passband. Explicit device
+Audio I/O first tries the internal rate when it lies in the supported audio
+range of 8..384 kHz, then other audio rates, preferring higher clocks to preserve
+passband. Narrower or wider internal clocks stay separate from this hardware
+negotiation. Explicit device
 identity and default-card discovery are preserved. ALSA software resampling and
 WinMM ACM conversion are disabled during this negotiation. A bounded Blackman-
 windowed sinc converter connects the selected hardware clock to the internal
-clock, preserving phase, duration and callback continuity. It uses 256
+clock, preserving phase, duration and callback continuity. Downsampling ratios
+greater than four are decomposed into bounded stages with small intermediate
+buffers instead of allocating a duration-sized filter. Each stage uses 256
 interpolated fractional phases. For unequal rates, its declared flat passband is
 0.42 times the lower rate and its transition rolls off before Nyquist. Equal-rate
 conversion is bit-exact and reports the Nyquist bound of 0.5 times the rate.
@@ -99,11 +131,21 @@ samples, with zero extension at their boundaries. Converter memory depends on
 rate ratio, never transmission duration, and is included in live DSP accounting.
 
 Interpolation cannot restore frequencies beyond hardware Nyquist or compensate
-unknown analog filtering. The GUI shows the negotiated clock and indicates when
-the selected band exceeds the converter's usable passband. Oscillator drift and
+unknown analog filtering. The GUI shows the negotiated clock. Both the GUI and
+direct CLI audio commands reject a selected band that exceeds the negotiated
+converter's usable passband; WAV output remains independent of hardware.
+Oscillator drift and
 physical microphone/speaker frequency response still need device-level validation.
 
 ## Automatic signal planning
+
+The CLI and GUI use automatic planning by default: a target C/N0 of 40 dB-Hz,
+with `auto-keystream` when a key is selected and `auto-pattern` otherwise.
+Explicit CLI `--spreading`, `--scramble`, `--dsss`, `--sample-rate` or `--carrier`
+controls select the manual configuration instead. Those controls cannot be
+combined with an explicit `--target-snr` or `--pattern` automatic plan.
+The simulator's `--snr` describes channel noise and does not select the transmit
+configuration.
 
 `tuning::resolve` accepts bandwidth, target **C/N0 in dB-Hz**, a pattern mode and
 key availability. C/N0 is signal power divided by noise power in a 1 Hz reference
@@ -190,8 +232,9 @@ they do not accumulate an unlimited set of new wall-clock epochs.
 Streaming reception assumes carrier error is within the chosen integration's
 tolerance. The generic batch known-training decoder can estimate a small static
 carrier offset, but that search is not part of the blind streaming packet path.
-Accelerated simulation assumes matched chip despreading and ideal carrier timing;
-it cannot establish arbitrary long encrypted-pattern acquisition on real audio.
+Accelerated simulation assumes matched chip despreading while modeling carrier
+and symbol-clock error; it cannot establish arbitrary long encrypted-pattern
+acquisition on real audio or demonstrate a tracking loop that is not implemented.
 
 `live::Session` owns continuous capture, preparation and decoding workers. Normal
 GUI startup opens the OS-default input; an optional device override is available.
@@ -202,10 +245,35 @@ Cancellation is checked between processing chunks and driver buffer operations.
 A driver blocking inside an operating-system call remains outside that guarantee.
 
 The waveform, windowed FFT and measured complex constellation feed live plots.
-Idle noise plots update about 20 times per second. The constellation uses one
-shared display scale and retains relative amplitudes. Its axes and amplitude
+Plot input is a continuous bounded sample window with an absolute sample origin;
+FFT windows and carrier phase do not restart at an audio callback boundary.
+Varying callback sizes or GUI scheduling therefore do not redefine the signal
+being measured. Rendering is paced to about 20 updates per second as CPU time
+allows; this is not a guarantee against an overloaded audio device or processor.
+Idle simulated noise follows the same 20 Hz cadence with bounded preview chunks.
+Queuing a transmission interrupts that wait; active transmissions run at CPU
+speed independently of their virtual airtime.
+The locked receiver maintains a sliding set of up to 2,048 recent observations,
+and unlocked input supplies current noise/phase diagnostics. The constellation
+uses one shared display scale and retains relative amplitudes. Its axes and amplitude
 rings are display aids, not a calibration certificate. Decoder diagnostics and
 acquisition scores are evidence of signal processing, never packet authenticity.
+
+The waveform initially shows twelve carrier cycles from the latest buffer,
+with actual sample dots when space permits. The mouse wheel changes the
+timebase and double-click restores it. Zoomed-out views draw each pixel's
+minimum/maximum samples, preserving peaks without skipping input. The waterfall
+uses peak pooling over every FFT bin, and one labeled 100 dB color range for all
+retained rows. Large simulated noise can raise that shared range; a settings
+change or click clears it. Different frequency axes never share a history.
+
+Actual playback shows the transmitter's latest 2,048 payload symbols rather
+than only the symbols fitting in a 2,048-sample waveform. The fixed training is
+excluded. Simulation continues to show receiver observations. Labels distinguish
+transmitted and received symbols from raw input I/Q, and show the selected APSK
+alphabet and retained observation count. No ideal or missing points are inserted
+into measured data. Symbol plots retain a nominal unit scale rather than
+stretching a lone inner ring to the outer edge.
 Positive rates too small for decimal display use scientific notation instead of
 rounding to `0.0 bit/s`.
 
@@ -225,26 +293,59 @@ DSP work permits, yielding between chunks; it does not sleep for the advertised
 on-air duration or allocate that duration as PCM. No fixed real-time multiplier
 is required. TX progress distinguishes virtual elapsed seconds from wall-clock
 CPU time, and completion/cancellation remain observable between GUI polls.
+The receiver's candidate epoch window is admitted before packet preparation and
+held through that simulated burst and its tail. A slow CPU or wall-clock jump
+does not expire its candidates. Idle reception and each subsequent burst admit
+current epochs again; the key search still includes all configured receive keys.
 
-For the accelerated AWGN path, complex integrated symbol observations receive
-noise with the variance implied by sample-domain white noise and their sample
-counts. This is a coherent, ideal-carrier, ideal-symbol-timing channel model.
-Uniform-time observation bins cross training/payload boundaries without carrying
-framing labels. Chip despreading alignment is ideal in this statistical model;
-the receiver still searches phase/header hypotheses. It avoids synthesizing
-every sample of a very long tone. It is not a substitute
-for raw PCM acquisition tests, and does not model arbitrary timing offsets,
-resampling drift, phase noise, multipath, nonlinear hardware or interference.
-Plots use bounded signal/noise previews rather than a retained whole transmission.
+Complex integrated observations receive AWGN with the variance implied by
+sample-domain white noise and their sample counts. The channel also defaults to
+**100 ppm relative transmitter/receiver crystal error** and a separate Wiener
+phase-diffusion assumption of **0.5 degrees per square root second**. The crystal
+parameter represents the combined relative clock error, not two independent
+100 ppm oscillators. Positive error raises the received carrier and makes symbols
+arrive sooner:
+
+```text
+clock_ratio       = 1 + clock_error_ppm * 1e-6
+receiver_endpoint = ceil(transmitted_samples / clock_ratio)
+carrier_error_Hz  = explicit_frequency_offset + carrier_Hz * (clock_ratio - 1)
+RMS_phase_change  = phase_noise_degrees_per_sqrt_second * sqrt(elapsed_seconds)
+```
+
+The accelerated path joins Wiener phase endpoints with linear ramps over at most
+16 subintervals per observation. It integrates each carrier/phase ramp analytically
+using its sinc coherence loss, including when an observation spans billions of
+carrier cycles. A mean attenuation term accounts for unresolved Brownian-bridge
+variance. This is a bounded stochastic approximation, not an exact sampled
+phase-noise trace over arbitrarily long symbols. Timing boundaries accumulate
+clock error; the decoder is not given corrected boundaries or phase values.
+
+Observation bins cross training/payload boundaries without framing labels.
+Chip despreading remains matched in this statistical model, so clock-dependent
+chip-correlation loss is not fully reproduced. The receiver still searches
+phase/header hypotheses, but has no clock/phase tracking loop. Consequently,
+long weak-signal integration can fail through coherence loss even when an ideal
+oscillator AWGN loopback would succeed. Longer integration alone cannot repair
+that error. Use `--clock-error-ppm 0 --phase-noise 0` with CLI `simulate` or
+`listen` when intentionally measuring the ideal-oscillator case.
+
+The model avoids synthesizing every sample of a very long tone. It does not
+establish arbitrary PCM acquisition, fading/multipath performance, nonlinear
+hardware behavior or interference rejection. Plots use bounded signal/noise
+previews rather than a retained whole transmission.
 Twenty-four spectrum rows are captured by media position between one-quarter
 and one-half of the payload, independent of GUI polling. On simulation completion,
 the waveform and spectrum show the payload-midpoint sample for two wall-clock
 seconds. A bounded transmitter segment history reconstructs the actual local
 waveform, including carrier phase and spreading, with independent display noise.
+The preview is time-warped and phase-rotated using the simulated channel trajectory;
+its independent display-noise generator does not change decoder randomness.
 The constellation uses accumulated receiver observations (up to 2,048 points),
-not transmitted ideal points. After the hold, live waveform/waterfall updates
-resume while the received constellation persists until the next transmission
-or configuration. Background simulation reception continues throughout the hold.
+not transmitted ideal points. After the hold, waveform, waterfall and constellation
+all resume live input. The previous simulated packet no longer obscures noise,
+lock diagnostics or a subsequent incoming transmission. Background simulation
+reception continues throughout the hold.
 The packet is still decoded and validated; transmitted application bytes are not
 inserted directly into the receive cache.
 
@@ -271,10 +372,12 @@ presets may fail decoding.
 
 The legacy `transfer::transmit`/`receive`, `modem::simulate` and WAV interfaces
 operate on complete PCM vectors and retain their batch allocation checks.
-They use the shared 0.3 waveform; streaming support does not make an arbitrarily
-large WAV fit in memory. The sample-domain channel can add leading delay, AWGN
-and a fixed frequency shift. This path tests effects excluded by the accelerated
-ideal-timing model.
+They use the shared 0.5 modem configuration; streaming support does not make an
+arbitrarily large WAV fit in memory. The sample-domain channel adds leading delay,
+AWGN, fixed frequency shift, relative sample-clock error and Wiener phase noise.
+It interpolates the analytic PCM waveform at the altered clock and applies phase
+noise sample by sample. This path exercises waveform timing and chip correlation
+that the accelerated matched-chip statistic simplifies.
 
 The generic raw-byte `modem::demodulate` API uses known-training timing and
 constant carrier-offset acquisition with the shared adaptive APSK quantizer. Normal
@@ -317,8 +420,8 @@ ordered provisional/final events, cancellation, content/DSP limits and receive
 resumption. These tests do not establish physical-device performance. Consult
 [validation.md](validation.md) for which builds and tests have actually run.
 
-The weak-channel regression also derives sampled AWGN from C/N0 targets of
--20 and -60 dB-Hz and checks several deterministic seeds with RS60. This tests
-integration at the planner's actual noise assumption within the ideal-timing
-statistical model. It does not establish those sensitivities on raw PCM or
-physical hardware.
+Weak-channel regressions explicitly disable oscillator impairments when isolating
+the planner's AWGN integration assumption. Separate channel tests cover relative
+clock drift, phase diffusion, coherence loss, seeded replay and bounded previews.
+An ideal-oscillator weak-channel result does not establish the same sensitivity
+with the default 100 ppm crystal, on raw PCM, or on physical hardware.

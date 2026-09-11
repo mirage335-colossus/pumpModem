@@ -1,12 +1,13 @@
-# Implementation security review — 2026-09-10
+# Implementation security review — 2026-09-11
 
-This is a focused source and behavior review updated for the version 0.3 implementation,
+This is a focused source and behavior review updated for the version 0.5 implementation,
 not an independent security audit or a claim that the original specification is
 fully implemented. The review covered cryptography, keyfile handling, packet
 release ordering, CLI output, GUI cache/clipboard boundaries, and QR rendering.
-Version 0.3's incremental DSP and adaptive differential APSK waveforms are a new audio
-implementation; the packet and keyfile formats are unchanged. Historical test
-results below do not establish validation of the new waveform. Current execution
+Version 0.5 adds public audio whitening, bounded TX-symbol history, plot projection
+fixes and GUI keyfile creation. The APSK mapping, packet and keyfile formats are
+unchanged; the audio wire requires 0.5 peers. Public whitening is not encryption.
+Historical test results below do not establish validation of these changes. Current execution
 results are tracked separately in [validation.md](validation.md).
 
 ## Findings addressed during implementation
@@ -23,6 +24,7 @@ results are tracked separately in [validation.md](validation.md).
 | UTF-8 C1 controls could appear in named key labels. | Keyring names reject ASCII and C1 controls, malformed UTF-8, duplicates and out-of-bounds lengths. |
 | Text packets appeared in the received-file list. | The list projects only verified file/screenshot kinds; text stays available for exact ticker clipboard copy. File selection follows packet ID despite cache changes. |
 | Unit-circle constellation normalization hid transmitted amplitude information. | Shared APSK carries amplitude and phase; measured amplitudes are retained and the GUI uses one common I/Q display scale. This is a signal-display correction, not an authentication mechanism. |
+| Native menu parsing split or merged valid key names, so the displayed selection could use another key or fall back to plaintext. | Numbered display labels use literal replacement with one stable index per key. Invalid indices fail closed. Tests include separators, submenu characters, ampersands and a key named `None`, and verify the selected key's MAC. |
 | Long-tone waveform allocation confused content limits with DSP limits. | Streaming uses an independent bounded workspace and incrementally emitted/received data. Packet/cache limits remain content-based; batch PCM/WAV allocation remains separate. Regression tests explicitly distinguish streaming and batch eligibility. |
 | A very fast simulated transmission could finish between GUI polls and leave the UI busy. | A persistent terminal-state marker records completion/cancellation; ordered event serials preserve pending-before-final observations. |
 
@@ -62,7 +64,7 @@ packet digest.
   calls the C++ service directly; saves require an explicit path and
   exclusive creation.
 
-## Version 0.3 checks and remaining validation boundaries
+## Version 0.4 checks and remaining validation boundaries
 
 The new GUI policy tests cover file-kind filtering, strict clipboard eligibility,
 one active transmission, and cooldown only for actual encrypted output. The
@@ -74,13 +76,21 @@ have passed on every target; execution evidence belongs in validation.md.
 Adaptive profiles use two through six bits per symbol with geometry-based noise
 and drift margins; they do not change cryptographic validation. Symbol padding
 is removed before packet decoding. Hardware rate conversion uses bounded filter
-state and exposes its physical passband. Simulation review retains only bounded
-diagnostics, with received observations distinct from transmitted ideal symbols.
+state and exposes its physical passband. Its stages keep large conversion ratios
+bounded, and a wider planning range does not implement an SDR hardware backend.
+Simulation review retains only bounded diagnostics for two seconds, then all plots
+return to live input. Received observations remain distinct from ideal transmitted
+symbols; continuous plot windows do not restart carrier phase at callback boundaries.
 
-The accelerated simulator assumes ideal carrier/symbol timing and adds noise to
-integrated observations. It shares waveform mapping and receiver decisions with
-PCM, but does not model arbitrary acquisition timing, drift, fading, multipath or
-hardware nonlinearities. Real reception uses a finite timing/key/epoch bank,
+The accelerated simulator adds noise, 100 ppm relative crystal error and phase
+diffusion of 0.5 degrees per square root second by default. It changes symbol
+durations and analytically integrates carrier coherence loss, with a bounded
+piecewise approximation to the Wiener phase trajectory. Chip despreading remains
+matched. It shares waveform mapping and receiver decisions with PCM, but does not
+implement oscillator tracking or model arbitrary acquisition, fading, multipath
+or hardware nonlinearities. Very long integrations can fail with the default
+crystal error; disabling impairments for a diagnostic does not demonstrate a
+solution to that limitation. Real reception uses a finite timing/key/epoch bank,
 bounded by configured workspace. Fixed five-second training does not gain energy
 when payload symbols become longer; blind protected-bootstrap acquisition avoids
 requiring a training match, with complete packet verification still mandatory.

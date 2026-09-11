@@ -5,8 +5,13 @@ No decoded address selects a network endpoint. No received command is executed,
 no received filename selects a write path, and no received file is auto-opened.
 The native GUI calls the C++ transfer service directly without a subprocess or
 shell. File saves require a user-selected path and exclusive creation.
-Release 0.3 uses adaptive differential APSK and symbol-boundary padding;
+Release 0.5 uses bandwidth-derived clocks with adaptive differential APSK;
 packet integrity/authentication and existing keyfile formats are unchanged.
+Its public audio whitening mask reduces symbol bias, but is reversible without a
+key and supplies no confidentiality or additional key-reuse protection. Keyfile
+generation in the GUI uses the same exclusive creation and 128 MiB keyring codec
+as the CLI. Show in folder passes an encoded parent-directory URI to the OS;
+it does not open or execute received content.
 
 The protected computer still trusts its audio/ADC hardware, firmware, operating
 system drivers, and application runtime. Audio modulation does not prove the
@@ -74,9 +79,11 @@ not a total process resource sandbox or a guarantee against CPU exhaustion.
 Actual acquisition evaluates a finite timing/key/epoch bank at one carrier.
 Too many candidate receivers can exceed the configured workspace and fail
 explicitly. Successful symbol correlation is never sufficient to accept content.
-Accelerated simulation supplies ideal carrier/symbol timing and integrated AWGN;
-it still runs packet decoding and integrity/authentication, but success there
-does not validate arbitrary physical acquisition or receiver sensitivity. Blind
+Accelerated simulation supplies integrated AWGN, relative crystal error and phase
+noise while assuming matched chip despreading. Its bounded phase-noise approximation
+and analytic coherence calculation do not implement oscillator tracking. It still
+runs packet decoding and integrity/authentication, but success there does not
+validate arbitrary physical acquisition or receiver sensitivity. Blind
 protected-bootstrap acquisition avoids requiring detectable five-second training
 when payload symbols are much longer. Bootstrap correction remains provisional
 until complete packet digest/MAC verification succeeds.

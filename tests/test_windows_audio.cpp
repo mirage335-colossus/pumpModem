@@ -117,6 +117,32 @@ int main() {
                 error=std::max(error,std::abs(converted[i]-(15000./32768)*std::sin(2*std::numbers::pi*1300*static_cast<double>(i)/96000)));
             require(error<.00015,"Windows capture resampling timestamps changed");clean();
         }
+        for(const unsigned logical:{64u,4800u}) {
+            constexpr unsigned hardware=48000;
+            const double frequency=logical/8.;
+            fake::reset();fake::state.supported_rates={hardware};
+            std::vector<float> tone(logical*4+1);
+            for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(.4*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical));
+            audio::StreamFormat observed;
+            audio::play(tone,logical,"7",{},[&](const auto& info){observed=info;});
+            direct_format();
+            require(observed.logical_rate==logical && observed.hardware_rate==hardware,"Windows low DSP clock leaked into hardware negotiation");
+            require(fake::state.selected_device==7 && fake::state.initial_queue==2 && !fake::state.gap,"low-rate playback changed endpoint or lost double buffering");
+            require(fake::state.played.size()==(tone.size()*hardware+logical-1)/logical,"Windows low-rate playback duration changed");
+            double error=0;
+            for(std::size_t i=hardware;i+hardware<fake::state.played.size();++i)
+                error=std::max(error,std::abs(fake::state.played[i]/32767.-.4*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/hardware)));
+            require(error<.00015,"Windows low-rate playback phase or amplitude changed");clean();
+            fake::reset();fake::state.supported_rates={hardware};
+            fake::state.sample=[&](std::size_t index,unsigned clock){return static_cast<std::int16_t>(15000*std::sin(2*std::numbers::pi*frequency*static_cast<double>(index)/clock));};
+            const auto converted=audio::record(4,logical,"7",1024*1024,{},[&](const auto& info){observed=info;});
+            direct_format();
+            require(converted.size()==logical*4 && observed.hardware_rate==hardware && observed.workspace_bytes<5*1024*1024,"Windows bounded low-rate capture contract failed");
+            error=0;
+            for(std::size_t i=logical;i<converted.size();++i)
+                error=std::max(error,std::abs(converted[i]-(15000./32768)*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical)));
+            require(error<.00015,"Windows multistage capture phase or amplitude changed");clean();
+        }
         std::cout<<"Windows audio lifecycle tests passed\n";return 0;
     }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

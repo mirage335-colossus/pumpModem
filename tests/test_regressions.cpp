@@ -33,6 +33,13 @@ transfer::Options options(double bandwidth, tuning::PatternMode mode) {
     result.dsp_workspace_bytes = 8 * 1024 * 1024;
     return result;
 }
+modem::ChannelConfig ideal_channel() {
+    // These regressions isolate AWGN integration and framing. Clock-error
+    // degradation is covered by the dedicated channel/transfer suites.
+    modem::ChannelConfig result;
+    result.clock_error_ppm=0; result.phase_noise_degrees_per_sqrt_second=0;
+    return result;
+}
 void same_packet(const transfer::Received& received, const Message& sent) {
     check(received.packet.message.id == sent.id && received.packet.message.data == sent.data,
           "modem regression changed received identity or bytes");
@@ -44,7 +51,8 @@ void same_packet(const transfer::Received& received, const Message& sent) {
           "simulation must return measured signal diagnostics");
 }
 void long_tones_use_bounded_workspace() {
-    const auto sent = payload();
+    auto sent = payload();
+    sent.data.resize(2048,0x59); // Still exceeds full PCM capacity at the leaner DSP clock.
     double previous_airtime = 0;
     for (const auto mode : {tuning::PatternMode::tone_128, tuning::PatternMode::tone_1024}) {
         auto value = options(2400, mode);
@@ -56,7 +64,7 @@ void long_tones_use_bounded_workspace() {
         check(!estimate.batch_memory_supported, "streaming eligibility must be independent of full-waveform allocation");
         check(estimate.total_seconds > previous_airtime, "longer forced tones must change actual airtime");
         previous_airtime = estimate.total_seconds;
-        modem::ChannelConfig channel;
+        auto channel = ideal_channel();
         channel.snr_db = 25;
         channel.delay_samples = 137;
         channel.seed = 0x8128;
@@ -74,7 +82,7 @@ void wideband_fractional_carrier_pcm_roundtrip() {
     const auto estimate = transfer::estimate(sent, value);
     auto samples = transfer::transmit(sent, value);
     check(estimate.waveform_samples == samples.size(), "PCM size must agree with exact framing estimate");
-    modem::ChannelConfig channel;
+    auto channel = ideal_channel();
     channel.snr_db = 35;
     channel.delay_samples = 137;
     channel.seed = 0x24000;
@@ -105,7 +113,7 @@ void weak_auto_and_fixed_training() {
           "the five-second preamble must not round up to a long payload symbol");
     // A strong test channel isolates long-symbol integration from acquisition
     // sensitivity; the tuning target is not a five-second acquisition promise.
-    modem::ChannelConfig channel;
+    auto channel = ideal_channel();
     channel.snr_db = 25;
     channel.seed = 0x16385;
     same_packet(transfer::simulate(sent, value, channel), sent);
@@ -129,7 +137,7 @@ void obscured_training_pcm_roundtrip() {
     std::mt19937_64 random(0xb007);
     std::normal_distribution<float> noise(0, .7f);
     for (std::size_t i = 0; i < training; ++i) samples[i] = noise(random);
-    modem::ChannelConfig channel;
+    auto channel = ideal_channel();
     channel.snr_db = 35;
     channel.delay_samples = 137;
     channel.seed = 0x5ec;
@@ -148,7 +156,7 @@ void weak_channels_use_the_planned_integration() {
         value.fec = FecMode::rs60;
         const auto estimate = transfer::estimate(sent, value);
         check(estimate.memory_supported, "weak-channel integration must remain streaming-feasible");
-        modem::ChannelConfig channel;
+        auto channel = ideal_channel();
         channel.snr_db = target - 10 * std::log10(static_cast<double>(value.modem.sample_rate) / 2);
         auto short_integration = value;
         short_integration.modem = tuning::resolve(2400, 40, tuning::PatternMode::auto_tone, false).config;

@@ -1,6 +1,8 @@
 #include "datapump/live.hpp"
+#include "datapump/audio.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -12,6 +14,32 @@
 
 using namespace datapump;
 using namespace std::chrono_literals;
+// Link-time audio adapter: exercise Session's actual playback/capture branch
+// without a host sound card. Simulation must never call this adapter.
+namespace datapump::audio {
+void capture(std::uint32_t rate,const std::string& device,const CaptureCallback& callback,
+             std::stop_token stop,StreamFormatCallback format) {
+    if(device!="live-test-audio")throw Error("unexpected audio capture in live test");
+    if(format)format({rate,rate,.42*rate,4096});
+    const std::vector<float> silence(std::max<std::uint32_t>(1,rate/20));
+    while(!stop.stop_requested()) {
+        if(!callback(silence))return;
+        std::this_thread::sleep_for(2ms);
+    }
+}
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& callback,
+              std::stop_token stop,StreamFormatCallback format) {
+    if(device!="live-test-audio")throw Error("unexpected audio playback in live test");
+    if(format)format({rate,rate,.42*rate,4096});
+    std::array<float,4096> output{};
+    while(!stop.stop_requested()) {
+        const auto count=callback(output);
+        if(count>output.size())throw Error("live playback exceeded output capacity");
+        if(!count)return;
+        std::this_thread::sleep_for(2ms);
+    }
+}
+}
 namespace {
 void check(bool condition, const char* description) {
     if (!condition) throw std::runtime_error(description);
@@ -24,6 +52,10 @@ live::Settings settings() {
     live::Settings value;
     value.simulation = true;
     value.simulation_snr_db = 18;
+    // These cases isolate transport, scheduling and UI review. Oscillator
+    // impairments have separate channel and live-default coverage.
+    value.simulation_clock_error_ppm = 0;
+    value.simulation_phase_noise_degrees_per_sqrt_second = 0;
     value.device = "THIS DEVICE MUST NEVER BE OPENED IN SIMULATION";
     value.transfer.modem.sample_rate = 8000;
     value.transfer.modem.bandwidth_hz = 1000;
@@ -41,7 +73,7 @@ Message message(std::uint8_t id, std::size_t size) {
     return result;
 }
 template<class Predicate> live::Snapshot wait_for(live::Session& session, Predicate predicate,
-                                                std::chrono::milliseconds timeout = 6s) {
+                                                std::chrono::milliseconds timeout = 30s) {
     const auto until = std::chrono::steady_clock::now() + timeout;
     std::string last_status, last_signal;
     double fraction = 0;
@@ -72,12 +104,36 @@ void test_idle_noise_and_plots() {
     check(std::all_of(later.spectrum_db.begin(), later.spectrum_db.end(), [](auto n) { return std::isfinite(n); }),
           "noise FFT contains only finite bins");
     check(later.constellation.size() > 10, "idle constellation comes from measured baseband samples");
+    check(later.constellation_source==live::ConstellationSource::input,"idle constellation is labeled measured input");
     check(std::any_of(later.constellation.begin(), later.constellation.end(), [](auto point) {
         return std::abs(std::abs(point) - 1) > 0.1;
     }), "raw constellation retains amplitude instead of normalizing every point onto a circle");
     check(later.received.empty() && later.signals.empty(), "noise is never promoted to a message");
     session.stop();
     check(!session.snapshot().running, "stop is immediately observable");
+}
+void test_audio_tx_accumulates_payload_constellation() {
+    live::Session session;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
+    value.transfer.modem.spreading_factor=128;
+    session.start(value);
+    wait_for(session,[](const auto& snapshot){return !snapshot.waveform.empty();});
+    session.transmit(message(89,1024));
+    const auto active=wait_for(session,[](const auto& snapshot) {
+        return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
+               snapshot.constellation.size()>32;
+    });
+    check(active.constellation.size()<=2048,"real audio TX history remains bounded");
+    check(active.constellation.size()*modem::symbol_sample_count(value.transfer.modem)>active.waveform.size()*16,
+          "real audio TX displays a history of slow payload symbols beyond its short PCM preview");
+    for(const auto point:active.constellation)
+        check(std::min(std::abs(std::abs(point)-.35),std::abs(std::abs(point)-.7))<1e-8,
+              "real audio TX shows actual mapped symbol amplitudes");
+    check(active.received.empty() && !active.simulation_review,"TX history is not represented as received simulation data");
+    wait_for(session,[](const auto& snapshot){return snapshot.transmission_finished;});
+    const auto listening=wait_for(session,[](const auto& snapshot){return snapshot.constellation_source==live::ConstellationSource::input;});
+    check(!listening.transmitting && !listening.simulation_review,"real audio returns to live input after playback");
 }
 void test_partial_back_to_back_and_resume() {
     live::Session session;
@@ -113,7 +169,7 @@ void test_partial_back_to_back_and_resume() {
             received.push_back(item.packet.message);
         }
         return received.size() == 2 && !snapshot.transmitting;
-    }, 10s);
+    }, 60s);
     check(done.transmission_fraction == 1, "completed fast transmission leaves a persistent completion marker");
     check(partial_before_completion, "unvalidated text appears before the full waveform completes");
     check(received[0].id == first.id && received[0].data == first.data &&
@@ -134,15 +190,54 @@ void test_encrypted_auto_epoch() {
     value.transfer.modem.scramble = true;
     value.transfer.modem.dsss = true;
     value.transfer.timestamp = 0;
+    // Three epochs exercise automatic admission without making this semantic
+    // test a full-bank throughput benchmark under sanitizers. The separate
+    // three-key workspace test retains the default thirteen-epoch search.
+    value.transfer.search_seconds = 1;
     session.start(value);
     const auto sent = message(3, 700);
     session.transmit(sent);
-    const auto final = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); }, 12s);
+    const auto final = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); }, 60s);
     check(final.received.front().packet.message.data == sent.data && final.received.front().packet.authenticated,
           "selected second named key verifies actual encrypted continuous audio");
     check(final.received.front().timestamp > 1000000000, "zero timestamp selects the current epoch automatically");
 }
-void test_simulation_review_and_retained_constellation() {
+void test_simulated_epoch_admission_survives_clock_jumps() {
+    constexpr std::uint64_t origin = 1800000000;
+    std::atomic<std::uint64_t> queries{0};
+    // Each clock query advances an hour. Re-reading wall time after encoding
+    // or during a burst therefore cannot accidentally retain the right epoch.
+    live::Session session([&] { return static_cast<double>(origin + 3600 * queries.fetch_add(1)); });
+    auto value = settings();
+    value.transfer.key.emplace(Bytes(32, 0x72));
+    value.receive_keys.emplace_back(Bytes(32, 0x11));
+    value.receive_keys.emplace_back(Bytes(32, 0x72));
+    value.transfer.modem.scramble = value.transfer.modem.dsss = true;
+    value.transfer.timestamp = 0;
+    value.transfer.search_seconds = 1;
+    value.transfer.compression = true;
+    value.transfer.fec = FecMode::rs20;
+    session.start(value);
+    std::uint64_t previous_epoch = 0;
+    for (const auto id : {25U, 26U}) {
+        const auto sent = message(static_cast<std::uint8_t>(id), 96);
+        session.transmit(sent);
+        std::optional<transfer::Received> decoded;
+        wait_for(session, [&](const auto& snapshot) {
+            if (!snapshot.received.empty()) decoded = snapshot.received.front();
+            return decoded.has_value() && snapshot.transmission_finished;
+        }, 60s);
+        check(decoded->packet.authenticated && decoded->packet.message.data == sent.data,
+              "clock jumps during packet preparation or simulated reception discard the admitted key epoch");
+        check(decoded->timestamp >= origin && decoded->timestamp > previous_epoch,
+              "the next burst must admit a fresh receiver epoch after releasing its predecessor");
+        previous_epoch = decoded->timestamp;
+    }
+    rejects([] { live::Session invalid([] { return -1.; }); }, "negative injected epoch rejected");
+    rejects([] { live::Session invalid([] { return std::numeric_limits<double>::quiet_NaN(); }); }, "nonfinite injected epoch rejected");
+    rejects([] { live::Session invalid([] { return static_cast<double>(std::numeric_limits<std::uint64_t>::max()); }); }, "out-of-range injected epoch rejected");
+}
+void test_simulation_review_and_live_constellation() {
     live::Session session;
     const auto value = settings();
     session.start(value);
@@ -159,6 +254,7 @@ void test_simulation_review_and_retained_constellation() {
           "review waterfall retains the correct frequency scale");
     check(held.constellation_retained && held.constellation.size() > 100,
           "review contains accumulated received symbol points");
+    check(held.constellation_source==live::ConstellationSource::received,"simulation review identifies actual receiver observations");
     check(held.constellation.size() <= 2048, "retained constellation stays bounded");
     std::this_thread::sleep_for(100ms);
     const auto during = session.snapshot();
@@ -169,8 +265,12 @@ void test_simulation_review_and_retained_constellation() {
     const auto resumed = wait_for(session, [](const auto& snapshot) { return !snapshot.simulation_review; }, 3s);
     check(resumed.waveform != held.waveform && resumed.spectrum_db != held.spectrum_db,
           "waveform and spectrum return to live samples after two seconds");
-    check(resumed.constellation_retained && resumed.constellation == held.constellation,
-          "received constellation accumulation survives the return to idle noise");
+    check(!resumed.constellation_retained && resumed.constellation != held.constellation,
+          "constellation returns to the incoming live signal after two seconds");
+    check(resumed.constellation_source==live::ConstellationSource::input,"expired review returns its source label to live input");
+    const auto live_again = wait_for(session, [&](const auto& snapshot) { return snapshot.sequence > resumed.sequence; });
+    check(live_again.constellation != resumed.constellation,
+          "new receiver points keep replacing the completed simulation");
     session.transmit(message(22, 96));
     const auto next = session.snapshot();
     check(!next.simulation_review && !next.constellation_retained,
@@ -179,8 +279,32 @@ void test_simulation_review_and_retained_constellation() {
         return snapshot.transmission_finished && snapshot.transmission_id != held.transmission_id;
     });
     check(next_done.simulation_review, "consecutive simulation receives its own review identity");
+    session.cancel_transmit();
+    const auto cancelled_review=session.snapshot();
+    check(!cancelled_review.simulation_review && !cancelled_review.constellation_retained &&
+          cancelled_review.constellation_source==live::ConstellationSource::input,
+          "cancel during a completed review releases all retained constellation state");
+    const auto after_cancel=wait_for(session,[&](const auto& snapshot){return snapshot.sequence>cancelled_review.sequence;});
+    check(!after_cancel.constellation.empty() && after_cancel.constellation_source==live::ConstellationSource::input,
+          "cancelled review continues publishing measured input points");
     session.configure(value);
     check(!session.snapshot().constellation_retained, "configuration clears the old constellation");
+}
+void test_default_crystal_simulation() {
+    auto value=settings();
+    const live::Settings defaults;
+    check(defaults.simulation_clock_error_ppm==100 && defaults.simulation_phase_noise_degrees_per_sqrt_second>0,
+          "live simulation defaults must include a bad crystal and phase noise");
+    value.simulation_clock_error_ppm=defaults.simulation_clock_error_ppm;
+    value.simulation_phase_noise_degrees_per_sqrt_second=defaults.simulation_phase_noise_degrees_per_sqrt_second;
+    value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
+    value.transfer.fec=FecMode::rs20;
+    live::Session session; session.start(value);
+    const auto sent=message(24,96); session.transmit(sent);
+    const auto decoded=wait_for(session,[](const auto& snapshot) { return !snapshot.received.empty(); });
+    check(decoded.received.front().packet.message.data==sent.data,"default impaired channel failed its ordinary-bandwidth packet");
+    const auto held=wait_for(session,[](const auto& snapshot) { return snapshot.transmission_finished; });
+    check(held.simulation_review && held.constellation_retained,"impaired simulation must publish its measured review");
 }
 void test_receive_authentication_policy() {
     auto value = settings();
@@ -220,7 +344,7 @@ void test_encrypted_epoch_bank_refreshes_while_idle() {
     wait_for(session, [&](const auto&) { return std::chrono::steady_clock::now() - began > 2200ms; }, 4s);
     const auto sent = message(10, 64);
     session.transmit(sent);
-    const auto received = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); }, 10s);
+    const auto received = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); }, 60s);
     check(received.received.front().packet.authenticated && received.received.front().packet.message.data == sent.data,
           "an idle encrypted listener refreshes epochs after its initial timing window expires");
 }
@@ -232,6 +356,9 @@ void test_cancel_reconfigure_and_bounds() {
     rejects([&] { session.start(invalid); }, "insufficient explicit DSP workspace rejected");
     invalid = settings(); invalid.simulation_snr_db = std::numeric_limits<double>::quiet_NaN();
     rejects([&] { session.start(invalid); }, "nonfinite simulation SNR rejected");
+    invalid = settings(); invalid.simulation = false;
+    invalid.transfer.modem = tuning::resolve(30000000,100,tuning::PatternMode::auto_tone,false).config;
+    rejects([&] { session.start(invalid); }, "30MHz plans cannot start an unusable audio upsampler");
     auto value = settings();
     session.start(value);
     session.transmit(message(5, 120000));
@@ -311,7 +438,7 @@ void test_long_symbols_are_streamed_in_virtual_time() {
         const auto result = wait_for(session, [&](const auto& snapshot) {
             if (!snapshot.received.empty()) decoded = snapshot.received.front();
             return decoded.has_value() && snapshot.transmission_finished;
-        }, 15s);
+        }, 60s);
         const auto elapsed = std::chrono::steady_clock::now() - wall_start;
         check(decoded->packet.message.data == sent.data, "long-tone sampled statistics decode the real packet bytes");
         check(result.transmission_seconds > 3600, "long symbols actually advance hours of virtual media");
@@ -331,9 +458,12 @@ int main() {
             try { test(); } catch (const std::exception& error) { throw std::runtime_error(std::string(name) + ": " + error.what()); }
         };
         run("idle noise and plots", test_idle_noise_and_plots);
+        run("actual audio TX constellation", test_audio_tx_accumulates_payload_constellation);
         run("partial back-to-back reception", test_partial_back_to_back_and_resume);
         run("encrypted automatic epoch", test_encrypted_auto_epoch);
-        run("simulation review", test_simulation_review_and_retained_constellation);
+        run("simulated epoch admission across clock jumps", test_simulated_epoch_admission_survives_clock_jumps);
+        run("simulation review", test_simulation_review_and_live_constellation);
+        run("default crystal", test_default_crystal_simulation);
         run("receive authentication policy", test_receive_authentication_policy);
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);

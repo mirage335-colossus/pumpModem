@@ -19,8 +19,8 @@ AUDIO = ("--sample-rate", "8000", "--bw", "1000", "--carrier", "1500")
 
 
 class PumpCase(unittest.TestCase):
-    def run_pump(self, *args, data=None, ok=True):
-        result = subprocess.run([PUMP, *map(str, args)], input=data, capture_output=True, timeout=90)
+    def run_pump(self, *args, data=None, ok=True, env=None):
+        result = subprocess.run([PUMP, *map(str, args)], input=data, capture_output=True, timeout=90, env=env)
         self.assertEqual(result.returncode, 0 if ok else 2,
                          f"pump {' '.join(map(str, args))}: {result.stderr.decode(errors='replace')}")
         if not ok:
@@ -31,12 +31,12 @@ class PumpCase(unittest.TestCase):
 class CommandTests(PumpCase):
     def test_help_and_invalid_options(self):
         self.assertIn(b"simulate", self.run_pump("--help").stdout)
-        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.3.0\n")
+        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.5.0\n")
         self.run_pump("simulate", "--text", "x", "--nonsense", "yes", ok=False)
         self.run_pump("simulate", "--text", "x", "--snr", "nan", ok=False)
         self.run_pump("tx", "--text", "x", ok=False)
         self.run_pump("simulate", "--text", "x", "--bw", "0", ok=False)
-        for options in (("--sample-rate", "0"), ("--sample-rate", "384001"),
+        for options in (("--sample-rate", "0"), ("--sample-rate", "120000001"),
                         ("--spreading", "0"), ("--spreading", "16385"),
                         ("--carrier", "nan"), ("--carrier", "inf"),
                         ("--fec", "21"), ("--memory-mb", "4097"),
@@ -50,6 +50,59 @@ class CommandTests(PumpCase):
         self.run_pump("pack", "--text", "x", "--input", "-", data=b"ambiguous", ok=False)
         self.run_pump("simulate", "--text", "x", "--device", "default", ok=False)
         self.run_pump("simulate", "--text", "x", "--search-seconds", "121", ok=False)
+        self.run_pump("simulate", "--text", "x", "--clock-error-ppm", "nan", ok=False)
+        self.run_pump("simulate", "--text", "x", "--phase-noise", "-1", ok=False)
+
+    def test_bandwidth_clock_and_impaired_channel(self):
+        default=json.loads(self.run_pump("estimate","--text","x").stdout)
+        requested=json.loads(self.run_pump("estimate","--text","x","--target-snr","40").stdout)
+        for field in ("sample_rate","carrier_hz","bit_rate","constellation_bits","spreading","symbol_seconds"):
+            self.assertEqual(default[field],requested[field],"default CLI must use automatic tuning")
+        self.assertTrue(default["target_supported"])
+        manual=json.loads(self.run_pump("estimate","--text","x","--spreading","1").stdout)
+        self.assertEqual(manual["spreading"],1)
+        self.assertEqual(manual["constellation_bits"],4)
+        for band, rate in (("100",400),("1.2kHz",4800),("30MHz",120000000)):
+            plan=json.loads(self.run_pump("estimate","--text","x","--bw",band,"--target-snr","110").stdout)
+            self.assertEqual(plan["sample_rate"],rate)
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "low-rate.wav"
+            self.run_pump("tx", "--text", "independent clock", "--bw", "100", "--output", path)
+            with wave.open(str(path), "rb") as wav:
+                self.assertEqual(wav.getframerate(), 400)
+            result = self.run_pump("rx", "--input", path, "--bw", "100", "--json")
+            self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"independent clock")
+        result = self.run_pump("simulate", "--text", "bad crystal", "--bw", "30MHz",
+                               "--target-snr", "110", "--snr", "30", "--json")
+        self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"bad crystal")
+        self.run_pump("listen", "--bw", "30MHz", "--seconds", "0.1", ok=False)
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "uses the deterministic ALSA fixture")
+    def test_negotiated_audio_passband(self):
+        fixture = pathlib.Path(PUMP).parent / "audio-test-lib"
+        if not (fixture / "libasound.so.2").exists():
+            self.skipTest("ALSA fixture is available in native build trees")
+        env = os.environ.copy()
+        env["LD_LIBRARY_PATH"] = str(fixture) + (os.pathsep + env["LD_LIBRARY_PATH"] if env.get("LD_LIBRARY_PATH") else "")
+        # The fake endpoint only supports 48 kHz. A 96 kHz modem clock therefore
+        # negotiates 48 kHz, whose converter cannot carry the requested 30 kHz edge.
+        wide = ("--bw", "24000", "--target-snr", "110", "--device", "default")
+        for command in (("tx", "--text", "passband", "--tx-delay", "0"),
+                        ("rx", "--seconds", "0.01"),
+                        ("status-tx", "--bits", "101", "--tx-delay", "0")):
+            with self.subTest(command=command[0]):
+                result = self.run_pump(*command, *wide, env=env, ok=False)
+                self.assertIn(b"exceeds this audio path's usable passband", result.stderr)
+                self.assertIn(b"30000.000000", result.stderr)
+        # A supported resampled band still plays, and WAV output is independent
+        # of the endpoint even when its requested band is wider than hardware.
+        self.run_pump("tx", "--text", "passband", "--bw", "1200", "--device", "default", "--tx-delay", "0", env=env)
+        self.run_pump("status-tx", "--bits", "101", "--bw", "1200", "--device", "default", "--tx-delay", "0", env=env)
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "wide.wav"
+            self.run_pump("tx", "--text", "passband", "--bw", "24000", "--target-snr", "110", "--output", path, env=env)
+            with wave.open(str(path), "rb") as wav:
+                self.assertEqual(wav.getframerate(), 96000)
 
     def test_command_specific_options_fail_before_side_effects(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -168,7 +221,8 @@ class CommandTests(PumpCase):
 
     def test_long_tone_simulation_and_slow_estimate(self):
         result = self.run_pump("simulate", "--text", "long tone", "--bw", "2400",
-                               "--pattern", "tone-1024", "--memory-mb", "1", "--json")
+                               "--pattern", "tone-1024", "--memory-mb", "1", "--json",
+                               "--clock-error-ppm", "0", "--phase-noise", "0")
         self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"long tone")
         slow = json.loads(self.run_pump("estimate", "--text", "!", "--bw", "2400",
                          "--target-snr", "-20", "--pattern", "auto-tone", "--repeatable").stdout)

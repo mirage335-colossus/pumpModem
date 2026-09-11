@@ -1,7 +1,7 @@
 # Public release and scope
 
 Data Pump is an independently developed civilian audio modem for text and file
-transfer. Version0.3 implements the features recorded in `requirements.md`.
+transfer. Version 0.5 implements the features recorded in `requirements.md`.
 It excludes routed addressing, built-in repeaters, asymmetric key exchange,
 and rapid uncontrolled Doppler tracking. These statements describe its actual
 functionality; they are not a legal classification or a claim that a particular

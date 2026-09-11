@@ -15,7 +15,7 @@ struct State {
     std::function<std::int16_t(std::size_t,unsigned)> sample;
     std::string selected;
     unsigned opens=0,closes=0,live=0,rate=0;
-    std::size_t captured=0,write_limit=137;
+    std::size_t captured=0,write_limit=137,read_limit=4096;
 };
 extern State state;
 void reset();

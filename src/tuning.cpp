@@ -60,18 +60,25 @@ double constellation_target_symbol_snr_db(unsigned bits) {
     const double distance=std::min(spacing,angular);
     return 10*std::log10(2*3.2*3.2*.30625/(distance*distance));
 }
+std::uint32_t recommended_sample_rate(double bandwidth_hz) {
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
+        throw Error("modem bandwidth must be 1..30000000 Hz");
+    return static_cast<std::uint32_t>(std::max(64.,std::ceil(4*bandwidth_hz)));
+}
+double recommended_carrier_hz(double bandwidth_hz) {
+    (void)recommended_sample_rate(bandwidth_hz);
+    return .75*bandwidth_hz;
+}
 Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool encryption) {
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>192000)
-        throw Error("automatic audio bandwidth must be 1..192000 Hz");
+    const auto sample_rate=recommended_sample_rate(bandwidth_hz);
     if(!std::isfinite(target_snr_db_hz)) throw Error("target C/N0 must be finite dB-Hz");
     const auto index=index_of(mode);
     modem::Config base;
     base.bandwidth_hz=bandwidth_hz;
     // This is an internal analysis/synthesis clock selected from bandwidth;
     // audio endpoints independently negotiate and resample their hardware rate.
-    base.sample_rate=bandwidth_hz<=22050?48000:bandwidth_hz<=47000?96000:bandwidth_hz<=95000?192000:384000;
-    const double spare=static_cast<double>(base.sample_rate)/2-bandwidth_hz;
-    base.carrier_hz=bandwidth_hz<=2400?1500:bandwidth_hz/2+std::min(1000.,spare/2);
+    base.sample_rate=sample_rate;
+    base.carrier_hz=recommended_carrier_hz(bandwidth_hz);
     const bool tone=mode==PatternMode::auto_tone || index>=9;
     base.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
     base.scramble=mode==PatternMode::auto_keystream && encryption;
@@ -129,7 +136,7 @@ SimulationPreset parse_simulation_preset(std::string_view name) {
 }
 LinkBudget link_budget(const SimulationPreset& preset,double bandwidth_hz,std::uint32_t sample_rate,double noise_figure_db) {
     if(!preset.enabled) throw Error("simulation preset is disabled");
-    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<=0 || sample_rate<8000 ||
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<=0 || bandwidth_hz>maximum_bandwidth_hz || sample_rate<64 || sample_rate>120000000 ||
        bandwidth_hz>static_cast<double>(sample_rate)/2 || !std::isfinite(noise_figure_db) || noise_figure_db<0 ||
        !std::isfinite(preset.transmit_dbm) || !std::isfinite(preset.attenuation_db) || preset.attenuation_db>0)
         throw Error("invalid simulation link budget");

@@ -54,6 +54,13 @@ std::size_t packet_workspace_limit(std::size_t content_limit);
 // Callbacks own their key material and remain valid after Options is destroyed.
 PacketOptions packet_options(const Options& options, std::uint64_t timestamp);
 modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
+// Public, reversible audio-frame whitening; this is not encryption. Offsets
+// include the fixed 32-byte training prefix, which is left untouched. Apply
+// after encryption on TX and before decryption on RX, with no added bytes.
+void xor_audio_whitening(std::span<std::uint8_t> bytes, std::uint64_t wire_offset = 0);
+// Combined public whitening/private data-stream mask for the protected frame
+// bootstrap. Cache once per receiver candidate; no per-trial crypto setup.
+Bytes audio_bootstrap_mask(const Options& options, std::uint64_t timestamp);
 Bytes pack(const Message& message, const Options& options);
 Bytes transmission_wire(const Message& message, const Options& options);
 DecodedPacket unpack(const Bytes& wire, const Options& options);

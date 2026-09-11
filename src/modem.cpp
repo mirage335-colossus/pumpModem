@@ -232,12 +232,12 @@ void discard(std::istream& in, std::size_t count) {
 }
 void validate(const Config& c) {
     check(c.constellation_bits>=2 && c.constellation_bits<=6,"constellation must carry 2..6 bits per symbol");
-    check(c.sample_rate >= 8000 && c.sample_rate <= 384000, "sample rate must be 8000..384000 Hz");
-    check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= c.sample_rate / 2.0,
-          "bandwidth must be finite and within 1 Hz..Nyquist");
+    check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
+    check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= 30000000 && c.bandwidth_hz <= c.sample_rate / 2.0,
+          "bandwidth must be finite and within 1 Hz..30 MHz and internal Nyquist");
     check(std::isfinite(c.carrier_hz) && c.carrier_hz >= c.bandwidth_hz / 2 &&
           c.carrier_hz + c.bandwidth_hz / 2 <= c.sample_rate / 2.0,
-          "carrier and bandwidth must fit inside audio passband");
+          "carrier and bandwidth must fit inside internal DSP passband");
     check(std::isfinite(c.training_seconds) && c.training_seconds == 5,
           "normal training duration is fixed at 5 seconds");
     check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");
@@ -248,6 +248,13 @@ void validate(const Config& c) {
     check(c.memory_limit >= 1024, "modem memory limit must be at least 1024 bytes");
     check(chip_samples(c) >= 4, "chip sampling is too fast");
     product(chip_samples(c), c.spreading_factor, std::numeric_limits<std::size_t>::max());
+}
+void validate_channel(const Config& c,const ChannelConfig& channel) {
+    check(std::isfinite(channel.snr_db) && channel.snr_db>=-300 && channel.snr_db<=300,"channel SNR must be -300..300 dB");
+    check(std::isfinite(channel.frequency_offset_hz) && std::abs(channel.frequency_offset_hz)<c.sample_rate/2.,"channel frequency offset must fit internal Nyquist");
+    check(std::isfinite(channel.clock_error_ppm) && std::abs(channel.clock_error_ppm)<=10000,"relative clock error must be -10000..10000 ppm");
+    check(std::isfinite(channel.phase_noise_degrees_per_sqrt_second) && channel.phase_noise_degrees_per_sqrt_second>=0 && channel.phase_noise_degrees_per_sqrt_second<=180,
+          "phase diffusion must be 0..180 degrees per square-root second");
 }
 std::uint64_t symbol_sample_count(const Config& c) {
     if(c.integration_seconds>0) {
@@ -316,17 +323,19 @@ DecodeResult demodulate(std::span<const float> samples, const Config& c,
 }
 std::vector<float> simulate(std::span<const float> samples, const Config& c, const ChannelConfig& channel) {
     validate(c); finite_samples(samples, c.memory_limit);
-    check(std::isfinite(channel.snr_db) && channel.snr_db >= -300 && channel.snr_db <= 300,
-          "simulation SNR must be finite and within -300..300 dB");
-    check(std::isfinite(channel.frequency_offset_hz) && std::abs(channel.frequency_offset_hz) < c.sample_rate / 2,
-          "invalid simulation frequency offset");
-    check(channel.delay_samples <= c.memory_limit / sizeof(float) - samples.size(), "simulation delay exceeds memory limit");
-    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {samples.size()+channel.delay_samples,sizeof(float)}});
-    std::vector<float> out(samples.size() + channel.delay_samples);
+    validate_channel(c,channel);
+    const auto rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
+    const auto receiver_count=std::ceil(static_cast<long double>(samples.size())/rate);
+    check(receiver_count<=c.memory_limit/sizeof(float),"simulation duration exceeds memory limit");
+    const auto count=static_cast<std::size_t>(receiver_count);
+    check(channel.delay_samples <= c.memory_limit / sizeof(float) - count, "simulation delay exceeds memory limit");
+    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count+channel.delay_samples,sizeof(float)}});
+    std::vector<float> out(count + channel.delay_samples);
     double power = 0;
     for (auto v : samples) power += static_cast<double>(v) * v;
     power = samples.empty() ? 0 : power / static_cast<double>(samples.size());
-    if (channel.frequency_offset_hz == 0) std::copy(samples.begin(), samples.end(), out.begin() + channel.delay_samples);
+    if (channel.frequency_offset_hz==0 && channel.clock_error_ppm==0 && channel.phase_noise_degrees_per_sqrt_second==0)
+        std::copy(samples.begin(), samples.end(), out.begin() + channel.delay_samples);
     else if (!samples.empty()) {
         const auto n = fft_size(samples.size(), c.memory_limit, sizeof(Complex));
         budget(c.memory_limit, {{samples.size(),sizeof(float)}, {out.size(),sizeof(float)}, {n,sizeof(Complex)}});
@@ -336,8 +345,27 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
         for (std::size_t k = 1; k < n/2; ++k) analytic[k] *= 2;
         for (std::size_t k = n/2+1; k < n; ++k) analytic[k] = 0;
         fft(analytic, true);
-        for (std::size_t i = 0; i < samples.size(); ++i)
-            out[i+channel.delay_samples] = static_cast<float>((analytic[i] * std::polar(1.0, tau * channel.frequency_offset_hz * static_cast<double>(i) / c.sample_rate)).real());
+        std::mt19937_64 phase_random(channel.seed^0xa0761d6478bd642fULL);
+        const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(c.sample_rate);
+        std::normal_distribution<double> phase_step(0,1);double phase=0;
+        for (std::size_t i = 0; i < count; ++i) {
+            const auto position=static_cast<long double>(i)*rate;
+            const auto center=static_cast<std::int64_t>(std::floor(position));
+            Complex value{};double weight=0;
+            if(std::abs(position-center)<1e-10)value=analytic[static_cast<std::size_t>(center)];
+            else for(auto tap=center-7;tap<=center+8;++tap) {
+                const auto distance=static_cast<double>(position-tap);
+                const auto window=.42+.5*std::cos(std::numbers::pi*distance/8)+.08*std::cos(std::numbers::pi*distance/4);
+                const auto angle=std::numbers::pi*distance;
+                const auto coefficient=(std::abs(angle)<1e-8?1:std::sin(angle)/angle)*window;
+                weight+=coefficient;
+                if(tap>=0 && tap<static_cast<std::int64_t>(samples.size()))value+=analytic[static_cast<std::size_t>(tap)]*coefficient;
+            }
+            if(weight)value/=weight;
+            const auto angle=std::remainder(static_cast<long double>(tau)*channel.frequency_offset_hz*i/c.sample_rate+phase,static_cast<long double>(tau));
+            out[i+channel.delay_samples]=static_cast<float>((value*std::polar(1.,static_cast<double>(angle))).real());
+            if(diffusion)phase+=phase_step(phase_random)*diffusion;
+        }
     }
     const double sigma = std::sqrt(power * std::pow(10.0, -channel.snr_db / 10));
     std::mt19937_64 generator(channel.seed);
@@ -347,7 +375,7 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
     return out;
 }
 void write_wav(std::ostream& out, std::span<const float> samples, std::uint32_t rate) {
-    check(rate >= 8000 && rate <= 384000, "invalid WAV sample rate");
+    check(rate >= 64 && rate <= 120000000, "invalid WAV sample rate");
     check(samples.size() <= (std::numeric_limits<std::uint32_t>::max() - 36) / 2, "WAV is too large");
     finite_samples(samples, std::numeric_limits<std::size_t>::max());
     out.write("RIFF",4); put32(out, static_cast<std::uint32_t>(36+samples.size()*2)); out.write("WAVEfmt ",8);
@@ -379,7 +407,7 @@ Wav read_wav(std::istream& in, std::size_t limit) {
             result.sample_rate = get32(b.data()+4);
             check(get16(b.data())==1 && get16(b.data()+2)==1 && get16(b.data()+14)==16 && get16(b.data()+12)==2,
                   "only PCM16 mono WAV is supported");
-            check(result.sample_rate >= 8000 && result.sample_rate <= 384000 && get32(b.data()+8)==result.sample_rate*2,
+            check(result.sample_rate >= 64 && result.sample_rate <= 120000000 && get32(b.data()+8)==result.sample_rate*2,
                   "invalid WAV sample rate or byte rate");
             discard(in,static_cast<std::size_t>(size-16)); have_format = true;
         } else if (std::memcmp(b.data(),"data",4)==0) {

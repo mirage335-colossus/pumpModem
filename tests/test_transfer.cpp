@@ -1,4 +1,6 @@
 #include "datapump/transfer.hpp"
+#include "datapump/streaming_modem.hpp"
+#include "../src/constellation.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -143,10 +145,92 @@ void test_complete_frame_encryption_and_spreading() {
     auto plaintext = modem::preamble(config);
     const auto frame = encode_packet(sample(), transfer::packet_options(value, value.timestamp), config.memory_limit);
     plaintext.insert(plaintext.end(), frame.begin(), frame.end());
-    const auto expected = modem::modulate(value.key->xor_data(plaintext, value.timestamp), config);
-    check(transfer::transmit(sample(), value) == expected, "entire preamble frame and FEC encrypted once");
+    auto encrypted = value.key->xor_data(plaintext, value.timestamp);
+    transfer::xor_audio_whitening(encrypted);
+    const auto expected = modem::modulate(encrypted, config);
+    check(transfer::transmit(sample(), value) == expected, "public audio whitening follows complete-frame encryption");
     const auto received = transfer::receive(expected, value);
     check(received.packet.message.data == sample().data && received.packet.authenticated, "encrypted spread waveform roundtrip");
+}
+void test_public_audio_whitening() {
+    Bytes protocol_vector(16);
+    transfer::xor_audio_whitening(protocol_vector,32);
+    check(protocol_vector==Bytes{0xfb,0xd2,0x7b,0xba,0x1d,0xec,0xfa,0x41,0xe9,0x26,0x5d,0x3c,0xc2,0x74,0x02,0x76},
+          "0.5 audio whitening protocol vector changed");
+    Bytes original(70001);
+    for (std::size_t i=0;i<original.size();++i) original[i]=static_cast<std::uint8_t>(i*17+9);
+    auto whole=original;
+    transfer::xor_audio_whitening(whole);
+    check(std::equal(whole.begin(),whole.begin()+32,original.begin()),"whitening leaves fixed training unchanged");
+    check(!std::equal(whole.begin()+32,whole.end(),original.begin()+32),"audio frame receives public whitening");
+    auto chunks=original;
+    std::size_t offset=0;
+    for(const std::size_t count:{7U,24U,3U,16379U,16384U,9U,32768U,4427U}) {
+        const auto size=std::min(count,chunks.size()-offset);
+        transfer::xor_audio_whitening(std::span(chunks).subspan(offset,size),offset);offset+=size;
+    }
+    transfer::xor_audio_whitening(std::span(chunks).subspan(offset),offset);
+    check(chunks==whole,"whitening is invariant across training and crypto chunk boundaries");
+    transfer::xor_audio_whitening(chunks);
+    check(chunks==original,"public whitening is reversible");
+    whole[32771]^=0x42;
+    transfer::xor_audio_whitening(whole);
+    original[32771]^=0x42;
+    check(whole==original,"whitening has no error propagation between bytes");
+    Bytes far(193),far_chunks(193);
+    constexpr auto far_offset=(std::uint64_t{1}<<39)+31;
+    transfer::xor_audio_whitening(far,far_offset);
+    transfer::xor_audio_whitening(std::span(far_chunks).first(17),far_offset);
+    transfer::xor_audio_whitening(std::span(far_chunks).subspan(17),far_offset+17);
+    check(far==far_chunks && far!=Bytes(far.size()),"whitening supports large seek offsets without repetition or allocation");
+    rejects([&]{transfer::xor_audio_whitening(far,std::numeric_limits<std::uint64_t>::max()-100);},"whitening rejects offset overflow");
+    for(const bool keyed:{false,true}) {
+        const auto value=options(keyed);
+        const auto encoded=encode_packet(sample(),transfer::packet_options(value,value.timestamp));
+        const auto packed=transfer::pack(sample(),value);
+        check(packed==(keyed?value.key->xor_data(encoded,value.timestamp):encoded),"raw pack format is independent of audio whitening");
+        const auto wire=transfer::transmission_wire(sample(),value);
+        check(wire.size()==encoded.size()+32,"public whitening adds no bytes or airtime");
+        const auto training=modem::preamble(value.modem);
+        const auto expected_training=keyed?value.key->xor_data(training,value.timestamp):training;
+        check(std::equal(wire.begin(),wire.begin()+32,expected_training.begin()),"training keeps its existing encryption semantics");
+        auto prefix=Bytes(wire.begin()+32,wire.begin()+32+packet_prefix_size);
+        const auto mask=transfer::audio_bootstrap_mask(value,value.timestamp);
+        check(mask.size()==packet_prefix_size,"bootstrap mask has exact protected prefix size");
+        for(std::size_t i=0;i<prefix.size();++i)prefix[i]^=mask[i];
+        check(std::equal(prefix.begin(),prefix.end(),encoded.begin()),"precomputed bootstrap mask reverses public and private streams");
+    }
+}
+void test_whitened_fec_audio() {
+    auto sent=sample();sent.repeatable=false;sent.data=Bytes(137,0x73);
+    for(unsigned bits=2;bits<=6;++bits)for(const bool keyed:{false,true}) {
+        auto value=options(keyed);value.modem.constellation_bits=bits;value.compression=false;value.search_seconds=0;
+        value.fec=bits%2?FecMode::rs60:FecMode::rs20;
+        auto wire=transfer::transmission_wire(sent,value);
+        // Corrupt bytes after whitening. An additive mask preserves the exact
+        // RS error locations, both in the protected bootstrap and coded body.
+        for(unsigned i=0;i<12;++i)wire[32+i]^=static_cast<std::uint8_t>(71+i);
+        wire[32+packet_prefix_size+3]^=0x61;
+        wire[32+packet_prefix_size+19]^=0x72;
+        const auto pcm=modem::modulate(wire,transfer::seeded_config(value,value.timestamp));
+        const auto received=transfer::receive(pcm,value);
+        check(received.packet.message.data==sent.data && received.packet.authenticated==keyed,
+              "whitened audio preserves FEC correction and authentication across all constellation sizes");
+    }
+}
+void test_structured_payload_constellation_occupancy() {
+    auto sent=sample();sent.repeatable=false;sent.data=Bytes(4096,0);
+    for(const bool keyed:{false,true}) {
+        auto value=options(keyed);value.compression=false;value.modem.constellation_bits=6;
+        value.modem.spreading_mode=modem::SpreadingMode::tone;
+        const auto wire=transfer::transmission_wire(sent,value);
+        std::array<std::size_t,64> counts{};std::size_t count=0;
+        for(const auto section:{std::span(wire).subspan(32,packet_prefix_size),std::span(wire).subspan(32+packet_prefix_size)})
+            for(std::size_t bit=0;bit<section.size()*8;bit+=6){++counts[modem::detail::read_bits(section,bit,6)];++count;}
+        double entropy=0;
+        for(const auto n:counts){check(n>0,"structured audio frame uses every selected differential symbol");const double p=static_cast<double>(n)/count;entropy-=p*std::log2(p);}
+        check(entropy>5.97,"public whitening removes large amplitude and phase bias from structured frames");
+    }
 }
 void test_adaptive_symbol_airtime_and_padding() {
     for (const auto bits : {2U, 3U, 4U, 5U, 6U}) {
@@ -238,6 +322,18 @@ void test_valid_packet_ignores_trailing_capture() {
     const auto result=transfer::receive(samples,value);
     check(result.packet.message.data==sent.data,"valid short packet survives a long trailing capture without caching noise or preamble");
 }
+void test_simulation_oscillator_limit() {
+    auto value=options();value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=3600;
+    auto message=sample();message.repeatable=false;message.data={'x'};
+    modem::ChannelConfig ideal;ideal.snr_db=30;ideal.clock_error_ppm=0;ideal.phase_noise_degrees_per_sqrt_second=0;
+    check(transfer::simulate(message,value,ideal).packet.message.data==message.data,
+          "hour-long ideal symbols must remain CPU-bounded and decodable");
+    const modem::ChannelConfig crystal;
+    rejects([&]{transfer::simulate(message,value,crystal);},
+            "receiver without oscillator tracking claimed to decode incoherent100ppm hour-long symbols");
+    auto invalid=ideal;invalid.clock_error_ppm=std::numeric_limits<double>::infinity();
+    rejects([&]{transfer::simulate(message,value,invalid);},"simulation accepted infinite clock error");
+}
 void test_full_content_capacity_with_independent_scratch() {
     auto value=options();value.content_limit=1024*1024;
     auto sent=sample();sent.repeatable=false;sent.data.resize(value.content_limit,0x73);
@@ -256,10 +352,14 @@ int main() {
         test_shared_packet_pipeline();
         test_airtime_estimates_and_repeat_policy();
         test_complete_frame_encryption_and_spreading();
+        test_public_audio_whitening();
+        test_whitened_fec_audio();
+        test_structured_payload_constellation_occupancy();
         test_adaptive_symbol_airtime_and_padding();
         test_timing_search_and_progress();
         test_simulation_validation_and_cancellation();
         test_valid_packet_ignores_trailing_capture();
+        test_simulation_oscillator_limit();
         test_full_content_capacity_with_independent_scratch();
         std::cout << "transfer tests passed\n";
         return 0;

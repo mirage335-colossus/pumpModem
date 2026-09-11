@@ -3,6 +3,7 @@
 #include "datapump/packet.hpp"
 #include <chrono>
 #include <deque>
+#include <filesystem>
 #include <optional>
 #include <span>
 #include <string>
@@ -57,6 +58,16 @@ private:
     bool reviewing_ = false;
 };
 std::string format_bit_rate(double bits_per_second);
+// Names are comma-separated in the generation dialog. The keyfile codec
+// validates printable UTF-8, uniqueness and its production format limits.
+std::vector<std::string> key_entry_names(std::string_view text);
+// Numbered literal labels distinguish named keys from the unencrypted sentinel.
+// Only ampersands are escaped for FLTK's label renderer; callers must bypass
+// its menu-path parser when installing these labels.
+std::vector<std::string> key_choice_labels(std::span<const std::string> names);
+// An absolute, percent-encoded file URI for the native directory launcher.
+// No command string is constructed and no keyfile content is exposed.
+std::string folder_uri(const std::filesystem::path& directory);
 
 struct SignalLine {
     std::uint64_t id = 0;

@@ -1,5 +1,6 @@
 #pragma once
 #include "state.hpp"
+#include "plot_data.hpp"
 #include "datapump/qr.hpp"
 #include <FL/Fl.H>
 #include <FL/Fl_Double_Window.H>
@@ -137,22 +138,18 @@ private:
 
 class Waterfall : public Fl_Widget {
 public:
-    Waterfall() : Fl_Widget(0,0,1,1) {}
+    Waterfall() : Fl_Widget(0,0,1,1) {
+        tooltip("Peak FFT level with a shared color scale. Click to clear history and reset the scale.");
+    }
+    void clear() { history_.clear(); overview_=false; ++revision_; redraw(); }
+    int handle(int event) override {
+        if (event==FL_PUSH && Fl::event_button()==FL_LEFT_MOUSE) { clear(); return 1; }
+        return Fl_Widget::handle(event);
+    }
     void push(const std::vector<double>& bins,double bin_hz) {
         if (bins.empty()) return;
         overview_=false;
-        auto ordered=bins;
-        const auto median=ordered.begin()+static_cast<std::ptrdiff_t>(ordered.size()/2);
-        std::nth_element(ordered.begin(),median,ordered.end());
-        const auto floor=*median-12;
-        std::vector<unsigned char> row(256);
-        for (std::size_t i=0;i<row.size();++i) {
-            const auto value=bins[std::min(bins.size()-1,i*bins.size()/row.size())];
-            const auto normalized=std::isfinite(value)?std::clamp((value-floor)/64,0.0,1.0):0;
-            row[i]=static_cast<unsigned char>(normalized*255);
-        }
-        if (history_.size()>=160) history_.pop_front();
-        history_.push_back(std::move(row)); max_hz_=bin_hz*static_cast<double>(bins.size()-1); ++revision_; redraw();
+        history_.push(bins,bin_hz); ++revision_; redraw();
     }
     void restore(const std::vector<std::vector<double>>& rows,double bin_hz) {
         history_.clear(); ++revision_;
@@ -160,7 +157,7 @@ public:
         overview_=true;
         redraw();
     }
-    std::size_t rows() const { return history_.size(); }
+    std::size_t rows() const { return history_.rows().size(); }
     std::uint64_t revision() const { return revision_; }
 private:
     static unsigned char channel(double value) { return static_cast<unsigned char>(std::clamp(value,0.0,1.0)*255); }
@@ -168,13 +165,14 @@ private:
         fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),fl_rgb_color(9,15,24));
         const int width=std::max(1,w()-4),height=std::max(1,h()-24);
         std::vector<unsigned char> pixels(static_cast<std::size_t>(width*height*3),0);
+        const auto& rows=history_.rows();
         for (int py=0;py<height;++py) {
-            const int source=overview_?static_cast<int>(static_cast<std::size_t>(py)*history_.size()/static_cast<std::size_t>(height)):
-                static_cast<int>(history_.size())-height+py;
-            if (source<0 || static_cast<std::size_t>(source)>=history_.size()) continue;
-            const auto& row=history_[static_cast<std::size_t>(source)];
+            const int source=overview_?static_cast<int>(static_cast<std::size_t>(py)*rows.size()/static_cast<std::size_t>(height)):
+                static_cast<int>(rows.size())-height+py;
+            if (source<0 || static_cast<std::size_t>(source)>=rows.size()) continue;
+            const auto& row=rows[static_cast<std::size_t>(source)];
             for (int px=0;px<width;++px) {
-                const double value=static_cast<double>(row[static_cast<std::size_t>(px)*row.size()/static_cast<std::size_t>(width)])/255;
+                const double value=history_.intensity(row[static_cast<std::size_t>(px)*row.size()/static_cast<std::size_t>(width)]);
                 const auto offset=static_cast<std::size_t>((py*width+px)*3);
                 pixels[offset]=channel(3*value-1.2);
                 pixels[offset+1]=channel(3*value-1.8);
@@ -183,20 +181,32 @@ private:
         }
         fl_draw_image(pixels.data(),x()+2,y()+2,width,height,3);
         fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(176,193,202)); fl_draw("0 Hz",x()+7,y()+h()-7);
-        std::ostringstream end; end<<static_cast<int>(max_hz_)<<" Hz";
+        std::ostringstream legend; legend<<history_.lower_db()<<".."<<history_.upper_db()<<" dBFS peak";
+        fl_draw(legend.str().c_str(),x()+(w()-static_cast<int>(fl_width(legend.str().c_str())))/2,y()+h()-7);
+        std::ostringstream end; end<<static_cast<int>(history_.max_hz())<<" Hz";
         fl_draw(end.str().c_str(),x()+w()-static_cast<int>(fl_width(end.str().c_str()))-8,y()+h()-7);
     }
-    std::deque<std::vector<unsigned char>> history_;
-    double max_hz_=0;
+    plots::SpectrumHistory history_;
     std::uint64_t revision_=0;
     bool overview_=false;
 };
 
 class LivePlot : public Fl_Widget {
 public:
-    explicit LivePlot(bool constellation) : Fl_Widget(0,0,1,1),is_constellation_(constellation) {}
-    void update(const std::vector<float>& waveform,const std::vector<std::complex<double>>& constellation) {
-        waveform_=waveform; constellation_=constellation; redraw();
+    explicit LivePlot(bool constellation) : Fl_Widget(0,0,1,1),is_constellation_(constellation) {
+        if (!constellation) tooltip("Latest sampled waveform. Wheel to zoom the timebase; double-click to restore twelve carrier cycles. Dots are actual samples.");
+    }
+    void update(const std::vector<float>& waveform,const std::vector<std::complex<double>>& constellation,
+                const modem::Config& config,bool symbols=false) {
+        waveform_=waveform; constellation_=constellation; config_=config; symbols_=symbols; redraw();
+    }
+    int handle(int event) override {
+        if (!is_constellation_ && event==FL_MOUSEWHEEL) {
+            zoom_=std::clamp(zoom_*std::pow(2.,std::clamp(Fl::event_dy(),-4,4)),1./16,256.);
+            redraw(); return 1;
+        }
+        if (!is_constellation_ && event==FL_PUSH && Fl::event_clicks()) { zoom_=1; redraw(); return 1; }
+        return Fl_Widget::handle(event);
     }
     bool populated() const { return !waveform_.empty(); }
     const std::vector<float>& samples() const { return waveform_; }
@@ -207,11 +217,15 @@ private:
         const int left=x()+8,top=y()+8,width=w()-16,height=h()-16;
         fl_push_clip(left,top,width,height);
         if (is_constellation_) {
-            const int center_x=left+width/2,center_y=top+height/2;
-            const int radius=std::max(1,std::min(width-36,height-26)/2);
+            const int plot_height=height-(symbols_?34:18);
+            const int center_x=left+width/2,center_y=top+plot_height/2;
+            const int radius=std::max(1,std::min(width-36,plot_height-14)/2);
             double scale=0;
             for (auto point:constellation_) if (std::isfinite(std::abs(point))) scale=std::max(scale,std::abs(point));
             if (scale==0) scale=1;
+            // Actual symbol levels have a nominal peak below one. Do not
+            // stretch one observed inner ring into the apparent outer ring.
+            if (symbols_) scale=std::max(1.,std::ceil(scale*2)/2);
             fl_color(fl_rgb_color(70,91,108));
             fl_line(left,center_y,left+width,center_y); fl_line(center_x,top,center_x,top+height);
             for (double fraction:{.5,1.0}) {
@@ -231,20 +245,47 @@ private:
             fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
             std::ostringstream amplitude; amplitude<<std::setprecision(2)<<scale/2<<" / "<<scale<<" amplitude";
             fl_draw(amplitude.str().c_str(),left+3,top+height-1);
+            if (symbols_) {
+                std::ostringstream caption; caption<<(1U<<config_.constellation_bits)<<"-APSK / "<<constellation_.size()<<" recent symbols";
+                fl_draw(caption.str().c_str(),left+3,top+height-15);
+            }
         } else if (!waveform_.empty()) {
-            fl_color(fl_rgb_color(53,71,85)); fl_line(left,top+height/2,left+width,top+height/2);
+            const auto view=plots::waveform_window(waveform_,config_,zoom_);
+            const auto trace_height=height-17;
+            const auto mid=top+trace_height*.5;
+            fl_color(fl_rgb_color(53,71,85)); fl_line(left,static_cast<int>(mid),left+width,static_cast<int>(mid));
             fl_color(fl_rgb_color(91,216,202));
             double scale=1e-12;
             for (auto value:waveform_) scale=std::max(scale,std::abs(static_cast<double>(value)));
-            fl_begin_line();
-            for (std::size_t i=0;i<waveform_.size();++i) fl_vertex(
-                left+static_cast<double>(i)*width/static_cast<double>(std::max<std::size_t>(1,waveform_.size()-1)),
-                top+height*.5-static_cast<double>(waveform_[i])/scale*height*.43);
-            fl_end_line();
+            const auto screen_y=[&](double value) { return mid-value/scale*trace_height*.43; };
+            if (view.size()<=static_cast<std::size_t>(std::max(1,width))) {
+                const auto screen_x=[&](std::size_t i) { return left+static_cast<double>(i)*std::max(0,width-1)/static_cast<double>(std::max<std::size_t>(1,view.size()-1)); };
+                fl_begin_line();
+                for (std::size_t i=0;i<view.size();++i) fl_vertex(screen_x(i),screen_y(view[i]));
+                fl_end_line();
+                if (view.size()*4<static_cast<std::size_t>(width))
+                    for (std::size_t i=0;i<view.size();++i) fl_rectf(static_cast<int>(screen_x(i))-1,static_cast<int>(screen_y(view[i]))-1,2,2);
+            } else {
+                const auto columns=plots::waveform_columns(view,static_cast<std::size_t>(std::max(1,width)));
+                for (std::size_t i=0;i<columns.size();++i) {
+                    const auto px=left+static_cast<int>(i);
+                    fl_line(px,static_cast<int>(screen_y(columns[i].low)),px,static_cast<int>(screen_y(columns[i].high)));
+                    if (i) fl_line(px-1,static_cast<int>(screen_y(columns[i-1].last)),px,static_cast<int>(screen_y(columns[i].first)));
+                }
+            }
+            const auto seconds=static_cast<double>(view.size()-1)/config_.sample_rate;
+            std::ostringstream caption;
+            caption<<std::setprecision(3)<<seconds*(seconds<.001?1e6:1000)<<(seconds<.001?" us":" ms")
+                   <<" / "<<view.size()<<" samples";
+            fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(176,193,202));
+            fl_draw(caption.str().c_str(),left+2,top+height-1);
         }
         fl_pop_clip();
     }
     bool is_constellation_;
+    bool symbols_=false;
+    modem::Config config_;
+    double zoom_=1;
     std::vector<float> waveform_;
     std::vector<std::complex<double>> constellation_;
 };

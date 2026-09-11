@@ -14,9 +14,9 @@ inline constexpr double nominal_signal_power = 0.153125;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
     // Internal DSP clock, independent of the hardware audio endpoint clock.
-    std::uint32_t sample_rate = 48000;
+    std::uint32_t sample_rate = 4800;
     unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
-    double carrier_hz = 1500;
+    double carrier_hz = 900;
     double bandwidth_hz = 1200;
     double training_seconds = 5; // The physical format requires exactly five seconds.
     unsigned spreading_factor = 1;
@@ -44,10 +44,17 @@ struct ChannelConfig {
     double frequency_offset_hz = 0;
     std::size_t delay_samples = 0;
     std::uint64_t seed = 1;
+    // Relative transmitter/receiver clock error. Positive means the received
+    // carrier is higher and transmitted symbols arrive sooner.
+    double clock_error_ppm = 100;
+    // Wiener phase diffusion: RMS phase change over one second, scaling as
+    // sqrt(elapsed seconds). This is separate from deterministic clock error.
+    double phase_noise_degrees_per_sqrt_second = .5;
 };
 struct Wav { std::uint32_t sample_rate; std::vector<float> samples; };
 // Raises Error for invalid configuration, insufficient memory, or absent preamble.
 void validate(const Config& config);
+void validate_channel(const Config& config, const ChannelConfig& channel);
 double bit_rate(const Config& config);
 double symbol_seconds(const Config& config);
 std::uint64_t symbol_sample_count(const Config& config);

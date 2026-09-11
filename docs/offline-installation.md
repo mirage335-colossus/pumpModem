@@ -117,8 +117,16 @@ Windows system DLLs and API sets are an operating-system requirement. Visual C++
 redistributable DLLs are not excluded merely because they happen to reside in
 System32; the default static CRT avoids requiring their installation. The modem's
 Unicode path support requires Windows 10 version 1903 or newer. Windows code and
-CI configuration require actual Windows validation before a Windows release is
-declared verified.
+CI configuration require a successful native Windows CI run before a Windows
+artifact is declared verified.
+
+GLib (the GNOME utility library) and glibc (the Linux C runtime) are different
+dependencies. The FLTK GUI uses neither GTK nor GLib. The Linux CI build uses
+Ubuntu 22.04 and audits every executable and bundled shared library for a maximum
+glibc requirement of 2.35. The same downloaded archives must then run in fresh
+Ubuntu 22.04 and 24.04 compatibility jobs. A local build on a newer distribution
+can have a newer glibc requirement; the CI baseline does not retroactively make
+that local binary compatible with older systems.
 
 The locally available ALSA shared library is included in Linux packages even
 though audio loads it dynamically. The destination still supplies its audio
@@ -162,3 +170,43 @@ application dependency resolves within the copy, runs the modem and GUI checks,
 and confirms that file tampering and unlisted additions are rejected. On Linux,
 run the GUI test under an existing desktop or `xvfb-run -a`. CMake and these test
 scripts are not required to run the transferred software.
+
+## GitHub Actions binaries
+
+The **Portable native binaries** workflow runs on pushes, pull requests, and
+manual dispatch. Its successful jobs attach these downloadable build artifacts
+to the Actions run:
+
+| Artifact | Build and validation |
+| --- | --- |
+| `DataPump-Linux-x86_64-glibc-2.35` | GCC 11 on Ubuntu 22.04; native tests, GUI workflow, relocation, ELF ABI audit, and copies tested on Ubuntu 22.04/24.04 |
+| `DataPump-Windows-x86_64` | Visual Studio 2022 x64; static CRT and OpenSSL, native tests, GUI workflow, and relocation |
+
+Each artifact contains the application TGZ and ZIP archives and an outer
+`SHA256SUMS.txt` inventory. Both archive formats are extracted and tested before
+upload, including empty `PATH`, dependency closure, the native GUI self-check,
+and a simulated GUI transfer. The Linux sanitizer job also runs independently.
+Archives are retained for 30 days; copy a verified release into local storage for
+long-term offline use. The workflow does not publish GitHub Releases.
+
+GitHub Actions and the Windows vcpkg registry are pinned to upstream commit IDs.
+CI may download its compiler/development dependencies while preparing a build.
+Those downloads are unrelated to installing or moving the resulting application;
+the transferred directory still runs offline without vcpkg, Python, or an
+installer. The checked-in workflow must execute on GitHub before its hosted
+Windows and distribution compatibility results exist.
+
+Developers can apply the same archive checks locally:
+
+```sh
+cmake -DARCHIVE_DIR=/absolute/path/to/build/releases \
+  -DBUILD_DIR=/absolute/path/to/build -DGUI_SMOKE=ON \
+  -P tools/verify-native-archives.cmake
+cmake -DPACKAGE_ROOT=/absolute/path/to/DataPump-portable \
+  -DMAX_GLIBC=2.35 -P tools/verify-linux-abi.cmake
+```
+
+The optional `MAX_GLIBC` ceiling is also accepted by the archive verifier on
+Linux. It checks all packaged ELF files, rejects accidental GTK/GLib dependencies,
+and fails if a binary needs a newer glibc symbol version. Use a separate archive
+directory for each build when retaining earlier archives or checksum files.

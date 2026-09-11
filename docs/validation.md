@@ -1,107 +1,147 @@
-# Local validation record — version 0.3
+# Local validation record — version 0.5
 
-Linux x86_64, GCC 14.2, CMake 3.31, OpenSSL 3.5.7 and vendored FLTK 1.4.5.
-Python is optional developer test tooling; it is not installed with the application.
+The application and portable runtime are native C++. Python remains optional
+developer test tooling and is not installed with the application.
 
-* Native GUI Release: all 20 CTest suites passed. The CLI suite contains 19
-  integration tests, including production 128 MiB keyfiles, encrypted WAV
-  transfers, terminal escaping, exclusive saves and full-capacity packet pipes.
-* AddressSanitizer + UndefinedBehaviorSanitizer Debug: all 19 suites passed.
-  LeakSanitizer is disabled because this host's ptrace environment
-  prevents it from starting; no ASan or UBSan errors were reported.
-* CLI-only Release with Python discovery explicitly disabled: all 17 C++/CMake
-  suites passed, including relocation.
-* Adaptive constellations: all five profiles preserve equal average power and
-  Gray adjacency. Tests cover 25 raw PCM transfers across byte/bootstrap
-  boundaries, 26 noisy blind transfers (including erased training, unknown gain,
-  encryption, planned noise/drift and 16-byte protected-header corruption),
-  13 outer-ring/gain-alias regressions and 150,000 seeded differential decisions
-  at the specified noise/drift margin. These tests support the implemented design
-  margin, not a calibrated packet error rate or capacity optimum.
-* Independent rates: nominal modem timing is invariant across 44.1/48/96/192 kHz
-  internal sample clocks. Fragmented resampler streams preserve phase, amplitude,
-  duration and bounded workspace, suppress out-of-band aliasing and handle EOF.
-  Packet tests traverse different 44.1/48/96 kHz transmit/receive clocks, including
-  64-APSK, plus 24 kHz bandwidth through 88.2/96 kHz clocks with sufficient passband.
-* Streaming/transfer: forced tone 128/1024 operation remains eligible with an
-  8 MiB DSP workspace when full PCM would exceed the batch budget; live tone
-  1024/16384 roundtrips run in a 1 MiB workspace. Automatic integration exceeds
-  the former 16,384-chip ceiling, and training stays exactly five seconds.
-* Weak-channel model: fixed-ID messages at target C/N0 of -20 and -60 dB-Hz
-  decode with RS60 across seeds 1, 17 and 29 using the planned long integration.
-  The shorter 40 dB-Hz plan fails at the same noise levels. These are ideal-carrier,
-  matched-despreading integrated-AWGN tests, not measured radio sensitivity.
-* Physical PCM: 24 kHz bandwidth at 96 kHz sampling, a fractional 12,731.375 Hz
-  carrier and 137-sample delay roundtrip exactly. A separate tone-128 test removes
-  all training, substitutes noise and decodes with body FEC off. A streaming
-  encrypted 1,024-chip pattern test also recovers with obscured training, nearby
-  sample delay and -5 dB sample AWGN, without allocating a complete waveform.
-* Generic raw modem: binary and ciphertext-like training, delay, noise, a 3 Hz
-  static carrier offset, independent keyed spreading, WAV validation and active
-  cancellation pass. The generic known-training carrier search is distinct from
-  the streaming blind packet receiver's finite timing search.
-* Packet/resource regressions: trailing noise cannot discard a valid packet;
-  content at the configured capacity works with every FEC mode; batch and
-  streaming feasibility are independent; huge simulated idle intervals remain
-  cancellable. The bootstrap prefilter preserves every single-byte mutation
-  and 900 randomized 16-byte corruption trials while rejecting over 99% of
-  independent noise headers. Frozen RS vectors and correction trials still pass.
-* Continuous engine: all eleven cases pass, covering idle plots, pending/final
-  identity, consecutive messages, encryption and named keys, epoch refresh,
-  cancellation, bounded long tones and three keys with 13 candidate epochs each
-  at the largest keyed template under the default DSP budget, plus a two-second
-  simulation review with continued background reception and retained RX points.
-  Preview tests compare reconstructed recent samples against actual PCM,
-  including short dense symbols, keyed spreading and very long integration.
-* Audio: ALSA fixtures cover duplex default discovery, same-card conversion at
-  96 kHz, explicit-device failure, partial writes and streaming buffer lifetimes.
-  WinMM fixtures compile the actual Windows branch and check queued buffers,
-  cancellation, cleanup, slow callbacks, rate negotiation and suppression of ACM
-  conversion so the application's own rate converter is used.
-* Actual device configuration: this machine's discovered analog default opened
-  with both 48 and 96 kHz logical streams while the hardware stayed at 48 kHz.
-  The latter reported a 20.16 kHz usable converter passband and 233,680 bytes of
-  audio workspace. The probe submitted **zero PCM samples** and recorded no
-  microphone input. No physical audio transfer or Windows driver reliability
-  claim follows from this check.
+## Completed 0.5 checks
 
-The native GUI simulation smoke workflow checks changing plots/waterfall,
-pending-to-verified events, two consecutive transmissions without a simulation
-cooldown, exact UTF-8 clipboard text, text exclusion from the file list, exclusive
-binary save, cache clearing, frozen simulation review and receive resume while
-the accumulated constellation persists. The application layout was
-visually inspected on an isolated 1400×1100 display. The final workflow passed
-in both Release and ASan/UBSan builds.
+* Native GUI Release: all **23 CTest suites passed**.
+* CLI-only Release with Python discovery explicitly disabled: all **19 suites
+  passed**, including relocation checks.
+* Standalone GUI plot-projection tests and the actual-transmitter signal-view
+  regression passed. Release whitening, FEC and transmit-history tests passed
+  as part of the integrated suites.
+* All eight focused AddressSanitizer/UndefinedBehaviorSanitizer suites passed:
+  transfer, streaming modem, live sessions, signal view, GUI plot projection,
+  GUI state policy, GUI self-check and the CLI integration suite. LeakSanitizer
+  is disabled because this host's ptrace environment prevents it from starting.
+* The Release GUI workflow generated and loaded a production 128 MiB keyfile
+  with named keys while reception continued. It checked every selected
+  key against its matching MAC, including names containing menu punctuation
+  and a key named `None`, then completed text/file loopback, clipboard copying,
+  exclusive saves, held simulation plots and live resumption. Final GUI policy
+  and self-check suites passed again after the menu fix.
+* The final GUI workflow also passed under ASan/UBSan. Its focused fixture uses
+  two generated keys (`A|B` and `None`) and one admitted epoch; all ten menu-name
+  edge cases remain in the real FLTK self-check. Drift-window acquisition is
+  covered by the separate transfer/live sanitizer suites. The broader initial
+  GUI fixture passed in Release but exceeded its sanitizer deadlines. The GUI
+  test supports `--smoke-timeout 300`, also configured for CI.
+* The local installed bundle passed an audit of all 42 ELF paths: no GTK/GLib
+  dependency and a maximum required glibc version of 2.38.
 
-The relocation suite copies the installation into a path containing spaces and
-makes the original unavailable. CLI simulation and GUI self-check run with an
-empty `PATH`, invalid Python paths and an empty `LD_LIBRARY_PATH`. Inventory and
-native-library closure are verified; modified and unrecorded files are rejected.
-The final 0.3 GUI simulation workflow also passed in the relocated installation
-with these isolated environment settings.
-Both TGZ and ZIP archives were extracted and passed inventory, native-library
-closure and isolated command checks; the extracted ZIP also passed the GUI
-simulation workflow.
+Final TGZ and ZIP artifacts use `tools/verify-native-archives.cmake` to check
+extracted inventories, native dependencies, isolated CLI/GUI commands and ABI
+requirements. Historical measurements below apply to 0.4.
 
-Final generated-PCM benchmarks processed 6.187 media seconds in 5.000 wall
-seconds for 16-APSK (1.237× real time) and 7.381 media seconds in 5.001 wall
-seconds for 64-APSK (1.476× real time), with one key and 13 epoch candidates after
-warmup, following the dense gain-fit optimization. They do not benchmark every
-combination of bandwidth, keys or spreading settings. To repeat the workload
-without audio hardware:
+## Evidence for the 0.5 changes
 
-```sh
-cmake --build build --target benchmark_receiver
-./build/benchmark_receiver
-./build/benchmark_receiver 6
-```
+The default 4.8 kHz internal clock and 900 Hz carrier produce **384 cycles in a
+2,048-sample frame**. Drawing that entire frame into roughly 300 pixels aliases
+a clean sine wave into apparent blocks. A numeric probe found maximum error of
+3.3e-9 against the expected sampled sine, 2.1e-13 between contiguous and fragmented
+TX reads, 8.9e-8 after conversion through a 48 kHz audio clock, and 6.4e-14 between
+ideal accelerated preview and actual PCM. The carrier FFT level matched its
+expected amplitude. The regression checks continuous frame phase, primary FFT
+power and suppression of aliased square-wave harmonics by more than 70 dB.
 
-Cryptographic frozen vectors, keyfile tamper/permission cases, Unicode handling
-and QR matrices remain covered by the automated suites. Independent ZXing QR
-decoding was performed for the unchanged QR implementation during version 0.1;
-that external decoder was not added as a runtime dependency.
+The waveform view now defaults to twelve carrier cycles, retains actual sample
+values, and uses extrema when zoomed out. Waterfall tests check peak preservation,
+a shared color scale, bounded history and clearing on frequency-axis changes.
+Independent enumeration confirmed that all 1,025 original FFT-bin positions map
+to the same display columns in live and compact review paths.
 
-Live acquisition has finite carrier, timing and epoch hypotheses. Multi-day
-clock drift, arbitrary long encrypted-pattern start times, calibrated sensitivity,
-near-capacity throughput and native Windows hardware remain outside this local
-validation. See [modem.md](modem.md) and [requirements.md](requirements.md).
+Public audio whitening reduces data-dependent constellation bias. In a structured
+16APSK probe, empirical symbol-occupancy entropy increased from **3.640 to 3.956
+bits/symbol**; its maximum is 4. A 64APSK regression with a 4 KiB zero-filled
+payload visits every symbol and exceeds **5.97 bits/symbol**, for both keyed and
+plain audio. These are finite-frame occupancy measurements, not added payload
+entropy or a capacity measurement. Tests also cover the fixed protocol vector,
+chunk/offset invariance, reversibility, unchanged training and raw packet formats,
+and FEC correction/authentication across all five constellation sizes.
+
+Transmit diagnostics retain a bounded chronological payload-symbol history.
+Tests exercise ring overwrite, exclude training, compare PCM and accelerated
+histories, and verify that partial observations of hour-long symbols do not
+create duplicate points.
+
+Audio peers require matching **0.5 modem settings**. Packet and keyfile formats
+remain unchanged. Whitening is public and reversible; it does not conceal
+repeated frames or guarantee low probability of intercept. Rectangular pulse
+sidelobes remain. See [modem.md](modem.md) and [protocol.md](protocol.md).
+
+## Recorded 0.4 baseline
+
+These measurements were made on Linux x86_64 with GCC 14.2, CMake 3.31,
+OpenSSL 3.5.7 and vendored FLTK 1.4.5. Version 0.4 passed 22 native Release,
+19 Python-disabled CLI and 21 ASan/UBSan suites across integrated and focused
+runs. The final live sanitizer suite took 97.27 seconds. LeakSanitizer was disabled
+because this host's ptrace environment prevented startup.
+
+The retained regression coverage includes 1 Hz–30 MHz bandwidth planning;
+`max(64, ceil(4 * bandwidth))` internal clocks; bounded multistage resampling;
+independent 48/44.1 kHz packet paths; default 100 ppm crystal error and 0.5 degrees
+RMS phase diffusion per square root second; erased-training acquisition; adaptive
+4/8/16/32/64-APSK; and exact byte, bootstrap and FEC boundaries. Conversion from
+120 MHz to 64 Hz stays below 5 MiB. An ideal-clock packet with hour-long symbols
+decodes, while its bad-crystal counterpart fails validation rather than assuming
+impossible carrier coherence.
+
+Continuous tests cover idle plots, authentication, multiple keys/epochs,
+cancellation, consecutive messages and the two-second simulation review. All
+three plots return to live reception afterward. A clock that jumps an hour per
+query verifies that simulation preserves its admitted epochs through preparation
+and decoding, then admits fresh epochs for the next burst. ALSA/WinMM fixtures
+cover default discovery, partial I/O, rate conversion, cancellation and buffer
+lifetimes. Cryptographic vectors, production keyfiles, QR, Unicode, content
+bounds and exclusive saves remain covered.
+
+The 0.4 native GUI workflow passed normally and under ASan/UBSan: provisional to
+verified text, consecutive transmissions, exact UTF-8 clipboard copy, files-only
+save listing, exclusive binary save, cache clearing and held/live plots. Its
+layout was inspected on an isolated 1400×1100 display. This did not exercise a
+physical audio link or compare AC and battery power states.
+
+### 0.4 audio configuration and CPU measurements
+
+A zero-PCM default-device probe negotiated these formats:
+
+| Logical rate | Hardware rate | Converter passband | Playback workspace |
+| ---: | ---: | ---: | ---: |
+| 64 Hz | 48 kHz | 26.88 Hz | 118,348 B |
+| 4.8 kHz | 48 kHz | 2,016 Hz | 119,296 B |
+| 9.6 kHz | 48 kHz | 4,032 Hz | 120,256 B |
+| 96 kHz | 48 kHz | 20,160 Hz | 233,792 B |
+
+No sound was emitted and nothing was recorded. Passbands are converter
+calculations, not measured analog response. Unsupported bands are rejected
+before expensive audio processing; a high internal rate does not create an SDR
+frontend or overcome a sound card's physical passband.
+
+One synthetic 48 kHz → 4.8 kHz conversion processed one second in 15.42 ms,
+with 647,624 bytes of workspace and 5.81 ms setup. Eight input chunks produced
+exactly 4,800 samples. A separate generated-noise receiver benchmark measured
+7.77× real time for automatic three-bit modulation and 13.74× for forced six-bit
+modulation, using a 4.8 kHz clock and thirteen keyed epochs. Other build/test
+workers were stopped. These single-host CPU measurements are not end-to-end
+audio, battery-state or cross-machine performance guarantees.
+
+### 0.4 delivery baseline and continuing limits
+
+Relocation checks hide the original installation and exercise a copy in a path
+with spaces, empty `PATH`/`LD_LIBRARY_PATH`, and invalid Python paths. They verify
+dependency closure and reject modified or unrecorded files. Archive/ABI fixtures
+cover TGZ/ZIP extraction, checksums, accidental GTK/GLib linkage and excessive
+glibc requirements. The 0.4 package audit covered 42 ELF paths, found no GTK/GLib
+dependency, and measured a maximum glibc requirement of 2.38.
+
+GitHub Actions jobs have not run here. Windows binaries and the configured glibc
+2.35 compatibility floor require a successful hosted workflow run. Local builds
+on this newer host do not inherit that compatibility floor.
+
+The accelerated channel remains a bounded matched-chip model. It has no
+chip-clock recovery or carrier-tracking loop and does not demonstrate calibrated
+sensitivity, arbitrary long encrypted-pattern acquisition, near-capacity
+throughput, physical SDR operation, low probability of intercept, or Windows
+driver reliability. See [offline-installation.md](offline-installation.md) for
+bundle compatibility and copying requirements.

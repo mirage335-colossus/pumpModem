@@ -78,6 +78,36 @@ int main(){try{
     f::reset();f::state.available={"default"};f::state.supported_rates={48000,192000};
     a::play(std::vector<float>(100),96000,"default");
     check(f::state.rate==192000,"negotiation reduced passband despite an available higher hardware clock");
+    for(const unsigned logical:{64u,4800u}) {
+        constexpr unsigned hardware=48000;
+        const double frequency=logical/8.;
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};
+        f::state.write_limit=31; // The driver may make much less progress on battery.
+        a::StreamFormat observed;
+        std::vector<float> tone(logical*4+1);
+        for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(.5*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical));
+        a::play(tone,logical,"default",{},[&](const auto& info){observed=info;});
+        check(observed.logical_rate==logical && observed.hardware_rate==hardware,"low DSP clock changed hardware identity/rate");
+        check(std::all_of(f::state.configured.begin(),f::state.configured.end(),[](const auto& item){return item.second>=8000 && item.second<=384000;}),"audio hardware was asked to run at a sub-audio DSP clock");
+        check(f::state.played.size()==(tone.size()*hardware+logical-1)/logical,"partial low-rate playback changed duration");
+        double error=0;
+        for(std::size_t i=hardware;i+hardware<f::state.played.size();++i)
+            error=std::max(error,std::abs(f::state.played[i]/32767.-.5*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/hardware)));
+        check(error<.00015,"partial driver writes distort low-rate playback");
+        f::reset();f::state.available={"default"};f::state.supported_rates={hardware};
+        f::state.read_limit=73;
+        f::state.sample=[&](std::size_t index,unsigned clock){return static_cast<std::int16_t>(16000*std::sin(2*std::numbers::pi*frequency*static_cast<double>(index)/clock));};
+        const auto received=a::record(4,logical,"default",1024*1024,{},[&](const auto& info){observed=info;});
+        check(received.size()==logical*4 && observed.workspace_bytes<5*1024*1024,"low-rate capture lost duration or exceeded bounded DSP memory");
+        error=0;
+        for(std::size_t i=logical;i<received.size();++i)
+            error=std::max(error,std::abs(received[i]-(16000./32768)*std::sin(2*std::numbers::pi*frequency*static_cast<double>(i)/logical)));
+        check(error<.00015,"multistage capture distorted phase or amplitude");
+        f::state.captured=0;f::state.read_limit=173;
+        const auto other_chunks=a::record(4,logical,"default",1024*1024);
+        check(received==other_chunks,"varying driver capture chunk sizes changes modem PCM");
+        check(f::state.live==0,"low-rate conversion leaked an audio stream");
+    }
     f::reset();f::state.available={"default"};f::state.supported_rates={44100};
     std::stop_source cancelled;
     rejects([&]{a::playback(96000,"default",[&](std::span<float> values){cancelled.request_stop();std::fill(values.begin(),values.end(),.1f);return values.size();},cancelled.get_token());});

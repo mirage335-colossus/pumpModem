@@ -27,6 +27,12 @@ struct Plan {
 // Results are integration estimates, not empirical sensitivity guarantees.
 // Conservative differential phase/amplitude geometry target, not measured BER.
 double constellation_target_symbol_snr_db(unsigned bits);
+inline constexpr double maximum_bandwidth_hz = 30000000;
+// Internal real-PCM clock: four samples per hertz of occupied bandwidth, with
+// only the 64 Hz floor needed to sample the fixed five-second training frame.
+// Hardware/SDR clocks are negotiated independently at the endpoint boundary.
+std::uint32_t recommended_sample_rate(double bandwidth_hz);
+double recommended_carrier_hz(double bandwidth_hz);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
              bool encryption);
 struct SimulationPreset {

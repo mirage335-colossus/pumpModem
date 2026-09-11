@@ -90,6 +90,29 @@ int main() {
         check(gui::format_bit_rate(std::numeric_limits<double>::denorm_min()).find("e-")!=std::string::npos);
         check(gui::format_bit_rate(0)=="0 bit/s");
         check(gui::format_bit_rate(std::numeric_limits<double>::quiet_NaN())=="Unavailable");
+        check(gui::key_entry_names(" Home, Portable , Caf\xc3\xa9 ")==std::vector<std::string>({"Home","Portable","Caf\xc3\xa9"}));
+        const std::vector<std::string> choice_names{"A|B","None","_Home","Home","A&B","AB","Path/Back\\slash"};
+        check(gui::key_choice_labels(choice_names)==std::vector<std::string>({
+            "None","1. A|B","2. None","3. _Home","4. Home","5. A&&B","6. AB","7. Path/Back\\slash"}));
+        check(gui::key_choice_labels({})==std::vector<std::string>({"None"}));
+        for (const auto* invalid : {"", " ", ",Home", "Home,", "Home,,Portable"}) {
+            bool invalid_names=false;
+            try { (void)gui::key_entry_names(invalid); } catch (const Error&) { invalid_names=true; }
+            check(invalid_names);
+        }
+        bool empty_folder=false;
+        try { (void)gui::folder_uri({}); } catch (const Error&) { empty_folder=true; }
+        check(empty_folder);
+#ifdef _WIN32
+        check(gui::folder_uri(std::filesystem::path(u8"C:/Key folders/Caf\u00e9 #?%$`'\""))==
+              "file:///C:/Key%20folders/Caf%C3%A9%20%23%3F%25%24%60%27%22");
+        check(gui::folder_uri(std::filesystem::path(u8"//server/share/Key folders"))=="file://server/share/Key%20folders");
+#else
+        check(gui::folder_uri(std::filesystem::path(u8"/tmp/Key folders/Caf\u00e9 #?%$`'\""))==
+              "file:///tmp/Key%20folders/Caf%C3%A9%20%23%3F%25%24%60%27%22");
+#endif
+        check(gui::folder_uri(std::filesystem::current_path()/"folder"/".."/"keys")==
+              gui::folder_uri(std::filesystem::current_path()/"keys"));
         gui::PlotReviewPolicy plots;
         auto change=plots.observe(1,0,false);
         check(change.update_plots && change.append_waterfall && !change.restore_waterfall);

@@ -24,6 +24,7 @@ Bytes message(const m::Config& c) {
 }
 void cancellation() {
     m::Config config;
+    config.sample_rate=48000;config.carrier_hz=1500;
     const auto training = m::preamble(config);
     std::stop_source stopped;
     stopped.request_stop();
@@ -76,6 +77,9 @@ int main() {
             require(samples.size()==m::training_sample_count(adaptive)+m::payload_symbol_count(payload_bytes,adaptive)*m::symbol_sample_count(adaptive),"adaptive PCM sample count mismatch");
         }
         m::Config c;
+        // Keep this raw sample-SNR acquisition calibration fixed while the
+        // public default clock follows bandwidth at4.8kHz.
+        c.sample_rate=48000;c.carrier_hz=1500;
         const auto pre = m::preamble(c);
         const auto data = message(c);
         const auto wave = m::modulate(data, c);
@@ -85,6 +89,9 @@ int main() {
         require(decoded.diagnostics.preamble_correlation > .9, "clean correlation");
         require(decoded.diagnostics.sample_offset == 0, "clean timing");
         m::ChannelConfig channel;
+        // These fixtures isolate AWGN and explicit offset from oscillator
+        // impairments; realistic default crystal coverage is in test_channel.
+        channel.clock_error_ppm=0;channel.phase_noise_degrees_per_sqrt_second=0;
         channel.delay_samples = 1237; // Not a chip, symbol, or byte boundary.
         // Four-bit differential APSK requires more uncoded symbol energy than
         // the previous two-bit phase constellation. Packet FEC is tested separately.
@@ -115,7 +122,7 @@ int main() {
         auto wrong = spread_pre;
         for (std::size_t i = 0; i < wrong.size(); ++i) wrong[i] ^= static_cast<std::uint8_t>(i * 71);
         rejects([&] { (void)m::demodulate(spread_wave, c, wrong); }, "wrong preamble accepted");
-        c = {};
+        c = {};c.sample_rate=48000;c.carrier_hz=1500;
         // Ciphertext-like preamble: no fixed sync bytes are inserted by the DSP.
         auto arbitrary_pre = m::preamble(c);
         std::mt19937 ciphertext_rng(8337);
@@ -154,6 +161,10 @@ int main() {
         for (std::size_t i = 0; i < wave.size(); ++i)
             require(std::abs(wave[i] - restored.samples[i]) < 0.00004, "WAV PCM16 quantization");
         require(m::demodulate(restored.samples, c, pre).bytes == data, "WAV loopback");
+        std::stringstream internal_wav(std::ios::in | std::ios::out | std::ios::binary);
+        m::write_wav(internal_wav,std::array<float,4>{.1F,-.2F,.3F,-.4F},4800);
+        const auto internal_audio=m::read_wav(internal_wav);
+        require(internal_audio.sample_rate==4800 && internal_audio.samples.size()==4,"bandwidth-derived internal WAV clock metadata roundtrip");
         std::stringstream short_wav("RIFF", std::ios::in | std::ios::binary);
         rejects([&] { (void)m::read_wav(short_wav); }, "truncated WAV accepted");
         std::stringstream memory_wav(wav.str(), std::ios::in | std::ios::binary);

@@ -2,7 +2,12 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
-namespace alsa_test { State state; void reset(){state=State{};} }
+namespace alsa_test {
+// CLI subprocesses get one deterministic 48 kHz endpoint. Unit fixtures reset
+// this state and configure their own devices before each contract scenario.
+State state=[] {State value;value.available={"default"};value.supported_rates={48000};return value;}();
+void reset(){state=State{};}
+}
 extern "C" {
 int snd_pcm_open(void** pcm,const char* name,int,int) {
     auto& s=alsa_test::state;s.attempts.emplace_back(name);
@@ -17,6 +22,7 @@ int snd_pcm_set_params(void*,int,int,unsigned,unsigned rate,int,unsigned) {
 long snd_pcm_readi(void*,void* buffer,unsigned long count) {
     auto* pcm=static_cast<std::int16_t*>(buffer);
     auto& s=alsa_test::state;
+    count=std::min(count,static_cast<unsigned long>(s.read_limit));
     for(std::size_t i=0;i<count;++i) {
         pcm[i]=s.sample?s.sample(s.captured,s.rate):static_cast<std::int16_t>(s.captured%32768);
         ++s.captured;

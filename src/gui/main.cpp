@@ -11,6 +11,10 @@
 #include <FL/Fl_Hold_Browser.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Input_Choice.H>
+#include <FL/Fl_Menu_Button.H>
+#include <FL/filename.H>
+#include <FL/fl_ask.H>
+#include "key_choice.hpp"
 #include <array>
 #include <cctype>
 #include <cstdlib>
@@ -33,6 +37,10 @@ constexpr const char* smoke_text="CQ CQ - continuous reception\nClipboard caf\xc
     "Text first appears as pending, then becomes available to copy after the complete packet "
     "has passed error correction and integrity checks.";
 const Bytes smoke_file_bytes{0,1,2,3,0xff,0xc0,0x80,'D','a','t','a',' ','P','u','m','p','\n'};
+constexpr const char* menu_key_names="Station A, Portable, A|B, C, None, _Home, Home, A&B, AB, Slash/Back\\slash";
+// Keep production generation and key selection in the GUI workflow without
+// turning its two loopbacks into a 130-candidate acquisition stress test.
+constexpr const char* smoke_key_names="A|B, None";
 
 std::string path_text(const std::filesystem::path& path) {
     const auto text=path.u8string(); return {text.begin(),text.end()};
@@ -50,7 +58,8 @@ double bandwidth(const char* text) {
     std::string value(text);
     value.erase(std::remove(value.begin(),value.end(),' '),value.end());
     double scale=1;
-    if (value.ends_with("kHz")) { scale=1000; value.resize(value.size()-3); }
+    if (value.ends_with("MHz")) { scale=1000000; value.resize(value.size()-3); }
+    else if (value.ends_with("kHz")) { scale=1000; value.resize(value.size()-3); }
     else if (value.ends_with("Hz")) value.resize(value.size()-2);
     return number(value.c_str(),"Bandwidth")*scale;
 }
@@ -80,17 +89,19 @@ std::string seconds_text(double seconds) {
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
 }
-struct SmokeOptions { bool enabled=false; std::filesystem::path directory; double hold_seconds=0; };
+struct SmokeOptions { bool enabled=false; std::filesystem::path directory; double hold_seconds=0,timeout_seconds=100; };
 enum class PrepKind { estimate,keys,file,devices };
 struct Prepared {
     PrepKind kind=PrepKind::estimate;
     std::uint64_t revision=0;
     std::optional<transfer::Estimate> estimate;
     std::vector<KeyEntry> keys;
+    std::vector<std::string> key_names;
     std::vector<audio::Device> devices;
     std::shared_ptr<const Bytes> file;
     std::filesystem::path path;
     bool image=false;
+    bool generate_keyfile=false,created_keyfile=false;
     std::string error;
 };
 
@@ -104,11 +115,20 @@ public:
         repeatable_=new Fl_Check_Button(0,0,1,1,"Repeatable"); repeatable_->labelsize(13);
         bind(repeatable_,[this] { dirty_estimate(); });
         simulation_=new Fl_Choice(0,0,1,1,"Simulation");
+        simulation_->tooltip("Presets set transmit power and attenuation. All simulations include 100 ppm relative clock error and 0.5 degrees RMS phase noise per square root second.");
         for (const auto& preset:tuning::simulation_presets()) simulation_->add(preset.enabled?std::string(preset.name).c_str():"No");
         simulation_->value(smoke_.enabled?2:0); bind(simulation_,[this] { settings_changed(); });
-        key_browse_=button("Keyfile...",[this] { choose_keyfile(); });
+        key_browse_=new Fl_Menu_Button(0,0,1,1,"Keyfile"); key_browse_->labelsize(13);
+        key_browse_->add("Open...|Generate and save...|Show in folder");
+        key_browse_->mode(2,FL_MENU_INACTIVE);
+        key_browse_->tooltip("Open a shared keyfile, generate a new one, or show the loaded file's folder.");
+        bind(key_browse_,[this] {
+            if(key_browse_->value()==0)choose_keyfile();
+            else if(key_browse_->value()==1)generate_keyfile_dialog();
+            else if(key_browse_->value()==2)show_keyfile_folder();
+        });
         key_path_=label("None",12); key_entry_=new Fl_Choice(0,0,1,1,"Encryption key entry");
-        key_entry_->add("None"); key_entry_->value(0); bind(key_entry_,[this] {
+        gui::populate_key_choice(*key_entry_,{}); bind(key_entry_,[this] {
             key_load_failed_=false;
             if (!loaded_key_path_.empty()) key_path_->copy_label(path_text(loaded_key_path_.filename()).c_str());
             encryption_changed(); settings_changed();
@@ -141,7 +161,10 @@ public:
         waterfall_=new Waterfall; waveform_=new LivePlot(false); constellation_=new LivePlot(true);
         device_=new Fl_Input_Choice(0,0,1,1,"Audio device"); device_->add("default"); device_->value("default");
         device_->tooltip("default follows the operating system's default audio input and output.");
-        bandwidth_=new Fl_Input_Choice(0,0,1,1,"Bandwidth"); bandwidth_->add("1.2 kHz"); bandwidth_->add("2.4 kHz"); bandwidth_->add("22.05 kHz"); bandwidth_->add("24 kHz"); bandwidth_->value("1.2 kHz");
+        bandwidth_=new Fl_Input_Choice(0,0,1,1,"Bandwidth");
+        for (const auto* item:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","24 kHz","1 MHz","30 MHz"}) bandwidth_->add(item);
+        bandwidth_->value("1.2 kHz");
+        bandwidth_->tooltip("1 Hz to 30 MHz. Internal DSP clock follows bandwidth; MHz plans require simulation or a future SDR frontend.");
         snr_=new Fl_Input_Choice(0,0,1,1,"Target SNR dB / 1 Hz");
         for (auto value:{"40","6","-6","-60"}) snr_->add(value);
         snr_->value("40");
@@ -173,6 +196,8 @@ public:
         Fl::remove_timeout(poll_callback,this);
         session_.stop(); preparation_.request_stop();
         if (preparation_.joinable()) preparation_.join();
+        if(prepared_)record_smoke_keyfile(*prepared_);
+        if(smoke_keyfile_created_) { std::error_code error; std::filesystem::remove(smoke_key_path_,error); }
         editor_->buffer(nullptr); window_.reset();
     }
     int run() { Fl::run(); return smoke_.enabled&&!smoke_passed_?1:0; }
@@ -239,7 +264,11 @@ private:
         notice("Error: "+text,8);
         if (smoke_.enabled) { std::cerr<<"Native GUI smoke failed: "<<text<<std::endl; closing_=true; session_.stop(); preparation_.request_stop(); if (!preparing_) window_->hide(); }
     }
-    bool encrypted() const { return key_entry_->value()>0 && static_cast<std::size_t>(key_entry_->value())<=keys_.size(); }
+    bool encrypted() const {
+        const auto index=key_entry_->value();
+        if(index<0 || static_cast<std::size_t>(index)>keys_.size())throw Error("Select a valid encryption key entry");
+        return index>0;
+    }
     void encryption_changed() {
         const bool enabled=encrypted();
         pattern_->mode(0,enabled?0:FL_MENU_INACTIVE);
@@ -253,6 +282,9 @@ private:
         const auto mode=modes[static_cast<std::size_t>(std::max(0,pattern_->value()))];
         const auto plan=tuning::resolve(bandwidth(bandwidth_->value()),number(snr_->value(),"Target SNR"),mode,encrypted());
         result.transfer.modem=plan.config; result.transfer.timestamp=0;
+        // This UI loopback uses one admitted epoch. Drift-window acquisition
+        // has dedicated transfer/live tests; keep it out of the GUI fixture.
+        if(smoke_.enabled)result.transfer.search_seconds=0;
         result.transfer.fec=fec_->value()==0?FecMode::rs20:fec_->value()==1?FecMode::rs60:FecMode::off;
         if (encrypted()) result.transfer.key=keys_[static_cast<std::size_t>(key_entry_->value()-1)].key;
         for (const auto& entry:keys_) result.receive_keys.push_back(entry.key);
@@ -272,7 +304,7 @@ private:
     void settings_changed() {
         dirty_estimate();
         try {
-            current_settings_=settings(); settings_valid_=true; plot_policy_.reset();
+            current_settings_=settings(); settings_valid_=true; plot_policy_.reset(); waterfall_->clear();
             if (session_started_) session_.configure(current_settings_);
         } catch (...) {
             settings_valid_=false; airtime_->copy_label("Invalid modem settings"); throw;
@@ -302,8 +334,39 @@ private:
     }
     void choose_keyfile() {
         if (auto path=choose_path(false,"Choose encryption keyfile")) {
-            pending_key_=*path; key_loading_=true; key_load_failed_=false; key_path_->copy_label("Loading key entries..."); dirty_estimate();
+            pending_key_=*path; pending_key_names_.clear(); begin_keyfile("Loading key entries...");
         }
+    }
+    void begin_keyfile(const char* status) {
+        key_loading_=true; key_load_failed_=false; key_path_->copy_label(status);
+        key_browse_->deactivate(); key_entry_->deactivate(); dirty_estimate(); notice(status,10);
+    }
+    void request_keyfile_generation(const std::filesystem::path& path,std::vector<std::string> names) {
+        if(key_loading_)throw Error("Wait for the current keyfile operation to finish");
+        if(std::filesystem::exists(path) || std::filesystem::is_symlink(path))
+            throw Error("Choose a new filename; existing keyfiles are never overwritten");
+        // This early check improves the dialog error. The codec still creates
+        // exclusively, so a file appearing after the check is also protected.
+        pending_key_=path; pending_key_names_=std::move(names); begin_keyfile("Generating 128 MiB keyfile...");
+    }
+    void generate_keyfile_dialog() {
+        const auto* entered=fl_input("Key entry names, separated by commas:","Default");
+        if(closing_ || !entered)return;
+        auto names=gui::key_entry_names(entered);
+        if(auto path=choose_path(true,"Save new encryption keyfile","shared.key"))
+            request_keyfile_generation(*path,std::move(names));
+    }
+    void show_keyfile_folder() {
+        if(loaded_key_path_.empty())throw Error("Choose a keyfile first");
+        const auto folder=std::filesystem::absolute(loaded_key_path_).parent_path();
+        if(!std::filesystem::is_directory(folder))throw Error("The keyfile's folder is no longer available");
+        const auto uri=gui::folder_uri(folder);
+        std::array<char,512> error{};
+        if(!fl_open_uri(uri.c_str(),error.data(),static_cast<int>(error.size())))
+            throw Error(error[0]?error.data():"Could not open the keyfile's folder");
+    }
+    void record_smoke_keyfile(const Prepared& result) {
+        if(smoke_.enabled && result.created_keyfile && result.path==smoke_key_path_)smoke_keyfile_created_=true;
     }
     void choose_attachment() {
         if (auto path=choose_path(false,"Attach file")) {
@@ -332,7 +395,13 @@ private:
         Prepared result;
         if (pending_key_) {
             result.kind=PrepKind::keys; result.path=*pending_key_; pending_key_.reset();
-            start_preparation([](Prepared& value,std::stop_token) { value.keys=load_keyring(value.path); },std::move(result));
+            result.key_names=std::move(pending_key_names_); pending_key_names_.clear();
+            result.generate_keyfile=!result.key_names.empty();
+            start_preparation([](Prepared& value,std::stop_token stop) {
+                if(stop.stop_requested())throw Error("Operation cancelled");
+                if(value.generate_keyfile) { create_keyring(value.path,value.key_names); value.created_keyfile=true; }
+                value.keys=load_keyring(value.path);
+            },std::move(result));
         } else if (pending_file_) {
             result.kind=PrepKind::file; result.path=*pending_file_; pending_file_.reset();
             start_preparation([](Prepared& value,std::stop_token) {
@@ -356,21 +425,33 @@ private:
     void accept_prepared(Prepared result) {
         if (preparation_.joinable()) preparation_.join();
         preparing_=false;
+        record_smoke_keyfile(result);
         if (closing_) return;
         if (result.kind==PrepKind::keys) key_loading_=pending_key_.has_value();
         if (result.kind==PrepKind::file) file_loading_=pending_file_.has_value();
         if (!result.error.empty()) {
-            if (result.kind==PrepKind::keys) { key_load_failed_=true; key_path_->copy_label("Keyfile load failed"); }
+            if (result.kind==PrepKind::keys) {
+                key_load_failed_=true;
+                key_path_->copy_label(result.created_keyfile?"Keyfile saved; load failed":result.generate_keyfile?"Keyfile creation failed":"Keyfile load failed");
+                if(result.created_keyfile)result.error="Keyfile saved to "+path_text(result.path)+", but loading failed: "+result.error;
+            }
             if (result.kind==PrepKind::estimate && result.revision==revision_) { estimated_revision_=revision_; airtime_->copy_label(result.error.c_str()); }
             else if (result.kind!=PrepKind::devices) fail(result.error);
             return;
         }
         if (result.kind==PrepKind::keys && !pending_key_) {
+            // Loading the new key reconfigures reception and resets its sample
+            // counter. Observe generation progress before that reset.
+            if(smoke_.enabled && smoke_phase_==-1)
+                smoke_key_reception_=session_.snapshot().samples_received>initial_samples_;
             key_load_failed_=false; loaded_key_path_=result.path;
-            keys_=std::move(result.keys); key_entry_->clear(); key_entry_->add("None");
-            for (const auto& entry:keys_) key_entry_->add(menu_label(entry.name).c_str());
-            key_entry_->value(keys_.empty()?0:1); key_path_->copy_label(path_text(result.path.filename()).c_str()); key_path_->copy_tooltip(path_text(result.path).c_str());
-            encryption_changed(); settings_changed(); notice("Encryption key entries loaded.");
+            keys_=std::move(result.keys);
+            std::vector<std::string> names; names.reserve(keys_.size());
+            for(const auto& entry:keys_)names.push_back(entry.name);
+            gui::populate_key_choice(*key_entry_,names);
+            key_path_->copy_label(path_text(result.path.filename()).c_str()); key_path_->copy_tooltip(path_text(result.path).c_str());
+            encryption_changed(); settings_changed();
+            notice(result.created_keyfile?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded.");
         } else if (result.kind==PrepKind::file && !pending_file_) {
             attachment_=std::move(result.file); attachment_path_=result.path; attachment_image_=result.image;
             const auto title="Attached: "+gui::display_label(path_text(result.path.filename())); compose_label_->copy_label(title.c_str()); dirty_estimate();
@@ -448,6 +529,8 @@ private:
     void update_controls() {
         const bool busy=transmit_requested_ || last_snapshot_.transmitting || closing_;
         for (auto widget:std::array<Fl_Widget*,8>{simulation_,key_browse_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_}) busy?widget->deactivate():widget->activate();
+        if(key_loading_) { key_browse_->deactivate(); key_entry_->deactivate(); }
+        key_browse_->mode(2,loaded_key_path_.empty()?FL_MENU_INACTIVE:0);
         const auto remaining=gate_.remaining(current_settings_.simulation,encrypted()).count();
         const auto wait_seconds=remaining/1000+(remaining%1000!=0);
         const bool eligible=settings_valid_ && estimate_ && estimate_->memory_supported && (!repeatable_->value() || estimate_->repeatable_allowed);
@@ -472,11 +555,14 @@ private:
             else waterfall_->restore({snapshot.spectrum_db},snapshot.spectrum_bin_hz);
         } else if (plot_update.append_waterfall) waterfall_->push(snapshot.spectrum_db,snapshot.spectrum_bin_hz);
         if (plot_update.update_plots) {
-            waveform_->update(snapshot.waveform,snapshot.constellation); constellation_->update(snapshot.waveform,snapshot.constellation);
+            waveform_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem);
+            constellation_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem,
+                                    snapshot.constellation_source!=live::ConstellationSource::input);
         }
         waveform_label_->copy_label(snapshot.simulation_review?"Simulation sample":"Live waveform");
         waterfall_label_->copy_label(snapshot.simulation_review?"Simulation waterfall":"Spectrum / amplitude waterfall");
-        constellation_label_->copy_label(snapshot.constellation_retained?"Received constellation":"Phase / amplitude constellation");
+        constellation_label_->copy_label(snapshot.constellation_source==live::ConstellationSource::transmitted?"Transmitted constellation":
+            snapshot.constellation_source==live::ConstellationSource::received?"Received constellation":"Phase / amplitude constellation");
         for (auto& received:snapshot.received) {
             if (smoke_.enabled && std::string(received.packet.message.data.begin(),received.packet.message.data.end())==smoke_text) {
                 smoke_packet_=received.packet;
@@ -513,6 +599,7 @@ private:
                    <<" input samples  |  CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent_<<"%";
         if (snapshot.simulation) diagnostics<<"  |  Channel SNR "<<simulation_channel_snr_<<" dB / media "<<seconds_text(snapshot.virtual_seconds);
         else if (snapshot.hardware_sample_rate) diagnostics<<"  |  Hardware "<<snapshot.hardware_sample_rate/1000.0<<" kHz";
+        diagnostics<<"  |  DSP "<<current_settings_.transfer.modem.sample_rate<<" Hz";
         const auto upper_edge=current_settings_.transfer.modem.carrier_hz+current_settings_.transfer.modem.bandwidth_hz/2;
         if (!snapshot.simulation && snapshot.audio_passband_hz>0 && upper_edge>snapshot.audio_passband_hz) {
             diagnostics<<"  |  Audio passband exceeded";
@@ -563,18 +650,55 @@ private:
                 ++smoke_review_polls_;
             }
         } else if (smoke_review_id_ && last_snapshot_.transmission_id==smoke_review_id_ &&
-                   !last_snapshot_.transmitting && last_snapshot_.constellation_retained) {
-            if (constellation_->points()!=smoke_review_constellation_ ||
-                std::string(constellation_label_->label())!="Received constellation")
-                throw Error("The received constellation was lost when live samples resumed");
+                   !last_snapshot_.transmitting && !last_snapshot_.constellation_retained) {
+            if (constellation_->points()==smoke_review_constellation_ ||
+                std::string(constellation_label_->label())!="Phase / amplitude constellation")
+                throw Error("The constellation did not return to live reception after simulation review");
             if (waveform_->samples()!=smoke_review_waveform_ && waterfall_->revision()>smoke_review_revision_)
                 smoke_review_resumed_=true;
         }
     }
     void advance_smoke() {
-        if (Steady::now()-smoke_started_>std::chrono::seconds(100)) throw Error("Continuous native GUI smoke timed out");
+        if (std::chrono::duration<double>(Steady::now()-smoke_started_).count()>smoke_.timeout_seconds)
+            throw Error("Continuous native GUI smoke timed out");
         inspect_smoke_review();
-        if (smoke_phase_==0 && estimate_ && saw_noise_change_ && waterfall_->rows()>=3 && last_snapshot_.samples_received>0) {
+        if(smoke_phase_==-2 && estimate_ && saw_noise_change_ && last_snapshot_.samples_received>0) {
+            std::filesystem::create_directories(smoke_.directory);
+            smoke_key_path_=smoke_.directory/path_from_text("generated keys caf\xc3\xa9.key");
+            initial_samples_=last_snapshot_.samples_received;
+            request_keyfile_generation(smoke_key_path_,gui::key_entry_names(smoke_key_names));
+            smoke_phase_=-1;
+        } else if(smoke_phase_==-1 && !key_loading_ && estimate_) {
+            const auto names=gui::key_entry_names(smoke_key_names);
+            if(loaded_key_path_!=smoke_key_path_ || keys_.size()!=names.size() || !encrypted() || key_entry_->value()!=1 ||
+               !smoke_keyfile_created_ || std::filesystem::file_size(smoke_key_path_)<=keyfile_header_bytes)
+                throw Error("Generated production keyfile did not load and select its first named key");
+            if(!smoke_key_reception_)
+                throw Error("Keyfile generation stopped live reception");
+            if(key_browse_->mode(2)&FL_MENU_INACTIVE)throw Error("Loaded keyfile folder control stayed disabled");
+            const auto size=std::filesystem::file_size(smoke_key_path_);
+            bool rejected=false;
+            try { request_keyfile_generation(smoke_key_path_,{"Replacement"}); } catch(const Error&) { rejected=true; }
+            if(!rejected || key_loading_ || std::filesystem::file_size(smoke_key_path_)!=size)
+                throw Error("Generate keyfile accepted an existing save destination");
+            const auto labels=gui::key_choice_labels(names);
+            if(key_entry_->size()!=static_cast<int>(labels.size()+1))throw Error("Key names changed the number of menu entries");
+            for(std::size_t index=0;index<keys_.size();++index) {
+                const auto choice=static_cast<int>(index+1);
+                if(keys_[index].name!=names[index] || key_entry_->text(choice)!=labels[index+1] || key_entry_->mode(choice)!=0)
+                    throw Error("A key entry name was parsed as menu syntax");
+                key_entry_->picked(key_entry_->menu()+choice);
+                if(!encrypted() || !current_settings_.transfer.key ||
+                   current_settings_.transfer.key->mac(smoke_file_bytes)!=keys_[index].key.mac(smoke_file_bytes))
+                    throw Error("Selecting a named key changed its key identity or disabled encryption");
+            }
+            // Keep the existing plaintext clipboard/file smoke independent of
+            // key-search channel coverage after verifying automatic selection.
+            key_entry_->value(0); key_load_failed_=true;
+            key_entry_->picked(key_entry_->menu());
+            if(key_load_failed_ || encrypted())throw Error("Reselecting None did not acknowledge a failed keyfile load");
+            smoke_phase_=0;
+        } else if (smoke_phase_==0 && estimate_ && saw_noise_change_ && waterfall_->rows()>=3 && last_snapshot_.samples_received>0) {
             if (!last_snapshot_.simulation) throw Error("Smoke attempted to use an actual audio device");
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
@@ -619,8 +743,8 @@ private:
         } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting && smoke_review_resumed_ &&
                    last_snapshot_.sequence>resume_sequence_+2 && last_snapshot_.samples_received>resumed_samples_) {
             smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=6;
-            notice("GUI smoke passed: reception, text/file loopback, clipboard, save, held simulation plots and live resume.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: idle noise, pending-to-verified signals, normal TX, clipboard, exclusive save, simulation review and retained constellation after live resume."<<std::endl;
+            notice("GUI smoke passed: keyfile generation, reception, text/file loopback, clipboard, save and live plots.",smoke_.hold_seconds+1);
+            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals, normal TX, clipboard, exclusive save, simulation review and all plots returning to live reception."<<std::endl;
         } else if (smoke_phase_==6 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
@@ -632,10 +756,11 @@ private:
     gui::Signals signals_;
     gui::TransmissionPolicy gate_;
     gui::PlotReviewPolicy plot_policy_;
-    std::vector<std::string> file_ids_;
+    std::vector<std::string> file_ids_,pending_key_names_;
     std::vector<KeyEntry> keys_;
     std::shared_ptr<const Bytes> attachment_;
-    std::filesystem::path attachment_path_,loaded_key_path_;
+    std::filesystem::path attachment_path_,loaded_key_path_,smoke_key_path_;
+    bool smoke_keyfile_created_=false;
     bool attachment_image_=false,was_encrypted_=false,session_started_=false,closing_=false;
     bool preparing_=false,key_loading_=false,key_load_failed_=false,file_loading_=false,need_devices_=false,settings_valid_=true;
     bool transmit_requested_=false,saw_transmitting_=false,target_supported_=true,saw_noise_change_=false,smoke_passed_=false;
@@ -648,7 +773,8 @@ private:
     bool smoke_review_resumed_=false;
     std::vector<float> smoke_review_waveform_;
     std::vector<std::complex<double>> smoke_review_constellation_;
-    int smoke_phase_=0;
+    int smoke_phase_=-2;
+    bool smoke_key_reception_=false;
     double simulation_channel_snr_=0,cpu_percent_=0;
     std::string tuning_explanation_,notice_;
     std::vector<float> first_noise_;
@@ -665,7 +791,8 @@ private:
     Fl_Input_Choice *device_,*bandwidth_,*snr_;
     Fl_Check_Button* repeatable_;
     Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_;
-    Fl_Button *clear_,*key_browse_,*attach_,*use_text_,*transmit_,*cancel_,*save_;
+    Fl_Button *clear_,*attach_,*use_text_,*transmit_,*cancel_,*save_;
+    Fl_Menu_Button* key_browse_;
     ComposeEditor* editor_;
     QrPreview* qr_=nullptr;
     SignalBrowser* signal_browser_;
@@ -676,6 +803,20 @@ private:
 };
 
 void self_check() {
+    const auto names=gui::key_entry_names(menu_key_names);
+    const auto labels=gui::key_choice_labels(names);
+    Fl_Choice choice(0,0,1,1);
+    gui::populate_key_choice(choice,names);
+    if(choice.size()!=static_cast<int>(labels.size()+1) || choice.value()!=1)throw Error("Key choices lost their stable indices");
+    for(std::size_t index=0;index<labels.size();++index)
+        if(choice.text(static_cast<int>(index))!=labels[index] || choice.mode(static_cast<int>(index))!=0)
+            throw Error("A key name was interpreted as menu syntax");
+    int selections=0;
+    choice.callback([](Fl_Widget*,void* count) { ++*static_cast<int*>(count); },&selections);
+    choice.picked(choice.menu()+1); choice.picked(choice.menu()+1);
+    if(selections!=2)throw Error("Explicitly reselecting a key did not acknowledge the selection");
+    gui::populate_key_choice(choice,{});
+    if(choice.size()!=2 || choice.value()!=0 || std::string(choice.text(0))!="None")throw Error("Clearing key entries left a stale selection");
     transfer::Options options; options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
     options.timestamp=1800000000;
     Message message; message.data.assign(smoke_text,smoke_text+std::char_traits<char>::length(smoke_text));
@@ -697,10 +838,11 @@ int main(int argc,char** argv) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
             if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<'\n'; return 0; }
-            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS]]\n"; return 0; }
+            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS]]\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);
             else if (argument=="--smoke-hold" && i+1<argc) { smoke.hold_seconds=number(argv[++i],"Smoke hold"); if (smoke.hold_seconds<0 || smoke.hold_seconds>60) throw Error("Smoke hold must be 0..60 seconds"); }
+            else if (argument=="--smoke-timeout" && i+1<argc) { smoke.timeout_seconds=number(argv[++i],"Smoke timeout"); if (smoke.timeout_seconds<10 || smoke.timeout_seconds>600) throw Error("Smoke timeout must be 10..600 seconds"); }
             else throw Error("Unknown or incomplete GUI argument: "+argument);
         }
         if (smoke.enabled && smoke.directory.empty()) smoke.directory=std::filesystem::temp_directory_path()/("datapump-native-smoke-"+std::to_string(Steady::now().time_since_epoch().count()));

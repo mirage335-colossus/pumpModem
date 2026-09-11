@@ -55,6 +55,7 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
 int main() {
     try {
         roundtrip(1200, 44100, 48000, 4);
+        roundtrip(100, 48000, 44100, 4);
         roundtrip(2400, 48000, 44100, 4);
         roundtrip(2400, 44100, 96000, 6);
         // Wideband transport uses cards with enough physical passband. Rate

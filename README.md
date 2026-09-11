@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.3.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,9 +14,11 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.3 adds adaptive differential phase-and-amplitude constellations and
-symbol-boundary padding. Both ends of an audio link need 0.3 with matching modem settings;
-the packet and keyfile formats remain compatible.
+Version 0.5 adds an automatic waveform timebase, a consistent waterfall color
+scale, accumulated transmit-symbol diagnostics, and GUI keyfile generation.
+Audio frames are whitened to reduce data-dependent constellation bias. Both ends
+of an audio link need matching 0.5 settings; the packet and keyfile formats are
+unchanged. Bandwidth-derived clocks and oscillator impairments remain as in 0.4.
 
 ## Build and run
 
@@ -95,16 +97,26 @@ a bounded receive cache. WAV tools remain available through the CLI. It does not
 open received files or execute received content. Screenshots can be attached as
 ordinary image files; direct operating-system screenshot capture is not implemented.
 
+The **Keyfile** menu opens existing files, generates and saves a new 128 MiB
+keyfile with named entries in the background, or opens the loaded file's folder.
+Existing files are never overwritten. The waveform defaults to twelve carrier
+cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
+retains every FFT bin through peak pooling and uses one labeled color scale for
+its entire history. Click it to clear the history and reset that scale.
+
 Enter transmits audio; the checkbox changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
 updating while idle. Transmissions run at CPU speed through noisy complex
 observations and the same symbol decoder, with virtual airtime reported separately.
-On completion, the plots hold a payload-midpoint sample for two seconds. The
-received constellation dots remain accumulated after live waveform and waterfall
-updates resume, until the next transmission or settings change.
-This accelerated channel assumes ideal carrier and symbol timing; raw PCM
-acquisition is tested separately and remains available in CLI WAV simulation.
+On completion, all plots hold a payload-midpoint sample for two seconds, including
+up to 2,048 accumulated received constellation points. All plots then return to
+live input so new noise, lock attempts and transmissions remain visible.
+Simulation defaults to 100 ppm relative crystal error and phase diffusion of
+0.5 degrees per square root second. It models carrier coherence loss and changing
+symbol timing, while assuming matched chip despreading. It does not provide an
+oscillator tracking loop. Raw PCM acquisition is tested separately and remains
+available in CLI WAV simulation.
 Real audio reception pauses during transmission and resumes afterward.
 Bandwidth and target C/N0 determine constellation size and automatic integration length; forced pattern
 and tone modes are also available. Auto keystream is enabled with encryption.
@@ -170,7 +182,7 @@ printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 
 `status-rx` reports correlation with an already aligned known signal. It does not
 assert validated identity or implement continuous very-slow beacon monitoring.
-The reference modem supports 1.2/2.4/22.05/24kHz nominal bandwidth settings,
+The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz,
 forced lengths of 1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
 60% RS parity or no body FEC. The fixed bootstrap retains its protection even
 with `--fec off`; status mode is the route for truly overhead-free few-bit data.
@@ -183,13 +195,21 @@ receiver sensitivity or a capacity optimum.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
-to/from the modem's internal clock. Different 44.1/48/96 kHz cards can share the
+to/from the modem's internal clock. For bandwidth `B`, the internal sample rate
+is `max(64, ceil(4B))` samples/second and the carrier is `0.75B`. The 64 Hz floor
+preserves the fixed training schedule at very narrow bandwidths. Large downsampling
+ratios use bounded filter stages. Different 44.1/48/96 kHz cards can share the
 same modem settings. Conversion cannot restore frequencies outside the physical
-card's passband. The GUI indicates when the selected band exceeds the converter's
-usable passband; actual analog response remains device-dependent.
+card's passband. Live GUI audio rejects a selected band that exceeds the converter's
+usable passband; actual analog response remains device-dependent. The 30 MHz
+planning range permits future SDR integration; no SDR device backend is implemented.
 `--snr` is simulated sample-power SNR in dB. Simulation presets instead specify
 transmit dBm and channel attenuation, with thermal noise at 290K and a 10dB
-receiver noise figure. Extremely weak presets may produce only noise.
+receiver noise figure. With the default crystal impairment, extremely long
+integration can lose coherence and fail even when ideal-clock AWGN would decode.
+For a deliberately ideal oscillator diagnostic, use
+`--clock-error-ppm 0 --phase-noise 0` with `simulate` or `listen`. This does not
+demonstrate sensitivity or clock tracking on physical hardware.
 
 Repeatable eligibility is at most two seconds of incremental encoded content
 airtime, excluding preamble and fixed framing, with a minimum one-byte allowance.

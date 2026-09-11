@@ -9,10 +9,16 @@ Version 2 adds a variable-length short-payload prefix code. The framing, metadat
 integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
 versions; an older decoder that accepts only version 1 cannot read version 2.
 
-Application release 0.3 adds adaptive differential 4/8/16/32/64-APSK and
-symbol-boundary padding around the protected bootstrap. Audio peers require
-matching 0.3 modem settings. This does not change either packet version or the existing keyfile formats;
-audio waveform versions and packet codec versions are separate concepts.
+Application release 0.5 retains differential 4/8/16/32/64-APSK and symbol-boundary
+padding around the protected bootstrap. It applies a public additive whitening
+mask to the audio frame after encryption, excluding the training. Audio peers
+require matching 0.5 modem settings; older audio decoders do not remove this mask.
+This does not change either packet version or the existing keyfile formats;
+modem configuration and packet codec versions are separate concepts.
+
+Whitening is reversed before private decryption and packet FEC/validation. It
+adds no bytes, entropy, authentication, secrecy or error propagation. The exact
+mask is specified in [modem.md](modem.md); `pack`/`unpack` output is unchanged.
 
 The audio synchronization preamble is outside the packet codec. It is neither
 covered by packet Reed–Solomon coding nor by the packet digest/MAC. When
@@ -79,12 +85,15 @@ kind, identifier, and repeat flag but an empty payload:
 
 ```text
 content_bytes   = max(0, full_packet_bytes - empty_payload_packet_bytes)
-content_seconds = content_bytes * 8 / actual_modem_bit_rate
+content_symbols = max(0, payload_symbols(full_packet_bytes) - payload_symbols(empty_payload_packet_bytes))
+content_seconds = content_symbols * symbol_sample_count / internal_sample_rate
 repeat_allowed  = content_seconds <= 2 OR original_payload_bytes <= 1
 ```
 
 The subtraction excludes the fixed bootstrap, ID, metadata, tag, and their fixed
-FEC cost while including incremental payload coding/parity and actual compression.
+FEC cost while including incremental payload coding/parity, compression and
+symbol-boundary padding. `payload_symbols` counts the protected bootstrap and
+remaining body with their separate symbol boundaries.
 The preamble is outside both packets and never consumes this allowance. There is
 no 64 KiB limit. The threshold and one-byte floor are configurable through
 `transfer::RepeatPolicy`; the defaults above preserve a repeatable one-byte

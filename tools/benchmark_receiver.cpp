@@ -1,5 +1,6 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/transfer.hpp"
+#include "datapump/tuning.hpp"
 #include <chrono>
 #include <iostream>
 #include <string_view>
@@ -11,6 +12,7 @@ int main(int argc, char** argv) {
     using namespace datapump;
     try {
         transfer::Options options;
+        options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,true).config;
         if (argc > 2 || (argc == 2 && (std::string_view(argv[1]).size() != 1 || argv[1][0] < '2' || argv[1][0] > '6')))
             throw Error("usage: benchmark_receiver [bits-per-symbol: 2..6]");
         if (argc == 2) options.modem.constellation_bits = static_cast<unsigned>(argv[1][0] - '0');
@@ -20,7 +22,7 @@ int main(int argc, char** argv) {
         for (int offset = -6; offset <= 6; ++offset) {
             const auto epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(options.timestamp) + offset);
             auto expected = options.key->xor_data(modem::preamble(options.modem), epoch);
-            const auto mask = options.key->xor_data(Bytes(packet_prefix_size), epoch, expected.size());
+            const auto mask = transfer::audio_bootstrap_mask(options, epoch);
             bank.push_back(std::make_unique<modem::StreamingReceiver>(options.modem, std::move(expected),
                 8 * 1024 * 1024, [mask](const Bytes& prefix) {
                     try {
@@ -37,7 +39,7 @@ int main(int argc, char** argv) {
             for (auto& sample : block) sample = normal(random);
             for (auto& receiver : bank) receiver->push(block, stop);
         };
-        for (std::size_t warm = 0; warm < 240000; warm += block.size()) feed();
+        for (std::size_t warm = 0; warm < options.modem.sample_rate*5; warm += block.size()) feed();
         std::stop_source stop;
         std::jthread timer([&] {
             std::this_thread::sleep_for(std::chrono::seconds(5));
@@ -49,7 +51,7 @@ int main(int argc, char** argv) {
         catch (const Error&) { if (!stop.stop_requested()) throw; }
         const auto wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         const double media = static_cast<double>(samples) / options.modem.sample_rate;
-        std::cout << options.modem.constellation_bits << " bits/symbol, 13 keyed epochs, 48 kHz generated PCM: " << media << " media seconds / "
+        std::cout << options.modem.constellation_bits << " bits/symbol, 13 keyed epochs, " << options.modem.sample_rate << " Hz generated PCM: " << media << " media seconds / "
                   << wall << " wall seconds = " << media / wall << "x real time\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

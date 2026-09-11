@@ -7,9 +7,17 @@
 namespace datapump::audio {
 Resampler::Resampler(std::uint32_t input_rate,std::uint32_t output_rate)
     :input_rate_(input_rate),output_rate_(output_rate) {
-    if(input_rate<8000 || input_rate>384000 || output_rate<8000 || output_rate>384000)
-        throw Error("resampler rate must be 8000..384000 Hz");
+    if(input_rate<64 || input_rate>120000000 || output_rate<64 || output_rate>120000000)
+        throw Error("resampler rate must be 64..120000000 Hz");
     if(input_rate==output_rate)return;
+    if(static_cast<std::uint64_t>(input_rate)>static_cast<std::uint64_t>(output_rate)*4) {
+        auto intermediate_rate=output_rate;
+        while(static_cast<std::uint64_t>(intermediate_rate)*4<input_rate)intermediate_rate*=4;
+        first_stage_=std::make_unique<Resampler>(input_rate,intermediate_rate);
+        last_stage_=std::make_unique<Resampler>(intermediate_rate,output_rate);
+        intermediate_.resize(256);
+        return;
+    }
     const double ratio=std::min(1.,static_cast<double>(output_rate)/input_rate);
     radius_=static_cast<std::size_t>(std::ceil(48/ratio));
     taps_=radius_*2+1;
@@ -43,12 +51,33 @@ std::uint64_t Resampler::final_count() const {
     return whole*output_rate_+tail;
 }
 bool Resampler::finished() const noexcept {
+    if(last_stage_)return last_stage_->finished();
     if(!ending_)return false;
     // source_ is the timestamp of the next output in input sample units.
     return source_>=received_;
 }
 std::size_t Resampler::workspace_bytes() const noexcept {
-    return sizeof(*this)+(ring_.capacity()+coefficients_.capacity())*sizeof(float);
+    return sizeof(*this)+(ring_.capacity()+coefficients_.capacity()+intermediate_.capacity())*sizeof(float)+
+        (first_stage_?first_stage_->workspace_bytes()+last_stage_->workspace_bytes():0);
+}
+Resampler::Progress Resampler::process_stages(std::span<const float> input,std::span<float> output,bool end) {
+    Progress progress;
+    while(progress.produced<output.size() && !last_stage_->finished()) {
+        const auto converted=last_stage_->process(
+            std::span<const float>(intermediate_.data()+intermediate_position_,intermediate_count_-intermediate_position_),
+            output.subspan(progress.produced),first_stage_->finished());
+        intermediate_position_+=converted.consumed;
+        progress.produced+=converted.produced;
+        if(converted.consumed || converted.produced)continue;
+        if(intermediate_position_!=intermediate_count_)
+            throw Error("resampler stage buffer invariant failed");
+        const auto filled=first_stage_->process(input.subspan(progress.consumed),intermediate_,end);
+        progress.consumed+=filled.consumed;
+        intermediate_position_=0;intermediate_count_=filled.produced;
+        if(!filled.consumed && !filled.produced && !first_stage_->finished())break;
+    }
+    if(end && progress.consumed==input.size())ending_=true;
+    return progress;
 }
 double Resampler::passband_hz() const noexcept {
     return (input_rate_==output_rate_?.5:.42)*std::min(input_rate_,output_rate_);
@@ -79,6 +108,7 @@ void Resampler::discard_history() {
 }
 Resampler::Progress Resampler::process(std::span<const float> input,std::span<float> output,bool end) {
     if(ending_ && !input.empty())throw Error("cannot append to a finished resampler");
+    if(first_stage_)return process_stages(input,output,end);
     Progress progress;
     if(input_rate_==output_rate_) {
         const auto count=std::min(input.size(),output.size());

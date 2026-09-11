@@ -1,7 +1,9 @@
 #include "datapump/transfer.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/channel.hpp"
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <random>
@@ -10,6 +12,18 @@
 
 namespace datapump::transfer {
 namespace {
+constexpr std::uint64_t audio_training_bytes=32;
+const Crypto& public_whitening_stream() {
+    // Protocol constant, deliberately public. HKDF purpose separation and a
+    // 64-bit AES-CTR offset avoid short repeating masks on large transfers.
+    static const Crypto stream([] {
+        std::array<std::uint8_t,32> seed{};
+        constexpr std::string_view domain="DataPump/audio/whitening/v0.5";
+        std::copy(domain.begin(),domain.end(),seed.begin());
+        return seed;
+    }());
+    return stream;
+}
 void check_cancelled(std::stop_token stop) {
     if (stop.stop_requested()) throw Error("transfer cancelled");
 }
@@ -81,13 +95,15 @@ Bytes epoch_context(const Bytes& data, std::uint64_t timestamp) {
 modem::StreamingReceiver receiver(const Options& options,std::uint64_t timestamp) {
     const auto config=seeded_config(options,timestamp);
     auto expected=modem::preamble(config);
-    const auto prefix=expected.size(),limit=packet_budget(options);
+    const auto limit=packet_budget(options);
     if(options.key)expected=options.key->xor_data(expected,timestamp);
-    const auto key=options.key;
+    const auto mask=audio_bootstrap_mask(options,timestamp);
     return modem::StreamingReceiver(config,std::move(expected),options.dsp_workspace_bytes,
-        [key,timestamp,prefix,limit](const Bytes& bytes) {
+        [mask,limit](const Bytes& bytes) {
             try {
-                const auto plain=key?key->xor_data(bytes,timestamp,prefix):bytes;
+                if(bytes.size()>mask.size())return false;
+                auto plain=bytes;
+                for(std::size_t i=0;i<plain.size();++i)plain[i]^=mask[i];
                 return packet_bootstrap_possible(plain,limit) && packet_frame_size(plain,limit).has_value();
             } catch(const Error&) {return false;}
         });
@@ -95,6 +111,7 @@ modem::StreamingReceiver receiver(const Options& options,std::uint64_t timestamp
 Received verified(Bytes wire,modem::Diagnostics diagnostics,const Options& options,std::uint64_t timestamp) {
     const auto training=modem::preamble(options.modem).size();
     if(wire.size()<training)throw Error("packet bootstrap not acquired");
+    xor_audio_whitening(wire);
     if(options.key)wire=options.key->xor_data(wire,timestamp);
     const Bytes frame(wire.begin()+static_cast<std::ptrdiff_t>(training),wire.end());
     auto packet=decode_packet(frame,packet_options(options,timestamp),packet_budget(options));
@@ -109,12 +126,37 @@ void append_wire(Bytes& target,const Bytes& bytes,const Options& options) {
 std::optional<std::size_t> declared_wire_size(const Bytes& wire,const Options& options,std::uint64_t timestamp) {
     const auto training=modem::preamble(options.modem).size();
     if(wire.size()<training+packet_prefix_size)return {};
-    const Bytes prefix(wire.begin()+static_cast<std::ptrdiff_t>(training),
-                       wire.begin()+static_cast<std::ptrdiff_t>(training+packet_prefix_size));
+    Bytes prefix(wire.begin()+static_cast<std::ptrdiff_t>(training),
+                 wire.begin()+static_cast<std::ptrdiff_t>(training+packet_prefix_size));
+    xor_audio_whitening(prefix,training);
     const auto plain=options.key?options.key->xor_data(prefix,timestamp,training):prefix;
     const auto count=packet_frame_size(plain,packet_budget(options));
     return count?std::optional<std::size_t>(*count+training):std::nullopt;
 }
+}
+
+void xor_audio_whitening(std::span<std::uint8_t> bytes,std::uint64_t wire_offset) {
+    if(bytes.size()>std::numeric_limits<std::uint64_t>::max()-wire_offset)
+        throw Error("audio whitening stream offset overflow");
+    if(wire_offset<audio_training_bytes) {
+        const auto skip=static_cast<std::size_t>(std::min<std::uint64_t>(audio_training_bytes-wire_offset,bytes.size()));
+        bytes=bytes.subspan(skip);wire_offset+=skip;
+    }
+    if(bytes.empty())return;
+    auto offset=wire_offset-audio_training_bytes;
+    while(!bytes.empty()) {
+        const auto count=std::min<std::size_t>(16384,bytes.size());
+        const auto mask=public_whitening_stream().stream(StreamPurpose::Scrambler,0,offset,count);
+        for(std::size_t i=0;i<count;++i)bytes[i]^=mask[i];
+        bytes=bytes.subspan(count);offset+=count;
+    }
+}
+
+Bytes audio_bootstrap_mask(const Options& options,std::uint64_t timestamp) {
+    Bytes mask(packet_prefix_size);
+    xor_audio_whitening(mask,audio_training_bytes);
+    if(options.key)mask=options.key->xor_data(mask,timestamp,audio_training_bytes);
+    return mask;
 }
 
 std::size_t packet_workspace_limit(std::size_t content_limit) {
@@ -185,6 +227,7 @@ Bytes transmission_wire(const Message& message,const Options& options) {
     auto wire = modem::preamble(config);
     wire.insert(wire.end(), frame.begin(), frame.end());
     if (options.key) wire = options.key->xor_data(wire, options.timestamp);
+    xor_audio_whitening(wire);
     return wire;
 }
 
@@ -242,15 +285,8 @@ Received simulate(const Message& message, const Options& options, const modem::C
                   Progress progress, std::stop_token stop) {
     check_cancelled(stop);
     validate_message(message,options);
-    if(!std::isfinite(channel.snr_db) || std::abs(channel.snr_db)>300 || !std::isfinite(channel.frequency_offset_hz))
-        throw Error("invalid simulation channel");
     const auto config = seeded_config(options, options.timestamp);
-    // Frequency-offset experiments retain the raw PCM channel model. The
-    // accelerated channel explicitly assumes an ideal coherent carrier.
-    if(channel.frequency_offset_hz!=0) {
-        auto noisy=modem::simulate(transmit(message,options,stop),config,channel);
-        return receive(noisy,options,std::move(progress),stop);
-    }
+    modem::validate_channel(config,channel);
     const auto wire=transmission_wire(message,options);
     auto candidates=drift_candidates(options.timestamp,options.search_seconds,options.key.has_value());
     if(!options.key)candidates={options.timestamp};
@@ -260,26 +296,24 @@ Received simulate(const Message& message, const Options& options, const modem::C
         try {
             modem::StreamingTransmitter source(wire,config,options.dsp_workspace_bytes);
             auto decoder=receiver(options,timestamp);
-            std::mt19937_64 random(channel.seed);
+            modem::SimulationChannel impairments(config,channel);
             Bytes received;
             auto delay=static_cast<std::uint64_t>(channel.delay_samples);
             const auto quantum=std::max<std::uint64_t>(1,modem::symbol_sample_count(config)/32);
             while(delay) {
                 check_cancelled(stop);
                 const auto count=std::min(delay,quantum);
-                const auto noise=modem::add_awgn({{},count},channel.snr_db,random);
+                const auto noise=impairments.noise(count);
                 append_wire(received,decoder.push_symbols(std::span(&noise,1),stop),options);
                 delay-=count;
             }
             while(const auto observation=source.next_symbol(stop)) {
-                const auto noisy=modem::add_awgn(*observation,channel.snr_db,random);
-                append_wire(received,decoder.push_symbols(std::span(&noisy,1),stop),options);
+                if(const auto noisy=impairments.process(*observation))
+                    append_wire(received,decoder.push_symbols(std::span(&*noisy,1),stop),options);
             }
             append_wire(received,decoder.finish(stop),options);
             auto diagnostics=decoder.diagnostics();diagnostics.waveform.resize(2048);
-            source.preview_last(diagnostics.waveform);
-            std::normal_distribution<double> noise(0,std::sqrt(modem::nominal_signal_power*std::pow(10.,-channel.snr_db/10)));
-            for(auto& sample:diagnostics.waveform)sample+=static_cast<float>(noise(random));
+            impairments.preview_last(source,diagnostics.waveform);
             return verified(std::move(received),std::move(diagnostics),options,timestamp);
         } catch(const Error& error) {check_cancelled(stop);last_error=error.what();}
     }

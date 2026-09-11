@@ -32,10 +32,10 @@
 
 using namespace datapump;
 #ifndef DATAPUMP_VERSION
-#define DATAPUMP_VERSION "0.3.0"
+#define DATAPUMP_VERSION "0.5.0"
 #endif
 namespace {
-const char* usage=R"HELP(Data Pump 0.2 — civilian audio text and file modem
+const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text and file modem
 
 Usage: pump COMMAND [OPTIONS]
   simulate     Accelerated AWGN loopback; --output WAV uses raw sampled audio
@@ -63,10 +63,10 @@ Input/output:
 
 Modem:
   --bw HZ               Nominal bandwidth, default1200 (also 1.2kHz etc.)
-  --sample-rate HZ      Manual sample rate, 8000..384000; default48000
-  --carrier HZ          Default1500 (bandwidth/2+1000 for wide bandwidths)
-  --spreading N         Chips per 4-bit APSK symbol, 1..16384; default1
-  --target-snr DBHZ     Automatic integration target C/N0; default40
+  --sample-rate HZ      Internal DSP clock, 64..120000000; default max(64,4*bw)
+  --carrier HZ          Default 0.75*bw; hardware rate negotiated independently
+  --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
+  --target-snr DBHZ     Automatic target C/N0; default40, auto unless manual controls
   --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Independent encrypted direct-sequence spreading
@@ -91,6 +91,8 @@ Audio/simulation:
   --snr DB              Simulator measured signal/noise power ratio; default20
   --simulation PRESET   e.g. "3dBm -120dB": TX power and channel attenuation
   --seed N --delay-samples N --frequency-offset HZ
+  --clock-error-ppm N   Relative crystal error; default100 (0 for ideal clock)
+  --phase-noise N       Phase diffusion, degrees/sqrt(second); default0.5
 
 Very slow status:
   --bits 010            Exact known callsign bits (1..4096), no MAC or FEC
@@ -115,7 +117,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","pattern","simulation","key-name","key-names","cache-mb","dsp-mb"};
+            "target-snr","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -169,6 +171,7 @@ public:
         if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
+        if(command!="simulate" && command!="listen") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen");
         if(command=="listen") reject({"snr","frequency-offset","delay-samples","output","tx-delay"},"is not a listen option; choose a simulation preset for its continuous channel");
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
@@ -195,10 +198,15 @@ std::size_t dsp_budget(const Args& a) {
     if(!mb || mb>1024)throw Error("dsp-mb must be 1..1024");
     return static_cast<std::size_t>(mb*1024*1024);
 }
+bool automatic_tuning(const Args& a) {
+    const bool manual=a.has("spreading") || a.has("scramble") || a.has("dsss") ||
+                      a.has("sample-rate") || a.has("carrier");
+    return a.has("target-snr") || a.has("pattern") || !manual;
+}
 modem::Config config(const Args& a) {
     modem::Config c;
     c.bandwidth_hz=a.number("bw",1200);
-    const bool automatic=a.has("target-snr") || a.has("pattern");
+    const bool automatic=automatic_tuning(a);
     if(automatic) {
         if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate") || a.has("carrier"))
             throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate/carrier");
@@ -207,10 +215,10 @@ modem::Config config(const Args& a) {
         c=plan.config;
         if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
     }
-    auto rate=a.integer("sample-rate",automatic?c.sample_rate:c.bandwidth_hz>22050?96000:48000);
-    if(rate>384000) throw Error("sample rate exceeds384000");
+    auto rate=a.integer("sample-rate",automatic?c.sample_rate:tuning::recommended_sample_rate(c.bandwidth_hz));
+    if(rate>120000000) throw Error("internal sample rate exceeds120000000");
     c.sample_rate=static_cast<std::uint32_t>(rate);
-    c.carrier_hz=a.number("carrier",automatic?c.carrier_hz:c.bandwidth_hz>2400?c.bandwidth_hz/2+1000:1500);
+    c.carrier_hz=a.number("carrier",automatic?c.carrier_hz:tuning::recommended_carrier_hz(c.bandwidth_hz));
     auto spreading=a.integer("spreading",c.spreading_factor);
     if(spreading==0 || spreading>16384) throw Error("spreading must be1..16384");
     c.spreading_factor=static_cast<unsigned>(spreading);
@@ -218,7 +226,19 @@ modem::Config config(const Args& a) {
     if(!automatic) {c.scramble=a.has("scramble");c.dsss=a.has("dsss");}
     if((a.has("scramble") || a.has("dsss")) && !a.has("keyfile")) throw Error("encrypted spreading requires --keyfile");
     if(a.get("device-type","audio")!="audio") throw Error("this build supports analog audio only; SDR and IC-7100 frontends are not implemented");
+    if(a.has("device") && c.bandwidth_hz>192000)
+        throw Error("this bandwidth requires an SDR frontend; use simulation in this audio-only build");
     modem::validate(c);return c;
+}
+audio::StreamFormatCallback audio_passband_guard(const modem::Config& config) {
+    const auto upper_edge=config.carrier_hz+config.bandwidth_hz/2;
+    return [upper_edge](const audio::StreamFormat& format) {
+        if(upper_edge>format.usable_passband_hz)
+            throw Error("Selected upper band edge ("+std::to_string(upper_edge)+
+                        " Hz) exceeds this audio path's usable passband ("+
+                        std::to_string(format.usable_passband_hz)+
+                        " Hz). Choose a narrower band, a wider audio device, or simulation.");
+    };
 }
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -295,7 +315,7 @@ void output_wave(const Args& a,const std::vector<float>& samples,const modem::Co
     if(a.has("device")) {
         auto delay=a.number("tx-delay",6);
         if(delay<0 || delay>3600) throw Error("tx-delay must be0..3600 seconds");
-        audio::play(samples,c.sample_rate,a.get("device"));
+        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c));
         if(a.has("keyfile"))std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
@@ -348,6 +368,8 @@ void listen(const Args& a,const transfer::Options& options) {
             options.modem.bandwidth_hz,options.modem.sample_rate).sample_snr_db;
     }
     settings.simulation_seed=a.integer("seed",1);
+    settings.simulation_clock_error_ppm=a.number("clock-error-ppm",100);
+    settings.simulation_phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
     if(a.has("keyfile") && !a.has("key-name")) {
         for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
             std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
@@ -447,10 +469,11 @@ int main(int argc,char** argv) {
                 <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
                 <<",\"spreading\":"<<c.spreading_factor
                 <<",\"constellation_bits\":"<<c.constellation_bits
+                <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<c.carrier_hz
                 <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")
                 <<",\"memory_supported\":"<<(result.memory_supported?"true":"false")
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
-            if(a.has("target-snr") || a.has("pattern")) {
+            if(automatic_tuning(a)) {
                 const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",40),
                     tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
                 std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
@@ -481,7 +504,7 @@ int main(int argc,char** argv) {
         }
         if(a.command=="rx") {
             std::vector<float> samples;
-            if(a.has("device")) {if(a.has("input"))throw Error("choose --input WAV or --device");samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a));}
+            if(a.has("device")) {if(a.has("input"))throw Error("choose --input WAV or --device");samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a),{},audio_passband_guard(c));}
             else {auto wav=input_wav(a);c.sample_rate=wav.sample_rate;modem::validate(c);samples=std::move(wav.samples);}
             settings.modem=c;
             auto result=transfer::receive(samples,settings,progress);report(a,result.packet,result.diagnostics,result.timestamp);return 0;
@@ -496,7 +519,7 @@ int main(int argc,char** argv) {
                 if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
                 modem::StreamingTransmitter source(transfer::transmission_wire(outgoing,settings),
                     transfer::seeded_config(settings,timestamp),settings.dsp_workspace_bytes);
-                audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source.read(chunk);});
+                audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source.read(chunk);},{},audio_passband_guard(c));
                 if(settings.key)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
             } else output_wave(a,transfer::transmit(outgoing,settings),c);
             std::cerr<<"Transmitted "<<estimate.packet_bytes<<" frame bytes, "<<estimate.total_seconds
@@ -510,6 +533,8 @@ int main(int argc,char** argv) {
         }
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
+        channel.clock_error_ppm=a.number("clock-error-ppm",100);
+        channel.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
         const auto outgoing=message(a);
         transfer::Received result;
         if(a.has("output")) {

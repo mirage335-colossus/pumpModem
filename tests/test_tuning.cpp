@@ -59,8 +59,25 @@ void snr_planning() {
     plan=tuning::resolve(1200,-60,tuning::PatternMode::tone_1,true);
     check(!plan.target_supported && plan.config.spreading_factor==1,"explicit mode retained even if target impossible");
     rejects([]{tuning::resolve(0,6,tuning::PatternMode::auto_pattern,false);},"invalid bandwidth");
-    rejects([]{tuning::resolve(1000000,6,tuning::PatternMode::auto_pattern,false);},"unsupported audio bandwidth");
+    rejects([]{tuning::resolve(30000001,6,tuning::PatternMode::auto_pattern,false);},"unsupported modem bandwidth");
     rejects([]{tuning::resolve(1200,std::numeric_limits<double>::quiet_NaN(),tuning::PatternMode::auto_pattern,false);},"invalid target SNR");
+}
+void bandwidth_derived_clocks() {
+    for(const double bandwidth:{1.,16.,100.,1200.,2400.,24000.,192000.,1000000.,30000000.}) {
+        const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_tone,false);
+        const auto expected=static_cast<std::uint32_t>(std::max(64.,std::ceil(4*bandwidth)));
+        check(plan.config.sample_rate==expected,"internal sample clock must scale with occupied bandwidth");
+        near(plan.config.carrier_hz,.75*bandwidth,"carrier scales with bandwidth");
+        check(plan.config.carrier_hz+bandwidth/2<.42*plan.config.sample_rate,"internal spectrum must fit the conversion passband");
+        check(modem::training_sample_count(plan.config)>=64*5,"fixed training remains sampled at low bandwidth");
+        near(modem::bit_rate(plan.config),3*bandwidth,"strong channel throughput scales without an audio-rate ceiling");
+        const auto budget=tuning::link_budget(tuning::simulation_presets()[1],bandwidth,plan.config.sample_rate);
+        check(std::isfinite(budget.sample_snr_db),"low and SDR-rate clocks need valid link budgets");
+    }
+    const auto config=tuning::resolve(100,100,tuning::PatternMode::auto_tone,false).config;
+    const auto training=modem::preamble(config);
+    auto wire=training;wire.insert(wire.end(),{0,0xff,0x35,0xa8});
+    check(modem::demodulate(modem::modulate(wire,config),config,training).bytes==wire,"sub-audio internal clock preserves packet symbols");
 }
 void adaptive_geometry_and_rates() {
     for(unsigned bits=2;bits<=6;++bits) {
@@ -154,6 +171,6 @@ void sizing_and_validation() {
 }
 }
 int main() {
-    try {modes_and_tones();snr_planning();adaptive_geometry_and_rates();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_tones();snr_planning();adaptive_geometry_and_rates();bandwidth_derived_clocks();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

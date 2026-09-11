@@ -71,7 +71,26 @@ int main(){try {
         (void)convert(std::vector<float>(count,.25f),96000,44100,1,1);
     }
     rejects([]{Resampler invalid(0,48000);});
-    rejects([]{Resampler invalid(48000,384001);});
+    // Very low DSP clocks require several bounded filter stages, rather than
+    // one coefficient table proportional to the entire hardware/DSP ratio.
+    for(const auto& pair:{std::pair{48000u,64u},std::pair{64u,48000u},std::pair{120000000u,64u}}) {
+        Resampler converter(pair.first,pair.second);
+        require(converter.workspace_bytes()<5*1024*1024,"wide rate range creates an oversized filter table");
+    }
+    const auto low_input=sine(48000,12,48000*4+3);
+    const auto low_large=convert(low_input,48000,64,low_input.size(),4096);
+    const auto low_fragmented=convert(low_input,48000,64,17,3);
+    require(low_large==low_fragmented,"multistage conversion depends on callback boundaries");
+    const auto low_ideal=sine(64,12,low_large.size());
+    for(std::size_t i=70;i+70<low_large.size();++i)
+        require(std::abs(low_large[i]-low_ideal[i])<.0002,"low-rate conversion loses passband phase or amplitude");
+    const auto low_alias=convert(sine(48000,123,48000*4),48000,64,257,13);
+    require(rms(std::span<const float>(low_alias).subspan(70,low_alias.size()-140))<.0001,"multistage downsampling aliases rejected frequencies");
+    for(const auto count:{0u,1u,2u,3u,47u,1001u}) {
+        (void)convert(std::vector<float>(count,.25f),48000,64,1,1);
+        (void)convert(std::vector<float>(count,.25f),64,48000,1,17);
+    }
+    rejects([]{Resampler invalid(48000,120000001);});
     rejects([]{Resampler invalid(48000,44100);std::array<float,3> out{};invalid.process(std::array<float,1>{std::numeric_limits<float>::quiet_NaN()},out,true);});
     std::cout<<"Bounded band-limited sample-rate conversion tests passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

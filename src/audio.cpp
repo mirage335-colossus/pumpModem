@@ -23,15 +23,18 @@ void check_cancelled(std::stop_token stop) {
     if(stop.stop_requested()) throw Error("audio operation cancelled");
 }
 std::size_t sample_count(double seconds,std::uint32_t rate,std::size_t memory_limit) {
-    if(!std::isfinite(seconds) || seconds<=0 || rate<8000 || rate>384000 ||
+    if(!std::isfinite(seconds) || seconds<=0 || rate<64 || rate>120000000 ||
         seconds*rate>static_cast<double>(memory_limit/sizeof(float)))
         throw Error("audio duration/sample rate exceeds memory budget or valid range");
     return static_cast<std::size_t>(seconds*rate);
 }
 std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
-    if(logical_rate<8000 || logical_rate>384000)throw Error("invalid audio sample rate");
+    if(logical_rate<64 || logical_rate>120000000)throw Error("invalid logical sample rate");
     constexpr std::array<std::uint32_t,13> common{8000,11025,16000,22050,24000,32000,44100,48000,88200,96000,176400,192000,384000};
-    std::vector<std::uint32_t> result{logical_rate};
+    // Sound-card interfaces stay within actual audio clock ranges. SDR-rate
+    // logical PCM remains separate and does not imply an SDR audio backend.
+    std::vector<std::uint32_t> result;
+    if(logical_rate>=8000 && logical_rate<=384000)result.push_back(logical_rate);
     // Preserve physical passband when a faster device clock is available.
     for(const auto rate:common)if(rate>logical_rate)result.push_back(rate);
     for(auto it=common.rbegin();it!=common.rend();++it)if(*it<logical_rate)result.push_back(*it);

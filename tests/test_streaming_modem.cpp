@@ -9,6 +9,69 @@
 #include <chrono>
 #include <thread>
 using namespace datapump;
+void transmitted_constellation_history() {
+    modem::Config config;config.constellation_bits=6;
+    auto wire=modem::preamble(config);
+    for(unsigned i=0;i<2101;++i)wire.push_back(static_cast<std::uint8_t>(i*79+37));
+    modem::StreamingTransmitter source(wire,config),pcm(wire,config);
+    if(!source.payload_constellation().empty())throw std::runtime_error("unstarted TX constellation contains points");
+    const auto training=modem::training_sample_count(config);
+    while(source.samples_emitted()<training) {
+        source.next_symbol();
+        if(!source.payload_constellation().empty())throw std::runtime_error("fixed training polluted payload constellation");
+    }
+    std::vector<std::complex<double>> expected;
+    const auto symbol=modem::symbol_sample_count(config);
+    while(!source.finished()) {
+        const auto start=source.samples_emitted();
+        const auto observation=source.next_symbol();
+        if((start-training)%symbol==0)expected.push_back(observation->value);
+    }
+    if(expected.size()<=modem::StreamingTransmitter::constellation_history_limit)
+        throw std::runtime_error("TX ring fixture does not exercise overwrite");
+    expected.erase(expected.begin(),expected.end()-modem::StreamingTransmitter::constellation_history_limit);
+    const auto recent=source.payload_constellation();
+    if(recent!=expected)throw std::runtime_error("TX constellation is not the bounded chronological payload history");
+    std::array<float,317> block{};
+    while(!pcm.finished())pcm.read(block);
+    if(pcm.payload_constellation()!=recent)throw std::runtime_error("PCM and integrated TX histories differ");
+    const auto unchanged=source.payload_constellation();source.next_symbol();
+    if(source.payload_constellation()!=unchanged)throw std::runtime_error("finished transmitter appended a phantom symbol");
+
+    config.spreading_mode=modem::SpreadingMode::tone;config.integration_seconds=3600;
+    wire.resize(32+90);modem::StreamingTransmitter slow(wire,config);
+    while(slow.samples_emitted()<modem::training_sample_count(config))slow.next_symbol();
+    if(!slow.payload_constellation().empty())throw std::runtime_error("slow TX includes training points");
+    slow.next_symbol();const auto first=slow.payload_constellation();
+    if(first.size()!=1)throw std::runtime_error("first partial slow symbol is not visible");
+    slow.next_symbol();
+    if(slow.payload_constellation()!=first)throw std::runtime_error("partial integrations duplicate the slow symbol");
+    while(!slow.finished())slow.next_symbol();
+    if(slow.payload_constellation().size()!=modem::payload_symbol_count(wire.size()-32,config))
+        throw std::runtime_error("TX history lost symbols spanning hours of media time");
+}
+void live_constellation_window() {
+    modem::Config config;
+    Message message;message.id[0]=0x71;message.data={'l','i','v','e'};
+    auto wire=modem::preamble(config);const auto frame=encode_packet(message);wire.insert(wire.end(),frame.begin(),frame.end());
+    modem::StreamingTransmitter source(wire,config);modem::StreamingReceiver receiver(config,modem::preamble(config));
+    while(const auto observation=source.next_symbol())receiver.push_symbols(std::span(&*observation,1));
+    if(!receiver.synchronized())throw std::runtime_error("live constellation fixture failed acquisition");
+    const modem::SymbolObservation outer{{.7,0},modem::symbol_sample_count(config)};
+    for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&outer,1));
+    const modem::SymbolObservation inner{{.35,0},modem::symbol_sample_count(config)};
+    for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&inner,1));
+    const auto diagnostic=receiver.diagnostics();
+    if(diagnostic.constellation.size()!=2048)throw std::runtime_error("live constellation lost its bounded accumulation");
+    for(const auto point:diagnostic.constellation)
+        if(std::abs(point-std::complex<double>{.35,0})>1e-8)throw std::runtime_error("live constellation retained old amplitude samples after its window advanced");
+    const modem::SymbolObservation newest{{.63,.11},modem::symbol_sample_count(config)};
+    receiver.push_symbols(std::span(&newest,1));
+    const auto latest=receiver.diagnostics();
+    if(std::abs(latest.constellation.back()-newest.value)>1e-8 || std::abs(latest.constellation.front()-inner.value)>1e-8)
+        throw std::runtime_error("live constellation accumulation is not chronological");
+    if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("live constellation ring exceeded receiver workspace");
+}
 void long_keyed_pcm() {
     modem::Config config;config.sample_rate=8000;config.spreading_factor=1024;
     config.scramble=true;config.spreading_seed[0]=29;
@@ -237,16 +300,24 @@ int main() {
         std::jthread request_stop([&]{std::this_thread::sleep_for(std::chrono::milliseconds(20));interrupt.request_stop();});
         const auto before=std::chrono::steady_clock::now();
         const modem::SymbolObservation enormous_idle{{},std::uint64_t{1}<<48};
-        bool interrupted=false;
-        try{waiting.push_symbols(std::span(&enormous_idle,1),interrupt.get_token());}
+        bool interrupted=false;Bytes idle_output;
+        try{idle_output=waiting.push_symbols(std::span(&enormous_idle,1),interrupt.get_token());}
         catch(const Error& error){interrupted=std::string_view(error.what())=="modem operation cancelled";}
-        if(!interrupted || std::chrono::steady_clock::now()-before>std::chrono::seconds(2))
-            throw std::runtime_error("large integrated observation cannot be cancelled promptly");
+        if(!idle_output.empty() || waiting.synchronized() || std::chrono::steady_clock::now()-before>std::chrono::seconds(2))
+            throw std::runtime_error("constant idle observation was not skipped or cancelled promptly");
+        if(!interrupted) {
+            interrupt.request_stop();
+            try{waiting.push_symbols(std::span(&enormous_idle,1),interrupt.get_token());}
+            catch(const Error& error){interrupted=std::string_view(error.what())=="modem operation cancelled";}
+            if(!interrupted)throw std::runtime_error("fast idle acquisition ignored requested cancellation");
+        }
         long_keyed_pcm();
         adaptive_roundtrips();
         dense_missing_outer_ring();
         dense_gain_aliases();
         recent_pcm_preview();
+        transmitted_constellation_history();
+        live_constellation_window();
         std::cout<<"streaming modem tests passed\n";
     } catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

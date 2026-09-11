@@ -2,6 +2,7 @@
 #include "datapump/transfer.hpp"
 #include <complex>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -12,6 +13,8 @@ struct Settings {
     std::string device = "default";
     bool simulation = false;
     double simulation_snr_db = 18;
+    double simulation_clock_error_ppm = 100;
+    double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
     std::size_t content_limit = default_memory_limit;
     std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
@@ -39,11 +42,13 @@ struct SignalUpdate {
     std::uint64_t sequence = 0;
     double virtual_seconds = 0;
 };
+enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
     std::vector<std::complex<double>> constellation;
+    ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;
     std::string status;
@@ -60,8 +65,7 @@ struct Snapshot {
     bool transmission_finished = true;
     bool transmission_cancelled = false;
     // Completed simulations retain a payload-midpoint view for two wall-clock
-    // seconds. The accumulated receiver constellation then remains visible
-    // until another transmission or configuration replaces it.
+    // seconds. All plots, including the constellation, then return to live RX.
     std::uint64_t transmission_id = 0;
     bool simulation_review = false;
     bool constellation_retained = false;
@@ -78,7 +82,12 @@ struct Snapshot {
 // retaining the current raw plots. No FLTK or GUI objects are accessed here.
 class Session {
 public:
-    Session();
+    // Unix epoch seconds for key admission. An optional clock makes controlled
+    // time sources and deterministic clock-jump tests possible. It must be
+    // thread-safe and return finite, nonnegative values within uint64 range.
+    // Plot cadence and cancellation deadlines always use the steady clock.
+    using EpochClock = std::function<double()>;
+    explicit Session(EpochClock epoch_clock = {});
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;

@@ -1,59 +1,162 @@
-name: Build and test
+name: Portable native binaries
+
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
+concurrency:
+  group: native-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    name: Linux ${{ matrix.build_type }} (glibc 2.35)
+    runs-on: ubuntu-24.04
+    # Compile every application and collected library against this baseline,
+    # rather than letting a newer hosted runner raise the minimum glibc ABI.
+    container: ubuntu:22.04
+    timeout-minutes: 30
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - sanitizers: "OFF"
-            build_type: Release
+          - build_type: Release
+            sanitizers: "OFF"
             portable: "ON"
-          - sanitizers: "ON"
-            build_type: Debug
+          - build_type: Debug
+            sanitizers: "ON"
             portable: "OFF"
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      ASAN_OPTIONS: detect_leaks=0
+      CC: gcc-11
+      CXX: g++-11
     steps:
-      - uses: actions/checkout@v4
-      - name: Prepare native build toolchain
-        run: sudo apt-get update && sudo apt-get install -y libssl-dev zlib1g-dev libzstd-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth
-      - name: Configure without Python
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }} -DDATAPUMP_PORTABLE=${{ matrix.portable }} -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --parallel
+      - name: Prepare build dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git cmake ninja-build make g++-11 binutils libssl-dev libasound2-dev libx11-dev libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev xvfb xauth fontconfig-config fonts-dejavu-core python3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Configure native application without Python
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
+          -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          -DDATAPUMP_SANITIZERS=${{ matrix.sanitizers }}
+          -DDATAPUMP_PORTABLE=${{ matrix.portable }}
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+      - run: cmake --build build --parallel 2
       - run: ctest --test-dir build --output-on-failure --parallel 2
-        env:
-          ASAN_OPTIONS: detect_leaks=0
       - name: Exercise native desktop workflow
-        run: xvfb-run -a ./build/datapump-gui --smoke-test
-        env:
-          ASAN_OPTIONS: detect_leaks=0
-      - name: Optional developer CLI regression tests
+        run: xvfb-run -a ./build/datapump-gui --smoke-test --smoke-timeout 300
+      - name: Developer CLI regressions (Python is not packaged)
         run: python3 tests/test_cli.py build/pump
-        env:
-          ASAN_OPTIONS: detect_leaks=0
       - name: Verify relocated native GUI and package inventory
-        if: matrix.sanitizers == 'OFF'
+        if: matrix.portable == 'ON'
         run: xvfb-run -a cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
-      - name: Create native archives
-        if: matrix.sanitizers == 'OFF'
-        run: cmake --build build --target package
-  windows:
-    runs-on: windows-latest
+      - name: Create and verify both native archives
+        if: matrix.portable == 'ON'
+        run: |
+          cmake --build build --target package
+          xvfb-run -a cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+      - name: Upload Linux offline bundles
+        if: matrix.portable == 'ON'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-Linux-x86_64-glibc-2.35
+          path: |
+            build/releases/*.tar.gz
+            build/releases/*.zip
+            build/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  linux-compatibility:
+    name: Copied Linux binaries on Ubuntu ${{ matrix.ubuntu }}
+    needs: linux
+    runs-on: ubuntu-24.04
+    container: ubuntu:${{ matrix.ubuntu }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["22.04", "24.04"]
+    env:
+      DEBIAN_FRONTEND: noninteractive
     steps:
-      - uses: actions/checkout@v4
-      - run: vcpkg install openssl:x64-windows-static
-      - name: Configure static OpenSSL and CRT
+      # No application development libraries or compiler: only the display and
+      # inspection tools used to check the downloaded, already built bundle.
+      - name: Prepare compatibility checks
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates git cmake binutils xvfb xauth fontconfig-config fonts-dejavu-core
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: DataPump-Linux-x86_64-glibc-2.35
+          path: downloaded
+      - name: Run copied archives with isolated runtime paths
+        run: xvfb-run -a cmake -DARCHIVE_DIR="$PWD/downloaded" -DGUI_SMOKE=ON -DMAX_GLIBC=2.35 -P tools/verify-native-archives.cmake
+
+  windows:
+    name: Microsoft Windows x64 (static CRT)
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      VCPKG_DISABLE_METRICS: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Use a pinned dependency registry and build tool
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: microsoft/vcpkg
+          ref: 9e593bb18ea69cc5095e012465dcd675a822ed0d # 2026.07.29
+          path: .ci-vcpkg
+          persist-credentials: false
+      - name: Prepare static OpenSSL build dependency
         shell: pwsh
-        run: cmake -S . -B build -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" -DVCPKG_TARGET_TRIPLET=x64-windows-static -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
-      - run: cmake --build build --config Release --parallel
+        run: |
+          & ./.ci-vcpkg/bootstrap-vcpkg.bat -disableMetrics
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg bootstrap failed" }
+          & ./.ci-vcpkg/vcpkg.exe install openssl:x64-windows-static --clean-after-build
+          if ($LASTEXITCODE -ne 0) { throw "Static OpenSSL build failed" }
+      - name: Configure native application without Python
+        shell: pwsh
+        run: >-
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows-static
+          -DDATAPUMP_PORTABLE=ON -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded
+          -DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE
+      - run: cmake --build build --config Release --parallel 2
       - run: ctest --test-dir build -C Release --output-on-failure --parallel 2
-      - name: Exercise native desktop workflow
-        run: ./build/Release/datapump-gui.exe --smoke-test
-      - name: Verify native Windows package relocation
-        shell: pwsh
+      - name: Verify Windows GUI and relocation with an empty PATH
         run: cmake -DBUILD_DIR="$PWD/build" -DCONFIG=Release -DGUI_SMOKE=ON -P tests/package_native.cmake
-      - name: Create native archives
-        run: cmake --build build --config Release --target package
+      - name: Create and verify both native archives
+        shell: pwsh
+        run: |
+          cmake --build build --config Release --target package
+          if ($LASTEXITCODE -ne 0) { throw "Native packaging failed" }
+          cmake -DARCHIVE_DIR="$PWD/build/releases" -DBUILD_DIR="$PWD/build" -DGUI_SMOKE=ON -P tools/verify-native-archives.cmake
+          if ($LASTEXITCODE -ne 0) { throw "Archive verification failed" }
+      - name: Upload Windows offline bundles
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: DataPump-Windows-x86_64
+          path: |
+            build/releases/*.tar.gz
+            build/releases/*.zip
+            build/releases/SHA256SUMS.txt
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30

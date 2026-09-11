@@ -73,6 +73,56 @@ std::string format_bit_rate(double rate) {
     text << std::setprecision(3) << std::defaultfloat << rate << ' ' << unit;
     return text.str();
 }
+std::vector<std::string> key_entry_names(std::string_view text) {
+    std::vector<std::string> names;
+    for (;;) {
+        const auto comma=text.find(',');
+        auto name=text.substr(0,comma);
+        const auto first=name.find_first_not_of(" \t\r\n"),last=name.find_last_not_of(" \t\r\n");
+        if(first==std::string_view::npos)throw Error("Each key entry needs a name");
+        names.emplace_back(name.substr(first,last-first+1));
+        if(names.size()>128)throw Error("A keyfile supports at most 128 named entries");
+        if(comma==std::string_view::npos)return names;
+        text.remove_prefix(comma+1);
+    }
+}
+std::vector<std::string> key_choice_labels(std::span<const std::string> names) {
+    std::vector<std::string> labels{"None"};
+    labels.reserve(names.size()+1);
+    for(std::size_t index=0;index<names.size();++index) {
+        std::string label=std::to_string(index+1)+". ";
+        for(const char c:display_label(names[index])) {
+            if(c=='&')label+='&';
+            label+=c;
+        }
+        labels.push_back(std::move(label));
+    }
+    return labels;
+}
+std::string folder_uri(const std::filesystem::path& directory) {
+    if(directory.empty())throw Error("Choose a keyfile first");
+    auto encoded_path=std::filesystem::absolute(directory).lexically_normal().generic_u8string();
+    std::string path(encoded_path.begin(),encoded_path.end());
+    if(path.find('\0')!=std::string::npos)throw Error("Folder path contains a zero byte");
+    std::string uri="file://";
+#ifdef _WIN32
+    if(path.starts_with("//?/UNC/"))path="//"+path.substr(8);
+    else if(path.starts_with("//?/"))path.erase(0,4);
+    uri=path.starts_with("//")?"file:":"file:///";
+#endif
+    constexpr char hex[]="0123456789ABCDEF";
+    for(std::size_t index=0;index<path.size();++index) {
+        const auto byte=static_cast<unsigned char>(path[index]);
+        bool unreserved=(byte>='a' && byte<='z') || (byte>='A' && byte<='Z') ||
+            (byte>='0' && byte<='9') || byte=='-' || byte=='.' || byte=='_' || byte=='~' || byte=='/';
+#ifdef _WIN32
+        unreserved=unreserved || (index==1 && byte==':');
+#endif
+        if(unreserved)uri+=static_cast<char>(byte);
+        else { uri+='%';uri+=hex[byte>>4];uri+=hex[byte&15]; }
+    }
+    return uri;
+}
 
 void Signals::update(SignalLine line) {
     if (line.text.size()>4096) line.text.resize(4096);
