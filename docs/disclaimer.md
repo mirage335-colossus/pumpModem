@@ -27,5 +27,5 @@ verified facts by this release.
 
 The software does not certify permitted frequencies, power, modulation masks,
 spreading, or licenses for any jurisdiction. It has no FHSS/ISM compliance mode.
-Operators choose hardware and authorized operating conditions. See the MIT
-license for the software warranty terms.
+Operators choose hardware and authorized operating conditions. See the
+[CC0 1.0 Universal license](../LICENSE) for the software warranty terms.

@@ -244,7 +244,8 @@ lists the tests actually run. The supplied design is preserved in
 [original-specification.md](docs/original-specification.md) as source material,
 not as a claim that every requested feature or assertion is implemented.
 
-Application code is licensed under MIT; the vendored QR encoder retains its own
+Application code is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).
+Copyright (c) 2026 mirage335. The vendored QR encoder retains its own
 MIT notice. Data Pump is based in part on the work of the FLTK project. Its
 license and static-linking exception, OpenSSL notices, and collected runtime
 notices accompany the installation.
