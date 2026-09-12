@@ -122,6 +122,12 @@ complete five-second training sequence and packet.
 
 ## Desktop console
 
+FLTK remains the default GUI. An optional Rev backend uses the pinned upstream
+`clean` branch, shared semantic controls/controller and the same bitmap plot
+producers. Build it separately with `-DDATAPUMP_GUI_BACKEND=rev`; see the
+[Rev build and validation notes](docs/rev-backend.md) for its C++23 toolchain,
+software-OpenGL requirements and current release boundaries.
+
 The desktop application is a compiled executable linked to the same C++ transfer
 service as the CLI. FLTK and OpenSSL are linked statically by default. For a
 copyable installation, install or package a release build:
@@ -353,10 +359,12 @@ Windows10 version1903 or newer; non-ASCII paths on older Windows are unsupported
 `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. CMake installation
 and CPack TGZ/ZIP archives include both native executables and collected runtime
 libraries. `-DDATAPUMP_GUI_BACKEND=fltk` selects the single compiled GUI backend;
-FLTK is currently the default and only implemented choice. Unsupported or multiple
+FLTK is the default, and `rev` selects the optional Rev profile described above.
+Unsupported or multiple
 selections fail configuration. `datapump-gui --version` reports the compiled
 backend. Use `-DDATAPUMP_BUILD_GUI=OFF` for a CLI-only build, or
-`-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE` to disable the optional Python tests.
+`-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE` to disable optional Python tests in a
+FLTK/CLI build. Rev requires Python for resource embedding during the build.
 See [offline installation](docs/offline-installation.md) for copy and verification
 commands.
 
@@ -365,8 +373,9 @@ color where supported, and explicit status labels. `--monochrome` selects the
 grayscale presentation without changing control types or per-element settings.
 See the
 [minimal GUI contract](docs/gui-contract.md) and [architecture review](docs/gui-architecture.md)
-for the semantic widget interface and staged migration plan. Alternative adapters
-and the full declarative interface remain proposed work.
+for the semantic widget interface and staged migration plan. Rev exercises the
+shared declarations/controller and both toolkits share bitmap producers; FLTK's
+semantic screen/controller migration and further adapters remain proposed work.
 
 The source is separated into packet coding, cryptography, DSP/WAV, audio devices,
 runtime policy, a shared transfer service, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),

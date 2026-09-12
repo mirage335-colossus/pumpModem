@@ -1,7 +1,40 @@
 # Local validation record — version 0.7.2
 
-The application and portable runtime are native C++. Python remains optional
-developer test tooling and is not installed with the application.
+The application and portable runtime are native C++. Python is optional test
+tooling for FLTK/CLI builds and required to embed Rev resources at build time;
+it is not installed with the application.
+
+## Rev backend and shared bitmap extraction
+
+The optional Rev backend pins upstream `clean` at
+`d73faa7759b5cfd30d592057790ab458568b569b`. Linux builds used Clang 19, Ninja,
+and Mesa 25.0.7 llvmpipe (LLVM 19.1.7, OpenGL 4.5) on a private X11 display.
+Controller/declaration, pixel format/tile replay, Unicode boundary and display-free
+self-check suites passed. The shared controller smoke covered UTF-8 text, files,
+exact leading-zero bits, stale drafts, pending reception and retained saves.
+Rev rendered the same workflow, switched inspection pages and checked control
+layout, UTF-8 editing, failed-paste selection preservation and modal focus.
+Native clipboard tests covered UTF-8, empty versus failed reads, overlaps, stale
+responses, incremental long selections and stalled-transfer limits/expiry.
+
+The existing FLTK smoke and focused GUI/model suites passed after its plots were
+moved to the shared producers. Bitmap tests also passed under ASan/UBSan. FLTK
+plot output was inspected at ordinary and 200% display scale; Rev text wrapping,
+Unicode glyphs, QR output and control layout were inspected visually.
+
+A relocated Rev package passed dependency closure, inventory, CLI and full GUI
+checks with its checkout, build trees, original installation, development
+libraries and system fonts hidden. The path contained spaces and the environment
+had empty `PATH` and `LD_LIBRARY_PATH`. Tampered and unrecorded files were rejected.
+Host graphics drivers remain external dependencies.
+
+Software OpenGL works but remains CPU-intensive: a 31-second smoke-plus-hold run
+used 74 seconds user CPU after paint optimizations and a 10 Hz presentation cap,
+versus 211 seconds before. Modem events and plot history remain polled at 25 Hz.
+These measurements establish no low-power performance guarantee.
+See [Rev backend](rev-backend.md) for build instructions and measurement details.
+Windows, GCC 15+, hardware audio and the older Linux ABI release floor were not
+validated by this Rev run; macOS/Metal is not integrated.
 
 ## Dark QR startup default
 

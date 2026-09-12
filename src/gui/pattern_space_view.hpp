@@ -1,6 +1,7 @@
 #pragma once
 #include "pattern_space.hpp"
 #include "theme_fltk.hpp"
+#include "bitmap_fltk.hpp"
 #include <FL/Fl.H>
 #include <FL/fl_draw.H>
 #include <algorithm>
@@ -71,8 +72,6 @@ public:
         const int cell_width=std::min(32,(width-110)/static_cast<int>(std::max<std::size_t>(1,shown)));
         const int grid_x=x+86,grid_y=y+cursor+19,row_height=18;
         const auto bits=static_cast<unsigned>(std::bit_width(model.coefficients.size())-1);
-        double amplitude_scale=0;
-        for(const auto value:model.coefficients) amplitude_scale=std::max(amplitude_scale,std::abs(value));
         if(paint) {
             fl_font(theme::font,10); fl_color(muted()); fl_draw("Bits",x+14,grid_y-6);
             for(std::size_t c=0;c<shown;++c) {
@@ -82,19 +81,13 @@ public:
                     fl_draw(value.c_str(),left,grid_y-6);
                 }
             }
+            draw_bitmap(plots::PlotSnapshot::pattern_chips(model,first,shown),grid_x,grid_y,
+                        static_cast<int>(shown)*cell_width,static_cast<int>(model.coefficients.size())*row_height);
             for(std::size_t row=0;row<model.coefficients.size();++row) {
                 std::string value(bits,'0');
                 for(unsigned b=0;b<bits;++b) if((row>>b)&1U) value[bits-b-1]='1';
                 const int top=grid_y+static_cast<int>(row)*row_height;
                 fl_color(ink()); fl_font(theme::font,11); fl_draw(value.c_str(),x+14,top+13);
-                for(std::size_t c=0;c<shown;++c) {
-                    const auto chip=first+c;
-                    const auto sample=model.coefficients[row]*static_cast<double>(model.code[chip]);
-                    const int left=grid_x+static_cast<int>(c)*cell_width;
-                    const bool used=model.chip_weights[chip]>0;
-                    component_cell(left,top,cell_width-1,8,sample.real(),amplitude_scale,used);
-                    component_cell(left,top+8,cell_width-1,8,sample.imag(),amplitude_scale,used);
-                }
             }
         }
         cursor+=19+static_cast<int>(model.coefficients.size())*row_height+8;
@@ -126,17 +119,13 @@ public:
         fl_measure(detail.c_str(),detail_width,detail_height,0);
         const int map_height=std::max({240,map_size,detail_height+3});
         if(paint) {
+            draw_bitmap(plots::PlotSnapshot::pattern_distances(model),map_x,map_y,map_size,map_size);
             for(std::size_t a=0;a<matrix_count;++a) {
                 if(a%std::max<std::size_t>(1,symbols/8)==0 || a==symbols) {
                     const auto name=a==symbols?"U":std::to_string(a);
                     fl_font(theme::font,10); fl_color(muted());
                     fl_draw(name.c_str(),map_x+static_cast<int>(a)*map_cell,map_y-5);
                     fl_draw(name.c_str(),map_x-25,map_y+static_cast<int>(a)*map_cell+10);
-                }
-                for(std::size_t b=0;b<matrix_count;++b) {
-                    const auto fraction=maximum>0?map_distance(a,b)/maximum:0;
-                    fl_color(theme::fltk_color(static_cast<unsigned char>(std::lround(255*std::clamp(fraction,0.,1.)))));
-                    fl_rectf(map_x+static_cast<int>(b)*map_cell,map_y+static_cast<int>(a)*map_cell,map_cell,map_cell);
                 }
             }
             fl_font(theme::font,12); fl_color(ink());
@@ -198,20 +187,6 @@ private:
     static Fl_Color ink() { return theme::text_color(); }
     static Fl_Color muted() { return theme::fltk_color(theme::muted); }
     static std::string number(double value) { std::ostringstream out; out<<std::setprecision(3)<<value; return out.str(); }
-    static void component_cell(int x,int y,int width,int height,double value,double scale,bool used) {
-        if(used) {
-            const auto fraction=scale>0?std::clamp(value/scale,-1.,1.):0;
-            fl_color(theme::fltk_color(static_cast<unsigned char>(std::lround(127.5*(1+fraction)))));
-            fl_rectf(x,y,width,height);
-            return;
-        }
-        fl_color(theme::fltk_color(theme::surface)); fl_rectf(x,y,width,height);
-        fl_push_clip(x,y,width,height);
-        fl_color(theme::fltk_color(theme::grid));
-        for(int offset=-height;offset<width;offset+=4)
-            fl_line(x+offset,y+height-1,x+offset+height-1,y);
-        fl_pop_clip();
-    }
     mutable std::array<Button,4> buttons_{};
     mutable std::size_t first_=0,page_size_=1,last_page_=0;
 };

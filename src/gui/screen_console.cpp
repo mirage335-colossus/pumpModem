@@ -1,0 +1,51 @@
+#include "ui_contract.hpp"
+namespace datapump::gui::ui {
+const std::vector<Control>& console_screen() {
+    static const std::vector<Control> controls{
+        {Kind::label,Field::mode,Command::none,Bitmap::none,Page::console,0,"DATA PUMP"},
+        {Kind::action,Field::count,Command::clear_received,Bitmap::none,Page::console,0,"Clear received"},
+        {Kind::text,Field::callsign,Command::none,Bitmap::none,Page::console,1,"Callsign",1,false,128},
+        {Kind::text,Field::grid,Command::none,Bitmap::none,Page::console,1,"Grid",1,false,128},
+        {Kind::toggle,Field::repeatable,Command::none,Bitmap::none,Page::console,1,"Repeatable"},
+        {Kind::choice,Field::simulation,Command::none,Bitmap::none,Page::console,1,"Simulation"},
+        {Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"},
+        {Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"},
+        {Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"},
+        {Kind::action,Field::count,Command::acknowledge_key_failure,Bitmap::none,Page::console,2,"Keep current keys"},
+        {Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"},
+        {Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,"Keyfile"},
+        {Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"},
+        {Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Bandwidth"},
+        {Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"Target tone SNR (dB)"},
+        {Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Scrambler pattern / tone"},
+        {Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"},
+        {Kind::choice,Field::source,Command::none,Bitmap::none,Page::console,5,"Source"},
+        {Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"},
+        {Kind::label,Field::binary_label,Command::none,Bitmap::none,Page::console,6,"Binary"},
+        {Kind::text,Field::message,Command::none,Bitmap::none,Page::console,7,"Message",2,true},
+        {Kind::text,Field::binary,Command::none,Bitmap::none,Page::console,7,"Exact bits",1,true},
+        {Kind::bitmap,Field::count,Command::none,Bitmap::qr,Page::console,7,"QR preview"},
+        {Kind::action,Field::count,Command::attach_file,Bitmap::none,Page::console,8,"Attach file"},
+        {Kind::action,Field::count,Command::use_text,Bitmap::none,Page::console,8,"Use text"},
+        {Kind::choice,Field::qr_brightness,Command::none,Bitmap::none,Page::console,8,"QR brightness"},
+        {Kind::choice,Field::send_key,Command::none,Bitmap::none,Page::console,8,"Send key"},
+        {Kind::action,Field::count,Command::transmit,Bitmap::none,Page::console,9,"Transmit"},
+        {Kind::action,Field::count,Command::cancel,Bitmap::none,Page::console,9,"Cancel TX / stop replay"},
+        {Kind::label,Field::airtime,Command::none,Bitmap::none,Page::console,9,"Airtime",3},
+        {Kind::list,Field::signals,Command::none,Bitmap::none,Page::console,10,"Signals",3},
+        {Kind::list,Field::files,Command::none,Bitmap::none,Page::console,10,"Files in memory"},
+        {Kind::action,Field::count,Command::copy_signal,Bitmap::none,Page::console,11,"Copy selected signal"},
+        {Kind::action,Field::count,Command::save_file,Bitmap::none,Page::console,11,"Save selected file"},
+        {Kind::bitmap,Field::count,Command::none,Bitmap::waterfall,Page::console,12,"Spectrum / amplitude waterfall"},
+        {Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"},
+        {Kind::bitmap,Field::count,Command::none,Bitmap::constellation,Page::console,12,"Constellation"},
+        {Kind::action,Field::count,Command::clear_waterfall,Bitmap::none,Page::console,13,"Clear waterfall"},
+        {Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"},
+        {Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"},
+        {Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"},
+        {Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,"Diagnostics"},
+        {Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,"Status"}
+    };
+    return controls;
+}
+}

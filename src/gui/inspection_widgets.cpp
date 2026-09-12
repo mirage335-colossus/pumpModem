@@ -1,5 +1,6 @@
 #include "inspection_widgets.hpp"
 #include "theme_fltk.hpp"
+#include "bitmap_fltk.hpp"
 #include <FL/fl_draw.H>
 #include <algorithm>
 #include <cmath>
@@ -156,29 +157,10 @@ struct Canvas {
                     fl_color(border); fl_rect(left,top,card_width,row_height);
                     label(plot.title,left+14,top+12,card_width-28,header_height,13,ink(),true);
                     const int cx=left+card_width/2,cy=top+header_height+28+plot_size/2;
-                    double radius=.75;
-                    for(const auto point:plot.points) if(std::isfinite(std::abs(point))) radius=std::max(radius,std::abs(point));
-                    const double scale=static_cast<double>(plot_size)/2/(radius*1.16);
-                    fl_color(border);
-                    fl_line(cx-plot_size/2,cy,cx+plot_size/2,cy);
-                    fl_line(cx,cy-plot_size/2,cx,cy+plot_size/2);
-                    std::vector<int> rings;
-                    for(const auto point:plot.points) {
-                        if(!std::isfinite(std::abs(point))) continue;
-                        const auto r=static_cast<int>(std::lround(std::abs(point)*scale));
-                        if(std::find(rings.begin(),rings.end(),r)==rings.end()) {
-                            rings.push_back(r); fl_arc(cx-r,cy-r,2*r,2*r,0,360);
-                        }
-                    }
+                    draw_bitmap(plots::PlotSnapshot::constellation(plot.points,true),
+                                cx-plot_size/2,cy-plot_size/2,plot_size,plot_size);
                     fl_font(theme::font,10); fl_color(muted);
                     fl_draw("I",cx+plot_size/2-6,cy-5); fl_draw("Q",cx+5,cy-plot_size/2+10);
-                    fl_color(theme::data_color());
-                    for(const auto point:plot.points) {
-                        if(!std::isfinite(point.real())||!std::isfinite(point.imag())) continue;
-                        const int px=cx+static_cast<int>(std::lround(point.real()*scale));
-                        const int py=cy-static_cast<int>(std::lround(point.imag()*scale));
-                        fl_rectf(px-1,py-1,3,3);
-                    }
                     label(plot.detail,left+14,top+header_height+plot_size+44,card_width-28,detail_height,12,muted);
                 }
             }

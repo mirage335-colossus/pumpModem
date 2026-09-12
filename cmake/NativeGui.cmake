@@ -2,10 +2,12 @@
 # and its dependencies. Advertise only implemented adapters, never placeholders.
 if(DATAPUMP_GUI_BACKEND STREQUAL "fltk")
   include("${CMAKE_CURRENT_LIST_DIR}/GuiFltk.cmake")
+elseif(DATAPUMP_GUI_BACKEND STREQUAL "rev")
+  include("${CMAKE_CURRENT_LIST_DIR}/GuiRev.cmake")
 else()
   message(FATAL_ERROR
     "DATAPUMP_GUI_BACKEND must name exactly one implemented backend. "
-    "Received '${DATAPUMP_GUI_BACKEND}'. Available backends: fltk. "
+    "Received '${DATAPUMP_GUI_BACKEND}'. Available backends: fltk, rev. "
     "Use -DDATAPUMP_BUILD_GUI=OFF for a CLI-only build.")
 endif()
 message(STATUS "DataPump GUI backend: ${DATAPUMP_GUI_BACKEND}")

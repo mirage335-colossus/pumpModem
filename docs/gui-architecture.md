@@ -7,11 +7,14 @@ producers. Match the grayscale instrument-panel presentation and optional color
 accents across adapters through widget styling. Do not implement a general-purpose
 widget toolkit.
 
-The build selector and FLTK style, including default color when supported and a
-`--monochrome` override, are implemented.
-Controller extraction, the declarative screen API, pure bitmap plots and their
-transfer API, and alternative adapters are proposed work. The current FLTK
-widgets still contain custom drawing and plot interaction.
+The build selector, shared presentation roles and bitmap producers, semantic
+screen declarations, toolkit-free controller and opt-in Rev adapter are
+implemented. Rev uses the shared controller and declarations. Existing FLTK plot
+widgets use the shared pixel producers while retaining native captions and
+interactions; FLTK's controller and procedural screen migration remain.
+See [Rev backend](rev-backend.md) for the pinned `clean` revision, build profile
+and validation boundaries. The design below includes the extraction already
+completed for Rev and the remaining migration work.
 
 ## What the project already separates
 
@@ -32,17 +35,18 @@ would leave application state dependent on FLTK.
 
 ## Small, independently compiled modules
 
-Proposed ownership:
+Current and planned ownership:
 
 | Module | Responsibility |
 | --- | --- |
-| `ui_contract.hpp` | Small IDs, control records, typed values/events, pixel blocks. No toolkit, crypto, or modem headers. |
+| `ui_contract.hpp`, `bitmap.hpp` | Small IDs, control records, state/service records, pixel blocks. No toolkit, crypto, or modem headers. |
 | `screen_console.cpp`, `screen_inspection.cpp` | Ordered declarations and bindings; inherit the shared style. |
 | `controller.hpp/.cpp` | Authoritative values, commands, validation, selection policies, availability, and notices. |
-| `preparation.cpp` | Existing debounce, workers, cancellation, and revisioned results. |
+| `controller.cpp` preparation workers | Debounce, workers, cancellation, and revisioned results; a separate `preparation.cpp` remains optional. |
 | `plot_render.cpp` | Shared monochrome raster generation and optional private point/segment helpers. |
-| `backend_fltk.cpp` | Existing native widgets, event translation, presentation, and bitmap transfer. |
-| `gui_options.cpp` | Launch settings using shared parsers and validation. |
+| `backend_rev.cpp`, `rev_platform.cpp` | Rev elements, event translation, presentation, bitmap transfer, and native services. |
+| `main.cpp`, `bitmap_fltk.hpp` | Existing FLTK widgets/controller and shared bitmap transfer; semantic migration remains. |
+| Future `gui_options.cpp` | Launch settings using shared parsers and validation. |
 | `gui_smoke.cpp` | Existing workflow checks separated from production control flow. |
 
 Use plain compiled records and a few functions; avoid a deeply templated builder,
@@ -91,11 +95,12 @@ popup drawing, text caret handling, or backend branches.
 
 ## Plot and inspection migration
 
-The bitmap contract describes pixels, not UI widgets. The current `LivePlot`,
-`Waterfall`, and `PatternSpaceView` still handle mouse gestures. Pattern-space
-pagination even changes during painting and draws its own navigation buttons.
-Expose zoom/reset/clear/pagination as ordinary controls and make rendering a pure
-operation over a stable snapshot before using tiled repaint.
+The bitmap contract describes pixels, not UI widgets. Rev exposes
+zoom/reset/clear/pagination as ordinary declared controls. Shared renderers are
+pure operations over immutable snapshots and support tiled repaint. FLTK's
+`LivePlot`, `Waterfall`, and `PatternSpaceView` use those renderers while retaining
+their existing mouse gestures and native navigation; migrating those interactions
+to the declarations remains.
 
 Inspection already supplies structured content. Present its prose and tables
 through ordinary labels/lists, and rasterize only actual plots. Rasterizing the
@@ -122,9 +127,10 @@ cyan tint, and softens neutral text through the adapter's text role. The origina
 grayscale roles and scalar intensities remain unchanged. Reference marks, status,
 and signed pattern diagrams remain grayscale. The waterfall uses a
 fixed muted multihue lookup table over the same Gray8 intensities: black, dark blue,
-blue, cyan, green, yellow, orange, red, then soft off-white. FLTK converts requested
-image rows through a callback, retaining the Gray8 buffer without a second full
-RGB framebuffer.
+blue, cyan, green, yellow, orange, red, then soft off-white. Shared producers emit
+bounded rows. At ordinary scale FLTK batches up to 16 rows per native image
+operation; at high DPI it assembles a physical-pixel backing image. Rev copies
+the result into an opaque RGB texture.
 
 The QR preview has a separate brightness selection: Normal, Dim, Dark, or Off.
 Dark is selected on every startup. Dim and Dark use backgrounds of RGB (64, 0, 0)
@@ -135,7 +141,7 @@ the original white background and gray border; dim previews omit the border to
 avoid a bright frame.
 
 Color rendering and the QR brightness choice use existing control kinds. The
-proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional
+implemented bitmap contract retains mandatory Gray8/Mono1 and adds only optional
 packed RGB24. Its target capability defaults to false; shared producers emit
 RGB24 only when color is enabled and supported. Other targets keep the original
 gray/mono representation instead of desaturating false color. Use bounded rows
@@ -149,16 +155,18 @@ presentation during extraction; the current signal widget has no detail view.
 ## Responsiveness and memory
 
 `Session::snapshot()` currently drains reception events and copies current plot
-vectors under its mutex. The GUI polls every 40 ms. Throttling the entire poll
+vectors under its mutex. The GUI polls every 40 ms. Rev retains plot history at
+that cadence and presents state/plots every 100 ms; native input repaints directly.
+Throttling the entire poll
 because plots are hidden or slow would also delay received content. Keep event
 consumption independent of drawing cadence; eventually expose sequence-aware or
 immutable plot snapshots to avoid redundant copies.
 
-Each of the two LivePlot objects currently copies both waveform and constellation
-arrays although it needs only one. Share retained data, defer hidden rasterization,
-and reuse buffers. Preserve min/max envelopes and bounded reconstruction instead
-of dropping arbitrary samples. A changed shared waterfall scale must recolor its
-history consistently.
+Plot snapshots now share immutable retained data, and producers preserve min/max
+envelopes and bounded reconstruction instead of dropping arbitrary samples. Rev
+defers hidden rasterization and reuses unchanged textures. Continue to bound
+retained source data and reuse transfer buffers. A changed shared waterfall scale
+must recolor its history consistently.
 
 The spectrum history currently holds up to 256 by 160 doubles, about 320 KiB
 before container overhead. Tile output alone does not make that an MCU-sized
@@ -187,9 +195,12 @@ backend selections fail configuration. `DATAPUMP_BUILD_GUI=OFF` removes GUI
 dependencies while retaining backend-independent model tests. `--help` and
 `--version` report the compiled backend; no runtime registry is needed.
 
-The most informative second adapter is ncurses, built in a separate directory:
-it tests widget semantics and keyboard operation under SSH without relying on
-pixel equality. Its [menus](https://invisible-island.net/ncurses/man/menu.3x.html)
+Rev is the second adapter, built in a separate directory. Its retained controls
+and texture path test semantic control and bitmap boundaries with a different
+desktop toolkit. Software OpenGL is permitted for this profile and must be
+measured on deployment hardware. ncurses remains an informative SSH candidate:
+it tests semantics and keyboard operation without relying on pixel equality.
+Its [menus](https://invisible-island.net/ncurses/man/menu.3x.html)
 and [forms](https://invisible-island.net/ncurses/man/form.3x.html) supply existing
 selection/editing behavior. Future framebuffer/MCU profiles can use LVGL; SDL
 must be paired with an existing widget library. HTML uses DOM controls, with a
@@ -203,14 +214,16 @@ Do not weaken that existing check for an adapter that is not being compiled.
 
 1. Implement one-backend configuration and shared presentation roles with optional
    color (done).
-2. Extract authoritative state, workers, and platform requests while preserving
-   the existing FLTK workflows and tests.
+2. Extract authoritative state, workers, and platform requests (done for Rev),
+   while preserving the existing FLTK workflows and tests.
 3. Replace procedural construction/layout with small screen declarations and
-   native-widget mappings; separate smoke orchestration from production code.
-4. Convert interactive plot controls to semantic controls, then extract pure
-   pixel producers with equivalent complete-image and tiled output.
-5. Implement ncurses in a separate build and refine the small contract only
-   where real adapter differences require it. Freeze the contract after this.
+   native-widget mappings; separate smoke orchestration (done for Rev).
+4. Extract pure pixel producers with equivalent complete-image and tiled output
+   (done for both). Migrate FLTK plot interactions to semantic controls.
+5. Exercise Rev in a separate build (Linux/llvmpipe validated), migrate the remaining FLTK screen/controller
+   code to the shared declarations, and refine the contract where real adapter
+   differences require it. Consider ncurses afterward for SSH. Freeze the first
+   contract after both desktop adapters use its full semantic path.
 
 Keep current model, policy, waveform, acquisition, replay, and exact-bit tests.
 Add focused checks for silent updates, stable item identity, explicit selection

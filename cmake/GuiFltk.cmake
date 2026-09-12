@@ -19,6 +19,6 @@ endif()
 # EXCLUDE_FROM_ALL prevents upstream developer tools, headers, and libraries from
 # becoming part of the application's install/package.
 add_subdirectory(third_party/fltk EXCLUDE_FROM_ALL)
-add_executable(datapump-gui WIN32 src/gui/main.cpp src/gui/state.cpp src/gui/inspection_model.cpp src/gui/inspection_widgets.cpp)
+add_executable(datapump-gui WIN32 src/gui/main.cpp src/gui/plot_render.cpp src/gui/state.cpp src/gui/inspection_model.cpp src/gui/inspection_widgets.cpp)
 target_link_libraries(datapump-gui PRIVATE fltk::fltk)
 install(FILES third_party/fltk/COPYING DESTINATION share/doc/datapump RENAME FLTK-LICENSE)

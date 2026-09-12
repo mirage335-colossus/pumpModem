@@ -1,6 +1,7 @@
 #pragma once
 #include "state.hpp"
 #include "plot_data.hpp"
+#include "bitmap_fltk.hpp"
 #include "theme_fltk.hpp"
 #include "datapump/qr.hpp"
 #include <FL/Fl.H>
@@ -19,9 +20,9 @@
 namespace datapump::gui::widgets {
 class QrPreview : public Fl_Widget {
 public:
-    enum class Brightness { normal, dim, dark, off };
+    using Brightness = plots::QrBrightness;
     QrPreview() : Fl_Widget(0,0,1,1) {}
-    void brightness(Brightness value) { brightness_=value; redraw(); }
+    void brightness(Brightness value) { brightness_=value; snapshot_=plots::PlotSnapshot::qr(code_,brightness_); redraw(); }
     Brightness brightness() const { return brightness_; }
     void text(std::string_view value) {
         code_.reset();
@@ -30,30 +31,21 @@ public:
             try { code_=encode_qr(value); }
             catch (const Error&) { message_="Up to 500 characters"; }
         }
+        snapshot_=plots::PlotSnapshot::qr(code_,brightness_);
         redraw();
     }
     bool ready() const { return code_.has_value(); }
 private:
     void draw() override {
-        const unsigned char level=brightness_==Brightness::dim?64:brightness_==Brightness::dark?32:0;
-        const auto background=brightness_==Brightness::normal?FL_WHITE:
-            theme::color_enabled?fl_rgb_color(level,0,0):theme::fltk_color(level);
-        fl_color(background); fl_rectf(x(),y(),w(),h());
-        // Avoid a bright frame around a dimmed or hidden preview. Dimming changes
-        // only the light modules and quiet zone; the encoded matrix stays intact.
+        // Keep the optional frame outside the QR's four-module quiet zone,
+        // including sizes which fit an exact integer number of modules.
+        const int inset=brightness_==Brightness::normal?1:0;
+        draw_bitmap(snapshot_,x()+inset,y()+inset,w()-2*inset,h()-2*inset);
         if (brightness_==Brightness::normal) {
             fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
         }
         if (brightness_==Brightness::off) return;
-        if (code_) {
-            const int size=code_->size()+8;
-            const int pitch=std::max(1,std::min(w()-8,h()-8)/size);
-            const int left=x()+(w()-pitch*size)/2+pitch*4,top=y()+(h()-pitch*size)/2+pitch*4;
-            fl_color(FL_BLACK);
-            for (int row=0;row<code_->size();++row)
-                for (int col=0;col<code_->size();++col)
-                    if (code_->dark(col,row)) fl_rectf(left+col*pitch,top+row*pitch,pitch,pitch);
-        } else if (!message_.empty()) {
+        if (!code_ && !message_.empty()) {
             fl_color(FL_BLACK); fl_font(theme::font,12);
             fl_draw(message_.c_str(),x()+8,y()+8,w()-16,h()-16,FL_ALIGN_CENTER|FL_ALIGN_WRAP);
         }
@@ -62,6 +54,7 @@ private:
     std::string message_;
     // Stay dim from the first draw, even before a message has been entered.
     Brightness brightness_=Brightness::dark;
+    plots::PlotSnapshot snapshot_=plots::PlotSnapshot::qr(std::nullopt);
 };
 
 class ComposeEditor : public Fl_Text_Editor {
@@ -175,7 +168,7 @@ public:
     Waterfall() : Fl_Widget(0,0,1,1) {
         tooltip("Peak FFT level on one shared intensity scale: black is quiet, white is loud. Color uses muted blue, cyan, green, yellow, orange and red to soft off-white. Click to clear history and reset the scale.");
     }
-    void clear() { history_.clear(); overview_=false; ++revision_; redraw(); }
+    void clear() { history_.clear(); overview_=false; snapshot_=plots::PlotSnapshot::waterfall(history_); ++revision_; redraw(); }
     int handle(int event) override {
         if (event==FL_PUSH && Fl::event_button()==FL_LEFT_MOUSE) { clear(); return 1; }
         return Fl_Widget::handle(event);
@@ -183,48 +176,23 @@ public:
     void push(const std::vector<double>& bins,double bin_hz) {
         if (bins.empty()) return;
         overview_=false;
-        history_.push(bins,bin_hz); ++revision_; redraw();
+        history_.push(bins,bin_hz); snapshot_=plots::PlotSnapshot::waterfall(history_); ++revision_; redraw();
     }
     void restore(const std::vector<std::vector<double>>& rows,double bin_hz) {
         history_.clear(); ++revision_;
-        for (const auto& row:rows) push(row,bin_hz);
+        for (const auto& row:rows) history_.push(row,bin_hz);
         overview_=true;
+        snapshot_=plots::PlotSnapshot::waterfall(history_,overview_);
         redraw();
     }
     std::size_t rows() const { return history_.rows().size(); }
     std::uint64_t revision() const { return revision_; }
 private:
-    static unsigned char channel(double value) { return static_cast<unsigned char>(std::clamp(value,0.0,1.0)*255); }
-    static void color_row(void* context, int x, int y, int width, unsigned char* output) {
-        const auto& self = *static_cast<const Waterfall*>(context);
-        const auto stride = static_cast<std::size_t>(std::max(1, self.w() - 4));
-        const auto offset = static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x);
-        for (int i = 0; i < width; ++i) {
-            const auto color = theme::waterfall_palette[self.pixels_[offset + static_cast<std::size_t>(i)]];
-            *output++ = color.red; *output++ = color.green; *output++ = color.blue;
-        }
-    }
     void draw() override {
         fl_color(theme::fltk_color(theme::background)); fl_rectf(x(),y(),w(),h());
         fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
         const int width=std::max(1,w()-4),height=std::max(1,h()-24);
-        pixels_.resize(static_cast<std::size_t>(width)*static_cast<std::size_t>(height));
-        std::fill(pixels_.begin(),pixels_.end(),0);
-        const auto& rows=history_.rows();
-        for (int py=0;py<height;++py) {
-            const int source=overview_?static_cast<int>(static_cast<std::size_t>(py)*rows.size()/static_cast<std::size_t>(height)):
-                static_cast<int>(rows.size())-height+py;
-            if (source<0 || static_cast<std::size_t>(source)>=rows.size()) continue;
-            const auto& row=rows[static_cast<std::size_t>(source)];
-            for (int px=0;px<width;++px) {
-                const double value=history_.intensity(row[static_cast<std::size_t>(px)*row.size()/static_cast<std::size_t>(width)]);
-                const auto offset=static_cast<std::size_t>(py)*static_cast<std::size_t>(width)+static_cast<std::size_t>(px);
-                pixels_[offset]=channel(value);
-            }
-        }
-        // FLTK supplies a row buffer; no second full RGB framebuffer is retained.
-        if(theme::color_enabled) fl_draw_image(color_row,this,x()+2,y()+2,width,height,3);
-        else fl_draw_image(pixels_.data(),x()+2,y()+2,width,height,1);
+        draw_bitmap(snapshot_,x()+2,y()+2,width,height);
         fl_font(theme::font,11); fl_color(theme::fltk_color(theme::muted)); fl_draw("0 Hz",x()+7,y()+h()-7);
         std::ostringstream legend; legend<<history_.lower_db()<<".."<<history_.upper_db()<<" dBFS peak";
         fl_draw(legend.str().c_str(),x()+(w()-static_cast<int>(fl_width(legend.str().c_str())))/2,y()+h()-7);
@@ -232,7 +200,7 @@ private:
         fl_draw(end.str().c_str(),x()+w()-static_cast<int>(fl_width(end.str().c_str()))-8,y()+h()-7);
     }
     plots::SpectrumHistory history_;
-    std::vector<unsigned char> pixels_;
+    plots::PlotSnapshot snapshot_;
     std::uint64_t revision_=0;
     bool overview_=false;
 };
@@ -245,14 +213,14 @@ public:
     void update(const std::vector<float>& waveform,const std::vector<std::complex<double>>& constellation,
                 const modem::Config& config,bool symbols=false,std::uint64_t dropped=0) {
         waveform_=waveform; constellation_=constellation; config_=config; symbols_=symbols;
-        constellation_dropped_=dropped; redraw();
+        constellation_dropped_=dropped; refresh_snapshot(); redraw();
     }
     int handle(int event) override {
         if (!is_constellation_ && event==FL_MOUSEWHEEL) {
             zoom_=std::clamp(zoom_*std::pow(2.,std::clamp(Fl::event_dy(),-4,4)),1./16,256.);
-            redraw(); return 1;
+            refresh_snapshot(); redraw(); return 1;
         }
-        if (!is_constellation_ && event==FL_PUSH && Fl::event_clicks()) { zoom_=1; redraw(); return 1; }
+        if (!is_constellation_ && event==FL_PUSH && Fl::event_clicks()) { zoom_=1; refresh_snapshot(); redraw(); return 1; }
         return Fl_Widget::handle(event);
     }
     bool populated() const { return !waveform_.empty(); }
@@ -267,31 +235,11 @@ private:
         if (is_constellation_) {
             const int plot_height=height-((symbols_ || constellation_dropped_)?34:18);
             const int center_x=left+width/2,center_y=top+plot_height/2;
-            const int radius=std::max(1,std::min(width-36,plot_height-14)/2);
-            double scale=0;
-            for (auto point:constellation_) if (std::isfinite(std::abs(point))) scale=std::max(scale,std::abs(point));
-            if (scale==0) scale=1;
-            // Actual symbol levels have a nominal peak below one. Do not
-            // stretch one observed inner ring into the apparent outer ring.
-            if (symbols_) scale=std::max(1.,std::ceil(scale*2)/2);
-            fl_color(theme::fltk_color(theme::grid));
-            fl_line(left,center_y,left+width,center_y); fl_line(center_x,top,center_x,top+height);
-            for (double fraction:{.5,1.0}) {
-                const auto ring=static_cast<int>(radius*fraction);
-                fl_arc(center_x-ring,center_y-ring,2*ring,2*ring,0,360);
-            }
-            // A single scale preserves differences between symbol amplitudes.
-            // No point is individually projected onto a unit circle.
-            for (auto point:constellation_) {
-                if (!std::isfinite(point.real()) || !std::isfinite(point.imag())) continue;
-                const int px=center_x+static_cast<int>(point.real()/scale*radius);
-                const int py=center_y-static_cast<int>(point.imag()/scale*radius);
-                fl_color(theme::data_color()); fl_rectf(px-1,py-1,2,2);
-            }
+            draw_bitmap(snapshot_,left,top,width,plot_height);
             fl_font(theme::font,11); fl_color(theme::text_color());
             fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
-            std::ostringstream amplitude; amplitude<<std::setprecision(2)<<scale/2<<" / "<<scale<<" amplitude";
-            fl_draw(amplitude.str().c_str(),left+3,top+height-1);
+            const auto amplitude=snapshot_.caption(static_cast<unsigned>(std::max(1,width)));
+            fl_draw(amplitude.c_str(),left+3,top+height-1);
             if (symbols_ || constellation_dropped_) {
                 std::ostringstream caption;
                 if (symbols_) caption<<(1U<<config_.constellation_bits)<<"-APSK / ";
@@ -300,46 +248,18 @@ private:
                 fl_draw(caption.str().c_str(),left+3,top+height-15);
             }
         } else if (!waveform_.empty()) {
-            const auto view=plots::waveform_window(waveform_,config_,zoom_,plots::waveform_kernel_radius);
-            const auto trace=plots::waveform_reconstruction(waveform_,static_cast<std::size_t>(view.data()-waveform_.data()),
-                                                           view.size(),static_cast<std::size_t>(std::max(1,width)));
-            const auto trace_height=height-17;
-            const auto mid=top+trace_height*.5;
-            fl_color(theme::fltk_color(theme::grid)); fl_line(left,static_cast<int>(mid),left+width,static_cast<int>(mid));
-            fl_color(theme::data_color());
-            double scale=1e-12;
-            for (auto value:waveform_) scale=std::max(scale,std::abs(static_cast<double>(value)));
-            for (auto value:trace) scale=std::max(scale,std::abs(value));
-            const auto screen_y=[&](double value) { return mid-value/scale*trace_height*.43; };
-            if (view.size()<=static_cast<std::size_t>(std::max(1,width))) {
-                const auto screen_x=[&](std::size_t i) { return left+static_cast<double>(i)*std::max(0,width-1)/static_cast<double>(std::max<std::size_t>(1,view.size()-1)); };
-                fl_begin_line();
-                if (trace.empty()) {
-                    for (std::size_t i=0;i<view.size();++i) fl_vertex(screen_x(i),screen_y(view[i]));
-                } else {
-                    for (std::size_t i=0;i<trace.size();++i)
-                        fl_vertex(left+static_cast<double>(i)*std::max(0,width-1)/static_cast<double>(trace.size()-1),screen_y(trace[i]));
-                }
-                fl_end_line();
-                if (view.size()*4<static_cast<std::size_t>(width))
-                    for (std::size_t i=0;i<view.size();++i) fl_rectf(static_cast<int>(screen_x(i))-1,static_cast<int>(screen_y(view[i]))-1,2,2);
-            } else {
-                const auto columns=plots::waveform_columns(view,static_cast<std::size_t>(std::max(1,width)));
-                for (std::size_t i=0;i<columns.size();++i) {
-                    const auto px=left+static_cast<int>(i);
-                    fl_line(px,static_cast<int>(screen_y(columns[i].low)),px,static_cast<int>(screen_y(columns[i].high)));
-                    if (i) fl_line(px-1,static_cast<int>(screen_y(columns[i-1].last)),px,static_cast<int>(screen_y(columns[i].first)));
-                }
-            }
-            const auto seconds=static_cast<double>(view.size()-1)/config_.sample_rate;
-            std::ostringstream caption;
-            caption<<std::setprecision(3)<<seconds*(seconds<.001?1e6:1000)<<(seconds<.001?" us":" ms")
-                   <<" / "<<view.size()<<" samples"<<(trace.empty()?"":" / reconstructed");
+            draw_bitmap(snapshot_,left,top,width,height-17);
+            const auto caption=snapshot_.caption(static_cast<unsigned>(std::max(1,bitmap_sample_extent(left,width))));
             fl_font(theme::font,11); fl_color(theme::fltk_color(theme::muted));
-            fl_draw(caption.str().c_str(),left+2,top+height-1);
+            fl_draw(caption.c_str(),left+2,top+height-1);
         }
         fl_pop_clip();
     }
+    void refresh_snapshot() {
+        snapshot_=is_constellation_?plots::PlotSnapshot::constellation(constellation_,symbols_):
+            plots::PlotSnapshot::waveform(waveform_,config_,zoom_);
+    }
+    plots::PlotSnapshot snapshot_;
     bool is_constellation_;
     bool symbols_=false;
     std::uint64_t constellation_dropped_=0;

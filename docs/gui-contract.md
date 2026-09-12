@@ -1,9 +1,12 @@
 # Proposed minimal GUI contract
 
-Status: the single-backend build option and shared FLTK theme, color by default
-when supported with a `--monochrome` override, are implemented. The semantic
-declarations, bitmap transfer API, and alternative adapters below remain a design draft; the
-application currently uses FLTK. The proposed API declares semantic controls:
+Status: FLTK is the default; the opt-in Rev adapter uses shared semantic
+declarations and a toolkit-free controller. Both adapters use shared bitmap
+producers. The remaining FLTK controller/screen migration and broader contract
+below remain work in progress. Implemented records are in `src/gui/ui_contract.hpp`
+and `src/gui/bitmap.hpp`; the nested declaration example below remains a design
+direction. See [Rev backend](rev-backend.md) for tested capabilities. The API
+declares semantic controls:
 choices/dropdowns, tabs, text fields, actions, and lists. Adapters map them to
 existing backend widgets. Bitmap output is a separate path for plots and images.
 
@@ -154,6 +157,7 @@ existing controls is appropriate when there is no exact one-to-one equivalent.
 | Backend | Implementation of semantic controls |
 | --- | --- |
 | FLTK / wxWidgets / LVGL | Corresponding library widgets and containers. |
+| Rev (`clean` pin) | Text, Button, Checkbox, Dropdown and Box; native-element composition for lists, tabs, multiline text and path prompts. |
 | HTML / JavaScript | DOM controls such as `select`, `input`, `textarea`, and `button`; tab/page composition in the adapter. |
 | ncurses | Menu/form facilities for selection and editing; small adapter composition for dropdown presentation and tabs/pages. |
 | SDL | An existing widget library hosted by SDL, not an application-owned SDL widget engine. |
@@ -232,9 +236,10 @@ The minimal shared bitmap producers retain this grayscale basis:
 
 Optional color changes only the data tint or waterfall lookup described above.
 RGB24 uses three times the transfer bytes of Gray8; generate bounded rows or
-tiles only when needed. The current FLTK waterfall retains one Gray8 buffer and
-converts requested rows through its image callback, without a second full RGB
-framebuffer. That implementation does not yet expose the proposed bitmap API.
+tiles only when needed. Both desktop adapters consume this pixel API. FLTK
+batches up to 16 rows per native image operation at ordinary scale and assembles
+a physical-pixel backing image at high DPI; Rev retains an opaque RGB texture.
+These adapter storage choices do not impose a framebuffer on other targets.
 
 Keep measured values and a common I/Q scale when mapping points to pixels;
 simplifying appearance must not normalize each point or erase amplitude meaning.
@@ -245,9 +250,10 @@ pixel contract without adding backend methods.
 
 ## One backend per build
 
-Candidate adapters are FLTK, wxWidgets, LVGL, ncurses, HTML/JavaScript, SDL with
-an existing widget library, and a primitive-only MCU adapter. All expose the
-same semantic contract. A browser adapter's hosting/transport is a separate
+Implemented adapters are FLTK and Rev. Further candidates are wxWidgets, LVGL,
+ncurses, HTML/JavaScript, SDL with an existing widget library, and a primitive-only
+MCU adapter. Rev uses the semantic contract; FLTK still needs its screen/controller
+migration. Future adapters should expose the same contract. A browser adapter's hosting/transport is a separate
 implementation decision; it does not introduce a second UI definition.
 
 The implemented CMake cache option selects exactly one backend:
@@ -258,7 +264,7 @@ cmake --build build-native --target datapump-gui
 ./build-native/datapump-gui --version
 ```
 
-`fltk` is the default and currently the only implemented value. An empty,
+`fltk` is the default; `rev` selects the opt-in Rev profile. An empty,
 multiple, or unavailable selection fails configuration with the available choice.
 `DATAPUMP_BUILD_GUI=OFF` skips the backend and its dependencies altogether.
 Backend-independent GUI model tests remain available in CLI-only builds.
@@ -275,10 +281,11 @@ Use one default backend for each supported platform/profile and separate build
 directories for exceptional targets. Keep FLTK for the current desktop Linux and
 Windows releases; ncurses is the proposed SSH profile, and LVGL is a candidate
 for framebuffer/MCU targets. An SDL profile must name its accompanying widget
-library. These alternatives are not currently buildable.
+library. The other alternatives are not currently buildable.
 
-The initial supported rendering configuration should avoid application GL/EGL
-contexts. For the SDL window-surface path, disable
+The FLTK profile avoids application GL/EGL contexts. Rev's OpenGL profile is
+permitted, including software OpenGL; a future Rev software renderer must retain
+the same semantic and pixel boundaries. For a future SDL window-surface path, disable
 [framebuffer acceleration](https://wiki.libsdl.org/SDL3/SDL_HINT_FRAMEBUFFER_ACCELERATION)
 before acquiring the surface. The operating system's compositor/display path
 remains a separate deployment concern.
@@ -290,12 +297,11 @@ setting switches when their shared bindings exist.
 
 ## First implementation boundary
 
-Extract the existing FLTK controller and declarations first; preserve application
-behavior while simplifying plots to bitmap sources and exposing their existing
-zoom/reset/navigation operations through ordinary controls. Move the existing
-keyfile-failure acknowledgement that relies on reselecting a choice to an explicit
-Action. Then implement a second adapter and confirm that moving/adding a control
-touches no adapter code.
+Rev now exercises the extracted controller and declarations, pure bitmap sources,
+ordinary zoom/reset/navigation actions and explicit keyfile-failure acknowledgement.
+Both adapters use the shared pixel producers. Complete the FLTK screen/controller
+migration while preserving its existing behavior, then confirm that moving or
+adding a control touches no adapter code in either toolkit.
 Test stable selection after reorder/removal,
 literal labels, silent state updates, explicit acknowledgement, text submission,
 visibility, and unavailable backend handling. Check pixel formats, 1:1 placement,
