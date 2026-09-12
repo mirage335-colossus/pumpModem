@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.1.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.2.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,12 +14,12 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.5.1 reconstructs the displayed waveform from captured PCM samples and
-centers narrow audio modes at 1500 Hz. Receive integrations preserve chip and
-symbol boundaries at the new internal clocks. The 0.5 audio whitening, GUI
-keyfile tools and packet/keyfile formats remain unchanged. Both audio endpoints
-must use matching carrier and modem settings; narrow automatic defaults differ
-from 0.5.0.
+Version 0.5.2 replays each completed simulation's payload over three seconds and
+shows fresh constellation observations in the decoder's differential phase and
+amplitude coordinates. The waveform, packet and keyfile formats are unchanged
+from 0.5.1, including the 1500 Hz carrier for narrow audio modes. Both audio
+endpoints must use matching carrier and modem settings; narrow automatic
+defaults differ from 0.5.0.
 
 ## Build and run
 
@@ -110,9 +110,12 @@ transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
 updating while idle. Transmissions run at CPU speed through noisy complex
 observations and the same symbol decoder, with virtual airtime reported separately.
-On completion, all plots hold a payload-midpoint sample for two seconds, including
-up to 2,048 accumulated received constellation points. All plots then return to
-live input so new noise, lock attempts and transmissions remain visible.
+After computation completes, waveform, waterfall and constellation replay the
+payload chronologically over three seconds. Each frame shows the receiver state
+at that transmission position; the constellation uses fresh observations instead
+of a cloud accumulated over the packet. Starting another transmission or selecting
+Stop replay interrupts playback. All plots then return to live input so new noise, lock
+attempts and transmissions remain visible.
 Simulation defaults to 100 ppm relative crystal error and phase diffusion of
 0.5 degrees per square root second. It models carrier coherence loss and changing
 symbol timing, while assuming matched chip despreading. It does not provide an

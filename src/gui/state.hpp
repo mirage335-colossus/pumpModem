@@ -45,17 +45,19 @@ private:
 struct PlotUpdate {
     bool update_plots = false;
     bool append_waterfall = false;
-    bool restore_waterfall = false;
+    bool clear_waterfall = false;
 };
-// Frozen review frames are displayed once, without pretending that duplicate
-// waterfall rows represent newly sampled audio.
-class PlotReviewPolicy {
+// Each chronological replay frame is displayed once. Repeated UI polls do not
+// append duplicate spectrum rows, and a new replay starts a fresh waterfall.
+class PlotReplayPolicy {
 public:
-    PlotUpdate observe(std::uint64_t sequence, std::uint64_t transmission_id, bool review);
+    PlotUpdate observe(std::uint64_t sequence, std::uint64_t transmission_id,
+                       bool replay, std::size_t replay_frame = 0);
     void reset() noexcept { *this = {}; }
 private:
-    std::optional<std::uint64_t> sequence_, restored_transmission_;
-    bool reviewing_ = false;
+    std::optional<std::uint64_t> sequence_, transmission_;
+    std::optional<std::size_t> replay_frame_;
+    bool replaying_ = false;
 };
 std::string format_bit_rate(double bits_per_second);
 // Names are comma-separated in the generation dialog. The keyfile codec

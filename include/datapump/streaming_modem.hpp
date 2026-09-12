@@ -11,6 +11,14 @@ struct SymbolObservation {
     std::complex<double> value;
     std::uint64_t sample_count = 0;
 };
+// Newly observed payload symbols in the decoder's differential-phase and
+// gain-normalized amplitude coordinates. Points are measured, never snapped
+// to decisions. A slow consumer receives the newest bounded set and a count
+// of points displaced before it could consume them.
+struct ConstellationBatch {
+    std::vector<std::complex<double>> points;
+    std::uint64_t dropped = 0;
+};
 // Validation is deterministic for a given prefix within one receiver instance;
 // repeated identical rejected prefixes may reuse the previous verdict.
 using BootstrapValidator = std::function<bool(const Bytes&)>;
@@ -32,6 +40,7 @@ public:
     // Fixed training and spreading-chip signs are excluded. Each symbol is
     // retained once, regardless of PCM block size or integration duration.
     std::vector<std::complex<double>> payload_constellation() const;
+    ConstellationBatch take_payload_constellation();
     // Reconstruct the actual recent PCM, including spreading and carrier phase.
     // At most 2048 samples; any portion before the transmission is zero-filled.
     void preview_last(std::span<float> output) const;
@@ -60,6 +69,11 @@ public:
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
     Diagnostics diagnostics() const;
+    // Empty until bootstrap validation selects the receive timing. The first
+    // bootstrap symbol has no preceding received phase reference and is
+    // excluded; subsequent points use the same reference as the decoder.
+    // Reset discards pending points and their overflow count.
+    ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
     void reset();
 private:

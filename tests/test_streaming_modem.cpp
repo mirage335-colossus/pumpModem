@@ -9,6 +9,89 @@
 #include <chrono>
 #include <thread>
 using namespace datapump;
+using Complex=std::complex<double>;
+Complex decision_coordinates(Complex point,Complex previous) {
+    return std::abs(previous)>1e-20?point*std::conj(previous)/std::abs(previous):point;
+}
+void consumable_transmit_constellation() {
+    modem::Config config;config.constellation_bits=6;
+    auto wire=modem::preamble(config);
+    for(unsigned i=0;i<2101;++i)wire.push_back(static_cast<std::uint8_t>(i*79+37));
+    modem::StreamingTransmitter source(wire,config),overflow(wire,config),pcm(wire,config);
+    std::vector<Complex> observed,pcm_observed,expected;
+    auto append=[&](auto& destination,modem::ConstellationBatch batch) {
+        if(batch.dropped)throw std::runtime_error("regular constellation drains dropped points");
+        destination.insert(destination.end(),batch.points.begin(),batch.points.end());
+    };
+    while(!source.finished()) {
+        source.next_symbol();append(observed,source.take_payload_constellation());
+        if(!source.take_payload_constellation().points.empty())throw std::runtime_error("TX constellation drain repeated points");
+    }
+    const auto bootstrap=(std::min(wire.size()-32,packet_prefix_size)*8+config.constellation_bits-1)/config.constellation_bits;
+    for(std::size_t i=0;i<modem::payload_symbol_count(wire.size()-32,config);++i) {
+        const auto bytes=i<bootstrap?std::span(wire).subspan(32,packet_prefix_size):std::span(wire).subspan(32+packet_prefix_size);
+        const auto value=modem::detail::read_bits(bytes,(i<bootstrap?i:i-bootstrap)*config.constellation_bits,config.constellation_bits);
+        expected.push_back(modem::detail::mapped(value,config.constellation_bits,{1,0}));
+    }
+    auto matches=[](const auto& first,const auto& second) {
+        if(first.size()!=second.size())return false;
+        for(std::size_t i=0;i<first.size();++i)if(std::abs(first[i]-second[i])>1e-12)return false;
+        return true;
+    };
+    if(!matches(observed,expected))throw std::runtime_error("TX frame points do not show transmitted differential decisions");
+    std::array<float,317> block{};
+    while(!pcm.finished()){pcm.read(block);append(pcm_observed,pcm.take_payload_constellation());}
+    if(!matches(pcm_observed,expected))throw std::runtime_error("PCM frame constellation differs from integrated TX");
+    while(!overflow.finished())overflow.next_symbol();
+    const auto batch=overflow.take_payload_constellation();
+    const auto limit=modem::StreamingTransmitter::constellation_history_limit;
+    if(batch.dropped!=expected.size()-limit || !matches(batch.points,std::vector<Complex>(expected.end()-limit,expected.end())))
+        throw std::runtime_error("TX pending constellation is not bounded with exact loss reporting");
+    const auto empty=overflow.take_payload_constellation();
+    if(!empty.points.empty() || empty.dropped)throw std::runtime_error("TX consumption did not reset pending counters");
+    if(overflow.payload_constellation().size()!=limit)throw std::runtime_error("TX drain discarded legacy diagnostic history");
+}
+void consumable_receive_constellation() {
+    modem::Config config;config.spreading_mode=modem::SpreadingMode::tone;
+    Message message;message.kind=MessageKind::file;message.filename="plot.bin";message.data=Bytes(128,0x73);
+    auto wire=modem::preamble(config);const auto packet=encode_packet(message);wire.insert(wire.end(),packet.begin(),packet.end());
+    modem::StreamingTransmitter source(wire,config);
+    modem::StreamingReceiver receiver(config,modem::preamble(config));
+    const auto rotation=std::polar(2.6,.61);
+    std::vector<Complex> observed;
+    while(auto observation=source.next_symbol()) {
+        observation->value*=rotation;receiver.push_symbols(std::span(&*observation,1));
+        const auto batch=receiver.take_payload_constellation();
+        if(batch.dropped || (!receiver.synchronized() && !batch.points.empty()))throw std::runtime_error("unlocked timing candidates leaked into payload constellation");
+        observed.insert(observed.end(),batch.points.begin(),batch.points.end());
+        if(!receiver.take_payload_constellation().points.empty())throw std::runtime_error("RX constellation drain repeated points");
+    }
+    if(!receiver.synchronized())throw std::runtime_error("rotated RX plot fixture did not acquire");
+    const auto history=receiver.diagnostics().constellation;
+    if(observed.size()+1!=history.size())throw std::runtime_error("RX acquisition lost or repeated bootstrap constellation points");
+    for(std::size_t i=0;i<observed.size();++i)
+        if(std::abs(observed[i]-decision_coordinates(history[i+1],history[i]))>1e-12)
+            throw std::runtime_error("RX plot retains absolute carrier rotation instead of measured decision coordinates");
+    // An off-grid measured sample must remain off-grid; plotting ideal decoded
+    // points would conceal actual phase noise and amplitude errors.
+    const modem::SymbolObservation off_grid{{.413,.177},modem::symbol_sample_count(config)};
+    receiver.push_symbols(std::span(&off_grid,1));
+    const auto noisy=receiver.take_payload_constellation();
+    const auto latest=receiver.diagnostics().constellation;
+    if(noisy.points.size()!=1 || std::abs(noisy.points[0]-decision_coordinates(latest.back(),history.back()))>1e-12)
+        throw std::runtime_error("RX display synthesized or repeated the measured off-grid symbol");
+    for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&off_grid,1));
+    const auto bounded=receiver.take_payload_constellation();
+    if(bounded.points.size()!=2048 || bounded.dropped!=152)throw std::runtime_error("RX pending symbols are not bounded with exact overflow counts");
+    for(const auto point:bounded.points)
+        if(std::abs(point-Complex{std::abs(latest.back()),0})>1e-12)throw std::runtime_error("RX wrapped constellation lost its preceding phase reference");
+    const auto empty=receiver.take_payload_constellation();
+    if(!empty.points.empty() || empty.dropped)throw std::runtime_error("RX drain retained consumed points or loss counters");
+    receiver.push_symbols(std::span(&off_grid,1));receiver.reset();
+    const auto reset=receiver.take_payload_constellation();
+    if(!reset.points.empty() || reset.dropped || receiver.synchronized())throw std::runtime_error("RX reset retained previous capture points");
+    if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("consumable constellation exceeded receiver workspace");
+}
 void receiver_input_modes() {
     modem::Config config;
     modem::StreamingReceiver receiver(config,modem::preamble(config));
@@ -340,6 +423,8 @@ void recent_pcm_preview() {
 }
 int main() {
     try {
+        consumable_transmit_constellation();
+        consumable_receive_constellation();
         receiver_input_modes();
         exact_pcm_boundaries();
         modem::Config config;

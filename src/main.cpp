@@ -32,7 +32,7 @@
 
 using namespace datapump;
 #ifndef DATAPUMP_VERSION
-#define DATAPUMP_VERSION "0.5.1"
+#define DATAPUMP_VERSION "0.5.2"
 #endif
 namespace {
 const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text and file modem

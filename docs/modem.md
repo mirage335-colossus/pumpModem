@@ -1,11 +1,12 @@
-# Audio modem reference, application version 0.5.1
+# Audio modem reference, application version 0.5.2
 
-Version 0.5.1 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5.2 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
-matching carrier and modem settings. Version 0.5.1 raises narrow automatic audio
-carriers to 1500 Hz and corrects receive integration boundaries. Constellation
-mapping, symbol padding and the 0.5 public whitening mask are unchanged. Packet versions
+matching carrier and modem settings. This release changes constellation
+presentation and adds chronological simulation replay. The 0.5.1 waveforms,
+1500 Hz narrow-audio carrier and receive integration boundaries are unchanged,
+as are constellation mapping, symbol padding and the 0.5 public whitening mask. Packet versions
 1 and 2 and existing keyfile formats remain unchanged; modem configuration changes
 do not migrate or regenerate keys.
 
@@ -255,11 +256,15 @@ allows; this is not a guarantee against an overloaded audio device or processor.
 Idle simulated noise follows the same 20 Hz cadence with bounded preview chunks.
 Queuing a transmission interrupts that wait; active transmissions run at CPU
 speed independently of their virtual airtime.
-The locked receiver maintains a sliding set of up to 2,048 recent observations,
-and unlocked input supplies current noise/phase diagnostics. The constellation
-uses one shared display scale and retains relative amplitudes. Its axes and amplitude
-rings are display aids, not a calibration certificate. Decoder diagnostics and
-acquisition scores are evidence of signal processing, never packet authenticity.
+The GUI consumes fresh symbol observations from the locked receiver. Their
+phase is measured relative to the preceding received symbol, and their amplitude
+is normalized by the receiver's estimated gain. This is the decoder's coordinate
+system; points remain measured values and are never snapped to symbol decisions.
+Unlocked input supplies current noise/phase I/Q diagnostics. The source label
+distinguishes those input measurements from received or transmitted symbols.
+Axes and amplitude rings are display aids, not a calibration certificate. Decoder
+diagnostics and acquisition scores are evidence of processing, never packet
+authenticity.
 
 The waveform initially shows four carrier cycles from the latest buffer.
 A bounded 64-tap Blackman-windowed sinc reconstructs the line between measured
@@ -275,12 +280,16 @@ Unlocked receive I/Q diagnostics fit both carrier bases, including their cross
 term, so a window containing fractional carrier cycles does not introduce an
 artificial amplitude or phase ellipse.
 
-Actual playback shows the transmitter's latest 2,048 payload symbols rather
-than only the symbols fitting in a 2,048-sample waveform. The fixed training is
-excluded. Simulation continues to show receiver observations. Labels distinguish
-transmitted and received symbols from raw input I/Q, and show the selected APSK
-alphabet and retained observation count. No ideal or missing points are inserted
-into measured data. Symbol plots retain a nominal unit scale rather than
+Actual playback similarly drains newly emitted payload symbols, excluding fixed
+training. Pending points survive plot publication until a GUI snapshot consumes
+them; each delivered batch replaces the previously displayed cloud. A slow
+consumer receives a bounded batch with a count of overflowed points through
+`Snapshot::constellation_dropped`, also shown as omitted points in the plot caption.
+Source changes do not mix raw I/Q and symbol
+coordinates. The modem's legacy history APIs still expose up to 2,048 raw recent
+symbols for other callers; the GUI uses the drain APIs instead. Labels show the
+selected APSK alphabet and the current observation count. No ideal or missing
+points are inserted. Symbol plots retain a nominal unit scale rather than
 stretching a lone inner ring to the outer edge.
 Positive rates too small for decimal display use scientific notation instead of
 rounding to `0.0 bit/s`.
@@ -342,18 +351,32 @@ The model avoids synthesizing every sample of a very long tone. It does not
 establish arbitrary PCM acquisition, fading/multipath performance, nonlinear
 hardware behavior or interference rejection. Plots use bounded signal/noise
 previews rather than a retained whole transmission.
-Twenty-four spectrum rows are captured by media position between one-quarter
-and one-half of the payload, independent of GUI polling. On simulation completion,
-the waveform and spectrum show the payload-midpoint sample for two wall-clock
-seconds. A bounded transmitter segment history reconstructs the actual local
-waveform, including carrier phase and spreading, with independent display noise.
-The preview is time-warped and phase-rotated using the simulated channel trajectory;
-its independent display-noise generator does not change decoder randomness.
-The constellation uses accumulated receiver observations (up to 2,048 points),
-not transmitted ideal points. After the hold, waveform, waterfall and constellation
-all resume live input. The previous simulated packet no longer obscures noise,
-lock diagnostics or a subsequent incoming transmission. Background simulation
-reception continues throughout the hold.
+During computation, snapshots are captured at evenly spaced media positions from
+the start to the end of the payload, after fixed training. The normal timeline
+contains 60 frames. Each stores a compact 256-sample waveform, 257 peak-pooled
+spectrum bins and the fresh measured constellation for its interval. Its source
+and lock state are captured at that position, before the receiver's artificial
+end-of-capture tail; a later lock cannot be applied to an earlier frame.
+A bounded transmitter segment history reconstructs the actual local waveform,
+including carrier phase and spreading. The preview is time-warped and
+phase-rotated using the simulated channel trajectory; its independent display
+noise does not change decoder randomness.
+
+After CPU-bounded computation completes, the GUI plays the timeline over three
+wall-clock seconds. Every new frame updates waveform and constellation and adds
+one waterfall row. If GUI polling skips frames, their fresh points are merged
+into the next delivered batch within the same source coordinates, subject to a
+bounded capacity and an explicit overflow count. Duplicate polls do not append
+duplicate rows. Replay storage uses at most one eighth of the configured DSP
+budget, capped at roughly 1.1 MiB; frame and point capacities adapt to that budget.
+This storage is independent of simulated airtime and of the received-file cache.
+
+Starting another transmission or selecting Stop replay interrupts presentation.
+At the three-second deadline, any points still undelivered because GUI polling
+stalled are counted as omitted; replay does not extend or place those old points
+over live input. On completion or cancellation, waveform, waterfall and
+constellation all resume live input. Background simulated reception continues while replay is presented;
+the previous packet does not remain as a persistent constellation cloud.
 The packet is still decoded and validated; transmitted application bytes are not
 inserted directly into the receive cache.
 

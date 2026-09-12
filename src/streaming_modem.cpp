@@ -14,6 +14,31 @@ namespace {
 using Complex=std::complex<double>;
 constexpr double tau=2*std::numbers::pi;
 void cancelled(std::stop_token stop) {if(stop.stop_requested())throw Error("modem operation cancelled");}
+// The wire encodes phase changes, not absolute carrier phase. Retain the
+// measured amplitude and rotate by the preceding measurement's unit phase;
+// do not round either axis to the decoder's ideal symbol decision.
+Complex decision_coordinates(Complex point,Complex previous) {
+    return std::abs(previous)>1e-20?point*std::conj(previous)/std::abs(previous):point;
+}
+struct PendingConstellation {
+    std::size_t count=0;
+    std::uint64_t dropped=0;
+    Complex previous{1,0}; // Measurement immediately before the history ring.
+    void append(std::size_t capacity) {
+        if(count<capacity)++count;
+        else if(dropped<std::numeric_limits<std::uint64_t>::max())++dropped;
+    }
+    template<typename At>
+    ConstellationBatch take(std::size_t history_size,At at) {
+        ConstellationBatch result;result.points.reserve(count);result.dropped=dropped;
+        const auto begin=history_size-count;
+        auto prior=begin?at(begin-1):previous;
+        for(std::size_t i=begin;i<history_size;++i) {
+            const auto point=at(i);result.points.push_back(decision_coordinates(point,prior));prior=point;
+        }
+        count=0;dropped=0;return result;
+    }
+};
 std::uint64_t chip_count(const Config& c) {
     return static_cast<std::uint64_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
 }
@@ -207,6 +232,7 @@ struct StreamingTransmitter::Impl {
     std::size_t history_begin=0,history_count=0;
     std::array<Complex,StreamingTransmitter::constellation_history_limit> constellation{};
     std::size_t constellation_begin=0,constellation_count=0;
+    PendingConstellation pending_constellation;
     bool pcm=false,analytical=false;
     Impl(Bytes bytes,Config value,std::size_t workspace):wire(std::move(bytes)),config(value) {
         static_assert(sizeof(Impl)<=65536,"transmitter state exceeds its fixed workspace reservation");
@@ -231,12 +257,16 @@ struct StreamingTransmitter::Impl {
                 value=detail::read_bits(std::span(wire).subspan(32,std::min(wire.size()-32,packet_prefix_size)),payload_index*bits,bits);
             else value=detail::read_bits(std::span(wire).subspan(32+packet_prefix_size),(payload_index-bootstrap_count)*bits,bits);
         }
+        const auto previous=phase;
         point=detail::mapped(value,bits,phase);phase=point/std::abs(point);
         if(index>=64) {
+            if(!constellation_count)pending_constellation.previous=previous;
             if(constellation_count==constellation.size()) {
+                pending_constellation.previous=constellation[constellation_begin];
                 constellation_begin=(constellation_begin+1)%constellation.size();--constellation_count;
             }
             constellation[(constellation_begin+constellation_count++)%constellation.size()]=point;
+            pending_constellation.append(constellation.size());
         }
         segment_start=segment_end;
         segment_end=index<64?training*static_cast<std::uint64_t>(index+1)/64:segment_end+symbol;
@@ -264,6 +294,12 @@ std::vector<Complex> StreamingTransmitter::payload_constellation()const {
     for(std::size_t i=0;i<s.constellation_count;++i)
         result.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);
     return result;
+}
+ConstellationBatch StreamingTransmitter::take_payload_constellation() {
+    auto& s=*impl_;
+    return s.pending_constellation.take(s.constellation_count,[&](std::size_t i){
+        return s.constellation[(s.constellation_begin+i)%s.constellation.size()];
+    });
 }
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
@@ -339,6 +375,7 @@ struct StreamingReceiver::Impl {
     std::uint64_t selection_deadline=0;
     Diagnostics diagnostic;
     std::size_t constellation_cursor=0;
+    PendingConstellation pending_constellation;
     Complex oscillator{1,0};
     enum class Input { none,pcm,integrated };
     Input input=Input::none;
@@ -387,12 +424,14 @@ struct StreamingReceiver::Impl {
         }
         diagnostic.bit_rate=bit_rate(c);diagnostic.constellation.reserve(2048);
     }
-    void retain_constellation(Complex point) {
+    void retain_constellation(Complex point,bool has_reference=true) {
         if(diagnostic.constellation.size()<2048)diagnostic.constellation.push_back(point);
         else {
+            pending_constellation.previous=diagnostic.constellation[constellation_cursor];
             diagnostic.constellation[constellation_cursor]=point;
             if(++constellation_cursor==diagnostic.constellation.size())constellation_cursor=0;
         }
+        if(has_reference)pending_constellation.append(2048);
     }
     void completed(std::size_t index,Complex point,Bytes& output) {
         auto& candidate=candidates[index];
@@ -428,7 +467,7 @@ struct StreamingReceiver::Impl {
             const auto value=candidate.at(i)/candidate.gain;
             const auto bits=detail::decision(value,prior,1,config.constellation_bits);const auto ideal=detail::mapped(bits,config.constellation_bits,prior);
             power+=std::norm(ideal);error+=std::norm(value-ideal);prior=value;
-            retain_constellation(value);
+            retain_constellation(value,i!=0);
         }
         diagnostic.snr_db=10*std::log10(power/std::max(error,1e-20));
         diagnostic.preamble_correlation=0; // Acquisition evidence is bootstrap validation, not training.
@@ -521,6 +560,12 @@ Diagnostics StreamingReceiver::diagnostics()const{
     if(impl_->constellation_cursor)
         std::rotate(result.constellation.begin(),result.constellation.begin()+static_cast<std::ptrdiff_t>(impl_->constellation_cursor),result.constellation.end());
     return result;
+}
+ConstellationBatch StreamingReceiver::take_payload_constellation() {
+    auto& s=*impl_;
+    return s.pending_constellation.take(s.diagnostic.constellation.size(),[&](std::size_t i){
+        return s.diagnostic.constellation[(s.constellation_cursor+i)%s.diagnostic.constellation.size()];
+    });
 }
 std::size_t StreamingReceiver::working_bytes()const{
     std::size_t bytes=sizeof(Impl)+impl_->candidates.capacity()*sizeof(Candidate)+impl_->code.capacity()*sizeof(int)+impl_->diagnostic.constellation.capacity()*sizeof(Complex)+impl_->expected.capacity();

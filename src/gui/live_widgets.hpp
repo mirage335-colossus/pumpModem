@@ -197,8 +197,9 @@ public:
         if (!constellation) tooltip("Band-limited reconstruction of captured PCM, with actual sample dots. Wheel to zoom; double-click to restore four carrier cycles. Overview preserves sample peaks.");
     }
     void update(const std::vector<float>& waveform,const std::vector<std::complex<double>>& constellation,
-                const modem::Config& config,bool symbols=false) {
-        waveform_=waveform; constellation_=constellation; config_=config; symbols_=symbols; redraw();
+                const modem::Config& config,bool symbols=false,std::uint64_t dropped=0) {
+        waveform_=waveform; constellation_=constellation; config_=config; symbols_=symbols;
+        constellation_dropped_=dropped; redraw();
     }
     int handle(int event) override {
         if (!is_constellation_ && event==FL_MOUSEWHEEL) {
@@ -217,7 +218,7 @@ private:
         const int left=x()+8,top=y()+8,width=w()-16,height=h()-16;
         fl_push_clip(left,top,width,height);
         if (is_constellation_) {
-            const int plot_height=height-(symbols_?34:18);
+            const int plot_height=height-((symbols_ || constellation_dropped_)?34:18);
             const int center_x=left+width/2,center_y=top+plot_height/2;
             const int radius=std::max(1,std::min(width-36,plot_height-14)/2);
             double scale=0;
@@ -245,8 +246,11 @@ private:
             fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
             std::ostringstream amplitude; amplitude<<std::setprecision(2)<<scale/2<<" / "<<scale<<" amplitude";
             fl_draw(amplitude.str().c_str(),left+3,top+height-1);
-            if (symbols_) {
-                std::ostringstream caption; caption<<(1U<<config_.constellation_bits)<<"-APSK / "<<constellation_.size()<<" recent symbols";
+            if (symbols_ || constellation_dropped_) {
+                std::ostringstream caption;
+                if (symbols_) caption<<(1U<<config_.constellation_bits)<<"-APSK / ";
+                caption<<constellation_.size()<<(symbols_?" symbols":" input points");
+                if (constellation_dropped_) caption<<" / "<<constellation_dropped_<<" omitted";
                 fl_draw(caption.str().c_str(),left+3,top+height-15);
             }
         } else if (!waveform_.empty()) {
@@ -292,6 +296,7 @@ private:
     }
     bool is_constellation_;
     bool symbols_=false;
+    std::uint64_t constellation_dropped_=0;
     modem::Config config_;
     double zoom_=1;
     std::vector<float> waveform_;

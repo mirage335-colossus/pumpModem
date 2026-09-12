@@ -150,7 +150,10 @@ public:
         use_text_=button("Use text",[this] { attachment_.reset(); attachment_path_.clear(); compose_label_->copy_label("Message"); dirty_estimate(); });
         send_key_=new Fl_Choice(0,0,1,1); send_key_->add("on Enter|on Ctrl+Enter"); send_key_->value(0);
         transmit_=button("Transmit",[this] { transmit(); });
-        cancel_=button("Cancel TX",[this] { session_.cancel_transmit(); notice("Cancelling transmission..."); });
+        cancel_=button("Cancel TX",[this] {
+            const bool replay=last_snapshot_.simulation_replay;
+            session_.cancel_transmit(); notice(replay?"Stopping simulation replay...":"Cancelling transmission...");
+        });
         airtime_=label("Calculating airtime...",13);
         signal_browser_=new SignalBrowser(signals_); signal_browser_->copy=[this](const auto& id) { guarded([&] { copy_message(id); }); };
         file_browser_=new Fl_Hold_Browser(0,0,1,1); file_browser_->format_char(0); file_browser_->textsize(12);
@@ -536,13 +539,15 @@ private:
         const bool eligible=settings_valid_ && estimate_ && estimate_->memory_supported && (!repeatable_->value() || estimate_->repeatable_allowed);
         if (!busy && !key_loading_ && !key_load_failed_ && !file_loading_ && eligible && remaining==0) transmit_->activate(); else transmit_->deactivate();
         transmit_->copy_label(!busy && remaining>0?("TX wait "+std::to_string(wait_seconds)+"s").c_str():"Transmit");
-        busy&&!closing_?cancel_->activate():cancel_->deactivate();
+        (busy || last_snapshot_.simulation_replay)&&!closing_?cancel_->activate():cancel_->deactivate();
+        cancel_->copy_label(last_snapshot_.simulation_replay?"Stop replay":"Cancel TX");
         if (selected_file() && !closing_) save_->activate(); else save_->deactivate();
         if (!estimate_ || estimate_->repeatable_allowed || repeatable_->value()) repeatable_->activate(); else repeatable_->deactivate();
         if (attachment_) use_text_->activate(); else use_text_->deactivate();
     }
     void accept_snapshot(live::Snapshot snapshot) {
-        const auto plot_update=plot_policy_.observe(snapshot.sequence,snapshot.transmission_id,snapshot.simulation_review);
+        const auto plot_update=plot_policy_.observe(snapshot.sequence,snapshot.transmission_id,
+                                                    snapshot.simulation_replay,snapshot.replay_frame_index);
         if (snapshot.sequence!=last_sequence_) {
             last_sequence_=snapshot.sequence;
             if (!snapshot.waveform.empty()) {
@@ -550,19 +555,17 @@ private:
                 else if (first_noise_!=snapshot.waveform) saw_noise_change_=true;
             }
         }
-        if (plot_update.restore_waterfall) {
-            if (!snapshot.simulation_waterfall.empty()) waterfall_->restore(snapshot.simulation_waterfall,snapshot.simulation_waterfall_bin_hz);
-            else waterfall_->restore({snapshot.spectrum_db},snapshot.spectrum_bin_hz);
-        } else if (plot_update.append_waterfall) waterfall_->push(snapshot.spectrum_db,snapshot.spectrum_bin_hz);
+        if (plot_update.clear_waterfall) waterfall_->clear();
+        if (plot_update.append_waterfall) waterfall_->push(snapshot.spectrum_db,snapshot.spectrum_bin_hz);
         if (plot_update.update_plots) {
             waveform_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem);
             constellation_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem,
-                                    snapshot.constellation_source!=live::ConstellationSource::input);
+                                    snapshot.constellation_source!=live::ConstellationSource::input,snapshot.constellation_dropped);
+            waveform_label_->copy_label(snapshot.simulation_replay?"Simulation replay / waveform":"Live waveform");
+            waterfall_label_->copy_label(snapshot.simulation_replay?"Simulation replay / waterfall":"Spectrum / amplitude waterfall");
+            constellation_label_->copy_label(snapshot.constellation_source==live::ConstellationSource::transmitted?"Transmitted constellation":
+                snapshot.constellation_source==live::ConstellationSource::received?"Received constellation":"Receiver input I/Q");
         }
-        waveform_label_->copy_label(snapshot.simulation_review?"Simulation sample":"Live waveform");
-        waterfall_label_->copy_label(snapshot.simulation_review?"Simulation waterfall":"Spectrum / amplitude waterfall");
-        constellation_label_->copy_label(snapshot.constellation_source==live::ConstellationSource::transmitted?"Transmitted constellation":
-            snapshot.constellation_source==live::ConstellationSource::received?"Received constellation":"Phase / amplitude constellation");
         for (auto& received:snapshot.received) {
             if (smoke_.enabled && std::string(received.packet.message.data.begin(),received.packet.message.data.end())==smoke_text) {
                 smoke_packet_=received.packet;
@@ -584,7 +587,8 @@ private:
         }
         const auto mode=snapshot.simulation?"Simulation / continuous receive":"Listening / "+std::string(*device_->value()?device_->value():"default");
         const auto tx_mode="Transmitting "+std::to_string(static_cast<int>(std::clamp(snapshot.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(snapshot.transmission_seconds)+" media";
-        mode_->copy_label(snapshot.transmitting?tx_mode.c_str():mode.c_str());
+        const auto replay_mode="Simulation replay "+std::to_string(static_cast<int>(std::clamp(snapshot.simulation_sample_fraction,0.0,1.0)*100))+"%";
+        mode_->copy_label(snapshot.transmitting?tx_mode.c_str():snapshot.simulation_replay?replay_mode.c_str():mode.c_str());
         if (Steady::now()>=notice_until_) {
             const auto text=snapshot.error.empty()?snapshot.status:snapshot.error;
             status_->copy_label(text.c_str());
@@ -631,38 +635,80 @@ private:
         closing_=true; session_.stop(); preparation_.request_stop();
         if (!preparing_) window_->hide(); else notice("Closing after the current file operation stops...");
     }
-    void inspect_smoke_review() {
-        if (last_snapshot_.simulation_review) {
-            if (!last_snapshot_.transmission_id || !last_snapshot_.constellation_retained ||
-                last_snapshot_.simulation_waterfall.empty() || constellation_->points().size()<32)
-                throw Error("Simulation review did not retain measured plots");
-            if (std::string(waveform_label_->label())!="Simulation sample" ||
-                std::string(constellation_label_->label())!="Received constellation")
-                throw Error("Simulation review labels did not identify held samples");
-            if (smoke_review_id_!=last_snapshot_.transmission_id) {
-                smoke_review_id_=last_snapshot_.transmission_id;
-                smoke_review_revision_=waterfall_->revision(); smoke_review_polls_=1;
-                smoke_review_waveform_=waveform_->samples(); smoke_review_constellation_=constellation_->points();
-                smoke_review_resumed_=false;
-            } else {
-                if (waterfall_->revision()!=smoke_review_revision_ || waveform_->samples()!=smoke_review_waveform_ ||
-                    constellation_->points()!=smoke_review_constellation_)
-                    throw Error("Held simulation plots changed or appended duplicate waterfall rows");
-                ++smoke_review_polls_;
+    void inspect_smoke_replay() {
+        auto& replay=smoke_replay_;
+        if (last_snapshot_.simulation_replay) {
+            if (!last_snapshot_.transmission_id || last_snapshot_.replay_frame_count<2 ||
+                last_snapshot_.replay_frame_index>=last_snapshot_.replay_frame_count ||
+                !std::isfinite(last_snapshot_.simulation_sample_fraction) ||
+                last_snapshot_.simulation_sample_fraction<0 || last_snapshot_.simulation_sample_fraction>1)
+                throw Error("Simulation replay did not identify a chronological frame");
+            if (std::string(waveform_label_->label())!="Simulation replay / waveform" ||
+                std::string(waterfall_label_->label())!="Simulation replay / waterfall" ||
+                !std::string(mode_->label()).starts_with("Simulation replay "))
+                throw Error("Simulation replay labels did not identify the displayed frames");
+            const bool beginning=!replay.active || replay.id!=last_snapshot_.transmission_id;
+            if (beginning) {
+                replay={}; replay.active=true; replay.id=last_snapshot_.transmission_id;
+                replay.started=Steady::now();
+            } else if (last_snapshot_.replay_frame_index<replay.frame ||
+                       last_snapshot_.simulation_sample_fraction<replay.fraction) {
+                throw Error("Simulation replay moved backward in transmission time");
             }
-        } else if (smoke_review_id_ && last_snapshot_.transmission_id==smoke_review_id_ &&
-                   !last_snapshot_.transmitting && !last_snapshot_.constellation_retained) {
-            if (constellation_->points()==smoke_review_constellation_ ||
-                std::string(constellation_label_->label())!="Phase / amplitude constellation")
-                throw Error("The constellation did not return to live reception after simulation review");
-            if (waveform_->samples()!=smoke_review_waveform_ && waterfall_->revision()>smoke_review_revision_)
-                smoke_review_resumed_=true;
+            if (beginning || last_snapshot_.replay_frame_index!=replay.frame) {
+                if (!beginning) {
+                    if (waterfall_->revision()<=replay.revision)
+                        throw Error("A new replay frame did not append a waterfall row");
+                    if (waveform_->samples()!=replay.waveform) ++replay.waveform_changes;
+                }
+                // Snapshot owns the points for this interval, including fresh
+                // points merged over any GUI scheduling gap. The widget must
+                // replace them exactly, without retaining an older cloud.
+                if (constellation_->points()!=last_snapshot_.constellation)
+                    throw Error("Replay constellation accumulated points from older frames");
+                const auto source=last_snapshot_.constellation_source;
+                if (source==live::ConstellationSource::transmitted ||
+                    std::string(constellation_label_->label())!=(source==live::ConstellationSource::received?
+                        "Received constellation":"Receiver input I/Q"))
+                    throw Error("Replay constellation did not identify its actual receiver source");
+                replay.saw_symbols=replay.saw_symbols ||
+                    (source==live::ConstellationSource::received && !last_snapshot_.constellation.empty());
+                replay.frame=last_snapshot_.replay_frame_index;
+                replay.fraction=last_snapshot_.simulation_sample_fraction;
+                replay.revision=waterfall_->revision();
+                replay.waveform=waveform_->samples(); replay.constellation=constellation_->points();
+                ++replay.frames;
+            } else if (waterfall_->revision()!=replay.revision || waveform_->samples()!=replay.waveform ||
+                       constellation_->points()!=replay.constellation) {
+                throw Error("A repeated replay poll changed plots or duplicated its waterfall row");
+            }
+            return;
+        }
+        if (replay.active) {
+            replay.active=false;
+            if (replay.id!=smoke_interrupted_replay_id_ && replay.id!=smoke_cancelled_replay_id_) {
+                const auto elapsed=std::chrono::duration<double>(Steady::now()-replay.started).count();
+                if (elapsed<2.4 || elapsed>8 || replay.frames<10 || replay.waveform_changes<5 ||
+                    replay.fraction<.9 || !replay.saw_symbols)
+                    throw Error("Simulation replay did not show changing transmission frames over about three seconds");
+                smoke_completed_replay_id_=replay.id;
+            }
+        }
+        if (replay.id && last_snapshot_.transmission_id==replay.id && !last_snapshot_.transmitting &&
+            last_snapshot_.constellation_source==live::ConstellationSource::input &&
+            waveform_->samples()!=replay.waveform && waterfall_->revision()>replay.revision) {
+            if (std::string(waveform_label_->label())!="Live waveform" ||
+                std::string(constellation_label_->label())!="Receiver input I/Q")
+                throw Error("Replay completion did not return all plots to live receiver input");
+            replay.resumed=true;
         }
     }
     void advance_smoke() {
         if (std::chrono::duration<double>(Steady::now()-smoke_started_).count()>smoke_.timeout_seconds)
             throw Error("Continuous native GUI smoke timed out");
-        inspect_smoke_review();
+        if (smoke_phase_==7 && Steady::now()-smoke_cancelled_at_>std::chrono::seconds(2))
+            throw Error("Stopping replay did not promptly resume live reception");
+        inspect_smoke_replay();
         if(smoke_phase_==-2 && estimate_ && saw_noise_change_ && last_snapshot_.samples_received>0) {
             std::filesystem::create_directories(smoke_.directory);
             smoke_key_path_=smoke_.directory/path_from_text("generated keys caf\xc3\xa9.key");
@@ -703,7 +749,7 @@ private:
             if (!last_snapshot_.simulation) throw Error("Smoke attempted to use an actual audio device");
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
-        } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_review) {
+        } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_replay) {
             if (!saw_transmitting_ && last_snapshot_.transmission_fraction<1) throw Error("The normal transmit path was not observed");
             if (!pending_sequence_ || pending_sequence_>=final_sequence_) throw Error("Pending signal updates did not precede verified reception");
             if (last_snapshot_.samples_received<=initial_samples_) throw Error("Simulation stopped continuous reception while transmitting");
@@ -714,14 +760,18 @@ private:
                 if (signals_.lines()[index].packet_id==id) activated=signal_browser_->activate_line(index);
             if (!activated) throw Error("Verified signal was not available for click-to-copy");
             Fl::paste(*clipboard_probe_,1); smoke_phase_=2;
-        } else if (smoke_phase_==2 && clipboard_probe_->received && smoke_review_polls_>=3) {
+        } else if (smoke_phase_==2 && clipboard_probe_->received && smoke_replay_.frames>=3) {
             if (*clipboard_probe_->received!=smoke_text) throw Error("Click-to-copy changed verified UTF-8 text");
             if (gate_.remaining(true,encrypted()).count()!=0) throw Error("Simulation applied a transmit cooldown");
             attachment_=std::make_shared<const Bytes>(smoke_file_bytes); attachment_path_="payload.bin"; attachment_image_=false;
             compose_label_->copy_label("Attached: payload.bin"); dirty_estimate(); smoke_phase_=3;
-        } else if (smoke_phase_==3 && estimate_) {
+        } else if (smoke_phase_==3 && estimate_ && transmit_->active()) {
+            if (!last_snapshot_.simulation_replay) throw Error("Replay ended before its replacement transmission could start");
+            smoke_interrupted_replay_id_=last_snapshot_.transmission_id;
             transmit_->do_callback(); smoke_phase_=4;
-        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_review) {
+        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_replay) {
+            if (last_snapshot_.transmission_id<=smoke_interrupted_replay_id_)
+                throw Error("A new transmission did not replace the previous simulation replay");
             if (file_ids_.size()!=1 || !selected_file() || selected_file()->message.data!=smoke_file_bytes)
                 throw Error("Received file selection did not exclude text");
             const auto id=gui::id_label(smoke_file_packet_->message);
@@ -741,12 +791,23 @@ private:
             signals_.update({1000000,1500,"payload.bin",true,gui::id_label(smoke_file_packet_->message),false});
             use_text_->do_callback();
             resume_sequence_=last_snapshot_.sequence; smoke_phase_=5;
-        } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting && smoke_review_resumed_ &&
-                   last_snapshot_.sequence>resume_sequence_+2 && last_snapshot_.samples_received>resumed_samples_) {
-            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=6;
+        } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting && smoke_replay_.resumed &&
+                   last_snapshot_.sequence>resume_sequence_+2 && last_snapshot_.samples_received>resumed_samples_ &&
+                   estimate_ && transmit_->active()) {
+            if (smoke_completed_replay_id_!=last_snapshot_.transmission_id)
+                throw Error("A complete chronological replay was not observed before live reception resumed");
+            transmit_->do_callback(); smoke_phase_=6;
+        } else if (smoke_phase_==6 && last_snapshot_.simulation_replay && smoke_replay_.frames>=3 && cancel_->active()) {
+            smoke_cancelled_replay_id_=last_snapshot_.transmission_id;
+            resume_sequence_=last_snapshot_.sequence;
+            smoke_cancelled_at_=Steady::now();
+            cancel_->do_callback(); smoke_phase_=7;
+        } else if (smoke_phase_==7 && !last_snapshot_.simulation_replay && !last_snapshot_.transmitting &&
+                   smoke_replay_.resumed && last_snapshot_.sequence>resume_sequence_+2) {
+            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=8;
             notice("GUI smoke passed: keyfile generation, reception, text/file loopback, clipboard, save and live plots.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals, normal TX, clipboard, exclusive save, simulation review and all plots returning to live reception."<<std::endl;
-        } else if (smoke_phase_==6 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
+            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals, normal TX, clipboard, exclusive save, chronological three-second simulation replay, replay replacement/cancellation and all plots returning to live reception."<<std::endl;
+        } else if (smoke_phase_==8 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
     SmokeOptions smoke_;
@@ -756,7 +817,7 @@ private:
     gui::Inbox inbox_;
     gui::Signals signals_;
     gui::TransmissionPolicy gate_;
-    gui::PlotReviewPolicy plot_policy_;
+    gui::PlotReplayPolicy plot_policy_;
     std::vector<std::string> file_ids_,pending_key_names_;
     std::vector<KeyEntry> keys_;
     std::shared_ptr<const Bytes> attachment_;
@@ -769,17 +830,22 @@ private:
     std::optional<transfer::Estimate> estimate_;
     std::optional<DecodedPacket> smoke_packet_,smoke_file_packet_;
     std::uint64_t revision_=0,estimated_revision_=0,last_sequence_=0,initial_samples_=0,resumed_samples_=0,pending_sequence_=0,final_sequence_=0,resume_sequence_=0;
-    std::uint64_t smoke_review_id_=0,smoke_review_revision_=0;
-    unsigned smoke_review_polls_=0;
-    bool smoke_review_resumed_=false;
-    std::vector<float> smoke_review_waveform_;
-    std::vector<std::complex<double>> smoke_review_constellation_;
+    struct SmokeReplay {
+        std::uint64_t id=0,revision=0;
+        std::size_t frame=0,frames=0,waveform_changes=0;
+        double fraction=0;
+        bool active=false,resumed=false,saw_symbols=false;
+        Steady::time_point started{};
+        std::vector<float> waveform;
+        std::vector<std::complex<double>> constellation;
+    } smoke_replay_;
+    std::uint64_t smoke_interrupted_replay_id_=0,smoke_cancelled_replay_id_=0,smoke_completed_replay_id_=0;
     int smoke_phase_=-2;
     bool smoke_key_reception_=false;
     double simulation_channel_snr_=0,cpu_percent_=0;
     std::string tuning_explanation_,notice_;
     std::vector<float> first_noise_;
-    Steady::time_point estimate_requested_{},notice_until_{},smoke_started_{},smoke_finished_{},cpu_time_=Steady::now();
+    Steady::time_point estimate_requested_{},notice_until_{},smoke_started_{},smoke_finished_{},smoke_cancelled_at_{},cpu_time_=Steady::now();
     std::clock_t cpu_clock_=std::clock();
     std::jthread preparation_;
     std::mutex preparation_mutex_;

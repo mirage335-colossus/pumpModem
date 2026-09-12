@@ -52,7 +52,7 @@ live::Settings settings() {
     live::Settings value;
     value.simulation = true;
     value.simulation_snr_db = 18;
-    // These cases isolate transport, scheduling and UI review. Oscillator
+    // These cases isolate transport, scheduling and UI replay. Oscillator
     // impairments have separate channel and live-default coverage.
     value.simulation_clock_error_ppm = 0;
     value.simulation_phase_noise_degrees_per_sqrt_second = 0;
@@ -112,7 +112,7 @@ void test_idle_noise_and_plots() {
     session.stop();
     check(!session.snapshot().running, "stop is immediately observable");
 }
-void test_audio_tx_accumulates_payload_constellation() {
+void test_audio_tx_publishes_fresh_payload_constellation() {
     live::Session session;
     auto value=settings();value.simulation=false;value.device="live-test-audio";
     value.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
@@ -122,18 +122,54 @@ void test_audio_tx_accumulates_payload_constellation() {
     session.transmit(message(89,1024));
     const auto active=wait_for(session,[](const auto& snapshot) {
         return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
-               snapshot.constellation.size()>32;
+               !snapshot.constellation.empty();
     });
-    check(active.constellation.size()<=2048,"real audio TX history remains bounded");
-    check(active.constellation.size()*modem::symbol_sample_count(value.transfer.modem)>active.waveform.size()*16,
-          "real audio TX displays a history of slow payload symbols beyond its short PCM preview");
+    check(active.constellation.size()<=2048,"real audio TX symbol batch remains bounded");
     for(const auto point:active.constellation)
         check(std::min(std::abs(std::abs(point)-.35),std::abs(std::abs(point)-.7))<1e-8,
               "real audio TX shows actual mapped symbol amplitudes");
-    check(active.received.empty() && !active.simulation_review,"TX history is not represented as received simulation data");
+    check(active.received.empty() && !active.simulation_replay,"TX symbols are not represented as received simulation data");
     wait_for(session,[](const auto& snapshot){return snapshot.transmission_finished;});
     const auto listening=wait_for(session,[](const auto& snapshot){return snapshot.constellation_source==live::ConstellationSource::input;});
-    check(!listening.transmitting && !listening.simulation_review,"real audio returns to live input after playback");
+    check(!listening.transmitting && !listening.simulation_replay,"real audio returns to live input after playback");
+}
+void test_audio_tx_empty_symbol_intervals_and_cancel() {
+    live::Session session;
+    auto value = settings(); value.simulation = false; value.device = "live-test-audio";
+    value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
+    value.transfer.modem.spreading_factor = 16384;
+    session.start(value);
+    wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
+    session.transmit(message(90, 2048));
+    const auto symbol = wait_for(session, [](const auto& snapshot) {
+        return snapshot.transmitting && snapshot.constellation_source == live::ConstellationSource::transmitted &&
+               !snapshot.constellation.empty();
+    });
+    const auto between = wait_for(session, [&](const auto& snapshot) {
+        check(snapshot.transmitting, "long-tone fixture ended before its empty symbol interval");
+        check(snapshot.constellation_source == live::ConstellationSource::transmitted,
+              "an active transmitter cannot label its PCM as received input between slow symbols");
+        return snapshot.sequence > symbol.sequence && snapshot.constellation.empty();
+    });
+    check(between.transmission_fraction < 1 && !between.simulation_replay,
+          "empty transmitted-symbol frame belongs to an unfinished real-audio transmission");
+    session.cancel_transmit();
+    const auto cancelled = session.snapshot();
+    check(!cancelled.transmitting && cancelled.transmission_cancelled && cancelled.constellation.empty() &&
+          cancelled.constellation_source == live::ConstellationSource::input,
+          "cancellation immediately clears the slow transmitter's displayed symbols");
+    const auto listening = wait_for(session, [&](const auto& snapshot) {
+        check(!snapshot.transmitting && snapshot.constellation_source == live::ConstellationSource::input,
+              "a cancelled playback callback republished stale transmitted symbols");
+        return snapshot.sequence > cancelled.sequence && !snapshot.waveform.empty();
+    });
+    const auto resumed_at = std::chrono::steady_clock::now();
+    wait_for(session, [&](const auto& snapshot) {
+        check(!snapshot.transmitting && snapshot.constellation_source == live::ConstellationSource::input,
+              "old TX points reappeared after live input resumed");
+        return snapshot.samples_received > listening.samples_received &&
+               std::chrono::steady_clock::now() - resumed_at >= 120ms;
+    }, 3s);
 }
 void test_partial_back_to_back_and_resume() {
     live::Session session;
@@ -237,58 +273,154 @@ void test_simulated_epoch_admission_survives_clock_jumps() {
     rejects([] { live::Session invalid([] { return std::numeric_limits<double>::quiet_NaN(); }); }, "nonfinite injected epoch rejected");
     rejects([] { live::Session invalid([] { return static_cast<double>(std::numeric_limits<std::uint64_t>::max()); }); }, "out-of-range injected epoch rejected");
 }
-void test_simulation_review_and_live_constellation() {
-    live::Session session;
+void test_simulation_replay_and_live_constellation() {
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
     const auto value = settings();
     session.start(value);
     session.transmit(message(21, 96));
-    const auto held = wait_for(session, [](const auto& snapshot) {
+    const auto first = wait_for(session, [](const auto& snapshot) {
         return snapshot.transmission_finished && snapshot.transmission_fraction == 1;
     });
-    check(held.simulation_review && held.transmission_id != 0, "completed simulation publishes a persistent review frame");
-    check(held.simulation_sample_fraction >= .5 && held.simulation_sample_fraction < .52,
-          "review waveform comes from the payload midpoint, not trailing silence");
-    check(held.simulation_waterfall.size() == 24 && held.simulation_waterfall.front().size() == 257,
-          "fast simulation retains a bounded spectrum history independent of GUI polling");
-    check(held.simulation_waterfall_bin_hz == value.transfer.modem.sample_rate / 512.0,
-          "review waterfall retains the correct frequency scale");
-    check(held.constellation_retained && held.constellation.size() > 100,
-          "review contains accumulated received symbol points");
-    check(held.constellation_source==live::ConstellationSource::received,"simulation review identifies actual receiver observations");
-    check(held.constellation.size() <= 2048, "retained constellation stays bounded");
-    std::this_thread::sleep_for(100ms);
-    const auto during = session.snapshot();
-    check(during.simulation_review && during.sequence == held.sequence &&
-          during.waveform == held.waveform && during.spectrum_db == held.spectrum_db &&
-          during.constellation == held.constellation, "all review plots remain frozen while background reception continues");
-    check(during.samples_received > held.samples_received, "review does not pause the continuous receiver");
-    const auto resumed = wait_for(session, [](const auto& snapshot) { return !snapshot.simulation_review; }, 3s);
-    check(resumed.waveform != held.waveform && resumed.spectrum_db != held.spectrum_db,
-          "waveform and spectrum return to live samples after two seconds");
-    check(!resumed.constellation_retained && resumed.constellation != held.constellation,
-          "constellation returns to the incoming live signal after two seconds");
-    check(resumed.constellation_source==live::ConstellationSource::input,"expired review returns its source label to live input");
+    check(first.simulation_replay && first.transmission_id != 0 && first.replay_frame_index == 0,
+          "CPU-bound simulation finishes while its three-second replay is still on the first frame");
+    check(first.replay_frame_count == 60 && first.simulation_sample_fraction < .02,
+          "replay begins at payload start and retains sixty bounded media frames");
+    check(first.constellation_source == live::ConstellationSource::input,
+          "initial payload frame cannot borrow receiver lock from the completed simulation");
+    check(first.dsp_buffered_bytes <= value.dsp_workspace_bytes, "replay storage is included in the configured DSP workspace");
+    replay_milliseconds = 49;
+    const auto before_tick = session.snapshot();
+    check(before_tick.replay_frame_index == 0 && before_tick.waveform == first.waveform &&
+          before_tick.constellation == first.constellation,
+          "a replay frame remains visible for a complete fifty-millisecond GUI interval");
+    const auto background = wait_for(session, [&](const auto& snapshot) {
+        return snapshot.samples_received > first.samples_received;
+    });
+    check(background.simulation_replay && background.replay_frame_index == 0 && background.waveform == first.waveform,
+          "background noise continues without advancing or overwriting the presentation clock");
+
+    auto previous = first;
+    bool observed_lock = false, observed_fresh_symbols = false, changed_waveform = false, changed_spectrum = false;
+    std::uint64_t points_after_frame_40 = 0;
+    const auto symbols = (first.transmission_seconds - 5) * value.transfer.modem.sample_rate /
+                         static_cast<double>(modem::symbol_sample_count(value.transfer.modem));
+    const auto symbols_per_frame = static_cast<std::size_t>(std::ceil(symbols / 59)) + 3;
+    for (std::size_t index = 1; index < 60; ++index) {
+        replay_milliseconds = static_cast<std::int64_t>(index * 50);
+        const auto frame = session.snapshot();
+        check(frame.simulation_replay && frame.replay_frame_count == 60 && frame.replay_frame_index == index,
+              "replay advances at twenty frames per wall-clock second");
+        check(frame.simulation_sample_fraction >= previous.simulation_sample_fraction &&
+              frame.simulation_sample_fraction <= 1,
+              "replay media positions are chronological and never enter decoder-tail silence");
+        check(std::abs(frame.simulation_sample_fraction - static_cast<double>(index) / 59) < .02,
+              "replay frames sample the payload uniformly instead of repeating a selected middle window");
+        check(!frame.waveform.empty() && !frame.spectrum_db.empty() &&
+              frame.spectrum_bin_hz > 0 && frame.dsp_buffered_bytes <= value.dsp_workspace_bytes,
+              "every replay frame carries measured plots within the DSP budget");
+        check(std::abs(static_cast<double>(frame.spectrum_db.size() - 1) * frame.spectrum_bin_hz -
+                       value.transfer.modem.sample_rate / 2.) < frame.spectrum_bin_hz,
+              "compact replay spectra preserve the original Nyquist frequency axis");
+        changed_waveform = changed_waveform || frame.waveform != previous.waveform;
+        changed_spectrum = changed_spectrum || frame.spectrum_db != previous.spectrum_db;
+        if (index > 40) points_after_frame_40 += frame.constellation.size() + frame.constellation_dropped;
+        if (frame.constellation_source == live::ConstellationSource::received && !frame.constellation.empty()) {
+            if (observed_lock) {
+                check(frame.constellation.size() <= symbols_per_frame,
+                      "later replay frames contain fresh symbols instead of accumulating receiver history");
+                if (frame.constellation != previous.constellation) observed_fresh_symbols = true;
+            }
+            observed_lock = true;
+        }
+        const auto same_frame = session.snapshot();
+        check(same_frame.replay_frame_index == frame.replay_frame_index &&
+              same_frame.constellation == frame.constellation && same_frame.waveform == frame.waveform,
+              "reading a frame twice does not drain symbols before they can be displayed");
+        previous = frame;
+    }
+    check(observed_lock && observed_fresh_symbols, "successful replay shows actual lock followed by fresh measured symbol batches");
+    check(changed_waveform && changed_spectrum, "replay animates measured waveform and spectrum samples across the transmission");
+    check(previous.simulation_sample_fraction > .99, "last replay frame reaches the end of the transmitted payload");
+    double final_power = 0;
+    for (const auto sample : previous.waveform) final_power += sample * sample;
+    check(final_power / static_cast<double>(previous.waveform.size()) > .02,
+          "last high-SNR replay waveform includes transmitted signal rather than decoder-tail noise");
+    replay_milliseconds = 2999;
+    const auto last = session.snapshot();
+    check(last.simulation_replay && last.replay_frame_index == 59 && last.constellation == previous.constellation,
+          "last payload frame remains visible until the full three-second deadline");
+    replay_milliseconds = 3000;
+    const auto resumed = session.snapshot();
+    check(!resumed.simulation_replay && resumed.constellation_source == live::ConstellationSource::input,
+          "exactly three seconds releases replay and returns to incoming live samples");
     const auto live_again = wait_for(session, [&](const auto& snapshot) { return snapshot.sequence > resumed.sequence; });
-    check(live_again.constellation != resumed.constellation,
+    check(live_again.waveform != last.waveform && live_again.constellation != last.constellation,
           "new receiver points keep replacing the completed simulation");
+
+    // Repeat the same seeded transmission: the observed frame point counts
+    // above provide an independent oracle for an otherwise invisible tail.
+    session.transmit(message(21, 96));
+    const auto stalled_start = wait_for(session, [](const auto& snapshot) {
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
+    replay_milliseconds = 5000;
+    const auto before_stall = session.snapshot();
+    check(before_stall.replay_frame_index == 40 && points_after_frame_40 > 0,
+          "stalled-GUI fixture must leave real symbol points in the unseen final frames");
+    wait_for(session, [&](const auto& snapshot) { return snapshot.samples_received > stalled_start.samples_received; });
+    replay_milliseconds = 6000;
+    const auto after_stall = session.snapshot();
+    check(!after_stall.simulation_replay && after_stall.replay_frame_count == 0 &&
+          after_stall.constellation_source == live::ConstellationSource::input,
+          "a GUI that misses the final replay frames still returns to live input at exactly three seconds");
+    check(after_stall.constellation_dropped >= points_after_frame_40,
+          "replay expiry reports every symbol point in the frames the GUI never displayed");
+    check(after_stall.waveform != before_stall.waveform && after_stall.constellation != before_stall.constellation,
+          "expired replay points cannot remain over the live waveform after a GUI stall");
+
+    const auto next_started_at = replay_milliseconds.load();
     session.transmit(message(22, 96));
     const auto next = session.snapshot();
-    check(!next.simulation_review && !next.constellation_retained,
-          "a new transmission immediately releases the preceding review");
+    check(!next.simulation_replay, "a new transmission immediately releases the preceding replay");
     const auto next_done = wait_for(session, [&](const auto& snapshot) {
-        return snapshot.transmission_finished && snapshot.transmission_id != held.transmission_id;
+        return snapshot.transmission_finished && snapshot.transmission_id != first.transmission_id;
     });
-    check(next_done.simulation_review, "consecutive simulation receives its own review identity");
+    check(next_done.simulation_replay && next_done.replay_frame_index == 0,
+          "consecutive simulation starts its own three-second replay timeline");
+    replay_milliseconds = next_started_at + 2000;
+    const auto skipped = session.snapshot();
+    check(skipped.simulation_replay && skipped.replay_frame_index == 40 &&
+          skipped.constellation_source == live::ConstellationSource::received &&
+          (skipped.constellation.size() > symbols_per_frame || skipped.constellation_dropped > 0),
+          "a delayed GUI merges fresh symbols from skipped frames or reports their bounded overflow");
+    const auto skipped_again = session.snapshot();
+    check(skipped_again.constellation == skipped.constellation && skipped_again.constellation_dropped == skipped.constellation_dropped,
+          "merged symbols survive repeated reads within their display interval");
     session.cancel_transmit();
-    const auto cancelled_review=session.snapshot();
-    check(!cancelled_review.simulation_review && !cancelled_review.constellation_retained &&
-          cancelled_review.constellation_source==live::ConstellationSource::input,
-          "cancel during a completed review releases all retained constellation state");
-    const auto after_cancel=wait_for(session,[&](const auto& snapshot){return snapshot.sequence>cancelled_review.sequence;});
+    const auto cancelled_replay = session.snapshot();
+    check(!cancelled_replay.simulation_replay && cancelled_replay.constellation_source == live::ConstellationSource::input,
+          "cancel during replay immediately releases all retained constellation state");
+    replay_milliseconds = next_started_at + 3000;
+    const auto after_cancel=wait_for(session,[&](const auto& snapshot){return snapshot.sequence>cancelled_replay.sequence;});
     check(!after_cancel.constellation.empty() && after_cancel.constellation_source==live::ConstellationSource::input,
-          "cancelled review continues publishing measured input points");
+          "cancelled replay continues publishing measured input points without restoring old frames");
+
+    session.transmit(message(23, 32));
+    const auto third = wait_for(session, [](const auto& snapshot) { return snapshot.transmission_finished && snapshot.simulation_replay; });
+    session.transmit(message(27, 32));
+    check(!session.snapshot().simulation_replay, "transmit interrupts an active replay without waiting for its deadline");
+    wait_for(session, [&](const auto& snapshot) {
+        return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != third.transmission_id;
+    });
     session.configure(value);
-    check(!session.snapshot().constellation_retained, "configuration clears the old constellation");
+    check(!session.snapshot().simulation_replay, "configuration clears an active replay immediately");
+    replay_milliseconds = next_started_at + 6000;
+    const auto configured = wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
+    check(!configured.simulation_replay && configured.constellation_source == live::ConstellationSource::input,
+          "a new configuration cannot republish frames from its predecessor");
 }
 void test_default_crystal_simulation() {
     auto value=settings();
@@ -304,7 +436,7 @@ void test_default_crystal_simulation() {
     const auto decoded=wait_for(session,[](const auto& snapshot) { return !snapshot.received.empty(); });
     check(decoded.received.front().packet.message.data==sent.data,"default impaired channel failed its ordinary-bandwidth packet");
     const auto held=wait_for(session,[](const auto& snapshot) { return snapshot.transmission_finished; });
-    check(held.simulation_review && held.constellation_retained,"impaired simulation must publish its measured review");
+    check(held.simulation_replay && held.replay_frame_count > 0,"impaired simulation must publish its measured replay");
 }
 void test_receive_authentication_policy() {
     auto value = settings();
@@ -382,15 +514,26 @@ void test_cancel_reconfigure_and_bounds() {
     check(std::chrono::steady_clock::now() - stopped < 100ms, "stop enqueues cancellation promptly");
 }
 void test_unrecoverable_noise_does_not_validate() {
-    live::Session session;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
     auto value = settings(); value.simulation_snr_db = -80;
     session.start(value); session.transmit(message(7, 10));
-    wait_for(session, [&](const auto& snapshot) {
+    const auto finished = wait_for(session, [&](const auto& snapshot) {
         check(snapshot.received.empty(), "noise-obscured transmission never bypasses the modem");
         check(std::none_of(snapshot.signals.begin(), snapshot.signals.end(), [](const auto& signal) { return signal.validated; }),
               "unrecoverable samples never produce verified ticker text");
         return snapshot.transmission_fraction == 1 && !snapshot.transmitting;
     });
+    check(finished.simulation_replay && finished.replay_frame_count == 60,
+          "failed reception still replays the measured noisy transmission");
+    for (std::size_t index = 0; index < 60; ++index) {
+        replay_milliseconds = static_cast<std::int64_t>(index * 50);
+        const auto frame = session.snapshot();
+        check(frame.simulation_replay && frame.constellation_source == live::ConstellationSource::input && frame.received.empty(),
+              "noise-obscured replay never borrows transmitter symbols or claims receiver lock");
+    }
 }
 void test_weak_and_wide_modes_keep_the_channel_running() {
     live::Session session;
@@ -445,6 +588,8 @@ void test_long_symbols_are_streamed_in_virtual_time() {
         check(result.transmission_seconds > std::chrono::duration<double>(elapsed).count() * 100,
               "accelerated simulation is driven by DSP work rather than wall-clock airtime");
         check(result.dsp_buffered_bytes <= value.dsp_workspace_bytes, "long virtual duration does not grow DSP buffers");
+        check(result.simulation_replay && result.replay_frame_count > 1 && result.replay_frame_count <= 60,
+              "one-MiB weak-mode budget retains a bounded replay without storing hours of samples");
         const auto content_seconds = static_cast<double>(decoded->packet.consumed_bytes) * 8 /
                                      modem::bit_rate(value.transfer.modem);
         check(std::abs(result.transmission_seconds - content_seconds - 5) < 1e-6,
@@ -458,11 +603,12 @@ int main() {
             try { test(); } catch (const std::exception& error) { throw std::runtime_error(std::string(name) + ": " + error.what()); }
         };
         run("idle noise and plots", test_idle_noise_and_plots);
-        run("actual audio TX constellation", test_audio_tx_accumulates_payload_constellation);
+        run("actual audio TX constellation", test_audio_tx_publishes_fresh_payload_constellation);
+        run("actual audio empty symbols and cancel", test_audio_tx_empty_symbol_intervals_and_cancel);
         run("partial back-to-back reception", test_partial_back_to_back_and_resume);
         run("encrypted automatic epoch", test_encrypted_auto_epoch);
         run("simulated epoch admission across clock jumps", test_simulated_epoch_admission_survives_clock_jumps);
-        run("simulation review", test_simulation_review_and_live_constellation);
+        run("simulation replay", test_simulation_replay_and_live_constellation);
         run("default crystal", test_default_crystal_simulation);
         run("receive authentication policy", test_receive_authentication_policy);
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);

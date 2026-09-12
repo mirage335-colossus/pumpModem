@@ -1,9 +1,46 @@
-# Local validation record — version 0.5.1
+# Local validation record — version 0.5.2
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5.1 checks
+## Completed 0.5.2 checks
+
+* Native GUI Release: all **23 CTest suites passed**.
+* CLI-only Release with Python discovery disabled: all **19 suites passed**.
+* Final live-session and GUI projection/policy/self-check suites passed again
+  after adding slow-symbol labels and the cancelled-transmission serial guard.
+* ASan/UBSan passed the streaming-modem suite with the new symbol-drain API,
+  and all four final live/GUI suites. The standalone streaming translation unit
+  used `-O1` and linked the instrumented core library; the final live suite used
+  the normal Debug build and took 72.93 seconds. LeakSanitizer is disabled on
+  this ptrace host.
+* The native GUI workflow passed in Release and ASan/UBSan: production keyfile
+  generation, text/file reception, clipboard and exclusive saves, chronological
+  replay, replacement by a new transmission, Stop replay, and return to live
+  waveform, waterfall and input constellation.
+
+A separate injected monotonic presentation clock tests every 50 ms frame of a
+60-frame replay and its exact three-second deadline. Repeated reads retain the
+same frame. The tests verify early payload acquisition, fresh measured symbol
+batches after lock, changing waveform/spectrum, and an end frame containing the
+transmission rather than decoder-tail noise. A GUI that skips frames receives
+their pending compatible symbol points together. A GUI that misses the deadline
+returns directly to live input and reports the unseen points as omitted.
+
+The new symbol-drain tests cover rotated received signals, unsnapped off-grid
+measurements, differential coordinates, acquisition, repeated drains, ring
+overflow counts, resets, and agreement between PCM and integrated transmission.
+The live audio adapter checks empty intervals between slow symbols and that
+cancelled TX points cannot return after live input resumes. Long simulated
+symbols remain CPU-bounded and fit their existing 1 MiB test budget, reducing
+replay capacity when necessary.
+
+Packet/keyfile formats and transmitted waveforms remain compatible with 0.5.1.
+These presentation changes do not add carrier tracking or remove the recorded
+CPU limits below. Physical audio and battery-state comparisons have not been
+performed for this release. Hosted Windows/CI execution remains unverified here.
+
+## Recorded 0.5.1 checks
 
 * Native GUI Release: all **23 CTest suites passed**.
 * CLI-only Release with Python discovery explicitly disabled: all **19 suites

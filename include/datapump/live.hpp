@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include <chrono>
 #include <complex>
 #include <cstdint>
 #include <functional>
@@ -64,14 +65,14 @@ struct Snapshot {
     double transmission_fraction = 0;
     bool transmission_finished = true;
     bool transmission_cancelled = false;
-    // Completed simulations retain a payload-midpoint view for two wall-clock
-    // seconds. All plots, including the constellation, then return to live RX.
+    // Completed simulations replay the payload's measured plots in three
+    // wall-clock seconds, then all plots return to live reception.
     std::uint64_t transmission_id = 0;
-    bool simulation_review = false;
-    bool constellation_retained = false;
+    bool simulation_replay = false;
+    std::size_t replay_frame_index = 0;
+    std::size_t replay_frame_count = 0;
     double simulation_sample_fraction = 0;
-    std::vector<std::vector<double>> simulation_waterfall;
-    double simulation_waterfall_bin_hz = 0;
+    std::uint64_t constellation_dropped = 0;
     std::uint32_t hardware_sample_rate = 0;
     double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
@@ -87,7 +88,10 @@ public:
     // thread-safe and return finite, nonnegative values within uint64 range.
     // Plot cadence and cancellation deadlines always use the steady clock.
     using EpochClock = std::function<double()>;
-    explicit Session(EpochClock epoch_clock = {});
+    // Independent monotonic presentation clock; never changes modem timing,
+    // key admission, audio pacing or the CPU-bounded simulation trajectory.
+    using ReplayClock = std::function<std::chrono::steady_clock::time_point()>;
+    explicit Session(EpochClock epoch_clock = {}, ReplayClock replay_clock = {});
     ~Session();
     Session(const Session&) = delete;
     Session& operator=(const Session&) = delete;

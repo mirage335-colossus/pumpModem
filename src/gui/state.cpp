@@ -53,14 +53,17 @@ std::chrono::milliseconds TransmissionPolicy::remaining(bool simulation, bool en
     return std::chrono::ceil<std::chrono::milliseconds>(next_encrypted_ - now);
 }
 
-PlotUpdate PlotReviewPolicy::observe(std::uint64_t sequence, std::uint64_t transmission_id, bool review) {
+PlotUpdate PlotReplayPolicy::observe(std::uint64_t sequence, std::uint64_t transmission_id,
+                                    bool replay, std::size_t replay_frame) {
     const bool changed = !sequence_ || *sequence_ != sequence;
-    const bool restore = review && (!restored_transmission_ || *restored_transmission_ != transmission_id);
-    const bool update = restore || review != reviewing_ || (!review && changed);
+    const bool beginning = replay && (!replaying_ || !transmission_ || *transmission_ != transmission_id);
+    const bool frame_changed = !replay_frame_ || *replay_frame_ != replay_frame;
+    const bool update = replay ? beginning || frame_changed : replaying_ || changed;
     sequence_ = sequence;
-    reviewing_ = review;
-    if (restore) restored_transmission_ = transmission_id;
-    return {update, !review && update, restore};
+    transmission_ = transmission_id;
+    replay_frame_ = replay ? std::optional<std::size_t>(replay_frame) : std::nullopt;
+    replaying_ = replay;
+    return {update, update, beginning};
 }
 std::string format_bit_rate(double rate) {
     if (!std::isfinite(rate) || rate < 0) return "Unavailable";

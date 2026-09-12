@@ -113,24 +113,37 @@ int main() {
 #endif
         check(gui::folder_uri(std::filesystem::current_path()/"folder"/".."/"keys")==
               gui::folder_uri(std::filesystem::current_path()/"keys"));
-        gui::PlotReviewPolicy plots;
+        gui::PlotReplayPolicy plots;
         auto change=plots.observe(1,0,false);
-        check(change.update_plots && change.append_waterfall && !change.restore_waterfall);
+        check(change.update_plots && change.append_waterfall && !change.clear_waterfall);
         change=plots.observe(1,0,false);
-        check(!change.update_plots && !change.append_waterfall && !change.restore_waterfall);
-        change=plots.observe(2,1,true);
-        check(change.update_plots && !change.append_waterfall && change.restore_waterfall);
-        change=plots.observe(3,1,true); // The source clock can advance during review.
-        check(!change.update_plots && !change.append_waterfall && !change.restore_waterfall);
+        check(!change.update_plots && !change.append_waterfall && !change.clear_waterfall);
+        change=plots.observe(2,1,true,0);
+        check(change.update_plots && change.append_waterfall && change.clear_waterfall);
+        change=plots.observe(3,1,true,0); // Repeated delivery is not another frame.
+        check(!change.update_plots && !change.append_waterfall && !change.clear_waterfall);
+        change=plots.observe(4,1,true,1);
+        check(change.update_plots && change.append_waterfall && !change.clear_waterfall);
+        // A scheduling gap may skip frames; the newest delivery is still
+        // shown once, even if its unrelated source sequence is unchanged.
+        change=plots.observe(4,1,true,7);
+        check(change.update_plots && change.append_waterfall && !change.clear_waterfall);
+        change=plots.observe(4,1,true,7);
+        check(!change.update_plots && !change.append_waterfall && !change.clear_waterfall);
+        // Cancellation/completion returns every plot to live even when the
+        // source sequence has not changed since the final replay frame.
         change=plots.observe(4,1,false);
-        check(change.update_plots && change.append_waterfall && !change.restore_waterfall);
-        change=plots.observe(5,1,true);
-        check(change.update_plots && !change.append_waterfall && !change.restore_waterfall);
-        change=plots.observe(6,2,true);
-        check(change.update_plots && !change.append_waterfall && change.restore_waterfall);
+        check(change.update_plots && change.append_waterfall && !change.clear_waterfall);
+        change=plots.observe(5,1,false);
+        check(change.update_plots && change.append_waterfall && !change.clear_waterfall);
+        change=plots.observe(5,2,true,0);
+        check(change.update_plots && change.append_waterfall && change.clear_waterfall);
+        // A new transmission can replace a replay without a live poll between.
+        change=plots.observe(6,3,true,0);
+        check(change.update_plots && change.append_waterfall && change.clear_waterfall);
         plots.reset();
-        change=plots.observe(6,2,true);
-        check(change.update_plots && change.restore_waterfall);
+        change=plots.observe(6,3,true,2);
+        check(change.update_plots && change.append_waterfall && change.clear_waterfall);
         std::cout<<"Native GUI policy tests passed\n";
     } catch (const std::exception& error) { std::cerr<<error.what()<<'\n'; return 1; }
 }
