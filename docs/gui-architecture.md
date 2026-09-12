@@ -3,12 +3,15 @@
 The recommended approach is an application-specific semantic interface, built
 around the existing FLTK controls first. Keep one compiled backend, reusable
 application state/actions, a short screen definition, and shared bitmap plot
-producers. Match the monochrome instrument-panel presentation across adapters
-through widget styling. Do not implement a general-purpose widget toolkit.
+producers. Match the grayscale instrument-panel presentation and optional color
+accents across adapters through widget styling. Do not implement a general-purpose
+widget toolkit.
 
-The build selector and FLTK style are implemented. Controller extraction, the
-declarative screen API, pure bitmap plots, and alternative adapters are proposed
-work. The current FLTK widgets still contain custom drawing and plot interaction.
+The build selector and FLTK style, including default color when supported and a
+`--monochrome` override, are implemented.
+Controller extraction, the declarative screen API, pure bitmap plots and their
+transfer API, and alternative adapters are proposed work. The current FLTK
+widgets still contain custom drawing and plot interaction.
 
 ## What the project already separates
 
@@ -105,11 +108,27 @@ Waterfalls remain rows of intensity samples. All adapters use the same measured
 scales and sign conventions. Terminal output maps plot samples into cells with
 explicitly reduced fidelity, while controls remain native terminal text.
 
-The first FLTK style pass uses shared intensity roles, monospaced fonts, flat
+The grayscale basis uses shared intensity roles, monospaced fonts, flat
 borders, stationary short signal rows, small white constellation marks, and a reusable
 one-byte-per-pixel waterfall buffer. Signed pattern cells use a bipolar grayscale
 and revised legends so removing hue does not remove sign. QR contrast is retained.
 Native widgets continue to handle input and editing.
+
+Color is enabled by default when supported. `--monochrome` selects grayscale;
+`--color` re-enables color, and the last of these switches wins. Color gives data
+field values, waveform traces, and every constellation point the same fixed cyan
+tint. Reference marks, status,
+QR codes, and signed pattern diagrams remain grayscale. The waterfall uses a
+fixed black-blue-cyan-mint-white lookup table over the same Gray8 intensities;
+each RGB channel is nondecreasing. FLTK converts requested image rows through a
+callback, retaining the Gray8 buffer without a second full RGB framebuffer.
+
+Color adds no control kinds, IDs, bindings, or per-element properties. The
+proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional
+packed RGB24. Its target capability defaults to false; shared producers emit
+RGB24 only when color is enabled and supported. Other targets keep the original
+gray/mono representation instead of desaturating false color. Use bounded rows
+or tiles for RGB's extra transfer bytes; no palette management API is needed.
 
 Long signal rows retain their existing scrolling so pending/unverified content
 remains readable. Verified text and completed bits can still be copied in full.
@@ -171,7 +190,8 @@ Do not weaken that existing check for an adapter that is not being compiled.
 
 ## Implementation sequence and acceptance
 
-1. Implement one-backend configuration and shared presentation roles (done).
+1. Implement one-backend configuration and shared presentation roles with optional
+   color (done).
 2. Extract authoritative state, workers, and platform requests while preserving
    the existing FLTK workflows and tests.
 3. Replace procedural construction/layout with small screen declarations and

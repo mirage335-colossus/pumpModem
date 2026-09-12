@@ -144,7 +144,7 @@ and operating-system requirements.
 
 The console provides adjacent message and binary editors, explicit clipboard copy, file
 attachment, Level L QR previews, continuous audio reception, a scrolling
-frequency-labeled signal ticker with reception percentages, a false-color waterfall and live waveform,
+frequency-labeled signal ticker with reception percentages, a waterfall and live waveform,
 spectrum and constellation displays. It includes named shared-key selection and
 a bounded receive cache. WAV tools remain available through the CLI. It does not
 open received files or execute received content. Screenshots can be attached as
@@ -154,8 +154,16 @@ The **Keyfile** menu opens existing files, generates and saves a new 128 MiB
 keyfile with named entries in the background, or opens the loaded file's folder.
 Existing files are never overwritten. The waveform defaults to four carrier
 cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
-retains every FFT bin through peak pooling and uses one labeled color scale for
+retains every FFT bin through peak pooling and uses one labeled intensity scale for
 its entire history. Click it to clear the history and reset that scale.
+
+Color is enabled by default when supported: cyan data field values, waveform
+traces, and constellation points, plus a black-blue-cyan-mint-white waterfall.
+Every constellation point uses the same hue. Reference marks, status labels,
+QR codes, and signed pattern diagrams stay grayscale. Run
+`datapump-gui --monochrome` for grayscale; `--color` re-enables color, and the last
+of these switches wins. Color changes presentation only, using the same measured
+waterfall intensities. If FLTK cannot select an RGB visual, it uses grayscale.
 
 Use the source selector above the editors to choose Message/File or Binary.
 Binary accepts a few bits such as `001`, without converting them into a text
@@ -343,8 +351,10 @@ backend. Use `-DDATAPUMP_BUILD_GUI=OFF` for a CLI-only build, or
 See [offline installation](docs/offline-installation.md) for copy and verification
 commands.
 
-The GUI uses a shared monochrome instrument-panel style: fixed-width text, flat
-borders, grayscale plots, and explicit status labels. See the
+The GUI uses a shared instrument-panel style: fixed-width text, flat borders,
+color where supported, and explicit status labels. `--monochrome` selects the
+grayscale presentation without changing control types or per-element settings.
+See the
 [minimal GUI contract](docs/gui-contract.md) and [architecture review](docs/gui-architecture.md)
 for the semantic widget interface and staged migration plan. Alternative adapters
 and the full declarative interface remain proposed work.

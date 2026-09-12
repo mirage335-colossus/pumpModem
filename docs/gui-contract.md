@@ -1,8 +1,9 @@
 # Proposed minimal GUI contract
 
-Status: the single-backend build option and shared monochrome FLTK theme are
-implemented. The semantic declarations and alternative adapters below remain a
-design draft; the application currently uses FLTK. The common API declares semantic controls:
+Status: the single-backend build option and shared FLTK theme, color by default
+when supported with a `--monochrome` override, are implemented. The semantic
+declarations, bitmap transfer API, and alternative adapters below remain a design draft; the
+application currently uses FLTK. The proposed API declares semantic controls:
 choices/dropdowns, tabs, text fields, actions, and lists. Adapters map them to
 existing backend widgets. Bitmap output is a separate path for plots and images.
 
@@ -50,6 +51,18 @@ black modules on a white background. Signed data needs an explicit midpoint or
 other distinguishable marks and a legend; status never depends on color alone.
 Physical glyph shapes and native popup details may differ while retaining these
 presentation rules. A control declaration does not repeat styling properties.
+
+Color is enabled by default when supported, tinting data field values, the
+waveform, and all constellation points with one fixed cyan hue. `--monochrome` selects
+grayscale; `--color` re-enables color, and the last of these switches wins.
+Reference marks, status labels,
+QR codes, and signed pattern diagrams remain grayscale. The waterfall maps its
+unchanged intensity values through one fixed black-blue-cyan-mint-white lookup
+table whose RGB channels never decrease as intensity rises. Color adds no
+control kind, binding, ID, or per-element property. It is a global presentation
+preference. FLTK enables it only when an RGB visual is available; other displays
+retain the grayscale path. Future targets without color support likewise retain
+grayscale or monochrome.
 
 ## Screen declaration
 
@@ -157,7 +170,7 @@ API, alpha blending, scaling, interpolation, or general custom-widget callback.
 Illustrative output interface:
 
 ```cpp
-enum class PixelFormat { gray8, mono1 };
+enum class PixelFormat { gray8, mono1, rgb24 };
 struct PixelBlock {
     unsigned width, height, stride_bytes;
     PixelFormat format;
@@ -175,16 +188,23 @@ void blit(Id bitmap, unsigned x, unsigned y, PixelBlock block);
   eight pixels per byte, leftmost pixel in the most significant bit, 0 black,
   1 white. Rows start `stride_bytes` apart; unused end bits and padding are
   ignored. Stride is at least the packed row size and storage covers every row.
-- Adapters accept both formats and convert to the display's native encoding.
+- Adapters accept `gray8` and `mono1` and convert to the display's native encoding.
   Monochrome output thresholds gray8 at 128. A monochrome bitmap source uses
   dotted white crosshairs to keep them visible instead of relying on grey.
+- `rgb24` is optional: three packed bytes per pixel in R, G, B order, with
+  `stride_bytes >= 3 * width` and no alpha. The target's `supports_rgb24`
+  capability defaults to false. Shared producers use it only when color is
+  enabled and supported; otherwise they produce the original gray/mono data,
+  never grayscale obtained by desaturating false color. No palette management
+  API is needed. The target may quantize RGB to its native color encoding.
 - Pixel storage is borrowed until `blit` returns. The backend consumes or copies
   it before returning; asynchronous hardware transfers use backend-owned bounded
   storage or finish before return.
 - On repaint, the backend supplies the actual bitmap width/height and damaged
-  rectangle, sample aspect ratio, and whether output is monochrome. Shared code
-  uses these to preserve I/Q geometry and choose visible reference marks, renders
-  that region using one consistent plot snapshot, and emits one or more pixel
+  rectangle, sample aspect ratio, whether output is monochrome, and
+  `supports_rgb24`. Shared code uses these to preserve I/Q geometry and choose
+  visible reference marks, renders that region using one consistent plot snapshot,
+  and emits one or more pixel
   blocks. Resize or exposure can request a complete repaint. Retain enough
   source/history to regenerate it. A terminal adapter requests damage aligned to
   complete character cells, or retains the other samples of partially updated
@@ -196,13 +216,19 @@ framebuffer and atomic whole-frame presentation are not requirements. For a
 Tiling saves working memory; waterfall scrolling still requires transferring the
 affected pixels unless the backend independently optimizes display scrolling.
 
-The minimal shared bitmap producers are:
+The minimal shared bitmap producers retain this grayscale basis:
 
 | Source | Pixels |
 | --- | --- |
 | Waveform | Black background, optional grey baseline, white trace/envelope. |
 | Waterfall | Rows of grayscale intensities using a common signal-level scale. |
 | Constellation | Black background, grey crosshairs, white point pixels. |
+
+Optional color changes only the data tint or waterfall lookup described above.
+RGB24 uses three times the transfer bytes of Gray8; generate bounded rows or
+tiles only when needed. The current FLTK waterfall retains one Gray8 buffer and
+converts requested rows through its image callback, without a second full RGB
+framebuffer. That implementation does not yet expose the proposed bitmap API.
 
 Keep measured values and a common I/Q scale when mapping points to pixels;
 simplifying appearance must not normalize each point or erase amplitude meaning.
@@ -235,8 +261,9 @@ Backend-independent GUI model tests remain available in CLI-only builds.
 toolkit configuration, sources, libraries, and notices. Each build directory
 contains at most one GUI backend, including desktop builds. No runtime selector,
 backend registry, or plugin loader is needed. `--help` and `--version` identify
-the compiled backend. Future runtime settings can choose page, layout, or plot
-cadence within that backend, but cannot switch toolkits.
+the compiled backend. `--monochrome` and `--color` change presentation within that
+backend. Future runtime settings can choose page, layout, or plot cadence, but
+cannot switch toolkits.
 
 Use one default backend for each supported platform/profile and separate build
 directories for exceptional targets. Keep FLTK for the current desktop Linux and

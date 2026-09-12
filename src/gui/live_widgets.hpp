@@ -160,7 +160,7 @@ private:
 class Waterfall : public Fl_Widget {
 public:
     Waterfall() : Fl_Widget(0,0,1,1) {
-        tooltip("Peak FFT level on one shared grayscale: black is quiet, white is loud. Click to clear history and reset the scale.");
+        tooltip("Peak FFT level on one shared intensity scale: black is quiet, white is loud. Optional color follows the same scale. Click to clear history and reset the scale.");
     }
     void clear() { history_.clear(); overview_=false; ++revision_; redraw(); }
     int handle(int event) override {
@@ -182,6 +182,15 @@ public:
     std::uint64_t revision() const { return revision_; }
 private:
     static unsigned char channel(double value) { return static_cast<unsigned char>(std::clamp(value,0.0,1.0)*255); }
+    static void color_row(void* context, int x, int y, int width, unsigned char* output) {
+        const auto& self = *static_cast<const Waterfall*>(context);
+        const auto stride = static_cast<std::size_t>(std::max(1, self.w() - 4));
+        const auto offset = static_cast<std::size_t>(y) * stride + static_cast<std::size_t>(x);
+        for (int i = 0; i < width; ++i) {
+            const auto color = theme::waterfall_palette[self.pixels_[offset + static_cast<std::size_t>(i)]];
+            *output++ = color.red; *output++ = color.green; *output++ = color.blue;
+        }
+    }
     void draw() override {
         fl_color(theme::fltk_color(theme::background)); fl_rectf(x(),y(),w(),h());
         fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
@@ -200,7 +209,9 @@ private:
                 pixels_[offset]=channel(value);
             }
         }
-        fl_draw_image(pixels_.data(),x()+2,y()+2,width,height,1);
+        // FLTK supplies a row buffer; no second full RGB framebuffer is retained.
+        if(theme::color_enabled) fl_draw_image(color_row,this,x()+2,y()+2,width,height,3);
+        else fl_draw_image(pixels_.data(),x()+2,y()+2,width,height,1);
         fl_font(theme::font,11); fl_color(theme::fltk_color(theme::muted)); fl_draw("0 Hz",x()+7,y()+h()-7);
         std::ostringstream legend; legend<<history_.lower_db()<<".."<<history_.upper_db()<<" dBFS peak";
         fl_draw(legend.str().c_str(),x()+(w()-static_cast<int>(fl_width(legend.str().c_str())))/2,y()+h()-7);
@@ -262,7 +273,7 @@ private:
                 if (!std::isfinite(point.real()) || !std::isfinite(point.imag())) continue;
                 const int px=center_x+static_cast<int>(point.real()/scale*radius);
                 const int py=center_y-static_cast<int>(point.imag()/scale*radius);
-                fl_color(theme::fltk_color(theme::accent)); fl_rectf(px-1,py-1,2,2);
+                fl_color(theme::data_color()); fl_rectf(px-1,py-1,2,2);
             }
             fl_font(theme::font,11); fl_color(theme::fltk_color(theme::text));
             fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
@@ -282,7 +293,7 @@ private:
             const auto trace_height=height-17;
             const auto mid=top+trace_height*.5;
             fl_color(theme::fltk_color(theme::grid)); fl_line(left,static_cast<int>(mid),left+width,static_cast<int>(mid));
-            fl_color(theme::fltk_color(theme::accent));
+            fl_color(theme::data_color());
             double scale=1e-12;
             for (auto value:waveform_) scale=std::max(scale,std::abs(static_cast<double>(value)));
             for (auto value:trace) scale=std::max(scale,std::abs(value));

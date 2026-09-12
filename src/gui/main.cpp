@@ -442,7 +442,7 @@ private:
     }
     std::optional<std::filesystem::path> choose_path(bool create,const char* title,const char* suggested=".") {
         Fl_File_Chooser chooser(suggested,"*",create?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,title);
-        chooser.textfont(gui::theme::font); chooser.textcolor(gui::theme::fltk_color(gui::theme::text));
+        chooser.textfont(gui::theme::font); chooser.textcolor(gui::theme::data_color(gui::theme::text));
         chooser.preview(0); chooser.show();
         while (chooser.shown()) Fl::wait();
         if (closing_ || !chooser.value()) return std::nullopt;
@@ -1332,12 +1332,15 @@ void self_check() {
 int main(int argc,char** argv) {
     try {
         SmokeOptions smoke;
+        bool use_color=true;
         for (int i=1;i<argc;++i) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
             if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<" (backend: "<<DATAPUMP_GUI_BACKEND<<")\n"; return 0; }
-            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nGUI backend: "<<DATAPUMP_GUI_BACKEND<<" (selected at build time)\nUsage: datapump-gui [--version] [--help] [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
+            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nGUI backend: "<<DATAPUMP_GUI_BACKEND<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--version] [--help] [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n--color       Cyan data accents and false-color waterfall (default when supported).\n--monochrome  Use grayscale even when color is supported.\nIf both appear, the last switch wins. Unsupported displays always use grayscale.\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
+            else if (argument=="--color") use_color=true;
+            else if (argument=="--monochrome") use_color=false;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);
             else if (argument=="--smoke-hold" && i+1<argc) { smoke.hold_seconds=number(argv[++i],"Smoke hold"); if (smoke.hold_seconds<0 || smoke.hold_seconds>60) throw Error("Smoke hold must be 0..60 seconds"); }
             else if (argument=="--smoke-timeout" && i+1<argc) { smoke.timeout_seconds=number(argv[++i],"Smoke timeout"); if (smoke.timeout_seconds<10 || smoke.timeout_seconds>600) throw Error("Smoke timeout must be 10..600 seconds"); }
@@ -1356,7 +1359,9 @@ int main(int argc,char** argv) {
             else throw Error("Unknown or incomplete GUI argument: "+argument);
         }
         if (smoke.enabled && smoke.directory.empty()) smoke.directory=std::filesystem::temp_directory_path()/("datapump-native-smoke-"+std::to_string(Steady::now().time_since_epoch().count()));
-        gui::theme::apply_palette(); Fl::visual(FL_DOUBLE|FL_RGB);
+        // Optional color requires a supported RGB visual, never an OpenGL context.
+        // Fl_Double_Window supplies software buffering independently.
+        gui::theme::apply_palette(use_color && Fl::visual(FL_RGB));
         App app(std::move(smoke)); return app.run();
     } catch (const std::exception& error) { std::cerr<<"datapump-gui: "<<error.what()<<'\n'; return 1; }
 }

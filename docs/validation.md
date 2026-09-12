@@ -3,6 +3,29 @@
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
+## Optional color presentation
+
+Color is now enabled by default when an RGB visual is available. `--monochrome`
+explicitly selects grayscale; `--color` restores color preference, with the last
+switch taking precedence. The existing automatic grayscale fallback is unchanged.
+The default/override update rebuilt successfully and passed the five Release GUI
+model/self-check suites plus command-line override acceptance checks.
+
+Release and ASan/UBSan builds succeeded, and all five focused GUI/model suites
+passed in both configurations. `--color` is documented by `--help` and accepted
+alongside the display-free self-check.
+
+An isolated rendering harness exercised the actual FLTK fields, waveform,
+constellation, and waterfall widgets under ASan/UBSan with the CI leak-detection
+setting. Pixel comparison verified 89,050 clipped waterfall pixels over 213
+intensity levels against the shared palette, and identical constellation-point
+positions with one uniform tint. All palette channels were nondecreasing.
+Both presentations were visually inspected. On an isolated 8-bit display without
+a suitable RGB visual, a color request produced an entirely grayscale image.
+The waterfall retains its Gray8 buffer and converts color rows only when enabled.
+These checks exercise rendering and GUI policy; no physical-display or Windows
+performance measurements were made.
+
 ## Single-backend configuration and monochrome GUI
 
 The GUI rebuilt in Release and ASan/UBSan configurations. All five focused GUI

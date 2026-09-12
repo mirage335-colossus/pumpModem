@@ -172,7 +172,7 @@ struct Canvas {
                     }
                     fl_font(theme::font,10); fl_color(muted);
                     fl_draw("I",cx+plot_size/2-6,cy-5); fl_draw("Q",cx+5,cy-plot_size/2+10);
-                    fl_color(accent);
+                    fl_color(theme::data_color());
                     for(const auto point:plot.points) {
                         if(!std::isfinite(point.real())||!std::isfinite(point.imag())) continue;
                         const int px=cx+static_cast<int>(std::lround(point.real()*scale));

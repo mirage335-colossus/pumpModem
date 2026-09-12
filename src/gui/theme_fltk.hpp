@@ -14,8 +14,13 @@
 namespace datapump::gui::theme {
 inline constexpr Fl_Font font = FL_COURIER;
 inline constexpr Fl_Font bold_font = FL_COURIER_BOLD;
+// Fixed at startup. This adapter supports RGB drawing entirely in software.
+inline bool color_enabled = false;
 inline Fl_Color fltk_color(std::uint8_t level) {
     return fl_rgb_color(level, level, level);
+}
+inline Fl_Color data_color(std::uint8_t fallback = accent) {
+    return color_enabled ? fl_rgb_color(data_tint.red, data_tint.green, data_tint.blue) : fltk_color(fallback);
 }
 
 // A box style changes only widget decoration, not focus, editing, or input.
@@ -25,7 +30,8 @@ inline void border_box(int x, int y, int w, int h, Fl_Color color) {
     fl_rect(x, y, w, h);
 }
 
-inline void apply_palette() {
+inline void apply_palette(bool use_color = false) {
+    color_enabled = use_color;
     Fl::scheme("base");
     Fl::background(surface, surface, surface);
     Fl::background2(background, background, background);
@@ -47,21 +53,21 @@ inline void apply_widgets(Fl_Widget& widget) {
     widget.selection_color(fltk_color(grid));
     if (auto* input = dynamic_cast<Fl_Input_*>(&widget)) {
         input->textfont(font);
-        input->textcolor(fltk_color(text));
-        input->cursor_color(fltk_color(accent));
+        input->textcolor(data_color(text));
+        input->cursor_color(data_color());
     }
     if (auto* display = dynamic_cast<Fl_Text_Display*>(&widget)) {
         display->textfont(font);
-        display->textcolor(fltk_color(text));
-        display->cursor_color(fltk_color(accent));
+        display->textcolor(data_color(text));
+        display->cursor_color(data_color());
     }
     if (auto* menu = dynamic_cast<Fl_Menu_*>(&widget)) {
         menu->textfont(font);
-        menu->textcolor(fltk_color(text));
+        menu->textcolor(data_color(text));
     }
     if (auto* browser = dynamic_cast<Fl_Browser_*>(&widget)) {
         browser->textfont(font);
-        browser->textcolor(fltk_color(text));
+        browser->textcolor(data_color(text));
     }
     if (auto* group = dynamic_cast<Fl_Group*>(&widget))
         for (int i = 0; i < group->children(); ++i) apply_widgets(*group->child(i));
