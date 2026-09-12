@@ -1,9 +1,44 @@
-# Local validation record — version 0.7.0
+# Local validation record — version 0.7.1
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Version 0.7.0 framing changes
+## Version 0.7.1 pattern constellation
+
+The new Constellations tab shows the existing phase/amplitude observations beside
+the full analytic pattern projection in modeled noise units. The new numerical
+tests first failed because the projection did not exist, then passed with the
+bounded model. They cover every supported alphabet, pairwise template distances,
+fixed/keyed/tone equivalence, quantized integration time, sample-clock invariance,
+unsnapped observations, invalid numeric inputs, hour-long integrations and 30 MHz
+plans. A deterministic 16,000-trial Monte Carlo check uses the modem's actual AWGN
+generator to verify the modeled radial and differential tangential variance.
+
+* Native GUI Release: all **28 CTest suites passed** (54.72 seconds).
+* After the final layout adjustment, all four focused GUI/model suites passed
+  in Release (0.26 seconds) and under ASan/UBSan (1.93 seconds).
+  The complete GUI source also passed strict warning checks with `-Werror`.
+* The CLI-only Release rebuilt with Python discovery disabled and reports 0.7.1.
+* The complete Release and ASan/UBSan GUI workflows passed on a private virtual
+  display, including all four tabs during
+  continuous reception and three-second replay, minimum/expanded resizing,
+  exact observation projection, exclusion of unmatched I/Q, retained fresh-point
+  batches and clearing replay points on return to live reception.
+* The plot was visually inspected at the actual minimum 479×383 panel size
+  for 8- and 64-symbol alphabets, using real `add_awgn` differential observations
+  at moderate SNR and ideal-only high-SNR cases. Pixel margins preserve outer
+  markers and labels, and the closest-pair labels remain separate in dense views.
+
+The axes represent the analytic AWGN model, not a measured receiver likelihood.
+The differential-noise ellipses use the weakest configured reference ring;
+finite real-PCM quadrature covariance, clock drift and phase noise can differ
+from that approximation. No modem, packet, keyfile or replay format changed;
+0.7.1 remains compatible with 0.7.0. No runtime dependency was added.
+Physical audio, battery-state comparisons and hosted Windows/CI execution were
+not tested for this visualization release. LeakSanitizer is disabled for this
+host's tracing environment; ASan and UBSan remain enabled.
+
+## Recorded 0.7.0 framing checks
 
 The new tests first reproduced mandatory RS on a tiny message and receiver
 synchronization before rejection of a damaged short frame. The format removes

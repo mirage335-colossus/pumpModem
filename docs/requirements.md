@@ -1,6 +1,6 @@
 # Implementation coverage
 
-This matrix records version 0.7.0 behavior and its limits. It is not acceptance of
+This matrix records version 0.7.1 behavior and its limits. It is not acceptance of
 all performance and hardware claims in the original design. Adaptive audio peers
 need matching modem settings and the compact 0.7 packet format; existing keyfiles are unchanged.
 [Test execution results](validation.md) distinguish measured results from design
@@ -37,7 +37,8 @@ and source-level checks.
 | Replay storage | Skipped-frame points merge within bounded source-specific batches; overflow or points left undelivered at the deadline are reported as omitted. Workspace uses at most DSP budget/8, capped near 1.4 MiB, including roughly 38 KiB of result diagnostics plus plots, points and up to 4096 preview-text bytes per frame. Smaller budgets reduce capacity. Prepared packet content uses the separate content quota. |
 | Physical channel effects | Batch PCM applies delay, frequency shift, clock resampling and phase noise. Accelerated simulation shifts timing and carrier phase but assumes matched chip despreading and approximates phase diffusion with bounded subintervals. No oscillator tracking, fading/multipath or hardware nonlinearity model. Long weak-signal modes can fail with the default crystal error. |
 | QR Level L | Vendored encoder, UTF-8 ECI, up to 500 Unicode scalars; compose preview and SVG/PBM CLI output. Independent decoding history is recorded in validation results. |
-| Modem and packet inspection tabs | Console, Modem flow and Transmission layout share the selected settings while reception continues. Encoder-derived diagrams show active processing, ideal APSK alphabets, training, protected header, actual compression and shortened RS/interleaving structure, with a payload placeholder. Raw layouts omit packet overhead. AGC and convolutional/trellis algorithms are explicitly marked unavailable. |
+| Pattern constellation plot | Side-by-side phase/amplitude and matched-template views. Fresh measured symbol points, ideal centres, conservative differential-noise ellipses and closest-template gap in a labelled analytic AWGN model. Equal axes preserve modeled distances; no independent pattern-code alphabet or measured BER is claimed. Shares the replay clock and clears matched points on return to raw input. |
+| Modem and packet inspection tabs | Console, Constellations, Modem flow and Transmission layout share the selected settings while reception continues. Encoder-derived diagrams show active processing, ideal APSK alphabets, training, protected header, actual compression and shortened RS/interleaving structure, with a payload placeholder. Raw layouts omit packet overhead. AGC and convolutional/trellis algorithms are explicitly marked unavailable. |
 | Explicit exclusions | No asymmetric key exchange, built-in repeater, routable address, rapid Doppler tracking, SDR/FHSS or IC-7100 control. No legal classification claim. |
 
 Acceptance of sensitivity, capacity, RF compliance, adversarial security or

@@ -31,7 +31,7 @@ class PumpCase(unittest.TestCase):
 class CommandTests(PumpCase):
     def test_help_and_invalid_options(self):
         self.assertIn(b"simulate", self.run_pump("--help").stdout)
-        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.7.0\n")
+        self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.7.1\n")
         self.run_pump("simulate", "--text", "x", "--nonsense", "yes", ok=False)
         self.run_pump("simulate", "--text", "x", "--snr", "nan", ok=False)
         self.run_pump("tx", "--text", "x", ok=False)

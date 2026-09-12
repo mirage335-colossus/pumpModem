@@ -1,5 +1,6 @@
 #include "live_widgets.hpp"
 #include "inspection_widgets.hpp"
+#include "pattern_plot.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/live.hpp"
 #include "datapump/runtime.hpp"
@@ -97,7 +98,7 @@ std::string seconds_text(double seconds) {
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
 }
-enum class View { console,flow,transmission };
+enum class View { console,constellations,flow,transmission };
 struct SmokeOptions {
     bool enabled=false;
     std::filesystem::path directory;
@@ -219,6 +220,15 @@ public:
         clipboard_probe_=new ClipboardProbe;
         tabs_=new Fl_Tabs(0,0,1,1);
         console_=new Fl_Group(0,0,1,1,"Console"); console_->end();
+        constellations_=new Fl_Group(0,0,1,1,"Constellations");
+        constellation_heading_=label("Two views of the same symbol",20,true);
+        constellation_description_=label("Phase / amplitude coefficients and the complete pattern's matched projection in noise units.",13);
+        amplitude_detail_label_=label("Phase / amplitude",14,true);
+        pattern_detail_label_=label("Pattern constellation",14,true);
+        amplitude_detail_=new LivePlot(true); pattern_plot_=new PatternPlot;
+        constellation_note_=label("Hollow centres: possible symbols. Dots: observations. Wider separation relative to noise makes symbols easier to distinguish.",13);
+        constellation_note_->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_WRAP);
+        constellations_->end();
         flow_scroll_=new Fl_Scroll(0,0,1,1,"Modem flow"); flow_scroll_->type(Fl_Scroll::VERTICAL_ALWAYS);
         flow_diagram_=new InspectionDiagram(true); flow_scroll_->end();
         transmission_scroll_=new Fl_Scroll(0,0,1,1,"Transmission layout"); transmission_scroll_->type(Fl_Scroll::VERTICAL_ALWAYS);
@@ -228,7 +238,7 @@ public:
                 attach_,use_text_,send_key_,transmit_,cancel_,airtime_,signal_label_,file_label_,signal_browser_,file_browser_,save_,
                 waterfall_label_,waveform_label_,constellation_label_,waterfall_,waveform_,constellation_}) console_->add(widget);
         tabs_->value(console_);
-        for (auto* page:std::initializer_list<Fl_Group*>{console_,flow_scroll_,transmission_scroll_}) page->labelsize(13);
+        for (auto* page:std::initializer_list<Fl_Group*>{console_,constellations_,flow_scroll_,transmission_scroll_}) page->labelsize(13);
         bind(tabs_,[this] { layout_diagrams(); window_->redraw(); });
         window_->end();
         for (auto widget:std::array<Fl_Widget*,11>{callsign_,grid_,simulation_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_,fec_off_,send_key_}) { widget->align(FL_ALIGN_TOP_LEFT); widget->labelsize(12); }
@@ -283,8 +293,17 @@ private:
         simulation_->resize(366,62,183,27); key_browse_->resize(560,62,92,27);
         key_path_->resize(660,62,std::max(90,width-926),27); key_entry_->resize(width-248,62,232,27);
         tabs_->resize(margin,94,width-margin*2,height-210);
-        for (auto* page:std::initializer_list<Fl_Group*>{console_,flow_scroll_,transmission_scroll_})
+        for (auto* page:std::initializer_list<Fl_Group*>{console_,constellations_,flow_scroll_,transmission_scroll_})
             page->resize(margin,126,width-margin*2,height-242);
+        const int detail_x=margin+12,detail_width=(width-margin*2-40)/2;
+        const int detail_y=220,detail_height=height-detail_y-183;
+        constellation_heading_->resize(detail_x,141,width-margin*2-24,29);
+        constellation_description_->resize(detail_x,175,width-margin*2-24,23);
+        amplitude_detail_label_->resize(detail_x,199,detail_width,21);
+        pattern_detail_label_->resize(detail_x+detail_width+16,199,detail_width,21);
+        amplitude_detail_->resize(detail_x,detail_y,detail_width,detail_height);
+        pattern_plot_->resize(detail_x+detail_width+16,detail_y,detail_width,detail_height);
+        constellation_note_->resize(detail_x,height-175,width-margin*2-24,48);
         const int qr_size=196,compose_y=152,compose_height=196;
         const int binary_width=220,editor_width=width-margin*2-qr_size-binary_width-28;
         const int binary_x=margin+editor_width+14;
@@ -332,6 +351,7 @@ private:
     }
     void show_view(View view) {
         tabs_->value(view==View::console?static_cast<Fl_Widget*>(console_):
+                     view==View::constellations?static_cast<Fl_Widget*>(constellations_):
                      view==View::flow?static_cast<Fl_Widget*>(flow_scroll_):transmission_scroll_);
         tabs_->do_callback();
     }
@@ -383,7 +403,8 @@ private:
         live::Settings result;
         const auto modes=tuning::pattern_modes();
         const auto mode=modes[static_cast<std::size_t>(std::max(0,pattern_->value()))];
-        const auto plan=tuning::resolve(bandwidth(bandwidth_->value()),number(snr_->value(),"Target SNR"),mode,encrypted());
+        const auto cn0=number(snr_->value(),"Target SNR");
+        const auto plan=tuning::resolve(bandwidth(bandwidth_->value()),cn0,mode,encrypted());
         result.transfer.modem=plan.config; result.transfer.timestamp=0;
         // This UI loopback uses one admitted epoch. Drift-window acquisition
         // has dedicated transfer/live tests; keep it out of the GUI fixture.
@@ -399,6 +420,8 @@ private:
             result.simulation_snr_db=budget.sample_snr_db;
             simulation_channel_snr_=budget.snr_db;
         }
+        pattern_cn0_db_hz_=result.simulation?result.simulation_snr_db+
+            10*std::log10(static_cast<double>(result.transfer.modem.sample_rate)/2):cn0;
         result.content_limit=default_memory_limit;
         result.dsp_workspace_bytes=64*1024*1024;
         tuning_explanation_=plan.explanation; target_supported_=plan.target_supported;
@@ -411,6 +434,7 @@ private:
             if (session_started_) session_.configure(current_settings_);
         } catch (...) {
             settings_valid_=false; airtime_->copy_label("Invalid modem settings");
+            pattern_plot_->clear("Invalid modem settings");
             inspection_pending("Invalid modem settings"); throw;
         }
     }
@@ -691,10 +715,41 @@ private:
             waveform_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem);
             constellation_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem,
                                     snapshot.constellation_source!=live::ConstellationSource::input,snapshot.constellation_dropped);
+            amplitude_detail_->update(snapshot.waveform,snapshot.constellation,current_settings_.transfer.modem,
+                                      snapshot.constellation_source!=live::ConstellationSource::input,snapshot.constellation_dropped);
+            if (settings_valid_) {
+                try {
+                    pattern_plot_->update(snapshot.constellation,current_settings_.transfer.modem,pattern_cn0_db_hz_,
+                                          snapshot.constellation_source,snapshot.constellation_dropped,snapshot.simulation);
+                } catch (const Error&) {
+                    // A display-only numeric limit must not discard the
+                    // received events drained by this snapshot.
+                    pattern_plot_->clear("Noise model outside the display range");
+                }
+            }
             waveform_label_->copy_label(snapshot.simulation_replay?"Simulation replay / waveform":"Live waveform");
             waterfall_label_->copy_label(snapshot.simulation_replay?"Simulation replay / waterfall":"Spectrum / amplitude waterfall");
             constellation_label_->copy_label(snapshot.constellation_source==live::ConstellationSource::transmitted?"Transmitted constellation":
                 snapshot.constellation_source==live::ConstellationSource::received?"Received constellation":"Receiver input I/Q");
+            amplitude_detail_label_->copy_label(snapshot.constellation_source==live::ConstellationSource::transmitted?"Transmitted phase / amplitude":
+                snapshot.constellation_source==live::ConstellationSource::received?"Received phase / amplitude":"Receiver input I/Q");
+            pattern_detail_label_->copy_label(snapshot.simulation_replay?"Simulation replay / pattern constellation":"Pattern constellation");
+            if (smoke_.enabled && settings_valid_) {
+                const auto& projection=pattern_plot_->model();
+                if (amplitude_detail_->points()!=snapshot.constellation || pattern_plot_->source()!=snapshot.constellation_source ||
+                    projection.symbols.size()!=(std::size_t{1}<<current_settings_.transfer.modem.constellation_bits))
+                    throw Error("Detailed constellation plots lost their configured alphabet or current source");
+                if (snapshot.constellation_source==live::ConstellationSource::input) {
+                    if (!pattern_plot_->raw_points().empty() || !projection.observations.empty())
+                        throw Error("Unmatched input samples were displayed as pattern symbols");
+                } else {
+                    if (pattern_plot_->raw_points()!=snapshot.constellation || projection.observations.size()!=snapshot.constellation.size())
+                        throw Error("Pattern plot skipped, accumulated or replaced measured symbols");
+                    for (std::size_t i=0;i<projection.observations.size();++i)
+                        if (std::abs(projection.observations[i]*projection.quadrature_sigma-snapshot.constellation[i])>1e-10)
+                            throw Error("Pattern projection changed an observed symbol");
+                }
+            }
         }
         for (auto& received:snapshot.received) {
             if (smoke_.enabled) {
@@ -811,6 +866,7 @@ private:
             last_snapshot_.transmission_id!=transmission || buffer_text(compose_)!=message || buffer_text(binary_)!=bits)
             throw Error("Changing inspection tabs modified composition, model revision or receiver state");
         auto* expected=view==View::console?static_cast<Fl_Widget*>(console_):
+            view==View::constellations?static_cast<Fl_Widget*>(constellations_):
             view==View::flow?static_cast<Fl_Widget*>(flow_scroll_):transmission_scroll_;
         if (tabs_->value()!=expected || !expected->visible())
             throw Error("The requested native inspection tab was not selected");
@@ -821,6 +877,12 @@ private:
         const auto message=buffer_text(compose_),bits=buffer_text(binary_);
         for (const auto& size:std::array<std::pair<int,int>,2>{{{1030,786},{1400,1000}}}) {
             window_->size(size.first,size.second);
+            smoke_select_view(View::constellations);
+            if (amplitude_detail_->w()<479 || pattern_plot_->w()!=amplitude_detail_->w() || pattern_plot_->h()<383 ||
+                amplitude_detail_->x()+amplitude_detail_->w()>=pattern_plot_->x() ||
+                pattern_plot_->y()+pattern_plot_->h()>constellation_note_->y() ||
+                constellation_note_->y()+constellation_note_->h()>constellations_->y()+constellations_->h())
+                throw Error("Constellation panels overlap or lose readable bounds when resizing");
             for (const auto view:{View::flow,View::transmission}) {
                 smoke_select_view(view);
                 auto* scroll=view==View::flow?flow_scroll_:transmission_scroll_;
@@ -844,55 +906,64 @@ private:
             throw Error("Resizing or scrolling diagrams changed the modem session or composition");
     }
     bool smoke_idle_tabs() {
-        if (smoke_tab_stage_==5) return false;
+        if (smoke_tab_stage_==6) return false;
         if (!estimate_ || !inspection_ || !saw_noise_change_) return true;
         if (smoke_tab_stage_==0) {
             smoke_inspection(false,"Reed-Solomon 20%");
             smoke_resize_scroll();
             smoke_select_view(View::flow); smoke_tab_samples_=last_snapshot_.samples_received; smoke_tab_stage_=1;
-        } else if (smoke_tab_stage_==1 || smoke_tab_stage_==2) {
+        } else if (smoke_tab_stage_>=1 && smoke_tab_stage_<=3) {
             if (last_snapshot_.samples_received<smoke_tab_samples_)
                 throw Error("Switching inspection tabs reset continuous reception");
             if (last_snapshot_.samples_received==smoke_tab_samples_) return true;
             if (smoke_tab_stage_==1) {
                 smoke_select_view(View::transmission); smoke_tab_samples_=last_snapshot_.samples_received; smoke_tab_stage_=2;
+            } else if (smoke_tab_stage_==2) {
+                smoke_select_view(View::constellations); smoke_tab_samples_=last_snapshot_.samples_received; smoke_tab_stage_=3;
             } else {
+                if (pattern_plot_->model().symbols.size()!=(std::size_t{1}<<current_settings_.transfer.modem.constellation_bits) ||
+                    !pattern_plot_->raw_points().empty() || !pattern_plot_->model().observations.empty())
+                    throw Error("Idle pattern plot omitted configured symbols or treated raw input as a decoded pattern");
                 fec_->value(1); fec_->do_callback();
                 if (inspection_) throw Error("Changing FEC left the previous diagram visible");
-                smoke_tab_stage_=3;
+                smoke_tab_stage_=4;
             }
-        } else if (smoke_tab_stage_==3) {
+        } else if (smoke_tab_stage_==4) {
             smoke_inspection(false,"Reed-Solomon 60%");
             fec_->value(0); fec_->do_callback();
             if (inspection_) throw Error("Restoring FEC left a stale diagram model");
-            smoke_tab_stage_=4;
-        } else if (smoke_tab_stage_==4) {
+            smoke_tab_stage_=5;
+        } else if (smoke_tab_stage_==5) {
             smoke_inspection(false,"Reed-Solomon 20%");
-            smoke_select_view(View::console); smoke_tab_stage_=5;
+            smoke_select_view(View::console); smoke_tab_stage_=6;
         }
-        return smoke_tab_stage_!=5;
+        return smoke_tab_stage_!=6;
     }
     void smoke_replay_tabs() {
-        if (smoke_phase_!=1 || !last_snapshot_.simulation_replay || smoke_replay_tab_stage_==3) return;
+        if (smoke_phase_!=1 || !last_snapshot_.simulation_replay || smoke_replay_tab_stage_==4) return;
         if (smoke_replay_tab_stage_==0 && smoke_replay_.frames>=2) {
             smoke_select_view(View::flow); smoke_tab_frame_=last_snapshot_.replay_frame_index; smoke_replay_tab_stage_=1;
         } else if (smoke_replay_tab_stage_==1 && last_snapshot_.replay_frame_index>smoke_tab_frame_) {
             smoke_select_view(View::transmission); smoke_tab_frame_=last_snapshot_.replay_frame_index; smoke_replay_tab_stage_=2;
         } else if (smoke_replay_tab_stage_==2 && last_snapshot_.replay_frame_index>smoke_tab_frame_) {
-            smoke_select_view(View::console); smoke_replay_tab_stage_=3;
+            smoke_select_view(View::constellations); smoke_tab_frame_=last_snapshot_.replay_frame_index; smoke_replay_tab_stage_=3;
+        } else if (smoke_replay_tab_stage_==3 && last_snapshot_.replay_frame_index>smoke_tab_frame_ &&
+                   last_snapshot_.constellation_source==live::ConstellationSource::received && !pattern_plot_->raw_points().empty()) {
+            smoke_replay_tab_stage_=4;
+            std::cout<<"Pattern constellation receive frame ready"<<std::endl;
         }
     }
     void finish_smoke() {
         smoke_select_view(smoke_.view);
-        if (smoke_.view!=View::console) {
+        if (smoke_.view==View::flow || smoke_.view==View::transmission) {
             auto* scroll=smoke_.view==View::flow?flow_scroll_:transmission_scroll_;
             auto* diagram=smoke_.view==View::flow?flow_diagram_:transmission_diagram_;
             const int bottom=std::max(0,diagram->h()-scroll->h()+16);
             scroll->scroll_to(0,static_cast<int>(std::lround(smoke_.scroll_fraction*bottom)));
         }
         smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=13;
-        notice("GUI smoke passed: keyfiles, packet and binary transmission, diagrams, clipboard and live plots.",smoke_.hold_seconds+1);
-        std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy, live packet/binary/FEC inspection models, tab switching, minimum/expanded diagram resizing and complete scrolling without receiver resets, and all plots returning to live reception."<<std::endl;
+        notice("GUI smoke passed: keyfiles, packet and binary transmission, pattern constellation, diagrams and live plots.",smoke_.hold_seconds+1);
+        std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy, live packet/binary/FEC inspection models, exact pattern projection and noise model, four-tab switching, minimum/expanded diagram resizing and complete scrolling without receiver resets, and all plots returning to live reception."<<std::endl;
     }
     void inspect_smoke_replay() {
         auto& replay=smoke_replay_;
@@ -952,9 +1023,10 @@ private:
                 replay.fraction=last_snapshot_.simulation_sample_fraction;
                 replay.revision=waterfall_->revision();
                 replay.waveform=waveform_->samples(); replay.constellation=constellation_->points();
+                replay.pattern_points=pattern_plot_->model().observations;
                 ++replay.frames;
             } else if (waterfall_->revision()!=replay.revision || waveform_->samples()!=replay.waveform ||
-                       constellation_->points()!=replay.constellation) {
+                       constellation_->points()!=replay.constellation || pattern_plot_->model().observations!=replay.pattern_points) {
                 throw Error("A repeated replay poll changed plots or duplicated its waterfall row");
             }
             return;
@@ -975,7 +1047,8 @@ private:
             last_snapshot_.constellation_source==live::ConstellationSource::input &&
             waveform_->samples()!=replay.waveform && waterfall_->revision()>replay.revision) {
             if (std::string(waveform_label_->label())!="Live waveform" ||
-                std::string(constellation_label_->label())!="Receiver input I/Q")
+                std::string(constellation_label_->label())!="Receiver input I/Q" ||
+                !pattern_plot_->model().observations.empty() || !pattern_plot_->raw_points().empty())
                 throw Error("Replay completion did not return all plots to live receiver input");
             replay.resumed=true;
         }
@@ -1030,7 +1103,8 @@ private:
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
         } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && !last_snapshot_.simulation_replay) {
-            if (smoke_replay_tab_stage_!=3) throw Error("The simulation replay did not continue across all inspection tabs");
+            if (smoke_replay_tab_stage_!=4) throw Error("The simulation replay did not continue across all four tabs");
+            smoke_select_view(View::console);
             if (!saw_transmitting_ && last_snapshot_.transmission_fraction<1) throw Error("The normal transmit path was not observed");
             if (!pending_sequence_ || pending_sequence_>=final_sequence_) throw Error("Pending signal updates did not precede verified reception");
             if (last_snapshot_.samples_received<=initial_samples_) throw Error("Simulation stopped continuous reception while transmitting");
@@ -1243,7 +1317,7 @@ private:
         bool active=false,resumed=false,saw_symbols=false,binary=false;
         Steady::time_point started{};
         std::vector<float> waveform;
-        std::vector<std::complex<double>> constellation;
+        std::vector<std::complex<double>> constellation,pattern_points;
     } smoke_replay_;
     std::uint64_t smoke_interrupted_replay_id_=0,smoke_cancelled_replay_id_=0,smoke_completed_replay_id_=0;
     std::uint64_t smoke_snapshot_poll_=0,smoke_received_packets_=0;
@@ -1255,7 +1329,7 @@ private:
     bool smoke_binary_fixture_=false;
     double smoke_binary_seconds_=0;
     std::uint64_t smoke_binary_signal_id_=0;
-    double simulation_channel_snr_=0,cpu_percent_=0;
+    double simulation_channel_snr_=0,cpu_percent_=0,pattern_cn0_db_hz_=40;
     std::string tuning_explanation_,notice_;
     std::vector<float> first_noise_;
     Steady::time_point estimate_requested_{},notice_until_{},smoke_started_{},smoke_finished_{},smoke_cancelled_at_{},cpu_time_=Steady::now();
@@ -1267,6 +1341,7 @@ private:
     Fl_Text_Buffer compose_,binary_;
     std::unique_ptr<MainWindow> window_;
     Fl_Box *header_,*mode_,*key_path_,*compose_label_,*binary_label_,*signal_label_,*file_label_,*airtime_=nullptr,*waterfall_label_,*waveform_label_,*constellation_label_,*diagnostics_,*status_;
+    Fl_Box *constellation_heading_,*constellation_description_,*amplitude_detail_label_,*pattern_detail_label_,*constellation_note_;
     Fl_Input *callsign_,*grid_;
     Fl_Output* fec_off_;
     Fl_Input_Choice *device_,*bandwidth_,*snr_;
@@ -1275,7 +1350,7 @@ private:
     Fl_Button *clear_,*attach_,*use_text_,*transmit_,*cancel_,*save_;
     Fl_Menu_Button* key_browse_;
     Fl_Tabs* tabs_;
-    Fl_Group* console_;
+    Fl_Group *console_,*constellations_;
     Fl_Scroll *flow_scroll_,*transmission_scroll_;
     InspectionDiagram *flow_diagram_=nullptr,*transmission_diagram_=nullptr;
     ComposeEditor *editor_,*binary_editor_;
@@ -1283,7 +1358,8 @@ private:
     SignalBrowser* signal_browser_;
     Fl_Hold_Browser* file_browser_;
     Waterfall* waterfall_;
-    LivePlot *waveform_,*constellation_;
+    LivePlot *waveform_,*constellation_,*amplitude_detail_;
+    PatternPlot* pattern_plot_;
     ClipboardProbe* clipboard_probe_;
 };
 
@@ -1325,7 +1401,7 @@ int main(int argc,char** argv) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
             if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<'\n'; return 0; }
-            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
+            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|constellations|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);
             else if (argument=="--smoke-hold" && i+1<argc) { smoke.hold_seconds=number(argv[++i],"Smoke hold"); if (smoke.hold_seconds<0 || smoke.hold_seconds>60) throw Error("Smoke hold must be 0..60 seconds"); }
@@ -1333,9 +1409,10 @@ int main(int argc,char** argv) {
             else if (argument=="--smoke-view" && i+1<argc) {
                 const std::string view=argv[++i];
                 if (view=="console") smoke.view=View::console;
+                else if (view=="constellations") smoke.view=View::constellations;
                 else if (view=="flow") smoke.view=View::flow;
                 else if (view=="transmission") smoke.view=View::transmission;
-                else throw Error("Smoke view must be console, flow or transmission");
+                else throw Error("Smoke view must be console, constellations, flow or transmission");
             }
             else if (argument=="--smoke-raw-view") smoke.raw_view=true;
             else if (argument=="--smoke-scroll" && i+1<argc) {

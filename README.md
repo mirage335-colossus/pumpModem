@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented compact packet for
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.7.0.** The audio/packet/crypto
+**Status: working reference implementation, version 0.7.1.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -27,8 +27,16 @@ identifier is transmitted. The compression library is built statically from
 vendored source; the complete portable application can be copied between
 compatible computers without downloading packages.
 
-The desktop has three tabs: **Console**, **Modem flow**, and **Transmission
-layout**. Modem flow follows the selected transmit and receive processing,
+The desktop has four tabs: **Console**, **Constellations**, **Modem flow**, and
+**Transmission layout**. Constellations places the phase/amplitude view beside
+a live matched-pattern projection, with ideal symbols, received points, noise
+ellipses and the closest template distance in noise-standard-deviation units.
+It follows the same three-second simulation replay. The selected noise model is
+labelled; raw input is never passed off as a received pattern. See
+[pattern constellation geometry](docs/pattern-constellation.md). Version 0.7.1
+retains the 0.7 packet format and existing keyfiles.
+
+Modem flow follows the selected transmit and receive processing,
 including phase/amplitude alphabets, spreading, integration, coding and gain
 estimation. Transmission layout illustrates the proposed on-air sequence,
 preamble, protected bootstrap, body fields and Reed–Solomon blocks, with a

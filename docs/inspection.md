@@ -1,16 +1,24 @@
 # Modem and transmission inspection
 
 The native desktop keeps shared key, metadata and modem controls visible above
-and below three tabs. **Console** contains composition, the signal browser,
+and below four tabs. **Console** contains composition, the signal browser,
 received files and live plots. Switching tabs leaves the receiver and current
 three-second simulation replay running.
+
+**Constellations** shows phase/amplitude observations beside the complete
+pattern's analytic matched projection. Ideal templates, fresh received points,
+noise ellipses and the nearest template gap share equal noise-unit axes. The
+noise model comes from the simulation preset or configured target C/N0; it is
+labelled separately from measured points. Unlocked input has no matched pattern
+observations. See [geometry and interpretation](pattern-constellation.md).
 
 **Modem flow** shows the currently selected transmit and receive paths as ordered
 stage cards. Active processing, disabled options and unavailable algorithms have
 different labels. It includes the ideal phase/amplitude alphabets used for
 training and data, the chosen pattern or tone mode, symbol integration, packet
 coding, encryption, and the appropriate audio or simulation path. These are
-configured ideal points; measured received symbols remain on the Console.
+configured ideal points; measured received symbols appear on Console and
+Constellations.
 
 The view describes the implemented gain estimate accurately: framed acquisition
 searches timing, gain and initial differential-phase candidates using pattern
