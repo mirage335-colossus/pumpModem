@@ -1,5 +1,6 @@
 #include "live_widgets.hpp"
 #include "inspection_widgets.hpp"
+#include "theme_fltk.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/live.hpp"
 #include "datapump/runtime.hpp"
@@ -156,7 +157,7 @@ public:
         bind(source_,[this] { dirty_estimate(); update_controls(); });
         binary_label_=label("Binary / 0 bits",13,true);
         file_label_=label("Files in memory",13,true);
-        editor_=new ComposeEditor; editor_->buffer(&compose_); editor_->textfont(FL_HELVETICA); editor_->textsize(16);
+        editor_=new ComposeEditor; editor_->buffer(&compose_); editor_->textfont(gui::theme::font); editor_->textsize(16);
         editor_->wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
         editor_->ctrl_enter=[this] { return send_key_->value()==1; };
         editor_->transmit=[this] { guarded([this] { transmit(); }); };
@@ -239,6 +240,7 @@ public:
         window_->size_range(1030,786);
         window_->callback([](Fl_Widget*,void* context) { static_cast<App*>(context)->close(); },this);
         window_->on_resize=[this] { layout(); };
+        gui::theme::apply_widgets(*window_);
         layout(); encryption_changed();
         if (smoke_.enabled) compose_.text(smoke_text);
         qr_->text(buffer_text(compose_));
@@ -272,7 +274,7 @@ private:
     }
     Fl_Box* label(const char* text,int size,bool bold=false) {
         auto result=new Fl_Box(0,0,1,1,text); result->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
-        result->labelsize(size); if (bold) result->labelfont(FL_HELVETICA_BOLD); return result;
+        result->labelsize(size); result->labelfont(bold?gui::theme::bold_font:gui::theme::font); return result;
     }
     Fl_Input* input(const char* title,const char* value) {
         auto result=new Fl_Input(0,0,1,1,title); result->value(value); result->textsize(13); return result;
@@ -440,6 +442,7 @@ private:
     }
     std::optional<std::filesystem::path> choose_path(bool create,const char* title,const char* suggested=".") {
         Fl_File_Chooser chooser(suggested,"*",create?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,title);
+        chooser.textfont(gui::theme::font); chooser.textcolor(gui::theme::fltk_color(gui::theme::text));
         chooser.preview(0); chooser.show();
         while (chooser.shown()) Fl::wait();
         if (closing_ || !chooser.value()) return std::nullopt;
@@ -1332,8 +1335,8 @@ int main(int argc,char** argv) {
         for (int i=1;i<argc;++i) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
-            if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<'\n'; return 0; }
-            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
+            if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<" (backend: "<<DATAPUMP_GUI_BACKEND<<")\n"; return 0; }
+            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nGUI backend: "<<DATAPUMP_GUI_BACKEND<<" (selected at build time)\nUsage: datapump-gui [--version] [--help] [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);
             else if (argument=="--smoke-hold" && i+1<argc) { smoke.hold_seconds=number(argv[++i],"Smoke hold"); if (smoke.hold_seconds<0 || smoke.hold_seconds>60) throw Error("Smoke hold must be 0..60 seconds"); }
@@ -1353,7 +1356,7 @@ int main(int argc,char** argv) {
             else throw Error("Unknown or incomplete GUI argument: "+argument);
         }
         if (smoke.enabled && smoke.directory.empty()) smoke.directory=std::filesystem::temp_directory_path()/("datapump-native-smoke-"+std::to_string(Steady::now().time_since_epoch().count()));
-        Fl::scheme("gtk+"); Fl::visual(FL_DOUBLE|FL_RGB);
+        gui::theme::apply_palette(); Fl::visual(FL_DOUBLE|FL_RGB);
         App app(std::move(smoke)); return app.run();
     } catch (const std::exception& error) { std::cerr<<"datapump-gui: "<<error.what()<<'\n'; return 1; }
 }

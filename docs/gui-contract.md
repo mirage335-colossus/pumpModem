@@ -1,7 +1,8 @@
 # Proposed minimal GUI contract
 
-Status: design draft. These declarations, backends, and switches are proposed;
-the application currently uses FLTK. The common API declares semantic controls:
+Status: the single-backend build option and shared monochrome FLTK theme are
+implemented. The semantic declarations and alternative adapters below remain a
+design draft; the application currently uses FLTK. The common API declares semantic controls:
 choices/dropdowns, tabs, text fields, actions, and lists. Adapters map them to
 existing backend widgets. Bitmap output is a separate path for plots and images.
 
@@ -33,30 +34,54 @@ needed. One short screen declaration should show its hierarchy and bindings.
 | Tabs | Display one named page; pages have IDs and titles. |
 | Scroll | Provide vertical scrolling for one child. |
 
+## Consistent presentation
+
+Every backend follows the same early-computing instrument-panel style: black
+backgrounds, grey reference marks, bright data, monospaced labels, square borders,
+compact spacing, and explicit text status. The intensity roles are defined once
+in `src/gui/theme.hpp`; adapters map them through existing widget styling. A
+monochrome terminal may use stippling or reverse video where grey is unavailable.
+Focus and selection remain clearly visible through the backend's usual behavior.
+
+The style applies to controls as well as plots, without recreating controls in a
+shared framebuffer. No decorative motion, glow, shadows, or animated ticker is
+required. A waterfall advances only to display signal history. QR codes retain
+black modules on a white background. Signed data needs an explicit midpoint or
+other distinguishable marks and a legend; status never depends on color alone.
+Physical glyph shapes and native popup details may differ while retaining these
+presentation rules. A control declaration does not repeat styling properties.
+
+## Screen declaration
+
 An illustrative declaration, not an implemented API:
 
 ```cpp
 page(Page::console, "Console",
   column(
     row(
-      choice(Id::source, "Source", State::source, Options::sources),
-      text(Id::bandwidth, "Bandwidth", State::bandwidth,
+      choice(Field::source, "Source", Options::sources),
+      text(Field::bandwidth, "Bandwidth",
            suggestions(Options::bandwidths))),
-    text(Id::message, "Message", State::message, multiline(6)),
+    text(Field::message, "Message", multiline(6)),
     row(
-      action(Id::transmit, "Transmit", Command::transmit),
-      action(Id::cancel, "Cancel TX", Command::cancel)),
-    bitmap(Id::waveform, PixelSource::waveform, grow(1))))
+      action(Command::transmit, "Transmit"),
+      action(Command::cancel, "Cancel TX")),
+    bitmap(PixelSource::waveform, grow(1))))
 ```
 
 Reordering children moves controls. Bindings identify application values and
 commands; labels are literal text. A keyfile command menu is a presentation of
 Actions, not a Choice whose selected value unexpectedly executes a command.
+Ordinary control identity derives from its page, binding kind, and field/command/
+source ID. Do not repeat a separate widget ID for the same binding. Only a repeated
+binding within one page needs an explicit stable instance suffix. CLI settings
+reuse field metadata, defaults, and parsers independently of page identity.
 
 ## Behavior that every adapter preserves
 
-1. **Stable identity.** Controls, options, pages, and list records have explicit
-   IDs. Labels, positions, and array indices never identify application values.
+1. **Stable identity.** Controls derive stable IDs from their bindings as above;
+   options, pages, and list records have explicit IDs. Labels, positions, and
+   array indices never identify application values.
    Duplicate IDs in their declared scope are errors. Literal labels must not be
    interpreted as toolkit menu paths, accelerators, or formatting syntax.
 2. **State and input.** Application state is authoritative. Applying state never
@@ -157,9 +182,13 @@ void blit(Id bitmap, unsigned x, unsigned y, PixelBlock block);
   it before returning; asynchronous hardware transfers use backend-owned bounded
   storage or finish before return.
 - On repaint, the backend supplies the actual bitmap width/height and damaged
-  rectangle. Shared code renders that region using one consistent plot snapshot,
-  and emits one or more pixel blocks. Resize or exposure can request a complete
-  repaint. Retain enough source/history to regenerate it.
+  rectangle, sample aspect ratio, and whether output is monochrome. Shared code
+  uses these to preserve I/Q geometry and choose visible reference marks, renders
+  that region using one consistent plot snapshot, and emits one or more pixel
+  blocks. Resize or exposure can request a complete repaint. Retain enough
+  source/history to regenerate it. A terminal adapter requests damage aligned to
+  complete character cells, or retains the other samples of partially updated
+  cells. It declares its cell geometry instead of assuming square samples.
 
 A pixel block can be the entire image, a tile, or one scanline. A permanent full
 framebuffer and atomic whole-frame presentation are not requirements. For a
@@ -182,29 +211,38 @@ Zoom, reset, clear, and diagram navigation use ordinary controls, keeping Bitmap
 output-only. Shared code may rasterize additional static images through the same
 pixel contract without adding backend methods.
 
-## Backends and command-line selection
+## One backend per build
 
 Candidate adapters are FLTK, wxWidgets, LVGL, ncurses, HTML/JavaScript, SDL with
 an existing widget library, and a primitive-only MCU adapter. All expose the
 same semantic contract. A browser adapter's hosting/transport is a separate
 implementation decision; it does not introduce a second UI definition.
 
-Proposed initial GUI switches:
+The implemented CMake cache option selects exactly one backend:
 
-```text
-datapump-gui --list-gui-backends
-datapump-gui --gui-backend=wx --gui-layout=desktop
-datapump-gui --gui-backend=sdl --gui-layout=compact
-datapump-gui --gui-backend=ncurses --gui-layout=compact
+```sh
+cmake -S . -B build-native -DDATAPUMP_GUI_BACKEND=fltk
+cmake --build build-native --target datapump-gui
+./build-native/datapump-gui --version
 ```
 
-Only compiled adapters appear in the list. An unavailable explicit backend or
-unsupported layout fails with a clear error and available choices. Omitting the
-backend selects the build's documented default. Parse help and selection before
-initializing any GUI library. Small builds can include exactly one adapter;
-desktop builds can offer several through the same switches. Runtime plugin
-loading is unnecessary. MCU firmware can select the same defaults at build time
-when there is no command line.
+`fltk` is the default and currently the only implemented value. An empty,
+multiple, or unavailable selection fails configuration with the available choice.
+`DATAPUMP_BUILD_GUI=OFF` skips the backend and its dependencies altogether.
+Backend-independent GUI model tests remain available in CLI-only builds.
+
+`cmake/NativeGui.cmake` dispatches only the selected backend; its module owns its
+toolkit configuration, sources, libraries, and notices. Each build directory
+contains at most one GUI backend, including desktop builds. No runtime selector,
+backend registry, or plugin loader is needed. `--help` and `--version` identify
+the compiled backend. Future runtime settings can choose page, layout, or plot
+cadence within that backend, but cannot switch toolkits.
+
+Use one default backend for each supported platform/profile and separate build
+directories for exceptional targets. Keep FLTK for the current desktop Linux and
+Windows releases; ncurses is the proposed SSH profile, and LVGL is a candidate
+for framebuffer/MCU targets. An SDL profile must name its accompanying widget
+library. These alternatives are not currently buildable.
 
 The initial supported rendering configuration should avoid application GL/EGL
 contexts. For the SDL window-surface path, disable
@@ -229,7 +267,9 @@ Test stable selection after reorder/removal,
 literal labels, silent state updates, explicit acknowledgement, text submission,
 visibility, and unavailable backend handling. Check pixel formats, 1:1 placement,
 buffer lifetimes, and identical complete-image versus tiled repaint output.
-Freeze the first contract only after both adapters demonstrate the same semantics.
+Freeze the first contract only after both adapters demonstrate the same semantics
+in separate builds. The source review and staged extraction plan are in
+[GUI architecture](gui-architecture.md).
 
 Keep the declaration vocabulary and one complete example together in a short
 public header. Separate the screen declarations, application action/state

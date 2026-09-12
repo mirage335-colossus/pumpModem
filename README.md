@@ -335,10 +335,19 @@ by the Linux test environment. MSVC builds embed a UTF-8 process manifest for
 Windows10 version1903 or newer; non-ASCII paths on older Windows are unsupported.
 `DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. CMake installation
 and CPack TGZ/ZIP archives include both native executables and collected runtime
-libraries. Use `-DDATAPUMP_BUILD_GUI=OFF` for a CLI-only build, or
+libraries. `-DDATAPUMP_GUI_BACKEND=fltk` selects the single compiled GUI backend;
+FLTK is currently the default and only implemented choice. Unsupported or multiple
+selections fail configuration. `datapump-gui --version` reports the compiled
+backend. Use `-DDATAPUMP_BUILD_GUI=OFF` for a CLI-only build, or
 `-DCMAKE_DISABLE_FIND_PACKAGE_Python3=TRUE` to disable the optional Python tests.
 See [offline installation](docs/offline-installation.md) for copy and verification
 commands.
+
+The GUI uses a shared monochrome instrument-panel style: fixed-width text, flat
+borders, grayscale plots, and explicit status labels. See the
+[minimal GUI contract](docs/gui-contract.md) and [architecture review](docs/gui-architecture.md)
+for the semantic widget interface and staged migration plan. Alternative adapters
+and the full declarative interface remain proposed work.
 
 The source is separated into packet coding, cryptography, DSP/WAV, audio devices,
 runtime policy, a shared transfer service, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),

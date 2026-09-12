@@ -1,6 +1,7 @@
 #pragma once
 #include "state.hpp"
 #include "plot_data.hpp"
+#include "theme_fltk.hpp"
 #include "datapump/qr.hpp"
 #include <FL/Fl.H>
 #include <FL/Fl_Double_Window.H>
@@ -31,7 +32,8 @@ public:
     bool ready() const { return code_.has_value(); }
 private:
     void draw() override {
-        fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),FL_WHITE);
+        fl_color(FL_WHITE); fl_rectf(x(),y(),w(),h());
+        fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
         if (code_) {
             const int size=code_->size()+8;
             const int pitch=std::max(1,std::min(w()-8,h()-8)/size);
@@ -41,7 +43,7 @@ private:
                 for (int col=0;col<code_->size();++col)
                     if (code_->dark(col,row)) fl_rectf(left+col*pitch,top+row*pitch,pitch,pitch);
         } else if (!message_.empty()) {
-            fl_color(FL_DARK2); fl_font(FL_HELVETICA,12);
+            fl_color(FL_BLACK); fl_font(theme::font,12);
             fl_draw(message_.c_str(),x()+8,y()+8,w()-16,h()-16,FL_ALIGN_CENTER|FL_ALIGN_WRAP);
         }
     }
@@ -90,7 +92,7 @@ public:
                 "Data: percentage of encoded body bits correct before error correction,\n"
                 "measured only after full packet verification. Includes metadata, compressed\n"
                 "content and integrity tag; excludes the bootstrap header and parity.\n"
-                "Green rows are verified; click verified text to copy. Files use the file list.\n"
+                "Rows marked verified passed verification; click verified text to copy. Files use the file list.\n"
                 "Binary rows are raw received bits without preamble, FEC or integrity checks.\n"
                 "Click completed binary rows to copy all bits; a prefix is not copyable.");
     }
@@ -114,34 +116,38 @@ private:
         return signals_.lines().size()>visible?signals_.lines().size()-visible:0;
     }
     void draw() override {
-        fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),fl_rgb_color(15,24,34));
-        fl_font(FL_COURIER,14);
+        fl_color(theme::fltk_color(theme::background)); fl_rectf(x(),y(),w(),h());
+        fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
+        fl_font(theme::font,14);
         if (signals_.lines().empty()) {
-            fl_color(fl_rgb_color(132,151,164));
+            fl_color(theme::fltk_color(theme::muted));
             fl_draw("Listening for signals...",x()+15,y()+h()/2);
             return;
         }
-        const auto age=std::chrono::duration<double>(std::chrono::steady_clock::now()-started_).count();
         const auto first=first_line();
         for (std::size_t index=first;index<signals_.lines().size();++index) {
             const auto& line=signals_.lines()[index];
             const int top=y()+7+static_cast<int>(index-first)*row_height;
-            const int left=x()+174,right=x()+w()-10;
+            const int left=x()+194,right=x()+w()-10;
             std::ostringstream caption; caption<<static_cast<int>(std::lround(line.frequency_hz))<<" Hz";
-            fl_color(line.binary?(line.complete?fl_rgb_color(135,190,237):fl_rgb_color(232,182,91)):
-                     line.validated?fl_rgb_color(116,219,186):fl_rgb_color(232,182,91));
-            fl_font(FL_HELVETICA_BOLD,12); fl_draw(caption.str().c_str(),x()+11,top+14);
-            fl_font(FL_HELVETICA,10); fl_draw(signal_status_label(line).c_str(),x()+101,top+14);
-            fl_font(FL_HELVETICA,11);
+            fl_color(theme::fltk_color((line.binary?line.complete:line.validated)?theme::text:theme::muted));
+            fl_font(theme::bold_font,12); fl_draw(caption.str().c_str(),x()+11,top+14);
+            fl_font(theme::font,10); fl_draw(signal_status_label(line).c_str(),x()+101,top+14);
+            fl_font(theme::font,11);
             fl_draw(signal_preamble_label(line).c_str(),x()+11,top+29);
             fl_draw(signal_data_label(line).c_str(),x()+11,top+44);
-            fl_push_clip(left,top,right-left,row_height-1);
-            fl_font(FL_COURIER,15);
+            fl_push_clip(left,top,std::max(0,right-left),row_height-1);
+            fl_font(theme::font,15);
             const auto text=display_label(line.text);
+            int text_x=left;
             const auto text_width=fl_width(text.c_str());
-            const auto travel=std::max(1.0,text_width+static_cast<double>(right-left));
-            const auto offset=std::fmod(age*42.0+static_cast<double>(index)*31.0,travel);
-            const int text_x=right-static_cast<int>(offset);
+            if(text_width>right-left) {
+                // Preserve access to long pending text until a semantic detail
+                // view replaces this widget. Short rows need no motion.
+                const auto age=std::chrono::duration<double>(std::chrono::steady_clock::now()-started_).count();
+                const auto travel=std::max(1.0,text_width+static_cast<double>(right-left));
+                text_x=right-static_cast<int>(std::fmod(age*42.0+static_cast<double>(index)*31.0,travel));
+            }
             fl_draw(text.c_str(),text_x,top+31);
             fl_pop_clip();
         }
@@ -154,7 +160,7 @@ private:
 class Waterfall : public Fl_Widget {
 public:
     Waterfall() : Fl_Widget(0,0,1,1) {
-        tooltip("Peak FFT level with a shared color scale. Click to clear history and reset the scale.");
+        tooltip("Peak FFT level on one shared grayscale: black is quiet, white is loud. Click to clear history and reset the scale.");
     }
     void clear() { history_.clear(); overview_=false; ++revision_; redraw(); }
     int handle(int event) override {
@@ -177,9 +183,11 @@ public:
 private:
     static unsigned char channel(double value) { return static_cast<unsigned char>(std::clamp(value,0.0,1.0)*255); }
     void draw() override {
-        fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),fl_rgb_color(9,15,24));
+        fl_color(theme::fltk_color(theme::background)); fl_rectf(x(),y(),w(),h());
+        fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
         const int width=std::max(1,w()-4),height=std::max(1,h()-24);
-        std::vector<unsigned char> pixels(static_cast<std::size_t>(width*height*3),0);
+        pixels_.resize(static_cast<std::size_t>(width)*static_cast<std::size_t>(height));
+        std::fill(pixels_.begin(),pixels_.end(),0);
         const auto& rows=history_.rows();
         for (int py=0;py<height;++py) {
             const int source=overview_?static_cast<int>(static_cast<std::size_t>(py)*rows.size()/static_cast<std::size_t>(height)):
@@ -188,20 +196,19 @@ private:
             const auto& row=rows[static_cast<std::size_t>(source)];
             for (int px=0;px<width;++px) {
                 const double value=history_.intensity(row[static_cast<std::size_t>(px)*row.size()/static_cast<std::size_t>(width)]);
-                const auto offset=static_cast<std::size_t>((py*width+px)*3);
-                pixels[offset]=channel(3*value-1.2);
-                pixels[offset+1]=channel(3*value-1.8);
-                pixels[offset+2]=channel(value<.65?2.4*value:2.4-2.3*value);
+                const auto offset=static_cast<std::size_t>(py)*static_cast<std::size_t>(width)+static_cast<std::size_t>(px);
+                pixels_[offset]=channel(value);
             }
         }
-        fl_draw_image(pixels.data(),x()+2,y()+2,width,height,3);
-        fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(176,193,202)); fl_draw("0 Hz",x()+7,y()+h()-7);
+        fl_draw_image(pixels_.data(),x()+2,y()+2,width,height,1);
+        fl_font(theme::font,11); fl_color(theme::fltk_color(theme::muted)); fl_draw("0 Hz",x()+7,y()+h()-7);
         std::ostringstream legend; legend<<history_.lower_db()<<".."<<history_.upper_db()<<" dBFS peak";
         fl_draw(legend.str().c_str(),x()+(w()-static_cast<int>(fl_width(legend.str().c_str())))/2,y()+h()-7);
         std::ostringstream end; end<<static_cast<int>(history_.max_hz())<<" Hz";
         fl_draw(end.str().c_str(),x()+w()-static_cast<int>(fl_width(end.str().c_str()))-8,y()+h()-7);
     }
     plots::SpectrumHistory history_;
+    std::vector<unsigned char> pixels_;
     std::uint64_t revision_=0;
     bool overview_=false;
 };
@@ -229,7 +236,8 @@ public:
     const std::vector<std::complex<double>>& points() const { return constellation_; }
 private:
     void draw() override {
-        fl_draw_box(FL_DOWN_BOX,x(),y(),w(),h(),fl_rgb_color(15,24,34));
+        fl_color(theme::fltk_color(theme::background)); fl_rectf(x(),y(),w(),h());
+        fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
         const int left=x()+8,top=y()+8,width=w()-16,height=h()-16;
         fl_push_clip(left,top,width,height);
         if (is_constellation_) {
@@ -242,7 +250,7 @@ private:
             // Actual symbol levels have a nominal peak below one. Do not
             // stretch one observed inner ring into the apparent outer ring.
             if (symbols_) scale=std::max(1.,std::ceil(scale*2)/2);
-            fl_color(fl_rgb_color(70,91,108));
+            fl_color(theme::fltk_color(theme::grid));
             fl_line(left,center_y,left+width,center_y); fl_line(center_x,top,center_x,top+height);
             for (double fraction:{.5,1.0}) {
                 const auto ring=static_cast<int>(radius*fraction);
@@ -254,10 +262,9 @@ private:
                 if (!std::isfinite(point.real()) || !std::isfinite(point.imag())) continue;
                 const int px=center_x+static_cast<int>(point.real()/scale*radius);
                 const int py=center_y-static_cast<int>(point.imag()/scale*radius);
-                fl_color(fl_rgb_color(18,72,70)); fl_pie(px-3,py-3,7,7,0,360);
-                fl_color(fl_rgb_color(133,255,222)); fl_pie(px-2,py-2,5,5,0,360);
+                fl_color(theme::fltk_color(theme::accent)); fl_rectf(px-1,py-1,2,2);
             }
-            fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(209,222,232));
+            fl_font(theme::font,11); fl_color(theme::fltk_color(theme::text));
             fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
             std::ostringstream amplitude; amplitude<<std::setprecision(2)<<scale/2<<" / "<<scale<<" amplitude";
             fl_draw(amplitude.str().c_str(),left+3,top+height-1);
@@ -274,8 +281,8 @@ private:
                                                            view.size(),static_cast<std::size_t>(std::max(1,width)));
             const auto trace_height=height-17;
             const auto mid=top+trace_height*.5;
-            fl_color(fl_rgb_color(53,71,85)); fl_line(left,static_cast<int>(mid),left+width,static_cast<int>(mid));
-            fl_color(fl_rgb_color(91,216,202));
+            fl_color(theme::fltk_color(theme::grid)); fl_line(left,static_cast<int>(mid),left+width,static_cast<int>(mid));
+            fl_color(theme::fltk_color(theme::accent));
             double scale=1e-12;
             for (auto value:waveform_) scale=std::max(scale,std::abs(static_cast<double>(value)));
             for (auto value:trace) scale=std::max(scale,std::abs(value));
@@ -304,7 +311,7 @@ private:
             std::ostringstream caption;
             caption<<std::setprecision(3)<<seconds*(seconds<.001?1e6:1000)<<(seconds<.001?" us":" ms")
                    <<" / "<<view.size()<<" samples"<<(trace.empty()?"":" / reconstructed");
-            fl_font(FL_HELVETICA,11); fl_color(fl_rgb_color(176,193,202));
+            fl_font(theme::font,11); fl_color(theme::fltk_color(theme::muted));
             fl_draw(caption.str().c_str(),left+2,top+height-1);
         }
         fl_pop_clip();

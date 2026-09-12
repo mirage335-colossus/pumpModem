@@ -3,6 +3,40 @@
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
+## Single-backend configuration and monochrome GUI
+
+The GUI rebuilt in Release and ASan/UBSan configurations. All five focused GUI
+model/self-check suites passed in each configuration; all four toolkit-independent
+GUI suites also built and passed in a fresh CLI-only configuration.
+
+Fresh configuration accepted the default and explicit `fltk` selection and
+rejected empty, multiple, and unimplemented selections. GUI-off configuration
+skipped FLTK even with an unavailable backend value. The CLI-only executable
+built and ran `--help` with shared OpenSSL: this host's separate static OpenSSL
+installation lacks its required zstd link dependency without the existing local
+development support setup. The dependency policy was not changed.
+
+The Release GUI workflow passed on a private 1440-by-1100 virtual display,
+covering keyfile operations, transmission, exact binary reception, clipboard/save,
+replay, three tabs, resizing and complete diagram scrolling. Console and modem-flow
+layouts were inspected visually. Dynamic dependencies contained no GL/EGL,
+GTK/GLib, Cairo, or Pango library. `--help` and `--version` reported `fltk`.
+
+The sanitizer workflow passed its behavior checks. An initial run with leak
+detection enabled reported 41,319 bytes of Fontconfig allocations at shutdown;
+the model/self-check suites passed with leak detection enabled outside the
+sandbox. The GUI workflow was repeated using the existing CI setting
+`ASAN_OPTIONS=detect_leaks=0`, retaining address and undefined-behavior checks.
+After restoring scrolling for overflowing signal text, a later sanitizer run
+timed out during the file-transfer stage despite the earlier completed workflows.
+An unchanged-binary retry completed with exit status zero. The cause of the
+intermittent timeout was not established. The final Release model/self-check
+rerun passed all five suites; those checks do not cover this workflow failure.
+
+This validates the current FLTK implementation, not a second adapter or MCU
+deployment. The controller/declaration/bitmap extraction remains proposed work.
+Windows, physical audio, and representative slow hardware were not exercised.
+
 ## Version 0.7.2 static full-pattern inspection
 
 The standalone Constellations tab is removed. Modem flow now displays all legal
