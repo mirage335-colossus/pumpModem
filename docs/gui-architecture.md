@@ -119,9 +119,10 @@ Color is enabled by default when supported. `--monochrome` selects grayscale;
 field values, waveform traces, and every constellation point the same fixed cyan
 tint. Reference marks, status,
 QR codes, and signed pattern diagrams remain grayscale. The waterfall uses a
-fixed black-blue-cyan-mint-white lookup table over the same Gray8 intensities;
-each RGB channel is nondecreasing. FLTK converts requested image rows through a
-callback, retaining the Gray8 buffer without a second full RGB framebuffer.
+fixed multihue lookup table over the same Gray8 intensities: black, dark blue,
+blue, cyan, green, yellow, orange, red, then white. FLTK converts requested image
+rows through a callback, retaining the Gray8 buffer without a second full RGB
+framebuffer.
 
 Color adds no control kinds, IDs, bindings, or per-element properties. The
 proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional

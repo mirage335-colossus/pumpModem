@@ -160,7 +160,7 @@ private:
 class Waterfall : public Fl_Widget {
 public:
     Waterfall() : Fl_Widget(0,0,1,1) {
-        tooltip("Peak FFT level on one shared intensity scale: black is quiet, white is loud. Optional color follows the same scale. Click to clear history and reset the scale.");
+        tooltip("Peak FFT level on one shared intensity scale: black is quiet, white is loud. Color progresses through blue, cyan, green, yellow, orange and red to white. Click to clear history and reset the scale.");
     }
     void clear() { history_.clear(); overview_=false; ++revision_; redraw(); }
     int handle(int event) override {

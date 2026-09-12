@@ -57,8 +57,9 @@ waveform, and all constellation points with one fixed cyan hue. `--monochrome` s
 grayscale; `--color` re-enables color, and the last of these switches wins.
 Reference marks, status labels,
 QR codes, and signed pattern diagrams remain grayscale. The waterfall maps its
-unchanged intensity values through one fixed black-blue-cyan-mint-white lookup
-table whose RGB channels never decrease as intensity rises. Color adds no
+unchanged intensity values through one fixed multihue lookup table: black, dark
+blue, blue, cyan, green, yellow, orange, red, then white. Grayscale retains the
+original scalar intensities rather than desaturating this palette. Color adds no
 control kind, binding, ID, or per-element property. It is a global presentation
 preference. FLTK enables it only when an RGB visual is available; other displays
 retain the grayscale path. Future targets without color support likewise retain

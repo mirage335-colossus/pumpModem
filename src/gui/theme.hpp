@@ -15,16 +15,17 @@ inline constexpr std::uint8_t accent = 255;
 struct Rgb { std::uint8_t red, green, blue; };
 inline constexpr Rgb data_tint{128, 255, 224};
 
-// Optional false color uses the same scalar intensity as grayscale. Every
-// channel is nondecreasing: brighter input never becomes darker in the ramp.
+// Multihue false color maps the same scalar intensity as grayscale. Grayscale
+// output uses that original intensity, never a desaturation of this palette.
 inline constexpr auto waterfall_palette = [] {
-    constexpr std::array<Rgb, 5> stops{{
-        {0, 0, 0}, {0, 32, 96}, {0, 160, 192}, {128, 224, 224}, {255, 255, 255}
+    constexpr std::array<Rgb, 9> stops{{
+        {0, 0, 0}, {0, 0, 128}, {0, 64, 255}, {0, 224, 255}, {0, 224, 64},
+        {224, 224, 0}, {255, 128, 0}, {255, 0, 0}, {255, 255, 255}
     }};
     std::array<Rgb, 256> colors{};
     for (unsigned i = 0; i < colors.size(); ++i) {
-        const unsigned segment = i / 64, offset = i % 64;
-        const unsigned span = segment == 3 ? 63 : 64;
+        const unsigned segment = i / 32, offset = i % 32;
+        const unsigned span = segment == 7 ? 31 : 32;
         const auto blend = [=](std::uint8_t a, std::uint8_t b) {
             return static_cast<std::uint8_t>((a * (span - offset) + b * offset) / span);
         };

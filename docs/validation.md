@@ -3,6 +3,19 @@
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
+## Multihue waterfall
+
+The waterfall now uses blue, cyan, green, yellow, orange and red between black
+and white. Only the shared 256-entry lookup table and its descriptions changed;
+the existing RGB row conversion, grayscale intensities, and control interface
+remain unchanged.
+
+All five Release GUI/model suites passed. An ASan/UBSan rendering harness
+verified 89,050 clipped waterfall pixels across 213 intensity levels, distinct
+blue/green/red regions, unchanged grayscale pixels against the previous render,
+and unchanged uniformly tinted constellation points. The multihue output was
+also inspected visually.
+
 ## Optional color presentation
 
 Color is now enabled by default when an RGB visual is available. `--monochrome`
@@ -19,7 +32,8 @@ An isolated rendering harness exercised the actual FLTK fields, waveform,
 constellation, and waterfall widgets under ASan/UBSan with the CI leak-detection
 setting. Pixel comparison verified 89,050 clipped waterfall pixels over 213
 intensity levels against the shared palette, and identical constellation-point
-positions with one uniform tint. All palette channels were nondecreasing.
+positions with one uniform tint. The initial cyan/mint palette had nondecreasing
+channels; the later multihue palette above intentionally varies hue instead.
 Both presentations were visually inspected. On an isolated 8-bit display without
 a suitable RGB visual, a color request produced an entirely grayscale image.
 The waterfall retains its Gray8 buffer and converts color rows only when enabled.

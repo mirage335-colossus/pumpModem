@@ -158,12 +158,14 @@ retains every FFT bin through peak pooling and uses one labeled intensity scale 
 its entire history. Click it to clear the history and reset that scale.
 
 Color is enabled by default when supported: cyan data field values, waveform
-traces, and constellation points, plus a black-blue-cyan-mint-white waterfall.
+traces, and constellation points, plus a multihue waterfall progressing from
+black through dark blue, blue, cyan, green, yellow, orange, and red to white.
 Every constellation point uses the same hue. Reference marks, status labels,
 QR codes, and signed pattern diagrams stay grayscale. Run
 `datapump-gui --monochrome` for grayscale; `--color` re-enables color, and the last
-of these switches wins. Color changes presentation only, using the same measured
-waterfall intensities. If FLTK cannot select an RGB visual, it uses grayscale.
+of these switches wins. Color changes presentation only. Grayscale uses the
+original measured waterfall intensities, not desaturated false color. If FLTK
+cannot select an RGB visual, it uses grayscale.
 
 Use the source selector above the editors to choose Message/File or Binary.
 Binary accepts a few bits such as `001`, without converting them into a text
