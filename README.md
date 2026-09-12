@@ -161,11 +161,17 @@ Color is enabled by default when supported: muted cyan data field values, wavefo
 traces, and constellation points, softer gray text, and a subdued multihue waterfall
 progressing from black through dark blue, blue, cyan, green, yellow, orange, and
 red to soft off-white. Every constellation point uses the same hue. Reference
-marks, status labels, QR codes, and signed pattern diagrams stay grayscale. Run
+marks, status labels, and signed pattern diagrams stay grayscale. Run
 `datapump-gui --monochrome` for grayscale; `--color` re-enables color, and the last
 of these switches wins. Color changes presentation only. Grayscale uses the
 original measured waterfall intensities and original text contrast, not
 desaturated false color. If FLTK cannot select an RGB visual, it uses grayscale.
+
+The dropdown above the QR preview offers **Normal**, **Dim red**, **Dark red**,
+and **Off**. The dim settings replace the bright white QR background with dark
+red; Off makes the preview black. Only the QR preview changes, and the selection
+is kept while you edit the message. Monochrome displays offer Dim gray and Dark
+gray instead. Choose Normal to restore the full-contrast QR code for scanning.
 
 Use the source selector above the editors to choose Message/File or Binary.
 Binary accepts a few bits such as `001`, without converting them into a text

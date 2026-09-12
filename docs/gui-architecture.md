@@ -111,7 +111,7 @@ explicitly reduced fidelity, while controls remain native terminal text.
 The grayscale basis uses shared intensity roles, monospaced fonts, flat
 borders, stationary short signal rows, small white constellation marks, and a reusable
 one-byte-per-pixel waterfall buffer. Signed pattern cells use a bipolar grayscale
-and revised legends so removing hue does not remove sign. QR contrast is retained.
+and revised legends so removing hue does not remove sign. Normal QR contrast is retained.
 Native widgets continue to handle input and editing.
 
 Color is enabled by default when supported. `--monochrome` selects grayscale;
@@ -119,13 +119,20 @@ Color is enabled by default when supported. `--monochrome` selects grayscale;
 field values, waveform traces, and every constellation point the same fixed muted
 cyan tint, and softens neutral text through the adapter's text role. The original
 grayscale roles and scalar intensities remain unchanged. Reference marks, status,
-QR codes, and signed pattern diagrams remain grayscale. The waterfall uses a
+and signed pattern diagrams remain grayscale. The waterfall uses a
 fixed muted multihue lookup table over the same Gray8 intensities: black, dark blue,
 blue, cyan, green, yellow, orange, red, then soft off-white. FLTK converts requested
 image rows through a callback, retaining the Gray8 buffer without a second full
 RGB framebuffer.
 
-Color adds no control kinds, IDs, bindings, or per-element properties. The
+The QR preview has a separate brightness selection: Normal, Dim, Dark, or Off.
+Dim and Dark use backgrounds of RGB (64, 0, 0) and (24, 0, 0) when color is enabled,
+or grayscale levels 64 and 24 otherwise. Off paints the preview black. The choice
+persists across text edits without changing the encoded matrix, module geometry,
+or other widgets. Normal restores the original white background and gray border;
+dim previews omit the border to avoid a bright frame.
+
+Color rendering and the QR brightness choice use existing control kinds. The
 proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional
 packed RGB24. Its target capability defaults to false; shared producers emit
 RGB24 only when color is enabled and supported. Other targets keep the original

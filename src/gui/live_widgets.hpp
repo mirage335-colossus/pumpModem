@@ -19,7 +19,10 @@
 namespace datapump::gui::widgets {
 class QrPreview : public Fl_Widget {
 public:
+    enum class Brightness { normal, dim, dark, off };
     QrPreview() : Fl_Widget(0,0,1,1) {}
+    void brightness(Brightness value) { brightness_=value; redraw(); }
+    Brightness brightness() const { return brightness_; }
     void text(std::string_view value) {
         code_.reset();
         message_="";
@@ -32,8 +35,16 @@ public:
     bool ready() const { return code_.has_value(); }
 private:
     void draw() override {
-        fl_color(FL_WHITE); fl_rectf(x(),y(),w(),h());
-        fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
+        const unsigned char level=brightness_==Brightness::dim?64:brightness_==Brightness::dark?24:0;
+        const auto background=brightness_==Brightness::normal?FL_WHITE:
+            theme::color_enabled?fl_rgb_color(level,0,0):theme::fltk_color(level);
+        fl_color(background); fl_rectf(x(),y(),w(),h());
+        // Avoid a bright frame around a dimmed or hidden preview. Dimming changes
+        // only the light modules and quiet zone; the encoded matrix stays intact.
+        if (brightness_==Brightness::normal) {
+            fl_color(theme::fltk_color(theme::grid)); fl_rect(x(),y(),w(),h());
+        }
+        if (brightness_==Brightness::off) return;
         if (code_) {
             const int size=code_->size()+8;
             const int pitch=std::max(1,std::min(w()-8,h()-8)/size);
@@ -49,6 +60,7 @@ private:
     }
     std::optional<QrCode> code_;
     std::string message_;
+    Brightness brightness_=Brightness::normal;
 };
 
 class ComposeEditor : public Fl_Text_Editor {

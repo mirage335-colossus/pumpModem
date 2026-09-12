@@ -46,8 +46,12 @@ Focus and selection remain clearly visible through the backend's usual behavior.
 
 The style applies to controls as well as plots, without recreating controls in a
 shared framebuffer. No decorative motion, glow, shadows, or animated ticker is
-required. A waterfall advances only to display signal history. QR codes retain
-black modules on a white background. Signed data needs an explicit midpoint or
+required. A waterfall advances only to display signal history. QR codes default to
+black modules on a white background. The QR brightness dropdown can dim that
+background and its quiet zone to dark red (gray in monochrome), or hide the
+preview on black. Black modules and their geometry are preserved; Normal restores
+full contrast for scanning. This control affects only the QR preview.
+Signed data needs an explicit midpoint or
 other distinguishable marks and a legend; status never depends on color alone.
 Physical glyph shapes and native popup details may differ while retaining these
 presentation rules. A control declaration does not repeat styling properties.
@@ -55,14 +59,13 @@ presentation rules. A control declaration does not repeat styling properties.
 Color is enabled by default when supported, tinting data field values, the
 waveform, and all constellation points with one fixed muted cyan hue; neutral
 text uses softer gray. `--monochrome` selects grayscale; `--color` re-enables color,
-and the last of these switches wins. Reference marks, status labels, QR codes,
+and the last of these switches wins. Reference marks, status labels,
 and signed pattern diagrams remain grayscale. The waterfall maps its
 unchanged intensity values through one fixed muted multihue lookup table: black,
 dark blue, blue, cyan, green, yellow, orange, red, then soft off-white. Grayscale
 retains the original scalar intensities and text contrast rather than desaturating
-this palette. Color adds no control kind, binding, ID, or per-element property.
-It is a global presentation
-preference. FLTK enables it only when an RGB visual is available; other displays
+this palette. The global color preference and the QR brightness choice use
+existing control kinds. FLTK enables color only when an RGB visual is available; other displays
 retain the grayscale path. Future targets without color support likewise retain
 grayscale or monochrome.
 

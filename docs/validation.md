@@ -3,6 +3,27 @@
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
+## QR preview brightness
+
+A dropdown above the QR preview selects Normal, Dim red, Dark red, or Off.
+Monochrome output uses gray dimming levels. The selection survives message edits
+and affects only the preview; Normal retains the original black-on-white rendering.
+The Release GUI rebuilt, and the QR suite plus all five focused GUI/model suites
+passed.
+
+An ASan/UBSan rendering harness (with `detect_leaks=0`) exercised the actual App
+dropdown callbacks at minimum, default, and enlarged window sizes. On a 24-bit
+display, Normal matched the previous QR rendering pixel for pixel; dimming
+preserved modules and quiet-zone geometry, and empty/error states stayed dim.
+Off remained entirely black while editing. The adjacent waterfall was
+unchanged in both color and monochrome. The minimum-size layout was inspected
+visually.
+
+On an 8-bit display without a suitable RGB visual, the actual App rendered only
+grayscale, with gray dropdown labels and working brightness callbacks. Strict
+waterfall pixel comparison was limited to 24-bit displays because colormap
+allocation changes quantization on the 8-bit display.
+
 ## Muted color presentation
 
 Color output now uses subdued cyan data text and traces, softer neutral labels,

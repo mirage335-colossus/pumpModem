@@ -177,6 +177,14 @@ public:
             static_cast<App*>(context)->binary_changed();
         },this);
         qr_=new QrPreview;
+        qr_brightness_=new Fl_Choice(0,0,1,1);
+        qr_brightness_->add(gui::theme::color_enabled?
+            "QR: Normal|QR: Dim red|QR: Dark red|QR: Off":"QR: Normal|QR: Dim gray|QR: Dark gray|QR: Off");
+        qr_brightness_->value(0); qr_brightness_->textsize(12);
+        qr_brightness_->tooltip("QR preview brightness only. Dim and Dark reduce the background; Off hides the preview. Choose Normal for scanning.");
+        bind(qr_brightness_,[this] {
+            qr_->brightness(static_cast<QrPreview::Brightness>(qr_brightness_->value()));
+        });
         attach_=button("Attach file",[this] { choose_attachment(); });
         use_text_=button("Use text",[this] { attachment_.reset(); attachment_path_.clear(); compose_label_->copy_label("Message"); dirty_estimate(); });
         send_key_=new Fl_Choice(0,0,1,1); send_key_->add("on Enter|on Ctrl+Enter"); send_key_->value(0);
@@ -229,7 +237,7 @@ public:
         transmission_scroll_=new Fl_Scroll(0,0,1,1,"Transmission layout"); transmission_scroll_->type(Fl_Scroll::VERTICAL_ALWAYS);
         transmission_diagram_=new InspectionDiagram(false); transmission_scroll_->end();
         tabs_->end();
-        for (auto* widget:std::initializer_list<Fl_Widget*>{compose_label_,source_,binary_label_,editor_,binary_editor_,qr_,
+        for (auto* widget:std::initializer_list<Fl_Widget*>{compose_label_,source_,binary_label_,editor_,binary_editor_,qr_,qr_brightness_,
                 attach_,use_text_,send_key_,transmit_,cancel_,airtime_,signal_label_,file_label_,signal_browser_,file_browser_,save_,
                 waterfall_label_,waveform_label_,constellation_label_,waterfall_,waveform_,constellation_}) console_->add(widget);
         tabs_->value(console_);
@@ -298,6 +306,7 @@ private:
         binary_label_->resize(binary_x,130,binary_width,20);
         editor_->resize(margin,compose_y,editor_width,compose_height);
         binary_editor_->resize(binary_x,compose_y,binary_width,compose_height);
+        qr_brightness_->resize(width-margin-qr_size,130,qr_size,20);
         qr_->resize(width-margin-qr_size,compose_y,qr_size,qr_size);
         const int buttons_y=compose_y+compose_height+8;
         attach_->resize(margin,buttons_y,169,29); use_text_->resize(194,buttons_y,78,29);
@@ -1282,7 +1291,7 @@ private:
     Fl_Output* fec_off_;
     Fl_Input_Choice *device_,*bandwidth_,*snr_;
     Fl_Check_Button* repeatable_;
-    Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_,*source_=nullptr;
+    Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_,*source_=nullptr,*qr_brightness_=nullptr;
     Fl_Button *clear_,*attach_,*use_text_,*transmit_,*cancel_,*save_;
     Fl_Menu_Button* key_browse_;
     Fl_Tabs* tabs_;
