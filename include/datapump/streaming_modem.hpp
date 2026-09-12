@@ -20,8 +20,11 @@ struct ConstellationBatch {
     std::uint64_t dropped = 0;
 };
 // Validation is deterministic for a given prefix within one receiver instance;
-// repeated identical rejected prefixes may reuse the previous verdict.
-using BootstrapValidator = std::function<bool(const Bytes&)>;
+// repeated identical prefixes may reuse the previous extent/rejection verdict.
+using BootstrapValidator = std::function<std::optional<std::size_t>(const Bytes&)>;
+// Exact complete packet bytes, without the synthetic training prefix. Short
+// frames remain provisional until their digest/MAC passes this callback.
+using PacketValidator = std::function<bool(const Bytes&)>;
 
 // Unframed binary input: one meaningful 0/1 bit per element, including leading
 // zeros. The final symbol uses only its actual number of remaining bits.
@@ -61,7 +64,7 @@ class StreamingReceiver {
 public:
     StreamingReceiver(Config config, Bytes expected_preamble,
                       std::size_t workspace_bytes = 8 * 1024 * 1024,
-                      BootstrapValidator validator = {});
+                      BootstrapValidator validator = {}, PacketValidator packet_validator = {});
     ~StreamingReceiver();
     StreamingReceiver(StreamingReceiver&&) noexcept;
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
@@ -69,14 +72,22 @@ public:
     // changing input kinds. Empty spans do not select an input kind.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
     Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
-    // End a finite capture with at most one symbol of silence, completing
-    // partial candidate integrals without adding transmitted framing/airtime.
+    // End a finite capture by completing only final integrals with at least
+    // 50% observed coverage; integrity validation resolves its decisions.
+    // Does not insert silence or extra data symbols.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
+    // A plausible short header is collecting, but is not yet verified/locked.
+    bool acquiring() const;
+    // Bounded, unverified encoded bytes from the best provisional fit. These
+    // are for a clearly tentative preview, never packet/file delivery.
+    Bytes provisional_frame() const;
     Diagnostics diagnostics() const;
-    // Empty until bootstrap validation selects the receive timing. The first
+    // Available for the best provisional fit while acquiring(), then for the
+    // validated receive timing after synchronization. The first
     // bootstrap symbol has no preceding received phase reference and is
     // excluded; subsequent points use the same reference as the decoder.
+    // Switching tentative fits does not replay already published samples.
     // Reset discards pending points and their overflow count.
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;

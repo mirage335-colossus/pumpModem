@@ -56,14 +56,10 @@ Options binary_options(std::span<const std::uint8_t> bits,const Options& options
     return result;
 }
 Estimate estimate_encoded(const Message& message, const Options& options, std::size_t frame_size) {
-    Message empty;
-    empty.kind = message.kind;
-    empty.filename = message.filename;
-    empty.callsign = message.callsign;
-    empty.grid = message.grid;
-    empty.repeatable = message.repeatable;
-    empty.id = message.id;
-    const auto overhead = encode_packet(empty, packet_options(options, options.timestamp), packet_budget(options)).size();
+    // Tiny actual packets use no FEC. A larger packet's hypothetical empty
+    // baseline must retain that larger packet's effective code, otherwise
+    // metadata parity would be wrongly charged as forwarded content.
+    const auto overhead=packet_empty_layout(message,options.fec).wire_bytes;
     Estimate result;
     result.packet_bytes = frame_size;
     result.content_bytes = frame_size > overhead ? frame_size - overhead : 0;
@@ -86,8 +82,9 @@ Estimate estimate_encoded(const Message& message, const Options& options, std::s
     try {
         // A real streaming receiver allocates only its finite hypothesis bank.
         // Check that same allocation contract, not the hypothetical PCM vector.
-        modem::StreamingReceiver probe(options.modem,modem::preamble(options.modem),options.dsp_workspace_bytes);
-        result.memory_supported = probe.working_bytes() <= options.dsp_workspace_bytes;
+        modem::StreamingReceiver probe(options.modem,modem::preamble(options.modem),
+            options.dsp_workspace_bytes-audio_validation_workspace);
+        result.memory_supported = probe.working_bytes()+audio_validation_workspace <= options.dsp_workspace_bytes;
     } catch (const Error&) {
         result.memory_supported = false;
     }
@@ -106,18 +103,10 @@ Bytes epoch_context(const Bytes& data, std::uint64_t timestamp) {
 modem::StreamingReceiver receiver(const Options& options,std::uint64_t timestamp) {
     const auto config=seeded_config(options,timestamp);
     auto expected=modem::preamble(config);
-    const auto limit=packet_budget(options);
     if(options.key)expected=options.key->xor_data(expected,timestamp);
-    const auto mask=audio_bootstrap_mask(options,timestamp);
-    return modem::StreamingReceiver(config,std::move(expected),options.dsp_workspace_bytes,
-        [mask,limit](const Bytes& bytes) {
-            try {
-                if(bytes.size()>mask.size())return false;
-                auto plain=bytes;
-                for(std::size_t i=0;i<plain.size();++i)plain[i]^=mask[i];
-                return packet_bootstrap_possible(plain,limit) && packet_frame_size(plain,limit).has_value();
-            } catch(const Error&) {return false;}
-        });
+    auto validators=audio_validators(options,timestamp);
+    return modem::StreamingReceiver(config,std::move(expected),options.dsp_workspace_bytes-audio_validation_workspace,
+        std::move(validators.bootstrap),std::move(validators.packet));
 }
 Received verified(Bytes wire,modem::Diagnostics diagnostics,const Options& options,std::uint64_t timestamp) {
     const auto training=modem::preamble(options.modem).size();
@@ -136,9 +125,10 @@ void append_wire(Bytes& target,const Bytes& bytes,const Options& options) {
 }
 std::optional<std::size_t> declared_wire_size(const Bytes& wire,const Options& options,std::uint64_t timestamp) {
     const auto training=modem::preamble(options.modem).size();
-    if(wire.size()<training+packet_prefix_size)return {};
+    if(wire.size()<=training)return {};
+    const auto available=std::min(wire.size()-training,packet_prefix_size);
     Bytes prefix(wire.begin()+static_cast<std::ptrdiff_t>(training),
-                 wire.begin()+static_cast<std::ptrdiff_t>(training+packet_prefix_size));
+                 wire.begin()+static_cast<std::ptrdiff_t>(training+available));
     xor_audio_whitening(prefix,training);
     const auto plain=options.key?options.key->xor_data(prefix,timestamp,training):prefix;
     const auto count=packet_frame_size(plain,packet_budget(options));
@@ -164,10 +154,34 @@ void xor_audio_whitening(std::span<std::uint8_t> bytes,std::uint64_t wire_offset
 }
 
 Bytes audio_bootstrap_mask(const Options& options,std::uint64_t timestamp) {
-    Bytes mask(packet_prefix_size);
+    Bytes mask(audio_validation_limit);
     xor_audio_whitening(mask,audio_training_bytes);
     if(options.key)mask=options.key->xor_data(mask,timestamp,audio_training_bytes);
     return mask;
+}
+
+AudioValidators audio_validators(const Options& options,std::uint64_t timestamp) {
+    const auto mask=std::make_shared<const Bytes>(audio_bootstrap_mask(options,timestamp));
+    const auto limit=packet_budget(options);
+    AudioValidators result;
+    result.bootstrap=[mask,limit](const Bytes& bytes)->std::optional<std::size_t> {
+        try {
+            if(bytes.size()>mask->size())return {};
+            auto plain=bytes;
+            for(std::size_t i=0;i<plain.size();++i)plain[i]^=(*mask)[i];
+            return packet_probe_frame_size(plain,limit);
+        } catch(const Error&) {return {};}
+    };
+    result.packet=[mask,limit,content_limit=options.content_limit,codec=packet_options(options,timestamp)](const Bytes& bytes) {
+        try {
+            if(bytes.size()>mask->size())return false;
+            auto plain=bytes;
+            for(std::size_t i=0;i<plain.size();++i)plain[i]^=(*mask)[i];
+            const auto decoded=decode_packet(plain,codec,limit);
+            return decoded.consumed_bytes==plain.size()&&decoded.message.data.size()<=content_limit;
+        } catch(const Error&) {return false;}
+    };
+    return result;
 }
 
 std::size_t packet_workspace_limit(std::size_t content_limit) {
@@ -209,8 +223,17 @@ modem::Config seeded_config(const Options& options, std::uint64_t timestamp) {
 }
 
 Estimate estimate(const Message& message, const Options& options) {
+    return estimate(message,options,nullptr);
+}
+
+Estimate estimate(const Message& message,const Options& options,PacketLayout* layout) {
     validate_message(message, options);
-    const auto frame_size = encode_packet(message, packet_options(options, options.timestamp), packet_budget(options)).size();
+    std::size_t frame_size=0;
+    {
+        const auto frame=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
+        frame_size=frame.size();
+        if(layout)*layout=packet_layout(frame,packet_budget(options));
+    }
     return estimate_encoded(message, options, frame_size);
 }
 

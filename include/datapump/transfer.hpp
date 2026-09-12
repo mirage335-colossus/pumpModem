@@ -41,6 +41,9 @@ struct Estimate {
 // Exact framing/compression/FEC size and actual quantized modem symbol timing;
 // allocates a packet, never a waveform. Does not enforce repeat_policy.
 Estimate estimate(const Message& message, const Options& options);
+// Optional numeric layout comes from that same encoded packet, avoiding a
+// second full content encoding when presenting a transmission inspection.
+Estimate estimate(const Message& message, const Options& options, PacketLayout* layout);
 // Raw binary has no training, framing, compression, FEC or authentication.
 // Input elements are individual 0/1 bits. Byte estimates are ceil(bits/8)
 // storage equivalents; only the supplied meaningful bits are modulated.
@@ -71,9 +74,20 @@ modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
 // include the fixed 32-byte training prefix, which is left untouched. Apply
 // after encryption on TX and before decryption on RX, with no added bytes.
 void xor_audio_whitening(std::span<std::uint8_t> bytes, std::uint64_t wire_offset = 0);
-// Combined public whitening/private data-stream mask for the protected frame
-// bootstrap. Cache once per receiver candidate; no per-trial crypto setup.
+// Combined public whitening/private data-stream mask for the bounded bootstrap
+// and provisional whole-frame checks. Cache once per receiver; no per-trial
+// crypto setup. The mask is not transmitted and adds no frame bytes.
+inline constexpr std::size_t audio_validation_limit = 2048;
+inline constexpr std::size_t audio_validation_workspace = audio_validation_limit + 4096;
 Bytes audio_bootstrap_mask(const Options& options, std::uint64_t timestamp);
+struct AudioValidators {
+    modem::BootstrapValidator bootstrap;
+    modem::PacketValidator packet;
+};
+// Both callbacks own their key/mask and inspect bytes following training.
+// Bootstrap returns the declared whole-frame extent; packet requires full
+// integrity/authentication and checks the admitted original-content limit.
+AudioValidators audio_validators(const Options& options, std::uint64_t timestamp);
 Bytes pack(const Message& message, const Options& options);
 Bytes transmission_wire(const Message& message, const Options& options);
 DecodedPacket unpack(const Bytes& wire, const Options& options);

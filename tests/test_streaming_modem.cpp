@@ -9,6 +9,13 @@
 #include <chrono>
 #include <thread>
 using namespace datapump;
+modem::PacketValidator masked_packet_validator(Bytes mask,PacketOptions options={}) {
+    return [mask=std::move(mask),options=std::move(options)](const Bytes& wire) {
+        auto packet=wire;
+        for(std::size_t i=0;i<std::min(mask.size(),packet.size());++i)packet[i]^=mask[i];
+        try{(void)decode_packet(packet,options);return true;}catch(const Error&){return false;}
+    };
+}
 using Complex=std::complex<double>;
 Complex decision_coordinates(Complex point,Complex previous) {
     return std::abs(previous)>1e-20?point*std::conj(previous)/std::abs(previous):point;
@@ -210,10 +217,8 @@ void consumable_transmit_constellation() {
         source.next_symbol();append(observed,source.take_payload_constellation());
         if(!source.take_payload_constellation().points.empty())throw std::runtime_error("TX constellation drain repeated points");
     }
-    const auto bootstrap=(std::min(wire.size()-32,packet_prefix_size)*8+config.constellation_bits-1)/config.constellation_bits;
     for(std::size_t i=0;i<modem::payload_symbol_count(wire.size()-32,config);++i) {
-        const auto bytes=i<bootstrap?std::span(wire).subspan(32,packet_prefix_size):std::span(wire).subspan(32+packet_prefix_size);
-        const auto value=modem::detail::read_bits(bytes,(i<bootstrap?i:i-bootstrap)*config.constellation_bits,config.constellation_bits);
+        const auto value=modem::detail::read_bits(std::span(wire).subspan(32),i*config.constellation_bits,config.constellation_bits);
         expected.push_back(modem::detail::mapped(value,config.constellation_bits,{1,0}));
     }
     auto matches=[](const auto& first,const auto& second) {
@@ -236,8 +241,9 @@ void consumable_transmit_constellation() {
 }
 void consumable_receive_constellation() {
     modem::Config config;config.spreading_mode=modem::SpreadingMode::tone;
-    Message message;message.kind=MessageKind::file;message.filename="plot.bin";message.data=Bytes(128,0x73);
-    auto wire=modem::preamble(config);const auto packet=encode_packet(message);wire.insert(wire.end(),packet.begin(),packet.end());
+    Message message;message.kind=MessageKind::file;message.filename="plot.bin";message.data=Bytes(4096,0x73);
+    PacketOptions options;options.compression=false;
+    auto wire=modem::preamble(config);const auto packet=encode_packet(message,options);wire.insert(wire.end(),packet.begin(),packet.end());
     modem::StreamingTransmitter source(wire,config);
     modem::StreamingReceiver receiver(config,modem::preamble(config));
     const auto rotation=std::polar(2.6,.61);
@@ -248,6 +254,7 @@ void consumable_receive_constellation() {
         if(batch.dropped || (!receiver.synchronized() && !batch.points.empty()))throw std::runtime_error("unlocked timing candidates leaked into payload constellation");
         observed.insert(observed.end(),batch.points.begin(),batch.points.end());
         if(!receiver.take_payload_constellation().points.empty())throw std::runtime_error("RX constellation drain repeated points");
+        if(receiver.synchronized())break;
     }
     if(!receiver.synchronized())throw std::runtime_error("rotated RX plot fixture did not acquire");
     const auto history=receiver.diagnostics().constellation;
@@ -288,12 +295,74 @@ void receiver_input_modes() {
     if(!rejected)throw std::runtime_error("receiver silently mixed PCM and integrated partial symbols");
     receiver.reset();receiver.push_symbols(integrated);receiver.finish();
 }
+void provisional_short_reception() {
+    for(unsigned bits=2;bits<=6;++bits) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_mode=modem::SpreadingMode::tone;
+        PacketOptions options;options.fec=FecMode::rs60;options.compression=false;
+        Message message;message.id[0]=static_cast<std::uint8_t>(bits);message.data={'e'};
+        const auto packet=encode_packet(message,options);
+        const auto layout=packet_layout(packet);
+        if(layout.header_parity_bytes || layout.body_parity_bytes)throw std::runtime_error("tiny packet contains Reed-Solomon redundancy");
+        auto corrupt=packet;corrupt.back()^=1;
+        modem::StreamingReceiver receiver(config,modem::preamble(config));
+        bool tentative=false;Bytes recovered;
+        for(const bool invalid:{true,false}) {
+            auto wire=modem::preamble(config);const auto& frame=invalid?corrupt:packet;
+            wire.insert(wire.end(),frame.begin(),frame.end());modem::StreamingTransmitter source(wire,config);
+            while(auto point=source.next_symbol()) {
+                if(source.samples_emitted()<=modem::training_sample_count(config))point->value={};
+                point->value*=std::polar(.61,.73);
+                const auto bytes=receiver.push_symbols(std::span(&*point,1));
+                const auto dots=receiver.take_payload_constellation();
+                tentative=tentative || (receiver.acquiring() && !receiver.synchronized() && !dots.points.empty());
+                if(invalid && (!bytes.empty() || receiver.synchronized()))throw std::runtime_error("CRC-only header committed an invalid tiny packet");
+                recovered.insert(recovered.end(),bytes.begin(),bytes.end());
+                if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("provisional receivers exceeded workspace");
+            }
+        }
+        const auto tail=receiver.finish();recovered.insert(recovered.end(),tail.begin(),tail.end());
+        auto expected=modem::preamble(config);expected.insert(expected.end(),packet.begin(),packet.end());
+        if(!tentative || recovered!=expected || !receiver.synchronized())throw std::runtime_error("invalid short frame prevented subsequent verified acquisition at "+std::to_string(bits)+" bits");
+        if(!receiver.finish().empty())throw std::runtime_error("short-packet finish repeated frame bytes");
+    }
+    for(unsigned bits=2;bits<=6;++bits) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_mode=modem::SpreadingMode::tone;
+        modem::StreamingReceiver receiver(config,modem::preamble(config));
+        std::mt19937_64 random(819+bits);std::normal_distribution<float> noise(0,.12F);
+        std::array<float,317> samples{};
+        for(unsigned chunk=0;chunk<200;++chunk) {
+            for(auto& sample:samples)sample=noise(random);
+            if(!receiver.push(samples).empty() || receiver.synchronized())throw std::runtime_error("noise-only input acquired a packet at "+std::to_string(bits)+" bits");
+            if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("noise acquisition exceeded bounded workspace");
+        }
+        if(!receiver.finish().empty() || receiver.synchronized())throw std::runtime_error("noise finish invented a packet");
+    }
+    for(const unsigned bits:{2U,6U}) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_mode=modem::SpreadingMode::tone;
+        PacketOptions options;options.fec=FecMode::off;options.compression=false;
+        Message message;message.id[0]=21;message.data=Bytes(4096,0x73);
+        const auto packet=encode_packet(message,options);
+        auto wire=modem::preamble(config);wire.insert(wire.end(),packet.begin(),packet.end());
+        modem::StreamingTransmitter source(wire,config);modem::StreamingReceiver receiver(config,modem::preamble(config));
+        while(auto point=source.next_symbol()) {
+            receiver.push_symbols(std::span(&*point,1));
+            if(receiver.acquiring() && !receiver.synchronized())break;
+        }
+        if(!receiver.acquiring() || receiver.synchronized())throw std::runtime_error("long-observation fixture missed provisional large-header selection");
+        const modem::SymbolObservation enormous{{.35,0},std::uint64_t{1}<<42};
+        const auto start=std::chrono::steady_clock::now();
+        const auto bytes=receiver.push_symbols(std::span(&enormous,1));
+        if(!receiver.synchronized() || bytes.size()>wire.size() || receiver.working_bytes()>8*1024*1024 ||
+           std::chrono::steady_clock::now()-start>std::chrono::seconds(2))
+            throw std::runtime_error("deferred large-header observation grew with virtual duration");
+    }
+}
 void exact_pcm_boundaries() {
     // Ten- and nine-sample chips are deliberately not multiples of a four
     // sample I/Q integration quantum. Dense symbols must retain their exact
     // chip and symbol boundaries, including across arbitrary input chunks.
     for(const double bandwidth:{1200.,1499.,1499.25,1703.})
-        for(unsigned bits=4;bits<=6;++bits)for(unsigned mode=0;mode<2;++mode) {
+        for(unsigned bits=2;bits<=6;++bits)for(unsigned mode=0;mode<2;++mode) {
         modem::Config config;config.bandwidth_hz=bandwidth;
         config.sample_rate=static_cast<unsigned>(std::ceil(std::max(6000.,4*bandwidth)));
         config.carrier_hz=1500;config.constellation_bits=bits;
@@ -311,17 +380,17 @@ void exact_pcm_boundaries() {
         std::fill_n(wire.begin(),32,0);
         for(const unsigned delay:{0U,17U}) {
             modem::StreamingTransmitter source(wire,config);
-            modem::StreamingReceiver receiver(config,Bytes(wire.begin(),wire.begin()+32),8*1024*1024,[&](const Bytes& prefix){
+            modem::StreamingReceiver receiver(config,Bytes(wire.begin(),wire.begin()+32),8*1024*1024,[&](const Bytes& prefix)->std::optional<std::size_t>{
                 // Isolate exact PCM boundaries from blind acquisition's
                 // training-edge aliases, whose first two symbol decisions
                 // can need bootstrap FEC. Other tests exercise that policy.
-                if(prefix.size()!=packet_prefix_size)return false;
+                if(prefix.size()!=packet_prefix_size)return {};
                 for(std::size_t i=0;i<prefix.size();++i) {
-                    const unsigned reference_bits=(delay || mode) && i==0?7U<<(8-bits):0;
-                    if(((prefix[i]^wire[32+i])&~reference_bits)!=0)return false;
+                    const unsigned reference_bits=(delay || mode) && i==0?((1U<<modem::detail::phase_bits(bits))-1)<<(8-bits):0;
+                    if(((prefix[i]^wire[32+i])&~reference_bits)!=0)return {};
                 }
-                return true;
-            });
+                return frame.size();
+            },[&](const Bytes& packet){return packet==Bytes(wire.begin()+32,wire.end());});
             receiver.push(std::vector<float>(delay));
             constexpr std::array<std::size_t,6> partitions{1,13,257,511,7,96};
             std::array<float,511> block{};Bytes received;std::size_t partition=0;
@@ -337,7 +406,7 @@ void exact_pcm_boundaries() {
                 // leaves only the first symbol's differential phase unknown.
                 // Its amplitude, every later header bit and all body bytes
                 // must be exact before FEC. Undelayed tones compare every bit.
-                const unsigned reference_bits=(delay || mode) && i==32?7U<<(8-bits):0;
+                const unsigned reference_bits=(delay || mode) && i==32?((1U<<modem::detail::phase_bits(bits))-1)<<(8-bits):0;
                 if(((wire[i]^received[i])&~reference_bits)!=0)
                     throw std::runtime_error("PCM boundary changed wire byte "+std::to_string(i)+" ("+std::to_string(wire[i])+" to "+std::to_string(received[i])+", offset "+std::to_string(receiver.diagnostics().sample_offset)+") before error correction"+context);
             }
@@ -400,10 +469,11 @@ void transmitted_constellation_history() {
 }
 void live_constellation_window() {
     modem::Config config;
-    Message message;message.id[0]=0x71;message.data={'l','i','v','e'};
-    auto wire=modem::preamble(config);const auto frame=encode_packet(message);wire.insert(wire.end(),frame.begin(),frame.end());
+    Message message;message.id[0]=0x71;message.data=Bytes(4096,0x73);
+    PacketOptions options;options.compression=false;
+    auto wire=modem::preamble(config);const auto frame=encode_packet(message,options);wire.insert(wire.end(),frame.begin(),frame.end());
     modem::StreamingTransmitter source(wire,config);modem::StreamingReceiver receiver(config,modem::preamble(config));
-    while(const auto observation=source.next_symbol())receiver.push_symbols(std::span(&*observation,1));
+    while(const auto observation=source.next_symbol()) {receiver.push_symbols(std::span(&*observation,1));if(receiver.synchronized())break;}
     if(!receiver.synchronized())throw std::runtime_error("live constellation fixture failed acquisition");
     const modem::SymbolObservation outer{{.7,0},modem::symbol_sample_count(config)};
     for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&outer,1));
@@ -433,12 +503,12 @@ void long_keyed_pcm() {
     auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
     auto wire=key.xor_data(plain,epoch);
     const Bytes expected(wire.begin(),wire.begin()+32);
-    const auto mask=key.stream(StreamPurpose::Data,epoch,32,packet_prefix_size);
+    const auto mask=key.stream(StreamPurpose::Data,epoch,32,frame.size());
     modem::StreamingTransmitter source(wire,config);
     modem::StreamingReceiver receiver(config,expected,8*1024*1024,[mask](const Bytes& prefix){
         auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
-        try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
-    });
+        return packet_probe_frame_size(header);
+    },masked_packet_validator(mask,options));
     receiver.push(std::array<float,17>{});
     std::array<float,317> block{};Bytes received;
     std::mt19937_64 random(8192);
@@ -467,19 +537,20 @@ void adaptive_roundtrips() {
         for(unsigned i=0;i<103;++i)message.data.push_back(static_cast<std::uint8_t>(random()));
         PacketOptions options;options.fec=trial<2?FecMode::off:FecMode::rs60;
         auto frame=encode_packet(message,options);
-        // Exact lattice points carrying up to16 corrupted bootstrap bytes
-        // remain within its Reed-Solomon correction radius.
-        if(trial>=8)for(unsigned i=0;i<16;++i)frame[i]^=static_cast<std::uint8_t>(91+i);
+        // Corrupt only the actual header correction allowance. Small headers
+        // receive proportional parity; FEC-off headers receive no parity.
+        const auto correctable=packet_layout(frame).header_parity_bytes/2;
+        if(trial>=8)for(std::size_t i=0;i<correctable;++i)frame[i]^=static_cast<std::uint8_t>(91+i);
         auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
         const Crypto key(Bytes(32,0x53));constexpr std::uint64_t epoch=1800000000;
         const auto wire=trial?key.xor_data(plain,epoch):plain;
         const Bytes expected(wire.begin(),wire.begin()+32);
-        const auto mask=key.stream(StreamPurpose::Data,epoch,32,packet_prefix_size);
+        const auto mask=key.stream(StreamPurpose::Data,epoch,32,frame.size());
         modem::StreamingTransmitter source(wire,config);
         modem::StreamingReceiver receiver(config,expected,8*1024*1024,[&](const Bytes& prefix){
             auto header=prefix;if(trial)for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
-            try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
-        });
+            return packet_probe_frame_size(header);
+        },masked_packet_validator(trial?mask:Bytes{},options));
         const auto sample_snr=tuning::constellation_target_symbol_snr_db(bits)+(trial>=2 && trial<8?0:8)-10*std::log10(modem::symbol_seconds(config)*config.sample_rate/2);
         const double gain=trial?.62:1.35;Bytes received;
         while(auto observation=source.next_symbol()) {
@@ -493,7 +564,7 @@ void adaptive_roundtrips() {
             if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("adaptive acquisition exceeded bounded workspace");
         }
         const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
-        if(received.size()<plain.size())throw std::runtime_error("adaptive "+std::to_string(bits)+"-bit acquisition failed");
+        if(received.size()<plain.size())throw std::runtime_error("adaptive "+std::to_string(bits)+"-bit acquisition failed in trial "+std::to_string(trial));
         if(trial)received=key.xor_data(received,epoch);
         const auto result=decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(plain.size())),options);
         if(result.message.data!=message.data)throw std::runtime_error("adaptive constellation changed payload");
@@ -501,29 +572,112 @@ void adaptive_roundtrips() {
         if(source.total_samples()!=expected_samples)throw std::runtime_error("adaptive symbol padding changed estimated airtime");
     }
 }
+void two_ring_gain_aliases() {
+    // A short whitened header need not populate both amplitude rings evenly.
+    // Force valid XOR-stream fixtures with only one ring, and with a minority
+    // of either ring. Header validation must resolve gain aliases without
+    // assuming a balanced population or a known transmitter amplitude.
+    for(unsigned bits=2;bits<=4;++bits)for(unsigned population=0;population<4;++population)
+        for(const double gain:{.62,1.35}) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_factor=32;
+        config.spreading_mode=modem::SpreadingMode::tone;
+        PacketOptions options;options.fec=FecMode::off;options.compression=false;
+        Message message;message.id[0]=static_cast<std::uint8_t>(bits);message.data={0,1,0x35};
+        const auto frame=encode_packet(message,options);Bytes coded(frame.begin(),frame.begin()+packet_prefix_size);
+        const auto symbols=(packet_prefix_size*8+bits-1)/bits;
+        for(std::size_t symbol=0;symbol<symbols;++symbol) {
+            const bool outer=population==0 || (population==2 && symbol%8!=0) || (population==3 && symbol%8==0);
+            const auto bit=symbol*bits;
+            coded[bit/8]=static_cast<std::uint8_t>((coded[bit/8]&~(1U<<(7-bit%8)))|(static_cast<unsigned>(outer)<<(7-bit%8)));
+        }
+        Bytes mask(packet_prefix_size);
+        for(std::size_t i=0;i<mask.size();++i)mask[i]=coded[i]^frame[i];
+        auto wire=modem::preamble(config);wire.insert(wire.end(),coded.begin(),coded.end());wire.insert(wire.end(),frame.begin()+packet_prefix_size,frame.end());
+        modem::StreamingTransmitter source(wire,config);
+        modem::StreamingReceiver receiver(config,modem::preamble(config),8*1024*1024,[&](const Bytes& prefix){
+            auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
+            return packet_probe_frame_size(header);
+        },masked_packet_validator(mask,options));
+        Bytes received;std::mt19937_64 random(0xabc+bits*17+population);
+        const auto sample_snr=tuning::constellation_target_symbol_snr_db(bits)+12-10*std::log10(modem::symbol_seconds(config)*config.sample_rate/2);
+        while(auto observation=source.next_symbol()) {
+            if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
+            *observation=modem::add_awgn(*observation,sample_snr,random);observation->value*=gain;
+            const auto bytes=receiver.push_symbols(std::span(&*observation,1));received.insert(received.end(),bytes.begin(),bytes.end());
+        }
+        const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+        const auto context=" at "+std::to_string(bits)+" bits, ring population "+std::to_string(population)+", gain "+std::to_string(gain);
+        if(received.size()<wire.size())throw std::runtime_error("two-ring gain alias prevented short header acquisition"+context);
+        for(std::size_t i=0;i<mask.size();++i)received[32+i]^=mask[i];
+        if(decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(wire.size())),options).message.data!=message.data)
+            throw std::runtime_error("two-ring bootstrap chose an aliased gain"+context);
+    }
+}
+void short_noisy_bootstraps() {
+    // Even a one-byte status message must acquire without preamble evidence.
+    // Exercise every payload width and body-FEC choice, both plain and
+    // whitened, with an unknown gain and a non-symbol-aligned receive start.
+    for(unsigned bits=2;bits<=6;++bits)for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})
+        for(const bool encrypted:{false,true}) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_factor=32;
+        config.spreading_mode=modem::SpreadingMode::tone;
+        PacketOptions options;options.fec=fec;options.compression=false;
+        Message message;message.id[0]=static_cast<std::uint8_t>(bits);message.data={0x65};
+        const auto frame=encode_packet(message,options);
+        auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
+        const Crypto key(Bytes(32,0x53));constexpr std::uint64_t epoch=1800000000;
+        const auto wire=encrypted?key.xor_data(plain,epoch):plain;
+        const auto mask=key.stream(StreamPurpose::Data,epoch,32,frame.size());
+        modem::StreamingTransmitter source(wire,config);
+        modem::StreamingReceiver receiver(config,Bytes(wire.begin(),wire.begin()+32),8*1024*1024,[&](const Bytes& prefix){
+            auto header=prefix;if(encrypted)for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
+            return packet_probe_frame_size(header);
+        },masked_packet_validator(encrypted?mask:Bytes{},options));
+        const modem::SymbolObservation delay{{},17};receiver.push_symbols(std::span(&delay,1));
+        Bytes received;std::mt19937_64 random(0xdef+bits*19+static_cast<unsigned>(fec)*7+static_cast<unsigned>(encrypted));
+        const auto sample_snr=tuning::constellation_target_symbol_snr_db(bits)+6-10*std::log10(modem::symbol_seconds(config)*config.sample_rate/2);
+        while(auto observation=source.next_symbol()) {
+            if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
+            *observation=modem::add_awgn(*observation,sample_snr,random);observation->value*=encrypted?.43:1.2;
+            const auto bytes=receiver.push_symbols(std::span(&*observation,1));received.insert(received.end(),bytes.begin(),bytes.end());
+        }
+        const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+        const auto context=" at "+std::to_string(bits)+" bits, FEC "+std::to_string(static_cast<unsigned>(fec))+", encrypted "+std::to_string(encrypted);
+        if(received.size()<plain.size())throw std::runtime_error("short noisy bootstrap did not acquire"+context);
+        if(encrypted)received=key.xor_data(received,epoch);
+        try {
+            const auto packet=decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(plain.size())),options);
+            if(packet.message.data!=message.data)throw std::runtime_error("short noisy bootstrap changed data"+context);
+        } catch(const Error& error) {throw std::runtime_error(std::string(error.what())+context);}
+    }
+}
 void dense_missing_outer_ring() {
-    // Pinned from a search of actual AES epoch streams. The protected
-    // bootstrap occupies only rings1..7, although the complete64APSK
-    // constellation has eight rings; gain acquisition must still succeed.
+    // Find a deterministic actual AES epoch stream whose short protected
+    // bootstrap occupies only rings1..7. The complete64APSK constellation
+    // has eight rings; gain acquisition must still succeed without ring8.
     modem::Config config;config.constellation_bits=6;config.spreading_mode=modem::SpreadingMode::tone;
     Message message;message.id[0]=81;
     for(unsigned i=0;i<29;++i)message.data.push_back(static_cast<std::uint8_t>(i*17+91));
     PacketOptions options;options.fec=FecMode::off;
     const auto frame=encode_packet(message,options);
     auto plain=modem::preamble(config);plain.insert(plain.end(),frame.begin(),frame.end());
-    const Crypto key(Bytes(32,0x53));constexpr std::uint64_t epoch=1801378970;
-    const auto wire=key.xor_data(plain,epoch);const Bytes expected(wire.begin(),wire.begin()+32);
-    const auto encoded_header=std::span(wire).subspan(32,packet_prefix_size);
-    unsigned maximum=0;
-    for(unsigned symbol=0;symbol<96;++symbol)
-        maximum=std::max(maximum,1+modem::detail::gray_decode(modem::detail::read_bits(encoded_header,symbol*6,6)>>3));
+    const Crypto key(Bytes(32,0x53));std::uint64_t epoch=1801378970;
+    Bytes wire;unsigned maximum=0;
+    for(unsigned attempt=0;attempt<1024;++attempt,++epoch) {
+        wire=key.xor_data(plain,epoch);
+        const auto encoded_header=std::span(wire).subspan(32,packet_prefix_size);maximum=0;
+        for(std::size_t symbol=0;symbol<(packet_prefix_size*8+5)/6;++symbol)
+            maximum=std::max(maximum,1+modem::detail::gray_decode(modem::detail::read_bits(encoded_header,symbol*6,6)>>3));
+        if(maximum==7)break;
+    }
     if(maximum!=7)throw std::runtime_error("missing outer-ring fixture no longer exercises the intended lattice");
-    const auto mask=key.stream(StreamPurpose::Data,epoch,32,packet_prefix_size);
+    const Bytes expected(wire.begin(),wire.begin()+32);
+    const auto mask=key.stream(StreamPurpose::Data,epoch,32,frame.size());
     modem::StreamingTransmitter source(wire,config);
     modem::StreamingReceiver receiver(config,expected,8*1024*1024,[&](const Bytes& prefix){
         auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
-        try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
-    });
+        return packet_probe_frame_size(header);
+    },masked_packet_validator(mask,options));
     Bytes received;
     while(auto observation=source.next_symbol()) {
         if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
@@ -547,12 +701,17 @@ void dense_gain_aliases() {
         Message message;message.id[0]=static_cast<std::uint8_t>(variant);
         for(unsigned i=0;i<29;++i)message.data.push_back(static_cast<std::uint8_t>(i*17+variant));
         const auto frame=encode_packet(message,options);Bytes coded(frame.begin(),frame.begin()+packet_prefix_size);
-        for(unsigned symbol=0;symbol<96;++symbol) {
+        for(std::size_t symbol=0;symbol<(packet_prefix_size*8+5)/6;++symbol) {
             auto value=modem::detail::read_bits(coded,symbol*6,6);
             const auto ring=modem::detail::gray_decode(value>>3)%maximum;
             value=(value&7)|((ring^(ring>>1))<<3);
+            // The final partial symbol has zero padding supplied by the
+            // modem. Use the inner ring rather than writing beyond the
+            // protected bytes or depending on unavailable padding bits.
+            if(symbol*6+6>packet_prefix_size*8)value=0;
             for(unsigned position=0;position<6;++position) {
                 const auto bit=symbol*6+position;
+                if(bit>=packet_prefix_size*8)break;
                 coded[bit/8]=static_cast<std::uint8_t>((coded[bit/8]&~(1U<<(7-bit%8)))|(((value>>(5-position))&1U)<<(7-bit%8)));
             }
         }
@@ -562,8 +721,8 @@ void dense_gain_aliases() {
         modem::StreamingTransmitter source(wire,config);
         modem::StreamingReceiver receiver(config,modem::preamble(config),8*1024*1024,[&](const Bytes& prefix){
             auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
-            try{return packet_bootstrap_possible(header) && packet_frame_size(header).has_value();}catch(const Error&){return false;}
-        });
+            return packet_probe_frame_size(header);
+        },masked_packet_validator(mask,options));
         Bytes received;
         while(auto observation=source.next_symbol()) {
             if(source.samples_emitted()<=modem::training_sample_count(config))observation->value={};
@@ -606,11 +765,26 @@ void recent_pcm_preview() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--provisional-only") {
+            provisional_short_reception();std::cout<<"provisional packet tests passed\n";return 0;
+        }
+        if(argc>1 && std::string_view(argv[1])=="--gain-only") {
+            two_ring_gain_aliases();std::cout<<"two-ring gain tests passed\n";return 0;
+        }
+        if(argc>1 && std::string_view(argv[1])=="--bootstrap-only") {
+            provisional_short_reception();
+            two_ring_gain_aliases();short_noisy_bootstraps();
+            adaptive_roundtrips();dense_missing_outer_ring();dense_gain_aliases();exact_pcm_boundaries();
+            std::cout<<"compact bootstrap tests passed\n";return 0;
+        }
         raw_binary_transmitter();
         raw_binary_receiver();
         if(argc>1 && std::string_view(argv[1])=="--binary-only") {std::cout<<"raw binary modem tests passed\n";return 0;}
         received_preamble_evidence();
         if(argc>1 && std::string_view(argv[1])=="--preamble-only") {std::cout<<"preamble evidence tests passed\n";return 0;}
+        provisional_short_reception();
+        two_ring_gain_aliases();
+        short_noisy_bootstraps();
         consumable_transmit_constellation();
         consumable_receive_constellation();
         receiver_input_modes();
@@ -623,7 +797,7 @@ int main(int argc,char** argv) {
         auto wire=modem::preamble(config);wire.insert(wire.end(),frame.begin(),frame.end());
         modem::StreamingTransmitter source(wire,config);
         modem::StreamingReceiver receiver(config,modem::preamble(config),8*1024*1024,
-            [](const Bytes& prefix){try{return packet_frame_size(prefix).has_value();}catch(const Error&){return false;}});
+            [](const Bytes& prefix){return packet_probe_frame_size(prefix);});
         Bytes recovered;
         std::mt19937_64 random(71);
         bool inner=false,outer=false;

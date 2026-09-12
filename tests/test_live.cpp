@@ -120,6 +120,23 @@ void check_signal_metrics(const live::Snapshot& snapshot) {
         }
     }
 }
+void check_packet_replay_start(const live::Snapshot& snapshot, const char* description) {
+    check(snapshot.received.empty(), description);
+    if (!snapshot.simulation_replay) {
+        check(snapshot.signals.empty(), description);
+        return;
+    }
+    // Frame zero may identify an acquisition, but cannot disclose information
+    // learned by the CPU-bounded decoder from later points in the signal.
+    check(snapshot.replay_frame_index == 0 && snapshot.signals.size() <= 1, description);
+    for (const auto& signal : snapshot.signals) {
+        check(signal.text == "Receiving..." && !signal.validated && signal.packet_id.empty() &&
+              signal.received_bytes == 0 && signal.expected_bytes == 0 &&
+              !signal.preamble_received_percent && !signal.pre_fec_accuracy &&
+              !signal.binary && !signal.complete && signal.received_bits == 0 && signal.expected_bits == 0,
+              description);
+    }
+}
 template<class Predicate> live::Snapshot wait_for(live::Session& session, Predicate predicate,
                                                 std::chrono::milliseconds timeout = 30s) {
     const auto until = std::chrono::steady_clock::now() + timeout;
@@ -640,8 +657,7 @@ void test_simulation_replay_and_live_constellation() {
     session.start(value);
     session.transmit(message(21, 96));
     const auto first = wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(),
-              "CPU-bound simulation cannot publish reception before the visual timeline starts");
+        check_packet_replay_start(snapshot, "CPU-bound simulation cannot publish reception before the visual timeline starts");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     check(first.simulation_replay && first.transmission_id != 0 && first.replay_frame_index == 0,
@@ -666,7 +682,8 @@ void test_simulation_replay_and_live_constellation() {
     auto previous = first;
     bool observed_lock = false, observed_fresh_symbols = false, changed_waveform = false, changed_spectrum = false;
     bool observed_pending = false;
-    std::uint64_t pending_id = 0, last_pending_sequence = 0;
+    std::uint64_t pending_id = first.signals.empty() ? 0 : first.signals.front().id;
+    std::uint64_t last_pending_sequence = first.signals.empty() ? 0 : first.signals.front().sequence;
     std::uint64_t points_after_frame_40 = 0;
     const auto symbols = first.transmission_seconds * value.transfer.modem.sample_rate /
                          static_cast<double>(modem::symbol_sample_count(value.transfer.modem));
@@ -751,7 +768,7 @@ void test_simulation_replay_and_live_constellation() {
     // above provide an independent oracle for an otherwise invisible tail.
     session.transmit(message(21, 96));
     const auto stalled_start = wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "repeated simulation must defer its new reception events");
+        check_packet_replay_start(snapshot, "repeated simulation must defer its new reception events");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     replay_milliseconds = 5000;
@@ -783,7 +800,7 @@ void test_simulation_replay_and_live_constellation() {
     const auto next = session.snapshot();
     check(!next.simulation_replay, "a new transmission immediately releases the preceding replay");
     const auto next_done = wait_for(session, [&](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "new simulation results remain hidden at replay start");
+        check_packet_replay_start(snapshot, "new simulation results remain hidden at replay start");
         return snapshot.transmission_finished && snapshot.transmission_id != first.transmission_id;
     });
     check(next_done.simulation_replay && next_done.replay_frame_index == 0,
@@ -810,13 +827,13 @@ void test_simulation_replay_and_live_constellation() {
 
     session.transmit(message(23, 32));
     const auto third = wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "interrupted-result fixture must begin with unpresented events");
+        check_packet_replay_start(snapshot, "interrupted-result fixture must begin with unpresented events");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     session.transmit(message(27, 32));
     check(!session.snapshot().simulation_replay, "transmit interrupts an active replay without waiting for its deadline");
     wait_for(session, [&](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "an interrupted packet cannot leak while its successor is computing");
+        check_packet_replay_start(snapshot, "an interrupted packet cannot leak while its successor is computing");
         return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != third.transmission_id;
     });
     replay_milliseconds = next_started_at + 6000;
@@ -829,7 +846,7 @@ void test_simulation_replay_and_live_constellation() {
     }), "interrupted signal-browser rows cannot reappear with the replacement packet");
     session.transmit(message(28, 32));
     wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "configuration fixture must retain unpresented events");
+        check_packet_replay_start(snapshot, "configuration fixture must retain unpresented events");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     session.configure(value);
@@ -856,7 +873,7 @@ void test_default_crystal_simulation() {
     session.start(value);
     const auto sent=message(24,96); session.transmit(sent);
     const auto held=wait_for(session,[](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "impaired channel must defer reception until its presentation advances");
+        check_packet_replay_start(snapshot, "impaired channel must defer reception until its presentation advances");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     check(held.replay_frame_count > 0,"impaired simulation must publish its measured replay");
@@ -874,8 +891,7 @@ void test_interrupt_discards_due_unpresented_reception() {
     session.start(settings());
     const auto await_replay = [&](std::uint64_t previous_id) {
         return wait_for(session, [&](const auto& snapshot) {
-            check(snapshot.signals.empty() && snapshot.received.empty(),
-                  "interrupted replay cannot leak due but unpresented reception into its successor");
+            check_packet_replay_start(snapshot, "interrupted replay cannot leak due but unpresented reception into its successor");
             return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != previous_id;
         });
     };
@@ -990,14 +1006,17 @@ void test_cancel_reconfigure_and_bounds() {
     session.configure(value);
     const auto sent = message(6, 700);
     session.transmit(sent);
-    wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "reconfiguration cannot restore cancelled reception events");
+    const auto replacement = wait_for(session, [](const auto& snapshot) {
+        check_packet_replay_start(snapshot, "reconfiguration cannot restore cancelled reception events");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
+    check(replacement.transmission_id != cancelled.transmission_id,
+          "reconfiguration presents a new transmission identity after cancellation");
     replay_milliseconds = 6000;
     const auto final = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); });
     check_signal_metrics(final);
-    check(final.received.front().packet.message.id == sent.id && final.received.front().packet.message.data == sent.data,
+    check(final.received.size() == 1 && final.received.front().packet.message.id == sent.id &&
+          final.received.front().packet.message.data == sent.data,
           "fresh configuration recovers after cancellation without retaining an airtime-sized window");
     check(final.dsp_buffered_bytes <= value.dsp_workspace_bytes, "streaming DSP workspace stays independently bounded");
     const auto stopped = std::chrono::steady_clock::now();
@@ -1080,8 +1099,7 @@ void test_long_symbols_are_streamed_in_virtual_time() {
         const auto wall_start = std::chrono::steady_clock::now();
         session.transmit(sent);
         const auto result = wait_for(session, [](const auto& snapshot) {
-            check(snapshot.signals.empty() && snapshot.received.empty(),
-                  "hours-long virtual reception cannot bypass its bounded visual presentation");
+            check_packet_replay_start(snapshot, "hours-long virtual reception cannot bypass its bounded visual presentation");
             return snapshot.transmission_finished && snapshot.simulation_replay;
         }, 60s);
         const auto elapsed = std::chrono::steady_clock::now() - wall_start;

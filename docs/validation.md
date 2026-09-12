@@ -1,9 +1,143 @@
-# Local validation record — version 0.5.6
+# Local validation record — version 0.7.0
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5.6 checks
+## Version 0.7.0 framing changes
+
+The new tests first reproduced mandatory RS on a tiny message and receiver
+synchronization before rejection of a damaged short frame. The format removes
+the magic byte and fixed-width body length, uses a variable compact header,
+automatically disables all RS below 16 original bytes, and carries header and
+body in one continuous symbol stream. Bounded provisional decoders verify
+complete short frames before synchronization; initial phase hypotheses allow
+reception without relying on header RS to repair the first symbol.
+
+* Native GUI Release: all **28 CTest suites passed** (67.93 seconds).
+* CLI-only Release with Python discovery disabled: all **23 suites passed**
+  (49.38 seconds).
+* Final Debug ASan/UBSan with `-O1`: all **27 CTest suites passed**
+  (424.14 seconds), including the instrumented vendored codec, full streaming
+  acquisition, transfer, live sessions, CLI, audio contracts and GUI models.
+  The initial unoptimized nine-suite sanitizer run and the separate broader
+  compact-bootstrap acquisition matrix also passed.
+* Short provisional-reception tests passed under ASan/UBSan: corrupted complete
+  packets never establish lock, subsequent valid packets recover, noise alone
+  does not synchronize, and extremely long observations remain bounded.
+* The complete Release and ASan/UBSan GUI workflows passed on the private virtual display,
+  including automatic FEC Off below 16 bytes, restoration of the longer-message
+  FEC choice, all three tabs, pending previews and exactly three-second replay.
+  The compact transmission diagram and processing flow were visually inspected.
+* Native ZIP and TGZ bundles passed fresh extraction into directories containing
+  spaces, manifest and dependency checks, short/long compression simulations,
+  and complete GUI workflows with package-search paths cleared. Their 42 ELF
+  files have no GTK/GLib dependency; the local glibc requirement is at most 2.38.
+
+The packet tests cover original-size boundaries 0/1/15/16/255/256, canonical
+variable lengths, maximum metadata, every content kind, header correction up to
+the actual parity budget, and malformed frames with otherwise valid integrity.
+Receiver and transfer tests span two through six bits per symbol, keyed and
+plain frames, missing training, continuous partial-bit boundaries, noisy gain
+hypotheses, and recovery after a corrupted short body. Live tests preserve the
+fresh-symbol limit across timing/gain changes and fit hours of simulated airtime
+within a 1 MiB workspace.
+
+A deterministic same-wire oracle confirmed that the old marginal-SNR CLI fixture
+contains one to three actual bit errors in its now-uncoded six-byte message.
+Those packets correctly fail integrity. The lifecycle fixture now uses the
+healthy 3 dBm / -90 dB preset, retaining default crystal drift and phase noise;
+noisy packet rejection is tested separately. Replay-start checks permit only a
+new, empty, unverified frame-zero status and still forbid cancelled content.
+
+Profiling the same PCM cases before and after nonthrowing acquisition probes
+reduced two/three/four/five/six-bit trial times from
+0.415/1.038/2.115/3.547/5.082 seconds to
+0.179/0.211/0.278/0.531/0.732 seconds, with identical header decisions. Fixed-size
+probe caches and conservative RS shape checks avoid repeated rejection work;
+these measurements are local observations, not throughput guarantees.
+
+The unoptimized Debug sanitizer live test reached its existing 60-second
+computation deadline midway through multi-key reception. Sanitizer compilation
+now uses `-O1`, retaining debug symbols, assertions, ASan/UBSan and frame pointers.
+This also covers the already-instrumented vendored codec and standalone audio
+tests. Normal Release, portable and MSVC compilation flags are unaffected.
+The final full live suite passes with its original deadlines and assertions.
+
+Both peers must use 0.7.0 framing. Raw-bit and keyfile formats are unchanged.
+Physical audio, battery-state comparisons and hosted Windows/CI execution were
+not tested for this release. LeakSanitizer is disabled for this host's tracing
+environment; address and undefined-behavior instrumentation remain enabled.
+
+## Recorded 0.6.0 checks
+
+* All **28 native/core CTest suites passed** across the full run and focused CLI
+  rerun. The original CLI fixture assumed 65 KiB of repetition could not fit the
+  repeat airtime policy; it now checks both compressed acceptance and explicit
+  uncompressed rejection. The final CLI suite passed in 20.50 seconds.
+* CLI-only Release with Python discovery disabled: all **23 suites passed**
+  (37.70 seconds).
+* All **nine focused ASan/UBSan suites passed** (254.87 seconds): packet,
+  compact format, both compression codecs, transfer, inspection, plots, GUI
+  policy and GUI self-check. The vendored liblzma C code was instrumented too.
+* The compact-bootstrap acquisition suite passed under ASan/UBSan, covering
+  two-ring gain aliases, noisy one-byte packets, supported constellation widths,
+  missing-ring hypotheses, exact symbol padding and PCM boundaries.
+* The complete GUI workflow passed in Release and ASan/UBSan on the isolated
+  display. It covers text/file/raw reception, key generation, pending results,
+  three-second replay, clipboard, file saves, tab switching and diagram layout.
+  The final inspection also requires LZMA2 for its long text example. The flow
+  and compact-bootstrap transmission views were visually inspected.
+
+New tests first demonstrated the 72-byte bootstrap and short-window two-ring
+acquisition failures, then passed with the 16-byte format and alternate gain
+hypotheses. Packet tests cover four damaged header bytes, actual compression,
+incompressible fallback, bounded original sizes, malformed lengths with valid
+CRC/RS/SHA, and no transmitted dictionary identifier. Short-code tests cover
+all bytes, canonical tokens/padding and bounded truncated previews. LZMA2 tests
+include an independently generated `xz --format=raw --lzma2=preset=9e,dict=4KiB`
+vector, strict stream endings, invalid controls, expansion limits, previews and
+an enforcing scratch allocator. Vendored source hashes are checked by CTest.
+
+The new compression dependency is pinned source compiled statically. No Python
+or destination compression package is needed. Packet wire compatibility with
+0.5.x is deliberately removed; raw-bit and keyfile formats are unchanged.
+Physical audio, battery-state comparisons and hosted Windows/CI execution were
+not tested for this release. LeakSanitizer is disabled for this host's tracing
+environment; address and undefined-behavior instrumentation remain enabled.
+
+## Recorded 0.5.7 checks
+
+* Native GUI Release: all **24 CTest suites passed** (28.92 seconds).
+* CLI-only Release with Python discovery disabled: all **19 suites passed**
+  (31.86 seconds).
+* All six focused ASan/UBSan suites passed: packet, transfer, inspection model,
+  GUI plots, GUI policy and GUI self-check (128.84 seconds). LeakSanitizer was
+  disabled for this host's tracing environment.
+* The four Release GUI suites passed again after the final receiver-description
+  correction. The complete GUI workflow passed in both Release and ASan/UBSan
+  on the isolated virtual display, using simulated input.
+* GUI workflow checks cover all three tabs during idle reception and replay,
+  asynchronous RS20/RS60 and raw/packet model changes, invalid-input clearing,
+  retained composition and receiver state, 1030×786 and 1400×1000 window sizes,
+  and scrolling each diagram to its end and back. Packet and raw reception,
+  clipboard handling, file saves and three-second replay remain covered.
+
+The inspection tests were written before the model implementation. They verify
+encoder-derived compression, keyed integrity, mandatory bootstrap parity with
+body FEC Off, independent five-bit symbol padding, full and shortened RS20/RS60
+blocks, physical byte totals, and omission of actual payload, metadata values
+and key material. Receiver steps distinguish incoming-header selection from
+outgoing settings. Raw diagrams add no packet overhead; hour-long and 30 MHz
+plans remain bounded without generating waveforms. Strict C++20 warning checks
+passed for the model and native diagram code.
+
+The flow, transmission sequence and chosen constellation panels were visually
+inspected in the running GUI. Packet, keyfile and waveform formats are unchanged.
+No Python, GUI toolkit or other runtime dependency was added. Physical audio,
+battery comparisons and hosted Windows/CI execution were not tested for this
+GUI inspection release.
+
+## Recorded 0.5.6 checks
 
 * Native GUI Release: all **23 CTest suites passed** (28.21 seconds).
 * CLI-only Release with Python discovery disabled: all **19 suites passed**

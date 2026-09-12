@@ -1,4 +1,5 @@
 #include "live_widgets.hpp"
+#include "inspection_widgets.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/live.hpp"
 #include "datapump/runtime.hpp"
@@ -13,6 +14,8 @@
 #include <FL/Fl_Input_Choice.H>
 #include <FL/Fl_Output.H>
 #include <FL/Fl_Menu_Button.H>
+#include <FL/Fl_Scroll.H>
+#include <FL/Fl_Tabs.H>
 #include <FL/filename.H>
 #include <FL/fl_ask.H>
 #include "key_choice.hpp"
@@ -94,12 +97,21 @@ std::string seconds_text(double seconds) {
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
 }
-struct SmokeOptions { bool enabled=false; std::filesystem::path directory; double hold_seconds=0,timeout_seconds=100; };
+enum class View { console,flow,transmission };
+struct SmokeOptions {
+    bool enabled=false;
+    std::filesystem::path directory;
+    double hold_seconds=0,timeout_seconds=100;
+    View view=View::console;
+    bool raw_view=false;
+    double scroll_fraction=0;
+};
 enum class PrepKind { estimate,keys,file,devices };
 struct Prepared {
     PrepKind kind=PrepKind::estimate;
     std::uint64_t revision=0;
     std::optional<transfer::Estimate> estimate;
+    std::shared_ptr<const gui::Inspection> inspection;
     std::vector<KeyEntry> keys;
     std::vector<std::string> key_names;
     std::vector<audio::Device> devices;
@@ -197,16 +209,30 @@ public:
         for (auto mode:tuning::pattern_modes()) pattern_->add(pattern_label(mode).c_str());
         pattern_->value(1);
         fec_=new Fl_Choice(0,0,1,1,"Error correction"); fec_->add("Reed-Solomon 20%|Reed-Solomon 60%|Off"); fec_->value(0);
+        fec_->tooltip("Applies to header and body. Messages under 16 original bytes automatically use no Reed-Solomon coding.");
         fec_off_=new Fl_Output(0,0,1,1,"Error correction"); fec_off_->value("Off"); fec_off_->textsize(13);
-        fec_off_->tooltip("Raw binary has no error correction. Message / File retains its selected packet setting.");
+        fec_off_->tooltip("Raw binary and messages under 16 original bytes have no Reed-Solomon coding. The selection for longer messages is retained.");
         fec_off_->deactivate(); fec_off_->hide();
         for (auto widget:std::array<Fl_Widget*,5>{device_,bandwidth_,snr_,pattern_,fec_}) bind(widget,[this] { settings_changed(); });
         for (auto widget:{callsign_,grid_}) { widget->when(FL_WHEN_CHANGED); bind(widget,[this] { dirty_estimate(); }); }
         diagnostics_=label("",12); status_=label("Starting continuous reception...",13);
         clipboard_probe_=new ClipboardProbe;
+        tabs_=new Fl_Tabs(0,0,1,1);
+        console_=new Fl_Group(0,0,1,1,"Console"); console_->end();
+        flow_scroll_=new Fl_Scroll(0,0,1,1,"Modem flow"); flow_scroll_->type(Fl_Scroll::VERTICAL_ALWAYS);
+        flow_diagram_=new InspectionDiagram(true); flow_scroll_->end();
+        transmission_scroll_=new Fl_Scroll(0,0,1,1,"Transmission layout"); transmission_scroll_->type(Fl_Scroll::VERTICAL_ALWAYS);
+        transmission_diagram_=new InspectionDiagram(false); transmission_scroll_->end();
+        tabs_->end();
+        for (auto* widget:std::initializer_list<Fl_Widget*>{compose_label_,source_,binary_label_,editor_,binary_editor_,qr_,
+                attach_,use_text_,send_key_,transmit_,cancel_,airtime_,signal_label_,file_label_,signal_browser_,file_browser_,save_,
+                waterfall_label_,waveform_label_,constellation_label_,waterfall_,waveform_,constellation_}) console_->add(widget);
+        tabs_->value(console_);
+        for (auto* page:std::initializer_list<Fl_Group*>{console_,flow_scroll_,transmission_scroll_}) page->labelsize(13);
+        bind(tabs_,[this] { layout_diagrams(); window_->redraw(); });
         window_->end();
         for (auto widget:std::array<Fl_Widget*,11>{callsign_,grid_,simulation_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_,fec_off_,send_key_}) { widget->align(FL_ALIGN_TOP_LEFT); widget->labelsize(12); }
-        window_->size_range(1030,750);
+        window_->size_range(1030,786);
         window_->callback([](Fl_Widget*,void* context) { static_cast<App*>(context)->close(); },this);
         window_->on_resize=[this] { layout(); };
         layout(); encryption_changed();
@@ -256,11 +282,14 @@ private:
         callsign_->resize(margin,62,115,27); grid_->resize(142,62,85,27); repeatable_->resize(238,61,119,28);
         simulation_->resize(366,62,183,27); key_browse_->resize(560,62,92,27);
         key_path_->resize(660,62,std::max(90,width-926),27); key_entry_->resize(width-248,62,232,27);
-        const int qr_size=196,compose_y=116,compose_height=196;
+        tabs_->resize(margin,94,width-margin*2,height-210);
+        for (auto* page:std::initializer_list<Fl_Group*>{console_,flow_scroll_,transmission_scroll_})
+            page->resize(margin,126,width-margin*2,height-242);
+        const int qr_size=196,compose_y=152,compose_height=196;
         const int binary_width=220,editor_width=width-margin*2-qr_size-binary_width-28;
         const int binary_x=margin+editor_width+14;
-        source_->resize(margin,94,145,20); compose_label_->resize(margin+155,94,editor_width-155,20);
-        binary_label_->resize(binary_x,94,binary_width,20);
+        source_->resize(margin,130,145,20); compose_label_->resize(margin+155,130,editor_width-155,20);
+        binary_label_->resize(binary_x,130,binary_width,20);
         editor_->resize(margin,compose_y,editor_width,compose_height);
         binary_editor_->resize(binary_x,compose_y,binary_width,compose_height);
         qr_->resize(width-margin-qr_size,compose_y,qr_size,qr_size);
@@ -268,7 +297,7 @@ private:
         attach_->resize(margin,buttons_y,169,29); use_text_->resize(194,buttons_y,78,29);
         send_key_->resize(281,buttons_y,129,29); transmit_->resize(419,buttons_y,112,29); cancel_->resize(540,buttons_y,106,29);
         airtime_->resize(657,buttons_y,width-margin-657,29);
-        const int signal_y=buttons_y+56,files_width=252,signal_height=std::max(117,height-674);
+        const int signal_y=buttons_y+56,files_width=252,signal_height=std::max(117,height-710);
         signal_label_->resize(margin,signal_y-23,width-files_width-50,21); file_label_->resize(width-margin-files_width,signal_y-23,files_width,21);
         signal_browser_->resize(margin,signal_y,width-margin*2-files_width-14,signal_height);
         file_browser_->resize(width-margin-files_width,signal_y,files_width,signal_height-36);
@@ -288,7 +317,30 @@ private:
         fec_->resize(x,controls_y,width-margin-x,27);
         fec_off_->resize(x,controls_y,width-margin-x,27);
         diagnostics_->resize(margin,height-56,width-margin*2,22); status_->resize(margin,height-31,width-margin*2,24);
+        layout_diagrams();
         window_->redraw();
+    }
+    void layout_diagrams() {
+        for (const auto& pair:std::array<std::pair<Fl_Scroll*,InspectionDiagram*>,2>{{
+                {flow_scroll_,flow_diagram_},{transmission_scroll_,transmission_diagram_}}}) {
+            auto* scroll=pair.first; auto* diagram=pair.second;
+            const int width=std::max(1,scroll->w()-32);
+            const int height=std::max(scroll->h()-16,diagram->content_height(width));
+            scroll->scroll_to(0,std::min(scroll->yposition(),std::max(0,height-scroll->h()+16)));
+            diagram->resize(scroll->x()+8,scroll->y()+8-scroll->yposition(),width,height);
+        }
+    }
+    void show_view(View view) {
+        tabs_->value(view==View::console?static_cast<Fl_Widget*>(console_):
+                     view==View::flow?static_cast<Fl_Widget*>(flow_scroll_):transmission_scroll_);
+        tabs_->do_callback();
+    }
+    void inspection_pending(const std::string& message) {
+        inspection_.reset();
+        if (flow_diagram_) {
+            flow_diagram_->set_pending(message); transmission_diagram_->set_pending(message);
+            layout_diagrams();
+        }
     }
     void notice(const std::string& text,double seconds=4) {
         notice_=text; notice_until_=Steady::now()+std::chrono::milliseconds(static_cast<int>(seconds*1000));
@@ -358,7 +410,8 @@ private:
             current_settings_=settings(); settings_valid_=true; plot_policy_.reset(); waterfall_->clear();
             if (session_started_) session_.configure(current_settings_);
         } catch (...) {
-            settings_valid_=false; airtime_->copy_label("Invalid modem settings"); throw;
+            settings_valid_=false; airtime_->copy_label("Invalid modem settings");
+            inspection_pending("Invalid modem settings"); throw;
         }
     }
     Message message() const {
@@ -374,9 +427,11 @@ private:
     }
     void dirty_estimate() {
         ++revision_; estimate_.reset(); estimate_requested_=Steady::now();
+        inspection_pending("Calculating current transmission...");
         if (binary_mode() && !binary_input_valid_) {
             estimated_revision_=revision_;
             if (airtime_) airtime_->copy_label(binary_error_.c_str());
+            inspection_pending(binary_error_);
         } else if (airtime_) airtime_->copy_label("Calculating airtime...");
     }
     std::optional<std::filesystem::path> choose_path(bool create,const char* title,const char* suggested=".") {
@@ -470,9 +525,14 @@ private:
             start_preparation([](Prepared& value,std::stop_token) { value.devices=audio::devices(); },std::move(result));
         } else if (settings_valid_ && !estimate_ && estimated_revision_!=revision_ && Steady::now()-estimate_requested_>=std::chrono::milliseconds(120)) {
             result.kind=PrepKind::estimate; result.revision=revision_;
-            auto bits=selected_bits(); auto payload=bits?Message{}:message(); auto options=current_settings_.transfer;
-            start_preparation([bits=std::move(bits),payload=std::move(payload),options=std::move(options)](Prepared& value,std::stop_token) {
-                value.estimate=bits?transfer::estimate_binary(*bits,options):transfer::estimate(payload,options);
+            gui::InspectionRequest request;
+            request.binary=selected_bits(); request.message=request.binary?Message{}:message(); request.options=current_settings_.transfer;
+            request.requested_pattern=tuning::pattern_mode_name(tuning::pattern_modes()[static_cast<std::size_t>(pattern_->value())]);
+            request.target_snr=number(snr_->value(),"Target SNR"); request.simulation=current_settings_.simulation;
+            request.device=current_settings_.device;
+            start_preparation([request=std::move(request)](Prepared& value,std::stop_token) {
+                value.inspection=std::make_shared<const gui::Inspection>(gui::inspect(request));
+                value.estimate=value.inspection->estimate;
             },std::move(result));
         }
     }
@@ -489,7 +549,9 @@ private:
                 key_path_->copy_label(result.created_keyfile?"Keyfile saved; load failed":result.generate_keyfile?"Keyfile creation failed":"Keyfile load failed");
                 if(result.created_keyfile)result.error="Keyfile saved to "+path_text(result.path)+", but loading failed: "+result.error;
             }
-            if (result.kind==PrepKind::estimate && result.revision==revision_) { estimated_revision_=revision_; airtime_->copy_label(result.error.c_str()); }
+            if (result.kind==PrepKind::estimate && result.revision==revision_) {
+                estimated_revision_=revision_; airtime_->copy_label(result.error.c_str()); inspection_pending(result.error);
+            }
             else if (result.kind!=PrepKind::devices) fail(result.error);
             return;
         }
@@ -515,6 +577,9 @@ private:
             device_->value(selected.c_str());
         } else if (result.kind==PrepKind::estimate && result.revision==revision_) {
             estimate_=result.estimate; estimated_revision_=revision_;
+            inspection_=std::move(result.inspection);
+            flow_diagram_->set_model(inspection_); transmission_diagram_->set_model(inspection_);
+            layout_diagrams();
             const auto& estimate=*estimate_;
             std::string text=binary_mode()?std::to_string(binary_bit_count_)+(binary_bit_count_==1?" bit / TX ":" bits / TX ")+seconds_text(estimate.total_seconds):
                 "TX "+seconds_text(estimate.total_seconds)+" / content "+seconds_text(estimate.content_seconds);
@@ -600,7 +665,10 @@ private:
         if (!binary && (!estimate_ || estimate_->repeatable_allowed || repeatable_->value())) repeatable_->activate(); else repeatable_->deactivate();
         if (!binary && attachment_) use_text_->activate(); else use_text_->deactivate();
         for (auto widget:std::array<Fl_Widget*,3>{callsign_,grid_,attach_}) binary?widget->deactivate():widget->activate();
-        if (binary) { fec_->deactivate(); fec_->hide(); fec_off_->show(); }
+        const bool tiny=!binary && !file_loading_ && (attachment_?attachment_->size():static_cast<std::size_t>(compose_.length()))<16;
+        if (binary || tiny) {
+            fec_->deactivate(); fec_->hide(); fec_off_->value(binary?"Off":"Off (under 16 B)"); fec_off_->show();
+        }
         else { fec_off_->hide(); fec_->show(); }
         busy?source_->deactivate():source_->activate();
         binary?binary_editor_->activate():binary_editor_->deactivate();
@@ -725,6 +793,107 @@ private:
         closing_=true; session_.stop(); preparation_.request_stop();
         if (!preparing_) window_->hide(); else notice("Closing after the current file operation stops...");
     }
+    void smoke_inspection(bool binary,const std::string& fec) const {
+        if (!inspection_ || !estimate_ || inspection_->binary!=binary || inspection_->lanes.empty() || inspection_->sections.empty() ||
+            estimated_revision_!=revision_ || inspection_->estimate.total_seconds!=estimate_->total_seconds)
+            throw Error("Diagram model did not match the current transmission estimate and source");
+        const auto field=std::find_if(inspection_->fields.begin(),inspection_->fields.end(),
+            [](const auto& item) { return item.name=="Body FEC"; });
+        if (field==inspection_->fields.end() || field->value!=fec)
+            throw Error("Diagram model retained the wrong error-correction setting");
+    }
+    void smoke_select_view(View view) {
+        const auto revision=revision_,sequence=last_snapshot_.sequence,transmission=last_snapshot_.transmission_id;
+        const auto model=inspection_;
+        const auto message=buffer_text(compose_),bits=buffer_text(binary_);
+        show_view(view);
+        if (revision_!=revision || inspection_!=model || last_snapshot_.sequence!=sequence ||
+            last_snapshot_.transmission_id!=transmission || buffer_text(compose_)!=message || buffer_text(binary_)!=bits)
+            throw Error("Changing inspection tabs modified composition, model revision or receiver state");
+        auto* expected=view==View::console?static_cast<Fl_Widget*>(console_):
+            view==View::flow?static_cast<Fl_Widget*>(flow_scroll_):transmission_scroll_;
+        if (tabs_->value()!=expected || !expected->visible())
+            throw Error("The requested native inspection tab was not selected");
+    }
+    void smoke_resize_scroll() {
+        const auto revision=revision_,sequence=last_snapshot_.sequence,transmission=last_snapshot_.transmission_id;
+        const auto model=inspection_;
+        const auto message=buffer_text(compose_),bits=buffer_text(binary_);
+        for (const auto& size:std::array<std::pair<int,int>,2>{{{1030,786},{1400,1000}}}) {
+            window_->size(size.first,size.second);
+            for (const auto view:{View::flow,View::transmission}) {
+                smoke_select_view(view);
+                auto* scroll=view==View::flow?flow_scroll_:transmission_scroll_;
+                auto* diagram=view==View::flow?flow_diagram_:transmission_diagram_;
+                const int width=scroll->w()-32;
+                const int height=std::max(scroll->h()-16,diagram->content_height(width));
+                if (diagram->w()!=width || diagram->h()!=height || scroll->xposition()!=0)
+                    throw Error("Resizing an inspection tab lost its measured canvas bounds");
+                const int bottom=std::max(0,height-scroll->h()+16);
+                scroll->scroll_to(0,bottom);
+                if (scroll->yposition()!=bottom || diagram->y()+diagram->h()!=scroll->y()+scroll->h()-8)
+                    throw Error("The inspection diagram could not scroll to its final content");
+                scroll->scroll_to(0,0);
+                if (scroll->yposition()!=0 || diagram->y()!=scroll->y()+8)
+                    throw Error("The inspection diagram could not return to its heading");
+            }
+        }
+        window_->size(1180,866); smoke_select_view(View::console);
+        if (revision_!=revision || inspection_!=model || last_snapshot_.sequence!=sequence ||
+            last_snapshot_.transmission_id!=transmission || buffer_text(compose_)!=message || buffer_text(binary_)!=bits)
+            throw Error("Resizing or scrolling diagrams changed the modem session or composition");
+    }
+    bool smoke_idle_tabs() {
+        if (smoke_tab_stage_==5) return false;
+        if (!estimate_ || !inspection_ || !saw_noise_change_) return true;
+        if (smoke_tab_stage_==0) {
+            smoke_inspection(false,"Reed-Solomon 20%");
+            smoke_resize_scroll();
+            smoke_select_view(View::flow); smoke_tab_samples_=last_snapshot_.samples_received; smoke_tab_stage_=1;
+        } else if (smoke_tab_stage_==1 || smoke_tab_stage_==2) {
+            if (last_snapshot_.samples_received<smoke_tab_samples_)
+                throw Error("Switching inspection tabs reset continuous reception");
+            if (last_snapshot_.samples_received==smoke_tab_samples_) return true;
+            if (smoke_tab_stage_==1) {
+                smoke_select_view(View::transmission); smoke_tab_samples_=last_snapshot_.samples_received; smoke_tab_stage_=2;
+            } else {
+                fec_->value(1); fec_->do_callback();
+                if (inspection_) throw Error("Changing FEC left the previous diagram visible");
+                smoke_tab_stage_=3;
+            }
+        } else if (smoke_tab_stage_==3) {
+            smoke_inspection(false,"Reed-Solomon 60%");
+            fec_->value(0); fec_->do_callback();
+            if (inspection_) throw Error("Restoring FEC left a stale diagram model");
+            smoke_tab_stage_=4;
+        } else if (smoke_tab_stage_==4) {
+            smoke_inspection(false,"Reed-Solomon 20%");
+            smoke_select_view(View::console); smoke_tab_stage_=5;
+        }
+        return smoke_tab_stage_!=5;
+    }
+    void smoke_replay_tabs() {
+        if (smoke_phase_!=1 || !last_snapshot_.simulation_replay || smoke_replay_tab_stage_==3) return;
+        if (smoke_replay_tab_stage_==0 && smoke_replay_.frames>=2) {
+            smoke_select_view(View::flow); smoke_tab_frame_=last_snapshot_.replay_frame_index; smoke_replay_tab_stage_=1;
+        } else if (smoke_replay_tab_stage_==1 && last_snapshot_.replay_frame_index>smoke_tab_frame_) {
+            smoke_select_view(View::transmission); smoke_tab_frame_=last_snapshot_.replay_frame_index; smoke_replay_tab_stage_=2;
+        } else if (smoke_replay_tab_stage_==2 && last_snapshot_.replay_frame_index>smoke_tab_frame_) {
+            smoke_select_view(View::console); smoke_replay_tab_stage_=3;
+        }
+    }
+    void finish_smoke() {
+        smoke_select_view(smoke_.view);
+        if (smoke_.view!=View::console) {
+            auto* scroll=smoke_.view==View::flow?flow_scroll_:transmission_scroll_;
+            auto* diagram=smoke_.view==View::flow?flow_diagram_:transmission_diagram_;
+            const int bottom=std::max(0,diagram->h()-scroll->h()+16);
+            scroll->scroll_to(0,static_cast<int>(std::lround(smoke_.scroll_fraction*bottom)));
+        }
+        smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=13;
+        notice("GUI smoke passed: keyfiles, packet and binary transmission, diagrams, clipboard and live plots.",smoke_.hold_seconds+1);
+        std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy, live packet/binary/FEC inspection models, tab switching, minimum/expanded diagram resizing and complete scrolling without receiver resets, and all plots returning to live reception."<<std::endl;
+    }
     void inspect_smoke_replay() {
         auto& replay=smoke_replay_;
         if (last_snapshot_.simulation_replay) {
@@ -817,6 +986,8 @@ private:
         if (smoke_phase_==9 && !smoke_replay_.resumed && Steady::now()-smoke_cancelled_at_>std::chrono::seconds(2))
             throw Error("Stopping replay did not promptly resume live reception");
         inspect_smoke_replay();
+        smoke_replay_tabs();
+        if (smoke_phase_==-2 && smoke_idle_tabs()) return;
         if(smoke_phase_==-2 && estimate_ && saw_noise_change_ && last_snapshot_.samples_received>0) {
             std::filesystem::create_directories(smoke_.directory);
             smoke_key_path_=smoke_.directory/path_from_text("generated keys caf\xc3\xa9.key");
@@ -854,10 +1025,12 @@ private:
             if(key_load_failed_ || encrypted())throw Error("Reselecting None did not acknowledge a failed keyfile load");
             smoke_phase_=0;
         } else if (smoke_phase_==0 && estimate_ && saw_noise_change_ && waterfall_->rows()>=3 && last_snapshot_.samples_received>0) {
+            smoke_inspection(false,"Reed-Solomon 20%");
             if (!last_snapshot_.simulation) throw Error("Smoke attempted to use an actual audio device");
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
         } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && !last_snapshot_.simulation_replay) {
+            if (smoke_replay_tab_stage_!=3) throw Error("The simulation replay did not continue across all inspection tabs");
             if (!saw_transmitting_ && last_snapshot_.transmission_fraction<1) throw Error("The normal transmit path was not observed");
             if (!pending_sequence_ || pending_sequence_>=final_sequence_) throw Error("Pending signal updates did not precede verified reception");
             if (last_snapshot_.samples_received<=initial_samples_) throw Error("Simulation stopped continuous reception while transmitting");
@@ -957,7 +1130,7 @@ private:
             if (selected_bits() || revision_!=packet_revision)
                 throw Error("Inactive binary input changed the packet transmission source");
             source_->value(1); source_->do_callback();
-            if (!binary_mode() || binary_input_valid_ || estimate_ || transmit_->active() ||
+            if (!binary_mode() || binary_input_valid_ || estimate_ || inspection_ || transmit_->active() ||
                 fec_->visible() || !fec_off_->visible() || std::string(fec_off_->value())!="Off")
                 throw Error("Invalid binary input did not disable transmission");
             source_->value(0); source_->do_callback();
@@ -980,6 +1153,7 @@ private:
                 throw Error("Binary input did not share Enter preference");
             smoke_phase_=10;
         } else if (smoke_phase_==10 && estimate_ && transmit_->active()) {
+            smoke_inspection(true,"Off");
             const auto bits=selected_bits();
             if (!bits || *bits!=Bytes({0,0,1}) || binary_bit_count_!=3 || !encrypted() ||
                 callsign_->active() || grid_->active() || fec_->active() || repeatable_->active() || attach_->active() ||
@@ -1015,9 +1189,26 @@ private:
             Fl::paste(*clipboard_probe_,1); smoke_phase_=12;
         } else if (smoke_phase_==12 && clipboard_probe_->received) {
             if (*clipboard_probe_->received!="001") throw Error("Copying received binary bits changed leading zeros or bit count");
-            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=13;
-            notice("GUI smoke passed: keyfiles, packet and binary transmission, clipboard, save and live plots.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy and all plots returning to live reception."<<std::endl;
+            source_->value(0); source_->do_callback(); use_text_->do_callback();
+            compose_.text("help"); smoke_phase_=15;
+        } else if (smoke_phase_==15 && estimate_ && inspection_) {
+            smoke_inspection(false,"Off");
+            if (fec_->visible() || fec_->active() || !fec_off_->visible() ||
+                std::string(fec_off_->value())!="Off (under 16 B)" ||
+                !inspection_->packet_layout || inspection_->packet_layout->header_bytes!=4 ||
+                inspection_->packet_layout->header_parity_bytes || inspection_->packet_layout->body_parity_bytes)
+                throw Error("A one-word message retained Reed-Solomon coding or hid its automatic override");
+            if (smoke_.view!=View::console && !smoke_.raw_view) {
+                compose_.text(smoke_text); smoke_phase_=14;
+            } else { source_->value(1); source_->do_callback(); smoke_phase_=16; }
+        } else if (smoke_phase_==16 && estimate_ && inspection_) {
+            smoke_inspection(true,"Off"); finish_smoke();
+        } else if (smoke_phase_==14 && estimate_ && inspection_) {
+            const auto compression=std::find_if(inspection_->fields.begin(),inspection_->fields.end(),
+                [](const auto& field) { return field.name=="Compression"; });
+            if(compression==inspection_->fields.end() || !compression->value.starts_with("LZMA2 preset 9e"))
+                throw Error("Long-message inspection did not select the fixed LZMA2 profile");
+            smoke_inspection(false,"Reed-Solomon 20%"); finish_smoke();
         } else if (smoke_phase_==13 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
@@ -1042,6 +1233,7 @@ private:
     std::string binary_error_="Enter one or more binary bits";
     std::optional<std::filesystem::path> pending_key_,pending_file_;
     std::optional<transfer::Estimate> estimate_;
+    std::shared_ptr<const gui::Inspection> inspection_;
     std::optional<DecodedPacket> smoke_packet_,smoke_file_packet_;
     std::uint64_t revision_=0,estimated_revision_=0,last_sequence_=0,initial_samples_=0,resumed_samples_=0,pending_sequence_=0,final_sequence_=0,resume_sequence_=0;
     struct SmokeReplay {
@@ -1056,6 +1248,9 @@ private:
     std::uint64_t smoke_interrupted_replay_id_=0,smoke_cancelled_replay_id_=0,smoke_completed_replay_id_=0;
     std::uint64_t smoke_snapshot_poll_=0,smoke_received_packets_=0;
     int smoke_phase_=-2;
+    int smoke_tab_stage_=0,smoke_replay_tab_stage_=0;
+    std::uint64_t smoke_tab_samples_=0;
+    std::size_t smoke_tab_frame_=0;
     bool smoke_key_reception_=false;
     bool smoke_binary_fixture_=false;
     double smoke_binary_seconds_=0;
@@ -1079,6 +1274,10 @@ private:
     Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_,*source_=nullptr;
     Fl_Button *clear_,*attach_,*use_text_,*transmit_,*cancel_,*save_;
     Fl_Menu_Button* key_browse_;
+    Fl_Tabs* tabs_;
+    Fl_Group* console_;
+    Fl_Scroll *flow_scroll_,*transmission_scroll_;
+    InspectionDiagram *flow_diagram_=nullptr,*transmission_diagram_=nullptr;
     ComposeEditor *editor_,*binary_editor_;
     QrPreview* qr_=nullptr;
     SignalBrowser* signal_browser_;
@@ -1126,11 +1325,23 @@ int main(int argc,char** argv) {
             const std::string argument=argv[i];
             if (argument=="--self-check") { self_check(); return 0; }
             if (argument=="--version") { std::cout<<"Data Pump native GUI "<<DATAPUMP_VERSION<<'\n'; return 0; }
-            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS]]\n"; return 0; }
+            if (argument=="--help") { std::cout<<"Data Pump continuous native console\nUsage: datapump-gui [--self-check] [--smoke-test [--smoke-dir DIRECTORY] [--smoke-hold SECONDS] [--smoke-timeout SECONDS] [--smoke-view console|flow|transmission] [--smoke-raw-view] [--smoke-scroll 0..1]]\n"; return 0; }
             if (argument=="--smoke-test") smoke.enabled=true;
             else if (argument=="--smoke-dir" && i+1<argc) smoke.directory=path_from_text(argv[++i]);
             else if (argument=="--smoke-hold" && i+1<argc) { smoke.hold_seconds=number(argv[++i],"Smoke hold"); if (smoke.hold_seconds<0 || smoke.hold_seconds>60) throw Error("Smoke hold must be 0..60 seconds"); }
             else if (argument=="--smoke-timeout" && i+1<argc) { smoke.timeout_seconds=number(argv[++i],"Smoke timeout"); if (smoke.timeout_seconds<10 || smoke.timeout_seconds>600) throw Error("Smoke timeout must be 10..600 seconds"); }
+            else if (argument=="--smoke-view" && i+1<argc) {
+                const std::string view=argv[++i];
+                if (view=="console") smoke.view=View::console;
+                else if (view=="flow") smoke.view=View::flow;
+                else if (view=="transmission") smoke.view=View::transmission;
+                else throw Error("Smoke view must be console, flow or transmission");
+            }
+            else if (argument=="--smoke-raw-view") smoke.raw_view=true;
+            else if (argument=="--smoke-scroll" && i+1<argc) {
+                smoke.scroll_fraction=number(argv[++i],"Smoke scroll");
+                if (smoke.scroll_fraction<0 || smoke.scroll_fraction>1) throw Error("Smoke scroll must be 0..1");
+            }
             else throw Error("Unknown or incomplete GUI argument: "+argument);
         }
         if (smoke.enabled && smoke.directory.empty()) smoke.directory=std::filesystem::temp_directory_path()/("datapump-native-smoke-"+std::to_string(Steady::now().time_since_epoch().count()));

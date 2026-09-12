@@ -78,8 +78,11 @@ std::vector<int> pattern(const Config& c) {
     }
     return result;
 }
-bool packet_bootstrap(const Bytes& prefix) {
-    try {return packet_bootstrap_possible(prefix) && packet_frame_size(prefix).has_value();}catch(const Error&){return false;}
+std::optional<std::size_t> packet_bootstrap(const Bytes& prefix) {
+    return packet_probe_frame_size(prefix);
+}
+bool packet_valid(const Bytes& bytes) {
+    try {return decode_packet(bytes).consumed_bytes==bytes.size();}catch(const Error&){return false;}
 }
 struct PcmProjection {
     double xc=0,xs=0,cc=0,ss=0,cs=0;
@@ -287,23 +290,27 @@ struct Candidate {
     double gain=1;
     std::array<double,8> gain_hypotheses{};
     unsigned gain_count=0;
-    double residual_limit=0;
+    double residual_limit=0,quality_limit=0;
     unsigned partial=0;
     unsigned partial_bits=0;
     bool valid=false;
+    std::size_t frame_extent=0;
     Bytes validated_header;
-    Bytes last_failed_header;
-    std::vector<Complex> following;
+    std::array<std::array<std::uint8_t,packet_prefix_size>,8> failed_headers{};
+    std::size_t failed_count=0,failed_cursor=0;
+    struct Run {Complex point;std::uint64_t count=0;};
+    std::vector<Run> following;
+    std::uint64_t following_symbols=0;
     double quality=std::numeric_limits<double>::infinity();
     void retain(Complex value) {
         repeated_points=value==last_point?std::min(repeated_points+1,points.size()):1;
         last_point=value;
         auto length=count;
         if(length==points.size()) {
-            const auto old=std::lower_bound(ordered_radii.begin(),ordered_radii.end(),(bits>=5?std::abs(points[cursor]):std::norm(points[cursor])));
+            const auto old=std::lower_bound(ordered_radii.begin(),ordered_radii.end(),std::abs(points[cursor]));
             std::move(old+1,ordered_radii.end(),old);--length;
         }
-        const auto amplitude=bits>=5?std::abs(value):std::norm(value);
+        const auto amplitude=std::abs(value);
         const auto sorted_end=ordered_radii.begin()+static_cast<std::ptrdiff_t>(length);
         const auto position=std::lower_bound(ordered_radii.begin(),sorted_end,amplitude);
         std::move_backward(position,sorted_end,sorted_end+1);*position=amplitude;
@@ -312,11 +319,6 @@ struct Candidate {
     Complex at(std::size_t i)const{const auto index=cursor+i;return points[index<points.size()?index:index-points.size()];}
     void estimate_gain() {
         gain_count=0;
-        if(detail::rings(bits)==2) {
-            gain=(std::sqrt(ordered_radii[points.size()/4])/.35+std::sqrt(ordered_radii[points.size()*3/4])/.7)/2;
-            if(std::isfinite(gain) && gain>=1e-12)gain_hypotheses[gain_count++]=gain;
-            return;
-        }
         const auto spacing=detail::radius_step(bits);
         const auto levels=detail::rings(bits);
         const auto radii=std::span(ordered_radii);
@@ -327,6 +329,8 @@ struct Candidate {
         // Try every possible highest occupied ring, so absent outer rings do
         // not imply a transmitter-side gain assumption. Bootstrap validation
         // resolves remaining gain aliases (e.g. only even rings occupied).
+        // This also matters for two-ring alphabets: a compact header can
+        // occupy only one ring, making a quartile-based gain ambiguous.
         std::array<std::pair<double,double>,8> plausible{};unsigned plausible_count=0;
         for(unsigned highest=1;highest<=levels;++highest) {
             double candidate=radii.back()/(spacing*highest);
@@ -376,10 +380,13 @@ struct Candidate {
             if(!duplicate)gain_hypotheses[gain_count++]=candidate;
         }
     }
-    Bytes header(const BootstrapValidator& validator) {
+    template<typename Validator,typename Accepted>
+    void headers(const Validator& validator,double admission_quality,Accepted accepted) {
         estimate_gain();
         for(unsigned hypothesis=0;hypothesis<gain_count;++hypothesis) {
             gain=gain_hypotheses[hypothesis];
+            measure_quality();
+            if(!std::isfinite(quality) || quality>quality_limit || quality>=admission_quality)continue;
             Bytes bytes;bytes.reserve(packet_prefix_size);
             Complex prior{1,0};unsigned pending=0,available=0;
             for(std::size_t i=0;i<points.size();++i) {
@@ -387,12 +394,30 @@ struct Candidate {
                 prior=value;pending=(pending<<bits)|decoded;available+=bits;
                 if(available>=8){available-=8;bytes.push_back(static_cast<std::uint8_t>(pending>>available));}
             }
-            if(bytes==last_failed_header)continue;
-            bool accepted=false;try{accepted=validator(bytes);}catch(const Error&){}
-            if(accepted){previous=at(points.size()-1);return bytes;}
-            last_failed_header=std::move(bytes);
+            bool failed=false;
+            for(std::size_t i=0;i<failed_count;++i)
+                failed=failed || std::equal(bytes.begin(),bytes.end(),failed_headers[i].begin());
+            if(failed)continue;
+            const auto phase_count=1U<<detail::phase_bits(bits);
+            const auto phase_mask=(phase_count-1)<<(8-bits);
+            const auto first=bytes.front();bool plausible=false;
+            // Absolute receive phase is unknown. Enumerate only the first
+            // differential phase label; measured radial bits remain intact.
+            for(unsigned phase=0;phase<phase_count;++phase) {
+                bytes.front()=static_cast<std::uint8_t>((first&~phase_mask)|(phase<<(8-bits)));
+                std::optional<std::size_t> extent;
+                try {extent=validator(bytes);}catch(const Error&){}
+                if(!extent || *extent<bytes.size())continue;
+                plausible=true;
+                if(accepted(bytes,*extent,pending,available,gain))return;
+            }
+            bytes.front()=first;
+            if(!plausible) {
+                std::copy(bytes.begin(),bytes.end(),failed_headers[failed_cursor].begin());
+                failed_count=std::min(failed_count+1,failed_headers.size());
+                failed_cursor=(failed_cursor+1)%failed_headers.size();
+            }
         }
-        return {};
     }
     void measure_quality() {
         double residual=0,power=0;
@@ -486,7 +511,7 @@ struct StreamingTransmitter::Impl {
     Config config;
     std::vector<int> code;
     std::uint64_t position=0,total=0,training=0,symbol=0,chip=0,segment_start=0,segment_end=0;
-    std::size_t symbol_index=0,payload_symbols=0,bootstrap_count=0,raw_bit_count=0;
+    std::size_t symbol_index=0,payload_symbols=0,raw_bit_count=0;
     Complex phase{1,0},point{};
     struct Segment {std::uint64_t begin=0,end=0;Complex value{};};
     // At least four samples/symbol: cover every symbol intersecting the
@@ -504,7 +529,6 @@ struct StreamingTransmitter::Impl {
         if(workspace<65536+config.spreading_factor*sizeof(int))throw Error("streaming transmitter workspace is too small");
         code=pattern(config);training=training_sample_count(config);symbol=symbol_sample_count(config);chip=chip_count(config);
         payload_symbols=payload_symbol_count(wire.size()-32,config);
-        bootstrap_count=(std::min(wire.size()-32,packet_prefix_size)*8+config.constellation_bits-1)/config.constellation_bits;
         if(payload_symbols>(std::numeric_limits<std::uint64_t>::max()-training)/symbol)throw Error("transmission duration exceeds 64-bit sample counter");
         total=training+static_cast<std::uint64_t>(payload_symbols)*symbol;
         advance();
@@ -537,9 +561,7 @@ struct StreamingTransmitter::Impl {
         } else if(index<64)value=detail::read_bits(std::span(wire).first(32),index*4,4);
         else {
             bits=config.constellation_bits;const auto payload_index=index-64;
-            if(payload_index<bootstrap_count)
-                value=detail::read_bits(std::span(wire).subspan(32,std::min(wire.size()-32,packet_prefix_size)),payload_index*bits,bits);
-            else value=detail::read_bits(std::span(wire).subspan(32+packet_prefix_size),(payload_index-bootstrap_count)*bits,bits);
+            value=detail::read_bits(std::span(wire).subspan(32),payload_index*bits,bits);
         }
         const auto previous=phase;
         point=detail::mapped(value,bits,phase);phase=point/std::abs(point);
@@ -648,27 +670,63 @@ void StreamingTransmitter::preview_last_analytic(std::span<Complex> output)const
 }
 
 struct StreamingReceiver::Impl {
+    static constexpr std::size_t provisional_limit=2048;
+    struct Trial {
+        bool active=false;
+        std::size_t candidate=0,extent=0;
+        std::uint64_t start=0;
+        double gain=1,quality=0;
+        std::optional<PreambleReception> preamble;
+        Complex previous{1,0},history_previous{1,0};
+        unsigned partial=0,partial_bits=0;
+        Bytes bytes;
+        std::array<std::uint8_t,8> first_bytes{};
+        std::size_t first_count=0;
+        std::array<Complex,64> history{};
+        std::size_t history_begin=0,history_count=0,total_points=0;
+        void retain(Complex point) {
+            if(history_count==history.size()) {
+                history_previous=history[history_begin];
+                history_begin=(history_begin+1)%history.size();--history_count;
+            }
+            history[(history_begin+history_count++)%history.size()]=point;++total_points;
+        }
+    };
+    struct ProbeVerdict {
+        std::array<std::uint8_t,packet_prefix_size> bytes{};
+        std::size_t extent=0;
+        bool occupied=false;
+    };
     Config config;
     Bytes expected;
     BootstrapValidator validator;
+    PacketValidator packet_validator;
     std::vector<int> code;
     std::vector<Candidate> candidates;
+    std::vector<Trial> trials;
+    std::array<ProbeVerdict,512> probe_verdicts{};
+    std::optional<std::size_t> displayed_trial;
     std::uint64_t position=0,symbol=0,chip=0,training=0,earliest=0,timing_resolution=0;
     std::size_t selected=0,workspace=0,bootstrap_symbols=0;
     bool synced=false;
+    std::size_t frame_extent=0,frame_emitted=0;
     bool finished=false;
     std::uint64_t selection_deadline=0;
     Diagnostics diagnostic;
     std::size_t constellation_cursor=0;
     PendingConstellation pending_constellation;
+    std::array<Complex,2048> fresh_points{};
+    std::size_t fresh_begin=0;
+    std::uint64_t last_plot_end=0;
     TrainingEvidence training_evidence;
     Complex oscillator{1,0};
     enum class Input { none,pcm,integrated };
     Input input=Input::none;
-    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check):config(c),expected(std::move(pre)),validator(std::move(check)),workspace(budget),training_evidence(c,expected) {
+    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check,PacketValidator complete):config(c),expected(std::move(pre)),validator(std::move(check)),packet_validator(std::move(complete)),workspace(budget),training_evidence(c,expected) {
         validate(c);if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
         bootstrap_symbols=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
         if(!validator)validator=packet_bootstrap;
+        if(!packet_validator)packet_validator=packet_valid;
         symbol=symbol_sample_count(c);training=training_sample_count(c);chip=chip_count(c);
         if(symbol>(std::numeric_limits<std::uint64_t>::max()-training)/bootstrap_symbols)throw Error("bootstrap acquisition exceeds 64-bit sample counter");
         // Bootstrap validation is the synchronization evidence. A capture can
@@ -703,51 +761,179 @@ struct StreamingReceiver::Impl {
         for(std::size_t i=0;i<candidates.size();++i) {
             candidates[i].start=origins[i];candidates[i].end=origins[i]+symbol;
             candidates[i].points.resize(bootstrap_symbols);candidates[i].ordered_radii.resize(bootstrap_symbols);candidates[i].bits=c.constellation_bits;
-            candidates[i].last_failed_header.reserve(packet_prefix_size);
-            if(c.constellation_bits>=5) {
-                const auto spacing=detail::radius_step(c.constellation_bits);
-                const auto esn0=std::pow(10.,tuning::constellation_target_symbol_snr_db(c.constellation_bits)/10);
-                candidates[i].residual_limit=9*.30625/(2*esn0*spacing*spacing);
-            }
+            const auto spacing=detail::radius_step(c.constellation_bits);
+            const auto esn0=std::pow(10.,tuning::constellation_target_symbol_snr_db(c.constellation_bits)/10);
+            candidates[i].residual_limit=9*.30625/(2*esn0*spacing*spacing);
+            // Reject noise-like differential phase/amplitude before trying
+            // CRC/header hypotheses. Dense alphabets retain the radial
+            // three-sigma noise allowance; sparse alphabets reject broad
+            // phase noise more tightly. Both include planned phase drift.
+            candidates[i].quality_limit=(c.constellation_bits>=5?9:4)/esn0+std::pow(std::numbers::pi/64,2);
         }
         diagnostic.bit_rate=bit_rate(c);diagnostic.constellation.reserve(2048);
+        const auto base=sizeof(Impl)+candidates.capacity()*sizeof(Candidate)+code.capacity()*sizeof(int)+expected.capacity()+2048*sizeof(Complex)+
+            candidates.size()*(packet_prefix_size+bootstrap_symbols*(sizeof(Complex)+sizeof(double)));
+        const auto slot_bytes=sizeof(Trial)+provisional_limit;
+        if(base>budget || budget-base<slot_bytes)throw Error("streaming receiver workspace cannot hold a provisional packet");
+        const auto slots=std::min<std::size_t>(8,std::max<std::size_t>(1,(budget-base)/(4*slot_bytes)));
+        trials.resize(slots);
+        for(auto& trial:trials)trial.bytes.reserve(provisional_limit);
     }
-    void retain_constellation(Complex point,bool has_reference=true) {
+    void retain_constellation(Complex point,bool has_reference=true,std::optional<Complex> reference={},std::optional<std::uint64_t> sample_end={}) {
+        const auto previous=reference.value_or(diagnostic.constellation.empty()?Complex{1,0}:
+            diagnostic.constellation[(constellation_cursor+diagnostic.constellation.size()-1)%diagnostic.constellation.size()]);
         if(diagnostic.constellation.size()<2048)diagnostic.constellation.push_back(point);
         else {
-            pending_constellation.previous=diagnostic.constellation[constellation_cursor];
             diagnostic.constellation[constellation_cursor]=point;
             if(++constellation_cursor==diagnostic.constellation.size())constellation_cursor=0;
         }
-        if(has_reference)pending_constellation.append(2048);
+        if(has_reference && (!sample_end || *sample_end>last_plot_end)) {
+            fresh_points[(fresh_begin+pending_constellation.count)%fresh_points.size()]=decision_coordinates(point,previous);
+            if(pending_constellation.count==fresh_points.size())fresh_begin=(fresh_begin+1)%fresh_points.size();
+            pending_constellation.append(fresh_points.size());
+            if(sample_end)last_plot_end=*sample_end;
+        }
     }
-    void completed(std::size_t index,Complex point,Bytes& output) {
+    std::optional<std::size_t> probe(const Bytes& bytes) {
+        if(bytes.size()!=packet_prefix_size)return {};
+        std::uint64_t hash=1469598103934665603ULL;
+        for(const auto byte:bytes){hash^=byte;hash*=1099511628211ULL;}
+        auto& entry=probe_verdicts[hash&(probe_verdicts.size()-1)];
+        if(entry.occupied && std::equal(bytes.begin(),bytes.end(),entry.bytes.begin()))
+            return entry.extent?std::optional<std::size_t>{entry.extent}:std::nullopt;
+        std::optional<std::size_t> extent;try{extent=validator(bytes);}catch(const Error&){}
+        std::copy(bytes.begin(),bytes.end(),entry.bytes.begin());entry.extent=extent.value_or(0);entry.occupied=true;
+        return extent;
+    }
+    void show_trial(std::size_t slot,bool replace_history) {
+        const auto& trial=trials[slot];displayed_trial=slot;
+        if(!replace_history)return;
+        diagnostic.constellation.clear();constellation_cursor=0;
+        auto previous=trial.history_previous/trial.gain;
+        for(std::size_t i=0;i<trial.history_count;++i) {
+            const auto point=trial.history[(trial.history_begin+i)%trial.history.size()]/trial.gain;
+            const auto end=trial.start+symbol*(trial.total_points-trial.history_count+i+1);
+            retain_constellation(point,i!=0 || trial.total_points>trial.history_count,previous,end);
+            previous=point;
+        }
+    }
+    void commit_trial(std::size_t slot,Bytes& output) {
+        auto& trial=trials[slot];auto& candidate=candidates[trial.candidate];
+        if(!displayed_trial || *displayed_trial!=slot)show_trial(slot,true);
+        synced=true;selected=trial.candidate;frame_extent=frame_emitted=trial.extent;
+        candidate.previous=trial.previous;candidate.gain=trial.gain;
+        candidate.partial=trial.partial;candidate.partial_bits=trial.partial_bits;
+        diagnostic.sample_offset=static_cast<std::size_t>(trial.start>training?trial.start-training:0);
+        diagnostic.preamble_reception=trial.preamble;
+        diagnostic.snr_db=-10*std::log10(std::max(trial.quality,1e-20));
+        output.insert(output.end(),expected.begin(),expected.end());output.insert(output.end(),trial.bytes.begin(),trial.bytes.end());
+        for(auto& pending:trials)pending.active=false;
+        displayed_trial.reset();selection_deadline=0;
+    }
+    void provisional(std::size_t index,Complex point,Bytes& output) {
+        for(std::size_t slot=0;slot<trials.size();++slot) {
+            auto& trial=trials[slot];if(!trial.active || trial.candidate!=index)continue;
+            const auto previous=trial.previous;
+            const auto value=detail::decision(point,previous,trial.gain,config.constellation_bits);
+            trial.previous=point;trial.retain(point);
+            trial.partial=(trial.partial<<config.constellation_bits)|value;trial.partial_bits+=config.constellation_bits;
+            if(trial.partial_bits>=8) {
+                trial.partial_bits-=8;trial.bytes.push_back(static_cast<std::uint8_t>(trial.partial>>trial.partial_bits));
+            }
+            if(displayed_trial && *displayed_trial==slot)retain_constellation(point/trial.gain,true,previous/trial.gain,candidates[index].end);
+            if(trial.bytes.size()<trial.extent)continue;
+            bool accepted=false;
+            for(std::size_t first=0;first<trial.first_count && !accepted;++first) {
+                trial.bytes.front()=trial.first_bytes[first];
+                try{accepted=packet_validator(trial.bytes);}catch(const Error&){}
+            }
+            if(accepted){commit_trial(slot,output);return;}
+            trial.active=false;
+            if(displayed_trial && *displayed_trial==slot)displayed_trial.reset();
+        }
+    }
+    void admit(std::size_t index,const Bytes& bytes,std::size_t extent,unsigned partial,unsigned available,double gain) {
+        auto& candidate=candidates[index];candidate.gain=gain;candidate.measure_quality();
+        const auto start=candidate.end-symbol*bootstrap_symbols;
+        for(auto& trial:trials)
+            // Proportional header RS may repair every first-phase label to
+            // the same header. They share all following decisions and must
+            // not consume the entire pool before another timing/gain fits.
+            if(trial.active && trial.candidate==index && trial.start==start && trial.gain==gain &&
+               trial.extent==extent && trial.bytes.size()==bytes.size() &&
+               std::equal(bytes.begin()+1,bytes.end(),trial.bytes.begin()+1)) {
+                const auto end=trial.first_bytes.begin()+static_cast<std::ptrdiff_t>(trial.first_count);
+                if(std::find(trial.first_bytes.begin(),end,bytes.front())==end) {
+                    if(trial.first_count==trial.first_bytes.size())throw Error("first-phase hypothesis capacity exceeded");
+                    trial.first_bytes[trial.first_count++]=bytes.front();
+                }
+                return;
+            }
+        std::size_t slot=0;
+        while(slot<trials.size() && trials[slot].active)++slot;
+        if(slot==trials.size()) {
+            slot=static_cast<std::size_t>(std::max_element(trials.begin(),trials.end(),[](const auto& a,const auto& b){return a.quality<b.quality;})-trials.begin());
+            if(trials[slot].quality<=candidate.quality)return;
+        }
+        const bool replacing_display=displayed_trial && *displayed_trial==slot;
+        if(selection_deadline) {
+            selection_deadline=0;
+            for(auto& pending:candidates){pending.valid=false;pending.following.clear();pending.following_symbols=0;}
+        }
+        auto& trial=trials[slot];trial.active=true;trial.candidate=index;trial.extent=extent;trial.start=start;
+        trial.gain=gain;trial.quality=candidate.quality;trial.previous=candidate.at(bootstrap_symbols-1);
+        trial.preamble=training_evidence.reception(start,timing_resolution);
+        trial.partial=partial;trial.partial_bits=available;trial.bytes.assign(bytes.begin(),bytes.end());
+        trial.first_count=1;trial.first_bytes[0]=bytes.front();
+        trial.history_begin=trial.history_count=trial.total_points=0;trial.history_previous={1,0};
+        for(std::size_t i=0;i<bootstrap_symbols;++i)trial.retain(candidate.at(i));
+        if(!displayed_trial)show_trial(slot,true);
+        else if(replacing_display || trial.quality<trials[*displayed_trial].quality)show_trial(slot,true);
+    }
+    void completed(std::size_t index,Complex point,Bytes& output,std::optional<std::uint64_t> sample_end={}) {
         auto& candidate=candidates[index];
         if(synced) {
+            if(frame_emitted>=frame_extent)return;
             const auto value=detail::decision(point,candidate.previous,candidate.gain,config.constellation_bits);candidate.previous=point;
             candidate.partial=(candidate.partial<<config.constellation_bits)|value;candidate.partial_bits+=config.constellation_bits;
-            if(candidate.partial_bits>=8){candidate.partial_bits-=8;output.push_back(static_cast<std::uint8_t>(candidate.partial>>candidate.partial_bits));}
-            retain_constellation(point/candidate.gain);
+            if(candidate.partial_bits>=8){candidate.partial_bits-=8;if(frame_emitted<frame_extent){output.push_back(static_cast<std::uint8_t>(candidate.partial>>candidate.partial_bits));++frame_emitted;}}
+            retain_constellation(point/candidate.gain,true,{},sample_end.value_or(candidate.end));
             return;
         }
-        if(candidate.valid) {candidate.following.push_back(point);return;}
+        provisional(index,point,output);if(synced)return;
+        if(candidate.valid) {
+            if(!candidate.following.empty() && candidate.following.back().point==point)++candidate.following.back().count;
+            else candidate.following.push_back({point,1});
+            ++candidate.following_symbols;return;
+        }
         candidate.retain(point);
         if(candidate.count<bootstrap_symbols || candidate.end<earliest)return;
-        const auto header=candidate.header(validator);if(header.empty())return;
-        candidate.measure_quality();
-        candidate.valid=true;candidate.validated_header=header;
-        if(!selection_deadline) {
-            if(symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver selection counter overflow");
-            selection_deadline=candidate.end+symbol;
+        double admission_quality=std::numeric_limits<double>::infinity();
+        if(std::all_of(trials.begin(),trials.end(),[](const auto& trial){return trial.active;})) {
+            admission_quality=0;
+            for(const auto& trial:trials)admission_quality=std::max(admission_quality,trial.quality);
         }
+        candidate.headers([&](const Bytes& bytes){return probe(bytes);},admission_quality,[&](const Bytes& header,std::size_t extent,unsigned partial,unsigned available,double gain) {
+            if(extent<=provisional_limit){admit(index,header,extent,partial,available,gain);return false;}
+            if(std::any_of(trials.begin(),trials.end(),[](const auto& trial){return trial.active;}))return false;
+            candidate.gain=gain;candidate.measure_quality();candidate.previous=candidate.at(bootstrap_symbols-1);
+            candidate.partial=partial;candidate.partial_bits=available;
+            candidate.valid=true;candidate.validated_header=header;candidate.frame_extent=extent;
+            if(!selection_deadline) {
+                if(symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver selection counter overflow");
+                selection_deadline=candidate.end+symbol;
+            }
+            return true;
+        });
     }
-    void select(Bytes& output) {
+    void select(Bytes& output,std::stop_token stop) {
+        cancelled(stop);
         double best=std::numeric_limits<double>::infinity();
         for(std::size_t index=0;index<candidates.size();++index)
             if(candidates[index].valid && candidates[index].quality<best){best=candidates[index].quality;selected=index;}
         auto& candidate=candidates[selected];
-        synced=true;
-        const auto payload_start=candidate.start-symbol*(bootstrap_symbols+candidate.following.size());
+        synced=true;frame_extent=candidate.frame_extent;frame_emitted=candidate.validated_header.size();
+        const auto payload_start=candidate.start-symbol*(bootstrap_symbols+candidate.following_symbols);
         diagnostic.sample_offset=static_cast<std::size_t>(payload_start>training?payload_start-training:0);
         diagnostic.preamble_reception=training_evidence.reception(payload_start,timing_resolution);
         output.insert(output.end(),expected.begin(),expected.end());output.insert(output.end(),candidate.validated_header.begin(),candidate.validated_header.end());
@@ -756,17 +942,24 @@ struct StreamingReceiver::Impl {
             const auto value=candidate.at(i)/candidate.gain;
             const auto bits=detail::decision(value,prior,1,config.constellation_bits);const auto ideal=detail::mapped(bits,config.constellation_bits,prior);
             power+=std::norm(ideal);error+=std::norm(value-ideal);prior=value;
-            retain_constellation(value,i!=0);
+            retain_constellation(value,i!=0,{},payload_start+symbol*(i+1));
         }
         diagnostic.snr_db=10*std::log10(power/std::max(error,1e-20));
         diagnostic.preamble_correlation=0; // Acquisition evidence is bootstrap validation, not training.
         const auto following=std::move(candidate.following);
-        for(const auto point:following)completed(selected,point,output);
+        auto sample_end=payload_start+symbol*bootstrap_symbols;
+        for(const auto& run:following)
+            for(std::uint64_t i=0;i<run.count && frame_emitted<frame_extent;++i) {
+                if((i&4095U)==0)cancelled(stop);
+                sample_end+=symbol;
+                completed(selected,run.point,output,sample_end);
+            }
     }
     Bytes feed(SymbolObservation observation,bool matched,std::stop_token stop,bool captured=true) {
         cancelled(stop);if(!observation.sample_count || !std::isfinite(observation.value.real()) || !std::isfinite(observation.value.imag()))throw Error("invalid integrated observation");
         if(observation.sample_count>std::numeric_limits<std::uint64_t>::max()-position)throw Error("receiver sample counter overflow");
         const auto finish=position+observation.sample_count;Bytes output;
+        if(synced && frame_emitted>=frame_extent){position=finish;return output;}
         if(captured && !synced)training_evidence.integrated(observation);
         const auto first=synced?selected:0,last=synced?selected+1:candidates.size();
         for(std::size_t index=first;index<last;++index) {
@@ -786,7 +979,19 @@ struct StreamingReceiver::Impl {
                     if(symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
                     candidate.end+=symbol;
                     if(synced && selected!=index)break;
-                    if(matched && !synced && !candidate.valid && candidate.repeated_points==bootstrap_symbols) {
+                    const bool provisional_active=std::any_of(trials.begin(),trials.end(),[&](const auto& trial){return trial.active && trial.candidate==index;});
+                    if(matched && !synced && candidate.valid && candidate.sum==Complex{}) {
+                        const auto repeats=(finish-cursor)/symbol;
+                        if(repeats) {
+                            if(!candidate.following.empty() && candidate.following.back().point==observation.value)candidate.following.back().count+=repeats;
+                            else candidate.following.push_back({observation.value,repeats});
+                            candidate.following_symbols+=repeats;
+                            const auto advance=repeats*symbol;
+                            if(advance>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
+                            candidate.start+=advance;candidate.end+=advance;cursor+=advance;
+                        }
+                    }
+                    if(matched && !synced && !candidate.valid && !provisional_active && candidate.repeated_points==bootstrap_symbols) {
                         // A complete identical-point bootstrap has just failed
                         // validation. Every further full-symbol window inside
                         // this same constant observation is identical, so skip
@@ -795,12 +1000,13 @@ struct StreamingReceiver::Impl {
                         if(advance>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
                         candidate.start+=advance;candidate.end+=advance;cursor+=advance;
                     }
+                    if(synced && frame_emitted>=frame_extent){cursor=finish;break;}
                 }
             }
             if(synced)break;
         }
         position=finish;
-        if(!synced && selection_deadline && position>=selection_deadline)select(output);
+        if(!synced && selection_deadline && position>=selection_deadline)select(output,stop);
         return output;
     }
     template<class Projection>
@@ -808,6 +1014,7 @@ struct StreamingReceiver::Impl {
         cancelled(stop);
         if(count>std::numeric_limits<std::uint64_t>::max()-position)throw Error("receiver sample counter overflow");
         const auto finish=position+count;Bytes output;
+        if(synced && frame_emitted>=frame_extent){position=finish;return output;}
         if(split_chips && !synced)training_evidence.pcm(count,projection);
         const auto first=synced?selected:0,last=synced?selected+1:candidates.size();
         for(std::size_t index=first;index<last;++index) {
@@ -835,17 +1042,23 @@ struct StreamingReceiver::Impl {
                     candidate.end+=symbol;
                 }
             }
+            if(synced)break;
         }
         position=finish;
-        if(!synced && selection_deadline && position>=selection_deadline)select(output);
+        if(!synced && selection_deadline && position>=selection_deadline)select(output,stop);
         return output;
     }
 };
-StreamingReceiver::StreamingReceiver(Config c,Bytes pre,std::size_t workspace,BootstrapValidator validator):impl_(std::make_unique<Impl>(c,std::move(pre),workspace,std::move(validator))){}
+StreamingReceiver::StreamingReceiver(Config c,Bytes pre,std::size_t workspace,BootstrapValidator validator,PacketValidator packet_validator):impl_(std::make_unique<Impl>(c,std::move(pre),workspace,std::move(validator),std::move(packet_validator))){}
 StreamingReceiver::~StreamingReceiver()=default;
 StreamingReceiver::StreamingReceiver(StreamingReceiver&&) noexcept=default;
 StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=default;
 bool StreamingReceiver::synchronized()const{return impl_->synced;}
+bool StreamingReceiver::acquiring()const{return impl_->selection_deadline || std::any_of(impl_->trials.begin(),impl_->trials.end(),[](const auto& trial){return trial.active;});}
+Bytes StreamingReceiver::provisional_frame()const {
+    const auto& s=*impl_;
+    return s.displayed_trial && s.trials[*s.displayed_trial].active?s.trials[*s.displayed_trial].bytes:Bytes{};
+}
 Diagnostics StreamingReceiver::diagnostics()const{
     auto result=impl_->diagnostic;
     if(impl_->constellation_cursor)
@@ -854,16 +1067,18 @@ Diagnostics StreamingReceiver::diagnostics()const{
 }
 ConstellationBatch StreamingReceiver::take_payload_constellation() {
     auto& s=*impl_;
-    return s.pending_constellation.take(s.diagnostic.constellation.size(),[&](std::size_t i){
-        return s.diagnostic.constellation[(s.constellation_cursor+i)%s.diagnostic.constellation.size()];
-    });
+    ConstellationBatch result;result.points.reserve(s.pending_constellation.count);result.dropped=s.pending_constellation.dropped;
+    for(std::size_t i=0;i<s.pending_constellation.count;++i)result.points.push_back(s.fresh_points[(s.fresh_begin+i)%s.fresh_points.size()]);
+    s.pending_constellation.count=0;s.pending_constellation.dropped=0;s.fresh_begin=0;return result;
 }
 std::size_t StreamingReceiver::working_bytes()const{
     std::size_t bytes=sizeof(Impl)+impl_->candidates.capacity()*sizeof(Candidate)+impl_->code.capacity()*sizeof(int)+impl_->diagnostic.constellation.capacity()*sizeof(Complex)+impl_->expected.capacity();
-    for(const auto& candidate:impl_->candidates)bytes+=candidate.validated_header.capacity()+candidate.last_failed_header.capacity()+(candidate.following.capacity()+candidate.points.capacity())*sizeof(Complex)+candidate.ordered_radii.capacity()*sizeof(double);
+    for(const auto& candidate:impl_->candidates)bytes+=candidate.validated_header.capacity()+candidate.following.capacity()*sizeof(Candidate::Run)+candidate.points.capacity()*sizeof(Complex)+candidate.ordered_radii.capacity()*sizeof(double);
+    bytes+=impl_->trials.capacity()*sizeof(Impl::Trial);
+    for(const auto& trial:impl_->trials)bytes+=trial.bytes.capacity();
     return bytes;
 }
-void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.expected,s.workspace,s.validator);impl_=std::move(fresh);}
+void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.expected,s.workspace,s.validator,s.packet_validator);impl_=std::move(fresh);}
 Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation> observations,std::stop_token stop) {
     auto& s=*impl_;
     if(s.finished)throw Error("capture already finished; reset before appending input");
@@ -907,10 +1122,23 @@ Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token sto
 Bytes StreamingReceiver::finish(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)return {};
     Bytes output;
-    if(s.input==Impl::Input::pcm)output=s.feed_pcm(s.symbol,[&](std::uint64_t begin,std::uint64_t length){
-        return PcmProjection::silence(s.position+begin,length,s.config);
-    },false,stop);
-    else output=s.feed({{},s.symbol},true,stop,false);
+    const auto first=s.synced?s.selected:0,last=s.synced?s.selected+1:s.candidates.size();
+    for(std::size_t index=first;index<last;++index) {
+        cancelled(stop);auto& candidate=s.candidates[index];
+        const auto observed=s.position>candidate.start?s.position-candidate.start:0;
+        // Complete only a substantially observed final symbol. Fit its
+        // measured interval; zero-padding a missing tail biases radial bits
+        // and can invent an additional data/constellation symbol.
+        if(!observed || observed<s.symbol-s.symbol/2)continue;
+        const auto point=s.input==Impl::Input::pcm?candidate.pcm_sum.value():candidate.sum/static_cast<double>(observed);
+        if(!std::isfinite(point.real()) || !std::isfinite(point.imag()))throw Error("integrated sample magnitude overflow");
+        s.completed(index,point,output);
+        candidate.start=candidate.end;
+        if(s.symbol>std::numeric_limits<std::uint64_t>::max()-candidate.end)throw Error("receiver symbol counter overflow");
+        candidate.end+=s.symbol;
+        if(s.synced)break;
+    }
+    if(!s.synced && s.selection_deadline)s.select(output,stop);
     s.finished=true;
     return output;
 }

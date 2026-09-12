@@ -1,4 +1,5 @@
 #include "datapump/modem.hpp"
+#include "datapump/packet.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -68,8 +69,10 @@ void cancellation() {
 int main() {
     try {
         cancellation();
-        for(unsigned bits=2;bits<=6;++bits)for(const auto payload_bytes:{1U,71U,72U,73U,129U}) {
+        for(unsigned bits=2;bits<=6;++bits)for(const auto payload_bytes:{std::size_t{1},packet_prefix_size-1,packet_prefix_size,packet_prefix_size+1,2*packet_prefix_size+1}) {
             m::Config adaptive;adaptive.constellation_bits=bits;
+            require(m::payload_symbol_count(payload_bytes,adaptive)==(payload_bytes*8+bits-1)/bits,
+                    "packet bytes must form one bitstream without internal header padding");
             auto training=m::preamble(adaptive),wire=training;
             for(unsigned i=0;i<payload_bytes;++i)wire.push_back(static_cast<std::uint8_t>(i*37+bits));
             const auto samples=m::modulate(wire,adaptive);

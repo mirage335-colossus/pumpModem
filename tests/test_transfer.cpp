@@ -133,8 +133,9 @@ void test_shared_packet_pipeline() {
     }
     auto oversize = message;
     oversize.data.resize(65537);
-    rejects([&] { transfer::pack(oversize, options()); }, "repeatable airtime enforced by shared service");
-    rejects([&] { transfer::transmit(oversize, options()); }, "repeatable airtime enforced for audio");
+    auto uncompressed=options();uncompressed.compression=false;
+    rejects([&] { transfer::pack(oversize, uncompressed); }, "repeatable airtime enforced by shared service");
+    rejects([&] { transfer::transmit(oversize, uncompressed); }, "repeatable airtime enforced for audio");
     auto small = options();
     small.modem.memory_limit = 1024;
     check(transfer::unpack(transfer::pack(message,small),small).message.data==message.data,
@@ -152,9 +153,8 @@ void test_airtime_estimates_and_repeat_policy() {
     check(std::abs(estimate.total_seconds-static_cast<double>(samples.size())/value.modem.sample_rate)<1e-9,
           "estimated airtime matches actual modulation");
     check(estimate.packet_bytes==transfer::pack(message,value).size(),"estimated encoded packet length");
-    auto empty=message;empty.data.clear();
-    const auto overhead=transfer::estimate(empty,value);
-    check(estimate.content_bytes==estimate.packet_bytes-overhead.packet_bytes,"repeat accounting excludes all fixed framing and metadata");
+    const auto overhead=packet_empty_layout(message,value.fec);
+    check(estimate.content_bytes==estimate.packet_bytes-overhead.wire_bytes,"repeat accounting excludes all fixed framing and metadata under the actual effective FEC");
     check(estimate.content_seconds<estimate.packet_seconds && estimate.packet_seconds<estimate.total_seconds,
           "content packet and total airtimes kept distinct");
     check(estimate.memory_supported && estimate.repeatable_allowed,"ordinary transfer estimate supported");
@@ -183,11 +183,14 @@ void test_airtime_estimates_and_repeat_policy() {
     auto boundary_options=value;
     boundary_options.fec=FecMode::off;
     boundary_options.compression=false;
-    auto boundary=message;boundary.data.resize(500);
+    // Original-size and encoded-body-size ULEBs each grow by one byte from
+    // the empty baseline:498 payload bytes therefore cost500 wire bytes.
+    auto boundary=message;boundary.data.resize(498);
     const auto exact_limit=transfer::estimate(boundary,boundary_options);
-    check(exact_limit.content_seconds==2 && exact_limit.repeatable_allowed,"inclusive two-second content boundary");
+    check(exact_limit.content_bytes==500 && exact_limit.content_seconds==2 && exact_limit.repeatable_allowed,"inclusive two-second content boundary includes length growth");
     boundary.data.push_back(0);
-    check(!transfer::estimate(boundary,boundary_options).repeatable_allowed,"one byte over airtime boundary rejected");
+    const auto over_limit=transfer::estimate(boundary,boundary_options);
+    check(over_limit.content_bytes==501 && !over_limit.repeatable_allowed,"499 payload bytes plus length growth exceed airtime boundary");
     boundary.kind=MessageKind::file;
     boundary.filename=std::string(220,'x');
     boundary.data.resize(10);
@@ -195,6 +198,23 @@ void test_airtime_estimates_and_repeat_policy() {
     const auto metadata=transfer::estimate(boundary,boundary_options);
     check(metadata.packet_seconds>2 && metadata.content_seconds<2 && metadata.repeatable_allowed,
           "large fixed metadata does not consume repeatable content allowance");
+    for(const auto requested:{FecMode::rs20,FecMode::rs60}) {
+        boundary_options.fec=requested;boundary.data.resize(16);
+        const auto accounting=transfer::estimate(boundary,boundary_options);
+        const auto same_code_baseline=packet_empty_layout(boundary,requested);
+        auto real_empty=boundary;real_empty.data.clear();
+        const auto tiny_frame=encode_packet(real_empty,transfer::packet_options(boundary_options,boundary_options.timestamp));
+        check(same_code_baseline.fec==requested&&same_code_baseline.wire_bytes>tiny_frame.size(),
+              "empty-content accounting lost the real packet's fixed metadata parity");
+        check(accounting.content_bytes==accounting.packet_bytes-same_code_baseline.wire_bytes,
+              "changing the tiny-message FEC rule charged fixed metadata as repeatable content");
+        boundary.data.resize(15);
+        const auto tiny_selected=transfer::estimate(boundary,boundary_options);
+        auto no_fec=boundary_options;no_fec.fec=FecMode::off;
+        const auto tiny_plain=transfer::estimate(boundary,no_fec);
+        check(tiny_selected.packet_bytes==tiny_plain.packet_bytes&&tiny_selected.content_seconds==tiny_plain.content_seconds,
+              "FEC preference added symbols to a tiny packet");
+    }
     boundary_options.repeat_policy.maximum_seconds=std::numeric_limits<double>::quiet_NaN();
     rejects([&]{transfer::estimate(boundary,boundary_options);},"invalid airtime policy rejected");
 }
@@ -261,7 +281,7 @@ void test_public_audio_whitening() {
         check(std::equal(wire.begin(),wire.begin()+32,expected_training.begin()),"training keeps its existing encryption semantics");
         auto prefix=Bytes(wire.begin()+32,wire.begin()+32+packet_prefix_size);
         const auto mask=transfer::audio_bootstrap_mask(value,value.timestamp);
-        check(mask.size()==packet_prefix_size,"bootstrap mask has exact protected prefix size");
+        check(mask.size()==transfer::audio_validation_limit,"mask covers bounded full-frame validation without adding transmitted bytes");
         for(std::size_t i=0;i<prefix.size();++i)prefix[i]^=mask[i];
         check(std::equal(prefix.begin(),prefix.end(),encoded.begin()),"precomputed bootstrap mask reverses public and private streams");
     }
@@ -271,12 +291,14 @@ void test_whitened_fec_audio() {
     for(unsigned bits=2;bits<=6;++bits)for(const bool keyed:{false,true}) {
         auto value=options(keyed);value.modem.constellation_bits=bits;value.compression=false;value.search_seconds=0;
         value.fec=bits%2?FecMode::rs60:FecMode::rs20;
+        const auto layout=packet_layout(encode_packet(sent,transfer::packet_options(value,value.timestamp)));
+        const auto header_size=layout.header_bytes+layout.header_parity_bytes;
         auto wire=transfer::transmission_wire(sent,value);
         // Corrupt bytes after whitening. An additive mask preserves the exact
         // RS error locations, both in the protected bootstrap and coded body.
-        for(unsigned i=0;i<12;++i)wire[32+i]^=static_cast<std::uint8_t>(71+i);
-        wire[32+packet_prefix_size+3]^=0x61;
-        wire[32+packet_prefix_size+19]^=0x72;
+        for(std::size_t i=0;i<layout.header_parity_bytes/2;++i)wire[32+i]^=static_cast<std::uint8_t>(71+i);
+        wire[32+header_size+3]^=0x61;
+        wire[32+header_size+19]^=0x72;
         const auto pcm=modem::modulate(wire,transfer::seeded_config(value,value.timestamp));
         const auto received=transfer::receive(pcm,value);
         check(received.packet.message.data==sent.data && received.packet.authenticated==keyed,
@@ -290,16 +312,16 @@ void test_structured_payload_constellation_occupancy() {
         value.modem.spreading_mode=modem::SpreadingMode::tone;
         const auto wire=transfer::transmission_wire(sent,value);
         std::array<std::size_t,64> counts{};std::size_t count=0;
-        for(const auto section:{std::span(wire).subspan(32,packet_prefix_size),std::span(wire).subspan(32+packet_prefix_size)})
-            for(std::size_t bit=0;bit<section.size()*8;bit+=6){++counts[modem::detail::read_bits(section,bit,6)];++count;}
+        const auto section=std::span(wire).subspan(32);
+        for(std::size_t bit=0;bit<section.size()*8;bit+=6){++counts[modem::detail::read_bits(section,bit,6)];++count;}
         double entropy=0;
-        for(const auto n:counts){check(n>0,"structured audio frame uses every selected differential symbol");const double p=static_cast<double>(n)/count;entropy-=p*std::log2(p);}
+        for(const auto n:counts){check(n>0,"structured audio frame uses every selected differential symbol");const double p=static_cast<double>(n)/static_cast<double>(count);entropy-=p*std::log2(p);}
         check(entropy>5.97,"public whitening removes large amplitude and phase bias from structured frames");
     }
 }
 void test_adaptive_symbol_airtime_and_padding() {
-    for (const auto bits : {2U, 3U, 4U, 5U, 6U}) {
-        auto value = options();
+    for (const auto bits : {2U, 3U, 4U, 5U, 6U}) for(const bool keyed:{false,true}) {
+        auto value = options(keyed);value.search_seconds=0;
         value.modem.constellation_bits = bits;
         value.fec = FecMode::off;
         value.compression = false;
@@ -308,6 +330,9 @@ void test_adaptive_symbol_airtime_and_padding() {
         payload.data = {0x4d};
         const auto estimated = transfer::estimate(payload, value);
         const auto samples = transfer::transmit(payload, value);
+        const auto payload_symbols=(estimated.packet_bytes*8+bits-1)/bits;
+        check(estimated.waveform_samples==modem::training_sample_count(value.modem)+
+              payload_symbols*modem::symbol_sample_count(value.modem),"packet airtime contains no header/body alignment padding");
         check(estimated.waveform_samples == samples.size(), "adaptive symbol padding is included in sample estimates");
         check(std::abs(estimated.total_seconds - static_cast<double>(samples.size()) / value.modem.sample_rate) < 1e-10,
               "adaptive airtime estimate matches actual PCM duration");
@@ -318,6 +343,45 @@ void test_adaptive_symbol_airtime_and_padding() {
               "repeat allowance counts incremental symbols including final padding");
         const auto received = transfer::receive(samples, value);
         check(received.packet.message.data == payload.data, "short payload is exact across all adaptive constellation sizes");
+    }
+    // Cross the encoded-body ULEB width, without compressibility hiding it.
+    for(const auto size:{1U,127U,128U,255U,256U}) {
+        auto value=options();value.fec=FecMode::off;value.compression=false;value.modem.constellation_bits=5;
+        auto payload=sample();payload.repeatable=false;payload.data.resize(size,0x71);
+        const auto estimated=transfer::estimate(payload,value);
+        const auto wire=transfer::transmission_wire(payload,value);
+        modem::StreamingTransmitter source(wire,value.modem);
+        const auto expected=modem::training_sample_count(value.modem)+
+            ((estimated.packet_bytes*8+4)/5)*modem::symbol_sample_count(value.modem);
+        check(source.total_samples()==expected&&estimated.waveform_samples==expected,
+              "variable header width changed continuous final-symbol accounting");
+    }
+}
+void test_provisional_audio_validation() {
+    auto message=sample();message.repeatable=false;
+    for(const bool keyed:{false,true}) {
+        auto value=options(keyed);value.fec=FecMode::off;value.compression=false;
+        const auto wire=transfer::transmission_wire(message,value);
+        const Bytes frame(wire.begin()+32,wire.end());
+        const auto plain=encode_packet(message,transfer::packet_options(value,value.timestamp));
+        const auto extent=packet_header_extent(plain);
+        check(extent.has_value()&&*extent<packet_prefix_size,"fixture uses a variable header shorter than probe capacity");
+        const auto validators=transfer::audio_validators(value,value.timestamp);
+        check(!validators.bootstrap({}),"empty receive prefix acquires");
+        const Bytes prefix(frame.begin(),frame.begin()+static_cast<std::ptrdiff_t>(*extent));
+        check(validators.bootstrap(prefix)==frame.size(),"bootstrap callback lost declared frame extent");
+        check(validators.packet(frame),"complete provisional frame did not validate");
+        check(!validators.packet(prefix),"header-only provisional frame was accepted as complete");
+        auto damaged=frame;damaged.back()^=1;
+        check(!validators.packet(damaged),"whole-frame callback ignores failed digest/MAC");
+        damaged=frame;damaged.push_back(0);
+        check(!validators.packet(damaged),"whole-frame callback admits trailing bytes");
+        auto small=value;small.content_limit=1;
+        check(!transfer::audio_validators(small,value.timestamp).packet(frame),"provisional decode bypasses content limit");
+        if(keyed) {
+            auto wrong=value;wrong.key=Crypto(Bytes(32,0x72));
+            check(!transfer::audio_validators(wrong,value.timestamp).packet(frame),"wrong key accepted provisional packet");
+        }
     }
 }
 void test_timing_search_and_progress() {
@@ -423,6 +487,7 @@ int main(int argc,char** argv) {
         test_whitened_fec_audio();
         test_structured_payload_constellation_occupancy();
         test_adaptive_symbol_airtime_and_padding();
+        test_provisional_audio_validation();
         test_timing_search_and_progress();
         test_simulation_validation_and_cancellation();
         test_valid_packet_ignores_trailing_capture();

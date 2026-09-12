@@ -5,8 +5,11 @@ environments, and package downloads are absent from the application installation
 A working installation can be copied as one directory to another compatible
 computer and run immediately.
 
-The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder is
-also vendored. CMake uses these local sources and an already installed C++
+The complete FLTK 1.4.5 source is pinned in `third_party/fltk`; the QR encoder and
+the XZ 5.8.4 liblzma source subset are also vendored. liblzma is compiled into
+the application statically, so the destination needs no compression package or
+liblzma DLL. Its license and source provenance are included in each bundle.
+CMake uses these local sources and an already installed C/C++
 toolchain, OpenSSL development files, and desktop development libraries. There is
 no `FetchContent`, runtime bootstrap, or dependency download during configuration,
 compilation, installation, or packaging.

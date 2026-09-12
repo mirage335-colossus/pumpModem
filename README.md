@@ -2,17 +2,40 @@
 
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
-waveform and accelerated channel simulation, and a documented versioned packet format. Received content
+waveform and accelerated channel simulation, and a documented compact packet format. Received content
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.6.** The audio/packet/crypto
+**Status: working reference implementation, version 0.7.0.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
 RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
+
+Release 0.7.0 gives ordinary messages under 16 bytes a four-byte bootstrap and
+automatically disables all Reed–Solomon coding for them. Other short messages
+typically use six to nine bootstrap bytes with coding enabled. There is no
+magic marker or separate header symbol padding. Short frames remain provisional
+until complete integrity verification, so a plausible corrupted header cannot
+commit receiver lock. Both peers need the new format; legacy decoding is removed.
+Short content uses one fixed byte-prefix code that
+favors lowercase text; longer messages/files use raw LZMA2 with preset 9 extreme
+settings. Compression is automatic when smaller, and no dictionary or dictionary
+identifier is transmitted. The compression library is built statically from
+vendored source; the complete portable application can be copied between
+compatible computers without downloading packages.
+
+The desktop has three tabs: **Console**, **Modem flow**, and **Transmission
+layout**. Modem flow follows the selected transmit and receive processing,
+including phase/amplitude alphabets, spreading, integration, coding and gain
+estimation. Transmission layout illustrates the proposed on-air sequence,
+preamble, protected bootstrap, body fields and Reed–Solomon blocks, with a
+placeholder for the payload. Both views update from the current message, source,
+key and modem settings in the background. Counts come from the actual encoder;
+message contents and key material are not displayed. Reception and simulation
+continue while switching tabs. See [the inspection views](docs/inspection.md).
 
 The binary editor sits beside the message editor. Select Binary to
 transmit an exact sequence such as `001`, using the shared streaming phase/amplitude
@@ -30,8 +53,7 @@ including fixed training, live plots and pending signal-browser text. Verified
 messages, file entries and data accuracy become available at the end of that
 presentation. It retains per-signal preamble reception and fresh constellation
 observations in the decoder's differential phase and amplitude coordinates.
-Existing packet waveforms, packet and keyfile formats are unchanged from 0.5.1, including
-the 1500 Hz carrier for narrow audio modes. Both audio
+Existing keyfiles remain usable, and narrow audio modes retain the 1500 Hz carrier. Both audio
 endpoints must use matching carrier and modem settings; narrow automatic
 defaults differ from 0.5.0.
 
@@ -228,8 +250,9 @@ printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 assert validated identity or implement continuous very-slow beacon monitoring.
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz,
 forced lengths of 1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
-60% RS parity or no body FEC. The fixed bootstrap retains its protection even
-with `--fec off`; status mode is the route for truly overhead-free few-bit data.
+60% RS parity or FEC Off. The compact header follows the effective body coding
+policy, with all RS automatically disabled below 16 original bytes. Raw binary
+is available for exact few-bit data without packet fields or integrity tags.
 `--target-snr` is the desired C/N0 in dBHz. The planner maximizes modeled throughput
 across 4/8/16/32/64-point phase-and-amplitude constellations with geometry-based
 noise and drift margins. It caps phase density at eight positions and payload

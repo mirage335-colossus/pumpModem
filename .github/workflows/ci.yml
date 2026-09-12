@@ -44,6 +44,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Configure native application without Python
+        # liblzma is pinned in third_party/xz and compiled statically; there is
+        # no liblzma development package or compression source download.
         run: >-
           cmake -S . -B build -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11
           -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
@@ -132,6 +134,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Static OpenSSL build failed" }
       - name: Configure native application without Python
         shell: pwsh
+        # The same offline C sources build with MSVC; no liblzma DLL or vcpkg
+        # compression package is required on the copied installation.
         run: >-
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
           -DCMAKE_TOOLCHAIN_FILE="$PWD/.ci-vcpkg/scripts/buildsystems/vcpkg.cmake"

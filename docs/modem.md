@@ -1,16 +1,15 @@
-# Audio modem reference, application version 0.5.6
+# Audio modem reference, application version 0.7.0
 
-Version 0.5.6 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.7.0 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
-matching carrier and modem settings. This release synchronizes the complete
-three-second simulation presentation: fixed training, plots, pending browser
-observations and final verified reception. It retains the 0.5.3 reception-quality
-measurements and 0.5.2 constellation coordinates. The 0.5.1 waveforms,
-1500 Hz narrow-audio carrier and receive integration boundaries are unchanged,
-as are constellation mapping, symbol padding and the 0.5 public whitening mask. Packet versions
-1 and 2 and existing keyfile formats remain unchanged; modem configuration changes
-do not migrate or regenerate keys.
+matching carrier and modem settings and the compact 0.7 packet format. Ordinary
+one-word messages have a four-byte bootstrap and no RS coding. Other short
+messages typically use six to nine bootstrap bytes when coding is enabled.
+Gain acquisition accounts for a short header that occupies only a subset of
+amplitude rings. Fixed training, three-second
+simulation presentation, the narrow-audio 1500 Hz carrier and public whitening
+are unchanged. Existing keyfiles need no migration.
 
 This is a reference modem. It does not establish near-capacity throughput,
 calibrated radio sensitivity, a spectral mask, or low probability of intercept.
@@ -46,11 +45,12 @@ indexes `[0, 1, 3, 2, 7, 6, 4, 5]`. Phase continues across the training/payload
 boundary. PCM is the real component of the complex symbol times the carrier
 oscillator and configured chip sign.
 
-The fixed 72-byte protected bootstrap and the remaining packet body each finish
-on a symbol boundary. Unused bits are zero padding, excluded from decoded bytes.
-The five-bit profile needs padding at the bootstrap boundary. `payload_symbol_count`
-includes both boundaries; repeatable airtime counts the incremental symbols
-relative to an empty packet with the same metadata.
+The variable bootstrap and remaining packet body form a continuous bitstream.
+Only the final symbol can contain unused pad bits, excluded from decoded bytes.
+There is no magic marker, internal symbol padding, end marker or transmitted
+zero-byte tail. `payload_symbol_count` is the ceiling of packet bits divided by
+bits per symbol. Repeatable airtime counts incremental symbols relative to a
+numeric empty-payload baseline with the same metadata and effective coding.
 
 The 32-byte known preamble always uses 64 independently timed 16-APSK training symbols. Its duration is five seconds,
 quantized to the sample grid, independently of payload symbol duration. A payload
@@ -190,10 +190,10 @@ proof of capacity-optimal throughput or calibrated packet error rate.
 These estimates concern payload integration, not guaranteed acquisition or a
 measured error rate. In particular, making payload symbols arbitrarily long
 does not increase the energy in a fixed five-second preamble. Reception therefore
-uses the protected packet bootstrap for blind acquisition rather than requiring
+uses pattern constellation evidence and the compact packet bootstrap for blind acquisition rather than requiring
 a training correlation threshold. It can acquire a long-symbol header even when
-training is obscured, subject to the finite timing bank and successful bootstrap
-correction. Oscillator drift, fading and finite receiver hypotheses impose further
+training is obscured, subject to the finite timing bank and successful frame
+validation. Oscillator drift, fading and finite receiver hypotheses impose further
 limits. No thermal sensitivity or near-capacity claim follows from the planner.
 
 ## Incremental receiver and live audio
@@ -206,18 +206,29 @@ separate content budget and pass the ordinary bootstrap, FEC, metadata and final
 digest/MAC checks before becoming a received message.
 
 Acquisition searches a finite set of timing hypotheses at the configured carrier,
-using corrected protected-bootstrap structure as its synchronization validator.
-It does not require the five-second training bytes to be observable. Full packet
-digest/MAC verification is still mandatory; bootstrap acceptance is not final
-content validation. PCM mixing solves the I/Q Gram system so it does not assume
+using the pattern constellation's radial and differential-phase fit, followed by
+compact header checks. It does not require the five-second training bytes to
+be observable. Initial phase labels are tried explicitly; FEC Off no longer
+depends on RS repairing that ambiguity. For frames up to 2048 encoded bytes,
+header acceptance starts a bounded provisional decoder while other timing
+hypotheses keep searching. Only complete digest/MAC verification commits short-
+frame lock. Larger frames still acquire from their validated header and must
+pass full integrity before delivery. PCM mixing solves the I/Q Gram system so it does not assume
 an integer number of carrier cycles per integration.
 Dense profiles first screen amplitude-lattice residuals using three times the
 radial noise standard deviation at the planner's geometric margin. Bounded gain
 hypotheses consider every possible highest occupied ring; full protected-header
-validation resolves the ambiguity when outer rings are absent. This keeps idle
+validation and complete short-frame checks resolve the ambiguity when outer rings are absent. This keeps idle
 noise fitting inexpensive. The screen is designed for the stated AWGN margin;
 it is not a guarantee that every impulsively corrupted, otherwise RS-correctable
 waveform will be acquired.
+An additional differential phase/amplitude residual check includes the planner's
+allowed phase drift. Repeated decoded probes share bounded validation caches;
+they do not repeat RS and CRC work for every equivalent timing/gain hypothesis.
+Provisional short frames can supply measured constellation points and mutable
+text previews, but they cannot select the active key, enter the verified inbox,
+or become copyable/savable content. Candidate rejection clears its tentative
+text. The full packet's digest or MAC remains the delivery condition.
 Keyed continuous reception builds a bounded bank of loaded-key and candidate-
 epoch receivers. The default search is plus or minus six whole seconds; the live
 API accepts at most 60 seconds in either direction and 128 loaded keys, with the
@@ -258,10 +269,13 @@ allows; this is not a guarantee against an overloaded audio device or processor.
 Idle simulated noise follows the same 20 Hz cadence with bounded preview chunks.
 Queuing a transmission interrupts that wait; active transmissions run at CPU
 speed independently of their virtual airtime.
-The GUI consumes fresh symbol observations from the locked receiver. Their
+The GUI consumes fresh symbol observations from the provisional or locked receiver. Their
 phase is measured relative to the preceding received symbol, and their amplitude
 is normalized by the receiver's estimated gain. This is the decoder's coordinate
 system; points remain measured values and are never snapped to symbol decisions.
+A bounded queue retains each point with its measured phase reference until the
+next GUI snapshot. Changing a timing or gain hypothesis does not republish older
+symbol times; overflow is counted rather than growing this queue indefinitely.
 Unlocked input supplies current noise/phase I/Q diagnostics. The source label
 distinguishes those input measurements from received or transmitted symbols.
 Axes and amplitude rings are display aids, not a calibration certificate. Decoder

@@ -1,7 +1,6 @@
 #include "datapump/modem.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
-#include "datapump/packet.hpp"
 #include "constellation.hpp"
 #include <algorithm>
 #include <bit>
@@ -189,7 +188,6 @@ DecodeResult known_training(std::span<const float> samples,const Config& c,
     auto oscillator=std::polar(1.,tau*(c.carrier_hz+frequency_offset)*static_cast<double>(start)/c.sample_rate);
     const auto rotation=std::polar(1.,tau*(c.carrier_hz+frequency_offset)/c.sample_rate);
     double power=0,error=0;unsigned partial=0,partial_bits=0;
-    const auto bootstrap_count=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
     for(std::size_t symbol=0;symbol<count;++symbol) {
         check_cancelled(stop);double xc=0,xs=0,cc=0,ss=0,cs=0;
         for(std::size_t i=0;i<duration;++i) {
@@ -206,7 +204,6 @@ DecodeResult known_training(std::span<const float> samples,const Config& c,
         power+=std::norm(ideal);error+=std::norm(point-ideal);previous=point;
         partial=(partial<<c.constellation_bits)|bits;partial_bits+=c.constellation_bits;
         if(partial_bits>=8){partial_bits-=8;result.bytes.push_back(static_cast<std::uint8_t>(partial>>partial_bits));}
-        if(symbol+1==bootstrap_count){partial=0;partial_bits=0;}
         if(result.diagnostics.constellation.size()<2048)result.diagnostics.constellation.push_back(point/gain);
     }
     result.diagnostics.snr_db=10*std::log10(std::max(power,1e-20)/std::max(error,1e-20));
@@ -275,9 +272,9 @@ std::size_t payload_symbol_count(std::size_t payload_bytes,const Config& c) {
         const auto bits=product(count,8,std::numeric_limits<std::size_t>::max()-c.constellation_bits+1);
         return (bits+c.constellation_bits-1)/c.constellation_bits;
     };
-    // Five-bit profiles explicitly pad the fixed 72-byte bootstrap boundary,
-    // preserving a byte-aligned header for blind acquisition and encrypted data.
-    return symbols(std::min(payload_bytes,packet_prefix_size))+symbols(payload_bytes>packet_prefix_size?payload_bytes-packet_prefix_size:0);
+    // A symbol may straddle the variable header/body boundary. Only the final
+    // symbol can contain unused bits, never an internal byte-alignment gap.
+    return symbols(payload_bytes);
 }
 std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     validate(c);check(wire_bytes>=32,"16APSK wire requires the 32-byte training prefix");

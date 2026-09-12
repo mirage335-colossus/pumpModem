@@ -74,7 +74,7 @@ public:
 };
 class MainWindow : public Fl_Double_Window {
 public:
-    MainWindow() : Fl_Double_Window(1180,830,"Data Pump") {}
+    MainWindow() : Fl_Double_Window(1180,866,"Data Pump") {}
     std::function<void()> on_resize;
     void resize(int x,int y,int w,int h) override {
         Fl_Double_Window::resize(x,y,w,h);

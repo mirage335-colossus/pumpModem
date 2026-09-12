@@ -1,8 +1,8 @@
 # Implementation coverage
 
-This matrix records version 0.5.6 behavior and its limits. It is not acceptance of
+This matrix records version 0.7.0 behavior and its limits. It is not acceptance of
 all performance and hardware claims in the original design. Adaptive audio peers
-need matching 0.5 audio whitening/settings; packet versions 1/2 and existing keyfiles are unchanged.
+need matching modem settings and the compact 0.7 packet format; existing keyfiles are unchanged.
 [Test execution results](validation.md) distinguish measured results from design
 and source-level checks.
 
@@ -16,8 +16,8 @@ and source-level checks.
 | 256 MiB receive content | Bounded RAM cache with ID replacement and eviction. Streaming DSP has an independent default 64 MiB budget; packet scratch has checked content-derived bounds. Neither number is a total process RSS guarantee. |
 | Large keyfile and pad | Production 128 MiB random header wraps an authenticated collection of 1..128 named complete five-purpose keysets. GUI opens, generates/saves in the background and shows the loaded file's folder. New files use exclusive creation and select the first named key. Legacy keyfiles load as Default. Optional large pad support remains in CLI. No physical-erasure guarantee. |
 | Repeatable messages | ID and repeat flag protected by packet integrity/authentication. Allowed when incremental encoded content takes at most 2 seconds, or original content has at most one byte. Fixed training, framing and metadata are excluded. No arbitrary 64 KiB cap or built-in repeater. |
-| Training and protected packets | Independently timed five-second default preamble, even for longer payload symbols. HMAC before body RS, byte interleaving, whole training/frame/parity encryption. Plain packets use SHA-256 integrity. Bootstrap remains RS protected with body FEC off. |
-| Short compression | Fixed legacy dictionary and version 2 variable-length prefix codec for content below 256 bytes. Common bytes can use 3-bit codes; arbitrary data remains lossless. Compression is selected only when shorter. |
+| Training and protected packets | Independently timed five-second default preamble, even for longer payload symbols. HMAC before body RS, byte interleaving, whole training/frame/parity encryption. Plain packets use SHA-256 integrity. Variable flags/ULEB128-length/CRC16 header, no magic, no internal symbol padding or transmitted zero-byte tail. Original messages below 16 bytes use no RS anywhere; otherwise header and body use the same nominal coding policy. Frames up to 2048 encoded bytes verify full integrity before short-frame lock. |
+| Automatic compression | One fixed byte-prefix code below 256 original bytes; common lowercase bytes use 3-bit codes. Longer data uses raw LZMA2 preset 9 extreme with history derived from original length. No dictionary/codebook/selector is transmitted; stored bytes are used when compression would expand. Vendored static liblzma needs no destination packages. |
 | Cipher streams | AES-256-CTR, HKDF purpose/epoch separation and independent HMAC. Data, DSSS and Scrambler purposes are connected; FHSS purpose is reserved without RF hopping. |
 | Audio-frame whitening | Public additive mask after private encryption, excluding fixed training; removes structured-frame symbol bias with no added bytes or error propagation. Pack/unpack are unchanged. Not encryption, increased capacity, a white-spectrum guarantee or LPI certification. |
 | Time and key search | Finite timing hypotheses at one configured carrier. Live receiver bank covers loaded keys and whole-second candidate epochs, default ±6 seconds, API maximum ±60 seconds subject to aggregate workspace. No unlimited clock search or nanosecond time discipline. |
@@ -37,6 +37,7 @@ and source-level checks.
 | Replay storage | Skipped-frame points merge within bounded source-specific batches; overflow or points left undelivered at the deadline are reported as omitted. Workspace uses at most DSP budget/8, capped near 1.4 MiB, including roughly 38 KiB of result diagnostics plus plots, points and up to 4096 preview-text bytes per frame. Smaller budgets reduce capacity. Prepared packet content uses the separate content quota. |
 | Physical channel effects | Batch PCM applies delay, frequency shift, clock resampling and phase noise. Accelerated simulation shifts timing and carrier phase but assumes matched chip despreading and approximates phase diffusion with bounded subintervals. No oscillator tracking, fading/multipath or hardware nonlinearity model. Long weak-signal modes can fail with the default crystal error. |
 | QR Level L | Vendored encoder, UTF-8 ECI, up to 500 Unicode scalars; compose preview and SVG/PBM CLI output. Independent decoding history is recorded in validation results. |
+| Modem and packet inspection tabs | Console, Modem flow and Transmission layout share the selected settings while reception continues. Encoder-derived diagrams show active processing, ideal APSK alphabets, training, protected header, actual compression and shortened RS/interleaving structure, with a payload placeholder. Raw layouts omit packet overhead. AGC and convolutional/trellis algorithms are explicitly marked unavailable. |
 | Explicit exclusions | No asymmetric key exchange, built-in repeater, routable address, rapid Doppler tracking, SDR/FHSS or IC-7100 control. No legal classification claim. |
 
 Acceptance of sensitivity, capacity, RF compliance, adversarial security or
