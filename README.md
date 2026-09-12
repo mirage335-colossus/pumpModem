@@ -75,8 +75,9 @@ defaults differ from 0.5.0.
 ## Build and run
 
 Build with a C++20 compiler, CMake 3.21+, OpenSSL 3 development files, and the
-platform's desktop development libraries. The complete FLTK 1.4.5 source and QR
-encoder are vendored. CMake does not fetch dependencies. On Debian/Ubuntu, build
+platform's desktop development libraries. The FLTK 1.4.5 source and QR
+encoder are vendored; see [dependency source and version notes](third_party/README.md).
+CMake does not fetch dependencies. On Debian/Ubuntu, build
 packages are `build-essential cmake libssl-dev zlib1g-dev libzstd-dev libx11-dev
 libxft-dev libxext-dev libxrender-dev libxcursor-dev libxfixes-dev libxinerama-dev`.
 These are build-machine requirements; a packaged installation includes its
