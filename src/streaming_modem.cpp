@@ -43,6 +43,25 @@ struct PendingConstellation {
 std::uint64_t chip_count(const Config& c) {
     return static_cast<std::uint64_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
 }
+// A short final raw symbol uses a subset of the configured APSK alphabet.
+// Spread its available phase/radius levels over the full alphabet, rather
+// than inventing zero bits to fill an ordinary full-width symbol.
+unsigned raw_symbol_value(unsigned value,unsigned meaningful,unsigned configured) {
+    if(meaningful==configured)return value;
+    const auto full_phases=1U<<detail::phase_bits(configured),full_rings=detail::rings(configured);
+    unsigned phase=0,ring=0;
+    if(meaningful==1) {
+        phase=value?full_phases/2:0;ring=value?full_rings-1:0;
+    } else {
+        const auto phases=1U<<detail::phase_bits(meaningful),rings=detail::rings(meaningful);
+        phase=detail::phase_step(value,meaningful)*(full_phases/phases);
+        const auto rank=detail::gray_decode(value>>detail::phase_bits(meaningful));
+        ring=rank*(full_rings-1)/(rings-1);
+    }
+    constexpr std::array<unsigned,8> inverse{0,1,3,2,6,7,5,4};
+    const auto phase_value=detail::phase_bits(configured)==3?inverse[phase]:phase^(phase>>1);
+    return ((ring^(ring>>1))<<detail::phase_bits(configured))|phase_value;
+}
 std::vector<int> pattern(const Config& c) {
     const auto count=c.spreading_factor;
     std::vector<int> result(count,1);
@@ -392,7 +411,7 @@ struct StreamingTransmitter::Impl {
     Config config;
     std::vector<int> code;
     std::uint64_t position=0,total=0,training=0,symbol=0,chip=0,segment_start=0,segment_end=0;
-    std::size_t symbol_index=0,payload_symbols=0,bootstrap_count=0;
+    std::size_t symbol_index=0,payload_symbols=0,bootstrap_count=0,raw_bit_count=0;
     Complex phase{1,0},point{};
     struct Segment {std::uint64_t begin=0,end=0;Complex value{};};
     // At least four samples/symbol: cover every symbol intersecting the
@@ -402,7 +421,7 @@ struct StreamingTransmitter::Impl {
     std::array<Complex,StreamingTransmitter::constellation_history_limit> constellation{};
     std::size_t constellation_begin=0,constellation_count=0;
     PendingConstellation pending_constellation;
-    bool pcm=false,analytical=false;
+    bool pcm=false,analytical=false,raw=false;
     Impl(Bytes bytes,Config value,std::size_t workspace):wire(std::move(bytes)),config(value) {
         static_assert(sizeof(Impl)<=65536,"transmitter state exceeds its fixed workspace reservation");
         validate(config);
@@ -415,11 +434,32 @@ struct StreamingTransmitter::Impl {
         total=training+static_cast<std::uint64_t>(payload_symbols)*symbol;
         advance();
     }
+    Impl(RawBits input,Config value,std::size_t workspace):config(value),raw_bit_count(input.bits.size()),raw(true) {
+        validate(config);
+        if(input.bits.empty())throw Error("raw binary transmission requires at least one bit");
+        if(workspace<65536+config.spreading_factor*sizeof(int))throw Error("streaming transmitter workspace is too small");
+        wire.resize(raw_bit_count/8+(raw_bit_count%8!=0));
+        for(std::size_t i=0;i<raw_bit_count;++i) {
+            if(input.bits[i]>1)throw Error("raw binary input elements must be zero or one");
+            wire[i/8]|=static_cast<std::uint8_t>(input.bits[i]<<(7-i%8));
+        }
+        code=pattern(config);symbol=symbol_sample_count(config);chip=chip_count(config);
+        payload_symbols=raw_bit_count/config.constellation_bits+(raw_bit_count%config.constellation_bits!=0);
+        if(payload_symbols>std::numeric_limits<std::uint64_t>::max()/symbol)throw Error("transmission duration exceeds 64-bit sample counter");
+        total=static_cast<std::uint64_t>(payload_symbols)*symbol;
+        // Start the first raw symbol when the first sample is requested, so
+        // diagnostics never claim an untransmitted initial point.
+    }
     void advance() {
         const auto index=symbol_index++;
-        if(index>=64+payload_symbols){segment_end=total;return;}
+        const auto training_symbols=raw?0U:64U;
+        if(index>=training_symbols+payload_symbols){segment_end=total;return;}
         unsigned bits=4,value=0;
-        if(index<64)value=detail::read_bits(std::span(wire).first(32),index*4,4);
+        if(raw) {
+            bits=config.constellation_bits;const auto offset=index*bits;
+            const auto meaningful=static_cast<unsigned>(std::min<std::size_t>(bits,raw_bit_count-offset));
+            value=raw_symbol_value(detail::read_bits(wire,offset,meaningful),meaningful,bits);
+        } else if(index<64)value=detail::read_bits(std::span(wire).first(32),index*4,4);
         else {
             bits=config.constellation_bits;const auto payload_index=index-64;
             if(payload_index<bootstrap_count)
@@ -428,7 +468,7 @@ struct StreamingTransmitter::Impl {
         }
         const auto previous=phase;
         point=detail::mapped(value,bits,phase);phase=point/std::abs(point);
-        if(index>=64) {
+        if(index>=training_symbols) {
             if(!constellation_count)pending_constellation.previous=previous;
             if(constellation_count==constellation.size()) {
                 pending_constellation.previous=constellation[constellation_begin];
@@ -438,7 +478,7 @@ struct StreamingTransmitter::Impl {
             pending_constellation.append(constellation.size());
         }
         segment_start=segment_end;
-        segment_end=index<64?training*static_cast<std::uint64_t>(index+1)/64:segment_end+symbol;
+        segment_end=index<training_symbols?training*static_cast<std::uint64_t>(index+1)/64:segment_end+symbol;
         if(history_count==history.size()){history_begin=(history_begin+1)%history.size();--history_count;}
         history[(history_begin+history_count++)%history.size()]={segment_start,segment_end,point};
         const auto oldest=position>StreamingTransmitter::analytic_preview_limit?position-StreamingTransmitter::analytic_preview_limit:0;
@@ -451,6 +491,7 @@ struct StreamingTransmitter::Impl {
     }
 };
 StreamingTransmitter::StreamingTransmitter(Bytes wire,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(wire),c,workspace)){}
+StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(bits),c,workspace)){}
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;

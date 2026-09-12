@@ -105,6 +105,10 @@ public:
     void configure(const Settings& settings);
     void update(const Settings& settings) { configure(settings); }
     void transmit(const Message& message);
+    // One 0/1 per element, including leading zeros. Uses streaming APSK and
+    // the selected data key, with no packet framing, preamble or FEC. Raw
+    // simulations show measured input; they cannot yield verified packets.
+    void transmit_bits(std::span<const std::uint8_t> bits);
     void cancel_transmit();
     Snapshot snapshot();
     void stop();

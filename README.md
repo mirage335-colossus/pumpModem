@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.4.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.5.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,12 +14,20 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.5.4 presents the entire simulated transmission over three seconds,
+Version 0.5.5 adds a binary editor beside the message editor. Select Binary to
+transmit an exact sequence such as `001`, using the shared streaming phase/amplitude
+modulator with no packet preamble, header, compression or error correction.
+Leading zeros are preserved; whitespace is ignored. The GUI shows the bit count
+and airtime, and selected keys apply stream encryption without adding bytes.
+Raw binary signals have no packet validation and do not appear as received
+text or files. The legacy CLI DBPSK status format is separate.
+
+The GUI presents the entire simulated transmission over three seconds,
 including fixed training, live plots and pending signal-browser text. Verified
 messages, file entries and data accuracy become available at the end of that
 presentation. It retains per-signal preamble reception and fresh constellation
 observations in the decoder's differential phase and amplitude coordinates.
-The waveform, packet and keyfile formats are unchanged from 0.5.1, including
+Existing packet waveforms, packet and keyfile formats are unchanged from 0.5.1, including
 the 1500 Hz carrier for narrow audio modes. Both audio
 endpoints must use matching carrier and modem settings; narrow automatic
 defaults differ from 0.5.0.
@@ -93,7 +101,7 @@ glibc at least as new as the build computer; Windows needs its own build. See
 [offline installation](docs/offline-installation.md) for packaging, verification,
 and operating-system requirements.
 
-The console provides text composition and explicit clipboard copy, file
+The console provides adjacent message and binary editors, explicit clipboard copy, file
 attachment, Level L QR previews, continuous audio reception, a scrolling
 frequency-labeled signal ticker with reception percentages, a false-color waterfall and live waveform,
 spectrum and constellation displays. It includes named shared-key selection and
@@ -108,11 +116,17 @@ cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
 retains every FFT bin through peak pooling and uses one labeled color scale for
 its entire history. Click it to clear the history and reset that scale.
 
-Enter transmits audio; the checkbox changes this to Ctrl+Enter. Normal
+Use the source selector above the editors to choose Message/File or Binary.
+Binary accepts a few bits such as `001`, without converting them into a text
+packet. Packet metadata, attachments and error correction controls are inactive
+for this source; the selected encryption key still applies.
+
+Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
 updating while idle. Transmissions run at CPU speed through noisy complex
-observations and the same symbol decoder, with virtual airtime reported separately.
+observations, with virtual airtime reported separately. Packet simulations use
+the same symbol decoder; unframed binary simulations display measured input.
 After computation completes, the entire transmission, including fixed training,
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and signal-browser previews follow the same timeline. Each frame shows the

@@ -86,7 +86,9 @@ std::string pattern_label(tuning::PatternMode mode) {
 }
 std::string seconds_text(double seconds) {
     std::ostringstream text;
-    if (seconds>=3600) text<<std::fixed<<std::setprecision(1)<<seconds/3600<<" h";
+    if (seconds>0 && seconds<.001) text<<std::setprecision(3)<<seconds*1e6<<" us";
+    else if (seconds>0 && seconds<1) text<<std::setprecision(3)<<seconds*1000<<" ms";
+    else if (seconds>=3600) text<<std::fixed<<std::setprecision(1)<<seconds/3600<<" h";
     else if (seconds>=60) text<<std::fixed<<std::setprecision(1)<<seconds/60<<" min";
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
@@ -136,6 +138,10 @@ public:
             encryption_changed(); settings_changed();
         });
         compose_label_=label("Message",13,true); signal_label_=label("Signals - click verified text to copy",13,true);
+        source_=new Fl_Choice(0,0,1,1); source_->add(menu_label("Message / File").c_str()); source_->add("Binary"); source_->value(0);
+        source_->textsize(12); source_->tooltip("Choose the input used by Transmit. The other editor is kept for later.");
+        bind(source_,[this] { dirty_estimate(); update_controls(); });
+        binary_label_=label("Binary / 0 bits",13,true);
         file_label_=label("Files in memory",13,true);
         editor_=new ComposeEditor; editor_->buffer(&compose_); editor_->textfont(FL_HELVETICA); editor_->textsize(16);
         editor_->wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
@@ -145,7 +151,16 @@ public:
         compose_.add_modify_callback([](int,int,int,int,const char*,void* context) {
             auto& app=*static_cast<App*>(context);
             if (app.qr_) app.qr_->text(buffer_text(app.compose_));
-            if (!app.attachment_) app.dirty_estimate();
+            if (!app.attachment_ && !app.binary_mode()) app.dirty_estimate();
+        },this);
+        binary_editor_=new ComposeEditor; binary_editor_->buffer(&binary_);
+        binary_editor_->textfont(FL_COURIER); binary_editor_->textsize(16);
+        binary_editor_->wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
+        binary_editor_->ctrl_enter=[this] { return send_key_->value()==1; };
+        binary_editor_->transmit=[this] { guarded([this] { transmit(); }); };
+        binary_editor_->tooltip("Exact bits, including leading zeros. Only 0, 1 and whitespace are accepted. Enter follows the selected send preference.");
+        binary_.add_modify_callback([](int,int,int,int,const char*,void* context) {
+            static_cast<App*>(context)->binary_changed();
         },this);
         qr_=new QrPreview;
         attach_=button("Attach file",[this] { choose_attachment(); });
@@ -193,6 +208,7 @@ public:
         session_.start(current_settings_); session_started_=true;
         need_devices_=!smoke_.enabled;
         dirty_estimate();
+        update_controls();
         window_->show();
         smoke_started_=Steady::now();
         Fl::add_timeout(.04,poll_callback,this);
@@ -203,7 +219,7 @@ public:
         if (preparation_.joinable()) preparation_.join();
         if(prepared_)record_smoke_keyfile(*prepared_);
         if(smoke_keyfile_created_) { std::error_code error; std::filesystem::remove(smoke_key_path_,error); }
-        editor_->buffer(nullptr); window_.reset();
+        editor_->buffer(nullptr); binary_editor_->buffer(nullptr); window_.reset();
     }
     int run() { Fl::run(); return smoke_.enabled&&!smoke_passed_?1:0; }
 private:
@@ -233,8 +249,12 @@ private:
         simulation_->resize(366,62,183,27); key_browse_->resize(560,62,92,27);
         key_path_->resize(660,62,std::max(90,width-926),27); key_entry_->resize(width-248,62,232,27);
         const int qr_size=196,compose_y=116,compose_height=196;
-        compose_label_->resize(margin,94,width-250,20);
-        editor_->resize(margin,compose_y,width-margin*2-qr_size-14,compose_height);
+        const int binary_width=220,editor_width=width-margin*2-qr_size-binary_width-28;
+        const int binary_x=margin+editor_width+14;
+        source_->resize(margin,94,145,20); compose_label_->resize(margin+155,94,editor_width-155,20);
+        binary_label_->resize(binary_x,94,binary_width,20);
+        editor_->resize(margin,compose_y,editor_width,compose_height);
+        binary_editor_->resize(binary_x,compose_y,binary_width,compose_height);
         qr_->resize(width-margin-qr_size,compose_y,qr_size,qr_size);
         const int buttons_y=compose_y+compose_height+8;
         attach_->resize(margin,buttons_y,169,29); use_text_->resize(194,buttons_y,78,29);
@@ -273,6 +293,23 @@ private:
         const auto index=key_entry_->value();
         if(index<0 || static_cast<std::size_t>(index)>keys_.size())throw Error("Select a valid encryption key entry");
         return index>0;
+    }
+    bool binary_mode() const { return source_ && source_->value()==1; }
+    std::optional<Bytes> selected_bits() const {
+        return binary_mode()?gui::selected_binary_bits(gui::TransmitSource::binary,buffer_text(const_cast<Fl_Text_Buffer&>(binary_))):
+            gui::selected_binary_bits(gui::TransmitSource::message_file,{});
+    }
+    void binary_changed() {
+        try {
+            const auto bits=gui::parse_binary_bits(buffer_text(binary_));
+            binary_bit_count_=bits.size(); binary_input_valid_=true; binary_error_.clear();
+            binary_label_->copy_label(("Binary / "+std::to_string(bits.size())+(bits.size()==1?" bit":" bits")).c_str());
+        } catch (const Error& error) {
+            binary_bit_count_=0; binary_input_valid_=false; binary_error_=error.what();
+            binary_label_->copy_label(buffer_text(binary_).find_first_not_of(" \t\r\n\f\v")==std::string::npos?
+                                      "Binary / 0 bits":"Binary / invalid input");
+        }
+        if (binary_mode()) dirty_estimate();
     }
     void encryption_changed() {
         const bool enabled=encrypted();
@@ -328,7 +365,10 @@ private:
     }
     void dirty_estimate() {
         ++revision_; estimate_.reset(); estimate_requested_=Steady::now();
-        if (airtime_) airtime_->copy_label("Calculating airtime...");
+        if (binary_mode() && !binary_input_valid_) {
+            estimated_revision_=revision_;
+            if (airtime_) airtime_->copy_label(binary_error_.c_str());
+        } else if (airtime_) airtime_->copy_label("Calculating airtime...");
     }
     std::optional<std::filesystem::path> choose_path(bool create,const char* title,const char* suggested=".") {
         Fl_File_Chooser chooser(suggested,"*",create?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,title);
@@ -421,9 +461,9 @@ private:
             start_preparation([](Prepared& value,std::stop_token) { value.devices=audio::devices(); },std::move(result));
         } else if (settings_valid_ && !estimate_ && estimated_revision_!=revision_ && Steady::now()-estimate_requested_>=std::chrono::milliseconds(120)) {
             result.kind=PrepKind::estimate; result.revision=revision_;
-            auto payload=message(); auto options=current_settings_.transfer;
-            start_preparation([payload=std::move(payload),options=std::move(options)](Prepared& value,std::stop_token) {
-                value.estimate=transfer::estimate(payload,options);
+            auto bits=selected_bits(); auto payload=bits?Message{}:message(); auto options=current_settings_.transfer;
+            start_preparation([bits=std::move(bits),payload=std::move(payload),options=std::move(options)](Prepared& value,std::stop_token) {
+                value.estimate=bits?transfer::estimate_binary(*bits,options):transfer::estimate(payload,options);
             },std::move(result));
         }
     }
@@ -467,27 +507,30 @@ private:
         } else if (result.kind==PrepKind::estimate && result.revision==revision_) {
             estimate_=result.estimate; estimated_revision_=revision_;
             const auto& estimate=*estimate_;
-            std::string text="TX "+seconds_text(estimate.total_seconds)+" / content "+seconds_text(estimate.content_seconds);
+            std::string text=binary_mode()?std::to_string(binary_bit_count_)+(binary_bit_count_==1?" bit / TX ":" bits / TX ")+seconds_text(estimate.total_seconds):
+                "TX "+seconds_text(estimate.total_seconds)+" / content "+seconds_text(estimate.content_seconds);
             if (!estimate.memory_supported) text="Content / DSP budget exceeded: "+seconds_text(estimate.total_seconds);
-            else if (repeatable_->value() && !estimate.repeatable_allowed) text="Repeatable content exceeds 2 s: "+seconds_text(estimate.content_seconds);
+            else if (!binary_mode() && repeatable_->value() && !estimate.repeatable_allowed) text="Repeatable content exceeds 2 s: "+seconds_text(estimate.content_seconds);
             airtime_->copy_label(text.c_str());
-            airtime_->tooltip("Total includes preamble, framing and error correction. Repeatable permits at most two seconds of encoded content, or an original payload of at most one byte.");
+            airtime_->tooltip(binary_mode()?"Exact binary symbols without packet training, metadata, compression or error correction. The selected encryption key still applies.":
+                "Total includes preamble, framing and error correction. Repeatable permits at most two seconds of encoded content, or an original payload of at most one byte.");
         }
     }
     void transmit() {
         if (closing_ || transmit_requested_ || last_snapshot_.transmitting) throw Error("A transmission is already in progress");
-        if (key_loading_ || file_loading_) throw Error("Wait for the selected file to finish loading");
+        if (key_loading_ || (!binary_mode() && file_loading_)) throw Error("Wait for the selected file to finish loading");
         if (key_load_failed_) throw Error("Choose a working keyfile or explicitly select an existing key entry before transmitting");
         if (!settings_valid_) throw Error("Correct the modem settings before transmitting");
         if (!estimate_ || estimated_revision_!=revision_) throw Error("Wait for the current airtime calculation");
         if (!estimate_->memory_supported) throw Error("This transmission exceeds the content or streaming DSP budget");
-        if (repeatable_->value() && !estimate_->repeatable_allowed) throw Error("Repeatable content must fit two seconds, unless its original payload is at most one byte");
-        auto payload=message();
+        if (!binary_mode() && repeatable_->value() && !estimate_->repeatable_allowed) throw Error("Repeatable content must fit two seconds, unless its original payload is at most one byte");
+        auto bits=selected_bits();
         gate_.started(current_settings_.simulation,encrypted()); transmit_requested_=true; saw_transmitting_=false;
         try {
             // The receiver is continuous. The session handles pause/resume for
             // real playback, and mixes loopback into its regular input stream.
-            session_.transmit(payload);
+            if (bits) session_.transmit_bits(*bits);
+            else session_.transmit(message());
         } catch (...) { transmit_requested_=false; gate_.abort_start(); throw; }
         notice(current_settings_.simulation?"Calculating the simulated transmission...":"Transmitting audio...");
     }
@@ -538,14 +581,20 @@ private:
         key_browse_->mode(2,loaded_key_path_.empty()?FL_MENU_INACTIVE:0);
         const auto remaining=gate_.remaining(current_settings_.simulation,encrypted()).count();
         const auto wait_seconds=remaining/1000+(remaining%1000!=0);
-        const bool eligible=settings_valid_ && estimate_ && estimate_->memory_supported && (!repeatable_->value() || estimate_->repeatable_allowed);
-        if (!busy && !key_loading_ && !key_load_failed_ && !file_loading_ && eligible && remaining==0) transmit_->activate(); else transmit_->deactivate();
+        const bool binary=binary_mode();
+        const bool eligible=settings_valid_ && estimate_ && estimate_->memory_supported && (binary || !repeatable_->value() || estimate_->repeatable_allowed);
+        if (!busy && !key_loading_ && !key_load_failed_ && (binary || !file_loading_) && eligible && remaining==0) transmit_->activate(); else transmit_->deactivate();
         transmit_->copy_label(!busy && remaining>0?("TX wait "+std::to_string(wait_seconds)+"s").c_str():"Transmit");
         (busy || last_snapshot_.simulation_replay)&&!closing_?cancel_->activate():cancel_->deactivate();
         cancel_->copy_label(last_snapshot_.simulation_replay?"Stop replay":"Cancel TX");
         if (selected_file() && !closing_) save_->activate(); else save_->deactivate();
-        if (!estimate_ || estimate_->repeatable_allowed || repeatable_->value()) repeatable_->activate(); else repeatable_->deactivate();
-        if (attachment_) use_text_->activate(); else use_text_->deactivate();
+        if (!binary && (!estimate_ || estimate_->repeatable_allowed || repeatable_->value())) repeatable_->activate(); else repeatable_->deactivate();
+        if (!binary && attachment_) use_text_->activate(); else use_text_->deactivate();
+        for (auto widget:std::array<Fl_Widget*,3>{callsign_,grid_,attach_}) binary?widget->deactivate():widget->activate();
+        if (binary) fec_->deactivate();
+        busy?source_->deactivate():source_->activate();
+        binary?binary_editor_->activate():binary_editor_->deactivate();
+        binary || attachment_?editor_->deactivate():editor_->activate();
     }
     void accept_snapshot(live::Snapshot snapshot) {
         if (smoke_.enabled) ++smoke_snapshot_poll_;
@@ -668,12 +717,14 @@ private:
             const bool beginning=!replay.active || replay.id!=last_snapshot_.transmission_id;
             if (beginning) {
                 replay={}; replay.active=true; replay.id=last_snapshot_.transmission_id;
+                replay.binary=smoke_binary_fixture_;
                 replay.started=Steady::now();
             } else if (last_snapshot_.replay_frame_index<replay.frame ||
                        last_snapshot_.simulation_sample_fraction<replay.fraction) {
                 throw Error("Simulation replay moved backward in transmission time");
             }
             for (const auto& signal:last_snapshot_.signals) {
+                if (replay.binary) throw Error("Raw binary simulation invented a packet-browser observation");
                 if (signal.validated) throw Error("Simulation verified a signal during its replay");
                 const auto found=std::find_if(signals_.lines().begin(),signals_.lines().end(),
                     [&](const auto& line) { return line.id==signal.id; });
@@ -716,8 +767,10 @@ private:
             replay.active=false;
             if (replay.id!=smoke_interrupted_replay_id_ && replay.id!=smoke_cancelled_replay_id_) {
                 const auto elapsed=std::chrono::duration<double>(Steady::now()-replay.started).count();
-                if (elapsed<2.4 || elapsed>8 || replay.frames<10 || replay.waveform_changes<5 ||
-                    replay.fraction<.9 || !replay.saw_symbols || !replay.pending_poll)
+                const auto minimum_frames=replay.binary?std::size_t{2}:std::size_t{10};
+                const auto minimum_changes=replay.binary?std::size_t{1}:std::size_t{5};
+                if (elapsed<2.4 || elapsed>8 || replay.frames<minimum_frames || replay.waveform_changes<minimum_changes ||
+                    replay.fraction<.9 || (!replay.binary && (!replay.saw_symbols || !replay.pending_poll)))
                     throw Error("Simulation replay did not show changing transmission frames over about three seconds");
                 smoke_completed_replay_id_=replay.id;
             }
@@ -869,10 +922,56 @@ private:
                    Steady::now()-smoke_cancelled_at_>std::chrono::milliseconds(3250)) {
             if (smoke_received_packets_!=2 || inbox_.items().size()!=2)
                 throw Error("Replay replacement or cancellation changed the verified inbox");
-            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=10;
-            notice("GUI smoke passed: keyfile generation, reception, text/file loopback, clipboard, save and live plots.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception and all plots returning to live reception."<<std::endl;
-        } else if (smoke_phase_==10 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
+            if (source_->size()!=3 || std::string(source_->text(0))!="Message / File" || std::string(source_->text(1))!="Binary")
+                throw Error("Transmission source choices were interpreted as menu paths");
+            const auto packet_revision=revision_;
+            binary_.text("001x");
+            if (selected_bits() || revision_!=packet_revision)
+                throw Error("Inactive binary input changed the packet transmission source");
+            source_->value(1); source_->do_callback();
+            if (!binary_mode() || binary_input_valid_ || estimate_ || transmit_->active())
+                throw Error("Invalid binary input did not disable transmission");
+            source_->value(0); source_->do_callback();
+            if (selected_bits() || !callsign_->active() || !grid_->active() || !fec_->active() || !attach_->active())
+                throw Error("Switching back to Message / File retained binary dispatch or disabled packet controls");
+            binary_.text("0 01");
+            if (selected_bits()) throw Error("Stale valid bits overrode the explicit Message / File source");
+            source_->value(1); source_->do_callback();
+            // A stale attachment and repeat setting must not wrap raw bits in
+            // a packet. Keep the selected key enabled for the actual loopback.
+            attachment_=std::make_shared<const Bytes>(smoke_file_bytes); attachment_path_="payload.bin";
+            repeatable_->value(1); key_entry_->value(1); key_entry_->do_callback();
+            send_key_->value(1);
+            if (!editor_->ctrl_enter() || !binary_editor_->ctrl_enter())
+                throw Error("Binary input did not share Ctrl+Enter preference");
+            send_key_->value(0);
+            if (editor_->ctrl_enter() || binary_editor_->ctrl_enter())
+                throw Error("Binary input did not share Enter preference");
+            smoke_phase_=10;
+        } else if (smoke_phase_==10 && estimate_ && transmit_->active()) {
+            const auto bits=selected_bits();
+            if (!bits || *bits!=Bytes({0,0,1}) || binary_bit_count_!=3 || !encrypted() ||
+                callsign_->active() || grid_->active() || fec_->active() || repeatable_->active() || attach_->active() ||
+                use_text_->active() || !key_entry_->active() || !binary_editor_->active() || editor_->active())
+                throw Error("Binary source did not retain exact bits, encryption and independent controls");
+            if (!std::string(airtime_->label()).starts_with("3 bits / TX ") ||
+                !std::string(binary_label_->label()).ends_with("3 bits") || editor_->x()+editor_->w()>=binary_editor_->x())
+                throw Error("Binary input did not show its count and airtime beside the message editor");
+            const auto expected=transfer::estimate_binary(*bits,current_settings_.transfer);
+            if (std::abs(estimate_->total_seconds-expected.total_seconds)>1e-12 ||
+                estimate_->total_seconds!=estimate_->content_seconds || estimate_->total_seconds!=estimate_->packet_seconds)
+                throw Error("Binary airtime included packet overhead or used stale message content");
+            smoke_binary_seconds_=expected.total_seconds; smoke_binary_fixture_=true;
+            transmit_->do_callback(); smoke_phase_=11;
+        } else if (smoke_phase_==11 && !transmit_requested_ && !last_snapshot_.transmitting && !last_snapshot_.simulation_replay &&
+                   smoke_replay_.binary && smoke_replay_.resumed && smoke_completed_replay_id_==last_snapshot_.transmission_id) {
+            if (smoke_received_packets_!=2 || inbox_.items().size()!=2 || file_ids_.size()!=1 ||
+                std::abs(last_snapshot_.transmission_seconds-smoke_binary_seconds_)>1.0/current_settings_.transfer.modem.sample_rate+1e-12)
+                throw Error("Binary simulation changed the packet inbox or transmitted the wrong bit duration");
+            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=12;
+            notice("GUI smoke passed: keyfiles, packet and binary transmission, clipboard, save and live plots.",smoke_.hold_seconds+1);
+            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit input with independent source selection and all plots returning to live reception."<<std::endl;
+        } else if (smoke_phase_==12 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
     SmokeOptions smoke_;
@@ -891,6 +990,9 @@ private:
     bool attachment_image_=false,was_encrypted_=false,session_started_=false,closing_=false;
     bool preparing_=false,key_loading_=false,key_load_failed_=false,file_loading_=false,need_devices_=false,settings_valid_=true;
     bool transmit_requested_=false,saw_transmitting_=false,target_supported_=true,saw_noise_change_=false,smoke_passed_=false;
+    bool binary_input_valid_=false;
+    std::size_t binary_bit_count_=0;
+    std::string binary_error_="Enter one or more binary bits";
     std::optional<std::filesystem::path> pending_key_,pending_file_;
     std::optional<transfer::Estimate> estimate_;
     std::optional<DecodedPacket> smoke_packet_,smoke_file_packet_;
@@ -899,7 +1001,7 @@ private:
         std::uint64_t id=0,revision=0,pending_poll=0;
         std::size_t frame=0,frames=0,waveform_changes=0;
         double fraction=0;
-        bool active=false,resumed=false,saw_symbols=false;
+        bool active=false,resumed=false,saw_symbols=false,binary=false;
         Steady::time_point started{};
         std::vector<float> waveform;
         std::vector<std::complex<double>> constellation;
@@ -908,6 +1010,8 @@ private:
     std::uint64_t smoke_snapshot_poll_=0,smoke_received_packets_=0;
     int smoke_phase_=-2;
     bool smoke_key_reception_=false;
+    bool smoke_binary_fixture_=false;
+    double smoke_binary_seconds_=0;
     double simulation_channel_snr_=0,cpu_percent_=0;
     std::string tuning_explanation_,notice_;
     std::vector<float> first_noise_;
@@ -917,16 +1021,16 @@ private:
     std::mutex preparation_mutex_;
     std::optional<Prepared> prepared_;
     std::vector<std::unique_ptr<std::function<void()>>> callbacks_;
-    Fl_Text_Buffer compose_;
+    Fl_Text_Buffer compose_,binary_;
     std::unique_ptr<MainWindow> window_;
-    Fl_Box *header_,*mode_,*key_path_,*compose_label_,*signal_label_,*file_label_,*airtime_=nullptr,*waterfall_label_,*waveform_label_,*constellation_label_,*diagnostics_,*status_;
+    Fl_Box *header_,*mode_,*key_path_,*compose_label_,*binary_label_,*signal_label_,*file_label_,*airtime_=nullptr,*waterfall_label_,*waveform_label_,*constellation_label_,*diagnostics_,*status_;
     Fl_Input *callsign_,*grid_;
     Fl_Input_Choice *device_,*bandwidth_,*snr_;
     Fl_Check_Button* repeatable_;
-    Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_;
+    Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_,*source_=nullptr;
     Fl_Button *clear_,*attach_,*use_text_,*transmit_,*cancel_,*save_;
     Fl_Menu_Button* key_browse_;
-    ComposeEditor* editor_;
+    ComposeEditor *editor_,*binary_editor_;
     QrPreview* qr_=nullptr;
     SignalBrowser* signal_browser_;
     Fl_Hold_Browser* file_browser_;
@@ -936,6 +1040,8 @@ private:
 };
 
 void self_check() {
+    if (seconds_text(.00000001)!="0.01 us" || seconds_text(.0025)!="2.5 ms")
+        throw Error("Short binary airtime rounded to zero");
     const auto names=gui::key_entry_names(menu_key_names);
     const auto labels=gui::key_choice_labels(names);
     Fl_Choice choice(0,0,1,1);

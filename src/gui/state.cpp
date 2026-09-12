@@ -6,6 +6,28 @@
 #include <sstream>
 
 namespace datapump::gui {
+Bytes parse_binary_bits(std::string_view text) {
+    std::size_t count=0;
+    for (const char value:text) {
+        if (value=='0' || value=='1') ++count;
+        else if (std::string_view(" \t\r\n\f\v").find(value)==std::string_view::npos)
+            throw Error("Binary input accepts only 0, 1 and whitespace");
+    }
+    if (!count) throw Error("Enter one or more binary bits");
+    Bytes bits;
+    bits.reserve(count);
+    for (const char value:text)
+        if (value=='0' || value=='1') bits.push_back(static_cast<std::uint8_t>(value-'0'));
+    return bits;
+}
+std::optional<Bytes> selected_binary_bits(TransmitSource source, std::string_view text) {
+    switch (source) {
+    case TransmitSource::message_file: return std::nullopt;
+    case TransmitSource::binary: return parse_binary_bits(text);
+    }
+    throw Error("Select Message / File or Binary input");
+}
+
 Inbox::Inbox(std::size_t capacity) : capacity_(capacity) {
     if (!capacity) throw Error("Receive cache capacity must be positive");
 }

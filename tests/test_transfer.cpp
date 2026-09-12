@@ -36,6 +36,54 @@ transfer::Options options(bool encrypted = false) {
     if (encrypted) value.key.emplace(Bytes(32, 0x37));
     return value;
 }
+void test_raw_binary_transfer() {
+    const Bytes bits{0,0,0,1,0,1,1,0,0,1,0};
+    for(const bool encrypted:{false,true}) {
+        auto value=options(encrypted);value.modem.spreading_factor=3;
+        value.modem.scramble=encrypted;value.modem.dsss=encrypted;
+        const auto estimate=transfer::estimate_binary(bits,value);
+        const auto symbols=bits.size()/value.modem.constellation_bits+(bits.size()%value.modem.constellation_bits!=0);
+        const auto expected_samples=symbols*modem::symbol_sample_count(value.modem);
+        check(estimate.waveform_samples==expected_samples && estimate.content_bytes==2 && estimate.packet_bytes==2,
+              "binary estimate preserves exact bit count without packet framing");
+        check(estimate.total_seconds==estimate.packet_seconds && estimate.total_seconds==estimate.content_seconds &&
+              std::abs(estimate.total_seconds-static_cast<double>(expected_samples)/value.modem.sample_rate)<1e-12,
+              "binary airtime includes only actual raw symbols");
+        check(estimate.memory_supported,"ordinary raw binary streaming is supported");
+        auto source=transfer::binary_transmitter(bits,value);
+        Bytes expected_bits=bits;
+        if(encrypted) {
+            const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp,0,2);
+            for(std::size_t i=0;i<bits.size();++i)expected_bits[i]^=static_cast<std::uint8_t>((mask[i/8]>>(7-i%8))&1);
+        }
+        modem::StreamingTransmitter reference(modem::RawBits{expected_bits},transfer::seeded_config(value,value.timestamp));
+        std::array<float,31> actual{},expected{};
+        while(!source->finished()) {
+            const auto count=source->read(actual),reference_count=reference.read(expected);
+            check(count==reference_count && std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(count),expected.begin()),
+                  "binary factory preserves leading zeros and applies exact data bits plus seeded spreading");
+        }
+        value.fec=FecMode::off;value.compression=false;value.repeat_policy.maximum_seconds=0;
+        auto same=transfer::binary_transmitter(bits,value);
+        auto canonical=transfer::binary_transmitter(bits,options(encrypted));
+        // Spreading changes physical samples; ignored packet controls leave
+        // raw airtime and meaningful bit count unchanged.
+        check(same->total_samples()==expected_samples && canonical->total_samples()==estimate.waveform_samples/3,
+              "packet FEC/compression/repeat controls cannot add raw framing or padding");
+    }
+    auto value=options();value.content_limit=bits.size()-1;
+    rejects([&]{transfer::estimate_binary(bits,value);},"raw binary parsed input capacity is enforced");
+    rejects([&]{transfer::binary_transmitter(bits,value);},"raw factory enforces the same parsed input capacity");
+    rejects([&]{transfer::binary_transmitter(Bytes{0,2},options());},"raw binary rejects non-bit values");
+    rejects([&]{transfer::estimate_binary({},options());},"raw binary rejects an empty request");
+    value=options();value.modem.integration_seconds=3600;value.modem.memory_limit=1024;
+    const auto slow=transfer::estimate_binary(Bytes{0,0,1},value);
+    check(slow.memory_supported && !slow.batch_memory_supported && slow.total_seconds==3600,
+          "hour-long raw symbols remain streamable without waveform memory");
+    value=options();value.dsp_workspace_bytes=256*1024;
+    check(!transfer::estimate_binary(bits,value).memory_supported,"raw estimates honor the reserved quarter of DSP workspace");
+    rejects([&]{transfer::binary_transmitter(bits,value);},"raw transmitter cannot use another DSP partition");
+}
 void test_callback_lifetime_and_epoch_binding() {
     const auto make_callbacks = [] {
         auto local = options(true);
@@ -346,8 +394,10 @@ void test_full_content_capacity_with_independent_scratch() {
     rejects([&]{transfer::pack(sent,value);},"one byte beyond actual content capacity rejected");
 }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
+        test_raw_binary_transfer();
+        if(argc>1 && std::string_view(argv[1])=="--binary-only") {std::cout<<"raw binary transfer tests passed\n";return 0;}
         test_callback_lifetime_and_epoch_binding();
         test_shared_packet_pipeline();
         test_airtime_estimates_and_repeat_policy();

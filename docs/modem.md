@@ -1,6 +1,6 @@
-# Audio modem reference, application version 0.5.4
+# Audio modem reference, application version 0.5.5
 
-Version 0.5.4 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5.5 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
 matching carrier and modem settings. This release synchronizes the complete
@@ -447,6 +447,28 @@ The last value sets AWGN power over the real sampled Nyquist bandwidth. For
 `3dBm -170dB`, C/N0 is -3 dB-Hz, regardless of the selected channel bandwidth.
 These are model inputs, not measurements of a soundcard or radio. Extreme
 presets may fail decoding.
+
+## Raw binary transmission
+
+The GUI's Binary editor is an alternative to its message/file source. It accepts
+`0` and `1`, preserves leading zeros and ignores whitespace. Its estimate and
+transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter`.
+`Session::transmit_bits` queues the same bounded streaming transmitter for audio
+or the accelerated simulation channel. Binary mode does not send callsign/grid
+metadata, an attachment, repeat requests, compression, fixed training, a packet
+header, integrity tag or error correction.
+
+Each complete group uses the configured APSK constellation. A partial final group
+selects a smaller set of points from that constellation; it carries only the
+remaining bits. Airtime is the number of groups times the quantized symbol duration,
+without byte padding or a five-second preamble. Selected keys mask only the actual
+bits with the data stream and seed the normal scrambler/spreading configuration.
+
+Raw signals have no packet bootstrap or authentication. During binary simulation,
+waveform, spectrum and input constellation replay the noisy signal over three
+seconds, then return to live noise. No packet lock or verified text/file reception
+is claimed. Automatic raw-bit discovery and known-sequence reception are not part
+of this GUI mode. The following CLI status API retains its separate DBPSK format.
 
 ## Batch PCM, WAV and few-bit status
 

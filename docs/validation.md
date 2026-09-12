@@ -1,9 +1,43 @@
-# Local validation record — version 0.5.4
+# Local validation record — version 0.5.5
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5.4 checks
+## Completed 0.5.5 checks
+
+* Native GUI Release: all **23 CTest suites passed** (28.35 seconds).
+* CLI-only Release with Python discovery disabled: all **19 suites passed**
+  (31.62 seconds).
+* Focused raw streaming-modem and transfer tests passed under ASan/UBSan.
+  LeakSanitizer was disabled for this host's tracing environment.
+* All four focused ASan/UBSan suites passed: live sessions, GUI plots, GUI policy
+  and GUI self-check. The Debug live suite took 96.34 seconds.
+* Native Release GUI workflow passed on the isolated virtual display, including
+  exact encrypted three-bit transmission, explicit source selection and return
+  to live plots. No physical audio device was used.
+* The complete GUI workflow also passed under ASan/UBSan. The new binary editor,
+  three-bit count and millisecond airtime were visually inspected on that display.
+
+Physical audio, battery comparisons and hosted Windows/CI execution were not
+tested for this release. Existing packet waveforms and keyfile formats are
+unchanged; the GUI raw binary format is separate from legacy CLI DBPSK status.
+
+## Binary transmission coverage
+
+New regressions check leading-zero binary input, invalid input and explicit
+source selection; exact unframed airtime for one through seventeen bits across
+all supported constellation widths; partial final symbols that vary both phase
+and amplitude; PCM/integrated agreement; and stream-key masking without extra
+bits. The GUI workflow includes selected-key three-bit transmission beside a
+retained message and attachment, with irrelevant packet controls disabled.
+
+Live-session tests exercise the actual playback branch through a link-time audio
+adapter, check its exact sample count, and simulate a one-symbol raw signal with
+an injected presentation clock. They cover the three-second deadline, measured
+input plots, no invented packet results, invalid-input nonmutation, cancellation,
+return to live noise, and an hours-long symbol with a 1 MiB DSP workspace.
+
+## Recorded 0.5.4 checks
 
 * Native GUI Release: all **23 CTest suites passed**.
 * CLI-only Release with Python discovery disabled: all **19 suites passed**.

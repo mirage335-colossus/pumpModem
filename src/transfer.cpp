@@ -44,6 +44,17 @@ void validate_message(const Message& message, const Options& options) {
     if (message.data.size() > options.content_limit)
         throw Error("message exceeds content limit");
 }
+Options binary_options(std::span<const std::uint8_t> bits,const Options& options) {
+    auto result=options;
+    // These controls describe packets and cannot alter a raw bit sequence.
+    result.fec=FecMode::off;result.compression=false;result.repeat_policy={};
+    validate(result);
+    if(bits.empty())throw Error("raw binary transmission requires at least one bit");
+    if(bits.size()>result.content_limit)throw Error("raw binary input exceeds content limit");
+    if(std::any_of(bits.begin(),bits.end(),[](auto bit){return bit>1;}))
+        throw Error("raw binary input elements must be zero or one");
+    return result;
+}
 Estimate estimate_encoded(const Message& message, const Options& options, std::size_t frame_size) {
     Message empty;
     empty.kind = message.kind;
@@ -201,6 +212,47 @@ Estimate estimate(const Message& message, const Options& options) {
     validate_message(message, options);
     const auto frame_size = encode_packet(message, packet_options(options, options.timestamp), packet_budget(options)).size();
     return estimate_encoded(message, options, frame_size);
+}
+
+Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& options) {
+    const auto value=binary_options(bits,options);
+    const auto symbols=bits.size()/value.modem.constellation_bits+(bits.size()%value.modem.constellation_bits!=0);
+    const auto symbol_samples=modem::symbol_sample_count(value.modem);
+    if(symbols>std::numeric_limits<std::uint64_t>::max()/symbol_samples)
+        throw Error("transmission duration exceeds 64-bit sample counter");
+    const auto samples=static_cast<std::uint64_t>(symbols)*symbol_samples;
+    Estimate result;
+    result.content_bytes=result.packet_bytes=bits.size()/8+(bits.size()%8!=0);
+    result.content_seconds=result.packet_seconds=result.total_seconds=static_cast<double>(samples)/value.modem.sample_rate;
+    result.repeatable_allowed=true;
+    const auto scratch=65536+value.modem.spreading_factor*sizeof(int);
+    result.memory_supported=scratch<=value.dsp_workspace_bytes/4;
+    if(samples<=std::numeric_limits<std::size_t>::max()) {
+        result.waveform_samples=static_cast<std::size_t>(samples);
+        const auto budget=value.modem.memory_limit;
+        result.batch_memory_supported=scratch<=budget && result.content_bytes<=budget-scratch &&
+            samples<=(budget-scratch-result.content_bytes)/sizeof(float);
+    }
+    return result;
+}
+
+std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
+    std::span<const std::uint8_t> bits,const Options& options) {
+    const auto value=binary_options(bits,options);
+    modem::RawBits raw{Bytes(bits.begin(),bits.end())};
+    if(value.key) {
+        // Keep crypto scratch fixed even for a large raw sequence. The final
+        // byte contributes only the meaningful bits present in the input.
+        std::size_t offset=0;
+        while(offset<bits.size()) {
+            const auto count=std::min<std::size_t>(16384*8,bits.size()-offset);
+            const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp,offset/8,count/8+(count%8!=0));
+            for(std::size_t i=0;i<count;++i)
+                raw.bits[offset+i]^=static_cast<std::uint8_t>((mask[i/8]>>(7-i%8))&1);
+            offset+=count;
+        }
+    }
+    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),value.dsp_workspace_bytes/4);
 }
 
 Bytes pack(const Message& message, const Options& options) {

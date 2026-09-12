@@ -23,11 +23,16 @@ struct ConstellationBatch {
 // repeated identical rejected prefixes may reuse the previous verdict.
 using BootstrapValidator = std::function<bool(const Bytes&)>;
 
+// Unframed binary input: one meaningful 0/1 bit per element, including leading
+// zeros. The final symbol uses only its actual number of remaining bits.
+struct RawBits { Bytes bits; };
+
 class StreamingTransmitter {
 public:
     static constexpr std::size_t analytic_preview_limit=2112;
     static constexpr std::size_t constellation_history_limit=2048;
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
+    StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;

@@ -2,6 +2,7 @@
 #include "datapump/crypto.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/packet.hpp"
+#include "datapump/streaming_modem.hpp"
 #include <functional>
 #include <optional>
 #include <span>
@@ -40,6 +41,14 @@ struct Estimate {
 // Exact framing/compression/FEC size and actual quantized modem symbol timing;
 // allocates a packet, never a waveform. Does not enforce repeat_policy.
 Estimate estimate(const Message& message, const Options& options);
+// Raw binary has no training, framing, compression, FEC or authentication.
+// Input elements are individual 0/1 bits. Byte estimates are ceil(bits/8)
+// storage equivalents; only the supplied meaningful bits are modulated.
+Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& options);
+// Uses the selected APSK modem and seeded spreading. A selected key masks
+// MSB-first bits with its data stream at options.timestamp; no tag is added.
+std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
+    std::span<const std::uint8_t> bits, const Options& options);
 struct Received {
     DecodedPacket packet;
     modem::Diagnostics diagnostics;

@@ -13,6 +13,54 @@ using Complex=std::complex<double>;
 Complex decision_coordinates(Complex point,Complex previous) {
     return std::abs(previous)>1e-20?point*std::conj(previous)/std::abs(previous):point;
 }
+void raw_binary_transmitter() {
+    for(unsigned width=2;width<=6;++width)for(std::size_t size=1;size<=17;++size) {
+        modem::Config config;config.constellation_bits=width;config.spreading_factor=3;
+        Bytes bits(size);for(std::size_t i=2;i<size;++i)bits[i]=static_cast<std::uint8_t>((i*7+i/3)&1);
+        modem::StreamingTransmitter source(modem::RawBits{bits},config),pcm(modem::RawBits{bits},config);
+        const auto symbols=size/width+(size%width!=0);
+        const auto expected_samples=symbols*modem::symbol_sample_count(config);
+        if(source.total_samples()!=expected_samples || source.samples_emitted()!=0 || !source.payload_constellation().empty())
+            throw std::runtime_error("raw binary adds training, byte padding or untransmitted points");
+        while(source.next_symbol()){}
+        std::vector<float> waveform;std::array<float,17> block{};
+        while(!pcm.finished()) {const auto count=pcm.read(block);waveform.insert(waveform.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));}
+        if(waveform.size()!=expected_samples || pcm.payload_constellation()!=source.payload_constellation() || source.payload_constellation().size()!=symbols)
+            throw std::runtime_error("raw binary PCM and integrated symbol streams disagree");
+        std::array<float,31> preview{};pcm.preview_last(preview);
+        for(std::size_t i=0;i<std::min(preview.size(),waveform.size());++i)
+            if(std::abs(preview[preview.size()-1-i]-waveform[waveform.size()-1-i])>1e-5F)
+                throw std::runtime_error("raw binary does not use the same carrier/spreading preview");
+    }
+    modem::Config config;
+    for(const auto& [input,expected]:std::array<std::pair<std::uint8_t,Complex>,2>{{{0,{.35,0}},{1,{-.7,0}}}}) {
+        modem::StreamingTransmitter source(modem::RawBits{{input}},config);
+        const auto first=source.next_symbol();
+        if(!first || std::abs(first->value-expected)>1e-12)
+            throw std::runtime_error("one raw bit must select distinct phase and amplitude points, without DBPSK or training");
+    }
+    // Three meaningful bits in a four-bit modem select eight APSK points:
+    // both rings and the four cardinal phases, without a fourth zero bit.
+    std::vector<Complex> partial_points;
+    for(unsigned value=0;value<8;++value) {
+        Bytes bits{static_cast<std::uint8_t>((value>>2)&1),static_cast<std::uint8_t>((value>>1)&1),static_cast<std::uint8_t>(value&1)};
+        modem::StreamingTransmitter source(modem::RawBits{bits},config);
+        partial_points.push_back(source.next_symbol()->value);
+    }
+    if(std::abs(partial_points[2]-Complex{0,-.35})>1e-12 || std::abs(partial_points[4]-Complex{.7,0})>1e-12)
+        throw std::runtime_error("partial raw symbol is zero padded instead of using its actual-width APSK subset");
+    for(std::size_t i=0;i<partial_points.size();++i)for(std::size_t j=0;j<i;++j)
+        if(std::abs(partial_points[i]-partial_points[j])<1e-12)throw std::runtime_error("partial raw bits map to duplicate constellation points");
+    bool rejected=false;try{modem::StreamingTransmitter invalid(modem::RawBits{{0,2,1}},config);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("raw transmitter accepted a non-bit element");
+    rejected=false;try{modem::StreamingTransmitter invalid(modem::RawBits{},config);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("raw transmitter accepted an empty transmission");
+    config.integration_seconds=3600;config.memory_limit=1024;
+    modem::StreamingTransmitter slow(modem::RawBits{{0,0,1}},config,65536+config.spreading_factor*sizeof(int));
+    std::size_t observations=0;while(slow.next_symbol())++observations;
+    if(slow.total_samples()!=static_cast<std::uint64_t>(config.sample_rate)*3600 || observations>33)
+        throw std::runtime_error("raw long-symbol simulation scales work or storage with airtime");
+}
 void received_preamble_evidence() {
     const auto capture=[](modem::Config config,bool pcm,unsigned prefix_mode,std::uint64_t crop=0,std::uint64_t delay=0) {
         Message message;message.id[0]=91;message.data={'t','r','a','i','n'};
@@ -500,6 +548,8 @@ void recent_pcm_preview() {
 }
 int main(int argc,char** argv) {
     try {
+        raw_binary_transmitter();
+        if(argc>1 && std::string_view(argv[1])=="--binary-only") {std::cout<<"raw binary modem tests passed\n";return 0;}
         received_preamble_evidence();
         if(argc>1 && std::string_view(argv[1])=="--preamble-only") {std::cout<<"preamble evidence tests passed\n";return 0;}
         consumable_transmit_constellation();

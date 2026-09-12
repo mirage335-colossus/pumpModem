@@ -16,6 +16,7 @@
 #include <random>
 #include <thread>
 #include <utility>
+#include <variant>
 
 namespace datapump::live {
 namespace {
@@ -136,6 +137,7 @@ void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch 
 struct Session::Impl {
     struct Prepared {
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
+        bool binary = false;
         std::uint64_t generation = 0, serial = 0;
         std::uint64_t admission_epoch = 0;
         std::uint64_t tail_remaining = 0;
@@ -181,7 +183,8 @@ struct Session::Impl {
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
     bool tx_busy = false;
-    std::deque<Message> queued;
+    using Transmission = std::variant<Message, Bytes>;
+    std::deque<Transmission> queued;
     std::shared_ptr<Prepared> ready;
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
@@ -236,6 +239,22 @@ struct Session::Impl {
         current.simulation_replay = false;
         current.replay_frame_index = current.replay_frame_count = 0;
         current.simulation_sample_fraction = 0;
+    }
+    // Called with mutex held, after validation. Invalid input must leave a
+    // currently presented simulation and its pending result untouched.
+    void enqueue(Transmission transmission) {
+        if (queued.size() >= 8) throw Error("transmit queue contains eight pending messages");
+        advance_replay(replay_clock());
+        queued.push_back(std::move(transmission)); current.transmitting = true;
+        current.transmission_finished = current.transmission_cancelled = false;
+        if (!tx_busy) {
+            current.transmission_fraction = current.transmission_seconds = 0;
+            clear_replay();
+        }
+        pending_points = {}; replay_omitted = 0;
+        current.constellation.clear(); current.constellation_source = ConstellationSource::input;
+        current.constellation_dropped = 0;
+        current.error.clear(); changed.notify_all();
     }
     void queue_points(modem::ConstellationBatch batch, ConstellationSource source_kind) {
         if (batch.points.empty() && !batch.dropped) return;
@@ -687,7 +706,8 @@ struct Session::Impl {
                 replay_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
                 current.replay_frame_count = replay.size();
-                current.status = "Simulation; three seconds of training, reception and decoded messages";
+                current.status = wave.binary ? "Simulation; three seconds of raw binary signal" :
+                    "Simulation; three seconds of training, reception and decoded messages";
                 ++current.sequence;
             }
         }
@@ -699,6 +719,10 @@ struct Session::Impl {
         current.transmission_seconds = static_cast<double>(wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
         current.transmission_fraction = static_cast<double>(wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
+        if (value.simulation && wave.binary) {
+            receiver_bytes = 0;
+            current.dsp_buffered_bytes = plot_workspace(value) + value.dsp_workspace_bytes / 4;
+        }
     }
     void source_loop(std::stop_token stop) {
         std::uint64_t local_generation = 0;
@@ -755,10 +779,10 @@ struct Session::Impl {
                         // replacements within the same DSP reservation.
                         simulation_bank.reset();
                         simulation_channel.reset();
-                        simulation_bank = make_bank(value, wave->admission_epoch);
+                        if (!wave->binary) simulation_bank = make_bank(value, wave->admission_epoch);
                         simulation_channel = std::make_unique<modem::SimulationChannel>(value.transfer.modem, channel_config(value));
                     }
-                    if (!simulation_bank) simulation_bank = make_bank(value);
+                    if (!simulation_bank && (!wave || !wave->binary)) simulation_bank = make_bank(value);
                     const auto sigma = std::sqrt(modem::nominal_signal_power / std::pow(10.0, value.simulation_snr_db / 10));
                     std::vector<float> preview(plot_size);
                     if (wave) {
@@ -771,7 +795,7 @@ struct Session::Impl {
                             if (!clean) {
                                 if (!wave->tail_started) {
                                     wave->tail_started = true;
-                                    wave->tail_remaining = modem::symbol_sample_count(value.transfer.modem);
+                                    wave->tail_remaining = wave->binary ? 0 : modem::symbol_sample_count(value.transfer.modem);
                                 }
                                 if (!wave->tail_remaining) break;
                                 const auto quantum = std::max<std::uint64_t>(1, modem::symbol_sample_count(value.transfer.modem) / 32);
@@ -786,7 +810,10 @@ struct Session::Impl {
                             }
                         }
                         account(samples, version); progress(*wave, value);
-                        feed_bank(*simulation_bank, value, version, processing_token, [&](auto& receiver) {
+                        // Unframed bits have no bootstrap or integrity check.
+                        // Display measured input, without inventing packet
+                        // acquisition, verified content or a locked decoder.
+                        if (!wave->binary) feed_bank(*simulation_bank, value, version, processing_token, [&](auto& receiver) {
                             return receiver.push_symbols(observations, processing_token);
                         }, wave.get());
                         // Decode through this exact media position before
@@ -865,12 +892,12 @@ struct Session::Impl {
     }
     void encode_loop(std::stop_token stop) {
         while (!stop.stop_requested()) {
-            Message message; Settings value; std::uint64_t version, serial; std::stop_token token;
+            Transmission transmission; Settings value; std::uint64_t version, serial; std::stop_token token;
             {
                 std::unique_lock lock(mutex);
                 changed.wait(lock, stop, [this] { return current.running && !tx_busy && replay.empty() && !queued.empty(); });
                 if (stop.stop_requested()) break;
-                message = std::move(queued.front()); queued.pop_front(); value = settings;
+                transmission = std::move(queued.front()); queued.pop_front(); value = settings;
                 version = generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
                 current.transmission_id = serial;
                 clear_replay(); pending_points = {};
@@ -878,7 +905,8 @@ struct Session::Impl {
                 current.constellation_dropped = 0;
                 tx_busy = true; current.transmitting = true; current.transmission_finished = false;
                 current.transmission_fraction = current.transmission_seconds = 0;
-                current.status = "Preparing packet; no complete waveform allocation";
+                current.status = std::holds_alternative<Bytes>(transmission) ? "Preparing raw binary signal" :
+                    "Preparing packet; no complete waveform allocation";
             }
             try {
                 // Admit the receiver clock before packet preparation consumes
@@ -886,14 +914,19 @@ struct Session::Impl {
                 // the normal multi-key candidate radius remains unchanged.
                 const auto admission_epoch = static_cast<std::uint64_t>(current_epoch());
                 if (!value.transfer.timestamp) value.transfer.timestamp = admission_epoch;
-                auto wire = transfer::transmission_wire(message, value.transfer);
-                if (token.stop_requested()) continue;
-                const auto config = transfer::seeded_config(value.transfer, value.transfer.timestamp);
                 auto prepared = std::make_shared<Prepared>();
                 prepared->generation = version; prepared->serial = serial; prepared->stop = token;
                 prepared->admission_epoch = admission_epoch;
-                prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(std::move(wire), config,
-                                                                                    value.dsp_workspace_bytes / 4);
+                prepared->binary = std::holds_alternative<Bytes>(transmission);
+                if (prepared->binary) {
+                    prepared->transmitter = transfer::binary_transmitter(std::get<Bytes>(transmission), value.transfer);
+                } else {
+                    auto wire = transfer::transmission_wire(std::get<Message>(transmission), value.transfer);
+                    if (token.stop_requested()) continue;
+                    const auto config = transfer::seeded_config(value.transfer, value.transfer.timestamp);
+                    prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(std::move(wire), config,
+                                                                                        value.dsp_workspace_bytes / 4);
+                }
                 if (value.simulation) {
                     const auto reserved = replay_workspace(value);
                     if (reserved <= replay_result_workspace) throw Error("DSP workspace cannot hold simulation results");
@@ -965,18 +998,16 @@ void Session::transmit(const Message& message) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
     if (message.data.size() > impl_->settings.content_limit) throw Error("message exceeds content capacity");
-    if (impl_->queued.size() >= 8) throw Error("transmit queue contains eight pending messages");
-    impl_->advance_replay(impl_->replay_clock());
-    impl_->queued.push_back(message); impl_->current.transmitting = true;
-    impl_->current.transmission_finished = impl_->current.transmission_cancelled = false;
-    if (!impl_->tx_busy) {
-        impl_->current.transmission_fraction = impl_->current.transmission_seconds = 0;
-        impl_->clear_replay();
-    }
-    impl_->pending_points = {}; impl_->replay_omitted = 0;
-    impl_->current.constellation.clear(); impl_->current.constellation_source = ConstellationSource::input;
-    impl_->current.constellation_dropped = 0;
-    impl_->current.error.clear(); impl_->changed.notify_all();
+    impl_->enqueue(message);
+}
+void Session::transmit_bits(std::span<const std::uint8_t> bits) {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->current.running) throw Error("continuous receiver is not running");
+    if (bits.empty()) throw Error("enter at least one binary bit");
+    if (bits.size() > impl_->settings.content_limit) throw Error("binary input exceeds content capacity");
+    if (std::any_of(bits.begin(), bits.end(), [](auto bit) { return bit > 1; }))
+        throw Error("binary input must contain only 0 and 1 bits");
+    impl_->enqueue(Bytes(bits.begin(), bits.end()));
 }
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);

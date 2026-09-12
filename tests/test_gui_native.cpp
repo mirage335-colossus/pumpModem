@@ -12,6 +12,24 @@ DecodedPacket packet(std::uint8_t id, std::size_t size) {
 }
 int main() {
     try {
+        check(gui::parse_binary_bits("0")==Bytes({0}));
+        check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
+        check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));
+        check(gui::parse_binary_bits(std::string(1025,'0'))==Bytes(1025,0));
+        for (const std::string& invalid : {std::string{},std::string(" \t\r\n"),std::string("0102"),
+                                         std::string("0b101"),std::string("0,1"),std::string("01x"),
+                                         std::string("0\0" "1",3),std::string("0\xc2\xa0" "1")}) {
+            bool rejected_bits=false;
+            try { (void)gui::parse_binary_bits(invalid); } catch (const Error&) { rejected_bits=true; }
+            check(rejected_bits);
+        }
+        auto source=gui::TransmitSource::message_file;
+        check(!gui::selected_binary_bits(source,"000101"));
+        check(!gui::selected_binary_bits(source,"invalid stale binary text"));
+        source=gui::TransmitSource::binary;
+        check(gui::selected_binary_bits(source,"000101")==std::optional<Bytes>(Bytes{0,0,0,1,0,1}));
+        source=gui::TransmitSource::message_file;
+        check(!gui::selected_binary_bits(source,"000101"));
         gui::Inbox inbox(5);
         inbox.put(packet(1,3));
         inbox.put(packet(1,2));
