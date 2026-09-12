@@ -130,7 +130,7 @@ private:
             const int top=y()+7+static_cast<int>(index-first)*row_height;
             const int left=x()+194,right=x()+w()-10;
             std::ostringstream caption; caption<<static_cast<int>(std::lround(line.frequency_hz))<<" Hz";
-            fl_color(theme::fltk_color((line.binary?line.complete:line.validated)?theme::text:theme::muted));
+            fl_color(theme::text_color((line.binary?line.complete:line.validated)?theme::text:theme::muted));
             fl_font(theme::bold_font,12); fl_draw(caption.str().c_str(),x()+11,top+14);
             fl_font(theme::font,10); fl_draw(signal_status_label(line).c_str(),x()+101,top+14);
             fl_font(theme::font,11);
@@ -160,7 +160,7 @@ private:
 class Waterfall : public Fl_Widget {
 public:
     Waterfall() : Fl_Widget(0,0,1,1) {
-        tooltip("Peak FFT level on one shared intensity scale: black is quiet, white is loud. Color progresses through blue, cyan, green, yellow, orange and red to white. Click to clear history and reset the scale.");
+        tooltip("Peak FFT level on one shared intensity scale: black is quiet, white is loud. Color uses muted blue, cyan, green, yellow, orange and red to soft off-white. Click to clear history and reset the scale.");
     }
     void clear() { history_.clear(); overview_=false; ++revision_; redraw(); }
     int handle(int event) override {
@@ -275,7 +275,7 @@ private:
                 const int py=center_y-static_cast<int>(point.imag()/scale*radius);
                 fl_color(theme::data_color()); fl_rectf(px-1,py-1,2,2);
             }
-            fl_font(theme::font,11); fl_color(theme::fltk_color(theme::text));
+            fl_font(theme::font,11); fl_color(theme::text_color());
             fl_draw("I",left+width-9,center_y-5); fl_draw("Q",center_x+5,top+12);
             std::ostringstream amplitude; amplitude<<std::setprecision(2)<<scale/2<<" / "<<scale<<" amplitude";
             fl_draw(amplitude.str().c_str(),left+3,top+height-1);

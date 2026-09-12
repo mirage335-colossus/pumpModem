@@ -195,7 +195,7 @@ public:
     }
 private:
     struct Button { int x=0,y=0,w=0,h=0; bool enabled=false; };
-    static Fl_Color ink() { return theme::fltk_color(theme::text); }
+    static Fl_Color ink() { return theme::text_color(); }
     static Fl_Color muted() { return theme::fltk_color(theme::muted); }
     static std::string number(double value) { std::ostringstream out; out<<std::setprecision(3)<<value; return out.str(); }
     static void component_cell(int x,int y,int width,int height,double value,double scale,bool used) {

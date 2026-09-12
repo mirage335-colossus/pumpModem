@@ -10,9 +10,9 @@ namespace datapump::gui::widgets {
 namespace {
 const Fl_Color background=theme::fltk_color(theme::background);
 const Fl_Color surface=theme::fltk_color(theme::surface);
-const Fl_Color ink=theme::fltk_color(theme::text);
+Fl_Color ink() { return theme::text_color(); }
 const Fl_Color muted=theme::fltk_color(theme::muted);
-const Fl_Color accent=theme::fltk_color(theme::accent);
+Fl_Color accent() { return theme::text_color(theme::accent); }
 const Fl_Color border=theme::fltk_color(theme::grid);
 constexpr int gap=16;
 
@@ -45,7 +45,7 @@ std::string quantities(const StructureSection& section) {
     return result;
 }
 void arrow(int left,int top,int right) {
-    fl_color(accent); fl_line(left,top,right-3,top);
+    fl_color(accent()); fl_line(left,top,right-3,top);
     fl_polygon(right-5,top-4,right,top,right-5,top+4);
 }
 struct Canvas {
@@ -58,7 +58,7 @@ struct Canvas {
         return height;
     }
     void heading(const std::string& text) {
-        cursor+=20; paragraph(text,15,ink,true); cursor+=12;
+        cursor+=20; paragraph(text,15,ink(),true); cursor+=12;
     }
     void note(const std::string& title,const std::string& detail) {
         const int title_height=text_height(title,width-28,13,true);
@@ -67,7 +67,7 @@ struct Canvas {
         if(paint) {
             fl_color(surface); fl_rectf(x,y+cursor,width,height);
             fl_color(border); fl_rect(x,y+cursor,width,height);
-            label(title,x+14,y+cursor+12,width-28,title_height,13,ink,true);
+            label(title,x+14,y+cursor+12,width-28,title_height,13,ink(),true);
             label(detail,x+14,y+cursor+18+title_height,width-28,detail_height,12,muted);
         }
         cursor+=height+12;
@@ -90,11 +90,11 @@ struct Canvas {
                 if(paint) {
                     fl_color(surface); fl_rectf(left,top,card_width,row_height);
                     fl_color(border); fl_rect(left,top,card_width,row_height);
-                    fl_color(active?accent:border); fl_line(left,top,left+card_width-1,top);
+                    fl_color(active?accent():border); fl_line(left,top,left+card_width-1,top);
                     const auto status=active?"ACTIVE":step.state==InspectionState::off?"OFF":"UNIMPLEMENTED";
-                    label(std::to_string(first+index+1)+"  /  "+status,left+14,top+13,card_width-28,18,10,active?accent:muted,true);
+                    label(std::to_string(first+index+1)+"  /  "+status,left+14,top+13,card_width-28,18,10,active?accent():muted,true);
                     const int title_height=text_height(step.title,card_width-28,13,true);
-                    label(step.title,left+14,top+36,card_width-28,title_height,13,ink,true);
+                    label(step.title,left+14,top+36,card_width-28,title_height,13,ink(),true);
                     label(step.detail,left+14,top+44+title_height,card_width-28,row_height-54-title_height,12,muted);
                     if(index+1<count) arrow(left+card_width+3,top+row_height/2,left+card_width+gap-3);
                 }
@@ -122,13 +122,13 @@ struct Canvas {
                 if(paint) {
                     fl_color(surface); fl_rectf(left,top,card_width,row_height);
                     fl_color(border); fl_rect(left,top,card_width,row_height);
-                    fl_color(accent); fl_line(left,top,left+card_width-1,top);
-                    label(std::to_string(first+index+1),left+14,top+13,card_width-28,16,11,accent,true);
+                    fl_color(accent()); fl_line(left,top,left+card_width-1,top);
+                    label(std::to_string(first+index+1),left+14,top+13,card_width-28,16,11,accent(),true);
                     const int title_height=text_height(section.title,card_width-28,14,true);
                     const auto counts=quantities(section);
                     const int counts_height=text_height(counts,card_width-28,12,true);
-                    label(section.title,left+14,top+36,card_width-28,title_height,14,ink,true);
-                    label(counts,left+14,top+42+title_height,card_width-28,counts_height,12,accent,true);
+                    label(section.title,left+14,top+36,card_width-28,title_height,14,ink(),true);
+                    label(counts,left+14,top+42+title_height,card_width-28,counts_height,12,accent(),true);
                     label(section.detail,left+14,top+50+title_height+counts_height,card_width-28,row_height-60-title_height-counts_height,12,muted);
                     if(index+1<count) arrow(left+card_width+3,top+row_height/2,left+card_width+gap-3);
                 }
@@ -154,7 +154,7 @@ struct Canvas {
                 if(paint) {
                     fl_color(surface); fl_rectf(left,top,card_width,row_height);
                     fl_color(border); fl_rect(left,top,card_width,row_height);
-                    label(plot.title,left+14,top+12,card_width-28,header_height,13,ink,true);
+                    label(plot.title,left+14,top+12,card_width-28,header_height,13,ink(),true);
                     const int cx=left+card_width/2,cy=top+header_height+28+plot_size/2;
                     double radius=.75;
                     for(const auto point:plot.points) if(std::isfinite(std::abs(point))) radius=std::max(radius,std::abs(point));
@@ -192,14 +192,14 @@ struct Canvas {
             const int height=std::max(text_height(field.name,name_width-24,12,true),text_height(field.value,width-name_width-24,12))+20;
             if(paint) {
                 fl_color(index%2==0?surface:background); fl_rectf(x,y+cursor,width,height);
-                label(field.name,x+12,y+cursor+10,name_width-24,height-20,12,ink,true);
+                label(field.name,x+12,y+cursor+10,name_width-24,height-20,12,ink(),true);
                 label(field.value,x+name_width+12,y+cursor+10,width-name_width-24,height-20,12,muted);
             }
             cursor+=height;
         }
     }
     void codeword(const std::string& title,std::size_t data,std::size_t parity) {
-        paragraph(title,12,ink,true); cursor+=8;
+        paragraph(title,12,ink(),true); cursor+=8;
         const auto total=data+parity;
         const int split=total?static_cast<int>(static_cast<double>(width)*static_cast<double>(data)/static_cast<double>(total)):width;
         if(paint) {
@@ -207,8 +207,8 @@ struct Canvas {
             fl_color(border); fl_rectf(x+split,y+cursor,width-split,40);
             fl_color(border); fl_rect(x,y+cursor,width,40);
             if(parity) { fl_color(muted); fl_line(x+split,y+cursor,x+split,y+cursor+39); }
-            label(std::to_string(data)+" data bytes",x+12,y+cursor+12,std::max(1,split-24),20,12,ink,true);
-            if(parity) label(std::to_string(parity)+" parity bytes",x+split+12,y+cursor+12,std::max(1,width-split-24),20,12,ink,true);
+            label(std::to_string(data)+" data bytes",x+12,y+cursor+12,std::max(1,split-24),20,12,ink(),true);
+            if(parity) label(std::to_string(parity)+" parity bytes",x+split+12,y+cursor+12,std::max(1,width-split-24),20,12,ink(),true);
         }
         cursor+=54;
     }
@@ -238,10 +238,10 @@ void InspectionDiagram::set_pending(std::string message) {
 int InspectionDiagram::content_height(int width) const { return render(width,false); }
 int InspectionDiagram::render(int width,bool paint) const {
     Canvas canvas{x()+20,y(),std::max(220,width-40),18,paint};
-    canvas.paragraph(flow_?"Configured modem flow":"Proposed transmission",22,ink,true);
+    canvas.paragraph(flow_?"Configured modem flow":"Proposed transmission",22,ink(),true);
     canvas.cursor+=8;
     if(!model_) { canvas.paragraph(pending_,14); return canvas.cursor+30; }
-    canvas.paragraph(model_->title,14,accent,true); canvas.cursor+=6;
+    canvas.paragraph(model_->title,14,accent(),true); canvas.cursor+=6;
     canvas.paragraph(model_->summary); canvas.cursor+=4;
     if(flow_) {
         for(const auto& lane:model_->lanes) {

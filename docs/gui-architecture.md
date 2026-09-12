@@ -116,13 +116,14 @@ Native widgets continue to handle input and editing.
 
 Color is enabled by default when supported. `--monochrome` selects grayscale;
 `--color` re-enables color, and the last of these switches wins. Color gives data
-field values, waveform traces, and every constellation point the same fixed cyan
-tint. Reference marks, status,
+field values, waveform traces, and every constellation point the same fixed muted
+cyan tint, and softens neutral text through the adapter's text role. The original
+grayscale roles and scalar intensities remain unchanged. Reference marks, status,
 QR codes, and signed pattern diagrams remain grayscale. The waterfall uses a
-fixed multihue lookup table over the same Gray8 intensities: black, dark blue,
-blue, cyan, green, yellow, orange, red, then white. FLTK converts requested image
-rows through a callback, retaining the Gray8 buffer without a second full RGB
-framebuffer.
+fixed muted multihue lookup table over the same Gray8 intensities: black, dark blue,
+blue, cyan, green, yellow, orange, red, then soft off-white. FLTK converts requested
+image rows through a callback, retaining the Gray8 buffer without a second full
+RGB framebuffer.
 
 Color adds no control kinds, IDs, bindings, or per-element properties. The
 proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional

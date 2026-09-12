@@ -3,6 +3,21 @@
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
+## Muted color presentation
+
+Color output now uses subdued cyan data text and traces, softer neutral labels,
+and muted waterfall hues ending in off-white. The monochrome roles and waterfall
+intensity/rendering path remain the same as the pre-color commit `924bd03`.
+
+The Release GUI rebuilt and all five focused GUI/model suites passed. Both
+`--color` and `--monochrome` passed the display-free self-check. An ASan/UBSan
+rendering harness (with the existing `detect_leaks=0` setting) verified 108,500
+clipped waterfall pixels across 218 intensity levels against the new palette,
+neutral labels capped at 208, and the uniform RGB (144, 192, 184) data tint.
+Its full 760-by-540 monochrome image was pixel-identical to the previous grayscale
+render. On an 8-bit display without a suitable RGB visual, a color request still
+produced entirely grayscale output. The muted rendering was inspected visually.
+
 ## Multihue waterfall
 
 The waterfall now uses blue, cyan, green, yellow, orange and red between black

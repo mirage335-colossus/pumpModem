@@ -19,6 +19,9 @@ inline bool color_enabled = false;
 inline Fl_Color fltk_color(std::uint8_t level) {
     return fl_rgb_color(level, level, level);
 }
+inline Fl_Color text_color(std::uint8_t fallback = text) {
+    return fltk_color(color_enabled && fallback > color_text ? color_text : fallback);
+}
 inline Fl_Color data_color(std::uint8_t fallback = accent) {
     return color_enabled ? fl_rgb_color(data_tint.red, data_tint.green, data_tint.blue) : fltk_color(fallback);
 }
@@ -35,13 +38,14 @@ inline void apply_palette(bool use_color = false) {
     Fl::scheme("base");
     Fl::background(surface, surface, surface);
     Fl::background2(background, background, background);
-    Fl::foreground(text, text, text);
+    const auto foreground = color_enabled ? color_text : text;
+    Fl::foreground(foreground, foreground, foreground);
     Fl::set_color(FL_SELECTION_COLOR, fltk_color(grid));
     Fl::set_color(FL_INACTIVE_COLOR, fltk_color(muted));
     for (auto box : {FL_UP_BOX, FL_DOWN_BOX, FL_THIN_UP_BOX, FL_THIN_DOWN_BOX})
         Fl::set_boxtype(box, border_box, 1, 1, 2, 2);
     Fl_Tooltip::color(fltk_color(surface));
-    Fl_Tooltip::textcolor(fltk_color(text));
+    Fl_Tooltip::textcolor(text_color());
     Fl_Tooltip::font(font);
     Fl_Tooltip::size(12);
     fl_message_font(font, 13);
@@ -49,7 +53,7 @@ inline void apply_palette(bool use_color = false) {
 
 inline void apply_widgets(Fl_Widget& widget) {
     widget.labelfont(widget.labelfont() & 1 ? bold_font : font);
-    widget.labelcolor(fltk_color(text));
+    widget.labelcolor(text_color());
     widget.selection_color(fltk_color(grid));
     if (auto* input = dynamic_cast<Fl_Input_*>(&widget)) {
         input->textfont(font);
