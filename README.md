@@ -168,10 +168,11 @@ original measured waterfall intensities and original text contrast, not
 desaturated false color. If FLTK cannot select an RGB visual, it uses grayscale.
 
 The dropdown above the QR preview offers **Normal**, **Dim red**, **Dark red**,
-and **Off**. The dim settings replace the bright white QR background with dark
-red; Off makes the preview black. Only the QR preview changes, and the selection
-is kept while you edit the message. Monochrome displays offer Dim gray and Dark
-gray instead. Choose Normal to restore the full-contrast QR code for scanning.
+and **Off**, with Dark red selected on every startup. The dim settings replace
+the bright white QR background with dark red; Off makes the preview black. Only
+the QR preview changes, and the selection is kept while you edit the message.
+Monochrome displays offer Dim gray and Dark gray instead, with Dark gray selected
+on startup. Choose Normal to restore the full-contrast QR code for scanning.
 
 Use the source selector above the editors to choose Message/File or Binary.
 Binary accepts a few bits such as `001`, without converting them into a text

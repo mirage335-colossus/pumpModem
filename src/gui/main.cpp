@@ -180,8 +180,8 @@ public:
         qr_brightness_=new Fl_Choice(0,0,1,1);
         qr_brightness_->add(gui::theme::color_enabled?
             "QR: Normal|QR: Dim red|QR: Dark red|QR: Off":"QR: Normal|QR: Dim gray|QR: Dark gray|QR: Off");
-        qr_brightness_->value(0); qr_brightness_->textsize(12);
-        qr_brightness_->tooltip("QR preview brightness only. Dim and Dark reduce the background; Off hides the preview. Choose Normal for scanning.");
+        qr_brightness_->value(static_cast<int>(qr_->brightness())); qr_brightness_->textsize(12);
+        qr_brightness_->tooltip("QR preview brightness only. Starts in Dark mode. Dim and Dark reduce the background; Off hides the preview. Choose Normal for scanning.");
         bind(qr_brightness_,[this] {
             qr_->brightness(static_cast<QrPreview::Brightness>(qr_brightness_->value()));
         });

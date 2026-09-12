@@ -3,6 +3,14 @@
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
+## Dark QR startup default
+
+The preview now starts in Dark mode before its first draw, and the dropdown reads
+that initial state. Every launch uses Dark red (Dark gray in monochrome), including
+with an empty message. The dark background level increased slightly from 24 to 32;
+Dim remains 64. The Release GUI rebuilt, and the QR suite plus all five focused
+GUI/model suites passed.
+
 ## QR preview brightness
 
 A dropdown above the QR preview selects Normal, Dim red, Dark red, or Off.

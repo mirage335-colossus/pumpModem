@@ -35,7 +35,7 @@ public:
     bool ready() const { return code_.has_value(); }
 private:
     void draw() override {
-        const unsigned char level=brightness_==Brightness::dim?64:brightness_==Brightness::dark?24:0;
+        const unsigned char level=brightness_==Brightness::dim?64:brightness_==Brightness::dark?32:0;
         const auto background=brightness_==Brightness::normal?FL_WHITE:
             theme::color_enabled?fl_rgb_color(level,0,0):theme::fltk_color(level);
         fl_color(background); fl_rectf(x(),y(),w(),h());
@@ -60,7 +60,8 @@ private:
     }
     std::optional<QrCode> code_;
     std::string message_;
-    Brightness brightness_=Brightness::normal;
+    // Stay dim from the first draw, even before a message has been entered.
+    Brightness brightness_=Brightness::dark;
 };
 
 class ComposeEditor : public Fl_Text_Editor {

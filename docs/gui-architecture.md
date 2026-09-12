@@ -111,7 +111,8 @@ explicitly reduced fidelity, while controls remain native terminal text.
 The grayscale basis uses shared intensity roles, monospaced fonts, flat
 borders, stationary short signal rows, small white constellation marks, and a reusable
 one-byte-per-pixel waterfall buffer. Signed pattern cells use a bipolar grayscale
-and revised legends so removing hue does not remove sign. Normal QR contrast is retained.
+and revised legends so removing hue does not remove sign. The Normal QR setting
+retains its original contrast.
 Native widgets continue to handle input and editing.
 
 Color is enabled by default when supported. `--monochrome` selects grayscale;
@@ -126,11 +127,12 @@ image rows through a callback, retaining the Gray8 buffer without a second full
 RGB framebuffer.
 
 The QR preview has a separate brightness selection: Normal, Dim, Dark, or Off.
-Dim and Dark use backgrounds of RGB (64, 0, 0) and (24, 0, 0) when color is enabled,
-or grayscale levels 64 and 24 otherwise. Off paints the preview black. The choice
-persists across text edits without changing the encoded matrix, module geometry,
-or other widgets. Normal restores the original white background and gray border;
-dim previews omit the border to avoid a bright frame.
+Dark is selected on every startup. Dim and Dark use backgrounds of RGB (64, 0, 0)
+and (32, 0, 0) when color is enabled, or grayscale levels 64 and 32 otherwise.
+Off paints the preview black. The choice persists across text edits without
+changing the encoded matrix, module geometry, or other widgets. Normal restores
+the original white background and gray border; dim previews omit the border to
+avoid a bright frame.
 
 Color rendering and the QR brightness choice use existing control kinds. The
 proposed bitmap contract retains mandatory Gray8/Mono1 and adds only optional

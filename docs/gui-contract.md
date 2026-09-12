@@ -46,11 +46,12 @@ Focus and selection remain clearly visible through the backend's usual behavior.
 
 The style applies to controls as well as plots, without recreating controls in a
 shared framebuffer. No decorative motion, glow, shadows, or animated ticker is
-required. A waterfall advances only to display signal history. QR codes default to
-black modules on a white background. The QR brightness dropdown can dim that
-background and its quiet zone to dark red (gray in monochrome), or hide the
-preview on black. Black modules and their geometry are preserved; Normal restores
-full contrast for scanning. This control affects only the QR preview.
+required. A waterfall advances only to display signal history. The QR brightness
+dropdown defaults to Dark red on every startup (Dark gray in monochrome), with
+black modules on a dim background and quiet zone. Dim offers a brighter red or
+gray background; Off hides the preview on black. Black modules and their geometry
+are preserved; Normal restores a white background with full contrast for scanning.
+This control affects only the QR preview.
 Signed data needs an explicit midpoint or
 other distinguishable marks and a legend; status never depends on color alone.
 Physical glyph shapes and native popup details may differ while retaining these
