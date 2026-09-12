@@ -40,12 +40,44 @@ int main() {
         gui::Signals signals;
         signals.update({7,1500,"uncertain tezt",false,{}});
         check(!signals.copy_id(0));
+        check(gui::signal_preamble_label(signals.lines()[0])=="Preamble --");
+        check(gui::signal_data_label(signals.lines()[0])=="Data pre-FEC pending");
         signals.update({7,1500,"corrected text",false,{}});
         check(signals.lines().size()==1 && signals.lines()[0].text=="corrected text");
         signals.update({7,1500,"corrected text",true,"verified-id"});
         check(signals.copy_id(0)=="verified-id");
+        gui::SignalLine quality{7,1500,"corrected text",true,"verified-id",true,75.0,
+                                PacketBitAccuracy{800,3}};
+        check(gui::signal_preamble_label(quality)=="Preamble 75.0%");
+        quality.preamble_received_percent=99.96;
+        check(gui::signal_preamble_label(quality)=="Preamble >99.9%");
+        quality.preamble_received_percent=100.;
+        check(gui::signal_preamble_label(quality)=="Preamble 100.0%");
+        quality.preamble_received_percent=75.;
+        check(gui::signal_data_label(quality)=="Data 99.62% pre-FEC");
+        signals.update(quality);
         signals.update({7,1500,"late unvalidated text",false,{}});
         check(signals.lines()[0].text=="corrected text" && signals.copy_id(0)=="verified-id");
+        check(signals.lines()[0].preamble_received_percent==75.0 &&
+              signals.lines()[0].pre_fec_accuracy->corrected_data_bits==3);
+        quality.pre_fec_accuracy=PacketBitAccuracy{800,0};
+        check(gui::signal_data_label(quality)=="Data 100% pre-FEC");
+        quality.pre_fec_accuracy=PacketBitAccuracy{8000000,1};
+        check(gui::signal_data_label(quality)=="Data >99.99% pre-FEC");
+        quality.pre_fec_accuracy=PacketBitAccuracy{800,800};
+        check(gui::signal_data_label(quality)=="Data 0.00% pre-FEC");
+        for (const auto invalid : {PacketBitAccuracy{0,0},PacketBitAccuracy{10,11}}) {
+            quality.pre_fec_accuracy=invalid;
+            check(gui::signal_data_label(quality)=="Data pre-FEC --");
+        }
+        quality.pre_fec_accuracy.reset();
+        check(gui::signal_data_label(quality)=="Data pre-FEC --");
+        quality.validated=false; quality.pre_fec_accuracy=PacketBitAccuracy{800,0};
+        check(gui::signal_data_label(quality)=="Data pre-FEC pending");
+        for (const auto invalid : {-1.,101.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+            quality.preamble_received_percent=invalid;
+            check(gui::signal_preamble_label(quality)=="Preamble --");
+        }
         for (std::uint64_t id=8;id<80;++id) signals.update({id,1500,std::string(5000,'a'),false,{}});
         check(signals.lines().size()==64 && signals.lines().back().text.size()==4096);
         signals.clear(); check(signals.lines().empty());

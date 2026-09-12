@@ -30,11 +30,23 @@ struct PacketOptions {
     std::function<bool(const Bytes&, const Bytes&)> verifier;
 };
 
+// Exact bit differences between received and corrected systematic body bytes:
+// metadata, encoded (possibly compressed) content and the digest/MAC. Header,
+// parity and demodulator tail bytes are excluded. XOR encryption/whitening
+// preserve these bit differences. This is available only after full validation.
+struct PacketBitAccuracy {
+    std::uint64_t received_data_bits = 0;
+    std::uint64_t corrected_data_bits = 0;
+};
+
 struct DecodedPacket {
     Message message;
     std::size_t corrected_bytes = 0;
     std::size_t consumed_bytes = 0;
     bool authenticated = false;
+    // Absent for a default/manual packet. Invalid or partial input never
+    // returns a DecodedPacket; valid no-FEC packets have zero corrected bits.
+    std::optional<PacketBitAccuracy> pre_fec_accuracy;
 };
 
 inline constexpr std::size_t packet_prefix_size = 72;

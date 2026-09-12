@@ -577,7 +577,8 @@ private:
         for (const auto& signal:snapshot.signals) {
             const auto packet=std::find_if(inbox_.items().begin(),inbox_.items().end(),[&](const auto& item) { return gui::id_label(item.message)==signal.packet_id; });
             const bool text_message=packet!=inbox_.items().end() && packet->message.kind==MessageKind::text;
-            signals_.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text_message});
+            signals_.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text_message,
+                             signal.preamble_received_percent,signal.pre_fec_accuracy});
             if (!signal.validated && pending_sequence_==0) pending_sequence_=signal.sequence;
             if (signal.validated && smoke_packet_ && signal.packet_id==gui::id_label(smoke_packet_->message)) final_sequence_=signal.sequence;
         }
@@ -757,7 +758,14 @@ private:
             const auto id=gui::id_label(smoke_packet_->message);
             bool activated=false;
             for (std::size_t index=0;index<signals_.lines().size();++index)
-                if (signals_.lines()[index].packet_id==id) activated=signal_browser_->activate_line(index);
+                if (signals_.lines()[index].packet_id==id) {
+                    const auto& line=signals_.lines()[index];
+                    if (!line.preamble_received_percent || !line.pre_fec_accuracy ||
+                        gui::signal_preamble_label(line).find('%')==std::string::npos ||
+                        gui::signal_data_label(line).find('%')==std::string::npos)
+                        throw Error("Verified signal did not display measured reception percentages");
+                    activated=signal_browser_->activate_line(index);
+                }
             if (!activated) throw Error("Verified signal was not available for click-to-copy");
             Fl::paste(*clipboard_probe_,1); smoke_phase_=2;
         } else if (smoke_phase_==2 && clipboard_probe_->received && smoke_replay_.frames>=3) {
@@ -775,8 +783,23 @@ private:
             if (file_ids_.size()!=1 || !selected_file() || selected_file()->message.data!=smoke_file_bytes)
                 throw Error("Received file selection did not exclude text");
             const auto id=gui::id_label(smoke_file_packet_->message);
+            bool measured_file=false;
             for (std::size_t index=0;index<signals_.lines().size();++index)
-                if (signals_.lines()[index].packet_id==id && signal_browser_->activate_line(index)) throw Error("A file signal was copyable as text");
+                if (signals_.lines()[index].packet_id==id) {
+                    const auto& line=signals_.lines()[index];
+                    if (!line.validated || !line.preamble_received_percent || !line.pre_fec_accuracy ||
+                        !smoke_file_packet_->pre_fec_accuracy ||
+                        gui::signal_preamble_label(line).find('%')==std::string::npos ||
+                        gui::signal_data_label(line).find('%')==std::string::npos)
+                        throw Error("Verified file signal did not display measured reception percentages");
+                    const auto& expected=*smoke_file_packet_->pre_fec_accuracy;
+                    if (line.pre_fec_accuracy->received_data_bits!=expected.received_data_bits ||
+                        line.pre_fec_accuracy->corrected_data_bits!=expected.corrected_data_bits)
+                        throw Error("File signal accuracy differs from its validated packet");
+                    if (signal_browser_->activate_line(index)) throw Error("A file signal was copyable as text");
+                    measured_file=true;
+                }
+            if (!measured_file) throw Error("Verified file had no measured signal-browser row");
             const auto saved_bytes=selected_file()->message.data;
             std::filesystem::create_directories(smoke_.directory); const auto path=smoke_.directory/"received.bin";
             save_bytes(path,saved_bytes);
@@ -784,11 +807,13 @@ private:
             if (data!=smoke_file_bytes) throw Error("Explicit save changed received bytes");
             bool rejected=false; try { save_bytes(path,saved_bytes); } catch (const Error&) { rejected=true; }
             if (!rejected) throw Error("Save overwrote an existing file");
+            const auto retained_signals=signals_.lines();
             clear_->do_callback();
             if (!inbox_.items().empty() || !signals_.lines().empty()) throw Error("Clear left received content in memory");
             inbox_.put(*smoke_packet_); inbox_.put(*smoke_file_packet_); refresh_files();
-            signals_.update({999999,1500,smoke_text,true,gui::id_label(smoke_packet_->message)});
-            signals_.update({1000000,1500,"payload.bin",true,gui::id_label(smoke_file_packet_->message),false});
+            for (const auto& line:retained_signals)
+                if (line.validated && (line.packet_id==gui::id_label(smoke_packet_->message) ||
+                                       line.packet_id==gui::id_label(smoke_file_packet_->message))) signals_.update(line);
             use_text_->do_callback();
             resume_sequence_=last_snapshot_.sequence; smoke_phase_=5;
         } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting && smoke_replay_.resumed &&

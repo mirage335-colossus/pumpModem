@@ -1,4 +1,5 @@
 #include "datapump/packet.hpp"
+#include "datapump/crypto.hpp"
 #include <openssl/evp.h>
 #include <algorithm>
 #include <iostream>
@@ -194,6 +195,110 @@ void test_corruption() {
     for (std::size_t i = packet_prefix_size; i < wire.size(); ++i) wire[i] ^= 0xaa;
     rejects([&] { decode_packet(wire); }, "reject corruption past RS capability");
 }
+struct BodyPositions {
+    std::vector<std::size_t> data,parity;
+};
+BodyPositions body_positions(const Bytes& wire,FecMode fec) {
+    std::size_t length=0;
+    for(std::size_t i=8;i<16;++i)length=(length<<8)|wire[i];
+    BodyPositions positions;positions.data.resize(length);
+    if(fec==FecMode::off) {
+        for(std::size_t i=0;i<length;++i)positions.data[i]=packet_prefix_size+i;
+        return positions;
+    }
+    const std::size_t capacity=fec==FecMode::rs20?210:150;
+    std::vector<std::size_t> counts,widths;
+    for(std::size_t offset=0;offset<length;offset+=capacity) {
+        const auto count=std::min(capacity,length-offset);
+        const auto parity=((count*(fec==FecMode::rs20?1:3)+4)/5+1)&~std::size_t{1};
+        counts.push_back(count);widths.push_back(count+parity);
+    }
+    auto position=packet_prefix_size;
+    for(std::size_t column=0;column<*std::max_element(widths.begin(),widths.end());++column)
+        for(std::size_t row=0;row<widths.size();++row) {
+            if(column>=widths[row])continue;
+            if(column<counts[row])positions.data[row*capacity+column]=position;
+            else positions.parity.push_back(position);
+            ++position;
+        }
+    check(position==wire.size(),"test body interleaver mapping covers exactly the encoded frame");
+    return positions;
+}
+void check_accuracy(const DecodedPacket& packet,std::uint64_t data_bits,std::uint64_t corrected_bits) {
+    check(packet.pre_fec_accuracy.has_value(),"validated packet omitted pre-FEC accuracy");
+    check(packet.pre_fec_accuracy->received_data_bits==data_bits,"pre-FEC accuracy denominator includes non-data bytes or decompressed content");
+    check(packet.pre_fec_accuracy->corrected_data_bits==corrected_bits,"pre-FEC accuracy is not the exact systematic-body bit difference");
+}
+void test_pre_fec_bit_accuracy() {
+    check(!DecodedPacket{}.pre_fec_accuracy,"unvalidated/default packet manufactured an accuracy measurement");
+    auto message=text_message(std::string(700,'x'));message.id.fill(0x19);
+    for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        PacketOptions options;options.fec=fec;options.compression=false;
+        const auto wire=encode_packet(message,options);
+        const auto positions=body_positions(wire,fec);
+        const auto bits=static_cast<std::uint64_t>(positions.data.size())*8;
+        check_accuracy(decode_packet(wire),bits,0);
+        auto tailed=wire;tailed.insert(tailed.end(),40,0xff);
+        check_accuracy(decode_packet(tailed),bits,0);
+        auto header_only=wire;header_only[0]^=0xff;header_only[50]^=0x81;
+        const auto header_fixed=decode_packet(header_only);
+        check_accuracy(header_fixed,bits,0);
+        check(header_fixed.corrected_bytes==2,"body accuracy changed legacy bootstrap correction count");
+        if(fec==FecMode::off) {
+            auto bad=wire;bad[positions.data[40]]^=1;
+            std::optional<DecodedPacket> decoded;
+            rejects([&]{decoded=decode_packet(bad);},"invalid no-FEC packet returned an accuracy result");
+            check(!decoded,"failed validation exposed unverified bit accuracy");
+            continue;
+        }
+        auto parity_only=wire;parity_only[positions.parity.front()]^=0xff;parity_only[positions.parity.back()]^=0x03;
+        const auto parity_fixed=decode_packet(parity_only);
+        check_accuracy(parity_fixed,bits,0);
+        check(parity_fixed.corrected_bytes==2,"body accuracy changed legacy parity correction count");
+        const std::size_t capacity=fec==FecMode::rs20?210:150;
+        const std::array<std::size_t,4> offsets{0,capacity-1,capacity,positions.data.size()-1};
+        const std::array<std::uint8_t,4> masks{1,0x81,0x3f,0xff};
+        auto systematic=wire;
+        for(std::size_t i=0;i<offsets.size();++i)systematic[positions.data[offsets[i]]]^=masks[i];
+        const auto data_fixed=decode_packet(systematic);
+        check_accuracy(data_fixed,bits,17);
+        check(data_fixed.corrected_bytes==4 && data_fixed.message.data==message.data,
+              "systematic repair changed legacy correction count or decoded data");
+        systematic[0]^=0x55;systematic[positions.parity.back()]^=0x80;
+        const auto mixed_fixed=decode_packet(systematic);
+        check_accuracy(mixed_fixed,bits,17);
+        check(mixed_fixed.corrected_bytes==6,"mixed repair failed to retain all corrected bytes");
+        auto burst=wire;
+        for(std::size_t i=0;i<12;++i)burst[packet_prefix_size+i]^=0x5a;
+        check_accuracy(decode_packet(burst),bits,48);
+    }
+    PacketOptions compressed;
+    const auto short_wire=encode_packet(text_message(std::string(80,'e')),compressed);
+    check((short_wire[6]&1)!=0,"accuracy fixture did not compress its payload");
+    const auto short_positions=body_positions(short_wire,compressed.fec);
+    const auto compressed_bits=static_cast<std::uint64_t>(short_positions.data.size())*8;
+    check(compressed_bits==(26+30+32)*8,"compressed accuracy fixture body layout changed");
+    check_accuracy(decode_packet(short_wire),compressed_bits,0);
+    auto damaged_short=short_wire;damaged_short[short_positions.data[26]]^=0x0f;
+    check_accuracy(decode_packet(damaged_short),compressed_bits,4);
+
+    // The codec sees decrypted bytes. A flipped ciphertext bit survives CTR
+    // decryption at the same position; measurement must remain exact under MAC.
+    const Crypto key(Bytes(32,0x57));
+    PacketOptions authenticated;authenticated.compression=false;
+    authenticated.authenticator=[&](const Bytes& bytes){return key.mac(bytes);};
+    authenticated.verifier=[&](const Bytes& bytes,const Bytes& tag){return key.verify(bytes,tag);};
+    const auto plain=encode_packet(message,authenticated);
+    const auto positions=body_positions(plain,authenticated.fec);
+    auto encrypted=key.xor_data(plain,1800000000);encrypted[positions.data[40]]^=0xa5;
+    const auto received=decode_packet(key.xor_data(encrypted,1800000000),authenticated);
+    check(received.authenticated,"pre-FEC test bypassed independent authentication");
+    check_accuracy(received,static_cast<std::uint64_t>(positions.data.size())*8,4);
+    authenticated.verifier=[](const Bytes&,const Bytes&){return false;};
+    std::optional<DecodedPacket> rejected;
+    rejects([&]{rejected=decode_packet(plain,authenticated);},"MAC failure returned pre-FEC accuracy");
+    check(!rejected,"failed MAC validation exposed an accuracy measurement");
+}
 void test_authentication() {
     PacketOptions options;
     // This deliberately simple test double checks callback boundaries, not MAC strength.
@@ -311,7 +416,7 @@ void test_adversarial_metadata() {
 }
 int main() {
     try {
-        test_rs(); test_bootstrap_prefilter(); test_compression(); test_partial_preview(); test_packets(); test_corruption(); test_authentication(); test_filenames(); test_adversarial_metadata();
+        test_rs(); test_bootstrap_prefilter(); test_compression(); test_partial_preview(); test_packets(); test_corruption(); test_pre_fec_bit_accuracy(); test_authentication(); test_filenames(); test_adversarial_metadata();
         std::cout << "packet tests passed\n";
         return 0;
     } catch (const std::exception& error) {

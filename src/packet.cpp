@@ -4,6 +4,7 @@
 #include <openssl/rand.h>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <limits>
 #include <string_view>
 
@@ -212,7 +213,8 @@ Bytes encode_body(const Bytes& body, FecMode mode) {
         }
     return result;
 }
-Bytes decode_body(const Bytes& wire, const Header& header, std::size_t& corrected) {
+Bytes decode_body(const Bytes& wire, const Header& header, std::size_t& corrected,
+                  std::uint64_t& corrected_data_bits) {
     if (header.fec == FecMode::off)
         return Bytes(wire.begin() + packet_prefix_size, wire.begin() + static_cast<std::ptrdiff_t>(header.wire_length));
     const auto capacity = block_capacity(header.fec);
@@ -232,7 +234,15 @@ Bytes decode_body(const Bytes& wire, const Header& header, std::size_t& correcte
         const auto start = row * full_width;
         const auto parity = parity_count(count, header.fec);
         Bytes block(rows.begin() + static_cast<std::ptrdiff_t>(start), rows.begin() + static_cast<std::ptrdiff_t>(start + count + parity));
-        corrected += packet_codec::rs_correct(block, parity);
+        const auto repaired=packet_codec::rs_correct(block, parity);
+        corrected += repaired;
+        // rows retains the received, deinterleaved bytes. RS is systematic:
+        // only the first count bytes carry encoded body data. Parity repairs
+        // still contribute to corrected_bytes, but never to data-bit accuracy.
+        if(repaired)
+            for(std::size_t i=0;i<count;++i)
+                corrected_data_bits+=static_cast<std::uint64_t>(
+                    std::popcount(static_cast<unsigned>(rows[start+i]^block[i])));
         result.insert(result.end(), block.begin(), block.begin() + static_cast<std::ptrdiff_t>(count));
     }
     return result;
@@ -656,7 +666,11 @@ DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options, std
     if (!authenticated && options.authenticator) throw Error("Unauthenticated packet rejected by keyed receiver");
     DecodedPacket result;
     result.corrected_bytes = header.corrected;
-    auto body = decode_body(wire, header, result.corrected_bytes);
+    if(header.body_length>std::numeric_limits<std::uint64_t>::max()/8)
+        throw Error("Packet data-bit count overflow");
+    PacketBitAccuracy accuracy;
+    accuracy.received_data_bits=static_cast<std::uint64_t>(header.body_length)*8;
+    auto body = decode_body(wire, header, result.corrected_bytes, accuracy.corrected_data_bits);
     const auto content_end = body.size() - tag_size;
     const Bytes tag(body.begin() + static_cast<std::ptrdiff_t>(content_end), body.end());
     Bytes canonical = header.bytes;
@@ -690,6 +704,7 @@ DecodedPacket decode_packet(const Bytes& wire, const PacketOptions& options, std
         (header.bytes[4]==2?packet_codec::decompress_short_v2(payload,header.original_length):packet_codec::decompress_short(payload, header.original_length)) : std::move(payload);
     result.consumed_bytes = header.wire_length;
     result.authenticated = authenticated;
+    result.pre_fec_accuracy=accuracy;
     return result;
 }
 }

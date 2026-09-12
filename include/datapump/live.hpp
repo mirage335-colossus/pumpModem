@@ -42,6 +42,11 @@ struct SignalUpdate {
     std::size_t expected_bytes = 0;
     std::uint64_t sequence = 0;
     double virtual_seconds = 0;
+    // Unknown until receiver evidence is available; never inferred from the
+    // synthetic training prefix returned by blind bootstrap acquisition.
+    std::optional<double> preamble_received_percent = std::nullopt;
+    // Available only after complete packet integrity/authentication checks.
+    std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {

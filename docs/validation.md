@@ -1,9 +1,53 @@
-# Local validation record — version 0.5.2
+# Local validation record — version 0.5.3
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5.2 checks
+## Completed 0.5.3 checks
+
+* Native GUI Release: all **23 CTest suites passed**.
+* CLI-only Release with Python discovery disabled: all **19 suites passed**.
+* All five focused ASan/UBSan suites passed: packet, live sessions, GUI plots,
+  GUI policy and GUI self-check. The Debug live suite took 77.75 seconds.
+  LeakSanitizer was disabled for this host's tracing environment.
+* The native Release GUI workflow passed on an isolated Xvfb display. Both text
+  and file rows carried reception percentages, with exact data counters matching
+  their verified packets. The labels were also visually inspected in the running
+  window alongside the scrolling messages.
+* The instrumented native GUI workflow also passed with ASan/UBSan. All GUI
+  workflows used the isolated display and simulated input, without opening a
+  physical audio device.
+* The full standalone streaming suite passed. Targeted preamble cases passed
+  under ASan, UBSan and float-cast-overflow instrumentation. All linked core
+  translation units used the current diagnostics layout.
+* Exact packet-bit accuracy tests passed in Release and ASan/UBSan, covering
+  no-FEC packets, header/parity-only repairs, known bit flips in full and ragged
+  interleaved blocks, compressed content, authenticated ciphertext corruption,
+  and exclusion of trailing bytes. Failed validation never supplies accuracy.
+
+Preamble fixtures cover clean training, half replaced by silence, missing training
+replaced by silence or noise, 18 dB noise, capture beginning halfway through
+training, leading silence, PCM/integrated agreement, and training retained across
+a bootstrap using hour-long symbols. Coarse observations remain unknown. Very
+large finite inputs exercise the numeric overflow guards. Every valid fixture
+also checks that blind acquisition still returns the correct packet.
+
+The new independent scanner has **11,520 bytes** of fixed storage per receiver
+on this x86_64 build. Receiver admission and reported workspace include it.
+Neither scanner storage nor runtime on a coarse integrated observation scales
+with an hour-long symbol. Recognition remains a conservative diagnostic with
+documented phase/amplitude thresholds, not a calibrated radio sensitivity test.
+
+After the test workers finished, the generated-noise benchmark with thirteen
+keyed epochs, three bits per symbol and a 6 kHz internal clock processed 2.66 times
+real time. The preceding 0.5.2 comparison processed 2.32 times real time. These
+short measurements on a shared host do not establish a speed improvement or
+real-time guarantees for other profiles and machines.
+
+Packet, keyfile and waveform formats remain compatible with 0.5.2. Physical audio,
+battery comparisons and hosted Windows/CI execution have not been tested here.
+
+## Recorded 0.5.2 checks
 
 * Native GUI Release: all **23 CTest suites passed**.
 * CLI-only Release with Python discovery disabled: all **19 suites passed**.

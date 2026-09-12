@@ -1,10 +1,11 @@
-# Audio modem reference, application version 0.5.2
+# Audio modem reference, application version 0.5.3
 
-Version 0.5.2 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5.3 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
-matching carrier and modem settings. This release changes constellation
-presentation and adds chronological simulation replay. The 0.5.1 waveforms,
+matching carrier and modem settings. This release adds reception-quality
+measurements to the signal browser. The 0.5.2 constellation presentation and
+chronological simulation replay remain, and the 0.5.1 waveforms,
 1500 Hz narrow-audio carrier and receive integration boundaries are unchanged,
 as are constellation mapping, symbol padding and the 0.5 public whitening mask. Packet versions
 1 and 2 and existing keyfile formats remain unchanged; modem configuration changes
@@ -265,6 +266,30 @@ distinguishes those input measurements from received or transmitted symbols.
 Axes and amplitude rings are display aids, not a calibration certificate. Decoder
 diagnostics and acquisition scores are evidence of processing, never packet
 authenticity.
+
+The signal browser's **Preamble** percentage is recognized training duration
+divided by the expected five-second training duration. Training always has 64
+segments (12.8 per second), even when the detected payload timing implies less
+than one payload symbol in five seconds. The receiver independently compares
+carrier projections with the expected training sequence, accounting for common
+gain and differential phase offset. It requires matching runs of at least eight
+segments; phase tolerance is 15 degrees and relative amplitude tolerance is 25%.
+This conservative evidence measure is distinct from correlation, sample-buffer
+coverage, or packet authentication. Blind bootstrap acquisition never creates
+preamble evidence from the regenerated prefix.
+
+Fixed projection history and bounded timestamped records preserve the measurement
+without storing an entire slow transmission. Missing or noisy training can give
+zero recognized coverage. Ambiguous timing, evicted history or observations too
+coarse to resolve training produce `--`. This diagnostic does not gate decoding.
+
+**Data … pre-FEC** measures exact bit agreement between the received systematic
+packet body and the corrected, fully verified body. It includes metadata, encoded
+content and the integrity tag, excluding bootstrap, parity and padding. Comparing
+the received and corrected bytes after deinterleaving counts actual bit changes,
+not eight assumed errors for every repaired byte. Compression changes the encoded
+denominator; XOR encryption and whitening preserve these bit differences.
+Partial or failed packets cannot establish this accuracy and remain `pending`.
 
 The waveform initially shows four carrier cycles from the latest buffer.
 A bounded 64-tap Blackman-windowed sinc reconstructs the line between measured

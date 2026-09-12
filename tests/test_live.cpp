@@ -72,6 +72,50 @@ Message message(std::uint8_t id, std::size_t size) {
     for (std::size_t i = 0; i < size; ++i) result.data.push_back(static_cast<std::uint8_t>(alphabet[i % alphabet.size()]));
     return result;
 }
+std::string message_id(const Message& message) {
+    constexpr char digits[] = "0123456789abcdef";
+    std::string result;
+    for (const auto byte : message.id) { result += digits[byte >> 4]; result += digits[byte & 15]; }
+    return result;
+}
+void check_signal_metrics(const live::Snapshot& snapshot) {
+    for (const auto& signal : snapshot.signals) {
+        if (!signal.validated)
+            check(!signal.pre_fec_accuracy, "pending signal text cannot claim validated pre-FEC data accuracy");
+        if (signal.preamble_received_percent)
+            check(std::isfinite(*signal.preamble_received_percent) && *signal.preamble_received_percent >= 0 &&
+                  *signal.preamble_received_percent <= 100, "preamble reception percentage must be finite and within 0..100");
+    }
+    for (const auto& received : snapshot.received) {
+        const auto id = message_id(received.packet.message);
+        const auto signal = std::find_if(snapshot.signals.begin(), snapshot.signals.end(), [&](const auto& update) {
+            return update.validated && update.packet_id == id;
+        });
+        check(signal != snapshot.signals.end(), "validated packet has no matching final signal-browser update");
+        check(received.packet.pre_fec_accuracy.has_value() && signal->pre_fec_accuracy.has_value(),
+              "validated packet and signal-browser row must carry exact pre-FEC body-bit counters");
+        const auto& packet_accuracy = *received.packet.pre_fec_accuracy;
+        const auto& signal_accuracy = *signal->pre_fec_accuracy;
+        check(signal_accuracy.received_data_bits == packet_accuracy.received_data_bits &&
+              signal_accuracy.corrected_data_bits == packet_accuracy.corrected_data_bits,
+              "signal-browser accuracy differs from the packet decoder's actual validated bit counts");
+        check(signal_accuracy.received_data_bits > 0 &&
+              signal_accuracy.corrected_data_bits <= signal_accuracy.received_data_bits,
+              "validated body-bit accuracy has an invalid denominator or correction count");
+        if (received.diagnostics.preamble_reception) {
+            const auto& preamble = *received.diagnostics.preamble_reception;
+            check(preamble.expected_samples > 0 && preamble.observed_samples <= preamble.expected_samples &&
+                  preamble.matched_samples <= preamble.observed_samples,
+                  "measured preamble coverage and matches must stay within the expected training interval");
+            check(signal->preamble_received_percent.has_value() &&
+                  std::abs(*signal->preamble_received_percent - 100 * preamble.received_fraction()) < 1e-10,
+                  "signal-browser preamble percentage differs from the selected receiver's actual measurement");
+        } else {
+            check(!signal->preamble_received_percent,
+                  "unmeasured preamble reception cannot be presented as a numeric percentage");
+        }
+    }
+}
 template<class Predicate> live::Snapshot wait_for(live::Session& session, Predicate predicate,
                                                 std::chrono::milliseconds timeout = 30s) {
     const auto until = std::chrono::steady_clock::now() + timeout;
@@ -185,6 +229,7 @@ void test_partial_back_to_back_and_resume() {
     check(session.snapshot().transmitting, "queued transmission state is immediately observable");
     std::uint64_t previous_samples = 0;
     const auto done = wait_for(session, [&](const auto& snapshot) {
+        check_signal_metrics(snapshot);
         check(snapshot.samples_received >= previous_samples, "source sample time never resets between transmissions");
         previous_samples = snapshot.samples_received;
         for (const auto& signal : snapshot.signals) {
@@ -202,6 +247,13 @@ void test_partial_back_to_back_and_resume() {
         for (const auto& item : snapshot.received) {
             check(item.diagnostics.bit_rate > 0 && !item.diagnostics.constellation.empty(),
                   "received message carries actual streaming receiver diagnostics");
+            check(item.packet.pre_fec_accuracy->corrected_data_bits == 0,
+                  "validated no-FEC body has 100-percent data accuracy without counting corrected header bits");
+            const auto final_signal = std::find_if(snapshot.signals.begin(), snapshot.signals.end(), [&](const auto& signal) {
+                return signal.validated && signal.packet_id == message_id(item.packet.message);
+            });
+            check(final_signal->preamble_received_percent.has_value(),
+                  "complete high-SNR preamble reception must be measured for the final signal-browser row");
             received.push_back(item.packet.message);
         }
         return received.size() == 2 && !snapshot.transmitting;
@@ -233,7 +285,10 @@ void test_encrypted_auto_epoch() {
     session.start(value);
     const auto sent = message(3, 700);
     session.transmit(sent);
-    const auto final = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); }, 60s);
+    const auto final = wait_for(session, [](const auto& snapshot) {
+        check_signal_metrics(snapshot);
+        return !snapshot.received.empty();
+    }, 60s);
     check(final.received.front().packet.message.data == sent.data && final.received.front().packet.authenticated,
           "selected second named key verifies actual encrypted continuous audio");
     check(final.received.front().timestamp > 1000000000, "zero timestamp selects the current epoch automatically");
@@ -521,6 +576,7 @@ void test_unrecoverable_noise_does_not_validate() {
     auto value = settings(); value.simulation_snr_db = -80;
     session.start(value); session.transmit(message(7, 10));
     const auto finished = wait_for(session, [&](const auto& snapshot) {
+        check_signal_metrics(snapshot);
         check(snapshot.received.empty(), "noise-obscured transmission never bypasses the modem");
         check(std::none_of(snapshot.signals.begin(), snapshot.signals.end(), [](const auto& signal) { return signal.validated; }),
               "unrecoverable samples never produce verified ticker text");
@@ -531,6 +587,7 @@ void test_unrecoverable_noise_does_not_validate() {
     for (std::size_t index = 0; index < 60; ++index) {
         replay_milliseconds = static_cast<std::int64_t>(index * 50);
         const auto frame = session.snapshot();
+        check_signal_metrics(frame);
         check(frame.simulation_replay && frame.constellation_source == live::ConstellationSource::input && frame.received.empty(),
               "noise-obscured replay never borrows transmitter symbols or claims receiver lock");
     }

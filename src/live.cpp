@@ -509,8 +509,11 @@ struct Session::Impl {
                     std::lock_guard lock(mutex);
                     if (current.running && generation == version) {
                         if (!receiver.signal_id) receiver.signal_id = signal_for(packet_id(preview->message));
+                        const auto diagnostics=receiver.modem->diagnostics();
+                        const auto preamble_percent=diagnostics.preamble_reception?
+                            std::optional<double>(100*diagnostics.preamble_reception->received_fraction()):std::nullopt;
                         add_signal({receiver.signal_id, value.transfer.modem.carrier_hz, text, false, packet_id(preview->message),
-                                    receiver.modem->diagnostics().snr_db, receiver.frame.size(), *expected_size});
+                                    diagnostics.snr_db, receiver.frame.size(), *expected_size,0,0,preamble_percent,std::nullopt});
                         receiver.last_preview = std::move(text);
                     }
                 }
@@ -526,8 +529,10 @@ struct Session::Impl {
             return true;
         }
         if (!receiver.signal_id) receiver.signal_id = signal_for(packet_id(packet.message));
+        const auto preamble_percent=diagnostics.preamble_reception?
+            std::optional<double>(100*diagnostics.preamble_reception->received_fraction()):std::nullopt;
         add_signal({receiver.signal_id, value.transfer.modem.carrier_hz, display_text(packet.message), true, packet_id(packet.message),
-                    diagnostics.snr_db, packet.consumed_bytes, packet.consumed_bytes});
+                    diagnostics.snr_db, packet.consumed_bytes, packet.consumed_bytes,0,0,preamble_percent,packet.pre_fec_accuracy});
         const auto bytes = packet.message.data.size();
         while (!current.received.empty() &&
                (current.received.size() >= maximum_events || received_bytes + bytes > value.content_limit)) {

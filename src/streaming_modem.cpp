@@ -5,6 +5,7 @@
 #include "constellation.hpp"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -83,6 +84,174 @@ struct PcmProjection {
         const auto phase=std::remainder((2*static_cast<long double>(start)+length-1)*angle,static_cast<long double>(tau));
         const auto cosine=scale*std::cos(phase),sine=scale*std::sin(phase);
         return {0,0,static_cast<double>((length+cosine)/2),static_cast<double>((length-cosine)/2),static_cast<double>(-sine/2)};
+    }
+};
+// Independent evidence recorder. Fixed-duration projection bins and a small
+// event ring retain recognized training without storing an hour-long bootstrap.
+// Nothing in this recorder participates in symbol acquisition or decoding.
+class TrainingEvidence {
+    static constexpr std::size_t history_size=520,event_limit=32;
+    struct Event {std::uint64_t begin=0,end=0,best_end=0,mask=0;};
+    struct Coverage {std::uint64_t begin=0,end=0;};
+    std::array<Complex,history_size> bins_{};
+    std::array<bool,history_size> valid_{};
+    std::array<Complex,64> expected_{};
+    std::array<Event,event_limit> events_{};
+    std::array<Coverage,event_limit> coverage_{};
+    std::size_t history_count_=0,event_count_=0,coverage_count_=0;
+    std::uint64_t training_=0,bin_=0,position_=0,evicted_until_=0;
+    PcmProjection pcm_;
+    Complex integrated_{};
+    bool partial_valid_=true;
+    void covered(std::uint64_t begin,std::uint64_t end) {
+        if(begin==end)return;
+        if(coverage_count_ && coverage_[coverage_count_-1].end==begin){coverage_[coverage_count_-1].end=end;return;}
+        if(coverage_count_==coverage_.size()){std::move(coverage_.begin()+1,coverage_.end(),coverage_.begin());--coverage_count_;}
+        coverage_[coverage_count_++]={begin,end};
+    }
+    bool covered_window(std::uint64_t end)const {
+        const auto begin=end>training_?end-training_:0;
+        if(begin==end)return true;
+        for(std::size_t i=0;i<coverage_count_;++i)
+            if(coverage_[i].begin<=begin && coverage_[i].end>=end)return true;
+        return false;
+    }
+    void retain(std::uint64_t mask) {
+        if(!mask)return;
+        if(event_count_ && position_-events_[event_count_-1].end<=2*bin_) {
+            auto& last=events_[event_count_-1];last.end=position_;
+            if(std::popcount(mask)>=std::popcount(last.mask)){last.mask=mask;last.best_end=position_;}
+            return;
+        }
+        if(event_count_==events_.size()) {
+            evicted_until_=events_[0].end;
+            std::move(events_.begin()+1,events_.end(),events_.begin());--event_count_;
+        }
+        events_[event_count_++]={position_,position_,position_,mask};
+    }
+    void inspect() {
+        std::array<Complex,64> points{};
+        std::array<bool,64> present{};
+        const auto completed=position_/bin_;
+        for(std::size_t i=0;i<points.size();++i) {
+            const auto segment_begin=training_*i/64,segment_end=training_*(i+1)/64;
+            // Ignore boundary bins: they can mix adjacent fixed training
+            // symbols at an arbitrary capture offset. Central projections
+            // still have to agree in both differential phase and amplitude.
+            const auto margin=(segment_end-segment_begin)/8;
+            const auto left_distance=training_-segment_begin-margin;
+            const auto right_distance=training_-segment_end+margin;
+            if(position_<=right_distance)continue;
+            const auto begin=position_>left_distance?position_-left_distance:0;
+            const auto end=position_-right_distance;
+            const auto first=begin/bin_+(begin%bin_!=0),last=end/bin_;
+            if(first>=last || last>completed || first<completed-history_count_)continue;
+            bool usable=true;
+            for(auto j=first;j<last;++j){usable=usable && valid_[j%history_size];points[i]+=bins_[j%history_size]/static_cast<double>(last-first);}
+            if(!usable)continue;
+            const auto amplitude=std::abs(points[i]);
+            present[i]=std::isfinite(amplitude) && amplitude>1e-12;
+        }
+        // A common differential phase accounts for carrier-frequency offset.
+        // A circular mode prevents missing/noisy portions from setting it.
+        std::array<Complex,63> changes{};
+        std::array<unsigned,32> histogram{};
+        for(std::size_t i=1;i<points.size();++i)if(present[i-1] && present[i]) {
+            const auto value=(points[i]/std::abs(points[i]))*std::conj(points[i-1]/std::abs(points[i-1]))*
+                std::conj(expected_[i]/std::abs(expected_[i]))*(expected_[i-1]/std::abs(expected_[i-1]));
+            changes[i-1]=value/std::abs(value);
+            const auto angle=std::arg(changes[i-1])+std::numbers::pi;
+            if(!std::isfinite(angle))continue;
+            ++histogram[std::min<std::size_t>(31,static_cast<std::size_t>(angle*32/tau))];
+        }
+        const auto peak=static_cast<std::size_t>(std::max_element(histogram.begin(),histogram.end())-histogram.begin());
+        if(histogram[peak]<4)return;
+        const auto center=-std::numbers::pi+(static_cast<double>(peak)+.5)*tau/32;
+        Complex sum{};
+        for(const auto value:changes)if(std::abs(value)>0 && std::abs(std::arg(value*std::polar(1.,-center)))<tau/24)sum+=value;
+        if(std::abs(sum)<1e-12)return;
+        const auto rotation=sum/std::abs(sum);
+        std::array<bool,63> links{};
+        for(std::size_t i=0;i<links.size();++i)
+            links[i]=std::abs(changes[i])>0 && std::abs(std::arg(changes[i]*std::conj(rotation)))<tau/24;
+        std::array<double,64> radii{};std::size_t radii_count=0;
+        for(std::size_t i=0;i<points.size();++i)
+            if(present[i] && ((i && links[i-1]) || (i<links.size() && links[i])))radii[radii_count++]=std::abs(points[i])/std::abs(expected_[i]);
+        if(radii_count<8)return;
+        std::sort(radii.begin(),radii.begin()+static_cast<std::ptrdiff_t>(radii_count));
+        const auto gain=radii[radii_count/2];
+        if(!std::isfinite(gain) || gain<=0)return;
+        std::uint64_t mask=0;std::size_t start=0,length=0;
+        for(std::size_t i=0;i<=points.size();++i) {
+            const auto matches=i<points.size() && present[i] &&
+                std::abs(std::abs(points[i])/std::abs(expected_[i])-gain)<=.25*gain;
+            if(matches && (!length || links[i-1])){if(!length)start=i;++length;continue;}
+            if(length>=8)for(auto j=start;j<start+length;++j)mask|=std::uint64_t{1}<<j;
+            length=matches?1:0;start=i;
+        }
+        retain(mask);
+    }
+    void complete(Complex point) {
+        const auto index=(position_/bin_-1)%history_size;
+        bins_[index]=point;valid_[index]=partial_valid_;partial_valid_=true;
+        pcm_={};integrated_={};history_count_=std::min(history_count_+1,history_size);
+        inspect();
+    }
+public:
+    TrainingEvidence(const Config& config,std::span<const std::uint8_t> expected):training_(training_sample_count(config)),bin_((training_+511)/512) {
+        if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
+        Complex previous{1,0};
+        for(std::size_t i=0;i<expected_.size();++i){expected_[i]=detail::mapped(detail::read_bits(expected,i*4,4),4,previous);previous=expected_[i];}
+    }
+    template<class Projection> void pcm(std::uint64_t count,const Projection& projection) {
+        covered(position_,position_+count);
+        std::uint64_t consumed=0;
+        while(consumed<count) {
+            const auto part=std::min(count-consumed,bin_-position_%bin_);
+            pcm_.add(projection(consumed,part));position_+=part;consumed+=part;
+            if(position_%bin_==0)complete(pcm_.value());
+        }
+    }
+    void integrated(SymbolObservation observation) {
+        const auto end=position_+observation.sample_count;
+        // One mean spanning multiple training symbols cannot prove which of
+        // them was received. Skip in constant time, preserving earlier events.
+        if(observation.sample_count>(training_+63)/64) {
+            position_=end;history_count_=0;partial_valid_=false;pcm_={};integrated_={};return;
+        }
+        covered(position_,end);
+        while(position_<end) {
+            const auto part=std::min(end-position_,bin_-position_%bin_);
+            integrated_+=observation.value*static_cast<double>(part);position_+=part;
+            if(!std::isfinite(integrated_.real()) || !std::isfinite(integrated_.imag())) {
+                partial_valid_=false;integrated_={};
+            }
+            if(position_%bin_==0)complete(integrated_/static_cast<double>(bin_));
+        }
+    }
+    std::optional<PreambleReception> reception(std::uint64_t payload_start,std::uint64_t timing_resolution)const {
+        const auto tolerance=std::max(2*bin_,timing_resolution);
+        const Event* found=nullptr;
+        for(std::size_t i=0;i<event_count_;++i) {
+            const auto& event=events_[i];
+            const auto distance=payload_start<event.begin?event.begin-payload_start:payload_start>event.end?payload_start-event.end:0;
+            if(distance>tolerance)continue;
+            if(found)return {}; // Timing cannot distinguish these events.
+            found=&event;
+        }
+        if(!found) {
+            if((evicted_until_ && (payload_start<=evicted_until_ || payload_start-evicted_until_<=tolerance)) || !covered_window(payload_start))return {};
+            return PreambleReception{training_,std::min(training_,payload_start),0};
+        }
+        const auto end=found->best_end;
+        if(!covered_window(end))return {};
+        std::uint64_t matched=0;
+        for(std::size_t i=0;i<64;++i)if(found->mask&(std::uint64_t{1}<<i)) {
+            const auto left=training_-training_*i/64,right=training_-training_*(i+1)/64;
+            const auto begin=end>left?end-left:0,finish=end>right?end-right:0;
+            matched+=finish-begin;
+        }
+        return PreambleReception{training_,std::min(training_,end),matched};
     }
 };
 struct Candidate {
@@ -368,7 +537,7 @@ struct StreamingReceiver::Impl {
     BootstrapValidator validator;
     std::vector<int> code;
     std::vector<Candidate> candidates;
-    std::uint64_t position=0,symbol=0,chip=0,training=0,earliest=0;
+    std::uint64_t position=0,symbol=0,chip=0,training=0,earliest=0,timing_resolution=0;
     std::size_t selected=0,workspace=0,bootstrap_symbols=0;
     bool synced=false;
     bool finished=false;
@@ -376,10 +545,11 @@ struct StreamingReceiver::Impl {
     Diagnostics diagnostic;
     std::size_t constellation_cursor=0;
     PendingConstellation pending_constellation;
+    TrainingEvidence training_evidence;
     Complex oscillator{1,0};
     enum class Input { none,pcm,integrated };
     Input input=Input::none;
-    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check):config(c),expected(std::move(pre)),validator(std::move(check)),workspace(budget) {
+    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check):config(c),expected(std::move(pre)),validator(std::move(check)),workspace(budget),training_evidence(c,expected) {
         validate(c);if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
         bootstrap_symbols=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
         if(!validator)validator=packet_bootstrap;
@@ -390,7 +560,7 @@ struct StreamingReceiver::Impl {
         earliest=0;
         const bool fine=(c.scramble || c.dsss) && c.spreading_factor>=1024 && symbol>4*chip;
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(symbol,fine?224:c.spreading_mode==SpreadingMode::tone&&!c.dsss?64:256));
-        if(count*(sizeof(Candidate)+packet_prefix_size+bootstrap_symbols*(sizeof(Complex)+sizeof(double)))+c.spreading_factor*sizeof(int)+65536>budget)throw Error("streaming receiver workspace is too small");
+        if(count*(sizeof(Candidate)+packet_prefix_size+bootstrap_symbols*(sizeof(Complex)+sizeof(double)))+c.spreading_factor*sizeof(int)+65536+sizeof(TrainingEvidence)>budget)throw Error("streaming receiver workspace is too small");
         code=pattern(c);
         std::vector<std::uint64_t> origins;origins.reserve(count);
         const auto coarse=fine?count/2:count;
@@ -411,6 +581,8 @@ struct StreamingReceiver::Impl {
             }
         }
         std::sort(origins.begin(),origins.end());origins.erase(std::unique(origins.begin(),origins.end()),origins.end());
+        timing_resolution=symbol-origins.back()+origins.front();
+        for(std::size_t i=1;i<origins.size();++i)timing_resolution=std::max(timing_resolution,origins[i]-origins[i-1]);
         candidates.resize(origins.size());
         for(std::size_t i=0;i<candidates.size();++i) {
             candidates[i].start=origins[i];candidates[i].end=origins[i]+symbol;
@@ -461,6 +633,7 @@ struct StreamingReceiver::Impl {
         synced=true;
         const auto payload_start=candidate.start-symbol*(bootstrap_symbols+candidate.following.size());
         diagnostic.sample_offset=static_cast<std::size_t>(payload_start>training?payload_start-training:0);
+        diagnostic.preamble_reception=training_evidence.reception(payload_start,timing_resolution);
         output.insert(output.end(),expected.begin(),expected.end());output.insert(output.end(),candidate.validated_header.begin(),candidate.validated_header.end());
         double power=0,error=0;Complex prior{1,0};
         for(std::size_t i=0;i<bootstrap_symbols;++i) {
@@ -474,10 +647,11 @@ struct StreamingReceiver::Impl {
         const auto following=std::move(candidate.following);
         for(const auto point:following)completed(selected,point,output);
     }
-    Bytes feed(SymbolObservation observation,bool matched,std::stop_token stop) {
+    Bytes feed(SymbolObservation observation,bool matched,std::stop_token stop,bool captured=true) {
         cancelled(stop);if(!observation.sample_count || !std::isfinite(observation.value.real()) || !std::isfinite(observation.value.imag()))throw Error("invalid integrated observation");
         if(observation.sample_count>std::numeric_limits<std::uint64_t>::max()-position)throw Error("receiver sample counter overflow");
         const auto finish=position+observation.sample_count;Bytes output;
+        if(captured && !synced)training_evidence.integrated(observation);
         const auto first=synced?selected:0,last=synced?selected+1:candidates.size();
         for(std::size_t index=first;index<last;++index) {
             if((index&15U)==0)cancelled(stop);
@@ -518,6 +692,7 @@ struct StreamingReceiver::Impl {
         cancelled(stop);
         if(count>std::numeric_limits<std::uint64_t>::max()-position)throw Error("receiver sample counter overflow");
         const auto finish=position+count;Bytes output;
+        if(split_chips && !synced)training_evidence.pcm(count,projection);
         const auto first=synced?selected:0,last=synced?selected+1:candidates.size();
         for(std::size_t index=first;index<last;++index) {
             if((index&15U)==0)cancelled(stop);
@@ -619,7 +794,7 @@ Bytes StreamingReceiver::finish(std::stop_token stop) {
     if(s.input==Impl::Input::pcm)output=s.feed_pcm(s.symbol,[&](std::uint64_t begin,std::uint64_t length){
         return PcmProjection::silence(s.position+begin,length,s.config);
     },false,stop);
-    else output=s.feed({{},s.symbol},true,stop);
+    else output=s.feed({{},s.symbol},true,stop,false);
     s.finished=true;
     return output;
 }

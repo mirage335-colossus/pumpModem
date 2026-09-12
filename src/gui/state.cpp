@@ -127,6 +127,28 @@ std::string folder_uri(const std::filesystem::path& directory) {
     return uri;
 }
 
+std::string signal_preamble_label(const SignalLine& line) {
+    const auto value=line.preamble_received_percent;
+    if (!value || !std::isfinite(*value) || *value<0 || *value>100) return "Preamble --";
+    if (*value>99.9 && *value<100) return "Preamble >99.9%";
+    std::ostringstream text; text.imbue(std::locale::classic());
+    text<<"Preamble "<<std::fixed<<std::setprecision(1)<<*value<<'%';
+    return text.str();
+}
+std::string signal_data_label(const SignalLine& line) {
+    if (!line.validated) return "Data pre-FEC pending";
+    const auto& accuracy=line.pre_fec_accuracy;
+    if (!accuracy || !accuracy->received_data_bits || accuracy->corrected_data_bits>accuracy->received_data_bits)
+        return "Data pre-FEC --";
+    if (!accuracy->corrected_data_bits) return "Data 100% pre-FEC";
+    const auto percent=100.*(1.-static_cast<double>(accuracy->corrected_data_bits)/static_cast<double>(accuracy->received_data_bits));
+    // A small error in a large file must never round to a perfect reception.
+    if (percent>99.99) return "Data >99.99% pre-FEC";
+    std::ostringstream text; text.imbue(std::locale::classic());
+    text<<"Data "<<std::fixed<<std::setprecision(2)<<percent<<"% pre-FEC";
+    return text.str();
+}
+
 void Signals::update(SignalLine line) {
     if (line.text.size()>4096) line.text.resize(4096);
     const auto found=std::find_if(lines_.begin(),lines_.end(),[&](const auto& item) { return item.id==line.id; });

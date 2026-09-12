@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iosfwd>
+#include <optional>
 #include <span>
 #include <stop_token>
 #include <vector>
@@ -30,6 +31,16 @@ struct Config {
     std::array<std::uint8_t, 32> dsss_seed{};
     std::size_t memory_limit = default_memory_limit;
 };
+// Duration of captured training independently recognized before the protected
+// packet bootstrap. This is evidence coverage, not a correlation percentage.
+struct PreambleReception {
+    std::uint64_t expected_samples = 0;
+    std::uint64_t observed_samples = 0;
+    std::uint64_t matched_samples = 0;
+    double received_fraction() const {
+        return expected_samples?static_cast<double>(matched_samples)/static_cast<double>(expected_samples):0;
+    }
+};
 struct Diagnostics {
     std::size_t sample_offset = 0;
     double preamble_correlation = 0;
@@ -37,6 +48,7 @@ struct Diagnostics {
     double bit_rate = 0;
     std::vector<std::complex<double>> constellation;
     std::vector<float> waveform;
+    std::optional<PreambleReception> preamble_reception = std::nullopt;
 };
 struct DecodeResult { Bytes bytes; Diagnostics diagnostics; };
 struct ChannelConfig {

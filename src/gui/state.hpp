@@ -78,7 +78,11 @@ struct SignalLine {
     bool validated = false;
     std::string packet_id;
     bool text_message = true;
+    std::optional<double> preamble_received_percent = std::nullopt;
+    std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
 };
+std::string signal_preamble_label(const SignalLine& line);
+std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.
 // Only a final verified observation can provide a clipboard lookup identity.
 class Signals {

@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.2.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.3.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,7 +14,8 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.5.2 replays each completed simulation's payload over three seconds and
+Version 0.5.3 adds per-signal preamble reception and data accuracy before error
+correction. It retains the three-second simulation replay introduced in 0.5.2 and
 shows fresh constellation observations in the decoder's differential phase and
 amplitude coordinates. The waveform, packet and keyfile formats are unchanged
 from 0.5.1, including the 1500 Hz carrier for narrow audio modes. Both audio
@@ -92,7 +93,7 @@ and operating-system requirements.
 
 The console provides text composition and explicit clipboard copy, file
 attachment, Level L QR previews, continuous audio reception, a scrolling
-frequency-labeled signal ticker, a false-color waterfall and live waveform,
+frequency-labeled signal ticker with reception percentages, a false-color waterfall and live waveform,
 spectrum and constellation displays. It includes named shared-key selection and
 a bounded receive cache. WAV tools remain available through the CLI. It does not
 open received files or execute received content. Screenshots can be attached as
@@ -127,6 +128,16 @@ and tone modes are also available. Auto keystream is enabled with encryption.
 The editor shows estimated airtime. Streaming transmission and reception use
 bounded DSP storage independent of airtime. Compression is always chosen automatically.
 Provisional ticker text is distinguished from validated cache entries.
+Each signal shows **Preamble** reception and **Data … pre-FEC**. Data accuracy is
+the percentage of encoded body bits received correctly before Reed–Solomon
+correction, measured against the fully verified result. This includes body
+metadata, compressed or raw content, and the integrity tag; it excludes bootstrap
+header and parity bits. It is not a percentage of decompressed file bytes.
+Unverified packets show `pending`; unavailable measurements show `--`.
+Preamble reception counts independently recognized training duration against the
+fixed five seconds, using its 64-segment schedule rather than the slower or faster
+payload symbol clock. See [modem diagnostics](docs/modem.md) for the measurement
+thresholds and bounded-history limits.
 The console enforces a six-second delay after actual encrypted transmission;
 simulation and unencrypted transmissions have no cooldown. CLI encrypted audio
 TX also waits six seconds after playback so sequential scripts inherit the delay; independent concurrent

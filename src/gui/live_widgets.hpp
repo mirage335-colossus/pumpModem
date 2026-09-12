@@ -84,7 +84,14 @@ public:
 
 class SignalBrowser : public Fl_Widget {
 public:
-    explicit SignalBrowser(const Signals& signals) : Fl_Widget(0,0,1,1),signals_(signals) {}
+    explicit SignalBrowser(const Signals& signals) : Fl_Widget(0,0,1,1),signals_(signals) {
+        tooltip("Preamble: recognized duration / expected five seconds (64 training segments),\n"
+                "independent of payload symbol rate; -- means unavailable.\n"
+                "Data: percentage of encoded body bits correct before error correction,\n"
+                "measured only after full packet verification. Includes metadata, compressed\n"
+                "content and integrity tag; excludes the bootstrap header and parity.\n"
+                "Green rows are verified; click verified text to copy. Files use the file list.");
+    }
     std::function<void(const std::string&)> copy;
     bool activate_line(std::size_t index) {
         if (const auto id=signals_.copy_id(index); id && copy) { copy(*id); return true; }
@@ -115,11 +122,14 @@ private:
         for (std::size_t index=first;index<signals_.lines().size();++index) {
             const auto& line=signals_.lines()[index];
             const int top=y()+7+static_cast<int>(index-first)*row_height;
-            const int left=x()+146,right=x()+w()-10;
+            const int left=x()+174,right=x()+w()-10;
             std::ostringstream caption; caption<<static_cast<int>(std::lround(line.frequency_hz))<<" Hz";
             fl_color(line.validated?fl_rgb_color(116,219,186):fl_rgb_color(232,182,91));
             fl_font(FL_HELVETICA_BOLD,12); fl_draw(caption.str().c_str(),x()+11,top+14);
-            fl_font(FL_HELVETICA,10); fl_draw(line.validated?(line.text_message?"verified / click to copy":"verified file / see list"):"pending / correcting",x()+11,top+28);
+            fl_font(FL_HELVETICA,10); fl_draw(line.validated?(line.text_message?"verified":"verified file"):"pending",x()+101,top+14);
+            fl_font(FL_HELVETICA,11);
+            fl_draw(signal_preamble_label(line).c_str(),x()+11,top+29);
+            fl_draw(signal_data_label(line).c_str(),x()+11,top+44);
             fl_push_clip(left,top,right-left,row_height-1);
             fl_font(FL_COURIER,15);
             const auto text=display_label(line.text);
@@ -127,11 +137,11 @@ private:
             const auto travel=std::max(1.0,text_width+static_cast<double>(right-left));
             const auto offset=std::fmod(age*42.0+static_cast<double>(index)*31.0,travel);
             const int text_x=right-static_cast<int>(offset);
-            fl_draw(text.c_str(),text_x,top+23);
+            fl_draw(text.c_str(),text_x,top+31);
             fl_pop_clip();
         }
     }
-    static constexpr int row_height=37;
+    static constexpr int row_height=54;
     const Signals& signals_;
     std::chrono::steady_clock::time_point started_=std::chrono::steady_clock::now();
 };

@@ -13,6 +13,83 @@ using Complex=std::complex<double>;
 Complex decision_coordinates(Complex point,Complex previous) {
     return std::abs(previous)>1e-20?point*std::conj(previous)/std::abs(previous):point;
 }
+void received_preamble_evidence() {
+    const auto capture=[](modem::Config config,bool pcm,unsigned prefix_mode,std::uint64_t crop=0,std::uint64_t delay=0) {
+        Message message;message.id[0]=91;message.data={'t','r','a','i','n'};
+        auto wire=modem::preamble(config);const auto packet=encode_packet(message);wire.insert(wire.end(),packet.begin(),packet.end());
+        modem::StreamingTransmitter source(wire,config);
+        modem::StreamingReceiver receiver(config,modem::preamble(config));
+        if(receiver.diagnostics().preamble_reception)throw std::runtime_error("training reception is known before acquisition");
+        const auto training=modem::training_sample_count(config);
+        const auto blank=prefix_mode==1?training/2:prefix_mode==2 || prefix_mode==3?training:0;
+        std::mt19937_64 random(917);std::normal_distribution<double> noise(0,.4);
+        Bytes received;
+        const auto retain=[&](Bytes bytes){received.insert(received.end(),bytes.begin(),bytes.end());};
+        if(pcm) {
+            if(delay)receiver.push(std::vector<float>(static_cast<std::size_t>(delay)));
+            std::array<float,317> block{};
+            while(!source.finished()) {
+                const auto begin=source.samples_emitted(),count=source.read(block);
+                for(std::size_t i=0;i<count;++i)if(begin+i<blank)block[i]=prefix_mode==3?static_cast<float>(noise(random)):0;
+                if(prefix_mode==4)for(std::size_t i=0;i<count;++i)block[i]+=static_cast<float>(noise(random)*std::sqrt(modem::nominal_signal_power*std::pow(10.,-1.8))/.4);
+                const auto skip=static_cast<std::size_t>(std::min<std::uint64_t>(count,crop>begin?crop-begin:0));
+                retain(receiver.push(std::span(block).subspan(skip,count-skip)));
+            }
+        } else {
+            if(delay) {const modem::SymbolObservation idle{{},delay};receiver.push_symbols(std::span(&idle,1));}
+            Complex training_sum{};
+            while(auto observation=source.next_symbol()) {
+                const auto begin=source.samples_emitted()-observation->sample_count;
+                if(begin<blank)observation->value=prefix_mode==3?Complex{noise(random),noise(random)}:Complex{};
+                if(prefix_mode==4)*observation=modem::add_awgn(*observation,18,random);
+                if(prefix_mode==5 && source.samples_emitted()<=training) {
+                    training_sum+=observation->value*static_cast<double>(observation->sample_count);
+                    if(source.samples_emitted()<training)continue;
+                    observation=modem::SymbolObservation{training_sum/static_cast<double>(training),training};
+                }
+                if(source.samples_emitted()<=crop)continue;
+                if(begin<crop)observation->sample_count-=crop-begin;
+                retain(receiver.push_symbols(std::span(&*observation,1)));
+            }
+        }
+        retain(receiver.finish());
+        if(!receiver.synchronized() || received.size()<wire.size() ||
+           decode_packet(Bytes(received.begin()+32,received.begin()+static_cast<std::ptrdiff_t>(wire.size()))).message.data!=message.data)
+            throw std::runtime_error("training evidence altered successful blind packet reception");
+        if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("training evidence exceeds the receiver workspace");
+        return receiver.diagnostics().preamble_reception;
+    };
+    modem::Config config;config.spreading_mode=modem::SpreadingMode::tone;
+    for(const bool pcm:{false,true}) {
+        for(const unsigned prefix_mode:{0U,1U,2U,3U,4U}) {
+            const auto result=capture(config,pcm,prefix_mode);
+            if(!result)throw std::runtime_error("ordinary preamble evidence unexpectedly unknown, mode "+std::to_string(prefix_mode)+", pcm "+std::to_string(pcm));
+            const auto expected=prefix_mode==0 || prefix_mode==4?1.:prefix_mode==1?.5:0.;
+            if(std::abs(result->received_fraction()-expected)>.04)
+                throw std::runtime_error("incorrect independently measured preamble fraction "+std::to_string(result->received_fraction())+", mode "+std::to_string(prefix_mode)+", pcm "+std::to_string(pcm));
+            if(result->expected_samples!=modem::training_sample_count(config) || result->matched_samples>result->observed_samples || result->observed_samples>result->expected_samples)
+                throw std::runtime_error("training coverage counters violate their duration bounds");
+        }
+        const auto late=capture(config,pcm,0,modem::training_sample_count(config)/2);
+        if(!late || std::abs(late->received_fraction()-.5)>.04 || std::abs(static_cast<double>(late->observed_samples)/static_cast<double>(late->expected_samples)-.5)>.04)
+            throw std::runtime_error("late capture invented the missing first half of training");
+        const auto delayed=capture(config,pcm,0,0,37);
+        if(!delayed || delayed->received_fraction()<.96)throw std::runtime_error("silence before a real preamble polluted its reception percentage");
+    }
+    if(capture(config,false,5))throw std::runtime_error("one coarse mean falsely proved individual training symbols");
+    config.integration_seconds=3600;
+    const auto slow=capture(config,false,0);
+    if(!slow || slow->received_fraction()<.96)throw std::runtime_error("hour-long bootstrap discarded independently recognized training");
+    config.integration_seconds=0;
+    for(const double magnitude:{1e200,1e308}) {
+        modem::StreamingReceiver receiver(config,modem::preamble(config));
+        const modem::SymbolObservation huge{{magnitude,magnitude},400};
+        try {for(unsigned i=0;i<90;++i)receiver.push_symbols(std::span(&huge,1));}
+        catch(const Error&) {} // The decoder may reject an overflowing sum.
+        if(receiver.synchronized() || receiver.diagnostics().preamble_reception)
+            throw std::runtime_error("huge finite observations manufactured training evidence");
+    }
+}
 void consumable_transmit_constellation() {
     modem::Config config;config.constellation_bits=6;
     auto wire=modem::preamble(config);
@@ -421,8 +498,10 @@ void recent_pcm_preview() {
         }
     }
 }
-int main() {
+int main(int argc,char** argv) {
     try {
+        received_preamble_evidence();
+        if(argc>1 && std::string_view(argv[1])=="--preamble-only") {std::cout<<"preamble evidence tests passed\n";return 0;}
         consumable_transmit_constellation();
         consumable_receive_constellation();
         receiver_input_modes();
