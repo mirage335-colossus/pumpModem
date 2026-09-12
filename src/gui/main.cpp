@@ -202,9 +202,13 @@ public:
         for (const auto* item:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","24 kHz","1 MHz","30 MHz"}) bandwidth_->add(item);
         bandwidth_->value("1.2 kHz");
         bandwidth_->tooltip("1 Hz to 30 MHz. Narrow audio modes use a 1500 Hz carrier. DSP clock fits bandwidth and carrier; MHz plans require simulation or a future SDR frontend.");
-        snr_=new Fl_Input_Choice(0,0,1,1,"Target SNR dB / 1 Hz");
+        snr_=new Fl_Input_Choice(0,0,1,1,"Target equivalent 1 Hz tone SNR (dB)");
         for (auto value:{"40","6","-6","-60"}) snr_->add(value);
         snr_->value("40");
+        snr_->tooltip("SNR that a stable, unmodulated tone with the same total received power as this data transmission\n"
+                      "would have in a 1 Hz effective noise bandwidth. The tone can be at any carrier frequency.\n"
+                      "For example, +1 dB here corresponds to -29 dB across a 1 kHz channel at the same received power.\n"
+                      "This is a planning assumption (C/N0), not a measured live SNR. Simulation presets set channel noise separately.");
         pattern_=new Fl_Choice(0,0,1,1,"Scrambler pattern / tone");
         for (auto mode:tuning::pattern_modes()) pattern_->add(pattern_label(mode).c_str());
         pattern_->value(1);
@@ -309,7 +313,7 @@ private:
         constellation_label_->resize(margin+waterfall_width+other_width+24,plots_y-23,other_width,21); constellation_->resize(margin+waterfall_width+other_width+24,plots_y,other_width,plot_h);
         const int controls_y=height-92;
         const int available=width-margin*2-40;
-        const int device_width=available*22/100,bw_width=available*14/100,snr_width=available*16/100,pattern_width=available*28/100;
+        const int device_width=available*19/100,bw_width=available*14/100,snr_width=available*24/100,pattern_width=available*23/100;
         int x=margin; device_->resize(x,controls_y,device_width,27); x+=device_width+10;
         bandwidth_->resize(x,controls_y,bw_width,27); x+=bw_width+10;
         snr_->resize(x,controls_y,snr_width,27); x+=snr_width+10;
