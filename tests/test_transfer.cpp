@@ -63,6 +63,21 @@ void test_raw_binary_transfer() {
             check(count==reference_count && std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(count),expected.begin()),
                   "binary factory preserves leading zeros and applies exact data bits plus seeded spreading");
         }
+        auto masked=bits;transfer::xor_binary_bits(masked,value);
+        check(masked==expected_bits,"shared binary mask matches the transmitted data stream");
+        for(std::size_t offset=0;offset<masked.size();) {
+            const auto count=std::min<std::size_t>(3,masked.size()-offset);
+            transfer::xor_binary_bits(std::span(masked).subspan(offset,count),value,offset);offset+=count;
+        }
+        check(masked==bits,"raw decryption handles meaningful fragments starting mid-byte");
+        auto integrated=transfer::binary_transmitter(bits,value);
+        modem::BinaryReceiver receiver(transfer::seeded_config(value,value.timestamp),bits.size());Bytes decoded;
+        while(auto observation=integrated->next_symbol()) {
+            auto received=receiver.push_symbols(std::span(&*observation,1));
+            transfer::xor_binary_bits(received,value,decoded.size());decoded.insert(decoded.end(),received.begin(),received.end());
+        }
+        auto tail=receiver.finish();transfer::xor_binary_bits(tail,value,decoded.size());decoded.insert(decoded.end(),tail.begin(),tail.end());
+        check(decoded==bits,"sample-derived binary reception decrypts the actual measured bits");
         value.fec=FecMode::off;value.compression=false;value.repeat_policy.maximum_seconds=0;
         auto same=transfer::binary_transmitter(bits,value);
         auto canonical=transfer::binary_transmitter(bits,options(encrypted));
@@ -75,6 +90,8 @@ void test_raw_binary_transfer() {
     rejects([&]{transfer::estimate_binary(bits,value);},"raw binary parsed input capacity is enforced");
     rejects([&]{transfer::binary_transmitter(bits,value);},"raw factory enforces the same parsed input capacity");
     rejects([&]{transfer::binary_transmitter(Bytes{0,2},options());},"raw binary rejects non-bit values");
+    Bytes invalid{2};rejects([&]{transfer::xor_binary_bits(invalid,options(true));},"raw mask rejects non-bit values");
+    Bytes one{0};rejects([&]{transfer::xor_binary_bits(one,options(true),std::numeric_limits<std::size_t>::max());},"raw mask rejects overflowing bit offsets");
     rejects([&]{transfer::estimate_binary({},options());},"raw binary rejects an empty request");
     value=options();value.modem.integration_seconds=3600;value.modem.memory_limit=1024;
     const auto slow=transfer::estimate_binary(Bytes{0,0,1},value);

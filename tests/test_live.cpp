@@ -246,6 +246,27 @@ void test_binary_audio_preserves_exact_bit_length() {
     });
     check(!listening.transmitting, "raw audio completion resumes continuous reception");
 }
+void check_binary_signals(const live::Snapshot& snapshot, std::size_t expected_bits) {
+    check(snapshot.received.empty(), "received binary bits cannot become downloadable packet content");
+    for (const auto& signal : snapshot.signals) {
+        check(signal.binary && !signal.validated && signal.packet_id.empty(),
+              "raw reception must be identified as unverified binary data, without a packet identity");
+        check(signal.received_bytes == 0 && signal.expected_bytes == 0 && signal.expected_bits == expected_bits &&
+              signal.received_bits <= expected_bits,
+              "raw reception reports meaningful bit counts instead of framed byte counts");
+        check(!signal.preamble_received_percent && !signal.pre_fec_accuracy,
+              "unframed binary reception cannot claim preamble evidence, FEC correction or validated bit accuracy");
+        if (signal.text == "Receiving binary...") {
+            check(!signal.complete && signal.received_bits == 0, "binary placeholder cannot claim recovered content");
+        } else {
+            check(signal.text.size() == std::min<std::size_t>(signal.received_bits, 4096) &&
+                  std::all_of(signal.text.begin(), signal.text.end(), [](auto bit) { return bit == '0' || bit == '1'; }),
+                  "binary signal text must contain only its actual recovered bits");
+        }
+        if (signal.complete)
+            check(signal.received_bits == expected_bits, "completed binary reception must account for every meaningful bit");
+    }
+}
 void test_binary_simulation_replay_validation_and_cancel() {
     std::atomic<std::int64_t> replay_milliseconds{0};
     live::Session session({}, [&] {
@@ -256,6 +277,8 @@ void test_binary_simulation_replay_validation_and_cancel() {
     auto value = settings();
     value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
     value.transfer.modem.spreading_factor = 128;
+    value.transfer.fec = FecMode::rs60;
+    value.simulation_snr_db = 40;
     value.content_limit = 16;
     session.start(value);
     const auto idle = wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
@@ -267,16 +290,34 @@ void test_binary_simulation_replay_validation_and_cancel() {
           "invalid binary input cannot mutate the transmit queue or poison the live session");
     const auto expected = transfer::estimate_binary(bits, value.transfer);
     session.transmit_bits(bits);
-    const auto first = wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "raw CPU simulation cannot invent a framed message");
+    const auto first = wait_for(session, [&](const auto& snapshot) {
+        check_binary_signals(snapshot, bits.size());
+        if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "raw reception cannot appear during CPU computation");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     check(first.replay_frame_count > 1 && first.replay_frame_count <= 60 && first.replay_frame_index == 0 &&
           std::abs(first.transmission_seconds - expected.total_seconds) < 1e-12,
           "raw simulation replays its exact unframed duration in bounded chronological frames");
+    std::uint64_t signal_id = 0, last_signal_sequence = 0;
+    bool saw_pending_bits = false;
+    const auto observe_pending = [&](const auto& snapshot) {
+        check_binary_signals(snapshot, bits.size());
+        for (const auto& signal : snapshot.signals) {
+            check(!signal.complete, "binary completion must wait for the full three-second replay deadline");
+            if (signal_id) check(signal.id == signal_id, "binary placeholder and recovered bits must retain a stable signal identity");
+            check(signal.sequence > last_signal_sequence, "binary signal updates must arrive in media order without duplication");
+            signal_id = signal.id; last_signal_sequence = signal.sequence;
+            if (signal.received_bits) {
+                check(std::string("001").starts_with(signal.text), "high-SNR pending binary content must be recovered correctly");
+                saw_pending_bits = true;
+            }
+        }
+    };
+    observe_pending(first);
     rejects([&] { session.transmit_bits(empty); }, "empty input cannot replace an active raw replay");
     rejects([&] { session.transmit_bits(invalid); }, "invalid bit input cannot replace an active raw replay");
     const auto still_first = session.snapshot();
+    observe_pending(still_first);
     check(still_first.simulation_replay && still_first.transmission_id == first.transmission_id &&
           still_first.waveform == first.waveform && still_first.replay_frame_index == 0,
           "rejected raw input leaves the active replay and its queue untouched");
@@ -286,16 +327,24 @@ void test_binary_simulation_replay_validation_and_cancel() {
           !middle.waveform.empty() && !middle.spectrum_db.empty() && !middle.constellation.empty() &&
           middle.constellation_source == live::ConstellationSource::input,
           "raw replay shows measured waveform, spectrum and input constellation halfway through its three seconds");
-    check(middle.signals.empty() && middle.received.empty(), "raw signal plots are not decoded packet content");
+    observe_pending(middle);
     replay_milliseconds = 2999;
     const auto last = session.snapshot();
     check(last.simulation_replay && last.simulation_sample_fraction > .99,
           "raw simulation remains visible through the full three-second presentation");
+    observe_pending(last);
+    check(saw_pending_bits, "sample-derived binary bits must be visible as pending before replay completion");
     replay_milliseconds = 3000;
     const auto completed = session.snapshot();
-    check(!completed.simulation_replay && completed.received.empty() && completed.signals.empty() &&
+    check_binary_signals(completed, bits.size());
+    check(completed.signals.size() == 1 && completed.signals.front().complete && completed.signals.front().text == "001" &&
+          completed.signals.front().id == signal_id && completed.signals.front().sequence > last_signal_sequence,
+          "raw simulation must deliver bits recovered from the channel at its presentation deadline");
+    check(!completed.simulation_replay && completed.received.empty() &&
           completed.constellation_source == live::ConstellationSource::input,
-          "raw simulation ends at exactly three seconds without fabricated text or files");
+          "raw simulation completes received bit text at exactly three seconds without fabricating a file");
+    const auto completed_again = session.snapshot();
+    check(completed_again.signals.empty() && completed_again.received.empty(), "binary completion is delivered exactly once");
     const auto noise = wait_for(session, [&](const auto& snapshot) {
         check(snapshot.signals.empty() && snapshot.received.empty(), "returning raw simulation to noise cannot validate content");
         return snapshot.samples_received > completed.samples_received && snapshot.waveform != last.waveform;
@@ -308,7 +357,8 @@ void test_binary_simulation_replay_validation_and_cancel() {
     replay_milliseconds = 4500;
     session.cancel_transmit();
     const auto cancelled = session.snapshot();
-    check(!cancelled.simulation_replay && cancelled.transmission_cancelled && !cancelled.transmitting,
+    check(!cancelled.simulation_replay && cancelled.transmission_cancelled && !cancelled.transmitting &&
+          cancelled.signals.empty() && cancelled.received.empty(),
           "raw replay can be cancelled immediately");
     replay_milliseconds = 6000;
     wait_for(session, [&](const auto& snapshot) {
@@ -316,6 +366,101 @@ void test_binary_simulation_replay_validation_and_cancel() {
               "cancelled raw replay cannot republish stale frames or fabricated packets");
         return snapshot.samples_received > cancellable.samples_received && snapshot.waveform != cancellable.waveform;
     });
+
+    session.transmit_bits(bits);
+    const auto replaceable = wait_for(session, [](const auto& snapshot) { return snapshot.transmission_finished && snapshot.simulation_replay; });
+    check_binary_signals(replaceable, bits.size());
+    check(!replaceable.signals.empty(), "raw replay starts with an explicit receiving placeholder");
+    const auto replaced_id = replaceable.signals.front().id;
+    replay_milliseconds = 8950;
+    const Bytes replacement_bits{1, 0};
+    session.transmit_bits(replacement_bits);
+    const auto interrupted = session.snapshot();
+    check(!interrupted.simulation_replay && interrupted.signals.empty() && interrupted.received.empty(),
+          "replacement drops due but unpresented binary rows from the interrupted transmission");
+    wait_for(session, [&](const auto& snapshot) {
+        check_binary_signals(snapshot, replacement_bits.size());
+        for (const auto& signal : snapshot.signals) check(signal.id != replaced_id, "replaced binary acquisition cannot leak into its successor");
+        return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != replaceable.transmission_id;
+    });
+    replay_milliseconds = 11950;
+    const auto replacement = session.snapshot();
+    check_binary_signals(replacement, replacement_bits.size());
+    const auto recovered = std::find_if(replacement.signals.begin(), replacement.signals.end(), [](const auto& signal) { return signal.complete; });
+    check(recovered != replacement.signals.end() && recovered->text == "10" && recovered->id != replaced_id,
+          "replacement presents its own recovered bits at its own three-second deadline");
+}
+void test_keyed_binary_reception_preserves_partial_symbols() {
+    const Bytes bits{0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0};
+    for (const auto fec : {FecMode::rs20, FecMode::rs60}) {
+        std::atomic<std::int64_t> replay_milliseconds{0};
+        live::Session session({}, [&] {
+            return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+        });
+        auto value = settings();
+        value.simulation_snr_db = 40;
+        value.transfer.key.emplace(Bytes(32, 0x73));
+        value.transfer.timestamp = 1500000000;
+        value.transfer.search_seconds = 0;
+        value.transfer.modem.scramble = true;
+        value.transfer.modem.dsss = true;
+        value.transfer.modem.spreading_factor = 3;
+        value.transfer.modem.constellation_bits = fec == FecMode::rs20 ? 4U : 6U;
+        value.transfer.fec = fec; value.transfer.compression = true;
+        const auto expected = transfer::estimate_binary(bits, value.transfer);
+        auto no_packet_controls = value.transfer;
+        no_packet_controls.fec = FecMode::off; no_packet_controls.compression = false;
+        check(expected.waveform_samples == transfer::estimate_binary(bits, no_packet_controls).waveform_samples,
+              "selected Reed-Solomon and compression cannot add overhead to keyed raw bits");
+        session.start(value); session.transmit_bits(bits);
+        const auto first = wait_for(session, [&](const auto& snapshot) {
+            check_binary_signals(snapshot, bits.size());
+            if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "keyed binary results cannot appear before replay starts");
+            return snapshot.transmission_finished && snapshot.simulation_replay;
+        });
+        check(std::abs(first.transmission_seconds - expected.total_seconds) < 1e-12,
+              "key masking and partial symbols preserve the exact raw transmission duration");
+        replay_milliseconds = 2999;
+        const auto pending = session.snapshot();
+        check_binary_signals(pending, bits.size());
+        check(std::any_of(pending.signals.begin(), pending.signals.end(), [](const auto& signal) {
+            return !signal.complete && signal.text == "00010110010";
+        }), "keyed binary reception must recover leading zeros and the final partial symbol before completion");
+        replay_milliseconds = 3000;
+        const auto completed = session.snapshot();
+        check_binary_signals(completed, bits.size());
+        check(!completed.simulation_replay && completed.signals.size() == 1 && completed.signals.front().complete &&
+              completed.signals.front().text == "00010110010",
+              "selected receive key must recover the actual binary channel samples without framing or FEC");
+    }
+}
+void test_noisy_binary_reception_does_not_echo_transmission() {
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value = settings(); value.simulation_snr_db = -100;
+    value.transfer.fec = FecMode::rs60;
+    Bytes bits(256);
+    std::string sent;
+    for (std::size_t i = 0; i < bits.size(); ++i) {
+        bits[i] = static_cast<std::uint8_t>((i * 7 + i / 3) & 1);
+        sent += bits[i] ? '1' : '0';
+    }
+    session.start(value); session.transmit_bits(bits);
+    wait_for(session, [&](const auto& snapshot) {
+        check_binary_signals(snapshot, bits.size());
+        if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "noisy binary results must still follow the replay clock");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
+    replay_milliseconds = 3000;
+    const auto completed = session.snapshot();
+    check_binary_signals(completed, bits.size());
+    const auto recovered = std::find_if(completed.signals.begin(), completed.signals.end(), [](const auto& signal) { return signal.complete; });
+    check(!completed.simulation_replay && recovered != completed.signals.end() && recovered->text.size() == bits.size(),
+          "unverified binary decisions remain visible even when the channel is too noisy for reliable reception");
+    check(recovered->text != sent,
+          "noise-obscured binary reception must come from measured samples, not an echo of transmitted bits");
 }
 void test_binary_long_symbol_uses_bounded_virtual_time() {
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -335,8 +480,9 @@ void test_binary_long_symbol_uses_bounded_virtual_time() {
     session.start(value);
     const auto wall_start = std::chrono::steady_clock::now();
     session.transmit_bits(bits);
-    const auto computed = wait_for(session, [](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "long raw symbols cannot become verified messages");
+    const auto computed = wait_for(session, [&](const auto& snapshot) {
+        check_binary_signals(snapshot, bits.size());
+        if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "long raw bit reception cannot bypass its visual timeline");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     }, 60s);
     const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
@@ -347,8 +493,10 @@ void test_binary_long_symbol_uses_bounded_virtual_time() {
           "hours-long raw binary transmission fits a one-MiB DSP workspace without allocating its waveform");
     replay_milliseconds = 3000;
     const auto completed = session.snapshot();
-    check(!completed.simulation_replay && completed.signals.empty() && completed.received.empty(),
-          "hours-long raw simulation still completes its visual replay in exactly three seconds");
+    check_binary_signals(completed, bits.size());
+    const auto recovered = std::find_if(completed.signals.begin(), completed.signals.end(), [](const auto& signal) { return signal.complete; });
+    check(!completed.simulation_replay && recovered != completed.signals.end() && recovered->text == "001",
+          "hours-long raw simulation still presents its recovered bits after exactly three seconds");
 }
 void test_partial_back_to_back_and_resume() {
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -965,6 +1113,8 @@ int main() {
         run("actual audio empty symbols and cancel", test_audio_tx_empty_symbol_intervals_and_cancel);
         run("binary audio exact bit length", test_binary_audio_preserves_exact_bit_length);
         run("binary simulation replay and cancellation", test_binary_simulation_replay_validation_and_cancel);
+        run("keyed binary partial-symbol reception", test_keyed_binary_reception_preserves_partial_symbols);
+        run("noisy binary is sample-derived", test_noisy_binary_reception_does_not_echo_transmission);
         run("binary long symbol bounded simulation", test_binary_long_symbol_uses_bounded_virtual_time);
         run("partial back-to-back reception", test_partial_back_to_back_and_resume);
         run("encrypted automatic epoch", test_encrypted_auto_epoch);

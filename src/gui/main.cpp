@@ -11,6 +11,7 @@
 #include <FL/Fl_Hold_Browser.H>
 #include <FL/Fl_Input.H>
 #include <FL/Fl_Input_Choice.H>
+#include <FL/Fl_Output.H>
 #include <FL/Fl_Menu_Button.H>
 #include <FL/filename.H>
 #include <FL/fl_ask.H>
@@ -137,7 +138,7 @@ public:
             if (!loaded_key_path_.empty()) key_path_->copy_label(path_text(loaded_key_path_.filename()).c_str());
             encryption_changed(); settings_changed();
         });
-        compose_label_=label("Message",13,true); signal_label_=label("Signals - click verified text to copy",13,true);
+        compose_label_=label("Message",13,true); signal_label_=label("Signals - click completed text or bits to copy",13,true);
         source_=new Fl_Choice(0,0,1,1); source_->add(menu_label("Message / File").c_str()); source_->add("Binary"); source_->value(0);
         source_->textsize(12); source_->tooltip("Choose the input used by Transmit. The other editor is kept for later.");
         bind(source_,[this] { dirty_estimate(); update_controls(); });
@@ -173,6 +174,10 @@ public:
         });
         airtime_=label("Calculating airtime...",13);
         signal_browser_=new SignalBrowser(signals_); signal_browser_->copy=[this](const auto& id) { guarded([&] { copy_message(id); }); };
+        signal_browser_->copy_binary=[this](const auto& bits) {
+            Fl::copy(bits.data(),static_cast<int>(bits.size()),1);
+            notice("Received binary bits copied to the clipboard (unverified).");
+        };
         file_browser_=new Fl_Hold_Browser(0,0,1,1); file_browser_->format_char(0); file_browser_->textsize(12);
         bind(file_browser_,[this] { update_controls(); });
         save_=button("Save selected...",[this] { save_dialog(); });
@@ -192,12 +197,15 @@ public:
         for (auto mode:tuning::pattern_modes()) pattern_->add(pattern_label(mode).c_str());
         pattern_->value(1);
         fec_=new Fl_Choice(0,0,1,1,"Error correction"); fec_->add("Reed-Solomon 20%|Reed-Solomon 60%|Off"); fec_->value(0);
+        fec_off_=new Fl_Output(0,0,1,1,"Error correction"); fec_off_->value("Off"); fec_off_->textsize(13);
+        fec_off_->tooltip("Raw binary has no error correction. Message / File retains its selected packet setting.");
+        fec_off_->deactivate(); fec_off_->hide();
         for (auto widget:std::array<Fl_Widget*,5>{device_,bandwidth_,snr_,pattern_,fec_}) bind(widget,[this] { settings_changed(); });
         for (auto widget:{callsign_,grid_}) { widget->when(FL_WHEN_CHANGED); bind(widget,[this] { dirty_estimate(); }); }
         diagnostics_=label("",12); status_=label("Starting continuous reception...",13);
         clipboard_probe_=new ClipboardProbe;
         window_->end();
-        for (auto widget:std::array<Fl_Widget*,10>{callsign_,grid_,simulation_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_,send_key_}) { widget->align(FL_ALIGN_TOP_LEFT); widget->labelsize(12); }
+        for (auto widget:std::array<Fl_Widget*,11>{callsign_,grid_,simulation_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_,fec_off_,send_key_}) { widget->align(FL_ALIGN_TOP_LEFT); widget->labelsize(12); }
         window_->size_range(1030,750);
         window_->callback([](Fl_Widget*,void* context) { static_cast<App*>(context)->close(); },this);
         window_->on_resize=[this] { layout(); };
@@ -278,6 +286,7 @@ private:
         snr_->resize(x,controls_y,snr_width,27); x+=snr_width+10;
         pattern_->resize(x,controls_y,pattern_width,27); x+=pattern_width+10;
         fec_->resize(x,controls_y,width-margin-x,27);
+        fec_off_->resize(x,controls_y,width-margin-x,27);
         diagnostics_->resize(margin,height-56,width-margin*2,22); status_->resize(margin,height-31,width-margin*2,24);
         window_->redraw();
     }
@@ -591,7 +600,8 @@ private:
         if (!binary && (!estimate_ || estimate_->repeatable_allowed || repeatable_->value())) repeatable_->activate(); else repeatable_->deactivate();
         if (!binary && attachment_) use_text_->activate(); else use_text_->deactivate();
         for (auto widget:std::array<Fl_Widget*,3>{callsign_,grid_,attach_}) binary?widget->deactivate():widget->activate();
-        if (binary) fec_->deactivate();
+        if (binary) { fec_->deactivate(); fec_->hide(); fec_off_->show(); }
+        else { fec_off_->hide(); fec_->show(); }
         busy?source_->deactivate():source_->activate();
         binary?binary_editor_->activate():binary_editor_->deactivate();
         binary || attachment_?editor_->deactivate():editor_->activate();
@@ -642,8 +652,21 @@ private:
             const bool text_message=packet!=inbox_.items().end() && packet->message.kind==MessageKind::text;
             if (smoke_.enabled && signal.validated && (snapshot.simulation_replay || packet==inbox_.items().end()))
                 throw Error("Simulation published a verified signal before its completed reception");
+            if (smoke_.enabled && signal.binary) {
+                if (signal.validated || !signal.packet_id.empty() || signal.preamble_received_percent || signal.pre_fec_accuracy)
+                    throw Error("Raw binary reception invented packet verification or FEC measurements");
+                if (signal.complete) {
+                    if (snapshot.transmitting || snapshot.simulation_replay || !smoke_replay_.binary ||
+                        !smoke_replay_.pending_poll || smoke_replay_.pending_poll>=smoke_snapshot_poll_)
+                        throw Error("Completed binary reception did not follow its pending replay");
+                    if (signal.text!="001" || signal.received_bits!=3 || signal.expected_bits!=3)
+                        throw Error("The noisy binary receiver changed the exact encrypted three-bit input");
+                    smoke_binary_signal_id_=signal.id;
+                }
+            }
             signals_.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text_message,
-                             signal.preamble_received_percent,signal.pre_fec_accuracy});
+                             signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,
+                             signal.received_bits,signal.expected_bits});
             if (!signal.validated && pending_sequence_==0) pending_sequence_=signal.sequence;
             if (signal.validated && smoke_packet_ && signal.packet_id==gui::id_label(smoke_packet_->message)) final_sequence_=signal.sequence;
         }
@@ -724,14 +747,18 @@ private:
                 throw Error("Simulation replay moved backward in transmission time");
             }
             for (const auto& signal:last_snapshot_.signals) {
-                if (replay.binary) throw Error("Raw binary simulation invented a packet-browser observation");
-                if (signal.validated) throw Error("Simulation verified a signal during its replay");
+                if (signal.validated || signal.complete) throw Error("Simulation completed a signal during its replay");
+                if (signal.binary!=replay.binary) throw Error("Simulation browser row used the wrong reception type");
                 const auto found=std::find_if(signals_.lines().begin(),signals_.lines().end(),
                     [&](const auto& line) { return line.id==signal.id; });
                 if (found==signals_.lines().end() || found->validated ||
-                    gui::signal_data_label(*found)!="Data pre-FEC pending" ||
-                    signals_.copy_id(static_cast<std::size_t>(found-signals_.lines().begin())))
+                    gui::signal_data_label(*found)!=(replay.binary?"FEC off":"Data pre-FEC pending") ||
+                    signals_.copy_id(static_cast<std::size_t>(found-signals_.lines().begin())) ||
+                    signals_.copy_bits(static_cast<std::size_t>(found-signals_.lines().begin())))
                     throw Error("Replay pending reception was not displayed as unverified data");
+                if (replay.binary && (gui::signal_status_label(*found)!="binary pending" ||
+                    gui::signal_preamble_label(*found)!="Preamble none" || found->expected_bits!=3))
+                    throw Error("Pending binary reception displayed packet metadata");
                 if (!replay.pending_poll) replay.pending_poll=smoke_snapshot_poll_;
             }
             if (beginning || last_snapshot_.replay_frame_index!=replay.frame) {
@@ -770,7 +797,7 @@ private:
                 const auto minimum_frames=replay.binary?std::size_t{2}:std::size_t{10};
                 const auto minimum_changes=replay.binary?std::size_t{1}:std::size_t{5};
                 if (elapsed<2.4 || elapsed>8 || replay.frames<minimum_frames || replay.waveform_changes<minimum_changes ||
-                    replay.fraction<.9 || (!replay.binary && (!replay.saw_symbols || !replay.pending_poll)))
+                    replay.fraction<.9 || !replay.saw_symbols || !replay.pending_poll)
                     throw Error("Simulation replay did not show changing transmission frames over about three seconds");
                 smoke_completed_replay_id_=replay.id;
             }
@@ -925,15 +952,19 @@ private:
             if (source_->size()!=3 || std::string(source_->text(0))!="Message / File" || std::string(source_->text(1))!="Binary")
                 throw Error("Transmission source choices were interpreted as menu paths");
             const auto packet_revision=revision_;
+            const auto packet_fec=fec_->value();
             binary_.text("001x");
             if (selected_bits() || revision_!=packet_revision)
                 throw Error("Inactive binary input changed the packet transmission source");
             source_->value(1); source_->do_callback();
-            if (!binary_mode() || binary_input_valid_ || estimate_ || transmit_->active())
+            if (!binary_mode() || binary_input_valid_ || estimate_ || transmit_->active() ||
+                fec_->visible() || !fec_off_->visible() || std::string(fec_off_->value())!="Off")
                 throw Error("Invalid binary input did not disable transmission");
             source_->value(0); source_->do_callback();
             if (selected_bits() || !callsign_->active() || !grid_->active() || !fec_->active() || !attach_->active())
                 throw Error("Switching back to Message / File retained binary dispatch or disabled packet controls");
+            if (!fec_->visible() || fec_off_->visible() || fec_->value()!=packet_fec)
+                throw Error("Switching back to Message / File changed its saved error-correction choice");
             binary_.text("0 01");
             if (selected_bits()) throw Error("Stale valid bits overrode the explicit Message / File source");
             source_->value(1); source_->do_callback();
@@ -952,7 +983,8 @@ private:
             const auto bits=selected_bits();
             if (!bits || *bits!=Bytes({0,0,1}) || binary_bit_count_!=3 || !encrypted() ||
                 callsign_->active() || grid_->active() || fec_->active() || repeatable_->active() || attach_->active() ||
-                use_text_->active() || !key_entry_->active() || !binary_editor_->active() || editor_->active())
+                use_text_->active() || !key_entry_->active() || !binary_editor_->active() || editor_->active() ||
+                fec_->visible() || !fec_off_->visible() || std::string(fec_off_->value())!="Off")
                 throw Error("Binary source did not retain exact bits, encryption and independent controls");
             if (!std::string(airtime_->label()).starts_with("3 bits / TX ") ||
                 !std::string(binary_label_->label()).ends_with("3 bits") || editor_->x()+editor_->w()>=binary_editor_->x())
@@ -968,10 +1000,25 @@ private:
             if (smoke_received_packets_!=2 || inbox_.items().size()!=2 || file_ids_.size()!=1 ||
                 std::abs(last_snapshot_.transmission_seconds-smoke_binary_seconds_)>1.0/current_settings_.transfer.modem.sample_rate+1e-12)
                 throw Error("Binary simulation changed the packet inbox or transmitted the wrong bit duration");
-            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=12;
+            bool copied=false;
+            clipboard_probe_->received.reset();
+            for (std::size_t index=0;index<signals_.lines().size();++index) {
+                const auto& line=signals_.lines()[index];
+                if (line.id!=smoke_binary_signal_id_) continue;
+                if (!line.binary || !line.complete || line.validated || line.text!="001" ||
+                    gui::signal_status_label(line)!="binary received" || gui::signal_preamble_label(line)!="Preamble none" ||
+                    gui::signal_data_label(line)!="FEC off" || signals_.copy_id(index))
+                    throw Error("Completed binary browser row did not retain the actual unverified bits");
+                copied=signal_browser_->activate_line(index);
+            }
+            if (!copied) throw Error("Completed binary bits were not available through their distinct clipboard path");
+            Fl::paste(*clipboard_probe_,1); smoke_phase_=12;
+        } else if (smoke_phase_==12 && clipboard_probe_->received) {
+            if (*clipboard_probe_->received!="001") throw Error("Copying received binary bits changed leading zeros or bit count");
+            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=13;
             notice("GUI smoke passed: keyfiles, packet and binary transmission, clipboard, save and live plots.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit input with independent source selection and all plots returning to live reception."<<std::endl;
-        } else if (smoke_phase_==12 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
+            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception, exact encrypted three-bit reception with measured constellation, pending-to-complete raw rows, exact raw clipboard copy and all plots returning to live reception."<<std::endl;
+        } else if (smoke_phase_==13 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
     SmokeOptions smoke_;
@@ -1012,6 +1059,7 @@ private:
     bool smoke_key_reception_=false;
     bool smoke_binary_fixture_=false;
     double smoke_binary_seconds_=0;
+    std::uint64_t smoke_binary_signal_id_=0;
     double simulation_channel_snr_=0,cpu_percent_=0;
     std::string tuning_explanation_,notice_;
     std::vector<float> first_noise_;
@@ -1025,6 +1073,7 @@ private:
     std::unique_ptr<MainWindow> window_;
     Fl_Box *header_,*mode_,*key_path_,*compose_label_,*binary_label_,*signal_label_,*file_label_,*airtime_=nullptr,*waterfall_label_,*waveform_label_,*constellation_label_,*diagnostics_,*status_;
     Fl_Input *callsign_,*grid_;
+    Fl_Output* fec_off_;
     Fl_Input_Choice *device_,*bandwidth_,*snr_;
     Fl_Check_Button* repeatable_;
     Fl_Choice *simulation_,*key_entry_,*send_key_,*pattern_,*fec_,*source_=nullptr;

@@ -90,10 +90,14 @@ public:
                 "Data: percentage of encoded body bits correct before error correction,\n"
                 "measured only after full packet verification. Includes metadata, compressed\n"
                 "content and integrity tag; excludes the bootstrap header and parity.\n"
-                "Green rows are verified; click verified text to copy. Files use the file list.");
+                "Green rows are verified; click verified text to copy. Files use the file list.\n"
+                "Binary rows are raw received bits without preamble, FEC or integrity checks.\n"
+                "Click completed binary rows to copy all bits; a prefix is not copyable.");
     }
     std::function<void(const std::string&)> copy;
+    std::function<void(const std::string&)> copy_binary;
     bool activate_line(std::size_t index) {
+        if (const auto bits=signals_.copy_bits(index); bits && copy_binary) { copy_binary(*bits); return true; }
         if (const auto id=signals_.copy_id(index); id && copy) { copy(*id); return true; }
         return false;
     }
@@ -124,9 +128,10 @@ private:
             const int top=y()+7+static_cast<int>(index-first)*row_height;
             const int left=x()+174,right=x()+w()-10;
             std::ostringstream caption; caption<<static_cast<int>(std::lround(line.frequency_hz))<<" Hz";
-            fl_color(line.validated?fl_rgb_color(116,219,186):fl_rgb_color(232,182,91));
+            fl_color(line.binary?(line.complete?fl_rgb_color(135,190,237):fl_rgb_color(232,182,91)):
+                     line.validated?fl_rgb_color(116,219,186):fl_rgb_color(232,182,91));
             fl_font(FL_HELVETICA_BOLD,12); fl_draw(caption.str().c_str(),x()+11,top+14);
-            fl_font(FL_HELVETICA,10); fl_draw(line.validated?(line.text_message?"verified":"verified file"):"pending",x()+101,top+14);
+            fl_font(FL_HELVETICA,10); fl_draw(signal_status_label(line).c_str(),x()+101,top+14);
             fl_font(FL_HELVETICA,11);
             fl_draw(signal_preamble_label(line).c_str(),x()+11,top+29);
             fl_draw(signal_data_label(line).c_str(),x()+11,top+44);

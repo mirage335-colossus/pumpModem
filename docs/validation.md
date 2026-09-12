@@ -1,9 +1,41 @@
-# Local validation record — version 0.5.5
+# Local validation record — version 0.5.6
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5.5 checks
+## Completed 0.5.6 checks
+
+* Native GUI Release: all **23 CTest suites passed** (28.21 seconds).
+* CLI-only Release with Python discovery disabled: all **19 suites passed**
+  (31.58 seconds).
+* New modem/transfer raw-reception cases passed under ASan/UBSan, including
+  partial symbols, measured constellation points and arbitrary-bit-offset
+  encryption. LeakSanitizer was disabled for this host's tracing environment.
+* All four focused ASan/UBSan suites passed: live sessions (91.30 seconds), GUI
+  plots, GUI policy and GUI self-check. The final GUI suites also passed in Release.
+* The new end-to-end requirement first failed against the unchanged 0.5.5
+  library: raw simulation produced no received bits at the presentation deadline.
+  The corrected Release GUI workflow recovered encrypted `001`, displayed the
+  pending and completed raw rows, and copied exactly those bits.
+* The final GUI workflow also passed under ASan/UBSan, including a visible
+  read-only FEC Off value in Binary mode and restoration of the saved packet
+  setting. The completed `001` row and controls were visually inspected on the
+  private virtual display, without using physical audio or the desktop clipboard.
+
+Receiver tests span all supported constellation widths and one through seventeen
+bits, preserve leading zeros, and check that altered/noisy observations change
+decisions. Live tests cover pending-to-complete presentation at exactly 3000 ms,
+no early computation results, keyed partial symbols with packet RS controls
+selected but no on-air overhead, no fabricated packet/accuracy metadata,
+cancellation, replacement, and an hours-long symbol within a 1 MiB DSP budget.
+
+Raw simulation supplies nominal start timing, length and a carrier reference;
+it does not implement blind real-audio raw discovery. Received raw bits have no
+FEC or integrity check and can contain channel errors. Packet and raw transmitted
+waveforms remain compatible with 0.5.5. Physical audio, battery comparisons and
+hosted Windows/CI execution were not tested for this release.
+
+## Recorded 0.5.5 checks
 
 * Native GUI Release: all **23 CTest suites passed** (28.35 seconds).
 * CLI-only Release with Python discovery disabled: all **19 suites passed**

@@ -9,7 +9,7 @@ Version 2 adds a variable-length short-payload prefix code. The framing, metadat
 integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
 versions; an older decoder that accepts only version 1 cannot read version 2.
 
-Application release 0.5.5 retains differential 4/8/16/32/64-APSK and symbol-boundary
+Application release 0.5.6 retains differential 4/8/16/32/64-APSK and symbol-boundary
 padding around the protected bootstrap. It applies a public additive whitening
 mask to the audio frame after encryption, excluding the training. Audio peers
 require matching modem settings and the 0.5 whitening mask. Release 0.5.1 changed
@@ -20,7 +20,9 @@ quality counters. Release 0.5.4 schedules the entire simulated transmission,
 browser previews and final received result across the same three-second
 presentation. Release 0.5.5 adds unframed binary APSK transmission as a separate
 GUI source; it has no packet fields or integrity/FEC and does not enter the
-packet decoder. These releases do not change the 0.5.1 packet waveform,
+packet decoder. Release 0.5.6 adds aligned raw APSK simulation reception and
+displays the unverified bit decisions without adding FEC or any on-air bytes.
+These releases do not change the 0.5.1 packet waveform,
 packet versions or keyfile formats. Modem
 configuration, presentation behavior and packet codec versions are separate
 concepts.

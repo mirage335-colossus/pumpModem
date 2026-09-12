@@ -138,6 +138,12 @@ struct Session::Impl {
     struct Prepared {
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
         bool binary = false;
+        std::unique_ptr<modem::BinaryReceiver> binary_receiver;
+        transfer::Options binary_options;
+        std::string binary_text;
+        std::size_t binary_received_bits = 0, binary_expected_bits = 0;
+        std::uint64_t binary_signal_id = 0;
+        bool binary_finished = false;
         std::uint64_t generation = 0, serial = 0;
         std::uint64_t admission_epoch = 0;
         std::uint64_t tail_remaining = 0;
@@ -145,6 +151,7 @@ struct Session::Impl {
         std::vector<ReplayFrame> replay;
         std::vector<std::optional<SignalUpdate>> signals;
         std::optional<SignalUpdate> verified;
+        std::optional<SignalUpdate> binary_result;
         std::optional<transfer::Received> received;
         std::size_t replay_count = 0, point_limit = 0;
         modem::ConstellationBatch interval_points;
@@ -194,6 +201,7 @@ struct Session::Impl {
     std::vector<ReplayFrame> replay;
     std::vector<std::optional<SignalUpdate>> replay_signals;
     std::optional<SignalUpdate> replay_verified;
+    std::optional<SignalUpdate> replay_binary_result;
     std::optional<transfer::Received> replay_received;
     std::size_t replay_signal_cursor = 0, staged_received_bytes = 0;
     std::uint64_t replay_signal_id = 0;
@@ -234,7 +242,7 @@ struct Session::Impl {
                 return !event.validated && event.id == replay_signal_id;
             });
         replay = {}; delivered_replay_frame.reset(); first_visible_replay_frame = 0;
-        replay_signals = {}; replay_verified.reset(); replay_received.reset();
+        replay_signals = {}; replay_verified.reset(); replay_binary_result.reset(); replay_received.reset();
         replay_signal_cursor = staged_received_bytes = 0; replay_signal_id = 0;
         current.simulation_replay = false;
         current.replay_frame_index = current.replay_frame_count = 0;
@@ -281,6 +289,7 @@ struct Session::Impl {
                 admit_received(replay_received->packet.message.data.size(), settings.content_limit);
                 current.received.push_back(std::move(*replay_received));
             }
+            if (replay_binary_result) append_signal(std::move(*replay_binary_result));
             // A stalled UI must not extend the replay or paint old symbol
             // coordinates over live input. Account for undelivered points.
             const auto first = delivered_replay_frame ? *delivered_replay_frame + 1 : 0;
@@ -533,9 +542,10 @@ struct Session::Impl {
     }
     void append_signal(SignalUpdate event) {
         if (current.signals.size() == maximum_events) {
+            const auto completed = [](const auto& item) { return item.validated || (item.binary && item.complete); };
             const auto pending = std::find_if(current.signals.begin(), current.signals.end(),
-                                             [](const auto& item) { return !item.validated; });
-            if (pending == current.signals.end() && !event.validated) return;
+                                             [&](const auto& item) { return !completed(item); });
+            if (pending == current.signals.end() && !completed(event)) return;
             current.signals.erase(pending == current.signals.end() ? current.signals.begin() : pending);
         }
         current.signals.push_back(std::move(event));
@@ -549,9 +559,48 @@ struct Session::Impl {
         // Floor quantization keeps even a late bootstrap visible for the last
         // interval before validation; a stalled UI never extends the deadline.
         const auto fraction = static_cast<long double>(wave->transmitter->samples_emitted()) / wave->transmitter->total_samples();
-        const auto index = std::min(wave->signals.size() - 1,
+        const auto index = std::min(wave->signals.size() - 1, wave->binary ? wave->replay.size() :
             static_cast<std::size_t>(fraction * static_cast<long double>(wave->signals.size())));
         wave->signals[index] = std::move(event);
+    }
+    SignalUpdate binary_signal(const Prepared& wave, const Settings& value, bool finished) const {
+        SignalUpdate event;
+        event.id = wave.binary_signal_id;
+        event.frequency_hz = value.transfer.modem.carrier_hz;
+        event.binary = true;
+        event.received_bits = wave.binary_received_bits;
+        event.expected_bits = wave.binary_expected_bits;
+        event.complete = finished && event.received_bits == event.expected_bits;
+        event.text = wave.binary_text.empty() ? "Receiving binary..." : wave.binary_text;
+        return event;
+    }
+    void receive_binary(Prepared& wave, const Settings& value,
+                        std::span<const modem::SymbolObservation> observations) {
+        if (wave.binary_finished) return;
+        auto bits = wave.binary_receiver->push_symbols(observations, wave.stop);
+        const bool finished = wave.transmitter->finished() && !wave.binary_finished;
+        if (finished) {
+            auto tail = wave.binary_receiver->finish(wave.stop);
+            bits.insert(bits.end(), tail.begin(), tail.end());
+            wave.binary_finished = true;
+        }
+        // Only the receiver's decisions are decrypted. Neither the original
+        // bit sequence nor transmitter symbols enter this receive path.
+        transfer::xor_binary_bits(bits, wave.binary_options, wave.binary_received_bits);
+        for (const auto bit : bits) if (wave.binary_text.size() < replay_text_limit)
+            wave.binary_text += static_cast<char>('0' + bit);
+        wave.binary_received_bits += bits.size();
+        auto points = wave.binary_receiver->take_payload_constellation();
+        wave.interval_locked = wave.interval_locked || !points.points.empty();
+        append_points(wave.interval_points, std::move(points));
+        std::lock_guard lock(mutex);
+        if (!current.running || generation != wave.generation || tx_serial != wave.serial || wave.stop.stop_requested()) return;
+        if (!bits.empty()) add_signal(binary_signal(wave, value, false), &wave);
+        if (finished) {
+            auto event = binary_signal(wave, value, true);
+            event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
+            wave.binary_result = std::move(event);
+        }
     }
     void make_receive_room(std::size_t bytes, std::size_t limit) {
         if (staged_received_bytes > limit || bytes > limit - staged_received_bytes)
@@ -701,7 +750,9 @@ struct Session::Impl {
                 replay = std::move(wave.replay); delivered_replay_frame.reset(); first_visible_replay_frame = 0;
                 replay_signals = std::move(wave.signals); replay_signal_cursor = 0;
                 replay_verified = std::move(wave.verified); replay_received = std::move(wave.received);
+                replay_binary_result = std::move(wave.binary_result);
                 if (replay_verified) replay_signal_id = replay_verified->id;
+                else if (replay_binary_result) replay_signal_id = replay_binary_result->id;
                 else for (const auto& event : replay_signals) if (event) { replay_signal_id = event->id; break; }
                 replay_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
@@ -720,8 +771,8 @@ struct Session::Impl {
         current.transmission_fraction = static_cast<double>(wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
         if (value.simulation && wave.binary) {
-            receiver_bytes = 0;
-            current.dsp_buffered_bytes = plot_workspace(value) + value.dsp_workspace_bytes / 4;
+            receiver_bytes = wave.binary_receiver->working_bytes();
+            current.dsp_buffered_bytes = receiver_bytes + plot_workspace(value) + value.dsp_workspace_bytes / 4;
         }
     }
     void source_loop(std::stop_token stop) {
@@ -810,10 +861,8 @@ struct Session::Impl {
                             }
                         }
                         account(samples, version); progress(*wave, value);
-                        // Unframed bits have no bootstrap or integrity check.
-                        // Display measured input, without inventing packet
-                        // acquisition, verified content or a locked decoder.
-                        if (!wave->binary) feed_bank(*simulation_bank, value, version, processing_token, [&](auto& receiver) {
+                        if (wave->binary) receive_binary(*wave, value, observations);
+                        else feed_bank(*simulation_bank, value, version, processing_token, [&](auto& receiver) {
                             return receiver.push_symbols(observations, processing_token);
                         }, wave.get());
                         // Decode through this exact media position before
@@ -919,7 +968,17 @@ struct Session::Impl {
                 prepared->admission_epoch = admission_epoch;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
                 if (prepared->binary) {
-                    prepared->transmitter = transfer::binary_transmitter(std::get<Bytes>(transmission), value.transfer);
+                    const auto& bits = std::get<Bytes>(transmission);
+                    prepared->transmitter = transfer::binary_transmitter(bits, value.transfer);
+                    if (value.simulation) {
+                        // Unframed simulation supplies burst length and nominal
+                        // start timing, but never the transmitted bit values.
+                        // Key and epoch come from the admitted session settings.
+                        prepared->binary_options = value.transfer;
+                        prepared->binary_expected_bits = bits.size();
+                        prepared->binary_receiver = std::make_unique<modem::BinaryReceiver>(
+                            transfer::seeded_config(value.transfer, value.transfer.timestamp), bits.size(), bank_capacity(value));
+                    }
                 } else {
                     auto wire = transfer::transmission_wire(std::get<Message>(transmission), value.transfer);
                     if (token.stop_requested()) continue;
@@ -940,6 +999,10 @@ struct Session::Impl {
                 }
                 std::lock_guard lock(mutex);
                 if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
+                if (prepared->binary && value.simulation) {
+                    prepared->binary_signal_id = next_signal++;
+                    add_signal(binary_signal(*prepared, value, false), prepared.get());
+                }
                 ready = std::move(prepared); if (!value.simulation) capture_stop.request_stop(); changed.notify_all();
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);

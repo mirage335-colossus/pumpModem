@@ -101,6 +101,49 @@ int main() {
         signals.clear(); check(signals.lines().empty());
         signals.update({90,1500,"readme.txt",true,"file-id",false});
         check(!signals.copy_id(0)); // Even UTF-8 files require explicit Save.
+        gui::SignalLine binary_line{91,1500,"Receiving binary...",false,{},false};
+        binary_line.binary=true;
+        binary_line.expected_bits=3;
+        check(gui::signal_status_label(binary_line)=="binary pending");
+        check(gui::signal_preamble_label(binary_line)=="Preamble none");
+        check(gui::signal_data_label(binary_line)=="FEC off");
+        signals.clear(); signals.update(binary_line);
+        check(!signals.copy_id(0) && !signals.copy_bits(0));
+        binary_line.text="00"; binary_line.received_bits=2;
+        signals.update(binary_line);
+        check(signals.lines()[0].text=="00" && !signals.copy_bits(0));
+        binary_line.text="001"; binary_line.complete=true; binary_line.received_bits=3;
+        signals.update(binary_line);
+        check(gui::signal_status_label(signals.lines()[0])=="binary received");
+        check(!signals.copy_id(0) && !signals.lines()[0].validated && signals.lines()[0].complete);
+        check(signals.copy_bits(0)=="001");
+        binary_line.text="0"; binary_line.complete=false;
+        signals.update(binary_line);
+        check(signals.lines()[0].text=="001" && signals.lines()[0].complete);
+        check(signals.copy_bits(0)=="001");
+        // A raw result never gains packet authentication or accuracy labels,
+        // even if a caller accidentally supplies unrelated packet fields.
+        binary_line.id=92; binary_line.text="001"; binary_line.complete=true;
+        binary_line.validated=true; binary_line.packet_id="not-a-raw-packet-id";
+        binary_line.preamble_received_percent=100.; binary_line.pre_fec_accuracy=PacketBitAccuracy{8,0};
+        signals.update(binary_line);
+        check(!signals.lines()[1].validated && signals.lines()[1].packet_id.empty() &&
+              !signals.lines()[1].preamble_received_percent && !signals.lines()[1].pre_fec_accuracy);
+        check(!signals.copy_id(1) && signals.copy_bits(1)=="001");
+        for (const auto& invalid_text : {std::string{},std::string("00x"),std::string("0 1"),std::string("00\0",3)}) {
+            binary_line.id=93; binary_line.text=invalid_text;
+            signals.update(binary_line);
+            check(!signals.copy_bits(2));
+        }
+        binary_line.text="001"; binary_line.expected_bits=4;
+        signals.update(binary_line); check(!signals.copy_bits(2));
+        binary_line.expected_bits=0; binary_line.received_bits=0;
+        signals.update(binary_line); check(!signals.copy_bits(2));
+        binary_line.text=std::string(5000,'0'); binary_line.expected_bits=binary_line.received_bits=5000;
+        signals.update(binary_line);
+        check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));
+        check(gui::signal_data_label(signals.lines()[2])=="FEC off / prefix");
+        check(!signals.copy_bits(3));
         gui::Inbox mixed;
         mixed.put(packet(1,3)); // Text belongs to the signal browser only.
         auto file=packet(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";

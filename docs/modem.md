@@ -1,6 +1,6 @@
-# Audio modem reference, application version 0.5.5
+# Audio modem reference, application version 0.5.6
 
-Version 0.5.5 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5.6 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
 matching carrier and modem settings. This release synchronizes the complete
@@ -464,11 +464,28 @@ remaining bits. Airtime is the number of groups times the quantized symbol durat
 without byte padding or a five-second preamble. Selected keys mask only the actual
 bits with the data stream and seed the normal scrambler/spreading configuration.
 
-Raw signals have no packet bootstrap or authentication. During binary simulation,
-waveform, spectrum and input constellation replay the noisy signal over three
-seconds, then return to live noise. No packet lock or verified text/file reception
-is claimed. Automatic raw-bit discovery and known-sequence reception are not part
-of this GUI mode. The following CLI status API retains its separate DBPSK format.
+Raw signals have no packet bootstrap or authentication. Binary simulation uses
+`modem::BinaryReceiver` to integrate the channel's noisy complex observations and
+choose the nearest point in each symbol's APSK alphabet, including the final
+partial alphabet. The receiver knows the requested bit count, nominal burst start,
+unit channel gain and initial carrier reference. It never reads the transmitted
+bit values or the channel's hidden phase/noise trajectory. Subsequent symbols use
+the previous measured phase. A final symbol with at least 99% of its nominal
+sample duration can complete after the small clock-length mismatch; shorter
+captures remain incomplete. This is aligned reception, not blind beacon discovery
+or a new carrier/clock tracking loop.
+
+Only the receiver's decided bits are decrypted with the configured data stream,
+at their exact bit offsets. There is no Reed–Solomon, packet checksum, MAC, padding
+or correction pass. Noise can therefore change the received bit sequence; a raw
+result is never labeled verified or assigned a fabricated accuracy percentage.
+During the three-second replay the browser shows pending reception and newly
+decoded bits, while the constellation shows measured symbol points when available.
+The complete result arrives at the deadline, when plots return to live noise.
+Complete bit strings can be copied; raw signals do not enter the file/packet inbox.
+Browser previews retain at most 4096 bits and indicate a longer result's prefix,
+which cannot be copied as a complete signal. Automatic raw real-audio discovery
+is not implemented. The following CLI status API retains its separate DBPSK format.
 
 ## Batch PCM, WAV and few-bit status
 

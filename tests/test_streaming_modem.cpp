@@ -61,6 +61,64 @@ void raw_binary_transmitter() {
     if(slow.total_samples()!=static_cast<std::uint64_t>(config.sample_rate)*3600 || observations>33)
         throw std::runtime_error("raw long-symbol simulation scales work or storage with airtime");
 }
+void raw_binary_receiver() {
+    for(unsigned width=2;width<=6;++width)for(std::size_t count=1;count<=17;++count) {
+        modem::Config config;config.constellation_bits=width;config.spreading_factor=3;
+        Bytes bits(count);for(std::size_t i=2;i<count;++i)bits[i]=static_cast<std::uint8_t>((i*7+i/3)&1);
+        modem::StreamingTransmitter source(modem::RawBits{bits},config);
+        modem::BinaryReceiver receiver(config,bits.size());Bytes received;
+        while(auto observation=source.next_symbol()) {
+            const auto part=receiver.push_symbols(std::span(&*observation,1));received.insert(received.end(),part.begin(),part.end());
+        }
+        const auto last=receiver.finish();received.insert(received.end(),last.begin(),last.end());
+        if(received!=bits || receiver.bits_received()!=bits.size() || !receiver.finish().empty())
+            throw std::runtime_error("raw sample-derived receiver lost leading zeros or actual-width final bits");
+        const auto points=receiver.take_payload_constellation();
+        if(points.points.size()!=count/width+(count%width!=0) || !receiver.take_payload_constellation().points.empty())
+            throw std::runtime_error("raw receiver constellation does not drain actual measured symbols");
+        if(receiver.working_bytes()>65536)throw std::runtime_error("raw receiver retained input-sized DSP state");
+    }
+    modem::Config config;config.integration_seconds=1;
+    const auto duration=modem::symbol_sample_count(config);
+    const auto decode=[&](Complex point,std::uint64_t samples) {
+        modem::BinaryReceiver receiver(config,1);const modem::SymbolObservation observation{point,samples};
+        auto result=receiver.push_symbols(std::span(&observation,1));const auto last=receiver.finish();
+        result.insert(result.end(),last.begin(),last.end());return result;
+    };
+    if(decode({.35,0},duration)!=Bytes{0} || decode({-.7,0},duration)!=Bytes{1})
+        throw std::runtime_error("raw receiver does not make its decision from observed phase and amplitude");
+    if(decode({-.7,0},duration-duration/200)!=Bytes{1} || !decode({-.7,0},duration/2).empty())
+        throw std::runtime_error("raw receiver finish mishandles small clock mismatch or fabricates incomplete bits");
+    modem::BinaryReceiver measured(config,4);const modem::SymbolObservation off_grid{{.413,.177},duration};
+    measured.push_symbols(std::span(&off_grid,1));
+    if(std::abs(measured.take_payload_constellation().points.at(0)-off_grid.value)>1e-12)
+        throw std::runtime_error("raw constellation snaps received evidence to transmitted ideals");
+    std::stop_source stopped;stopped.request_stop();bool interrupted=false;
+    try{measured.finish(stopped.get_token());}catch(const Error&){interrupted=true;}
+    if(!interrupted)throw std::runtime_error("raw receiver ignored cancellation");
+    measured.finish();bool rejected=false;
+    try{measured.push_symbols({});}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("finished raw receiver accepted more observations");
+    config.integration_seconds=3600;config.memory_limit=1024;
+    modem::StreamingTransmitter slow(modem::RawBits{{0,0,1}},config);
+    modem::BinaryReceiver bounded(config,3,65536);Bytes result;
+    while(auto observation=slow.next_symbol()) {const auto part=bounded.push_symbols(std::span(&*observation,1));result.insert(result.end(),part.begin(),part.end());}
+    if(result!=Bytes({0,0,1}) || bounded.working_bytes()>65536)
+        throw std::runtime_error("hour-long raw receiver grows with duration or loses bits");
+    config.integration_seconds=0;
+    modem::BinaryReceiver overflow(config,4*(2048+9));
+    const modem::SymbolObservation many{{.35,0},modem::symbol_sample_count(config)*(2048+9)};
+    if(overflow.push_symbols(std::span(&many,1)).size()!=4*(2048+9))throw std::runtime_error("raw receiver lost bits while draining long observation");
+    const auto retained=overflow.take_payload_constellation();
+    if(retained.points.size()!=2048 || retained.dropped!=9)throw std::runtime_error("raw receive constellation is not bounded");
+    modem::StreamingTransmitter clean(modem::RawBits{Bytes(64)},config);
+    modem::BinaryReceiver noisy(config,64);Bytes guesses;std::mt19937_64 random(719);
+    while(auto observation=clean.next_symbol()) {
+        const auto corrupted=modem::add_awgn(*observation,-100,random);
+        const auto part=noisy.push_symbols(std::span(&corrupted,1));guesses.insert(guesses.end(),part.begin(),part.end());
+    }
+    if(guesses.size()!=64 || guesses==Bytes(64))throw std::runtime_error("raw receiver ignored noisy samples in favor of transmitted bit truth");
+}
 void received_preamble_evidence() {
     const auto capture=[](modem::Config config,bool pcm,unsigned prefix_mode,std::uint64_t crop=0,std::uint64_t delay=0) {
         Message message;message.id[0]=91;message.data={'t','r','a','i','n'};
@@ -549,6 +607,7 @@ void recent_pcm_preview() {
 int main(int argc,char** argv) {
     try {
         raw_binary_transmitter();
+        raw_binary_receiver();
         if(argc>1 && std::string_view(argv[1])=="--binary-only") {std::cout<<"raw binary modem tests passed\n";return 0;}
         received_preamble_evidence();
         if(argc>1 && std::string_view(argv[1])=="--preamble-only") {std::cout<<"preamble evidence tests passed\n";return 0;}

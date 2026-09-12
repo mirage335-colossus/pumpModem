@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.5.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.6.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,13 +14,16 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.5.5 adds a binary editor beside the message editor. Select Binary to
+The binary editor sits beside the message editor. Select Binary to
 transmit an exact sequence such as `001`, using the shared streaming phase/amplitude
 modulator with no packet preamble, header, compression or error correction.
 Leading zeros are preserved; whitespace is ignored. The GUI shows the bit count
 and airtime, and selected keys apply stream encryption without adding bytes.
-Raw binary signals have no packet validation and do not appear as received
-text or files. The legacy CLI DBPSK status format is separate.
+Version 0.5.6 decodes raw binary simulation observations and shows the recovered
+bits in the signal browser: pending during the three-second replay, received at
+its end. Complete bit strings can be copied. These raw results have no packet
+validation or error correction and never become file entries. The legacy CLI
+DBPSK status format is separate.
 
 The GUI presents the entire simulated transmission over three seconds,
 including fixed training, live plots and pending signal-browser text. Verified
@@ -126,7 +129,8 @@ transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
 updating while idle. Transmissions run at CPU speed through noisy complex
 observations, with virtual airtime reported separately. Packet simulations use
-the same symbol decoder; unframed binary simulations display measured input.
+the same symbol decoder; unframed binary simulations use an aligned APSK decoder
+with the requested bit length and nominal carrier reference.
 After computation completes, the entire transmission, including fixed training,
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and signal-browser previews follow the same timeline. Each frame shows the

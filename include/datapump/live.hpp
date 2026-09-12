@@ -47,6 +47,12 @@ struct SignalUpdate {
     std::optional<double> preamble_received_percent = std::nullopt;
     // Available only after complete packet integrity/authentication checks.
     std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
+    // Raw bits are decoded observations, without a packet checksum/MAC or
+    // error correction. A completed result may contain channel bit errors.
+    bool binary = false;
+    bool complete = false;
+    std::size_t received_bits = 0;
+    std::size_t expected_bits = 0;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {
@@ -107,7 +113,8 @@ public:
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no packet framing, preamble or FEC. Raw
-    // simulations show measured input; they cannot yield verified packets.
+    // simulations decode aligned channel observations and deliver raw bits
+    // through signals, without claiming verified packet reception.
     void transmit_bits(std::span<const std::uint8_t> bits);
     void cancel_transmit();
     Snapshot snapshot();

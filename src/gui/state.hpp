@@ -87,17 +87,24 @@ struct SignalLine {
     bool text_message = true;
     std::optional<double> preamble_received_percent = std::nullopt;
     std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
+    bool binary = false;
+    bool complete = false;
+    std::size_t received_bits = 0;
+    std::size_t expected_bits = 0;
 };
+std::string signal_status_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
 std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.
-// Only a final verified observation can provide a clipboard lookup identity.
+// Verified packets have clipboard lookup identities. Complete raw binary
+// observations have a separate bit-string path with no packet/authentication ID.
 class Signals {
 public:
     void update(SignalLine line);
     void clear() noexcept { lines_.clear(); }
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
     std::optional<std::string> copy_id(std::size_t index) const;
+    std::optional<std::string> copy_bits(std::size_t index) const;
 private:
     std::deque<SignalLine> lines_;
 };

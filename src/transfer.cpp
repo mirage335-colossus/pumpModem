@@ -240,19 +240,28 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits,const Options& options) {
     const auto value=binary_options(bits,options);
     modem::RawBits raw{Bytes(bits.begin(),bits.end())};
+    xor_binary_bits(raw.bits,value);
+    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),value.dsp_workspace_bytes/4);
+}
+
+void xor_binary_bits(std::span<std::uint8_t> bits,const Options& options,std::size_t bit_offset) {
+    if(bits.empty())return;
+    const auto value=binary_options(bits,options);
+    if(bits.size()>std::numeric_limits<std::size_t>::max()-bit_offset)
+        throw Error("raw binary data-stream offset overflow");
     if(value.key) {
-        // Keep crypto scratch fixed even for a large raw sequence. The final
-        // byte contributes only the meaningful bits present in the input.
+        // A received fragment can start at any bit, not only a byte boundary.
+        // Keep crypto scratch bounded while preserving the exact TX stream.
         std::size_t offset=0;
         while(offset<bits.size()) {
-            const auto count=std::min<std::size_t>(16384*8,bits.size()-offset);
-            const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp,offset/8,count/8+(count%8!=0));
+            const auto position=bit_offset+offset,skip=position%8;
+            const auto count=std::min<std::size_t>(16384*8-skip,bits.size()-offset);
+            const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp,position/8,(skip+count)/8+((skip+count)%8!=0));
             for(std::size_t i=0;i<count;++i)
-                raw.bits[offset+i]^=static_cast<std::uint8_t>((mask[i/8]>>(7-i%8))&1);
+                bits[offset+i]^=static_cast<std::uint8_t>((mask[(skip+i)/8]>>(7-(skip+i)%8))&1);
             offset+=count;
         }
     }
-    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),value.dsp_workspace_bytes/4);
 }
 
 Bytes pack(const Message& message, const Options& options) {

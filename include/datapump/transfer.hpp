@@ -49,6 +49,10 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& opti
 // MSB-first bits with its data stream at options.timestamp; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
+// Symmetric raw data-stream masking, including fragments starting mid-byte.
+// Without a key the bits are unchanged. Does not authenticate decoded guesses.
+void xor_binary_bits(std::span<std::uint8_t> bits, const Options& options,
+                     std::size_t bit_offset = 0);
 struct Received {
     DecodedPacket packet;
     modem::Diagnostics diagnostics;

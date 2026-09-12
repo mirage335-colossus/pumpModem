@@ -406,6 +406,81 @@ struct Candidate {
 };
 }
 
+struct BinaryReceiver::Impl {
+    Config config;
+    std::size_t expected=0,received=0,pending_count=0,pending_begin=0;
+    std::uint64_t symbol=0,collected=0,dropped=0;
+    Complex mean{},previous{1,0};
+    std::array<Complex,64> alphabet{};
+    std::array<Complex,StreamingTransmitter::constellation_history_limit> points{};
+    bool finished=false;
+    Impl(Config value,std::size_t count,std::size_t workspace):config(value),expected(count) {
+        validate(config);
+        if(!count)throw Error("raw binary receiver requires a positive bit count");
+        if(sizeof(Impl)+sizeof(BinaryReceiver)>workspace)throw Error("raw binary receiver workspace is too small");
+        symbol=symbol_sample_count(config);
+        const auto symbols=count/config.constellation_bits+(count%config.constellation_bits!=0);
+        if(symbols>std::numeric_limits<std::uint64_t>::max()/symbol)
+            throw Error("raw binary receive duration exceeds 64-bit sample counter");
+        for(unsigned value_index=0;value_index<(1U<<config.constellation_bits);++value_index)
+            alphabet[value_index]=detail::mapped(value_index,config.constellation_bits,{1,0});
+    }
+    void complete(Bytes& output) {
+        const auto width=static_cast<unsigned>(std::min<std::size_t>(config.constellation_bits,expected-received));
+        const auto reference=std::abs(previous)>1e-20?previous/std::abs(previous):Complex{1,0};
+        const auto measured=mean*std::conj(reference);
+        unsigned decision=0;double closest=std::numeric_limits<double>::infinity();
+        for(unsigned candidate=0;candidate<(1U<<width);++candidate) {
+            const auto distance=std::abs(measured-alphabet[raw_symbol_value(candidate,width,config.constellation_bits)]);
+            if(distance<closest){closest=distance;decision=candidate;}
+        }
+        for(unsigned bit=0;bit<width;++bit)output.push_back(static_cast<std::uint8_t>((decision>>(width-bit-1))&1U));
+        received+=width;
+        if(pending_count==points.size()) {
+            pending_begin=(pending_begin+1)%points.size();--pending_count;
+            if(dropped<std::numeric_limits<std::uint64_t>::max())++dropped;
+        }
+        points[(pending_begin+pending_count++)%points.size()]=measured;
+        previous=mean;mean={};collected=0;
+    }
+};
+BinaryReceiver::BinaryReceiver(Config config,std::size_t bits,std::size_t workspace):impl_(std::make_unique<Impl>(config,bits,workspace)){}
+BinaryReceiver::~BinaryReceiver()=default;
+BinaryReceiver::BinaryReceiver(BinaryReceiver&&) noexcept=default;
+BinaryReceiver& BinaryReceiver::operator=(BinaryReceiver&&) noexcept=default;
+Bytes BinaryReceiver::push_symbols(std::span<const SymbolObservation> observations,std::stop_token stop) {
+    cancelled(stop);auto& s=*impl_;if(s.finished)throw Error("raw binary capture already finished");
+    Bytes output;
+    for(const auto& observation:observations) {
+        cancelled(stop);
+        if(!observation.sample_count || !std::isfinite(std::abs(observation.value)))
+            throw Error("invalid raw binary observation");
+        auto remaining=observation.sample_count;
+        while(remaining && s.received<s.expected) {
+            cancelled(stop);const auto count=std::min(remaining,s.symbol-s.collected);
+            const auto fraction=static_cast<double>(count)/static_cast<double>(s.collected+count);
+            s.mean=s.mean*(1-fraction)+observation.value*fraction;
+            if(!std::isfinite(std::abs(s.mean)))throw Error("raw binary integration overflow");
+            s.collected+=count;remaining-=count;
+            if(s.collected==s.symbol)s.complete(output);
+        }
+    }
+    return output;
+}
+Bytes BinaryReceiver::finish(std::stop_token stop) {
+    cancelled(stop);auto& s=*impl_;Bytes output;if(s.finished)return output;
+    if(s.received<s.expected && s.expected-s.received<=s.config.constellation_bits &&
+       s.collected>=s.symbol-s.symbol/100)s.complete(output);
+    s.finished=true;return output;
+}
+ConstellationBatch BinaryReceiver::take_payload_constellation() {
+    auto& s=*impl_;ConstellationBatch result;result.points.reserve(s.pending_count);result.dropped=s.dropped;
+    for(std::size_t i=0;i<s.pending_count;++i)result.points.push_back(s.points[(s.pending_begin+i)%s.points.size()]);
+    s.pending_count=0;s.pending_begin=0;s.dropped=0;return result;
+}
+std::size_t BinaryReceiver::bits_received()const{return impl_->received;}
+std::size_t BinaryReceiver::working_bytes()const{return sizeof(BinaryReceiver)+sizeof(Impl);}
+
 struct StreamingTransmitter::Impl {
     Bytes wire;
     Config config;

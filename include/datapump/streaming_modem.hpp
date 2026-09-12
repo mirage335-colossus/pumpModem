@@ -85,6 +85,28 @@ private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };
+
+// Aligned, unframed APSK reception. The bit count and modem settings are known;
+// carrier phase starts at zero and nominal channel gain is one. Decisions come
+// only from observed samples, with no framing, integrity check or correction.
+class BinaryReceiver {
+public:
+    BinaryReceiver(Config config, std::size_t bit_count,
+                   std::size_t workspace_bytes = 8 * 1024 * 1024);
+    ~BinaryReceiver();
+    BinaryReceiver(BinaryReceiver&&) noexcept;
+    BinaryReceiver& operator=(BinaryReceiver&&) noexcept;
+    Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
+    // A final symbol with at least99% measured clock coverage may complete;
+    // shorter/incomplete observations produce no invented trailing bits.
+    Bytes finish(std::stop_token stop = {});
+    ConstellationBatch take_payload_constellation();
+    std::size_t bits_received() const;
+    std::size_t working_bytes() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
 SymbolObservation add_awgn(SymbolObservation observation, double sample_snr_db,
                            std::mt19937_64& random);
 }

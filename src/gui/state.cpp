@@ -149,7 +149,12 @@ std::string folder_uri(const std::filesystem::path& directory) {
     return uri;
 }
 
+std::string signal_status_label(const SignalLine& line) {
+    if (line.binary) return line.complete?"binary received":"binary pending";
+    return line.validated?(line.text_message?"verified":"verified file"):"pending";
+}
 std::string signal_preamble_label(const SignalLine& line) {
+    if (line.binary) return "Preamble none";
     const auto value=line.preamble_received_percent;
     if (!value || !std::isfinite(*value) || *value<0 || *value>100) return "Preamble --";
     if (*value>99.9 && *value<100) return "Preamble >99.9%";
@@ -158,6 +163,7 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
+    if (line.binary) return line.received_bits>line.text.size()?"FEC off / prefix":"FEC off";
     if (!line.validated) return "Data pre-FEC pending";
     const auto& accuracy=line.pre_fec_accuracy;
     if (!accuracy || !accuracy->received_data_bits || accuracy->corrected_data_bits>accuracy->received_data_bits)
@@ -172,10 +178,14 @@ std::string signal_data_label(const SignalLine& line) {
 }
 
 void Signals::update(SignalLine line) {
+    if (line.binary) {
+        line.validated=false; line.packet_id.clear(); line.text_message=false;
+        line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();
+    }
     if (line.text.size()>4096) line.text.resize(4096);
     const auto found=std::find_if(lines_.begin(),lines_.end(),[&](const auto& item) { return item.id==line.id; });
     if (found!=lines_.end()) {
-        if (found->validated && !line.validated) return;
+        if ((found->validated && !line.validated) || (found->binary && found->complete && !line.complete)) return;
         *found=std::move(line);
     } else {
         if (lines_.size()>=64) lines_.pop_front();
@@ -183,8 +193,15 @@ void Signals::update(SignalLine line) {
     }
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
-    if (index>=lines_.size() || !lines_[index].validated || !lines_[index].text_message || lines_[index].packet_id.empty()) return std::nullopt;
+    if (index>=lines_.size() || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].packet_id.empty()) return std::nullopt;
     return lines_[index].packet_id;
+}
+std::optional<std::string> Signals::copy_bits(std::size_t index) const {
+    if (index>=lines_.size()) return std::nullopt;
+    const auto& line=lines_[index];
+    if (!line.binary || !line.complete || !line.received_bits || line.received_bits!=line.expected_bits ||
+        line.text.size()!=line.received_bits || line.text.find_first_not_of("01")!=std::string::npos) return std::nullopt;
+    return line.text;
 }
 
 bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept {
