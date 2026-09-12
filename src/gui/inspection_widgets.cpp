@@ -227,10 +227,10 @@ struct Canvas {
 
 InspectionDiagram::InspectionDiagram(bool flow) : Fl_Widget(0,0,1,1),flow_(flow) {}
 void InspectionDiagram::set_model(std::shared_ptr<const Inspection> model) {
-    model_=std::move(model); redraw();
+    model_=std::move(model); pattern_view_.reset(); redraw();
 }
 void InspectionDiagram::set_pending(std::string message) {
-    model_.reset(); pending_=std::move(message); redraw();
+    model_.reset(); pattern_view_.reset(); pending_=std::move(message); redraw();
 }
 int InspectionDiagram::content_height(int width) const { return render(width,false); }
 int InspectionDiagram::render(int width,bool paint) const {
@@ -248,6 +248,10 @@ int InspectionDiagram::render(int width,bool paint) const {
             canvas.heading("Chosen phase / amplitude alphabets");
             canvas.paragraph("Ideal symbol points in differential-phase coordinates; live received measurements remain on the Console tab.");
             canvas.cursor+=12; canvas.constellations(model_->constellations);
+        }
+        if(model_->pattern_space) {
+            canvas.heading("Full pattern / scrambler symbol space");
+            canvas.cursor+=pattern_view_.render(*model_->pattern_space,canvas.x,canvas.y+canvas.cursor,canvas.width,paint);
         }
         canvas.note("Preamble symbols",model_->preamble_description);
         canvas.note("Pattern and integration",model_->chip_description);
@@ -280,5 +284,9 @@ void InspectionDiagram::draw() {
     fl_push_clip(x(),y(),w(),h());
     fl_color(background); fl_rectf(x(),y(),w(),h());
     render(w(),true); fl_pop_clip();
+}
+int InspectionDiagram::handle(int event) {
+    if(flow_ && model_ && model_->pattern_space && pattern_view_.handle(event)) { redraw(); return 1; }
+    return Fl_Widget::handle(event);
 }
 }

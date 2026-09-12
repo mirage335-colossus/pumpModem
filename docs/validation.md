@@ -1,9 +1,57 @@
-# Local validation record — version 0.7.1
+# Local validation record — version 0.7.2
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Version 0.7.1 pattern constellation
+## Version 0.7.2 static full-pattern inspection
+
+The standalone Constellations tab is removed. Modem flow now displays all legal
+full-pattern symbols as phase/amplitude chip rows, a full-vector distance map,
+and matched/off-pattern energy for legal, shifted, unused and mean-noise cases.
+Every code position is inspectable through pagination; metrics always use the
+entire actual symbol, including repeated periods and partial chips.
+
+The new model tests first failed for the missing implementation. They then
+compared every displayed chip against the previously compiled transmitter's
+analytic preview and actual PCM, before rebuilding the modem with its extracted
+shared code generator. This checks that sharing the generator preserves the
+existing on-air sequences. Coverage includes every 2–6-bit APSK alphabet,
+fixed/tone/keyed/DSSS modes, exact time-weighted distances, truncated and repeated
+periods, antipodal timing ambiguity, public keyed illustrations, 16,384-chip
+codes, long integrations and 30 MHz configurations.
+
+The strengthened real-PCM acquisition test uses a 1,024-chip keyed pattern,
+4APSK, -15 dB sample SNR, erased training and a 17-sample delay that changes the
+carrier reference by 90 degrees. It measures per-chip Es/N0 below -7 dB, recovers
+the complete authenticated packet without Reed-Solomon, and rejects the same
+capture with a wrong code and a noise-only capture through finish.
+This verifies acquisition within the receiver's bounded timing bank, without
+hard chip decisions or a clean chip constellation. It does not establish
+arbitrary clock/frequency tracking; accelerated matched-symbol simulation is
+not used as evidence of blind chip acquisition.
+
+* All **29 native CTest suites passed** across the full run and focused GUI
+  rerun. The new keyed inspection fixture initially omitted its required key;
+  the corrected fixture retains the production key requirement.
+* All five GUI/model suites passed in Release (0.30 seconds) and under
+  ASan/UBSan (2.28 seconds). The below-chip-noise PCM regression also passed
+  under ASan/UBSan.
+* The CLI-only Release rebuilt with Python discovery disabled and reports 0.7.2.
+* The Release and ASan/UBSan GUI workflows passed with three tabs, current static-pattern model
+  binding, unchanged live plots, three-second packet/raw replay and complete
+  scrolling at minimum and expanded window sizes.
+* Native visual checks covered fixed16, tone16, keyed128, all 64 APSK values,
+  last-page access for 16,384 chips and a weak-signal example with -37.8 dB
+  nominal chip Es/N0 and +10 dB integrated Es/N0. All four navigation buttons
+  and static redraw invariance passed. The colour scale preserves distinct
+  outer amplitude rings. Strict GUI and harness warning checks passed.
+
+No wire format, keyfile or runtime dependency changed. Physical audio devices,
+battery-state comparisons and hosted Windows/CI execution were not tested.
+LeakSanitizer is disabled for this host's tracing environment; ASan and UBSan
+remain enabled.
+
+## Recorded 0.7.1 pattern constellation checks
 
 The new Constellations tab shows the existing phase/amplitude observations beside
 the full analytic pattern projection in modeled noise units. The new numerical

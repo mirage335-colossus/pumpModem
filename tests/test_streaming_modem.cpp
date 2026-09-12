@@ -491,7 +491,7 @@ void live_constellation_window() {
     if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("live constellation ring exceeded receiver workspace");
 }
 void long_keyed_pcm() {
-    modem::Config config;config.sample_rate=8000;config.spreading_factor=1024;
+    modem::Config config;config.sample_rate=6000;config.constellation_bits=2;config.spreading_factor=1024;
     config.scramble=true;config.spreading_seed[0]=29;
     config.memory_limit=1024; // Legacy waveform storage is deliberately unavailable.
     Message message;message.id[0]=31;message.data={'C','Q'};
@@ -505,21 +505,41 @@ void long_keyed_pcm() {
     const Bytes expected(wire.begin(),wire.begin()+32);
     const auto mask=key.stream(StreamPurpose::Data,epoch,32,frame.size());
     modem::StreamingTransmitter source(wire,config);
-    modem::StreamingReceiver receiver(config,expected,8*1024*1024,[mask](const Bytes& prefix){
+    const auto bootstrap=[mask](const Bytes& prefix){
         auto header=prefix;for(std::size_t i=0;i<header.size();++i)header[i]^=mask[i];
         return packet_probe_frame_size(header);
-    },masked_packet_validator(mask,options));
+    };
+    modem::StreamingReceiver receiver(config,expected,8*1024*1024,bootstrap,masked_packet_validator(mask,options));
+    auto wrong_config=config;wrong_config.spreading_seed[0]^=0x55;
+    modem::StreamingReceiver wrong_code(wrong_config,expected,8*1024*1024,bootstrap,masked_packet_validator(mask,options));
+    modem::StreamingReceiver noise_only(config,expected,8*1024*1024,bootstrap,masked_packet_validator(mask,options));
+    // Neither the symbol start nor the receive carrier phase is supplied.
+    // At 1500/6000 Hz, this delay rotates the carrier reference by 90 degrees.
     receiver.push(std::array<float,17>{});
-    std::array<float,317> block{};Bytes received;
+    wrong_code.push(std::array<float,17>{});noise_only.push(std::array<float,17>{});
+    std::array<float,317> block{},noise_block{};Bytes received;
     std::mt19937_64 random(8192);
-    std::normal_distribution<float> noise(0,static_cast<float>(std::sqrt(modem::nominal_signal_power*std::pow(10.,.5))));
+    constexpr double sample_snr_db=-15;
+    std::normal_distribution<float> noise(0,static_cast<float>(std::sqrt(modem::nominal_signal_power*std::pow(10.,-sample_snr_db/10))));
+    double signal_energy=0,noise_energy=0;
     while(!source.finished()) {
         const auto begin=source.samples_emitted();
         const auto count=source.read(block);
         // Training provides no acquisition assistance for this fixture.
-        for(std::size_t i=0;i<count;++i)if(begin+i<modem::training_sample_count(config))block[i]=0;
-        for(std::size_t i=0;i<count;++i)block[i]+=noise(random);
+        for(std::size_t i=0;i<count;++i) {
+            noise_block[i]=noise(random);
+            if(begin+i<modem::training_sample_count(config))block[i]=0;
+            else {
+                signal_energy+=static_cast<double>(block[i])*block[i];
+                noise_energy+=static_cast<double>(noise_block[i])*noise_block[i];
+            }
+            block[i]+=noise_block[i];
+        }
         const auto bytes=receiver.push(std::span(block).first(count));received.insert(received.end(),bytes.begin(),bytes.end());
+        if(!wrong_code.push(std::span(block).first(count)).empty() || wrong_code.synchronized())
+            throw std::runtime_error("wrong spreading code acquired a weak PCM packet");
+        if(!noise_only.push(std::span(noise_block).first(count)).empty() || noise_only.synchronized())
+            throw std::runtime_error("pure PCM noise acquired a weak packet");
         if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("long keyed PCM exceeded workspace");
     }
     const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
@@ -527,6 +547,16 @@ void long_keyed_pcm() {
     received=key.xor_data(received,epoch);
     const auto packet=decode_packet(Bytes(received.begin()+32,received.end()),options);
     if(packet.message.data!=message.data || !packet.authenticated)throw std::runtime_error("long keyed PCM changed authenticated bytes");
+    if(!wrong_code.finish().empty() || wrong_code.synchronized() || !noise_only.finish().empty() || noise_only.synchronized())
+        throw std::runtime_error("weak PCM finish invented a wrong-code/noise packet");
+    // The 10-sample chip has orthogonal quadratures at this carrier. AWGN
+    // projection then gives chip Es/N0 = sample SNR + 10 log10(chip/2).
+    // Check the measured signal/noise energy, not just the requested setting:
+    // individual chip decisions are below noise while the full code acquires.
+    const auto chip=std::ceil(2.*config.sample_rate/config.bandwidth_hz);
+    const auto chip_esn0_db=10*std::log10(signal_energy/noise_energy)+10*std::log10(chip/2);
+    if(!std::isfinite(chip_esn0_db) || chip_esn0_db>=-7)
+        throw std::runtime_error("weak PCM acquisition fixture is not below chip noise");
 }
 void adaptive_roundtrips() {
     for(unsigned bits=2;bits<=6;++bits)for(unsigned trial=0;trial<(bits>=5?10U:2U);++trial) {
@@ -765,6 +795,9 @@ void recent_pcm_preview() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--pattern-only") {
+            long_keyed_pcm();std::cout<<"below-chip-noise PCM pattern acquisition tests passed\n";return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--provisional-only") {
             provisional_short_reception();std::cout<<"provisional packet tests passed\n";return 0;
         }

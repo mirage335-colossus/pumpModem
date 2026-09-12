@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include "pattern_space.hpp"
 #include <complex>
 #include <optional>
 #include <string>
@@ -33,6 +34,7 @@ struct Inspection {
     std::vector<StructureSection> sections;
     std::vector<Field> fields;
     std::vector<Constellation> constellations;
+    std::optional<inspection::PatternSpace> pattern_space;
     std::string preamble_description,chip_description;
     transfer::Estimate estimate;
     std::optional<PacketLayout> packet_layout;

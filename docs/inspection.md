@@ -1,34 +1,42 @@
 # Modem and transmission inspection
 
 The native desktop keeps shared key, metadata and modem controls visible above
-and below four tabs. **Console** contains composition, the signal browser,
+and below three tabs. **Console** contains composition, the signal browser,
 received files and live plots. Switching tabs leaves the receiver and current
 three-second simulation replay running.
-
-**Constellations** shows phase/amplitude observations beside the complete
-pattern's analytic matched projection. Ideal templates, fresh received points,
-noise ellipses and the nearest template gap share equal noise-unit axes. The
-noise model comes from the simulation preset or configured target C/N0; it is
-labelled separately from measured points. Unlocked input has no matched pattern
-observations. See [geometry and interpretation](pattern-constellation.md).
 
 **Modem flow** shows the currently selected transmit and receive paths as ordered
 stage cards. Active processing, disabled options and unavailable algorithms have
 different labels. It includes the ideal phase/amplitude alphabets used for
 training and data, the chosen pattern or tone mode, symbol integration, packet
 coding, encryption, and the appropriate audio or simulation path. These are
-configured ideal points; measured received symbols appear on Console and
-Constellations.
+configured ideal points; measured received symbols appear on Console.
+
+Its static **pattern/scrambler constellation** shows each complete symbol as a
+row of complex phase/amplitude chips. All configured symbols and every position
+in the compact sign period are inspectable, with pages for long patterns.
+Distances account for the full template and exact quantized chip durations,
+even when only one page is visible. The view compares the permitted templates
+with an unused sign-vector example and a one-chip cyclic timing shift, including
+correlation and residual after the best complex amplitude/phase fit. It reports
+modeled chip-to-symbol integration gain separately from phase/amplitude geometry.
+Keyed modes use public illustrative signs and never expose the epoch-derived
+private sequence. See [geometry and interpretation](pattern-constellation.md).
 
 The view describes the implemented gain estimate accurately: framed acquisition
 searches timing, gain and initial differential-phase candidates using pattern
 constellation evidence and compact headers. Short frames remain provisional
 until complete integrity verification, while acquisition keeps searching.
-The chosen gain is held for body decoding. There is no continuous audio AGC or convolutional
+The receiver despreads and integrates the complex chip samples before its APSK
+decisions; no hard chip decisions or independently clean chip constellation are
+required. The chosen gain is held for body decoding. Timing hypotheses remain
+finite, with no continuous clock/frequency tracker, audio AGC or convolutional
 encoder/Viterbi decoder. Raw binary simulation has an aligned known-length
 receiver with nominal unit gain; continuous real audio reception still discovers
 framed packets. Simulation uses integrated channel observations, whereas real
-audio passes through the hardware/internal-clock conversion.
+audio passes through the hardware/internal-clock conversion. Integrated
+simulation assumes matched chip despreading and does not demonstrate blind
+timing/phase acquisition below the chip noise floor.
 
 **Transmission layout** shows the physical on-air sequence separately from the
 logical packet fields before interleaving. Blocks are schematic, with byte,

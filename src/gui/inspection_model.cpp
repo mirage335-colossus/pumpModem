@@ -33,6 +33,9 @@ FlowLane packet_receiver(bool simulation,bool keyed,bool fec,bool compressed,boo
         {simulation?"Channel observations":"Audio input + sample-rate conversion",simulation?
             "Integrate channel observations containing clock/frequency error, phase diffusion and AWGN. Hardware audio is bypassed.":
             "Convert the selected hardware clock to the internal modem clock, then project the carrier and despread each timing hypothesis."},
+        {simulation?"Already matched observations":"Full-pattern correlation",simulation?
+            "Accelerated simulation supplies whole-symbol matched channel statistics. It does not test blind chip timing acquisition.":
+            "Multiply complex chip projections by the candidate code and integrate before deciding a phase/amplitude symbol. No hard chip decisions are needed: correctly aligned signal adds coherently while independent noise does not. Wrong codes and code phases leave energy outside the legal pattern space."},
         {"Timing, gain and initial phase","Fit the pattern constellation across timing and gain hypotheses, then try the first symbol's possible differential phases. A plausible compact header starts a bounded provisional decoder. Verify the complete short frame before committing to lock; other timing hypotheses keep searching."},
         {"Parallel training diagnostic","An independent recorder measures matching portions of the five-second training signal; it is not a prerequisite for packet lock or byte recovery."},
         {"Remove public whitening","Reverse the public mask on the audio frame; the first 32 training-input bytes are excluded."},
@@ -77,6 +80,7 @@ Inspection inspect(const InspectionRequest& request) {
         (config.dsss?"The independent DSSS stream adds sign flips. ":"Independent DSSS is off. ")+
         "Signs restart each symbol; extended integration repeats the code and may end in a partial chip. The chip factor is not the number of payload bits per symbol.";
     result.constellations.push_back(alphabet(bits,"Payload APSK alphabet"));
+    result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
     const auto spread_detail=config.scramble?"Key-derived scrambler signs replace the base pattern; selected DSSS adds independent flips.":
         config.dsss?"Apply the configured base signs and independent key-derived DSSS flips.":
         config.spreading_mode==modem::SpreadingMode::tone?"All +1 chip signs; the same APSK carrier modulator is used.":"Apply the configured repeating fixed chip signs.";

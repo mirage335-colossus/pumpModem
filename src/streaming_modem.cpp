@@ -3,6 +3,7 @@
 #include "datapump/packet.hpp"
 #include "datapump/tuning.hpp"
 #include "constellation.hpp"
+#include "spreading_code.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -40,9 +41,6 @@ struct PendingConstellation {
         count=0;dropped=0;return result;
     }
 };
-std::uint64_t chip_count(const Config& c) {
-    return static_cast<std::uint64_t>(std::ceil(2.*c.sample_rate/c.bandwidth_hz));
-}
 // A short final raw symbol uses a subset of the configured APSK alphabet.
 // Spread its available phase/radius levels over the full alphabet, rather
 // than inventing zero bits to fill an ordinary full-width symbol.
@@ -61,22 +59,6 @@ unsigned raw_symbol_value(unsigned value,unsigned meaningful,unsigned configured
     constexpr std::array<unsigned,8> inverse{0,1,3,2,6,7,5,4};
     const auto phase_value=detail::phase_bits(configured)==3?inverse[phase]:phase^(phase>>1);
     return ((ring^(ring>>1))<<detail::phase_bits(configured))|phase_value;
-}
-std::vector<int> pattern(const Config& c) {
-    const auto count=c.spreading_factor;
-    std::vector<int> result(count,1);
-    constexpr std::array<int,8> fixed{1,1,-1,1,-1,-1,1,-1};
-    if(c.spreading_mode==SpreadingMode::pattern && count>1)
-        for(std::size_t i=0;i<count;++i)result[i]=fixed[i%fixed.size()];
-    if(c.scramble) {
-        Crypto key(c.spreading_seed);const auto bytes=key.stream(StreamPurpose::Scrambler,0,0,(count+7)/8);
-        for(std::size_t i=0;i<count;++i)result[i]=((bytes[i/8]>>(i%8))&1)?-1:1;
-    }
-    if(c.dsss) {
-        Crypto key(c.dsss_seed);const auto bytes=key.stream(StreamPurpose::Dsss,0,0,(count+7)/8);
-        for(std::size_t i=0;i<count;++i)if((bytes[i/8]>>(i%8))&1)result[i]=-result[i];
-    }
-    return result;
 }
 std::optional<std::size_t> packet_bootstrap(const Bytes& prefix) {
     return packet_probe_frame_size(prefix);
@@ -527,7 +509,7 @@ struct StreamingTransmitter::Impl {
         validate(config);
         if(wire.size()<32)throw Error("APSK wire requires the 32-byte training prefix");
         if(workspace<65536+config.spreading_factor*sizeof(int))throw Error("streaming transmitter workspace is too small");
-        code=pattern(config);training=training_sample_count(config);symbol=symbol_sample_count(config);chip=chip_count(config);
+        code=detail::spreading_code(config);training=training_sample_count(config);symbol=symbol_sample_count(config);chip=detail::spreading_chip_samples(config);
         payload_symbols=payload_symbol_count(wire.size()-32,config);
         if(payload_symbols>(std::numeric_limits<std::uint64_t>::max()-training)/symbol)throw Error("transmission duration exceeds 64-bit sample counter");
         total=training+static_cast<std::uint64_t>(payload_symbols)*symbol;
@@ -542,7 +524,7 @@ struct StreamingTransmitter::Impl {
             if(input.bits[i]>1)throw Error("raw binary input elements must be zero or one");
             wire[i/8]|=static_cast<std::uint8_t>(input.bits[i]<<(7-i%8));
         }
-        code=pattern(config);symbol=symbol_sample_count(config);chip=chip_count(config);
+        code=detail::spreading_code(config);symbol=symbol_sample_count(config);chip=detail::spreading_chip_samples(config);
         payload_symbols=raw_bit_count/config.constellation_bits+(raw_bit_count%config.constellation_bits!=0);
         if(payload_symbols>std::numeric_limits<std::uint64_t>::max()/symbol)throw Error("transmission duration exceeds 64-bit sample counter");
         total=static_cast<std::uint64_t>(payload_symbols)*symbol;
@@ -727,7 +709,7 @@ struct StreamingReceiver::Impl {
         bootstrap_symbols=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
         if(!validator)validator=packet_bootstrap;
         if(!packet_validator)packet_validator=packet_valid;
-        symbol=symbol_sample_count(c);training=training_sample_count(c);chip=chip_count(c);
+        symbol=symbol_sample_count(c);training=training_sample_count(c);chip=detail::spreading_chip_samples(c);
         if(symbol>(std::numeric_limits<std::uint64_t>::max()-training)/bootstrap_symbols)throw Error("bootstrap acquisition exceeds 64-bit sample counter");
         // Bootstrap validation is the synchronization evidence. A capture can
         // start after training, and crystal error changes its received length.
@@ -735,7 +717,7 @@ struct StreamingReceiver::Impl {
         const bool fine=(c.scramble || c.dsss) && c.spreading_factor>=1024 && symbol>4*chip;
         const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(symbol,fine?224:c.spreading_mode==SpreadingMode::tone&&!c.dsss?64:256));
         if(count*(sizeof(Candidate)+packet_prefix_size+bootstrap_symbols*(sizeof(Complex)+sizeof(double)))+c.spreading_factor*sizeof(int)+65536+sizeof(TrainingEvidence)>budget)throw Error("streaming receiver workspace is too small");
-        code=pattern(c);
+        code=detail::spreading_code(c);
         std::vector<std::uint64_t> origins;origins.reserve(count);
         const auto coarse=fine?count/2:count;
         for(std::size_t i=0;i<coarse;++i)origins.push_back((symbol/coarse)*i+((symbol%coarse)*i)/coarse);

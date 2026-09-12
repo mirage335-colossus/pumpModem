@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented compact packet for
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.7.1.** The audio/packet/crypto
+**Status: working reference implementation, version 0.7.2.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -27,14 +27,15 @@ identifier is transmitted. The compression library is built statically from
 vendored source; the complete portable application can be copied between
 compatible computers without downloading packages.
 
-The desktop has four tabs: **Console**, **Constellations**, **Modem flow**, and
-**Transmission layout**. Constellations places the phase/amplitude view beside
-a live matched-pattern projection, with ideal symbols, received points, noise
-ellipses and the closest template distance in noise-standard-deviation units.
-It follows the same three-second simulation replay. The selected noise model is
-labelled; raw input is never passed off as a received pattern. See
-[pattern constellation geometry](docs/pattern-constellation.md). Version 0.7.1
-retains the 0.7 packet format and existing keyfiles.
+The desktop has three tabs: **Console**, **Modem flow**, and **Transmission
+layout**. Modem flow includes a static pattern/scrambler constellation: every
+configured symbol is shown across the full sign period, with pages for long
+patterns, full-template distances and modeled integration gain. An unused sign
+vector and a shifted template illustrate evidence that a phase/amplitude-only
+projection leaves out. Keyed modes use clearly labelled public illustrative
+signs rather than private streams. See
+[pattern constellation geometry](docs/pattern-constellation.md). Version 0.7.2
+retains the 0.7 packet format and existing keyfiles, with no new runtime dependency.
 
 Modem flow follows the selected transmit and receive processing,
 including phase/amplitude alphabets, spreading, integration, coding and gain
@@ -44,6 +45,12 @@ placeholder for the payload. Both views update from the current message, source,
 key and modem settings in the background. Counts come from the actual encoder;
 message contents and key material are not displayed. Reception and simulation
 continue while switching tabs. See [the inspection views](docs/inspection.md).
+
+The receiver integrates the configured sign pattern before making APSK symbol
+decisions; it does not require individual chips to be decoded above the noise.
+Its timing search is finite and it has no continuous clock or frequency tracking
+loop. The accelerated simulation assumes matched despreading, so it does not
+establish blind acquisition below the chip noise floor.
 
 The binary editor sits beside the message editor. Select Binary to
 transmit an exact sequence such as `001`, using the shared streaming phase/amplitude

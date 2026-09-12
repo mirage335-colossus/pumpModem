@@ -1,113 +1,12 @@
 #include "../src/gui/plot_data.hpp"
-#include "../src/gui/pattern_constellation.hpp"
-#include "../src/constellation.hpp"
 #include "datapump/streaming_modem.hpp"
+#include <cmath>
 #include <iostream>
-#include <limits>
 #include <numbers>
-#include <random>
 
 using namespace datapump;
 void check(bool condition, const char* message) { if (!condition) throw Error(message); }
 namespace {
-void pattern_constellation_geometry() {
-    using namespace gui::plots;
-    modem::Config config;
-    config.sample_rate = 6000; config.bandwidth_hz = 1200; config.carrier_hz = 1500;
-    config.spreading_factor = 16;
-    for (unsigned bits = 2; bits <= 6; ++bits) {
-        config.constellation_bits = bits;
-        const auto model = pattern_constellation(config, 40);
-        check(model.symbols.size() == (1U << bits), "pattern symbols must represent the configured APSK alphabet, not all chip bit strings");
-        check(model.observations.empty(), "theoretical pattern centres must not invent received measurements");
-        double closest = std::numeric_limits<double>::infinity();
-        for (std::size_t i = 0; i < model.symbols.size(); ++i) {
-            const auto actual = modem::detail::mapped(static_cast<unsigned>(i), bits, {1, 0});
-            check(std::abs(model.symbols[i].centre * model.quadrature_sigma - actual) < 1e-14,
-                  "pattern symbol labels must preserve the modulator's phase and amplitude mapping");
-            check(model.symbols[i].radial_sigma == 1 && model.symbols[i].tangential_sigma >= std::sqrt(2.),
-                  "differential noise must include uncertainty in the preceding received phase");
-            for (std::size_t j = 0; j < i; ++j) {
-                const auto other = modem::detail::mapped(static_cast<unsigned>(j), bits, {1, 0});
-                // Every possible shared spreading sign is an isometry. Compare
-                // the integrated complete-template metric, not a second bank
-                // of invented independently selected chip sequences.
-                double template_distance = 0;
-                for (unsigned chip = 0; chip < config.spreading_factor; ++chip) {
-                    const auto sign = (chip * 13U + 7U) % 5U < 2U ? -1. : 1.;
-                    template_distance += std::norm(sign * actual - sign * other);
-                }
-                template_distance /= config.spreading_factor * model.quadrature_sigma * model.quadrature_sigma;
-                const auto distance = std::abs(model.symbols[i].centre - model.symbols[j].centre);
-                check(std::abs(distance * distance - template_distance) < 1e-10 * template_distance,
-                      "pattern projection must preserve complete-template statistical distance");
-                closest = std::min(closest, distance);
-            }
-        }
-        check(std::abs(closest - model.minimum_template_distance) < 1e-12, "nearest template separation must be measured in the displayed noise units");
-        check(std::abs(model.symbols[model.closest_symbols.first].centre - model.symbols[model.closest_symbols.second].centre) == model.minimum_template_distance,
-              "nearest-template connector must identify the actual minimum pair");
-        auto alternative = config;
-        alternative.sample_rate *= 2;
-        const auto doubled_clock = pattern_constellation(alternative, 40);
-        check(doubled_clock.symbols.front().centre == model.symbols.front().centre,
-              "pattern statistical distance must depend on integration time, not the hardware or internal sample clock");
-        alternative = config; alternative.spreading_factor *= 4;
-        const auto longer = pattern_constellation(alternative, 40);
-        check(std::abs(longer.minimum_template_distance / model.minimum_template_distance - 2.) < 1e-12,
-              "four times the integration must double noise-normalized template separation");
-        for (const auto mode : {modem::SpreadingMode::pattern, modem::SpreadingMode::tone}) {
-            alternative = config; alternative.spreading_mode = mode;
-            alternative.scramble = mode == modem::SpreadingMode::pattern;
-            alternative.dsss = true; alternative.spreading_seed[0] = 93; alternative.dsss_seed[0] = 81;
-            const auto shared_code = pattern_constellation(alternative, 40);
-            check(shared_code.symbols.front().centre == model.symbols.front().centre,
-                  "shared keyed, fixed and tone templates must not invent different template distances");
-        }
-    }
-    config.constellation_bits = 6;
-    const auto high_snr = pattern_constellation(config, 80);
-    const auto value = modem::detail::mapped(31, config.constellation_bits, {1, 0});
-    const auto radial = value / std::abs(value), tangent = radial * std::complex<double>{0, 1};
-    const auto reference = modem::detail::radius_step(config.constellation_bits);
-    std::mt19937_64 random(81273);
-    const double sample_snr = 80 - 10 * std::log10(config.sample_rate / 2.);
-    double radial_variance = 0, tangent_variance = 0;
-    constexpr std::size_t trials = 16000;
-    for (std::size_t i = 0; i < trials; ++i) {
-        const auto previous = modem::add_awgn({{reference, 0}, modem::symbol_sample_count(config)}, sample_snr, random).value;
-        const auto received = modem::add_awgn({value, modem::symbol_sample_count(config)}, sample_snr, random).value;
-        const auto differential = received * std::conj(previous) / std::abs(previous);
-        const auto error = (differential - value) / high_snr.quadrature_sigma;
-        radial_variance += std::pow((error * std::conj(radial)).real(), 2);
-        tangent_variance += std::pow((error * std::conj(tangent)).real(), 2);
-    }
-    radial_variance /= trials; tangent_variance /= trials;
-    check(std::abs(radial_variance - 1) < .04, "AWGN simulation must agree with the pattern plot's radial noise normalization");
-    check(std::abs(tangent_variance / std::pow(high_snr.symbols[31].tangential_sigma, 2) - 1) < .04,
-          "weakest-reference ellipse must include the actual differential phase noise variance");
-
-    std::vector<std::complex<double>> measurements(2100, {.137, -.291});
-    measurements[2098] = {std::numeric_limits<double>::quiet_NaN(), 0};
-    const auto observed = pattern_constellation(config, 40, measurements);
-    check(observed.observations.size() == 2047 && observed.omitted == 53,
-          "pattern observations must be bounded and account for displaced and nonfinite points");
-    check(std::abs(observed.observations.back() * observed.quadrature_sigma - measurements.back()) < 1e-14,
-          "pattern observations must remain measured coordinates, without nearest-symbol snapping");
-    config.spreading_factor = 16384; config.integration_seconds = 1e8;
-    const auto slow = pattern_constellation(config, -60);
-    check(slow.symbols.size() == 64 && std::isfinite(slow.minimum_template_distance),
-          "hour-long or large spreading patterns must not allocate chip histories or codeword banks");
-    config.sample_rate = 120000000; config.bandwidth_hz = 30000000; config.carrier_hz = 22500000;
-    config.integration_seconds = 0; config.spreading_factor = 1;
-    const auto wide = pattern_constellation(config, 120);
-    check(std::isfinite(wide.quadrature_sigma) && wide.quadrature_sigma > 0,
-          "wideband pattern geometry must remain finite at the supported SDR bandwidth");
-    bool rejected = false;
-    try { (void)pattern_constellation(config, std::numeric_limits<double>::infinity()); }
-    catch (const Error&) { rejected = true; }
-    check(rejected, "nonfinite noise models must be rejected before drawing");
-}
 void sampled_waveform_reconstruction() {
     constexpr auto radius = gui::plots::waveform_kernel_radius;
     constexpr std::size_t first = 100, count = 65, width = 400;
@@ -168,7 +67,6 @@ void sampled_waveform_reconstruction() {
 }
 int main() {
     try {
-        pattern_constellation_geometry();
         sampled_waveform_reconstruction();
         modem::Config config;
         config.sample_rate = 4800; config.carrier_hz = 900;
