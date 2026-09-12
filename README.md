@@ -6,7 +6,7 @@ waveform and accelerated channel simulation, and a documented versioned packet f
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
-**Status: working reference implementation, version 0.5.3.** The audio/packet/crypto
+**Status: working reference implementation, version 0.5.4.** The audio/packet/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
 In particular, near-capacity adaptive modulation, multi-signal radio scanning,
@@ -14,11 +14,13 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Version 0.5.3 adds per-signal preamble reception and data accuracy before error
-correction. It retains the three-second simulation replay introduced in 0.5.2 and
-shows fresh constellation observations in the decoder's differential phase and
-amplitude coordinates. The waveform, packet and keyfile formats are unchanged
-from 0.5.1, including the 1500 Hz carrier for narrow audio modes. Both audio
+Version 0.5.4 presents the entire simulated transmission over three seconds,
+including fixed training, live plots and pending signal-browser text. Verified
+messages, file entries and data accuracy become available at the end of that
+presentation. It retains per-signal preamble reception and fresh constellation
+observations in the decoder's differential phase and amplitude coordinates.
+The waveform, packet and keyfile formats are unchanged from 0.5.1, including
+the 1500 Hz carrier for narrow audio modes. Both audio
 endpoints must use matching carrier and modem settings; narrow automatic
 defaults differ from 0.5.0.
 
@@ -111,12 +113,19 @@ transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
 updating while idle. Transmissions run at CPU speed through noisy complex
 observations and the same symbol decoder, with virtual airtime reported separately.
-After computation completes, waveform, waterfall and constellation replay the
-payload chronologically over three seconds. Each frame shows the receiver state
-at that transmission position; the constellation uses fresh observations instead
-of a cloud accumulated over the packet. Starting another transmission or selecting
-Stop replay interrupts playback. All plots then return to live input so new noise, lock
-attempts and transmissions remain visible.
+After computation completes, the entire transmission, including fixed training,
+replays chronologically over three seconds. Waveform, waterfall, constellation
+and signal-browser previews follow the same timeline. Each frame shows the
+receiver state at that transmission position, with fresh constellation
+observations. Pending text appears as decoding advances; verified text, file
+entries and data accuracy are released at the three-second deadline. Neither
+copy nor save can expose the prepared result early.
+Starting another transmission or selecting Stop replay interrupts presentation
+and discards its undelivered results. Earlier completed receptions remain in
+memory. Calls queued during computation receive separate consecutive replays.
+Delayed polling delivers due browser events in order without extending replay.
+All plots return to live input afterward so new noise, lock attempts and
+transmissions remain visible.
 Simulation defaults to 100 ppm relative crystal error and phase diffusion of
 0.5 degrees per square root second. It models carrier coherence loss and changing
 symbol timing, while assuming matched chip despreading. It does not provide an
@@ -133,7 +142,9 @@ the percentage of encoded body bits received correctly before Reed–Solomon
 correction, measured against the fully verified result. This includes body
 metadata, compressed or raw content, and the integrity tag; it excludes bootstrap
 header and parity bits. It is not a percentage of decompressed file bytes.
-Unverified packets show `pending`; unavailable measurements show `--`.
+Unverified packets show `pending`; unavailable measurements show `--`. Simulation
+keeps data accuracy pending until verified reception is presented at the end of
+replay, even though computation finished earlier.
 Preamble reception counts independently recognized training duration against the
 fixed five seconds, using its 64-segment schedule rather than the slower or faster
 payload symbol clock. See [modem diagnostics](docs/modem.md) for the measurement

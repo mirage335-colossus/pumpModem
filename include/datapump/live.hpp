@@ -68,10 +68,11 @@ struct Snapshot {
     double virtual_seconds = 0;
     double transmission_seconds = 0;
     double transmission_fraction = 0;
-    bool transmission_finished = true;
+    bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
     bool transmission_cancelled = false;
-    // Completed simulations replay the payload's measured plots in three
-    // wall-clock seconds, then all plots return to live reception.
+    // Completed simulations present training, measured plots and provisional
+    // reception over three wall-clock seconds. Verified signals and received
+    // content are delivered once at the deadline, then plots return live.
     std::uint64_t transmission_id = 0;
     bool simulation_replay = false;
     std::size_t replay_frame_index = 0;

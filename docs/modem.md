@@ -1,11 +1,12 @@
-# Audio modem reference, application version 0.5.3
+# Audio modem reference, application version 0.5.4
 
-Version 0.5.3 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
+Version 0.5.4 uses shared differential 4/8/16/32/64-APSK waveforms for PCM and
 continuous operation. The selected profile carries two through six bits per
 payload symbol, with both amplitude and phase modulation. Audio peers require
-matching carrier and modem settings. This release adds reception-quality
-measurements to the signal browser. The 0.5.2 constellation presentation and
-chronological simulation replay remain, and the 0.5.1 waveforms,
+matching carrier and modem settings. This release synchronizes the complete
+three-second simulation presentation: fixed training, plots, pending browser
+observations and final verified reception. It retains the 0.5.3 reception-quality
+measurements and 0.5.2 constellation coordinates. The 0.5.1 waveforms,
 1500 Hz narrow-audio carrier and receive integration boundaries are unchanged,
 as are constellation mapping, symbol padding and the 0.5 public whitening mask. Packet versions
 1 and 2 and existing keyfile formats remain unchanged; modem configuration changes
@@ -290,6 +291,9 @@ the received and corrected bytes after deinterleaving counts actual bit changes,
 not eight assumed errors for every repaired byte. Compression changes the encoded
 denominator; XOR encryption and whitening preserve these bit differences.
 Partial or failed packets cannot establish this accuracy and remain `pending`.
+Simulation also withholds this measurement until the verified result is
+presented at the three-second deadline; advance computation does not expose it
+through a pending browser row.
 
 The waveform initially shows four carrier cycles from the latest buffer.
 A bounded 64-tap Blackman-windowed sinc reconstructs the line between measured
@@ -323,8 +327,11 @@ Pending ticker observations can change as additional bytes and parity arrive.
 They stay visibly provisional and cannot trigger clipboard copy or file save.
 Only complete validated text can be copied; validated files and screenshots
 appear in the separate RAM file list for explicit exclusive save. Ordered event
-serials preserve pending-before-final order even if several events reach the GUI
-in one poll.
+serials preserve pending-before-final order. Simulation schedules these events
+alongside its plots: normal GUI polling shows pending reception before the
+verified result. If polling stalls, due events are delivered in chronological
+order on the next poll without extending the presentation to force a visible
+pause between them.
 
 ## CPU-bounded simulation
 
@@ -377,30 +384,47 @@ establish arbitrary PCM acquisition, fading/multipath performance, nonlinear
 hardware behavior or interference rejection. Plots use bounded signal/noise
 previews rather than a retained whole transmission.
 During computation, snapshots are captured at evenly spaced media positions from
-the start to the end of the payload, after fixed training. The normal timeline
-contains 60 frames. Each stores a compact 256-sample waveform, 257 peak-pooled
-spectrum bins and the fresh measured constellation for its interval. Its source
-and lock state are captured at that position, before the receiver's artificial
+the start of fixed training to the end of the transmitted packet, including the
+protected header and encoded body. The normal timeline contains 60 frames. Each
+stores a compact 256-sample waveform, 257 peak-pooled spectrum bins, the fresh
+measured constellation for its interval and up to 4096 bytes of browser preview
+text. Its source and lock state are captured at that position, before the receiver's artificial
 end-of-capture tail; a later lock cannot be applied to an earlier frame.
 A bounded transmitter segment history reconstructs the actual local waveform,
 including carrier phase and spreading. The preview is time-warped and
 phase-rotated using the simulated channel trajectory; its independent display
 noise does not change decoder randomness.
 
-After CPU-bounded computation completes, the GUI plays the timeline over three
-wall-clock seconds. Every new frame updates waveform and constellation and adds
-one waterfall row. If GUI polling skips frames, their fresh points are merged
-into the next delivered batch within the same source coordinates, subject to a
-bounded capacity and an explicit overflow count. Duplicate polls do not append
-duplicate rows. Replay storage uses at most one eighth of the configured DSP
-budget, capped at roughly 1.1 MiB; frame and point capacities adapt to that budget.
-This storage is independent of simulated airtime and of the received-file cache.
+After CPU-bounded computation completes, the GUI plays the entire timeline over
+three wall-clock seconds. Preparation does not wait for simulated airtime.
+Every new frame updates waveform and constellation and adds one waterfall row.
+Decoded text and metadata are withheld until their scheduled preview positions;
+the browser first shows provisional reception. Complete verified text, received
+file entries and pre-FEC accuracy are released together at the three-second
+deadline. Failed decoding supplies no verified result. A prepared packet cannot
+be copied or saved before its presentation completes.
 
-Starting another transmission or selecting Stop replay interrupts presentation.
+If GUI polling skips frames, their fresh points are merged into the next
+delivered batch within the same source coordinates, subject to a
+bounded capacity and an explicit overflow count. Duplicate polls do not append
+duplicate rows. Due browser events are delivered in chronological order.
+Replay workspace uses at most one eighth of the configured DSP budget, capped
+at roughly 1.4 MiB. This includes roughly 38 KiB for the prepared result's
+diagnostics and caption, plus the frames' plots, points and preview text. Smaller
+budgets reduce frame and point capacities. This bounded workspace is independent
+of simulated airtime; the prepared packet's content is charged to the separate
+receive-content quota.
+
+Calls queued while simulation is still computing are presented consecutively,
+with a separate three-second replay for each. An explicit new transmission
+during active presentation or selecting Stop replay interrupts it and discards
+its undelivered browser events and received result. Previously completed
+receptions remain available.
 At the three-second deadline, any points still undelivered because GUI polling
-stalled are counted as omitted; replay does not extend or place those old points
-over live input. On completion or cancellation, waveform, waterfall and
-constellation all resume live input. Background simulated reception continues while replay is presented;
+stalled are counted as omitted. Due browser events and the final result are
+released in order; replay does not extend or place old points over live input.
+On completion or cancellation, waveform, waterfall and constellation all resume
+live input. Background simulated reception continues while replay is presented;
 the previous packet does not remain as a persistent constellation cloud.
 The packet is still decoded and validated; transmitted application bytes are not
 inserted directly into the receive cache.

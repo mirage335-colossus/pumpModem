@@ -9,15 +9,17 @@ Version 2 adds a variable-length short-payload prefix code. The framing, metadat
 integrity, FEC, and interleaving layouts remain the same. The decoder accepts both
 versions; an older decoder that accepts only version 1 cannot read version 2.
 
-Application release 0.5.3 retains differential 4/8/16/32/64-APSK and symbol-boundary
+Application release 0.5.4 retains differential 4/8/16/32/64-APSK and symbol-boundary
 padding around the protected bootstrap. It applies a public additive whitening
 mask to the audio frame after encryption, excluding the training. Audio peers
 require matching modem settings and the 0.5 whitening mask. Release 0.5.1 changed
 narrow automatic audio defaults to a 1500 Hz carrier, so both endpoints must
 agree on the carrier and internal clock as well as bandwidth and pattern.
-Release 0.5.2 changed diagnostic coordinates and GUI replay; 0.5.3 adds reception
-quality counters. Neither changes the 0.5.1 transmitted waveform, packet versions
-or keyfile formats. Modem
+Release 0.5.2 changed diagnostic coordinates and GUI replay; 0.5.3 added reception
+quality counters. Release 0.5.4 schedules the entire simulated transmission,
+browser previews and final received result across the same three-second
+presentation. These releases do not change the 0.5.1 transmitted waveform,
+packet versions or keyfile formats. Modem
 configuration, presentation behavior and packet codec versions are separate
 concepts.
 
@@ -237,6 +239,21 @@ have not passed final integrity/authentication and may change after further FEC
 correction or complete decoding. A preview must remain visibly provisional and
 must not become a verified cache entry, save result, clipboard result, or repeat
 request. `decode_packet` remains the only validated-message boundary.
+
+The continuous simulator computes decoding at CPU speed, then presents fixed
+training, packet observations and browser previews over three wall-clock seconds.
+Prepared metadata and content stay hidden until their scheduled presentation
+positions. Pending previews may change and carry no verified data-accuracy
+percentage. At the three-second deadline, a successfully validated packet becomes
+available for exact text copy or explicit file save, together with its measured
+pre-FEC accuracy. This presentation delay does not change packet validity or
+place timestamps in the packet format.
+
+Calls queued during computation receive consecutive presentations. An explicit
+new transmission during replay, or Stop replay, discards that presentation's
+undelivered observations and result; completed receptions remain available.
+If GUI polling stalls, due events are delivered in chronological order without
+extending the three-second timeline.
 
 ## Resource and attachment validation
 

@@ -1,9 +1,43 @@
-# Local validation record — version 0.5.3
+# Local validation record — version 0.5.4
 
 The application and portable runtime are native C++. Python remains optional
 developer test tooling and is not installed with the application.
 
-## Completed 0.5.3 checks
+## Completed 0.5.4 checks
+
+* Native GUI Release: all **23 CTest suites passed**.
+* CLI-only Release with Python discovery disabled: all **19 suites passed**.
+* All four focused ASan/UBSan suites passed: live sessions, GUI plots, GUI policy
+  and GUI self-check. The Debug live suite took 92.63 seconds. LeakSanitizer was
+  disabled for this host's tracing environment.
+* The new GUI workflow reproduced early verified reception against the previous
+  backend, then passed with the timed event implementation. Text and file rows
+  remain pending across earlier GUI polls; verified content and accuracy appear
+  only when the three-second presentation completes.
+* The workflow also replaces a replay after pending reception appears, cancels
+  its replacement, and checks through the original deadlines that neither
+  interrupted packet enters the inbox. A running pending row was visually
+  inspected on the private Xvfb display.
+* The complete timed GUI workflow also passed with ASan/UBSan. GUI checks used
+  simulated input on the isolated display, with no physical audio device.
+
+Deterministic presentation-clock tests cover the entire fixed-training/packet
+timeline, no early browser or receipt events during computation, incremental
+pending text, paired final signal and packet delivery at exactly 3,000 ms, and
+duplicate-free snapshot reads. Delayed polling flushes due events in order
+without extending the deadline. Two queued simulations each receive their own
+three-second timeline. Cancellation, replacement and configuration discard
+future results, including pending events made due before the next GUI poll.
+A cancellation after the deadline preserves an already completed reception.
+
+CPU cancellation is exercised during actual streaming progress. Failed decoding
+never produces verified content. The hours-long-symbol simulation still uses
+bounded CPU work and fits the 1 MiB DSP fixture, with fewer presentation frames
+to accommodate preview text and result diagnostics. Packet content uses the
+separate receive-content quota. Physical audio, battery comparisons and hosted
+Windows/CI execution were not tested for this release.
+
+## Recorded 0.5.3 checks
 
 * Native GUI Release: all **23 CTest suites passed**.
 * CLI-only Release with Python discovery disabled: all **19 suites passed**.

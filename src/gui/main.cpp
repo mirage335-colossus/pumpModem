@@ -36,10 +36,12 @@ constexpr const char* smoke_text="CQ CQ - continuous reception\nClipboard caf\xc
     "This message passes through the noisy symbol receiver while the waterfall keeps scrolling. "
     "Text first appears as pending, then becomes available to copy after the complete packet "
     "has passed error correction and integrity checks.";
+const std::string smoke_interrupted_text=std::string("Replace this pending replay. ")+smoke_text;
+const std::string smoke_cancelled_text=std::string("Cancel this pending replay. ")+smoke_text;
 const Bytes smoke_file_bytes{0,1,2,3,0xff,0xc0,0x80,'D','a','t','a',' ','P','u','m','p','\n'};
 constexpr const char* menu_key_names="Station A, Portable, A|B, C, None, _Home, Home, A&B, AB, Slash/Back\\slash";
 // Keep production generation and key selection in the GUI workflow without
-// turning its two loopbacks into a 130-candidate acquisition stress test.
+// turning its loopbacks into a 130-candidate acquisition stress test.
 constexpr const char* smoke_key_names="A|B, None";
 
 std::string path_text(const std::filesystem::path& path) {
@@ -487,7 +489,7 @@ private:
             // real playback, and mixes loopback into its regular input stream.
             session_.transmit(payload);
         } catch (...) { transmit_requested_=false; gate_.abort_start(); throw; }
-        notice(current_settings_.simulation?"Transmitting into the selected loopback channel...":"Transmitting audio...");
+        notice(current_settings_.simulation?"Calculating the simulated transmission...":"Transmitting audio...");
     }
     void refresh_files() {
         const auto selected=file_browser_->value();
@@ -546,6 +548,7 @@ private:
         if (attachment_) use_text_->activate(); else use_text_->deactivate();
     }
     void accept_snapshot(live::Snapshot snapshot) {
+        if (smoke_.enabled) ++smoke_snapshot_poll_;
         const auto plot_update=plot_policy_.observe(snapshot.sequence,snapshot.transmission_id,
                                                     snapshot.simulation_replay,snapshot.replay_frame_index);
         if (snapshot.sequence!=last_sequence_) {
@@ -567,6 +570,17 @@ private:
                 snapshot.constellation_source==live::ConstellationSource::received?"Received constellation":"Receiver input I/Q");
         }
         for (auto& received:snapshot.received) {
+            if (smoke_.enabled) {
+                if (snapshot.transmitting || snapshot.simulation_replay)
+                    throw Error("Simulation published verified content before replay completed");
+                if (smoke_replay_.id!=snapshot.transmission_id || !smoke_replay_.pending_poll ||
+                    smoke_replay_.pending_poll>=smoke_snapshot_poll_)
+                    throw Error("Verified reception did not follow a visible pending GUI poll");
+                const std::string text(received.packet.message.data.begin(),received.packet.message.data.end());
+                if (text==smoke_interrupted_text || text==smoke_cancelled_text)
+                    throw Error("An interrupted simulation released its undelivered packet");
+                ++smoke_received_packets_;
+            }
             if (smoke_.enabled && std::string(received.packet.message.data.begin(),received.packet.message.data.end())==smoke_text) {
                 smoke_packet_=received.packet;
             }
@@ -577,6 +591,8 @@ private:
         for (const auto& signal:snapshot.signals) {
             const auto packet=std::find_if(inbox_.items().begin(),inbox_.items().end(),[&](const auto& item) { return gui::id_label(item.message)==signal.packet_id; });
             const bool text_message=packet!=inbox_.items().end() && packet->message.kind==MessageKind::text;
+            if (smoke_.enabled && signal.validated && (snapshot.simulation_replay || packet==inbox_.items().end()))
+                throw Error("Simulation published a verified signal before its completed reception");
             signals_.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text_message,
                              signal.preamble_received_percent,signal.pre_fec_accuracy});
             if (!signal.validated && pending_sequence_==0) pending_sequence_=signal.sequence;
@@ -587,10 +603,11 @@ private:
             transmit_requested_=false; gate_.finished(); resumed_samples_=snapshot.samples_received;
         }
         const auto mode=snapshot.simulation?"Simulation / continuous receive":"Listening / "+std::string(*device_->value()?device_->value():"default");
-        const auto tx_mode="Transmitting "+std::to_string(static_cast<int>(std::clamp(snapshot.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(snapshot.transmission_seconds)+" media";
+        const auto tx_mode=std::string(snapshot.simulation?"Calculating simulation ":"Transmitting ")+
+            std::to_string(static_cast<int>(std::clamp(snapshot.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(snapshot.transmission_seconds)+" media";
         const auto replay_mode="Simulation replay "+std::to_string(static_cast<int>(std::clamp(snapshot.simulation_sample_fraction,0.0,1.0)*100))+"%";
         mode_->copy_label(snapshot.transmitting?tx_mode.c_str():snapshot.simulation_replay?replay_mode.c_str():mode.c_str());
-        if (Steady::now()>=notice_until_) {
+        if (snapshot.simulation_replay || last_snapshot_.simulation_replay || Steady::now()>=notice_until_) {
             const auto text=snapshot.error.empty()?snapshot.status:snapshot.error;
             status_->copy_label(text.c_str());
         }
@@ -656,6 +673,16 @@ private:
                        last_snapshot_.simulation_sample_fraction<replay.fraction) {
                 throw Error("Simulation replay moved backward in transmission time");
             }
+            for (const auto& signal:last_snapshot_.signals) {
+                if (signal.validated) throw Error("Simulation verified a signal during its replay");
+                const auto found=std::find_if(signals_.lines().begin(),signals_.lines().end(),
+                    [&](const auto& line) { return line.id==signal.id; });
+                if (found==signals_.lines().end() || found->validated ||
+                    gui::signal_data_label(*found)!="Data pre-FEC pending" ||
+                    signals_.copy_id(static_cast<std::size_t>(found-signals_.lines().begin())))
+                    throw Error("Replay pending reception was not displayed as unverified data");
+                if (!replay.pending_poll) replay.pending_poll=smoke_snapshot_poll_;
+            }
             if (beginning || last_snapshot_.replay_frame_index!=replay.frame) {
                 if (!beginning) {
                     if (waterfall_->revision()<=replay.revision)
@@ -690,7 +717,7 @@ private:
             if (replay.id!=smoke_interrupted_replay_id_ && replay.id!=smoke_cancelled_replay_id_) {
                 const auto elapsed=std::chrono::duration<double>(Steady::now()-replay.started).count();
                 if (elapsed<2.4 || elapsed>8 || replay.frames<10 || replay.waveform_changes<5 ||
-                    replay.fraction<.9 || !replay.saw_symbols)
+                    replay.fraction<.9 || !replay.saw_symbols || !replay.pending_poll)
                     throw Error("Simulation replay did not show changing transmission frames over about three seconds");
                 smoke_completed_replay_id_=replay.id;
             }
@@ -707,7 +734,7 @@ private:
     void advance_smoke() {
         if (std::chrono::duration<double>(Steady::now()-smoke_started_).count()>smoke_.timeout_seconds)
             throw Error("Continuous native GUI smoke timed out");
-        if (smoke_phase_==7 && Steady::now()-smoke_cancelled_at_>std::chrono::seconds(2))
+        if (smoke_phase_==9 && !smoke_replay_.resumed && Steady::now()-smoke_cancelled_at_>std::chrono::seconds(2))
             throw Error("Stopping replay did not promptly resume live reception");
         inspect_smoke_replay();
         if(smoke_phase_==-2 && estimate_ && saw_noise_change_ && last_snapshot_.samples_received>0) {
@@ -750,7 +777,7 @@ private:
             if (!last_snapshot_.simulation) throw Error("Smoke attempted to use an actual audio device");
             if (!qr_->ready()) throw Error("Typing did not update the QR preview");
             initial_samples_=last_snapshot_.samples_received; transmit_->do_callback(); smoke_phase_=1;
-        } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_replay) {
+        } else if (smoke_phase_==1 && smoke_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && !last_snapshot_.simulation_replay) {
             if (!saw_transmitting_ && last_snapshot_.transmission_fraction<1) throw Error("The normal transmit path was not observed");
             if (!pending_sequence_ || pending_sequence_>=final_sequence_) throw Error("Pending signal updates did not precede verified reception");
             if (last_snapshot_.samples_received<=initial_samples_) throw Error("Simulation stopped continuous reception while transmitting");
@@ -774,12 +801,10 @@ private:
             attachment_=std::make_shared<const Bytes>(smoke_file_bytes); attachment_path_="payload.bin"; attachment_image_=false;
             compose_label_->copy_label("Attached: payload.bin"); dirty_estimate(); smoke_phase_=3;
         } else if (smoke_phase_==3 && estimate_ && transmit_->active()) {
-            if (!last_snapshot_.simulation_replay) throw Error("Replay ended before its replacement transmission could start");
-            smoke_interrupted_replay_id_=last_snapshot_.transmission_id;
+            if (smoke_completed_replay_id_!=last_snapshot_.transmission_id)
+                throw Error("Text reception did not complete its chronological replay");
             transmit_->do_callback(); smoke_phase_=4;
-        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && last_snapshot_.simulation_replay) {
-            if (last_snapshot_.transmission_id<=smoke_interrupted_replay_id_)
-                throw Error("A new transmission did not replace the previous simulation replay");
+        } else if (smoke_phase_==4 && smoke_file_packet_ && !transmit_requested_ && !last_snapshot_.transmitting && !last_snapshot_.simulation_replay) {
             if (file_ids_.size()!=1 || !selected_file() || selected_file()->message.data!=smoke_file_bytes)
                 throw Error("Received file selection did not exclude text");
             const auto id=gui::id_label(smoke_file_packet_->message);
@@ -815,6 +840,7 @@ private:
                 if (line.validated && (line.packet_id==gui::id_label(smoke_packet_->message) ||
                                        line.packet_id==gui::id_label(smoke_file_packet_->message))) signals_.update(line);
             use_text_->do_callback();
+            compose_.text(smoke_interrupted_text.c_str());
             resume_sequence_=last_snapshot_.sequence; smoke_phase_=5;
         } else if (smoke_phase_==5 && last_snapshot_.running && !last_snapshot_.transmitting && smoke_replay_.resumed &&
                    last_snapshot_.sequence>resume_sequence_+2 && last_snapshot_.samples_received>resumed_samples_ &&
@@ -822,17 +848,31 @@ private:
             if (smoke_completed_replay_id_!=last_snapshot_.transmission_id)
                 throw Error("A complete chronological replay was not observed before live reception resumed");
             transmit_->do_callback(); smoke_phase_=6;
-        } else if (smoke_phase_==6 && last_snapshot_.simulation_replay && smoke_replay_.frames>=3 && cancel_->active()) {
+        } else if (smoke_phase_==6 && last_snapshot_.simulation_replay) {
+            // Prepare the replacement estimate while training is replayed so
+            // its Transmit action is ready when this packet becomes pending.
+            compose_.text(smoke_cancelled_text.c_str()); smoke_phase_=7;
+        } else if (smoke_phase_==7 && last_snapshot_.simulation_replay && smoke_replay_.frames>=3 &&
+                   smoke_replay_.pending_poll && smoke_replay_.pending_poll<smoke_snapshot_poll_ &&
+                   estimate_ && transmit_->active()) {
+            smoke_interrupted_replay_id_=last_snapshot_.transmission_id;
+            transmit_->do_callback(); smoke_phase_=8;
+        } else if (smoke_phase_==8 && last_snapshot_.simulation_replay &&
+                   last_snapshot_.transmission_id>smoke_interrupted_replay_id_ && smoke_replay_.frames>=3 &&
+                   smoke_replay_.pending_poll && smoke_replay_.pending_poll<smoke_snapshot_poll_ && cancel_->active()) {
             smoke_cancelled_replay_id_=last_snapshot_.transmission_id;
             resume_sequence_=last_snapshot_.sequence;
             smoke_cancelled_at_=Steady::now();
-            cancel_->do_callback(); smoke_phase_=7;
-        } else if (smoke_phase_==7 && !last_snapshot_.simulation_replay && !last_snapshot_.transmitting &&
-                   smoke_replay_.resumed && last_snapshot_.sequence>resume_sequence_+2) {
-            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=8;
+            cancel_->do_callback(); smoke_phase_=9;
+        } else if (smoke_phase_==9 && !last_snapshot_.simulation_replay && !last_snapshot_.transmitting &&
+                   smoke_replay_.resumed && last_snapshot_.sequence>resume_sequence_+2 &&
+                   Steady::now()-smoke_cancelled_at_>std::chrono::milliseconds(3250)) {
+            if (smoke_received_packets_!=2 || inbox_.items().size()!=2)
+                throw Error("Replay replacement or cancellation changed the verified inbox");
+            smoke_passed_=true; smoke_finished_=Steady::now(); smoke_phase_=10;
             notice("GUI smoke passed: keyfile generation, reception, text/file loopback, clipboard, save and live plots.",smoke_.hold_seconds+1);
-            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals, normal TX, clipboard, exclusive save, chronological three-second simulation replay, replay replacement/cancellation and all plots returning to live reception."<<std::endl;
-        } else if (smoke_phase_==8 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
+            std::cout<<"Continuous native GUI smoke passed: asynchronous production keyfile generation, automatic key selection, overwrite refusal, idle noise, pending-to-verified signals across separate GUI polls, normal TX, clipboard, exclusive save, chronological three-second whole-transmission simulation replay, pending replay replacement/cancellation without late reception and all plots returning to live reception."<<std::endl;
+        } else if (smoke_phase_==10 && std::chrono::duration<double>(Steady::now()-smoke_finished_).count()>=smoke_.hold_seconds) close();
     }
 
     SmokeOptions smoke_;
@@ -856,7 +896,7 @@ private:
     std::optional<DecodedPacket> smoke_packet_,smoke_file_packet_;
     std::uint64_t revision_=0,estimated_revision_=0,last_sequence_=0,initial_samples_=0,resumed_samples_=0,pending_sequence_=0,final_sequence_=0,resume_sequence_=0;
     struct SmokeReplay {
-        std::uint64_t id=0,revision=0;
+        std::uint64_t id=0,revision=0,pending_poll=0;
         std::size_t frame=0,frames=0,waveform_changes=0;
         double fraction=0;
         bool active=false,resumed=false,saw_symbols=false;
@@ -865,6 +905,7 @@ private:
         std::vector<std::complex<double>> constellation;
     } smoke_replay_;
     std::uint64_t smoke_interrupted_replay_id_=0,smoke_cancelled_replay_id_=0,smoke_completed_replay_id_=0;
+    std::uint64_t smoke_snapshot_poll_=0,smoke_received_packets_=0;
     int smoke_phase_=-2;
     bool smoke_key_reception_=false;
     double simulation_channel_snr_=0,cpu_percent_=0;

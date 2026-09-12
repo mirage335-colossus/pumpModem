@@ -216,7 +216,10 @@ void test_audio_tx_empty_symbol_intervals_and_cancel() {
     }, 3s);
 }
 void test_partial_back_to_back_and_resume() {
-    live::Session session;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
     auto value = settings();
     session.start(value);
     const auto first = message(1, 1200), second = message(2, 96);
@@ -228,15 +231,20 @@ void test_partial_back_to_back_and_resume() {
     std::map<std::string, std::uint64_t> pending_sequence;
     check(session.snapshot().transmitting, "queued transmission state is immediately observable");
     std::uint64_t previous_samples = 0;
+    std::uint64_t replay_id = 0;
+    std::int64_t replay_started_at = 0;
+    std::size_t replays_started = 0;
     const auto done = wait_for(session, [&](const auto& snapshot) {
         check_signal_metrics(snapshot);
         check(snapshot.samples_received >= previous_samples, "source sample time never resets between transmissions");
         previous_samples = snapshot.samples_received;
         for (const auto& signal : snapshot.signals) {
             if (!signal.validated) {
-                if (pending.contains(signal.packet_id)) check(pending[signal.packet_id] == signal.id, "partial text keeps a stable acquisition identity");
-                pending[signal.packet_id] = signal.id;
-                pending_sequence[signal.packet_id] = signal.sequence;
+                if (!signal.packet_id.empty()) {
+                    if (pending.contains(signal.packet_id)) check(pending[signal.packet_id] == signal.id, "partial text keeps a stable acquisition identity");
+                    pending[signal.packet_id] = signal.id;
+                    pending_sequence[signal.packet_id] = signal.sequence;
+                }
                 if (signal.received_bytes < signal.expected_bytes && signal.text.size() < first.data.size() &&
                     !signal.text.empty()) partial_before_completion = true;
             } else if (pending.contains(signal.packet_id)) {
@@ -245,6 +253,8 @@ void test_partial_back_to_back_and_resume() {
             }
         }
         for (const auto& item : snapshot.received) {
+            check(replay_milliseconds.load() >= replay_started_at + 3000,
+                  "queued packet's verified result must wait for its complete three-second presentation");
             check(item.diagnostics.bit_rate > 0 && !item.diagnostics.constellation.empty(),
                   "received message carries actual streaming receiver diagnostics");
             check(item.packet.pre_fec_accuracy->corrected_data_bits == 0,
@@ -256,9 +266,19 @@ void test_partial_back_to_back_and_resume() {
                   "complete high-SNR preamble reception must be measured for the final signal-browser row");
             received.push_back(item.packet.message);
         }
+        if (snapshot.simulation_replay && snapshot.transmission_id != replay_id) {
+            check(received.size() == replays_started,
+                  "queued simulation cannot replace the prior packet's unpresented final result");
+            replay_id = snapshot.transmission_id; replay_started_at = replay_milliseconds.load(); ++replays_started;
+            check(snapshot.replay_frame_index == 0,
+                  "each queued simulation begins a separate three-second presentation");
+        }
+        if (snapshot.simulation_replay)
+            replay_milliseconds = std::min(replay_started_at + 3000, replay_milliseconds.load() + 50);
         return received.size() == 2 && !snapshot.transmitting;
     }, 60s);
     check(done.transmission_fraction == 1, "completed fast transmission leaves a persistent completion marker");
+    check(replays_started == 2, "both queued packets receive their own complete presentation timeline");
     check(partial_before_completion, "unvalidated text appears before the full waveform completes");
     check(received[0].id == first.id && received[0].data == first.data &&
           received[1].id == second.id && received[1].data == second.data, "consecutive sampled packets retain order and exact bytes");
@@ -337,14 +357,16 @@ void test_simulation_replay_and_live_constellation() {
     session.start(value);
     session.transmit(message(21, 96));
     const auto first = wait_for(session, [](const auto& snapshot) {
-        return snapshot.transmission_finished && snapshot.transmission_fraction == 1;
+        check(snapshot.signals.empty() && snapshot.received.empty(),
+              "CPU-bound simulation cannot publish reception before the visual timeline starts");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     check(first.simulation_replay && first.transmission_id != 0 && first.replay_frame_index == 0,
           "CPU-bound simulation finishes while its three-second replay is still on the first frame");
     check(first.replay_frame_count == 60 && first.simulation_sample_fraction < .02,
-          "replay begins at payload start and retains sixty bounded media frames");
+          "replay begins at preamble start and retains sixty bounded media frames");
     check(first.constellation_source == live::ConstellationSource::input,
-          "initial payload frame cannot borrow receiver lock from the completed simulation");
+          "initial preamble frame cannot borrow receiver lock from the completed simulation");
     check(first.dsp_buffered_bytes <= value.dsp_workspace_bytes, "replay storage is included in the configured DSP workspace");
     replay_milliseconds = 49;
     const auto before_tick = session.snapshot();
@@ -356,13 +378,17 @@ void test_simulation_replay_and_live_constellation() {
     });
     check(background.simulation_replay && background.replay_frame_index == 0 && background.waveform == first.waveform,
           "background noise continues without advancing or overwriting the presentation clock");
+    check(background.signals.empty() && background.received.empty(), "background reception cannot release future simulation events");
 
     auto previous = first;
     bool observed_lock = false, observed_fresh_symbols = false, changed_waveform = false, changed_spectrum = false;
+    bool observed_pending = false;
+    std::uint64_t pending_id = 0, last_pending_sequence = 0;
     std::uint64_t points_after_frame_40 = 0;
-    const auto symbols = (first.transmission_seconds - 5) * value.transfer.modem.sample_rate /
+    const auto symbols = first.transmission_seconds * value.transfer.modem.sample_rate /
                          static_cast<double>(modem::symbol_sample_count(value.transfer.modem));
     const auto symbols_per_frame = static_cast<std::size_t>(std::ceil(symbols / 59)) + 3;
+    const auto training_fraction = 5 / first.transmission_seconds;
     for (std::size_t index = 1; index < 60; ++index) {
         replay_milliseconds = static_cast<std::int64_t>(index * 50);
         const auto frame = session.snapshot();
@@ -372,7 +398,7 @@ void test_simulation_replay_and_live_constellation() {
               frame.simulation_sample_fraction <= 1,
               "replay media positions are chronological and never enter decoder-tail silence");
         check(std::abs(frame.simulation_sample_fraction - static_cast<double>(index) / 59) < .02,
-              "replay frames sample the payload uniformly instead of repeating a selected middle window");
+              "replay frames sample the whole preamble and payload uniformly");
         check(!frame.waveform.empty() && !frame.spectrum_db.empty() &&
               frame.spectrum_bin_hz > 0 && frame.dsp_buffered_bytes <= value.dsp_workspace_bytes,
               "every replay frame carries measured plots within the DSP budget");
@@ -381,6 +407,17 @@ void test_simulation_replay_and_live_constellation() {
               "compact replay spectra preserve the original Nyquist frequency axis");
         changed_waveform = changed_waveform || frame.waveform != previous.waveform;
         changed_spectrum = changed_spectrum || frame.spectrum_db != previous.spectrum_db;
+        check(frame.received.empty(), "received files and messages cannot appear before the three-second presentation deadline");
+        check_signal_metrics(frame);
+        if (frame.simulation_sample_fraction + .02 < training_fraction)
+            check(frame.signals.empty(), "signal-browser content cannot appear while only the preamble has been presented");
+        for (const auto& signal : frame.signals) {
+            check(!signal.validated, "verified text cannot precede the last visual frame and completion deadline");
+            check(!signal.text.empty() && signal.sequence > last_pending_sequence,
+                  "pending reception needs ordered, visible signal-browser updates");
+            if (pending_id) check(signal.id == pending_id, "header placeholder and partial text must retain one acquisition identity");
+            pending_id = signal.id; last_pending_sequence = signal.sequence; observed_pending = true;
+        }
         if (index > 40) points_after_frame_40 += frame.constellation.size() + frame.constellation_dropped;
         if (frame.constellation_source == live::ConstellationSource::received && !frame.constellation.empty()) {
             if (observed_lock) {
@@ -394,11 +431,13 @@ void test_simulation_replay_and_live_constellation() {
         check(same_frame.replay_frame_index == frame.replay_frame_index &&
               same_frame.constellation == frame.constellation && same_frame.waveform == frame.waveform,
               "reading a frame twice does not drain symbols before they can be displayed");
+        check(same_frame.signals.empty() && same_frame.received.empty(), "repeated replay snapshots cannot duplicate reception events");
         previous = frame;
     }
     check(observed_lock && observed_fresh_symbols, "successful replay shows actual lock followed by fresh measured symbol batches");
+    check(observed_pending, "pending reception is visible for at least one frame before validation");
     check(changed_waveform && changed_spectrum, "replay animates measured waveform and spectrum samples across the transmission");
-    check(previous.simulation_sample_fraction > .99, "last replay frame reaches the end of the transmitted payload");
+    check(previous.simulation_sample_fraction > .99, "last replay frame reaches the end of the complete transmission");
     double final_power = 0;
     for (const auto sample : previous.waveform) final_power += sample * sample;
     check(final_power / static_cast<double>(previous.waveform.size()) > .02,
@@ -407,10 +446,20 @@ void test_simulation_replay_and_live_constellation() {
     const auto last = session.snapshot();
     check(last.simulation_replay && last.replay_frame_index == 59 && last.constellation == previous.constellation,
           "last payload frame remains visible until the full three-second deadline");
+    check(last.received.empty() && std::none_of(last.signals.begin(), last.signals.end(), [](const auto& signal) { return signal.validated; }),
+          "verified reception is withheld through 2999ms even though computation finished earlier");
     replay_milliseconds = 3000;
     const auto resumed = session.snapshot();
     check(!resumed.simulation_replay && resumed.constellation_source == live::ConstellationSource::input,
           "exactly three seconds releases replay and returns to incoming live samples");
+    check(resumed.received.size() == 1 && resumed.received.front().packet.message.id == message(21, 96).id,
+          "exactly three seconds delivers the completed received packet");
+    check_signal_metrics(resumed);
+    const auto verified = std::find_if(resumed.signals.begin(), resumed.signals.end(), [](const auto& signal) { return signal.validated; });
+    check(verified != resumed.signals.end() && verified->id == pending_id && verified->sequence > last_pending_sequence,
+          "final validated signal row arrives with its packet and replaces the pending identity");
+    const auto completed_again = session.snapshot();
+    check(completed_again.signals.empty() && completed_again.received.empty(), "completion events are delivered exactly once");
     const auto live_again = wait_for(session, [&](const auto& snapshot) { return snapshot.sequence > resumed.sequence; });
     check(live_again.waveform != last.waveform && live_again.constellation != last.constellation,
           "new receiver points keep replacing the completed simulation");
@@ -419,6 +468,7 @@ void test_simulation_replay_and_live_constellation() {
     // above provide an independent oracle for an otherwise invisible tail.
     session.transmit(message(21, 96));
     const auto stalled_start = wait_for(session, [](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "repeated simulation must defer its new reception events");
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     replay_milliseconds = 5000;
@@ -435,19 +485,29 @@ void test_simulation_replay_and_live_constellation() {
           "replay expiry reports every symbol point in the frames the GUI never displayed");
     check(after_stall.waveform != before_stall.waveform && after_stall.constellation != before_stall.constellation,
           "expired replay points cannot remain over the live waveform after a GUI stall");
+    check(after_stall.received.size() == 1 && after_stall.signals.size() >= 2 &&
+          !after_stall.signals.front().validated && after_stall.signals.back().validated,
+          "a GUI stall flushes pending reception before the final packet without extending the deadline");
+    check(std::is_sorted(after_stall.signals.begin(), after_stall.signals.end(), [](const auto& a, const auto& b) {
+        return a.sequence < b.sequence;
+    }), "missed signal-browser updates preserve their original order");
+    check_signal_metrics(after_stall);
+    const auto stalled_again = session.snapshot();
+    check(stalled_again.signals.empty() && stalled_again.received.empty(), "missed-frame catch-up events are not delivered twice");
 
     const auto next_started_at = replay_milliseconds.load();
     session.transmit(message(22, 96));
     const auto next = session.snapshot();
     check(!next.simulation_replay, "a new transmission immediately releases the preceding replay");
     const auto next_done = wait_for(session, [&](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "new simulation results remain hidden at replay start");
         return snapshot.transmission_finished && snapshot.transmission_id != first.transmission_id;
     });
     check(next_done.simulation_replay && next_done.replay_frame_index == 0,
           "consecutive simulation starts its own three-second replay timeline");
-    replay_milliseconds = next_started_at + 2000;
+    replay_milliseconds = next_started_at + 2900;
     const auto skipped = session.snapshot();
-    check(skipped.simulation_replay && skipped.replay_frame_index == 40 &&
+    check(skipped.simulation_replay && skipped.replay_frame_index == 58 &&
           skipped.constellation_source == live::ConstellationSource::received &&
           (skipped.constellation.size() > symbols_per_frame || skipped.constellation_dropped > 0),
           "a delayed GUI merges fresh symbols from skipped frames or reports their bounded overflow");
@@ -462,20 +522,40 @@ void test_simulation_replay_and_live_constellation() {
     const auto after_cancel=wait_for(session,[&](const auto& snapshot){return snapshot.sequence>cancelled_replay.sequence;});
     check(!after_cancel.constellation.empty() && after_cancel.constellation_source==live::ConstellationSource::input,
           "cancelled replay continues publishing measured input points without restoring old frames");
+    check(after_cancel.signals.empty() && after_cancel.received.empty(),
+          "cancelling a presentation discards its unpresented validation and received packet");
 
     session.transmit(message(23, 32));
-    const auto third = wait_for(session, [](const auto& snapshot) { return snapshot.transmission_finished && snapshot.simulation_replay; });
+    const auto third = wait_for(session, [](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "interrupted-result fixture must begin with unpresented events");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
     session.transmit(message(27, 32));
     check(!session.snapshot().simulation_replay, "transmit interrupts an active replay without waiting for its deadline");
     wait_for(session, [&](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "an interrupted packet cannot leak while its successor is computing");
         return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != third.transmission_id;
+    });
+    replay_milliseconds = next_started_at + 6000;
+    const auto replacement = session.snapshot();
+    check(replacement.received.size() == 1 && replacement.received.front().packet.message.id == message(27, 32).id,
+          "a new explicit transmission discards the interrupted packet and presents only its replacement");
+    check_signal_metrics(replacement);
+    check(std::none_of(replacement.signals.begin(), replacement.signals.end(), [&](const auto& signal) {
+        return signal.packet_id == message_id(message(23, 32));
+    }), "interrupted signal-browser rows cannot reappear with the replacement packet");
+    session.transmit(message(28, 32));
+    wait_for(session, [](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "configuration fixture must retain unpresented events");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
     });
     session.configure(value);
     check(!session.snapshot().simulation_replay, "configuration clears an active replay immediately");
-    replay_milliseconds = next_started_at + 6000;
+    replay_milliseconds = next_started_at + 9000;
     const auto configured = wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
     check(!configured.simulation_replay && configured.constellation_source == live::ConstellationSource::input,
           "a new configuration cannot republish frames from its predecessor");
+    check(configured.signals.empty() && configured.received.empty(), "configuration drops unpresented reception events");
 }
 void test_default_crystal_simulation() {
     auto value=settings();
@@ -486,12 +566,65 @@ void test_default_crystal_simulation() {
     value.simulation_phase_noise_degrees_per_sqrt_second=defaults.simulation_phase_noise_degrees_per_sqrt_second;
     value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
     value.transfer.fec=FecMode::rs20;
-    live::Session session; session.start(value);
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    session.start(value);
     const auto sent=message(24,96); session.transmit(sent);
+    const auto held=wait_for(session,[](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "impaired channel must defer reception until its presentation advances");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
+    check(held.replay_frame_count > 0,"impaired simulation must publish its measured replay");
+    replay_milliseconds = 3000;
     const auto decoded=wait_for(session,[](const auto& snapshot) { return !snapshot.received.empty(); });
+    check_signal_metrics(decoded);
     check(decoded.received.front().packet.message.data==sent.data,"default impaired channel failed its ordinary-bandwidth packet");
-    const auto held=wait_for(session,[](const auto& snapshot) { return snapshot.transmission_finished; });
-    check(held.simulation_replay && held.replay_frame_count > 0,"impaired simulation must publish its measured replay");
+    check(!decoded.simulation_replay, "impaired channel releases verified reception at the same presentation deadline");
+}
+void test_interrupt_discards_due_unpresented_reception() {
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    session.start(settings());
+    const auto await_replay = [&](std::uint64_t previous_id) {
+        return wait_for(session, [&](const auto& snapshot) {
+            check(snapshot.signals.empty() && snapshot.received.empty(),
+                  "interrupted replay cannot leak due but unpresented reception into its successor");
+            return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != previous_id;
+        });
+    };
+    session.transmit(message(29, 32));
+    const auto cancelled = await_replay(0);
+    // Do not snapshot here: pending text is due, but the GUI has not consumed it.
+    replay_milliseconds = 2950;
+    session.cancel_transmit();
+    const auto after_cancel = session.snapshot();
+    check(!after_cancel.simulation_replay && after_cancel.signals.empty() && after_cancel.received.empty(),
+          "cancel drops due pending rows that the GUI never presented");
+
+    session.transmit(message(30, 32));
+    const auto replaced = await_replay(cancelled.transmission_id);
+    replay_milliseconds = 5900;
+    session.transmit(message(31, 32));
+    const auto after_replace = session.snapshot();
+    check(!after_replace.simulation_replay && after_replace.signals.empty() && after_replace.received.empty(),
+          "explicit transmission replaces due but unpresented rows together with the old replay");
+    await_replay(replaced.transmission_id);
+    replay_milliseconds = 8900;
+    // Once the full deadline has elapsed, an interrupt must preserve reception.
+    session.cancel_transmit();
+    const auto finished = session.snapshot();
+    check(finished.received.size() == 1 && finished.received.front().packet.message.id == message(31, 32).id,
+          "cancel after the deadline preserves the completed replacement packet");
+    check_signal_metrics(finished);
+    check(std::none_of(finished.signals.begin(), finished.signals.end(), [&](const auto& signal) {
+        return signal.packet_id == message_id(message(29, 32)) || signal.packet_id == message_id(message(30, 32));
+    }), "interrupted pending rows cannot reappear with the replacement's final reception");
+    const auto again = session.snapshot();
+    check(again.signals.empty() && again.received.empty(), "deadline completion retained across cancel is still delivered exactly once");
 }
 void test_receive_authentication_policy() {
     auto value = settings();
@@ -536,7 +669,10 @@ void test_encrypted_epoch_bank_refreshes_while_idle() {
           "an idle encrypted listener refreshes epochs after its initial timing window expires");
 }
 void test_cancel_reconfigure_and_bounds() {
-    live::Session session;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({}, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
     rejects([&] { session.transmit(message(4, 1)); }, "stopped session rejects transmit");
     auto invalid = settings();
     invalid.dsp_workspace_bytes = 1;
@@ -549,18 +685,35 @@ void test_cancel_reconfigure_and_bounds() {
     auto value = settings();
     session.start(value);
     session.transmit(message(5, 120000));
+    wait_for(session, [](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "computation keeps pending and verified reception unpublished");
+        return snapshot.transmitting && snapshot.transmission_fraction > 0 && snapshot.transmission_fraction < 1;
+    });
     const auto before = std::chrono::steady_clock::now();
     session.cancel_transmit();
     check(std::chrono::steady_clock::now() - before < 100ms, "cancel does not wait for a full capture or transmission");
     const auto cancelled = session.snapshot();
     check(!cancelled.transmitting && cancelled.transmission_finished && cancelled.transmission_cancelled,
           "cancelled transmission has an immediately observable terminal marker");
+    replay_milliseconds = 3000;
+    const auto resumed = wait_for(session, [&](const auto& snapshot) {
+        check(!snapshot.simulation_replay && snapshot.signals.empty() && snapshot.received.empty(),
+              "a cancelled computation cannot publish a late presentation or reception event");
+        return snapshot.sequence > cancelled.sequence;
+    });
+    check(!resumed.transmitting, "cancelled computation returns to idle input processing");
     value.simulation_seed = 23;
     value.receive_buffer_seconds = 0.001; // Obsolete duration has no DSP significance.
     session.configure(value);
     const auto sent = message(6, 700);
     session.transmit(sent);
+    wait_for(session, [](const auto& snapshot) {
+        check(snapshot.signals.empty() && snapshot.received.empty(), "reconfiguration cannot restore cancelled reception events");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
+    replay_milliseconds = 6000;
     const auto final = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); });
+    check_signal_metrics(final);
     check(final.received.front().packet.message.id == sent.id && final.received.front().packet.message.data == sent.data,
           "fresh configuration recovers after cancellation without retaining an airtime-sized window");
     check(final.dsp_buffered_bytes <= value.dsp_workspace_bytes, "streaming DSP workspace stays independently bounded");
@@ -591,6 +744,12 @@ void test_unrecoverable_noise_does_not_validate() {
         check(frame.simulation_replay && frame.constellation_source == live::ConstellationSource::input && frame.received.empty(),
               "noise-obscured replay never borrows transmitter symbols or claims receiver lock");
     }
+    replay_milliseconds = 3000;
+    const auto completed = session.snapshot();
+    check_signal_metrics(completed);
+    check(!completed.simulation_replay && completed.received.empty() &&
+          std::none_of(completed.signals.begin(), completed.signals.end(), [](const auto& signal) { return signal.validated; }),
+          "the presentation deadline cannot turn failed reception into a verified packet");
 }
 void test_weak_and_wide_modes_keep_the_channel_running() {
     live::Session session;
@@ -618,7 +777,10 @@ void test_weak_and_wide_modes_keep_the_channel_running() {
 }
 void test_long_symbols_are_streamed_in_virtual_time() {
     for (const auto factor : {1024U, 16384U}) {
-        live::Session session;
+        std::atomic<std::int64_t> replay_milliseconds{0};
+        live::Session session({}, [&] {
+            return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+        });
         auto value = settings();
         value.transfer.modem.bandwidth_hz = 1;
         value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
@@ -634,20 +796,24 @@ void test_long_symbols_are_streamed_in_virtual_time() {
         session.start(value);
         const auto wall_start = std::chrono::steady_clock::now();
         session.transmit(sent);
-        std::optional<transfer::Received> decoded;
-        const auto result = wait_for(session, [&](const auto& snapshot) {
-            if (!snapshot.received.empty()) decoded = snapshot.received.front();
-            return decoded.has_value() && snapshot.transmission_finished;
+        const auto result = wait_for(session, [](const auto& snapshot) {
+            check(snapshot.signals.empty() && snapshot.received.empty(),
+                  "hours-long virtual reception cannot bypass its bounded visual presentation");
+            return snapshot.transmission_finished && snapshot.simulation_replay;
         }, 60s);
         const auto elapsed = std::chrono::steady_clock::now() - wall_start;
-        check(decoded->packet.message.data == sent.data, "long-tone sampled statistics decode the real packet bytes");
         check(result.transmission_seconds > 3600, "long symbols actually advance hours of virtual media");
         check(result.transmission_seconds > std::chrono::duration<double>(elapsed).count() * 100,
               "accelerated simulation is driven by DSP work rather than wall-clock airtime");
         check(result.dsp_buffered_bytes <= value.dsp_workspace_bytes, "long virtual duration does not grow DSP buffers");
         check(result.simulation_replay && result.replay_frame_count > 1 && result.replay_frame_count <= 60,
               "one-MiB weak-mode budget retains a bounded replay without storing hours of samples");
-        const auto content_seconds = static_cast<double>(decoded->packet.consumed_bytes) * 8 /
+        replay_milliseconds = 3000;
+        const auto decoded = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); });
+        check_signal_metrics(decoded);
+        check(!decoded.simulation_replay && decoded.received.front().packet.message.data == sent.data,
+              "long-tone sampled statistics decode real bytes and present them after exactly three seconds");
+        const auto content_seconds = static_cast<double>(decoded.received.front().packet.consumed_bytes) * 8 /
                                      modem::bit_rate(value.transfer.modem);
         check(std::abs(result.transmission_seconds - content_seconds - 5) < 1e-6,
               "training remains exactly five seconds even when a data symbol lasts hours");
@@ -667,6 +833,7 @@ int main() {
         run("simulated epoch admission across clock jumps", test_simulated_epoch_admission_survives_clock_jumps);
         run("simulation replay", test_simulation_replay_and_live_constellation);
         run("default crystal", test_default_crystal_simulation);
+        run("unpresented replay interruption", test_interrupt_discards_due_unpresented_reception);
         run("receive authentication policy", test_receive_authentication_policy);
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
