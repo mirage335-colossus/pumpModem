@@ -258,6 +258,23 @@
             };
             unsigned changes=0,errors=0;
             target->changed=[&](std::string){++changes;};target->error=[&](std::string){++errors;};
+            const std::string greeting="CQ \xc3\xa9 ";
+            target->apply(greeting);target->cursor=target->selectEnd=1;target->selectAnchor=0;
+            target->apply(greeting,1);
+            if(target->cursor!=static_cast<int>(greeting.size())||target->selectAnchor!=target->cursor||target->selectEnd!=target->cursor||changes||!target->targetFlags.focus)
+                throw std::runtime_error("Rev explicit cursor request did not silently select the text end");
+            target->cursor=target->selectEnd=1;target->selectAnchor=0;target->apply(greeting,1);
+            if(target->cursor!=1||target->selectAnchor!=0||target->selectEnd!=1)
+                throw std::runtime_error("Rev repeated cursor request reset a later selection");
+            target->apply(greeting+"!",1);
+            if(target->cursor!=1||target->selectAnchor!=0||target->selectEnd!=1||changes)
+                throw std::runtime_error("Rev ordinary text update replayed a consumed cursor request");
+            target->apply(greeting+"!",2);
+            if(target->cursor!=static_cast<int>(greeting.size()+1)||target->selectAnchor!=target->cursor||target->selectEnd!=target->cursor)
+                throw std::runtime_error("Rev new cursor revision ignored unchanged text");
+            target->apply({},3);
+            if(target->cursor||target->selectAnchor||target->selectEnd||changes||!target->targetFlags.focus)
+                throw std::runtime_error("Rev empty cursor reset retained a selection or changed focus");
             const std::string value=multiline?"caf\xc3\xa9\n\xf0\x9f\x8c\x8d":"01000001 01000010";
             source->apply(value);source->selectAnchor=source->selectEnd=source->cursor=static_cast<int>(value.size());shortcut(*source,"a");
             shortcut(*source,"c");target->apply("replace");target->selectAnchor=0;target->selectEnd=target->cursor=7;

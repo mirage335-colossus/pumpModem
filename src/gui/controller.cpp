@@ -68,6 +68,11 @@ struct Controller::Impl {
     bool need_devices=true,settings_valid=true,transmit_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
     BinaryEditor composer;
+    std::optional<BinaryEditor> previous_message;
+    std::string seeded_message;
+    bool generated_repeatable=false;
+    static constexpr std::string_view repeatable_prefix="REPEATABLE ";
+    static constexpr std::size_t repeatable_limit=256;
     std::size_t pattern_first=0,page_size=16;
     std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
     unsigned dsp_workspace_percent=50;
@@ -134,7 +139,7 @@ struct Controller::Impl {
         return nullptr;
     }
     Message message() const {
-        Message value; value.callsign=f(UiField::callsign).text; value.grid=f(UiField::grid).text; value.repeatable=f(UiField::repeatable).checked;
+        Message value;
         if(attachment) { value.data=*attachment; value.kind=attachment_image?MessageKind::screenshot:MessageKind::file; value.filename=path_text(attachment_path.filename()); }
         else value.data=composer.bytes();
         return value;
@@ -183,21 +188,73 @@ struct Controller::Impl {
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.escaped()?"Message / escaped bytes (\\xNN)":"Message";
     }
+    void sync_composer() {
+        f(UiField::message).text=composer.text();
+        f(UiField::binary).text=composer.binary();
+        draft_error.clear(); f(UiField::binary_label).text="Binary / first 16 bytes";
+        message_label();
+    }
+    bool has_repeatable_prefix() const {
+        const auto& bytes=composer.bytes();
+        return generated_repeatable&&bytes.size()>=repeatable_prefix.size()&&
+            std::equal(repeatable_prefix.begin(),repeatable_prefix.end(),bytes.begin());
+    }
+    void set_repeatable(bool checked) {
+        f(UiField::repeatable).checked=checked;
+        if(!draft_error.empty()) {
+            // Defer removal until the partial edit is committed. Moving the
+            // byte prefix now would change the suffix that Binary retains.
+            dirty(); return;
+        }
+        const bool untouched=draft_error.empty()&&f(UiField::message).text==seeded_message;
+        auto bytes=composer.bytes();
+        if(checked) bytes.insert(bytes.begin(),repeatable_prefix.begin(),repeatable_prefix.end());
+        else if(has_repeatable_prefix()) bytes.erase(bytes.begin(),bytes.begin()+static_cast<std::ptrdiff_t>(repeatable_prefix.size()));
+        generated_repeatable=checked;
+        if(bytes!=composer.bytes()) {
+            composer=BinaryEditor(std::move(bytes));
+            sync_composer();
+            if(checked)++f(UiField::message).text_cursor_end_revision;
+        }
+        if(untouched)seeded_message=f(UiField::message).text;
+        dirty();
+    }
+    void seed_composer() {
+        std::string greeting;
+        const auto& callsign=f(UiField::callsign).text;
+        const auto& grid=f(UiField::grid).text;
+        if(!callsign.empty()||!grid.empty()) {
+            greeting="CQ CQ CQ";
+            if(!callsign.empty())greeting+=" DE "+callsign;
+            if(!grid.empty())greeting+=" GRID "+grid;
+            greeting+=". Please reply. ";
+        }
+        auto& repeatable=f(UiField::repeatable).checked;
+        if(attachment||file_loading||greeting.size()+repeatable_prefix.size()>repeatable_limit)repeatable=false;
+        generated_repeatable=repeatable;
+        if(repeatable)greeting.insert(0,repeatable_prefix);
+        composer=BinaryEditor(Bytes(greeting.begin(),greeting.end()));
+        sync_composer(); ++f(UiField::message).text_cursor_end_revision;
+        seeded_message=composer.text(); dirty();
+    }
     void message_changed(std::string_view text) {
+        if(text.empty()) { seed_composer(); return; }
         try { composer.edit_text(text); }
         catch(const std::exception& e) {
             if(!composer.escaped())throw;
             // An escape is temporarily incomplete while typing or deleting.
             f(UiField::message).text=text; draft_error=e.what(); dirty(); return;
         }
-        f(UiField::message).text=composer.text();
-        f(UiField::binary).text=composer.binary();
-        draft_error.clear(); f(UiField::binary_label).text="Binary / first 16 bytes";
-        message_label(); dirty();
+        generated_repeatable=has_repeatable_prefix();
+        sync_composer();
+        if(generated_repeatable&&!f(UiField::repeatable).checked)set_repeatable(false);
+        else dirty();
     }
     void binary_changed() {
         try {
             composer.edit_binary(f(UiField::binary).text);
+            if(composer.bytes().empty()) { seed_composer(); return; }
+            generated_repeatable=has_repeatable_prefix();
             f(UiField::message).text=composer.text();
             const auto normalized=composer.binary();
             const auto compact=[](std::string_view text) {
@@ -207,6 +264,7 @@ struct Controller::Impl {
             if(compact(normalized)!=compact(f(UiField::binary).text))f(UiField::binary).text=normalized;
             draft_error.clear(); f(UiField::binary_label).text="Binary / first 16 bytes";
             message_label();
+            if(generated_repeatable&&!f(UiField::repeatable).checked)set_repeatable(false);
         } catch(const std::exception& e) {
             draft_error=e.what(); f(UiField::binary_label).text="Binary / incomplete or invalid";
         }
@@ -224,13 +282,14 @@ struct Controller::Impl {
         if(closing) return false;
         const bool busy=transmit_requested || snapshot.transmitting;
         switch(command) {
-        case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && (!f(UiField::repeatable).checked||estimate->repeatable_allowed) && gate.remaining(settings.simulation,encrypted()).count()==0;
+        case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
         case Command::acknowledge_key_failure: return !busy&&!key_loading&&key_failed;
         case Command::attach_file: return true;
         case Command::use_text: return attachment||file_loading;
+        case Command::paste_previous: return previous_message.has_value()&&!attachment&&!file_loading;
         case Command::save_file: return selected_file()!=nullptr;
         case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)); }
         case Command::pattern_first: case Command::pattern_previous: return pattern_first>0;
@@ -239,12 +298,15 @@ struct Controller::Impl {
         }
     }
     void controls() {
+        if(f(UiField::repeatable).checked&&(attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
         for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::binary).enabled=f(UiField::message).enabled=!attachment&&!closing;
-        f(UiField::repeatable).enabled=(!estimate||estimate->repeatable_allowed||f(UiField::repeatable).checked)&&!closing;
+        const auto repeatable_overhead=f(UiField::repeatable).checked?0:repeatable_prefix.size();
+        f(UiField::repeatable).enabled=!attachment&&!file_loading&&draft_error.empty()&&
+            composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
         const auto size=attachment?attachment->size():composer.bytes().size();
         f(UiField::fec).enabled=f(UiField::fec).enabled&&(file_loading||size>=16);
         f(UiField::fec).display_text=!file_loading&&size<16?"Off (under 16 B)":"";
@@ -349,7 +411,6 @@ struct Controller::Impl {
             f(UiField::flow_detail).text=flow.str(); f(UiField::transmission_detail).text=transmission.str();
             auto text="TX "+seconds_text(estimate->total_seconds)+" / content "+seconds_text(estimate->content_seconds);
             if(!estimate->memory_supported) text="Content / DSP budget exceeded: "+seconds_text(estimate->total_seconds);
-            else if(f(UiField::repeatable).checked&&!estimate->repeatable_allowed) text="Repeatable content exceeds 2 s: "+seconds_text(estimate->content_seconds);
             f(UiField::airtime).text=std::move(text);
         }
     }
@@ -395,10 +456,18 @@ struct Controller::Impl {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
         case Command::transmit: {
+            // Keep the accepted bytes available for retry, including arbitrary
+            // binary edits. Clearing here frees the next draft while TX runs.
+            std::optional<BinaryEditor> sent;
+            if(!attachment)sent=composer;
             gate.started(settings.simulation,encrypted()); transmit_requested=true;
             try { session.transmit(message()); } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
+            if(sent) { previous_message=std::move(sent); seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
+        case Command::paste_previous:
+            composer=*previous_message; generated_repeatable=false; f(UiField::repeatable).checked=false;
+            seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel: session.cancel_transmit(); notice(snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
         case Command::clear_received: inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
         case Command::attach_file:
@@ -479,9 +548,11 @@ void Controller::edit(UiField field,std::string text) {
         if(declaration==screen.end()) throw Error("This field is not editable text");
         if(const auto error=ui::edit_error(*declaration,text);!error.empty())throw Error(error);
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
+        const bool untouched=p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
         if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::device||field==UiField::bandwidth||field==UiField::snr) p.configure();
+        else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
@@ -499,7 +570,14 @@ void Controller::select(UiField field,std::string id) {
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
 }
-void Controller::toggle(UiField field,bool value) { auto& p=*impl_; if(p.f(field).enabled&&p.f(field).checked!=value) { p.f(field).checked=value; p.dirty(); p.controls(); } }
+void Controller::toggle(UiField field,bool value) {
+    auto& p=*impl_;
+    if(p.f(field).enabled&&p.f(field).checked!=value) {
+        if(field==UiField::repeatable)p.set_repeatable(value);
+        else { p.f(field).checked=value; p.dirty(); }
+        p.controls();
+    }
+}
 void Controller::activate(Command command) { try { impl_->action(command); } catch(const std::exception& e) { impl_->notice(e.what(),10); } impl_->controls(); }
 void Controller::complete_service(ui::ServiceResult result) { try { impl_->complete(std::move(result)); } catch(const std::exception& e) { impl_->notice(e.what(),10); } impl_->controls(); }
 std::vector<ui::ServiceRequest> Controller::take_services() { auto result=std::move(impl_->services); impl_->services.clear(); return result; }

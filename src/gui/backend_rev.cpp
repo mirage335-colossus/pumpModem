@@ -157,6 +157,7 @@ struct CheckboxView : re::Checkbox {
 struct Editor : theme::RevText {
     std::size_t limit;
     bool multiline;
+    std::uint64_t cursor_end_revision=0;
     RevPlatform& platform;
     std::function<void(std::string)> changed;
     std::function<void()> submit;
@@ -187,7 +188,13 @@ struct Editor : theme::RevText {
         const auto& value=content.get();cursor=boundary(value,cursor);
         selectAnchor=boundary(value,selectAnchor);selectEnd=boundary(value,selectEnd);
     }
-    void apply(const std::string& value) {if(content.get()!=value){content=value;clamp_positions();}}
+    void apply(const std::string& value,std::uint64_t revision=0) {
+        if(content.get()!=value){content=value;clamp_positions();}
+        if(revision&&revision!=cursor_end_revision) {
+            cursor_end_revision=revision;resetVerticalCursor();
+            cursor=selectAnchor=selectEnd=static_cast<int>(value.size());
+        }
+    }
     bool replace(const std::string& input) {
         if(!editable || targetFlags.disabled) return false;
         const auto edit=ui::text_edit(content.get(),{cursor,selectAnchor,selectEnd},input,multiline,limit);
@@ -901,7 +908,7 @@ public:
                 if(!b.control.help[0]||!view.visible||!view.enabled)hide_help(true);
                 else help_text->content=b.control.help;
             }
-            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->apply(value.text);b.editor->editable=view.enabled;b.editor->setDisabled(!view.enabled);}
+            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->apply(value.text,value.text_cursor_end_revision);b.editor->editable=view.enabled;b.editor->setDisabled(!view.enabled);}
             if(b.presentation.update_options(view.options)) {
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();

@@ -106,6 +106,34 @@ void generic_gestures_and_bitmaps() {
         image.reset(surface.image());require(pixel(left+12,top+20,0)==0,"Empty bitmap retained previous source pixels");
     }
 }
+void editor_cursor_requests() {
+    Fl_Double_Window window(600,200,"FLTK explicit text cursor regression");
+    auto* editor=new NativeEditor;editor->resize(10,10,560,100);
+    auto* input=new NativeInput;input->resize(10,130,560,27);
+    window.end();window.show();Fl::check();editor->take_focus();
+    unsigned changes=0;editor->changed=[&](std::string){++changes;};
+    const std::string greeting="CQ \xc3\xa9 ";
+    editor->apply(greeting);editor->insert_position(1);editor->buffer()->select(0,1);
+    editor->apply(greeting,1);
+    require(editor->insert_position()==static_cast<int>(greeting.size())&&!editor->buffer()->selected()&&changes==0&&Fl::focus()==editor,
+        "Explicit multiline cursor request did not silently select the text end");
+    editor->insert_position(1);editor->buffer()->select(0,1);editor->apply(greeting,1);
+    int start=0,end=0;editor->buffer()->selection_position(&start,&end);
+    require(editor->insert_position()==1&&start==0&&end==1,"Repeated cursor revision reset a later multiline selection");
+    editor->apply(greeting+"!",1);editor->buffer()->selection_position(&start,&end);
+    require(editor->insert_position()==1&&start==0&&end==1&&changes==0,"Ordinary multiline update replayed a consumed cursor request");
+    editor->apply(greeting+"!",2);
+    require(editor->insert_position()==static_cast<int>(greeting.size()+1)&&!editor->buffer()->selected(),"New cursor revision ignored unchanged multiline text");
+    editor->apply({},3);
+    require(editor->insert_position()==0&&!editor->buffer()->selected()&&changes==0,"Empty multiline reset retained a cursor or emitted an edit");
+    input->apply(greeting);input->insert_position(1,0);input->apply(greeting,1);
+    require(input->insert_position()==static_cast<int>(greeting.size())&&input->mark()==input->insert_position(),"Single-line cursor request retained its selection");
+    input->insert_position(1,0);input->apply(greeting,1);input->apply(greeting+"!",1);
+    require(input->insert_position()==1&&input->mark()==0,"Consumed single-line cursor request changed a later selection");
+    input->apply(greeting+"!",2);
+    require(input->insert_position()==static_cast<int>(greeting.size()+1)&&input->mark()==input->insert_position()&&Fl::focus()==editor,
+        "New single-line cursor request ignored unchanged text or changed focus");
+}
 void editors_and_records() {
     Fl_Double_Window window(600,450,"FLTK generic adapter regression");
     auto* editor=new NativeEditor;editor->resize(10,10,560,100);
@@ -584,6 +612,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();clipboard_shortcuts();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

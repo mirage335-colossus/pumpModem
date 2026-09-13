@@ -8,6 +8,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.font_size=control.multiline?16:13;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
     if(slot==Slot::header)control.font_size=22;
+    if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
+    if(slot==Slot::repeatable)control.help="Prepends REPEATABLE to message text, before the CQ greeting. Automatically turns off for attachments or messages over 256 bytes.";
+    if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(control.multiline) {
         control.submit=Command::transmit;control.submit_mode=Field::send_key;
         control.help="Enter transmits by default. Shift+Enter inserts a newline. The send-key choice can require Ctrl+Enter.";
@@ -63,6 +66,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
+        placed({Kind::action,Field::count,Command::paste_previous,Bitmap::none,Page::console,6,"Previous message - click to paste"}, Slot::paste_previous),
         placed({Kind::label,Field::binary_label,Command::none,Bitmap::none,Page::console,6,"Binary"}, Slot::binary_label),
         placed({Kind::text,Field::message,Command::none,Bitmap::none,Page::console,7,"",2,true,4*1024*1024}, Slot::message),
         placed({Kind::text,Field::binary,Command::none,Bitmap::none,Page::console,7,"",1,true}, Slot::binary),

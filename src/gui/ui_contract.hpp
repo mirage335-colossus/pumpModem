@@ -15,7 +15,7 @@ enum class Field {
     reference_alphabet, waveform_zoom, count
 };
 enum class Command {
-    none, transmit, cancel, clear_received, attach_file, use_text, open_keyfile,
+    none, transmit, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last
@@ -97,6 +97,9 @@ struct FieldState {
     bool visible = true;
     std::vector<Option> options;
     std::vector<Record> records;
+    // Increment for an explicit request to collapse selection at the text end.
+    // Zero requests nothing; each native editor consumes a revision only once.
+    std::uint64_t text_cursor_end_revision = 0;
 };
 enum class ServiceKind { open_file, save_file, prompt, clipboard, open_folder };
 struct ServiceRequest {

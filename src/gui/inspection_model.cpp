@@ -141,8 +141,6 @@ Inspection inspect(const InspectionRequest& request) {
     result.preamble_description="32 training-input bytes map to 64 fixed four-bit APSK segments over exactly five seconds (12.8 segments/s), independently of payload baud. Training is not chip-spread. A selected key masks its bytes; the public whitening mask skips them.";
     result.fields.insert(result.fields.end(),{{"Compression",compression_detail},
         {"Message kind",request.message.kind==MessageKind::text?"Text":request.message.kind==MessageKind::file?"File":"Screenshot"},
-        {"Repeat requested",request.message.repeatable?"Yes":"No"},
-        {"Repeat eligibility",result.estimate.repeatable_allowed?"Within the configured incremental-content policy":"Exceeds the configured incremental-content policy"},
         {"Body FEC",fec_name(layout.fec)},{"Bootstrap FEC",header_fec},
         {"FEC selection",layout.original_bytes<16?"Automatically off below 16 original bytes":"Selected mode applies to header and body"},
         {"Integrity",keyed?"32-byte epoch-bound HMAC-SHA256":"32-byte SHA-256"},

@@ -1,6 +1,7 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
+#include <filesystem>
 #include <iostream>
 #include <thread>
 
@@ -8,6 +9,207 @@ namespace {
 using namespace datapump;
 using namespace datapump::gui;
 void check(bool value, const char* message) { if (!value) throw Error(message); }
+void prepare(Controller& controller) {
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!controller.estimate()&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.estimate().has_value(),"Payload estimate was not prepared");
+}
+void composer_conveniences() {
+    using F=ui::Field; using C=ui::Command;
+    Controller controller({true,true});
+    check(controller.message_bytes().empty()&&controller.field(F::message).text.empty()&&
+          !controller.enabled(C::paste_previous),"Empty convenience fields added text or enabled previous-message paste");
+    controller.edit(F::callsign,"N0CALL");
+    check(controller.field(F::message).text=="CQ CQ CQ DE N0CALL. Please reply. ",
+          "Callsign did not seed an editable greeting with a trailing space");
+    check(controller.field(F::message).text_cursor_end_revision!=0,
+          "Seeding a greeting did not place subsequent typing after it");
+    controller.edit(F::grid,"AB12cd");
+    const std::string greeting="CQ CQ CQ DE N0CALL GRID AB12cd. Please reply. ";
+    check(controller.field(F::message).text==greeting,
+          "Grid did not update an untouched greeting or was normalized");
+    controller.edit(F::message,greeting+"Anyone listening?");
+    const auto draft_cursor_revision=controller.field(F::message).text_cursor_end_revision;
+    controller.edit(F::callsign,"Portable station / N0CALL");
+    controller.edit(F::grid,"Somewhere nearby");
+    check(controller.field(F::message).text==greeting+"Anyone listening?",
+          "Convenience field edits modified an existing message body");
+    check(controller.field(F::message).text_cursor_end_revision==draft_cursor_revision,
+          "Changing convenience fields moved the cursor in a user-written draft");
+    controller.edit(F::message,"");
+    check(controller.field(F::message).text_cursor_end_revision>draft_cursor_revision,
+          "Clearing a draft left the cursor before its new greeting");
+    check(controller.field(F::message).text==
+          "CQ CQ CQ DE Portable station / N0CALL GRID Somewhere nearby. Please reply. ",
+          "Clearing the message did not seed the latest verbatim convenience fields");
+    controller.edit(F::callsign,"");
+    check(controller.field(F::message).text=="CQ CQ CQ GRID Somewhere nearby. Please reply. ",
+          "A grid-only greeting retained an empty callsign separator");
+    controller.edit(F::grid,"");
+    check(controller.field(F::message).text.empty(),"Removing all convenience fields left whitespace");
+    controller.toggle(F::repeatable,true);
+    check(controller.field(F::message).text=="REPEATABLE ","Repeatable alone did not seed its in-band marker");
+    controller.edit(F::callsign,"N0CALL");
+    check(controller.field(F::message).text=="REPEATABLE CQ CQ CQ DE N0CALL. Please reply. ",
+          "Repeatable marker did not precede the station greeting");
+    controller.edit(F::callsign,"");
+    controller.toggle(F::repeatable,false);
+    check(controller.message_bytes().empty(),"Turning off the only convenience field left whitespace");
+    controller.edit(F::message,"A message body");
+    controller.toggle(F::repeatable,true);
+    controller.toggle(F::repeatable,true);
+    check(controller.field(F::message).text=="REPEATABLE A message body",
+          "Repeatable did not prepend exactly one editable marker");
+    controller.toggle(F::repeatable,false);
+    check(controller.field(F::message).text=="A message body","Turning repeatable off damaged the message body");
+
+    controller.edit(F::message,std::string(245,'x'));
+    controller.toggle(F::repeatable,true);
+    check(controller.field(F::repeatable).checked&&controller.message_bytes().size()==256,
+          "Repeatable rejected the inclusive 256-byte payload limit");
+    controller.edit(F::message,controller.field(F::message).text+"x");
+    check(!controller.field(F::repeatable).checked&&!controller.field(F::repeatable).enabled&&
+          controller.field(F::message).text==std::string(246,'x'),
+          "Exceeding 256 bytes did not force repeatable off and remove its intact marker");
+    controller.edit(F::message,std::string(244,'x')+"\xC3\xA9");
+    check(!controller.field(F::repeatable).enabled,"Repeatable counted Unicode characters instead of payload bytes");
+    controller.edit(F::message,std::string(243,'x')+"\xC3\xA9");
+    controller.toggle(F::repeatable,true);
+    check(controller.field(F::repeatable).checked&&controller.message_bytes().size()==256,
+          "A UTF-8 payload at the byte limit could not be repeatable");
+
+    controller.toggle(F::repeatable,false);
+    controller.edit(F::message,"");
+    controller.edit(F::binary,"00000000 11111111");
+    controller.toggle(F::repeatable,true);
+    const auto binary_repeatable=controller.message_bytes();
+    check(controller.field(F::repeatable).checked&&binary_repeatable.size()==13&&
+          binary_repeatable[11]==0&&binary_repeatable[12]==255,
+          "A short escaped payload lost bytes or incorrectly disabled repeatable");
+    controller.toggle(F::repeatable,false);
+    check(controller.message_bytes()==Bytes({0,255}),"Removing the repeatable marker changed arbitrary payload bytes");
+    controller.edit(F::message,"short");
+    controller.toggle(F::repeatable,true);
+    controller.activate(C::attach_file);
+    const auto services=controller.take_services();
+    check(services.size()==1&&services.front().kind==ui::ServiceKind::open_file,
+          "Attachment did not request a file");
+    controller.complete_service({services.front().id,false,std::filesystem::absolute(__FILE__).string(),{}});
+    check(!controller.field(F::repeatable).checked&&!controller.field(F::repeatable).enabled,
+          "Loading an attachment did not force repeatable off");
+    prepare(controller);
+    check(!controller.field(F::message).enabled&&!controller.field(F::repeatable).enabled,
+          "An attached file retained the repeatable convenience control");
+    controller.activate(C::use_text);
+    check(controller.field(F::repeatable).enabled&&!controller.field(F::repeatable).checked&&
+          controller.field(F::message).text=="short", "Returning to text restored repeatable or damaged the draft");
+
+    controller.edit(F::bandwidth,"1 Hz");
+    controller.toggle(F::repeatable,true);
+    prepare(controller);
+    check(!controller.estimate()->repeatable_allowed&&controller.field(F::repeatable).checked&&
+          controller.enabled(C::transmit),"Legacy repeatable airtime metadata still gated an in-band marker");
+    controller.edit(F::bandwidth,"1.2 kHz");
+    controller.edit(F::callsign,std::string(128,'C'));
+    controller.edit(F::grid,std::string(128,'G'));
+    controller.edit(F::message,"");
+    check(controller.field(F::message).text=="CQ CQ CQ DE "+std::string(128,'C')+" GRID "+std::string(128,'G')+". Please reply. "&&
+          !controller.field(F::repeatable).checked&&!controller.field(F::repeatable).enabled,
+          "Large convenience fields lost text or retained an over-limit repeatable greeting");
+    prepare(controller);
+    check(controller.enabled(C::transmit),"Legacy callsign/grid metadata length limits still rejected visible message text");
+}
+void previous_message_controls() {
+    using F=ui::Field; using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::callsign,"N0CALL");
+    controller.edit(F::grid,"AB12cd");
+    controller.toggle(F::repeatable,true);
+    const auto seeded=controller.field(F::message).text;
+    controller.edit(F::message,seeded+"Anyone listening?");
+    const auto sent=controller.message_bytes();
+    const auto sent_cursor_revision=controller.field(F::message).text_cursor_end_revision;
+    prepare(controller);
+    controller.activate(C::transmit);
+    check(controller.message_bytes()==sent&&!controller.enabled(C::paste_previous)&&
+          controller.field(F::message).text_cursor_end_revision==sent_cursor_revision,
+          "Rejected transmission cleared the draft or replaced previous-message state");
+    controller.start();
+    controller.activate(C::transmit);
+    check(controller.field(F::message).text==seeded&&controller.enabled(C::paste_previous),
+          "Accepted transmission did not immediately reseed the composer and enable previous-message paste");
+    check(controller.field(F::message).text_cursor_end_revision>sent_cursor_revision,
+          "Starting transmission left subsequent typing inside the new greeting");
+    controller.edit(F::message,"The next message is already being typed");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    while((controller.inbox().items().empty()||!controller.snapshot().transmission_finished)&&
+          std::chrono::steady_clock::now()<deadline) {
+        controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(!controller.inbox().items().empty(),"Convenience message did not arrive in simulation");
+    const auto& received=controller.inbox().items().front().message;
+    check(received.data==sent&&received.callsign.empty()&&received.grid.empty()&&!received.repeatable,
+          "Convenience values changed the transmitted bytes or leaked into packet metadata");
+    check(controller.snapshot().transmission_finished&&
+          controller.field(F::message).text=="The next message is already being typed",
+          "Late transmission completion cleared a newly typed draft");
+    controller.edit(F::callsign,"ANOTHER");
+    controller.edit(F::grid,"ZZ99zz");
+    const auto paste_cursor_revision=controller.field(F::message).text_cursor_end_revision;
+    controller.activate(C::paste_previous);
+    check(controller.message_bytes()==sent&&!controller.field(F::repeatable).checked,
+          "Previous-message paste changed exact bytes or interpreted the restored repeatable marker");
+    check(controller.field(F::message).text_cursor_end_revision>paste_cursor_revision,
+          "Restoring the previous message did not place the cursor after it");
+    controller.toggle(F::repeatable,false);
+    check(controller.message_bytes()==sent,"A pasted in-band marker was removed as checkbox state");
+    controller.close();
+    check(!controller.enabled(C::paste_previous),"Previous-message paste remained enabled while closing");
+}
+void repeatable_pending_drafts() {
+    using F=ui::Field; using C=ui::Command;
+    Controller controller({true,true});
+    const auto force_off_with_attachment=[&] {
+        controller.activate(C::attach_file);
+        const auto services=controller.take_services();
+        check(services.size()==1&&services.front().kind==ui::ServiceKind::open_file,
+              "Pending draft attachment did not request a file");
+        controller.complete_service({services.front().id,false,std::filesystem::absolute(__FILE__).string(),{}});
+        check(!controller.field(F::repeatable).checked&&!controller.field(F::repeatable).enabled,
+              "Pending draft prevented an attachment from forcing repeatable off");
+        controller.activate(C::use_text);
+    };
+    const std::string body="abcdefghijklmnopqrst";
+    controller.edit(F::message,body);
+    controller.toggle(F::repeatable,true);
+    const auto binary_bytes=controller.message_bytes();
+    auto binary_draft=controller.field(F::binary).text;
+    binary_draft.pop_back();
+    controller.edit(F::binary,binary_draft);
+    force_off_with_attachment();
+    check(controller.field(F::binary).text==binary_draft&&controller.message_bytes()==binary_bytes,
+          "Forcing repeatable off changed an incomplete binary draft or its committed prefix offsets");
+    controller.edit(F::binary,binary_draft+"0");
+    auto edited_body=body; edited_body[4]='d';
+    check(controller.field(F::message).text==edited_body&&
+          controller.message_bytes()==Bytes(edited_body.begin(),edited_body.end()),
+          "Completing a binary draft after repeatable was forced off lost or duplicated its suffix");
+
+    controller.edit(F::message,"");
+    controller.edit(F::binary,"00000000 11111111");
+    controller.toggle(F::repeatable,true);
+    const auto escaped_bytes=controller.message_bytes();
+    const std::string escaped_draft="REPEATABLE \\x0\\xFF";
+    controller.edit(F::message,escaped_draft);
+    force_off_with_attachment();
+    check(controller.field(F::message).text==escaped_draft&&controller.message_bytes()==escaped_bytes,
+          "Forcing repeatable off changed an incomplete escaped draft or its committed bytes");
+    controller.edit(F::message,"REPEATABLE \\x01\\xFF");
+    check(controller.message_bytes()==Bytes({1,255})&&controller.field(F::message).text=="\\x01\\xFF",
+          "Completing an escaped draft after repeatable was forced off changed its payload bytes");
+}
 void binary_editor_controls() {
     using F=ui::Field; using C=ui::Command;
     Controller controller({true,true});
@@ -25,14 +227,7 @@ void binary_editor_controls() {
           parse_binary_bits(controller.field(F::binary).text).size()==40,
           "Shortened prefix did not preserve and display the shifted suffix");
     controller.edit(F::message,"A");
-    const auto prepare=[&] {
-        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
-        while(!controller.estimate()&&std::chrono::steady_clock::now()<deadline) {
-            controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        check(controller.estimate().has_value(),"Payload estimate was not prepared");
-    };
-    prepare();
+    prepare(controller);
     controller.edit(F::binary,"001");
     check(controller.field(F::binary).text=="001"&&controller.field(F::message).text=="A"&&
           !controller.estimate()&&!controller.enabled(C::transmit),
@@ -48,7 +243,7 @@ void binary_editor_controls() {
     check(controller.message_bytes()==Bytes({0,255})&&controller.field(F::message).text=="\\x00\\xFF"&&
           controller.field(F::message_label).text.find("escaped")!=std::string::npos,
           "Arbitrary binary bytes were lost or displayed as ordinary text");
-    prepare();
+    prepare(controller);
     check(!controller.inspection()->binary&&controller.inspection()->packet_layout->original_bytes==2,
           "Binary editing changed the dispatch mode or encoded the escape characters");
     controller.start();controller.activate(C::transmit);
@@ -58,6 +253,11 @@ void binary_editor_controls() {
     }
     check(!controller.inbox().items().empty()&&controller.inbox().items().front().message.data==Bytes({0,255}),
           "Binary-edited zero and non-UTF-8 bytes did not arrive as the exact verified payload");
+    check(controller.message_bytes().empty()&&controller.enabled(C::paste_previous),
+          "Transmitting arbitrary bytes did not clear the composer and retain previous-message paste");
+    controller.activate(C::paste_previous);
+    check(controller.message_bytes()==Bytes({0,255})&&controller.field(F::message).text=="\\x00\\xFF",
+          "Previous-message paste did not restore exact arbitrary bytes and their escaped editor mode");
     controller.edit(F::message,"\\x0\\xFF");
     check(controller.field(F::message).text=="\\x0\\xFF"&&!controller.estimate()&&
           controller.message_bytes()==Bytes({0,255}),"Incomplete escape lost its draft or changed committed bytes");
@@ -157,6 +357,9 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        composer_conveniences();
+        previous_message_controls();
+        repeatable_pending_drafts();
         binary_editor_controls();
         workspace_controls();
         bitmap_source_checks();

@@ -37,7 +37,11 @@ void packet_layout() {
         check(field(result,"Bootstrap padding")=="0 bits (continuous packet)","header must not add a separate symbol boundary");
         check(field(result,"Final symbol padding")==std::to_string((5-wire.size()*8%5)%5)+" bits","continuous packet final padding is not exact");
         check(field(result,"Compression").find("Fixed byte prefix")!=std::string::npos,"actual selected fixed byte compression missing");
-        for(const auto& item:result.fields)check(item.name!="Packet version","inspection invents a packet version field");
+        for(const auto& item:result.fields) {
+            check(item.name!="Packet version","inspection invents a packet version field");
+            check(item.name!="Repeat requested" && item.name!="Repeat eligibility",
+                  "legacy packet flags must not describe the in-band Repeatable convenience control");
+        }
         const auto rendered=text(result);
         check(rendered.find("incoming header")!=std::string::npos,"receiver follows outgoing compression/FEC flags");
         for(const auto secret:{"eeeeeeee","private-name.txt","SECRET-CALL","ZZ99"})

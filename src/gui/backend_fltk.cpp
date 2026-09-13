@@ -245,14 +245,19 @@ public:
         const std::string inserted(text);buffer_.replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));
         buffer_.unselect();insert_position(edit.cursor);show_insert_position();return true;
     }
-    void apply(const std::string& text) {
-        if(buffer_text(buffer_)==text)return;
-        const auto cursor=insert_position(),top=mTopLineNum,horizontal=mHorizOffset;
-        int start=0,end=0;const bool selected=buffer_.selection_position(&start,&end)!=0;
-        applying_=true;buffer_.text(text.c_str());
-        const auto clamp=[&](int position){return ui::text_boundary(text,position);};
-        insert_position(clamp(cursor));if(selected)buffer_.select(clamp(start),clamp(end));
-        scroll(top,horizontal);applying_=false;
+    void apply(const std::string& text,std::uint64_t cursor_end_revision=0) {
+        if(buffer_text(buffer_)!=text) {
+            const auto cursor=insert_position(),top=mTopLineNum,horizontal=mHorizOffset;
+            int start=0,end=0;const bool selected=buffer_.selection_position(&start,&end)!=0;
+            applying_=true;buffer_.text(text.c_str());
+            const auto clamp=[&](int position){return ui::text_boundary(text,position);};
+            insert_position(clamp(cursor));if(selected)buffer_.select(clamp(start),clamp(end));
+            scroll(top,horizontal);applying_=false;
+        }
+        if(cursor_end_revision&&cursor_end_revision!=cursor_end_revision_) {
+            cursor_end_revision_=cursor_end_revision;
+            buffer_.unselect();insert_position(static_cast<int>(text.size()));show_insert_position();
+        }
     }
     int handle(int event) override {
         if(event==FL_PASTE) {
@@ -275,6 +280,7 @@ private:
     void draw() override {theme::DrawStyle style(*this);Fl_Text_Editor::draw();}
     Fl_Text_Buffer buffer_;
     bool applying_=false;
+    std::uint64_t cursor_end_revision_=0;
     ui::TextEdit propose(std::string_view inserted,int start,int end) {
         auto edit=ui::text_edit(buffer_text(buffer_),{insert_position(),start,end},inserted,true,byte_limit);
         if(!edit.error.empty()&&error)error(edit.error);
@@ -288,10 +294,15 @@ public:
     std::function<bool(bool,bool)> submit;
     std::size_t byte_limit=1024*1024;
     std::function<void(std::string)> error;
-    void apply(const std::string& text) {
-        if(text==value())return;
-        const auto selection=ui::TextSelection{insert_position(),mark(),insert_position()}.clamped(text);
-        value(text.c_str());insert_position(selection.cursor,selection.anchor);
+    void apply(const std::string& text,std::uint64_t cursor_end_revision=0) {
+        if(text!=value()) {
+            const auto selection=ui::TextSelection{insert_position(),mark(),insert_position()}.clamped(text);
+            value(text.c_str());insert_position(selection.cursor,selection.anchor);
+        }
+        if(cursor_end_revision&&cursor_end_revision!=cursor_end_revision_) {
+            cursor_end_revision_=cursor_end_revision;
+            insert_position(static_cast<int>(text.size()),static_cast<int>(text.size()));
+        }
     }
     bool paste(std::string_view text) {
         const auto edit=propose(text);if(!edit)return false;
@@ -309,6 +320,7 @@ public:
         return Fl_Input::handle(event);
     }
 private:
+    std::uint64_t cursor_end_revision_=0;
     void draw() override {theme::DrawStyle style(*this);Fl_Input::draw();}
     ui::TextEdit propose(std::string_view inserted) {
         auto edit=ui::text_edit(value(),{insert_position(),mark(),insert_position()},inserted,false,byte_limit);
@@ -768,8 +780,8 @@ private:
                 if(!child->tooltip()||std::string_view(child->tooltip())!=c.help)child->copy_tooltip(c.help);
             }
             if(b.label)label(b.label,view.control.label);
-            if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text);}
-            if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text);}
+            if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
+            if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text,state.text_cursor_end_revision);}
             if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
                 for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                     if(menu)populate(*menu,b.presentation.options());

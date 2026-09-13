@@ -96,6 +96,12 @@ checksum uses reflected CRC-32, polynomial `0xEDB88320`, initial and final XOR
 `0xFFFFFFFF`. It also limits accidental identity changes in pending previews.
 Callsign and grid describe content; no routing or destination address exists.
 
+These metadata fields and the repeat flag remain available to the CLI and
+packet API. The desktop Callsign, Grid and Repeatable controls instead insert
+editable in-band text into Message; desktop messages leave their corresponding
+packet metadata empty and the packet repeat flag off. See the
+[desktop compose behavior](../README.md#desktop-console).
+
 The digest/MAC covers the canonical variable systematic bootstrap followed
 by the logical metadata and encoded payload. It excludes the tag itself,
 training, parity and symbol pad bits. A keyed receiver rejects unkeyed packets;

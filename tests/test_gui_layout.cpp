@@ -21,6 +21,7 @@ void established_default() {
     check(layout[Slot::tabs] == Rect{16, 94, 1148, 656}, "tab viewport moved");
     check(layout[Slot::page] == Rect{16, 126, 1148, 624}, "page viewport moved");
     check(layout[Slot::message] == Rect{16, 152, 704, 196}, "message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{480, 130, 240, 20}, "previous-message button moved");
     check(layout[Slot::binary] == Rect{734, 152, 220, 196}, "binary editor moved");
     check(layout[Slot::qr] == Rect{968, 152, 196, 196}, "QR preview moved");
     check(layout[Slot::signals] == Rect{16, 412, 882, 156}, "received signals size changed");
@@ -59,6 +60,12 @@ void supported_sizes() {
               "composition row is misaligned");
         check(binary.x == message.x + message.w + 14 && qr.x == binary.x + binary.w + 14 &&
               qr.x + qr.w == size.w - margin, "composition gaps changed");
+        const auto message_label = layout[Slot::message_label], previous_message = layout[Slot::paste_previous];
+        check(message_label.w >= 300 && message_label.x == message.x &&
+              message_label.x + message_label.w + 8 == previous_message.x &&
+              previous_message.x + previous_message.w == message.x + message.w &&
+              message_label.y == previous_message.y && previous_message.y + previous_message.h <= message.y,
+              "previous-message action overlaps the heading or editor");
         const auto signals = layout[Slot::signals], files = layout[Slot::files], save = layout[Slot::save_file];
         check(signals.y == files.y && files.x == signals.x + signals.w + 14 &&
               files.x == save.x && files.w == save.w && save.y == files.y + files.h + 7 &&
@@ -89,7 +96,7 @@ void adapter_helpers() {
     check(rect.label_above() == Rect{10, 4, 100, 16}, "native field label geometry changed");
     check(rect.without_footer() == Rect{10, 20, 100, 56}, "compact action footer reservation changed");
     check(rect.without_footer(100).h == 0, "footer reservation produced negative content height");
-    check(!persistent_slot(Slot::none) && !persistent_slot(Slot::message) &&
+    check(!persistent_slot(Slot::none) && !persistent_slot(Slot::message) && !persistent_slot(Slot::paste_previous) &&
           !persistent_slot(Slot::tabs) && persistent_slot(Slot::callsign) &&
           persistent_slot(Slot::key_actions) && persistent_slot(Slot::status),
           "page membership changed");

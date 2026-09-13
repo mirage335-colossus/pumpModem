@@ -187,6 +187,25 @@ limited to 128 meaningful bits, with optional whitespace between groups. While
 an attachment is selected, both message draft views are inactive; Use text
 restores the synchronized draft.
 
+**Callsign** and **Grid** are convenience fields for the editable greeting in
+Message. Clearing Message inserts `CQ CQ CQ`, followed by ` DE ` and Callsign
+when present, ` GRID ` and Grid when present, then `. Please reply. ` including
+the final space. For example, Callsign `N0CALL` and Grid `AA00aa` produce
+`CQ CQ CQ DE N0CALL GRID AA00aa. Please reply. `. With both fields empty, no CQ
+greeting is inserted. These values are transmitted only as the visible message
+text; they do not set separate packet metadata.
+
+**Repeatable** adds `REPEATABLE ` before that greeting or before your message
+when no greeting is present. It turns off automatically for an attachment or
+when the message exceeds 256 payload bytes, including UTF-8 and greeting bytes.
+With all three convenience fields empty or off, no text or spaces are inserted.
+When a text transmission starts, Message clears to the current convenience text
+and **Previous message - click to paste** becomes available to restore the exact
+previous message for editing or retransmission. Pasting turns the Repeatable
+checkbox off; any restored `REPEATABLE ` marker remains ordinary editable text.
+The new draft remains available while transmission runs. The CLI and packet API
+retain their existing explicit metadata options and wire format.
+
 Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
@@ -324,7 +343,7 @@ searches from the receiver's epoch using `--search-seconds`; an encrypted transm
 outside that finite window fails reception. Shared modem settings and keys remain
 receiver configuration, independent of waveform synchronization.
 
-Repeatable eligibility is at most two seconds of incremental encoded content
+CLI repeatable eligibility is at most two seconds of incremental encoded content
 airtime, excluding preamble and fixed framing, with a minimum one-byte allowance.
 There is no 64KiB eligibility rule. This allowance does not override memory limits
 or establish that a setting can decode a particular channel.

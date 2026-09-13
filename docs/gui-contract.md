@@ -114,6 +114,11 @@ quality and message text; files and unverified prefixes are not copyable as text
 - Applying state is silent and preserves unchanged native widgets, focus, text
   cursor/selection, scroll and record identities. Removing or reordering records
   never transfers focus to a different record merely because it took an index.
+  An explicit `FieldState::text_cursor_end_revision` increment collapses the
+  editor selection at the text end without changing focus or emitting an edit.
+  Each native editor consumes the revision once, even if text is unchanged;
+  repeated presentation preserves subsequent user cursor movements. Zero does
+  not request cursor movement.
 - Selection uses IDs, never labels or native menu indices. Disabled entries
   cannot be newly selected. The controller chooses defaults and invalidation
   behavior; a native widget must not silently select the first entry.

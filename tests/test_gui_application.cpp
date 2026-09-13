@@ -234,7 +234,7 @@ void stale_page_input() {
     // Persistent declarations deliberately remain interactive on every page.
     editor.persistent=choice.persistent=toggle.persistent=action.persistent=true;
     app.edit(editor,"persistent text");app.toggle(toggle,!original_toggle);app.select(choice,"ctrl-enter");app.activate(action);
-    check(app.field(editor.field).text=="persistent text"&&app.field(toggle.field).checked!=original_toggle&&
+    check(app.field(editor.field).text=="REPEATABLE persistent text"&&app.field(toggle.field).checked!=original_toggle&&
           app.field(choice.field).selected=="ctrl-enter"&&app.take_services().size()==1,
           "Persistent controls lost input while another page was selected");
 }
@@ -274,12 +274,21 @@ void menu_groups() {
 void declarations() {
     std::set<ui::Page> ids;
     for(const auto& p:ui::pages())check(ids.insert(p.id).second,"Duplicate page identity");
+    unsigned previous_actions=0;
     for(const auto& c:ui::console_screen()) {
         check(ids.contains(c.page),"Control belongs to an undeclared page");
         const auto rect=ui::control_layout(c,{},ui::min_width,ui::min_height);
         check(rect.frame.w>0&&rect.frame.h>0,"Declaration has no usable shared placement");
         check(rect.frame.x>=0&&rect.frame.y>=0&&rect.frame.x+rect.frame.w<=ui::min_width&&rect.frame.y+rect.frame.h<=ui::min_height,"Control escaped minimum desktop");
+        if(c.command==ui::Command::paste_previous) {
+            ++previous_actions;
+            check(c.kind==ui::Kind::action&&c.slot==ui::Slot::paste_previous&&c.page==ui::Page::console&&!c.persistent,
+                  "Previous-message action is missing its shared console binding");
+            check(std::string_view(c.label)=="Previous message - click to paste"&&std::string_view(c.help).find("previous transmitted message")!=std::string_view::npos,
+                  "Previous-message declaration lost its label or help");
+        }
     }
+    check(previous_actions==1,"Console must declare exactly one previous-message action");
     // A new ordinary binding uses the generic row fallback: no slot/adapter
     // switch is necessary, and declaration order controls its placement.
     std::vector<ui::Control> extension{
