@@ -3,6 +3,7 @@
 #include "bitmap_sources.hpp"
 #include "gui_smoke.hpp"
 #include "inspection_page.hpp"
+#include "text_policy.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <chrono>
@@ -70,9 +71,49 @@ int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
 void Application::close() { impl_->controller.close(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) { impl_->controller.edit(field,std::move(text)); }
+void Application::edit(const ui::Control& declaration,std::string text) {
+    const auto view=control(declaration);
+    if(declaration.field==ui::Field::count||!view.enabled||!view.visible)return;
+    if(const auto problem=ui::edit_error(declaration,text);!problem.empty()) {report_error(problem);return;}
+    edit(declaration.field,std::move(text));
+}
+void Application::preset(const ui::Control& declaration,const std::string& id) {
+    const auto& options=control(declaration).state.options;
+    const auto found=std::find_if(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
+    if(found!=options.end())edit(declaration,found->id);
+}
 void Application::select(ui::Field field,std::string id) { impl_->controller.select(field,std::move(id)); }
 void Application::toggle(ui::Field field,bool value) { impl_->controller.toggle(field,value); }
 void Application::activate(ui::Command command) { impl_->controller.activate(command); }
+void Application::activate(const ui::Control& declaration) {
+    const auto view=control(declaration);
+    if(view.enabled&&view.visible)activate(declaration.command);
+}
+ControlPresentation Application::control(const ui::Control& declaration) const {
+    static const ui::FieldState empty;
+    const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
+    ControlPresentation view{state,declaration.label,state.enabled,state.visible};
+    if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count)view.label=state.text;
+    if(declaration.kind==ui::Kind::action) {
+        const auto current=command_label(declaration.command);
+        if(!current.empty())view.label=current;
+        view.enabled=view.enabled&&enabled(declaration.command);
+    }
+    return view;
+}
+MenuPresentation Application::menu(std::span<const ui::Control* const> items) const {
+    MenuPresentation view;
+    for(std::size_t i=0;i<items.size();++i) {
+        const auto item=control(*items[i]);
+        if(!item.visible)continue;
+        view.visible=true;view.enabled=view.enabled||item.enabled;
+        view.options.push_back({std::to_string(i),item.label,item.enabled});
+    }
+    return view;
+}
+void Application::select_menu(std::span<const ui::Control* const> items,const std::string& id) {
+    for(std::size_t i=0;i<items.size();++i)if(id==std::to_string(i)) {activate(*items[i]);return;}
+}
 const ui::FieldState& Application::field(ui::Field field) const { return impl_->controller.field(field); }
 bool Application::enabled(ui::Command command) const { return impl_->controller.enabled(command); }
 std::string Application::command_label(ui::Command command) const { return impl_->controller.command_label(command); }

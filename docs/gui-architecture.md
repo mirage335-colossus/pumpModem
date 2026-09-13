@@ -14,15 +14,18 @@ removed.
 | `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
+| `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
 | `document_layout.hpp` | Document flow, remaining widths, margins, padding, clipping and nested equal heights; adapters supply native glyph measurements only. |
-| `control_interactions.hpp`, `text_policy.hpp`, `utf8_policy.hpp` | Pointer/record double-click identity, wheel command repetition and atomic UTF-8 edit policy. |
+| `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
+| `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 edit policy and declaration-specific byte limits. |
+| `theme.hpp`, `presentation_palette.hpp` | Shared RGB values and semantic text/document tone and fill resolution. |
 | `screen_console.cpp` | Page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
 | `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry and label/editor/preset/caption placement in logical units. |
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
 | `bitmap_sources.hpp`, `plot_render.cpp` | Shared snapshots, captions, error overlays, invalidation and pixel producers. |
-| `application.cpp` | Launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
+| `application.cpp` | Control/menu presentation and dispatch, validated edits/presets, launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
 | `gui_smoke.cpp` | The same application workflow checks for both native backends and the headless harness. |
 
 `backend_fltk.cpp` and `backend_rev.cpp` iterate the same control/page definitions
@@ -31,6 +34,10 @@ renderers consume `ui::DocumentNode` without knowing what an inspection model is
 Adapters call `Application` through fields, commands, service messages and
 presentation snapshots; no public controller or bitmap-producer access is
 available.
+`Application::control()` resolves bound labels and availability;
+`Application::menu()` filters hidden entries and preserves their declaration IDs.
+Menu selection, action activation and presets return through shared dispatch,
+which rechecks eligibility and applies the control's edit constraints.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
@@ -67,10 +74,20 @@ never switch on a particular application field, command, bitmap or page. A
 Choice's optional `display_text` reports an effective value without changing its
 saved selected ID, for example FEC being off for binary or tiny input. Key labels
 are literal UTF-8; FLTK-specific escaping stays in its menu adapter.
+`control_binding.hpp` groups a menu only with declarations in the same scope and
+with the same `instance`: ordinary menus belong to a page, while persistent
+menus share one scope regardless of their declarations' page values. Layout uses
+the same grouping, so additional menu entries do not allocate another widget or
+consume row space. Reusing a menu ID on another page or instance needs no adapter
+special case.
 
 The application polls reception and captures plot history at 25 Hz while native
-state/plot presentation runs at 10 Hz. Native input can repaint immediately. Pointer double-click timing and wheel
-command repetition use the same shared policy in both adapters.
+state/plot presentation runs at 10 Hz. Native input can repaint immediately.
+Pointer double-click timing, wheel command repetition and record keyboard
+selection/activation use shared policy. Adapters translate keys and pointer
+coordinates, then focus and reveal the returned native row. Text tones for
+records, captions and documents, along with document fills, resolve to RGB in
+`presentation_palette.hpp`; native code only converts those values for drawing.
 Both use immutable document and bitmap identities so unchanged polling does not
 rebuild text trees or upload textures. Moving between pages and resizing cannot
 restart reception. File/prompt/clipboard services use request IDs and deferred
@@ -82,19 +99,25 @@ results; a pending Save retains its bytes independently of inbox changes.
 header dependencies against the public contract/native helper boundary. It
 rejects domain headers, application-ID decisions in native adapters, toolkit
 headers in the public contract, native calls from shared feature code, and
-obsolete parallel GUI sources. Its regression
-suite deliberately introduces a domain include through a helper, a new adapter
-with an application command, and a toolkit dependency in the public interface;
-all must be rejected. `gui_contract` separately compiles the public interface
+obsolete parallel GUI sources. Generic public helpers are checked for hidden
+application-ID decisions too. Its regression suite introduces domain includes,
+field/command/menu references, aliases and `using enum` imports, whitespace-split
+references, and toolkit dependencies in public or shared feature code; each
+forbidden dependency must be rejected. Legal sentinel aliases remain accepted.
+`gui_contract` separately compiles the public interface
 without modem or toolkit include/link dependencies and checks that controller,
-producer and model access are unavailable.
+producer and model access are unavailable, along with shared tone/fill values.
 
 `tests/gui_extension_fixture.hpp` and `tests/document_geometry_fixture.hpp` supply
 ordinary extensions unchanged to both native suites. They exercise added
-controls/actions, multiline presets, effective choice labels, generic gestures,
+controls/actions, multiline presets with byte limits, filtered menus with
+separate page/instance scopes, effective choice labels, generic gestures,
 record cells, relative document widths/margins, wrapped actions and opaque bitmap
 rectangles with padded strides and multiple formats. `gui_document_layout` and
-`gui_interactions` test geometry and event policy without a toolkit. Native tests
+`gui_interactions` test geometry and event policy without a toolkit, including
+record arrow navigation, disabled rows, Space/Enter, double-click identity and
+activation-on-selection. `gui_application` covers control/menu presentation,
+dispatch, preset validation and persistent menu grouping. Native tests
 verify that those descriptions reach real widgets and dispatch callbacks.
 Rev also checks rendered pixels when leaving deeply nested clips, so later
 document siblings and persistent controls remain visible while overflow stays

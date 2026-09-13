@@ -1,5 +1,6 @@
 #include "application.hpp"
 #include "record_presentations.hpp"
+#include <array>
 #include <iostream>
 #include <set>
 #include <thread>
@@ -57,6 +58,126 @@ void presentation() {
     app.edit(ui::Field::message,"Good");refresh();
     check(app.bitmap(qr).caption.empty()&&app.bitmap(qr).revision>before.revision,"Recovered QR retained an error or stale pixels");
 }
+void control_bindings() {
+    Application app({.simulation=true});
+    ui::Control label{ui::Kind::label};label.label="Literal extension label";
+    check(app.control(label).label==label.label,"Unbound label lost its declaration text");
+    label.field=ui::Field::status;app.report_error("Shared status text");
+    const auto status=app.control(label);
+    check(status.label=="Shared status text" && &status.state==&app.field(ui::Field::status),"Bound label lost authoritative shared field state");
+
+    ui::Control action{ui::Kind::action};action.command=ui::Command::clear_received;action.label="Declared clear action";
+    check(app.control(action).label==action.label&&app.control(action).enabled,"Action lost its fallback label or command availability");
+    action.command=ui::Command::cancel;action.label="Stale cancel label";
+    check(app.control(action).label=="Cancel TX"&&!app.control(action).enabled,"Action did not use the command's current label and eligibility");
+    action.command=ui::Command::clear_received;action.field=ui::Field::binary;
+    check(app.enabled(action.command)&&!app.control(action).enabled&&app.control(action).visible,"Disabled field did not restrict an otherwise enabled action");
+    app.activate(action);
+    check(app.field(ui::Field::status).text=="Shared status text","Disabled bound action still dispatched its command");
+    action.field=ui::Field::payload_alphabet;
+    check(!app.control(action).visible,"Hidden field did not hide its bound action");
+    app.activate(action);
+    check(app.field(ui::Field::status).text=="Shared status text","Hidden bound action still dispatched its command");
+    action.field=ui::Field::message;app.activate(action);
+    check(app.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Eligible bound action did not dispatch its command");
+}
+void menu_bindings() {
+    Application app({.simulation=true});
+    std::vector<ui::Control> declarations{
+        {ui::Kind::action,ui::Field::payload_alphabet,ui::Command::open_keyfile},
+        {ui::Kind::action,ui::Field::binary,ui::Command::open_keyfile},
+        {ui::Kind::action,ui::Field::count,ui::Command::clear_received},
+        {ui::Kind::action,ui::Field::count,ui::Command::cancel}
+    };
+    declarations[0].label="Hidden key action";declarations[1].label="Disabled key action";
+    declarations[2].label="Visible clear action";declarations[3].label="Stale cancel action";
+    std::vector<const ui::Control*> items;for(const auto& declaration:declarations)items.push_back(&declaration);
+    const auto menu=app.menu(items);
+    check(menu.visible&&menu.enabled&&menu.options.size()==3,"Menu did not aggregate visible and eligible items independently");
+    check(menu.options[0].id=="1"&&menu.options[1].id=="2"&&menu.options[2].id=="3","Filtering hidden menu items reassigned declaration identities");
+    check(!menu.options[0].enabled&&menu.options[1].enabled&&!menu.options[2].enabled,"Menu ignored field or command eligibility on individual items");
+    check(menu.options[1].label==declarations[2].label&&menu.options[2].label=="Cancel TX","Menu labels diverged from shared control presentation");
+
+    app.report_error("Menu selection unchanged");
+    for(const auto* id:{"0","1","3","02","-1","unknown"})app.select_menu(items,id);
+    check(app.take_services().empty()&&app.field(ui::Field::status).text=="Menu selection unchanged","Hidden, disabled or unknown menu ID dispatched an action");
+    app.select_menu(items,menu.options[1].id);
+    check(app.field(ui::Field::status).text.find("cleared")!=std::string::npos&&app.take_services().empty(),"Filtered menu ID dispatched a different declaration's command");
+
+    const auto hidden=app.menu(std::span<const ui::Control* const>(items.data(),1));
+    check(!hidden.visible&&!hidden.enabled&&hidden.options.empty(),"Entirely hidden menu retained a visible or enabled native target");
+    const auto disabled=app.menu(std::span<const ui::Control* const>(items.data()+1,1));
+    check(disabled.visible&&!disabled.enabled&&disabled.options.size()==1,"Entirely disabled menu lost visibility or remained enabled");
+    const auto empty=app.menu({});
+    check(!empty.visible&&!empty.enabled&&empty.options.empty(),"Empty menu acquired a native target");
+
+    app.select(ui::Field::source,"binary");
+    const auto changed=app.menu(items);
+    check(changed.options[0].id=="1"&&changed.options[0].enabled,"Menu retained stale item eligibility after shared state changed");
+    app.select_menu(items,"1");const auto requests=app.take_services();
+    check(requests.size()==1&&requests[0].kind==ui::ServiceKind::open_file,"Newly enabled menu item did not reach the shared service workflow");
+}
+void declared_edits() {
+    Application app({.simulation=true});
+    auto editor=control(ui::Field::message);editor.multiline=false;editor.byte_limit=5;
+    app.edit(editor,"valid");check(app.field(editor.field).text=="valid","Declared ordinary edit did not reach the shared field");
+    app.edit(editor,"longer");
+    check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text.find("byte limit")!=std::string::npos,"Declared byte limit was bypassed by an ordinary edit");
+    app.edit(editor,"a\nb");
+    check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text.find("one line")!=std::string::npos,"Declared single-line policy was bypassed by an ordinary edit");
+    app.edit(editor,std::string("\xc3",1));
+    check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text.find("UTF-8")!=std::string::npos,"Declared edit accepted invalid UTF-8");
+
+    auto preset=control(ui::Field::bandwidth);preset.byte_limit=4;
+    const auto original=app.field(preset.field).text;app.preset(preset,"100 Hz");
+    check(app.field(preset.field).text==original&&app.field(ui::Field::status).text.find("byte limit")!=std::string::npos,"Preset bypassed its declaration's byte limit");
+    app.preset(preset,"1 Hz");
+    check(app.field(preset.field).text=="1 Hz","Allowed preset did not use the ordinary edit path");
+    const auto revision=app.revision();app.report_error("Preset unchanged");app.preset(preset,"2 Hz");
+    check(app.field(preset.field).text=="1 Hz"&&app.revision()==revision&&app.field(ui::Field::status).text=="Preset unchanged","Unknown preset ID changed the field or attempted an edit");
+    auto disabled_preset=control(ui::Field::pattern);app.preset(disabled_preset,"auto-keystream");
+    check(app.field(disabled_preset.field).selected=="auto-pattern"&&app.field(ui::Field::status).text=="Preset unchanged","Disabled preset attempted to edit its bound field");
+
+    app.select(ui::Field::source,"binary");app.report_error("Inactive edit unchanged");app.edit(editor,"other");
+    check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text=="Inactive edit unchanged","Disabled declaration attempted an edit");
+    editor.field=ui::Field::payload_alphabet;const auto hidden_text=app.field(editor.field).text;app.edit(editor,"other");
+    check(app.field(editor.field).text==hidden_text&&app.field(ui::Field::status).text=="Inactive edit unchanged","Hidden declaration attempted an edit");
+    editor.field=ui::Field::count;app.edit(editor,"other");
+    check(app.field(ui::Field::status).text=="Inactive edit unchanged","Unbound declaration attempted an edit");
+}
+void menu_groups() {
+    std::vector<ui::Control> controls(8,ui::Control{ui::Kind::action});
+    for(auto& c:controls)c.menu=ui::Menu::keyfile;
+    controls[2].page=ui::Page::flow;
+    controls[3].instance=17;
+    controls[4].persistent=controls[5].persistent=true;controls[5].page=ui::Page::flow;
+    controls[6].menu=ui::Menu::none;
+    controls[7].persistent=true;controls[7].page=ui::Page::flow;controls[7].instance=17;
+    const auto groups=ui::control_groups(controls);
+    check(groups.size()==6&&groups[0].control==&controls[0]&&groups[1].control==&controls[2]&&groups[2].control==&controls[3],"Menu grouping merged different pages/instances or changed declaration order");
+    check(groups[0].menu_items==std::vector<const ui::Control*>{&controls[0],&controls[1]},"Same-scope menu items did not share one native control");
+    check(groups[3].control==&controls[4]&&groups[3].menu_items==std::vector<const ui::Control*>{&controls[4],&controls[5]},"Persistent menu did not group across its declarations' page values");
+    check(groups[4].control==&controls[6]&&groups[4].menu_items.empty()&&groups[5].control==&controls[7],"Ordinary control or separate persistent instance disappeared into a menu");
+
+    std::vector<ui::Control> row{
+        {ui::Kind::action,ui::Field::count,ui::Command::open_keyfile,ui::Bitmap::none,ui::Page::console,0,"Menu",2},
+        {ui::Kind::action,ui::Field::count,ui::Command::generate_keyfile,ui::Bitmap::none,ui::Page::console,0,"Menu item",99},
+        {ui::Kind::label,ui::Field::count,ui::Command::none,ui::Bitmap::none,ui::Page::console,0,"Neighbor",1},
+        {ui::Kind::action,ui::Field::count,ui::Command::open_keyfile,ui::Bitmap::none,ui::Page::console,0,"Another menu",3},
+        {ui::Kind::action,ui::Field::count,ui::Command::generate_keyfile,ui::Bitmap::none,ui::Page::console,0,"Another item",77}
+    };
+    for(const auto index:{0,1,3,4})row[index].menu=ui::Menu::keyfile;
+    row[3].instance=row[4].instance=1;
+    const std::vector<ui::Control> collapsed{row[0],row[2],row[3]};
+    for(std::size_t i=0;i<collapsed.size();++i) {
+        const auto index=std::array<std::size_t,3>{0,2,3}[i];
+        check(ui::control_layout(row[index],{},1180,866,row).frame==ui::control_layout(collapsed[i],{},1180,866,collapsed).frame,"Invisible menu continuation changed ordered row positions or stretch allocation");
+    }
+    const auto first=ui::control_layout(row[0],{},1180,866,row).frame;
+    const auto neighbor=ui::control_layout(row[2],{},1180,866,row).frame;
+    const auto last=ui::control_layout(row[3],{},1180,866,row).frame;
+    check(first.x+first.w<neighbor.x&&neighbor.x+neighbor.w<last.x&&first.w>neighbor.w&&last.w>first.w,"Unslotted menus lost their order or distinct stretch weights");
+}
 void declarations() {
     std::set<ui::Page> ids;
     for(const auto& p:ui::pages())check(ids.insert(p.id).second,"Duplicate page identity");
@@ -77,6 +198,6 @@ void declarations() {
 }
 }
 int main() {
-    try {records();presentation();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();menu_bindings();declared_edits();menu_groups();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

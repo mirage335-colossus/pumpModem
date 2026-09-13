@@ -1,5 +1,5 @@
 #pragma once
-#include "ui_contract.hpp"
+#include "control_binding.hpp"
 #include <span>
 
 namespace datapump::gui::ui {
@@ -17,9 +17,11 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
     out.frame=desktop[c.slot];
     if(c.slot==Slot::none) {
         unsigned total=0,before=0;bool found=false;
-        for(const auto& sibling:controls)if(sibling.page==c.page&&sibling.row==c.row&&sibling.slot==Slot::none) {
+        for(std::size_t i=0;i<controls.size();++i) {
+            const auto& sibling=controls[i];
+            if(sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
             total+=sibling.stretch;
-            if(&sibling==&c || (sibling.kind==c.kind&&sibling.field==c.field&&sibling.command==c.command&&
+            if(&sibling==&c || same_menu(sibling,c) || (sibling.kind==c.kind&&sibling.field==c.field&&sibling.command==c.command&&
                sibling.bitmap==c.bitmap&&sibling.instance==c.instance))found=true;
             else if(!found)before+=sibling.stretch;
         }

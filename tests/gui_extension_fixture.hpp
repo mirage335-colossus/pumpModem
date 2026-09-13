@@ -18,6 +18,14 @@ inline const std::vector<ui::Control>& extension_controls() {
         controls[0].click=ui::Command::clear_received;controls[0].double_click=ui::Command::reset_zoom;
         controls[0].wheel_up=ui::Command::zoom_in;controls[0].wheel_down=ui::Command::zoom_out;
         controls[2].instance=19;controls[2].font_size=17;
+        auto limited=controls[2];limited.instance=20;limited.row=3;limited.label="Limited presets";limited.byte_limit=1;
+        controls.push_back(limited);
+        ui::Control menu{ui::Kind::action,ui::Field::payload_alphabet,ui::Command::clear_received};
+        menu.row=4;menu.menu=ui::Menu::keyfile;menu.menu_label="Scoped menu";menu.label="Hidden menu entry";
+        controls.push_back(menu);
+        menu.field=ui::Field::count;menu.label="Clear from shared menu";controls.push_back(menu);
+        menu.page=ui::Page::flow;menu.menu_label="Other page menu";controls.push_back(menu);
+        menu.page=ui::Page::console;menu.instance=21;menu.menu_label="Other instance menu";controls.push_back(menu);
         return controls;
     }();
     return values;

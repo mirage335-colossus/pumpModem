@@ -81,6 +81,10 @@
         state.records.erase(state.records.begin());probe->apply(state);
         if(probe->rows.contains(inactive_id)||probe->rows.at(active_id).button!=retained||!retained->targetFlags.focus)
             throw std::runtime_error("Rev smoke: record removal changed another record's focus");
+        click.keyboard.space.id=1;retained->click(click);click.keyboard.space.id=-1;
+        if(selections!=3||activations!=2)throw std::runtime_error("Rev smoke: Space did not apply shared activate-on-select policy");
+        click.keyboard.enter.id=1;retained->click(click);click.keyboard.enter.id=-1;
+        if(selections!=4||activations!=3)throw std::runtime_error("Rev smoke: Enter duplicated activate-on-select activation");
         delete probe;
         declaration.activate_on_select=false;probe=new ListView(this,declaration,launch.color);
         selections=activations=0;probe->select=[&](std::string){++selections;};probe->activate=[&](std::string){++activations;};
@@ -91,6 +95,12 @@
         if(selections!=2||activations!=1)throw std::runtime_error("Rev smoke: Enter did not activate a selected record");
         retained->click(click);retained->click(click);
         if(selections!=4||activations!=2)throw std::runtime_error("Rev smoke: double-click did not activate a record");
+        click.keyboard.space.id=1;retained->click(click);click.keyboard.space.id=-1;
+        if(selections!=5||activations!=2)throw std::runtime_error("Rev smoke: Space bypassed separate record activation policy");
+        state=test::extension_records();state.enabled=false;probe->apply(state);
+        retained->click(click);click.keyboard.enter.id=1;retained->click(click);click.keyboard.enter.id=-1;
+        if(probe->navigate(retained,1)||selections!=5||activations!=2)
+            throw std::runtime_error("Rev smoke: disabled list permitted shared pointer or keyboard selection");
         delete probe;
         const auto paint=[&]{refresh(event);for(unsigned frame=0;frame<4;++frame){Rev::NativeWindow::pumpEvents();std::this_thread::sleep_for(std::chrono::milliseconds(4));}};
         declaration.follow_tail=true;declaration.activate_on_select=true;
@@ -129,7 +139,7 @@
     void verify_extension_contract() {
         verify_document_clipping();
         const auto& fixture=test::extension_controls();
-        if(bindings.size()!=fixture.size()||!bindings[0].label||bindings[0].label->content.get()!=fixture[0].label||!bindings[1].button)
+        if(bindings.size()!=ui::control_groups(fixture).size()||!bindings[0].label||bindings[0].label->content.get()!=fixture[0].label||!bindings[1].button)
             throw std::runtime_error("Rev smoke: declarative extension was not materialized literally");
         if(bindings[1].button->labelText->content.get()!=fixture[1].label||!bindings[3].toggle||bindings[3].toggle->label->content.get()!=fixture[3].label)
             throw std::runtime_error("Rev smoke: action/toggle literal labels were changed by the native factory");
@@ -154,6 +164,18 @@
         const auto preset=application.field(fixture[2].field).options[1].id;
         presets->params.value=preset;presets->onChange(click);
         if(application.field(fixture[2].field).text!=preset)throw std::runtime_error("Rev smoke: multiline preset did not dispatch an ordinary shared edit");
+        const auto original=application.field(fixture[2].field).text;
+        auto* limited=bindings[4].suggestions;limited->params.value=preset;limited->onChange(click);
+        if(application.field(fixture[2].field).text!=original||application.field(ui::Field::status).text.find("byte")==std::string::npos)
+            throw std::runtime_error("Rev smoke: native preset bypassed shared control validation");
+        auto& menu=bindings[5];
+        if(!menu.menu||menu.element->style->visibility==Visibility::Hidden||menu.element->targetFlags.disabled||
+           menu.menu->params.options.size()!=1||menu.menu->params.options[0].name!="Clear from shared menu")
+            throw std::runtime_error("Rev smoke: hidden leading menu item changed the visible shared menu");
+        if(!bindings[6].menu||!bindings[7].menu)throw std::runtime_error("Rev smoke: menus from distinct shared scopes were merged");
+        menu.menu->params.value=menu.menu->params.options[0].value;menu.menu->onChange(click);
+        if(application.field(ui::Field::status).text.find("cleared")==std::string::npos)
+            throw std::runtime_error("Rev smoke: filtered native menu dispatched the wrong shared entry");
         auto document=std::make_shared<const ui::DocumentNode>(test::extension_document());
         auto* document_parent=new re::Box(this);place(document_parent,{0,0,600,800});
         auto* view=new RevDocumentView(document_parent,launch.color,

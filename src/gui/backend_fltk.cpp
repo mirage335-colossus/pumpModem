@@ -4,6 +4,7 @@
 #include "theme_fltk.hpp"
 #include "text_policy.hpp"
 #include "control_interactions.hpp"
+#include "record_interactions.hpp"
 #include <stdexcept>
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
@@ -251,12 +252,7 @@ public:
 };
 
 Fl_Color text_color(ui::TextTone tone) {
-    switch(tone) {
-    case ui::TextTone::muted:return theme::fltk_color(theme::muted);
-    case ui::TextTone::data:return theme::data_color();
-    case ui::TextTone::inverse:return FL_BLACK;
-    default:return theme::text_color();
-    }
+    return theme::fltk_color(theme::text_rgb(tone,theme::color_enabled));
 }
 class NativeLiteralText : public Fl_Box {
 public:
@@ -290,21 +286,21 @@ class NativeRecords : public Fl_Scroll {
             redraw();Fl_Group::current(previous_group);
         }
         int handle(int event) override {
-            if(event==FL_PUSH&&Fl::event_button()==FL_LEFT_MOUSE&&record.enabled) {
-                owner.take_focus();owner.choose(record.id);
-                const bool twice=owner.clicks_.press(static_cast<float>(Fl::event_x()),static_cast<float>(Fl::event_y()),record.id);
-                if(twice&&!owner.control_.activate_on_select&&record.activatable&&owner.activated)owner.activated(record.id);
+            if(event==FL_PUSH&&Fl::event_button()==FL_LEFT_MOUSE&&active_r()) {
+                const auto action=owner.interactions_.pointer(record.id,static_cast<float>(Fl::event_x()),static_cast<float>(Fl::event_y()));
+                if(action) {owner.take_focus();owner.dispatch(action);}
                 return 1;
             }
             return Fl_Group::handle(event);
         }
     };
 public:
-    explicit NativeRecords(const ui::Control& control):Fl_Scroll(0,0,1,1),control_(control) {
+    explicit NativeRecords(const ui::Control& control):Fl_Scroll(0,0,1,1),control_(control),interactions_(control.activate_on_select) {
         type(Fl_Scroll::BOTH);box(FL_DOWN_BOX);end();
     }
     std::function<void(std::string)> selected,activated;
     void apply(const ui::FieldState& state) {
+        interactions_.apply(state);
         if(records_==state.records&&selected_==state.selected)return;
         auto* previous_group=Fl_Group::current();
         const int old_scroll=yposition();
@@ -327,22 +323,17 @@ public:
     }
     int handle(int event) override {
         if(event==FL_FOCUS||event==FL_UNFOCUS) {redraw();return 1;}
-        if(event==FL_KEYDOWN&&!records_.empty()) {
-            clicks_.reset();
-            auto found=std::find_if(records_.begin(),records_.end(),[&](const auto& item){return item.id==selected_;});
-            if(Fl::event_key()==FL_Enter||Fl::event_key()==FL_KP_Enter) {
-                if(found!=records_.end()&&found->enabled&&found->activatable&&activated)activated(found->id);
-                return 1;
-            }
-            if(Fl::event_key()==FL_Up||Fl::event_key()==FL_Down) {
-                auto index=found==records_.end()?0:static_cast<int>(found-records_.begin());
-                const int delta=Fl::event_key()==FL_Up?-1:1;
-                if(found!=records_.end())index+=delta;
-                for(;index>=0&&index<static_cast<int>(records_.size());index+=delta)if(records_[static_cast<std::size_t>(index)].enabled) {
-                    choose(records_[static_cast<std::size_t>(index)].id);
-                    const int top=index*control_.list_row_height;
+        if(event==FL_KEYDOWN&&active_r()) {
+            std::optional<ui::RecordKey> key;
+            if(Fl::event_key()==FL_Enter||Fl::event_key()==FL_KP_Enter)key=ui::RecordKey::enter;
+            else if(Fl::event_key()==' ')key=ui::RecordKey::space;
+            else if(Fl::event_key()==FL_Up)key=ui::RecordKey::up;
+            else if(Fl::event_key()==FL_Down)key=ui::RecordKey::down;
+            if(key) {
+                const auto action=interactions_.key(selected_,*key);
+                if(dispatch(action)) {
+                    const int top=static_cast<int>(action.index)*control_.list_row_height;
                     if(top<yposition())scroll_to(xposition(),top);else if(top+control_.list_row_height>yposition()+h())scroll_to(xposition(),top+control_.list_row_height-h());
-                    break;
                 }
                 return 1;
             }
@@ -351,15 +342,16 @@ public:
     }
 private:
     ui::Control control_;
-    ui::PointerClicks clicks_;
+    ui::RecordInteractions interactions_;
     std::vector<ui::Record> records_;
     std::map<std::string,Row*> rows_;
     std::string selected_;
     int content_width_=0;
     int viewport_width() const {return std::max(1,w()-Fl::scrollbar_size()-2);}
     int maximum_scroll() const {return std::max(0,static_cast<int>(records_.size())*control_.list_row_height-h()+2+(content_width_>viewport_width()?Fl::scrollbar_size():0));}
-    void choose(const std::string& id) {
-        selected_=id;layout_rows();if(selected)selected(id);
+    bool dispatch(const ui::RecordInteraction& action) {
+        return action.dispatch([this](const auto& id){selected_=id;layout_rows();if(selected)selected(id);},
+            [this](const auto& id){if(activated)activated(id);});
     }
     void layout_rows() {
         const int width=viewport_width();content_width_=width;
@@ -534,26 +526,22 @@ private:
     static void label(Fl_Widget* widget,const std::string& value) {if(widget&&(!widget->label()||value!=widget->label()))widget->copy_label(value.c_str());}
     static void enabled(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->active())widget->activate();else if(!value&&widget->active())widget->deactivate();}}
     static void visible(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->visible())widget->show();else if(!value&&widget->visible())widget->hide();}}
-    std::string command_label(const ui::Control& control) const {
-        const auto value=application.command_label(control.command);return value.empty()?control.label:value;
-    }
     void create_controls(std::span<const ui::Control> controls) {
-        std::map<ui::Menu,Binding*> menus;
-        for(const auto& control:controls) {
-            if(control.menu!=ui::Menu::none&&menus.contains(control.menu)) {menus[control.menu]->menu_items.push_back(&control);continue;}
+        for(const auto& declaration:ui::control_groups(controls)) {
+            const auto& control=*declaration.control;
             auto binding=std::make_unique<Binding>();auto& b=*binding;b.control=&control;
             auto* parent=control.persistent?static_cast<Fl_Group*>(window.get()):pages.at(control.page).group;parent->begin();
             b.group=new NativeControlGroup(control);b.group->dispatch=[this](ui::Command command){application.activate(command);};b.group->begin();
             b.label=new NativeLiteralText;b.label->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);b.label->labelsize(control.font_size);
             if(control.menu!=ui::Menu::none) {
-                b.menu=new Fl_Menu_Button(0,0,1,1,control.menu_label);b.menu_items.push_back(&control);menus.emplace(control.menu,&b);
-                bind(*b.menu,[this,p=&b]{const int index=p->menu->value();if(index>=0&&static_cast<std::size_t>(index)<p->menu_items.size())application.activate(p->menu_items[static_cast<std::size_t>(index)]->command);});
+                b.menu=new Fl_Menu_Button(0,0,1,1,control.menu_label);b.menu_items=declaration.menu_items;
+                bind(*b.menu,[this,p=&b]{const int index=p->menu->value();if(index>=0&&static_cast<std::size_t>(index)<p->menu_options.size())application.select_menu(p->menu_items,p->menu_options[static_cast<std::size_t>(index)].id);});
             } else switch(control.kind) {
             case ui::Kind::label:break;
             case ui::Kind::text:
                 if(control.multiline) {
                     b.editor=new NativeEditor;b.editor->textsize(control.font_size);
-                    b.editor->changed=[this,field=control.field](std::string text){application.edit(field,std::move(text));};
+                    b.editor->changed=[this,c=&control](std::string text){application.edit(*c,std::move(text));};
                     b.editor->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
                     b.editor->validate=[c=&control](std::string_view text){return ui::edit_error(*c,text);};
                     b.editor->error=[this](std::string error){application.report_error(std::move(error));};
@@ -562,10 +550,10 @@ private:
                     b.input->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
                     b.input->validate=[c=&control](std::string_view text){return ui::edit_error(*c,text);};
                     b.input->error=[this](std::string error){application.report_error(std::move(error));};
-                    bind(*b.input,[this,p=&b]{application.edit(p->control->field,p->input->value());});
+                    bind(*b.input,[this,p=&b]{application.edit(*p->control,p->input->value());});
                 }
                 b.suggestions=new Fl_Menu_Button(0,0,1,1,"v");
-                bind(*b.suggestions,[this,p=&b]{const auto i=p->suggestions->value();if(i>=0&&static_cast<std::size_t>(i)<p->options.size())application.edit(p->control->field,p->options[static_cast<std::size_t>(i)].id);});
+                bind(*b.suggestions,[this,p=&b]{const auto i=p->suggestions->value();if(i>=0&&static_cast<std::size_t>(i)<p->options.size())application.preset(*p->control,p->options[static_cast<std::size_t>(i)].id);});
                 break;
             case ui::Kind::choice:
                 b.choice=new NativeChoice;b.choice->textsize(control.font_size);b.choice->when(FL_WHEN_RELEASE_ALWAYS);
@@ -575,10 +563,10 @@ private:
                 bind(*b.toggle,[this,p=&b]{application.toggle(p->control->field,p->toggle->value()!=0);});break;
             case ui::Kind::action:
                 b.button=new Fl_Button(0,0,1,1,control.label);
-                bind(*b.button,[this,command=control.command]{application.activate(command);});break;
+                bind(*b.button,[this,c=&control]{application.activate(*c);});break;
             case ui::Kind::list:
                 b.records=new NativeRecords(control);
-                b.records->selected=[this,c=&control](std::string id){application.select(c->field,id);if(c->activate_on_select)application.activate_record(*c,id);};
+                b.records->selected=[this,c=&control](std::string id){application.select(c->field,id);};
                 b.records->activated=[this,c=&control](std::string id){application.activate_record(*c,id);};break;
             case ui::Kind::bitmap:
                 b.bitmap=new NativeBitmap;b.caption=new NativeLiteralText;b.caption->labelsize(11);b.caption->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
@@ -635,10 +623,10 @@ private:
     void apply() {
         auto* previous_group=Fl_Group::current();
         for(auto& item:bindings) {
-            auto& b=*item;const auto& c=*b.control;const ui::FieldState empty;
-            const auto& state=c.field==ui::Field::count?empty:application.field(c.field);
-            visible(b.group,state.visible);enabled(b.group,state.enabled);
-            if(b.label)label(b.label,c.kind==ui::Kind::label?(c.field==ui::Field::count?c.label:state.text):c.label);
+            auto& b=*item;const auto& c=*b.control;
+            const auto view=application.control(c);const auto& state=view.state;
+            if(!b.menu) {visible(b.group,view.visible);enabled(b.group,view.enabled);}
+            if(b.label)label(b.label,view.label);
             if(b.input&&state.text!=b.input->value()) {
                 const auto position=b.input->insert_position(),mark=b.input->mark();b.input->value(state.text.c_str());
                 b.input->insert_position(std::min(position,b.input->size()),std::min(mark,b.input->size()));
@@ -651,10 +639,10 @@ private:
             if(b.choice)b.choice->apply_display(state.display_text);
             if(b.toggle)b.toggle->value(state.checked);
             if(b.records)b.records->apply(state);
-            if(b.button) {enabled(b.button,application.enabled(c.command));label(b.button,command_label(c));}
-            if(b.menu&&!Fl::grab()) {
-                std::vector<ui::Option> options;for(const auto* command:b.menu_items)options.push_back({std::to_string(static_cast<int>(command->command)),command_label(*command),application.enabled(command->command)});
-                if(!same_options(options,b.menu_options)) {b.menu_options=std::move(options);populate(*b.menu,b.menu_options);}
+            if(b.button) {enabled(b.button,view.enabled);label(b.button,view.label);}
+            if(b.menu) {
+                auto menu=application.menu(b.menu_items);visible(b.group,menu.visible);enabled(b.group,menu.enabled);
+                if(!Fl::grab()&&!same_options(menu.options,b.menu_options)) {b.menu_options=std::move(menu.options);populate(*b.menu,b.menu_options);}
             }
             if(b.bitmap) {
                 const auto presentation=application.bitmap(c,static_cast<unsigned>(std::max(1,widgets::bitmap_sample_extent(b.bitmap->x(),b.bitmap->w(),Fl::screen_scale(window->screen_num())))));

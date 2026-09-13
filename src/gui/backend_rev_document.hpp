@@ -1,7 +1,7 @@
 #pragma once
 // Include after the Rev Element/Box/Text/Button/Appearance module imports.
 #include "document_layout.hpp"
-#include "theme.hpp"
+#include "presentation_palette.hpp"
 #include <functional>
 #include <cmath>
 #include <map>
@@ -111,10 +111,9 @@ private:
     Item materialize(Rev::Element::Element* parent,const ui::DocumentNode& node) {
         using namespace Rev::Appearance;
         namespace re=Rev::Element;
-        using Kind=decltype(node.kind);using Tone=decltype(node.tone);using Fill=decltype(node.fill);
-        const auto gray=node.tone==Tone::muted?theme::muted:color_?theme::color_text:theme::text;
-        const auto color=node.tone==Tone::accent&&color_?
-            rgba(theme::data_tint.red,theme::data_tint.green,theme::data_tint.blue,1):rgba(gray,gray,gray,1);
+        using Kind=decltype(node.kind);
+        const auto foreground=theme::text_rgb(node.tone,color_);
+        const auto color=rgba(foreground.red,foreground.green,foreground.blue,1);
         re::Element* element=nullptr;
         switch(node.kind) {
         case Kind::text: {
@@ -156,9 +155,8 @@ private:
         element->style->overflow=Overflow::Hide;
         element->style->padding={0_px,0_px,0_px,0_px};
         element->style->margin={0_px,0_px,0_px,0_px};
-        if(node.fill!=Fill::none) {
-            const auto gray=node.fill==Fill::surface?theme::surface:node.fill==Fill::parity?theme::grid:theme::background;
-            element->style->background.color=rgba(gray,gray,gray,1);
+        if(const auto fill=theme::document_fill_rgb(node.fill,node.kind==Kind::action)) {
+            element->style->background.color=rgba(fill->red,fill->green,fill->blue,1);
         }
         if(node.border) {element->style->border.width=1_px;element->style->border.color=rgba(theme::grid,theme::grid,theme::grid,1);}
         Item item;item.element=element;

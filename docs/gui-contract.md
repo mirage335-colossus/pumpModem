@@ -7,7 +7,8 @@ code. The contract is implemented in `src/gui/ui_contract.hpp`,
 `src/gui/ui_document.hpp` and `src/gui/bitmap.hpp`.
 
 `Application` is the only application-facing facade used by native adapters.
-It exposes generic field/action/service operations and presentation snapshots.
+It exposes generic field/action/service operations and presentation snapshots,
+including resolved control labels, menu options and their availability.
 Controller, modem models, workers and bitmap factories are private; the public
 header dependency tree contains only toolkit-neutral GUI headers.
 
@@ -38,6 +39,20 @@ optional pointer/wheel actions. Application behavior is not inferred from its
 label or from a particular widget type. Ordinary controls use stable binding
 identity; `instance` distinguishes intentional repeated bindings on one page.
 
+`control_binding.hpp` provides the control groups consumed by both adapters and
+the layout engine. Menu identity combines the declared menu ID, its page or
+persistent scope, and `instance`. Persistent menus group across page values;
+ordinary menus on different pages remain separate. Only the first declaration
+in each group creates a native control and consumes layout space.
+
+`Application::control()` resolves bound text, command labels, visibility and
+eligibility. `Application::menu()` derives each entry from that same presentation,
+omits hidden entries, and enables the menu when at least one visible entry is
+enabled. Returned option IDs retain declaration identity after filtering.
+Adapters pass those IDs to `select_menu()`; shared dispatch rechecks the chosen
+control's current visibility and eligibility. Adapters do not reconstruct menu
+policy or map filtered indices to application commands.
+
 `FieldState` carries authoritative text/selection/boolean values, visibility,
 eligibility, options and records. Options have IDs, literal labels and enabled
 flags. `display_text` optionally shows an effective value without replacing a
@@ -63,7 +78,10 @@ quality and message text; files and unverified prefixes are not copyable as text
 - Text is valid UTF-8 with a byte limit. Reject invalid/over-limit edits with
   feedback; do not truncate them. Failed paste preserves selection. Presets are
   available on both single-line and multiline text controls and
-  emit ordinary edits. Enter/Ctrl+Enter/Shift+Enter submission is shared
+  pass their option IDs to `Application::preset()`, which accepts enabled options
+  and uses the same validated control edit path. Unknown or disabled presets
+  cannot change text; a preset cannot bypass a control's byte limit.
+  Enter/Ctrl+Enter/Shift+Enter submission is shared
   command policy; native adapters translate modifiers only.
 - Declared click, double-click and wheel commands apply to every control kind.
   Adapters translate coordinates and wheel detents; shared interaction code
@@ -72,7 +90,13 @@ quality and message text; files and unverified prefixes are not copyable as text
   input without a declared gesture retains its ordinary native behavior.
 - Record selection and activation are separate semantic operations. A
   declaration may activate an eligible row on selection, as for click-to-copy
-  signals. The ordinary Copy/Save actions remain separately reachable.
+  signals. `record_interactions.hpp` handles pointers and keyboard input for both
+  adapters: Up/Down skip disabled rows without wrapping, Space selects, and Enter
+  or a double-click requests activation. Activation still requires an eligible
+  record; the declaration's activation-on-selection policy applies to keyboard
+  and pointer selection alike. Hidden or disabled lists accept neither operation.
+  Adapters only translate events and focus/reveal the returned row. The ordinary
+  Copy/Save actions remain separately reachable.
 - New records follow the tail only when the reader was already there. History
   review and long text remain accessible through native scrolling.
 - Key-file failure acknowledgement is an explicit action. It does not depend
@@ -113,6 +137,14 @@ renderers consume the same inspection tree and preserve action identity.
 Changing a section, table, note or plot there reaches both backends. Ordinary
 text, codeword bars and actions remain native elements, never whole-page bitmap
 rendering. The same distinction applies to structured signal records.
+
+`presentation_palette.hpp` resolves record/caption text tones, document tones and
+document fills into the RGB values in `theme.hpp`. Both adapters convert the
+resolved values to native colors. Normal, muted, data/accent and inverse text
+therefore keep the same meaning in monochrome and color modes. An action with
+no explicit fill uses the shared surface color; other unfilled document nodes
+remain transparent. Adding or changing a semantic palette role is shared
+presentation work.
 
 ## Bitmap boundary
 
@@ -157,8 +189,17 @@ flags, including `--simulation`, `--self-check` and the smoke options.
 
 A build selects exactly one backend through `DATAPUMP_GUI_BACKEND=fltk|rev`.
 CLI-only builds can still compile and test the shared GUI application without a
-widget toolkit. New primitives or platform requirements need adapter work;
-features expressed with this existing vocabulary do not.
+widget toolkit. Features expressed with this existing vocabulary require only
+shared declaration, presentation and application changes. A new primitive needs
+generic support in each adapter once; toolkit bugs, native rendering and platform
+requirements also remain adapter work.
+
+Shared extension fixtures exercise the same added controls, scoped/filtered
+menus, validated presets, record cells and document geometry in both native
+suites. Toolkit-free tests cover grouping, dispatch, record interaction policy
+and semantic palettes. The boundary guard also checks generic public helpers;
+its regressions reject application-ID decisions hidden behind helpers or aliases
+and dependencies that cross into a toolkit or application internals.
 
 See [GUI architecture](gui-architecture.md) for file ownership, extension tests
 and the architectural regression guard.

@@ -12,11 +12,22 @@ inline constexpr std::uint8_t muted = 160;
 inline constexpr std::uint8_t text = 240;
 inline constexpr std::uint8_t accent = 255;
 
-struct Rgb { std::uint8_t red, green, blue; };
+struct Rgb {
+    std::uint8_t red, green, blue;
+    bool operator==(const Rgb&) const = default;
+};
 // Color presentation uses softer text and subdued data accents. Keep the
 // grayscale roles above unchanged for monochrome and scalar plot intensities.
 inline constexpr std::uint8_t color_text = 208;
 inline constexpr Rgb data_tint{144, 192, 184};
+
+inline constexpr Rgb grayscale(std::uint8_t level) { return {level, level, level}; }
+inline constexpr Rgb text_rgb(bool use_color, std::uint8_t fallback = text) {
+    return grayscale(use_color && fallback > color_text ? color_text : fallback);
+}
+inline constexpr Rgb data_rgb(bool use_color, std::uint8_t fallback = accent) {
+    return use_color ? data_tint : grayscale(fallback);
+}
 
 // Muted multihue false color maps the same scalar intensity as grayscale, with
 // a soft off-white peak. Grayscale output uses the original intensity, never a

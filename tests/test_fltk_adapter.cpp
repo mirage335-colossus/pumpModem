@@ -127,6 +127,40 @@ void editors_and_records() {
         auto* cell=literal_row->child(i);if(cell->label()&&std::string_view(cell->label())=="@circle")literal=dynamic_cast<NativeLiteralText*>(cell)!=nullptr;
     }
     require(literal,"Record text that resembles an FLTK symbol did not use literal native drawing");
+    extension=datapump::gui::test::extension_records();
+    extension.records.insert(extension.records.begin()+1,{"disabled",{{"Disabled",8,0,-8,24,13}},false,true});
+    records->apply(extension);
+    unsigned selections=0,activations=0;std::string selected;
+    records->selected=[&](std::string id){++selections;selected=std::move(id);};
+    records->activated=[&](std::string){++activations;};
+    const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y;
+    Fl::e_keysym=' ';records->handle(FL_KEYDOWN);
+    require(selected=="record-a"&&selections==1&&activations==1,"Space did not apply shared activate-on-select policy");
+    Fl::e_keysym=FL_Enter;records->handle(FL_KEYDOWN);
+    require(selections==2&&activations==2,"Enter duplicated activate-on-select activation");
+    Fl::e_keysym=FL_Down;records->handle(FL_KEYDOWN);
+    require(selected=="record-b"&&selections==3&&activations==2,"Down did not skip disabled records or respect activation eligibility");
+    Fl::e_keysym=FL_Up;records->handle(FL_KEYDOWN);
+    require(selected=="record-a"&&selections==4&&activations==3,"Up did not select and activate the previous eligible record");
+    auto* active_row=record_widget(*records,"Original");require(active_row,"Shared record interaction fixture lost its row");
+    Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=20;Fl::e_y=140;
+    active_row->handle(FL_PUSH);active_row->handle(FL_PUSH);
+    require(selections==6&&activations==5,"Double-click duplicated activate-on-select activation");
+    extension.enabled=false;records->apply(extension);
+    active_row->handle(FL_PUSH);Fl::e_keysym=FL_Enter;records->handle(FL_KEYDOWN);Fl::e_keysym=FL_Down;records->handle(FL_KEYDOWN);
+    require(selections==6&&activations==5,"Disabled list permitted shared pointer or keyboard selection");
+    ui::Control separate{ui::Kind::list};NativeRecords ordinary(separate);
+    ordinary.resize(0,0,400,100);ordinary.apply(datapump::gui::test::extension_records());
+    selections=activations=0;
+    ordinary.selected=[&](std::string){++selections;};ordinary.activated=[&](std::string){++activations;};
+    Fl::e_keysym=' ';ordinary.handle(FL_KEYDOWN);
+    require(selections==1&&activations==0,"Space bypassed separate record activation policy");
+    Fl::e_keysym=FL_Enter;ordinary.handle(FL_KEYDOWN);
+    require(selections==2&&activations==1,"Enter did not activate a selected record");
+    active_row=record_widget(ordinary,"Original");require(active_row,"Separate record interaction fixture lost its row");
+    Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;active_row->handle(FL_PUSH);active_row->handle(FL_PUSH);
+    require(selections==4&&activations==2,"Shared double-click did not activate a record");
+    Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;
     window.hide();
 }
 Fl_Widget* find_label(Fl_Group& parent,const std::string& text) {
@@ -183,6 +217,20 @@ void extension_controls() {
     require(editor->textsize()==17&&text_label->labelsize()==17&&presets->textsize()==17,"Multiline control lost its declared font sizes");
     const auto& text_control=datapump::gui::test::extension_controls()[2];const auto preset=app.application.field(text_control.field).options[1].id;
     presets->picked(presets->menu()+1);require(app.application.field(text_control.field).text==preset,"Multiline preset did not dispatch an ordinary shared edit");
+    auto* limited_label=find_label(*window,"Limited presets");require(limited_label,"Limited preset extension is missing");
+    Fl_Menu_Button* limited=nullptr;
+    for(int i=0;i<limited_label->parent()->children();++i)if(auto* menu=dynamic_cast<Fl_Menu_Button*>(limited_label->parent()->child(i)))limited=menu;
+    require(limited&&limited->size()>2,"Limited control has no native presets");
+    const auto original=app.application.field(text_control.field).text;
+    limited->picked(limited->menu()+1);
+    require(app.application.field(text_control.field).text==original&&app.application.field(ui::Field::status).text.find("byte")!=std::string::npos,
+            "Native preset bypassed shared control validation");
+    auto* menu=dynamic_cast<Fl_Menu_Button*>(find_label(*window,"Scoped menu"));
+    require(menu&&menu->visible_r()&&menu->active_r()&&menu->size()==2,"Hidden leading menu item hid or disabled the visible shared menu");
+    require(find_label(*window,"Other page menu")&&find_label(*window,"Other instance menu"),"Menus from distinct shared scopes were merged");
+    require(literal_menu_text(menu->menu()[0].label())=="Clear from shared menu","Filtered native menu lost its shared label");
+    menu->picked(menu->menu());
+    require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Filtered native menu dispatched the wrong shared entry");
     action->do_callback();require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Shared extension action did not reach the common controller");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }

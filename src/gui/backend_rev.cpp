@@ -3,6 +3,7 @@
 #include "rev_platform.hpp"
 #include "theme.hpp"
 #include "control_interactions.hpp"
+#include "record_interactions.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <array>
@@ -278,12 +279,12 @@ struct ListView : re::Box {
     std::vector<std::string> order;
     std::function<void(std::string)> select,activate;
     re::Text* empty=nullptr;
-    bool color,follow_tail,activate_on_select,tail_at_last_paint=true,restore_scroll=false;
+    bool color,follow_tail,tail_at_last_paint=true,restore_scroll=false;
     float retained_scroll=0;
-    ui::PointerClicks clicks;
+    ui::RecordInteractions interactions;
     int row_height,width=1,height=1;
     ListView(re::Element* parent,const ui::Control& control,bool colored)
-        :re::Box(parent,{&column}),color(colored),follow_tail(control.follow_tail),activate_on_select(control.activate_on_select),row_height(control.list_row_height) {
+        :re::Box(parent,{&column}),color(colored),follow_tail(control.follow_tail),interactions(control.activate_on_select),row_height(control.list_row_height) {
         style->overflow=Overflow::Hide;style->scroll=Scroll::Vertical;
         style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
         empty=new re::Text(this,control.empty_text,{&smallText});
@@ -327,19 +328,16 @@ struct ListView : re::Box {
         if(tail)resolved.scroll.y=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
     }
     re::Button* navigate(re::Element* current,int direction) {
-        auto found=std::find_if(order.begin(),order.end(),[&](const auto& id){return rows.at(id).button==current;});
-        auto index=found==order.end()?0:static_cast<int>(found-order.begin())+direction;
-        for(;index>=0&&index<static_cast<int>(order.size());index+=direction) {
-            auto& row=rows.at(order[static_cast<std::size_t>(index)]);
-            if(row.button->disabled)continue;
-            clicks.reset();if(select)select(row.record.id);
-            if(activate_on_select&&row.record.activatable&&activate)activate(row.record.id);
-            const float top=static_cast<float>(index*row_height),bottom=top+static_cast<float>(row_height);
-            if(top<resolved.scroll.y)resolved.scroll.y=top;
-            else if(bottom>resolved.scroll.y+resolved.getInner(Axis::Vertical))resolved.scroll.y=bottom-resolved.getInner(Axis::Vertical);
-            shared->layoutDirty=true;return row.button;
-        }
-        return nullptr;
+        const auto found=std::find_if(order.begin(),order.end(),[&](const auto& id){return rows.at(id).button==current;});
+        const auto action=interactions.key(found==order.end()?std::string_view{}:*found,direction<0?ui::RecordKey::up:ui::RecordKey::down);
+        if(!dispatch(action))return nullptr;
+        const float top=static_cast<float>(action.index*static_cast<std::size_t>(row_height)),bottom=top+static_cast<float>(row_height);
+        if(top<resolved.scroll.y)resolved.scroll.y=top;
+        else if(bottom>resolved.scroll.y+resolved.getInner(Axis::Vertical))resolved.scroll.y=bottom-resolved.getInner(Axis::Vertical);
+        shared->layoutDirty=true;return rows.at(action.id).button;
+    }
+    bool dispatch(const ui::RecordInteraction& action) {
+        return action.dispatch([this](const auto& id){if(select)select(id);},[this](const auto& id){if(activate)activate(id);});
     }
     void layout_cells(RecordRow& row) {
         row.button->style->size={Px(width),Px(row_height)};
@@ -349,6 +347,7 @@ struct ListView : re::Box {
         }
     }
     void apply(const ui::FieldState& state) {
+        interactions.apply(state);
         const bool tail=follow_tail&&at_tail();restore_scroll=restore_scroll||hidden_page();bool changed=false;const auto old_order=order;
         std::set<std::string> retained;for(const auto& record:state.records)retained.insert(record.id);
         for(auto it=rows.begin();it!=rows.end();) {
@@ -363,12 +362,10 @@ struct ListView : re::Box {
                 row.button->tabStop=true;row.button->style->padding={0_px,0_px,0_px,0_px};
                 row.button->style->margin={0_px,0_px,0_px,0_px};row.button->style->border.width=0_px;
                 row.button->onClick([this,id=record.id](re::Event& event){
-                    const auto found=rows.find(id);if(found==rows.end()||!found->second.record.enabled)return;
-                    const bool keyboard=event.keyboard.enter||event.keyboard.space;
-                    const bool twice=!keyboard&&clicks.press(event.mouse.pos.x,event.mouse.pos.y,id);
-                    if(keyboard)clicks.reset();
-                    if(select)select(id);
-                    if(found->second.record.activatable&&activate&&(activate_on_select||event.keyboard.enter||twice))activate(id);
+                    const auto action=event.keyboard.enter?interactions.key(id,ui::RecordKey::enter):
+                        event.keyboard.space?interactions.key(id,ui::RecordKey::space):
+                        interactions.pointer(id,event.mouse.pos.x,event.mouse.pos.y);
+                    dispatch(action);
                 });
             }
             if(row.record!=record || inserted) {
@@ -382,9 +379,8 @@ struct ListView : re::Box {
                 for(std::size_t i=0;i<record.cells.size();++i) {
                     const auto& cell=record.cells[i];auto* text=row.cells[i];text->content=cell.text;
                     text->style->text.size=Px(cell.font_size);text->style->text.weight=cell.bold?700:400;
-                    const auto gray=cell.tone==ui::TextTone::muted?theme::muted:cell.tone==ui::TextTone::inverse?0:color?theme::color_text:theme::text;
-                    text->style->text.color=cell.tone==ui::TextTone::data&&color?
-                        rgba(theme::data_tint.red,theme::data_tint.green,theme::data_tint.blue,1):rgba(gray,gray,gray,1);
+                    const auto foreground=theme::text_rgb(cell.tone,color);
+                    text->style->text.color=rgba(foreground.red,foreground.green,foreground.blue,1);
                 }
                 layout_cells(row);
             }
@@ -414,7 +410,7 @@ struct Binding {
     ListView* list=nullptr;
     BitmapView* bitmap=nullptr;
     ChoiceView* menu=nullptr;
-    std::vector<ui::Control> menu_items;
+    std::vector<const ui::Control*> menu_items;
     std::uint64_t bitmap_revision=std::numeric_limits<std::uint64_t>::max();
     bool has_suggestions=false;
 };
@@ -607,11 +603,15 @@ public:
     }
     void verify_layout() const {
         for(const auto& binding:bindings) {
-            if(binding.button&&binding.button->labelText->content.get()!=action_label(binding.control))
+            if(binding.button&&binding.button->labelText->content.get()!=application.control(binding.control).label)
                 throw std::runtime_error("Rev smoke: native action label missed its current shared presentation");
-            if(binding.menu)for(std::size_t index=0;index<binding.menu_items.size();++index)
-                if(binding.menu->params.options[index].name!=action_label(binding.menu_items[index])||binding.menu->params.options[index].name.empty())
-                    throw std::runtime_error("Rev smoke: native menu omitted its declared or current action label");
+            if(binding.menu) {
+                const auto expected=application.menu(binding.menu_items);
+                if(binding.menu->params.options.size()!=expected.options.size())throw std::runtime_error("Rev smoke: native menu omitted shared options");
+                for(std::size_t index=0;index<expected.options.size();++index)
+                    if(binding.menu->params.options[index].name!=expected.options[index].label)
+                        throw std::runtime_error("Rev smoke: native menu omitted its declared or current action label");
+            }
             if(binding.control.page!=application.page()&&!binding.control.persistent)continue;
             bool hidden=false;
             for(auto* element=binding.element;element&&element!=this;element=element->parent)hidden=hidden||element->resolved.hidden;
@@ -631,6 +631,9 @@ public:
     void dispatch(ui::Command command) {
         application.activate(command);if(command_observer)command_observer(command);
     }
+    void dispatch(const ui::Control& control) {
+        application.activate(control);if(command_observer)command_observer(control.command);
+    }
     void show_help(const char* text,re::Element* owner) {
         const int width=std::min(600,details.size.width-32),height=120;
         const int x=std::clamp(static_cast<int>(owner->rect.x),16,details.size.width-width-16);
@@ -639,23 +642,17 @@ public:
         place(help_text,{x,y,width,height});help_text->content=text;help_text->style->visibility=Visibility::Visible;refresh(event);
     }
     void create_controls(std::span<const ui::Control> controls) {
-        for(const auto& c:controls) {
-            if(c.menu!=ui::Menu::none) {
-                const auto found=std::find_if(bindings.begin(),bindings.end(),[&](const auto& binding){return binding.control.menu==c.menu;});
-                if(found!=bindings.end()) {found->menu_items.push_back(c);continue;}
-            }
+        for(const auto& declaration:ui::control_groups(controls)) {
+            const auto& c=*declaration.control;
             Binding b{c};
             b.element=new re::Box(c.persistent?surface:pages.at(c.page),{&column});
             auto* container=b.element;
             if(c.menu!=ui::Menu::none) {
-                b.menu_items.push_back(c);
+                b.menu_items=declaration.menu_items;
                 b.menu=new ChoiceView(container,{.label="",.placeholder=c.menu_label,.openUpward=c.open_upward});
                 compact_dropdown(b.menu);b.menu->dropdown->tabStop=true;
-                b.menu->onChange=[this,menu=c.menu,choice=b.menu](re::Event&){
-                    for(const auto& binding:bindings)if(binding.control.menu==menu)
-                        for(const auto& item:binding.menu_items)if(std::to_string(static_cast<int>(item.command))==choice->params.value) {
-                            dispatch(item.command);choice->params.value.clear();return;
-                        }
+                b.menu->onChange=[this,items=b.menu_items,choice=b.menu](re::Event&){
+                    application.select_menu(items,choice->params.value);choice->params.value.clear();
                 };
             } else {
                 const auto geometry=ui::control_layout(c,state(c),details.size.width,details.size.height,declarations);
@@ -664,7 +661,7 @@ public:
                 case ui::Kind::label:break;
                 case ui::Kind::text:
                     b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
-                    b.editor->changed=[this,field=c.field](std::string text){application.edit(field,std::move(text));};
+                    b.editor->changed=[this,control=&c](std::string text){application.edit(*control,std::move(text));};
                     b.editor->error=[this](std::string error){application.report_error(std::move(error));};
                     if(c.submit!=ui::Command::none)b.editor->submit_event=[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);};
                     {
@@ -672,7 +669,7 @@ public:
                         b.suggestions=new ChoiceView(container,{.label="",.placeholder="",.openUpward=c.open_upward});
                         compact_dropdown(b.suggestions);b.suggestions->style->visibility=b.has_suggestions?Visibility::Visible:Visibility::Hidden;b.suggestions->dropdownText->style->visibility=Visibility::Hidden;
                         b.suggestions->dropdown->tabStop=true;
-                        b.suggestions->onChange=[this,field=c.field,choice=b.suggestions](re::Event&){application.edit(field,choice->params.value);choice->params.value.clear();};
+                        b.suggestions->onChange=[this,control=&c,choice=b.suggestions](re::Event&){application.preset(*control,choice->params.value);choice->params.value.clear();};
                     }
                     break;
                 case ui::Kind::choice:
@@ -685,7 +682,7 @@ public:
                 case ui::Kind::action:
                     b.button=new re::Button(container,re::Button::Params::Secondary(c.label));b.button->tabStop=true;
                     b.button->styles.add(&disabledControl);b.button->labelText->styles.add(&disabledText);
-                    b.button->onClick([this,command=c.command](re::Event&){dispatch(command);});break;
+                    b.button->onClick([this,control=&c](re::Event&){dispatch(*control);});break;
                 case ui::Kind::list:
                     b.list=new ListView(container,c,launch.color);
                     b.list->select=[this,field=c.field](std::string id){application.select(field,std::move(id));};
@@ -757,19 +754,13 @@ public:
         const auto viewport=ui::page_rect(details.size.width,details.size.height);
         for(const auto& [page,view]:documents)view->apply(application.document(page,viewport.w-2*ui::document_side_padding));
     }
-    std::string action_label(const ui::Control& control) const {
-        auto label=application.command_label(control.command);return label.empty()?control.label:label;
-    }
     void apply() {
         bool relayout=false;
         for(auto& b:bindings) {
-            if(b.menu) {
-                b.menu->params.options.clear();bool enabled=false;
-                for(const auto& item:b.menu_items) {const bool available=application.enabled(item.command);enabled=enabled||available;b.menu->params.options.push_back({action_label(item),std::to_string(static_cast<int>(item.command)),!available});}
-                b.menu->setDisabled(!enabled);
-            }
+            const auto presentation=application.control(b.control);
+            b.element->style->visibility=presentation.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!presentation.enabled);
             if(b.control.field!=ui::Field::count) {
-                const auto& value=state(b.control);b.element->style->visibility=value.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!value.enabled);
+                const auto& value=presentation.state;
                 if(b.editor){b.editor->apply(value.text);b.editor->editable=value.enabled;b.editor->setDisabled(!value.enabled);}
                 if(b.choice){b.choice->params.options.clear();for(const auto& item:value.options)b.choice->params.options.push_back({item.label,item.id,!item.enabled||!value.enabled});b.choice->params.value=value.selected;b.choice->display_text=value.display_text;if(!value.enabled)b.choice->closeMenu();}
                 if(b.suggestions){
@@ -780,9 +771,15 @@ public:
                 }
                 if(b.toggle)b.toggle->value=value.checked;
                 if(b.list)b.list->apply(value);
-                if(b.control.kind==ui::Kind::label&&b.label)b.label->content=value.text;
+                if(b.control.kind==ui::Kind::label&&b.label)b.label->content=presentation.label;
             }
-            if(b.button) {b.button->setDisabled(!application.enabled(b.control.command));b.button->labelText->content=action_label(b.control);}
+            if(b.button) {b.button->setDisabled(!presentation.enabled);b.button->labelText->content=presentation.label;}
+            if(b.menu) {
+                const auto menu=application.menu(b.menu_items);
+                b.element->style->visibility=menu.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!menu.enabled);
+                b.menu->params.options.clear();for(const auto& item:menu.options)b.menu->params.options.push_back({item.label,item.id,!item.enabled});
+                b.menu->setDisabled(!menu.enabled);if(!menu.visible||!menu.enabled)b.menu->closeMenu();
+            }
         }
         if(relayout)layout_desktop();
         update_plots();update_documents();for(auto& request:application.take_services())services.push_back(std::move(request));process_services();refresh(event);
@@ -798,9 +795,8 @@ public:
             if(binding.caption) {
                 binding.caption->content=presentation.caption;
                 binding.caption->style->visibility=presentation.caption.empty()?Visibility::Hidden:Visibility::Visible;
-                const auto gray=presentation.caption_tone==ui::TextTone::inverse?0:presentation.caption_tone==ui::TextTone::muted?theme::muted:launch.color?theme::color_text:theme::text;
-                binding.caption->style->text.color=presentation.caption_tone==ui::TextTone::data&&launch.color?
-                    rgba(theme::data_tint.red,theme::data_tint.green,theme::data_tint.blue,1):rgba(gray,gray,gray,1);
+                const auto foreground=theme::text_rgb(presentation.caption_tone,launch.color);
+                binding.caption->style->text.color=rgba(foreground.red,foreground.green,foreground.blue,1);
             }
         }
     }

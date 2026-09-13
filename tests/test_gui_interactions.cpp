@@ -1,12 +1,62 @@
 #include "control_interactions.hpp"
+#include "record_interactions.hpp"
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 
 namespace ui=datapump::gui::ui;
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+void record_interactions() {
+    using namespace std::chrono_literals;
+    ui::FieldState state;
+    state.records={{"disabled",{},false,true},{"ready",{},true,true},{"pending",{},true,false},{"last",{},true,true}};
+    ui::RecordInteractions events;
+    events.apply(state);
+    const auto now=ui::RecordInteractions::Clock::time_point{};
+    auto action=events.key({},ui::RecordKey::down);
+    require(action&&action.id=="ready"&&action.index==1&&!action.activate,"Initial navigation did not skip disabled records");
+    action=events.key("ready",ui::RecordKey::down);
+    require(action&&action.id=="pending"&&!action.activate,"Navigation did not select a non-activatable record");
+    action=events.key("pending",ui::RecordKey::up);
+    require(action&&action.id=="ready"&&!action.activate,"Up did not navigate by stable record identity");
+    require(!events.key("ready",ui::RecordKey::up)&&!events.key("last",ui::RecordKey::down),"Navigation wrapped past the list boundary");
+    require(!events.key("missing",ui::RecordKey::enter)&&!events.key("disabled",ui::RecordKey::space),"Keyboard input selected an absent or disabled record");
+    action=events.key("ready",ui::RecordKey::space);
+    require(action&&!action.activate,"Space ignored separate record activation policy");
+    require(events.key("ready",ui::RecordKey::enter).activate,"Enter did not activate an eligible record");
+    require(!events.key("pending",ui::RecordKey::enter).activate,"Enter activated an incomplete record");
+    require(!events.pointer("ready",10,10,now).activate&&events.pointer("ready",10,10,now+100ms).activate,
+        "Shared record double-click activation was lost");
+    events.pointer("ready",10,10,now+200ms);
+    events.key("ready",ui::RecordKey::space);
+    require(!events.pointer("ready",10,10,now+250ms).activate,"Keyboard selection retained stale double-click history");
+    require(!events.pointer("disabled",10,10,now+300ms)&&!events.pointer("missing",10,10,now+350ms),"Pointer selected an absent or disabled record");
+    std::swap(state.records[1],state.records[3]);events.apply(state);
+    action=events.key("ready",ui::RecordKey::up);
+    require(action.id=="pending"&&action.index==2,"Reordering transferred keyboard identity to a different record");
+    ui::RecordInteractions on_select(true);on_select.apply(state);
+    unsigned selections=0,activations=0;
+    const auto dispatch=[&](const auto& selected) {
+        selected.dispatch([&](const auto& id){require(id=="ready","Selection lost its stable ID");++selections;},
+            [&](const auto& id){require(id=="ready","Activation lost its stable ID");++activations;});
+    };
+    dispatch(on_select.key("ready",ui::RecordKey::space));
+    dispatch(on_select.key("ready",ui::RecordKey::enter));
+    dispatch(on_select.pointer("ready",10,10,now));
+    dispatch(on_select.pointer("ready",10,10,now+100ms));
+    require(selections==4&&activations==4,"Activate-on-select duplicated Enter/double-click activation or omitted Space");
+    require(!on_select.key("pending",ui::RecordKey::space).activate,"Activate-on-select bypassed record eligibility");
+    for(bool hidden:{false,true}) {
+        state.enabled=hidden;state.visible=!hidden;on_select.apply(state);
+        require(!on_select.pointer("ready",10,10)&&!on_select.key("ready",ui::RecordKey::enter)&&!on_select.key({},ui::RecordKey::down),
+            "Disabled or hidden list allowed selection or activation");
+    }
+    on_select.apply({});
+    require(!on_select.key({},ui::RecordKey::down),"An empty list created a selection");
+}
 int main() {
     try {
+        record_interactions();
         ui::Control control{ui::Kind::label};
         control.click=ui::Command::clear_received;control.double_click=ui::Command::reset_zoom;
         control.wheel_up=ui::Command::zoom_in;control.wheel_down=ui::Command::zoom_out;

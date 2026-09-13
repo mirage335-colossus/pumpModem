@@ -1,5 +1,6 @@
 #pragma once
 #include "document_layout.hpp"
+#include "presentation_palette.hpp"
 #include "bitmap_fltk.hpp"
 #include "theme_fltk.hpp"
 #include <FL/Fl_Box.H>
@@ -68,9 +69,8 @@ private:
         Fill fill=Fill::none;
         bool border=false;
         void draw(int x,int y,int width,int height) const {
-            if(fill!=Fill::none) {
-                const auto level=fill==Fill::surface?theme::surface:fill==Fill::parity?theme::grid:theme::background;
-                fl_color(theme::fltk_color(level));fl_rectf(x,y,width,height);
+            if(const auto color=theme::document_fill_rgb(fill)) {
+                fl_color(theme::fltk_color(*color));fl_rectf(x,y,width,height);
             }
             if(border) {fl_color(theme::fltk_color(theme::grid));fl_rect(x,y,width,height);}
         }
@@ -143,7 +143,7 @@ private:
 
     static int extent(float value) {return ui::document_extent(value);}
     static Fl_Color text_color(Tone tone) {
-        return tone==Tone::accent?theme::data_color():tone==Tone::muted?theme::text_color(theme::muted):theme::text_color();
+        return theme::fltk_color(theme::text_rgb(tone,theme::color_enabled));
     }
     static void activated(Fl_Widget*,void* data) {
         auto& item=*static_cast<Item*>(data);
@@ -181,9 +181,7 @@ private:
             if(!widget.label() || node.text!=widget.label())widget.copy_label(node.text.c_str());
         }
         if(node.kind==Kind::action) {
-            const auto fill=node.fill==Fill::none||node.fill==Fill::surface?theme::surface:
-                node.fill==Fill::parity?theme::grid:theme::background;
-            widget.box(FL_UP_BOX);widget.color(theme::fltk_color(fill));
+            widget.box(FL_UP_BOX);widget.color(theme::fltk_color(*theme::document_fill_rgb(node.fill,true)));
             static_cast<Button&>(widget).border=node.border;
             widget.align(FL_ALIGN_CENTER|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
         }

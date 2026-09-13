@@ -19,11 +19,14 @@ inline bool color_enabled = false;
 inline Fl_Color fltk_color(std::uint8_t level) {
     return fl_rgb_color(level, level, level);
 }
+inline Fl_Color fltk_color(Rgb value) {
+    return fl_rgb_color(value.red, value.green, value.blue);
+}
 inline Fl_Color text_color(std::uint8_t fallback = text) {
-    return fltk_color(color_enabled && fallback > color_text ? color_text : fallback);
+    return fltk_color(text_rgb(color_enabled, fallback));
 }
 inline Fl_Color data_color(std::uint8_t fallback = accent) {
-    return color_enabled ? fl_rgb_color(data_tint.red, data_tint.green, data_tint.blue) : fltk_color(fallback);
+    return fltk_color(data_rgb(color_enabled, fallback));
 }
 
 // A box style changes only widget decoration, not focus, editing, or input.
@@ -38,8 +41,8 @@ inline void apply_palette(bool use_color = false) {
     Fl::scheme("base");
     Fl::background(surface, surface, surface);
     Fl::background2(background, background, background);
-    const auto foreground = color_enabled ? color_text : text;
-    Fl::foreground(foreground, foreground, foreground);
+    const auto foreground = text_rgb(color_enabled);
+    Fl::foreground(foreground.red, foreground.green, foreground.blue);
     Fl::set_color(FL_SELECTION_COLOR, fltk_color(grid));
     Fl::set_color(FL_INACTIVE_COLOR, fltk_color(muted));
     for (auto box : {FL_UP_BOX, FL_DOWN_BOX, FL_THIN_UP_BOX, FL_THIN_DOWN_BOX})

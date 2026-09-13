@@ -19,6 +19,15 @@ struct BitmapPresentation {
     std::string title,caption;
     ui::TextTone caption_tone=ui::TextTone::muted;
 };
+struct ControlPresentation {
+    const ui::FieldState& state;
+    std::string label;
+    bool enabled=true,visible=true;
+};
+struct MenuPresentation {
+    std::vector<ui::Option> options;
+    bool enabled=false,visible=false;
+};
 // Shared lifecycle, presentation and workflow. Adapters pump native events,
 // translate declared bindings, and render a tick. This facade exposes only the
 // toolkit-neutral vocabulary; models, workers and bitmap producers are private.
@@ -36,9 +45,15 @@ public:
     void close();
     bool closing() const;
     void edit(ui::Field field,std::string text);
+    void edit(const ui::Control& control,std::string text);
+    void preset(const ui::Control& control,const std::string& id);
     void select(ui::Field field,std::string option_id);
     void toggle(ui::Field field,bool value);
     void activate(ui::Command command);
+    void activate(const ui::Control& control);
+    ControlPresentation control(const ui::Control& control) const;
+    MenuPresentation menu(std::span<const ui::Control* const> items) const;
+    void select_menu(std::span<const ui::Control* const> items,const std::string& id);
     const ui::FieldState& field(ui::Field field) const;
     bool enabled(ui::Command command) const;
     std::string command_label(ui::Command command) const;
