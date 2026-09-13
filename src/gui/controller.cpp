@@ -13,6 +13,7 @@
 #include <limits>
 #include <map>
 #include <mutex>
+#include <random>
 #include <sstream>
 #include <thread>
 
@@ -69,9 +70,12 @@ struct Controller::Impl {
     bool attachment_image=false,target_supported=true;
     BinaryEditor composer;
     std::optional<BinaryEditor> previous_message;
-    std::string seeded_message;
-    bool generated_repeatable=false;
-    static constexpr std::string_view repeatable_prefix="REPEATABLE ";
+    std::string seeded_message,repeatable_prefix,previous_repeatable_prefix,last_repeatable_prefix;
+    bool pending_repeatable_removal=false;
+    std::mt19937_64 repeatable_random{static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count())};
+    static constexpr std::string_view repeatable_alphabet="bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZ0123456789";
+    static constexpr std::size_t repeatable_prefix_size=20;
     static constexpr std::size_t repeatable_limit=256;
     std::size_t pattern_first=0,page_size=16;
     std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
@@ -196,21 +200,56 @@ struct Controller::Impl {
     }
     bool has_repeatable_prefix() const {
         const auto& bytes=composer.bytes();
-        return generated_repeatable&&bytes.size()>=repeatable_prefix.size()&&
+        return !repeatable_prefix.empty()&&bytes.size()>=repeatable_prefix.size()&&
             std::equal(repeatable_prefix.begin(),repeatable_prefix.end(),bytes.begin());
+    }
+    std::string new_repeatable_prefix() {
+        std::uniform_int_distribution<std::size_t> pick(0,repeatable_alphabet.size()-1);
+        std::string result;
+        do {
+            result="REPEATABLE-";
+            for(unsigned i=0;i<8;++i)result+=repeatable_alphabet[pick(repeatable_random)];
+            result+=' ';
+        } while(result==repeatable_prefix||result==last_repeatable_prefix);
+        last_repeatable_prefix=result;
+        return result;
+    }
+    void renew_repeatable_prefix() {
+        auto bytes=composer.bytes();
+        if(has_repeatable_prefix())bytes.erase(bytes.begin(),bytes.begin()+static_cast<std::ptrdiff_t>(repeatable_prefix.size()));
+        repeatable_prefix=new_repeatable_prefix();
+        bytes.insert(bytes.begin(),repeatable_prefix.begin(),repeatable_prefix.end());
+        composer=BinaryEditor(std::move(bytes));
+    }
+    std::string repeatable_message_edit(std::string_view text) {
+        if(pending_repeatable_removal||(!f(UiField::repeatable).checked&&repeatable_prefix.empty()))return std::string(text);
+        std::size_t prefix_end=0;
+        // Native editors can deliver several keystrokes before the next paint,
+        // still carrying an earlier generated ID. Replace that complete marker.
+        // Incomplete or otherwise edited marker text is ordinary body text;
+        // guessing which fragment to remove can discard a user's replacement.
+        if(text.size()>=repeatable_prefix_size&&text.starts_with("REPEATABLE-")&&text[19]==' '&&
+           std::all_of(text.begin()+11,text.begin()+19,[](char c){return repeatable_alphabet.find(c)!=std::string_view::npos;}))prefix_end=repeatable_prefix_size;
+        if(!composer.escaped()&&repeatable_prefix_size+text.size()-prefix_end>BinaryEditor::payload_limit)
+            throw Error("Message exceeds the 1 MiB byte limit");
+        // Renew committed bytes too: an incomplete escaped edit retains its
+        // last valid body, but still receives a new in-band identity.
+        renew_repeatable_prefix();
+        return repeatable_prefix+std::string(text.substr(prefix_end));
     }
     void set_repeatable(bool checked) {
         f(UiField::repeatable).checked=checked;
         if(!draft_error.empty()) {
             // Defer removal until the partial edit is committed. Moving the
             // byte prefix now would change the suffix that Binary retains.
-            dirty(); return;
+            pending_repeatable_removal=!checked; dirty(); return;
         }
         const bool untouched=draft_error.empty()&&f(UiField::message).text==seeded_message;
         auto bytes=composer.bytes();
-        if(checked) bytes.insert(bytes.begin(),repeatable_prefix.begin(),repeatable_prefix.end());
-        else if(has_repeatable_prefix()) bytes.erase(bytes.begin(),bytes.begin()+static_cast<std::ptrdiff_t>(repeatable_prefix.size()));
-        generated_repeatable=checked;
+        if(has_repeatable_prefix())bytes.erase(bytes.begin(),bytes.begin()+static_cast<std::ptrdiff_t>(repeatable_prefix.size()));
+        repeatable_prefix=checked?new_repeatable_prefix():std::string{};
+        if(checked)bytes.insert(bytes.begin(),repeatable_prefix.begin(),repeatable_prefix.end());
+        pending_repeatable_removal=false;
         if(bytes!=composer.bytes()) {
             composer=BinaryEditor(std::move(bytes));
             sync_composer();
@@ -230,8 +269,9 @@ struct Controller::Impl {
             greeting+=". Please reply. ";
         }
         auto& repeatable=f(UiField::repeatable).checked;
-        if(attachment||file_loading||greeting.size()+repeatable_prefix.size()>repeatable_limit)repeatable=false;
-        generated_repeatable=repeatable;
+        if(attachment||file_loading||greeting.size()+repeatable_prefix_size>repeatable_limit)repeatable=false;
+        repeatable_prefix=repeatable?new_repeatable_prefix():std::string{};
+        pending_repeatable_removal=false;
         if(repeatable)greeting.insert(0,repeatable_prefix);
         composer=BinaryEditor(Bytes(greeting.begin(),greeting.end()));
         sync_composer(); ++f(UiField::message).text_cursor_end_revision;
@@ -239,22 +279,27 @@ struct Controller::Impl {
     }
     void message_changed(std::string_view text) {
         if(text.empty()) { seed_composer(); return; }
-        try { composer.edit_text(text); }
+        const auto edited=repeatable_message_edit(text);
+        try { composer.edit_text(edited); }
         catch(const std::exception& e) {
             if(!composer.escaped())throw;
             // An escape is temporarily incomplete while typing or deleting.
-            f(UiField::message).text=text; draft_error=e.what(); dirty(); return;
+            f(UiField::message).text=edited; f(UiField::binary).text=composer.binary(); draft_error=e.what(); dirty(); return;
         }
-        generated_repeatable=has_repeatable_prefix();
+        if(!has_repeatable_prefix())repeatable_prefix.clear();
         sync_composer();
-        if(generated_repeatable&&!f(UiField::repeatable).checked)set_repeatable(false);
+        if(pending_repeatable_removal)set_repeatable(false);
         else dirty();
     }
     void binary_changed() {
         try {
             composer.edit_binary(f(UiField::binary).text);
             if(composer.bytes().empty()) { seed_composer(); return; }
-            generated_repeatable=has_repeatable_prefix();
+            if(has_repeatable_prefix()) {
+                if(!pending_repeatable_removal)renew_repeatable_prefix();
+            } else if(!repeatable_prefix.empty()) {
+                repeatable_prefix.clear(); f(UiField::repeatable).checked=false;
+            }
             f(UiField::message).text=composer.text();
             const auto normalized=composer.binary();
             const auto compact=[](std::string_view text) {
@@ -264,7 +309,7 @@ struct Controller::Impl {
             if(compact(normalized)!=compact(f(UiField::binary).text))f(UiField::binary).text=normalized;
             draft_error.clear(); f(UiField::binary_label).text="Binary / first 16 bytes";
             message_label();
-            if(generated_repeatable&&!f(UiField::repeatable).checked)set_repeatable(false);
+            if(pending_repeatable_removal)set_repeatable(false);
         } catch(const std::exception& e) {
             draft_error=e.what(); f(UiField::binary_label).text="Binary / incomplete or invalid";
         }
@@ -298,13 +343,14 @@ struct Controller::Impl {
         }
     }
     void controls() {
-        if(f(UiField::repeatable).checked&&(attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
+        if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
+           (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
         for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::binary).enabled=f(UiField::message).enabled=!attachment&&!closing;
-        const auto repeatable_overhead=f(UiField::repeatable).checked?0:repeatable_prefix.size();
+        const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
         const auto size=attachment?attachment->size():composer.bytes().size();
@@ -462,11 +508,11 @@ struct Controller::Impl {
             if(!attachment)sent=composer;
             gate.started(settings.simulation,encrypted()); transmit_requested=true;
             try { session.transmit(message()); } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
-            if(sent) { previous_message=std::move(sent); seed_composer(); }
+            if(sent) { previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
         case Command::paste_previous:
-            composer=*previous_message; generated_repeatable=false; f(UiField::repeatable).checked=false;
+            composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel: session.cancel_transmit(); notice(snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
         case Command::clear_received: inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;

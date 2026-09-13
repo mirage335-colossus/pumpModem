@@ -9,7 +9,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
     if(slot==Slot::header)control.font_size=22;
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
-    if(slot==Slot::repeatable)control.help="Prepends REPEATABLE to message text, before the CQ greeting. Automatically turns off for attachments or messages over 256 bytes.";
+    if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(control.multiline) {
         control.submit=Command::transmit;control.submit_mode=Field::send_key;

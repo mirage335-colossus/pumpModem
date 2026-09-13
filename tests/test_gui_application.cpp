@@ -187,6 +187,10 @@ void declared_native_input() {
           app.field(ui::Field::status).text=="Inactive native input unchanged",
           "Hidden or unbound native input changed state or attempted invalid field access");
 
+    const bool repeatable_before_gestures=app.field(ui::Field::repeatable).checked;
+    app.toggle(control(ui::Field::repeatable),false);
+    check(!app.field(ui::Field::fec).enabled,"An empty draft did not provide a disabled FEC control for stale gesture checks");
+    app.report_error("Inactive native input unchanged");
     ui::Control gesture{ui::Kind::label};gesture.click=ui::Command::clear_received;
     for(const auto field:{ui::Field::fec,ui::Field::payload_alphabet}) {
         gesture.field=field;app.gesture(gesture,gesture.click);
@@ -200,6 +204,7 @@ void declared_native_input() {
     check(app.field(ui::Field::status).text=="Inactive native input unchanged","Unavailable action accepted a secondary gesture");
     gesture.kind=ui::Kind::label;app.gesture(gesture,gesture.click);
     check(app.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Eligible generic gesture did not dispatch");
+    app.toggle(control(ui::Field::repeatable),repeatable_before_gestures);
     app.close();app.report_error("Closing input unchanged");
     choice=control(ui::Field::send_key);toggle=control(ui::Field::repeatable);
     app.select(choice,"ctrl-enter");app.toggle(toggle,original);app.gesture(gesture,gesture.click);
@@ -234,7 +239,10 @@ void stale_page_input() {
     // Persistent declarations deliberately remain interactive on every page.
     editor.persistent=choice.persistent=toggle.persistent=action.persistent=true;
     app.edit(editor,"persistent text");app.toggle(toggle,!original_toggle);app.select(choice,"ctrl-enter");app.activate(action);
-    check(app.field(editor.field).text=="REPEATABLE persistent text"&&app.field(toggle.field).checked!=original_toggle&&
+    const auto& repeatable_text=app.field(editor.field).text;
+    check(repeatable_text.size()==35&&repeatable_text.starts_with("REPEATABLE-")&&
+          repeatable_text.substr(11,8).find_first_not_of("bcdfghjklmnpqrstvwxzBCDFGHJKLMNPQRSTVWXZ0123456789")==std::string::npos&&
+          repeatable_text.substr(19)==" persistent text"&&app.field(toggle.field).checked!=original_toggle&&
           app.field(choice.field).selected=="ctrl-enter"&&app.take_services().size()==1,
           "Persistent controls lost input while another page was selected");
 }

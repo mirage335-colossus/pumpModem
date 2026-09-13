@@ -195,14 +195,17 @@ the final space. For example, Callsign `N0CALL` and Grid `AA00aa` produce
 greeting is inserted. These values are transmitted only as the visible message
 text; they do not set separate packet metadata.
 
-**Repeatable** adds `REPEATABLE ` before that greeting or before your message
-when no greeting is present. It turns off automatically for an attachment or
-when the message exceeds 256 payload bytes, including UTF-8 and greeting bytes.
+**Repeatable** adds `REPEATABLE-XXXXXXXX ` before that greeting or before your
+message when no greeting is present. The eight-character identifier uses random
+uppercase and lowercase consonants (excluding Y/y) and digits. Every message
+content edit, including insertion, deletion or paste, generates a fresh identifier.
+It turns off automatically for an attachment or when the message exceeds 256
+payload bytes, including UTF-8, greeting and the 20-byte repeatable prefix.
 With all three convenience fields empty or off, no text or spaces are inserted.
 When a text transmission starts, Message clears to the current convenience text
 and **Previous message - click to paste** becomes available to restore the exact
-previous message for editing or retransmission. Pasting turns the Repeatable
-checkbox off; any restored `REPEATABLE ` marker remains ordinary editable text.
+previous message for editing or retransmission, preserving its repeatable
+identifier. Editing the recalled message generates a fresh identifier.
 The new draft remains available while transmission runs. The CLI and packet API
 retain their existing explicit metadata options and wire format.
 
