@@ -4,12 +4,13 @@
 #include "theme.hpp"
 #include "control_interactions.hpp"
 #include "record_interactions.hpp"
+#include "service_queue.hpp"
+#include "record_scroll.hpp"
 #include <stdexcept>
 #include <algorithm>
 #include <array>
 #include <chrono>
 #include <cmath>
-#include <deque>
 #include <filesystem>
 #include <functional>
 #include <iostream>
@@ -279,8 +280,8 @@ struct ListView : re::Box {
     std::vector<std::string> order;
     std::function<void(std::string)> select,activate;
     re::Text* empty=nullptr;
-    bool color,follow_tail,tail_at_last_paint=true,restore_scroll=false;
-    float retained_scroll=0;
+    bool color,follow_tail,restore_scroll=false;
+    ui::RecordScroll scroll;
     ui::RecordInteractions interactions;
     int row_height,width=1,height=1;
     ListView(re::Element* parent,const ui::Control& control,bool colored)
@@ -298,10 +299,16 @@ struct ListView : re::Box {
         return false;
     }
     bool at_tail() {
-        if(hidden_page()||restore_scroll)return tail_at_last_paint;
+        if(hidden_page()||restore_scroll)return scroll.at_tail();
         // Native hidden pages have no resolved inner height. These rows have
         // declared fixed extents, so retain their tail semantics while hidden.
-        return resolved.scroll.y>=std::max(0.0f,static_cast<float>(order.size()*static_cast<std::size_t>(row_height))-static_cast<float>(height))-1;
+        return ui::RecordScroll::at_tail(resolved.scroll.y,maximum_scroll());
+    }
+    double maximum_scroll() const {
+        return std::max(0.0,static_cast<double>(order.size())*row_height-height);
+    }
+    void capture_scroll() {
+        if(!hidden_page()&&!restore_scroll)scroll.capture(resolved.scroll.y,maximum_scroll());
     }
     void computePrimitives(re::Event& event) override {
         if(!hidden_page()) {
@@ -310,30 +317,28 @@ struct ListView : re::Box {
                 if(std::abs(layout.rect.h-extent)>1||resolved.getInner(Axis::Vertical)<1) {
                     shared->layoutDirty=true;refresh(event);re::Box::computePrimitives(event);return;
                 }
-                resolved.scroll.y=follow_tail&&tail_at_last_paint?
-                    std::max(0.0f,static_cast<float>(order.size()*static_cast<std::size_t>(row_height))-static_cast<float>(height)):retained_scroll;
+                resolved.scroll.y=static_cast<float>(scroll.target(maximum_scroll(),follow_tail));
                 restore_scroll=false;shared->layoutDirty=true;refresh(event);
-            } else {retained_scroll=resolved.scroll.y;tail_at_last_paint=at_tail();}
+            } else capture_scroll();
         }
         re::Box::computePrimitives(event);
     }
     void retain_for_page_change() {
-        if(!hidden_page()&&!restore_scroll) {retained_scroll=resolved.scroll.y;tail_at_last_paint=at_tail();}
+        capture_scroll();
         restore_scroll=true;
     }
     void resize_content(int w,int h) {
-        const bool tail=follow_tail&&at_tail();restore_scroll=restore_scroll||hidden_page();width=w;height=h;
+        capture_scroll();restore_scroll=restore_scroll||hidden_page();width=w;height=h;
         place(empty,{15,std::max(0,(h-20)/2),std::max(1,w-30),20});
         for(auto& [id,row]:rows)layout_cells(row);
-        if(tail)resolved.scroll.y=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
+        resolved.scroll.y=static_cast<float>(scroll.target(maximum_scroll(),follow_tail));
     }
     re::Button* navigate(re::Element* current,int direction) {
         const auto found=std::find_if(order.begin(),order.end(),[&](const auto& id){return rows.at(id).button==current;});
         const auto action=interactions.key(found==order.end()?std::string_view{}:*found,direction<0?ui::RecordKey::up:ui::RecordKey::down);
         if(!dispatch(action))return nullptr;
-        const float top=static_cast<float>(action.index*static_cast<std::size_t>(row_height)),bottom=top+static_cast<float>(row_height);
-        if(top<resolved.scroll.y)resolved.scroll.y=top;
-        else if(bottom>resolved.scroll.y+resolved.getInner(Axis::Vertical))resolved.scroll.y=bottom-resolved.getInner(Axis::Vertical);
+        const double top=static_cast<double>(action.index)*row_height;
+        resolved.scroll.y=static_cast<float>(ui::RecordScroll::reveal(resolved.scroll.y,top,row_height,resolved.getInner(Axis::Vertical),maximum_scroll()));
         shared->layoutDirty=true;return rows.at(action.id).button;
     }
     bool dispatch(const ui::RecordInteraction& action) {
@@ -348,7 +353,7 @@ struct ListView : re::Box {
     }
     void apply(const ui::FieldState& state) {
         interactions.apply(state);
-        const bool tail=follow_tail&&at_tail();restore_scroll=restore_scroll||hidden_page();bool changed=false;const auto old_order=order;
+        capture_scroll();restore_scroll=restore_scroll||hidden_page();bool changed=false;const auto old_order=order;
         std::set<std::string> retained;for(const auto& record:state.records)retained.insert(record.id);
         for(auto it=rows.begin();it!=rows.end();) {
             if(!retained.contains(it->first)) {delete it->second.button;it=rows.erase(it);changed=true;}else ++it;
@@ -392,7 +397,7 @@ struct ListView : re::Box {
         // each long cell's horizontal scroll survive snapshot replacement.
         children=std::move(children_order);
         empty->style->visibility=order.empty()?Visibility::Visible:Visibility::Hidden;
-        if(tail)resolved.scroll.y=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
+        resolved.scroll.y=static_cast<float>(scroll.target(maximum_scroll(),follow_tail));
         if(changed||old_order!=order)shared->layoutDirty=true;
     }
 };
@@ -431,7 +436,7 @@ public:
     std::span<const ui::Control> declarations;
     std::function<void(ui::Command)> command_observer;
     std::vector<void*>* group;
-    std::deque<ui::ServiceRequest> services;
+    ui::ServiceQueue services;
     re::Box* dialog=nullptr;
     re::Box* modal=nullptr;
     Editor* prompt=nullptr;
@@ -536,7 +541,7 @@ public:
     }
     void keyDown(re::Event& e) override {
         if(dialog && e.keyboard.escape) {
-            dialog_result=ui::ServiceResult{services.front().id,true,{},{}};
+            if(const auto* request=services.current())dialog_result=ui::ServiceResult{request->id,true,{},{}};
             e.propagate=false;return;
         }
         if(e.keyboard.tab) {
@@ -617,7 +622,7 @@ public:
             for(auto* element=binding.element;element&&element!=this;element=element->parent)hidden=hidden||element->resolved.hidden;
             if(hidden)continue;
             if(application.smoke_passed()&&binding.list&&binding.control.follow_tail&&!binding.list->at_tail())
-                throw std::runtime_error("Rev smoke: visible record tail lost after page changes: scroll="+std::to_string(binding.list->resolved.scroll.y)+" retained="+std::to_string(binding.list->retained_scroll)+" content="+std::to_string(binding.list->layout.rect.h)+" height="+std::to_string(binding.list->height)+" inner="+std::to_string(binding.list->resolved.getInner(Axis::Vertical)));
+                throw std::runtime_error("Rev smoke: visible record tail lost after page changes: scroll="+std::to_string(binding.list->resolved.scroll.y)+" retained="+std::to_string(binding.list->scroll.position())+" content="+std::to_string(binding.list->layout.rect.h)+" height="+std::to_string(binding.list->height)+" inner="+std::to_string(binding.list->resolved.getInner(Axis::Vertical)));
             const auto& rect=binding.element->rect;
             const auto frame=ui::control_layout(binding.control,state(binding.control),details.size.width,details.size.height,declarations).frame;
             if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
@@ -758,6 +763,8 @@ public:
         bool relayout=false;
         for(auto& b:bindings) {
             const auto presentation=application.control(b.control);
+            if(b.label)b.label->content=presentation.label;
+            if(b.toggle)b.toggle->label->content=presentation.label;
             b.element->style->visibility=presentation.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!presentation.enabled);
             if(b.control.field!=ui::Field::count) {
                 const auto& value=presentation.state;
@@ -771,7 +778,6 @@ public:
                 }
                 if(b.toggle)b.toggle->value=value.checked;
                 if(b.list)b.list->apply(value);
-                if(b.control.kind==ui::Kind::label&&b.label)b.label->content=presentation.label;
             }
             if(b.button) {b.button->setDisabled(!presentation.enabled);b.button->labelText->content=presentation.label;}
             if(b.menu) {
@@ -782,7 +788,7 @@ public:
             }
         }
         if(relayout)layout_desktop();
-        update_plots();update_documents();for(auto& request:application.take_services())services.push_back(std::move(request));process_services();refresh(event);
+        update_plots();update_documents();services.synchronize(application.take_services(),application.closing());process_services();refresh(event);
     }
 #ifdef DATAPUMP_REV_ADAPTER_TEST
 #include "../../tests/rev_adapter_probes.inc"
@@ -801,20 +807,26 @@ public:
         }
     }
     void process_services() {
+        if(services.closed()) {
+            dialog_result.reset();service_probe=false;
+            if(modal) {delete modal;modal=nullptr;dialog=nullptr;prompt=nullptr;focus_control(nullptr);}
+            previous_focus=nullptr;return;
+        }
         if(dialog_result) {
             auto result=std::move(*dialog_result);dialog_result.reset();
+            if(!services.complete(result.id))return;
             delete modal;modal=nullptr;dialog=nullptr;prompt=nullptr;
             if(!service_probe)application.complete_service(std::move(result));service_probe=false;
-            if(!services.empty())services.pop_front();
             surface->setDisabled(false);focus_control(previous_focus);previous_focus=nullptr;
         }
-        if(dialog || services.empty())return;
-        auto request=services.front();
+        if(dialog)return;
+        const auto* next=services.next();if(!next)return;
+        const auto request=*next;
         if(request.kind==ui::ServiceKind::clipboard || request.kind==ui::ServiceKind::open_folder) {
             ui::ServiceResult result{request.id};
             try {if(request.kind==ui::ServiceKind::clipboard)platform.copy(request.value);else RevPlatform::open_folder(request.value);}
             catch(const std::exception& e){result.error=e.what();}
-            application.complete_service(std::move(result));services.pop_front();return;
+            if(services.complete(result.id))application.complete_service(std::move(result));return;
         }
         previous_focus=focused_control();
         modal=new re::Box(this);modal->style->layout.position=Position::Absolute;
@@ -846,7 +858,9 @@ int run(Launch launch) {
 #ifdef DATAPUMP_REV_ADAPTER_TEST
     if(launch.smoke) {
         Launch probe_options=launch;probe_options.smoke=false;probe_options.simulation=true;probe_options.page=ui::pages().front().id;
-        RevApp probe(windows,probe_options,test::extension_controls());probe.verify_extension_contract();
+        auto declarations=test::extension_controls();
+        RevApp probe(windows,probe_options,declarations);probe.verify_extension_contract();
+        test::relabel_extension_controls(declarations);probe.apply();probe.verify_updated_labels();probe.verify_service_shutdown();
     }
 #endif
     auto app=std::make_unique<RevApp>(windows,launch);

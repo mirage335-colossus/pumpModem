@@ -373,9 +373,10 @@ color where supported, and explicit status labels. `--monochrome` selects the
 grayscale presentation without changing control types or per-element settings.
 See the
 [minimal GUI contract](docs/gui-contract.md) and [architecture review](docs/gui-architecture.md)
-for the semantic widget interface and staged migration plan. Rev exercises the
-shared declarations/controller and both toolkits share bitmap producers; FLTK's
-semantic screen/controller migration and further adapters remain proposed work.
+for the shared widget interface and extension workflow. FLTK and Rev both use
+the same declarations, controller, record and document presentation, layout and
+bitmap producers. Features using these primitives are added in shared code and
+reach both backends; adapters handle native widgets, drawing and platform services.
 
 The source is separated into packet coding, cryptography, DSP/WAV, audio devices,
 runtime policy, a shared transfer service, CLI orchestration, and GUI state. See [protocol](docs/protocol.md),

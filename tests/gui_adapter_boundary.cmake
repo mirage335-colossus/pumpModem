@@ -7,7 +7,7 @@ set(contract_headers
   application.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
   desktop_layout.hpp control_layout.hpp document_layout.hpp
   control_binding.hpp record_interactions.hpp presentation_palette.hpp
-  text_policy.hpp utf8_policy.hpp control_interactions.hpp theme.hpp)
+  text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp theme.hpp)
 set(native_headers backend_fltk_document.hpp backend_rev_document.hpp
   bitmap_fltk.hpp theme_fltk.hpp rev_platform.hpp)
 

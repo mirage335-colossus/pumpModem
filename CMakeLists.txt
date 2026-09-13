@@ -84,6 +84,9 @@ if(BUILD_TESTING)
   add_executable(test_gui_interactions tests/test_gui_interactions.cpp)
   target_include_directories(test_gui_interactions PRIVATE src/gui)
   add_test(NAME gui_interactions COMMAND test_gui_interactions)
+  add_executable(test_gui_services tests/test_gui_services.cpp)
+  target_include_directories(test_gui_services PRIVATE src/gui)
+  add_test(NAME gui_services COMMAND test_gui_services)
   add_executable(test_inspection tests/test_inspection.cpp src/gui/inspection_model.cpp)
   target_include_directories(test_inspection PRIVATE src/gui)
   target_link_libraries(test_inspection PRIVATE datapump)
@@ -155,7 +158,7 @@ if(BUILD_TESTING)
       set_tests_properties(gui_adapter_conformance PROPERTIES LABELS "gui;native_gui" TIMEOUT 330 RUN_SERIAL TRUE)
     endif()
   endif()
-  set_tests_properties(gui_layout gui_contract gui_document_layout gui_interactions gui_inspection gui_pattern_space
+  set_tests_properties(gui_layout gui_contract gui_document_layout gui_interactions gui_services gui_inspection gui_pattern_space
     gui_plots gui_bitmaps gui_inspection_page gui_controller gui_application gui_adapter_boundary gui_boundary_regression gui_native_policy
     PROPERTIES LABELS "gui")
   if(UNIX)

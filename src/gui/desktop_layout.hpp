@@ -98,9 +98,9 @@ struct DesktopLayout {
         out[Slot::constellation_label] = {margin + waterfall_width + other_width + 24, plots_y - 23, other_width, 21};
         out[Slot::constellation] = {margin + waterfall_width + other_width + 24, plots_y, other_width, plot_height};
 
-        // Adapters needing explicit copy/plot actions reserve these small
-        // footers inside the established signal/plot blocks. Exterior geometry
-        // stays identical; FLTK's existing click/wheel gestures need no footer.
+        // Both adapters use these declared copy/plot actions alongside their
+        // shared click/wheel gestures. Small footers fit inside the established
+        // signal/plot blocks without changing their exterior geometry.
         const auto signals = out[Slot::signals], waterfall = out[Slot::waterfall], waveform = out[Slot::waveform];
         out[Slot::copy_signal] = {signals.x + 4, signals.y + signals.h - 22, 180, compact_action_height};
         out[Slot::clear_waterfall] = {waterfall.x + 4, waterfall.y + waterfall.h - 22, 128, compact_action_height};

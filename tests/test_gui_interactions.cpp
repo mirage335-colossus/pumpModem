@@ -1,11 +1,33 @@
 #include "control_interactions.hpp"
 #include "record_interactions.hpp"
+#include "record_scroll.hpp"
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 
 namespace ui=datapump::gui::ui;
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+void record_scroll() {
+    ui::RecordScroll scroll;
+    require(scroll.target(300,true)==300&&scroll.target(300,false)==0,"New list did not follow its declared initial tail policy");
+    scroll.capture(98,100);
+    require(scroll.at_tail()&&scroll.target(140,true)==140,"Near-tail reader did not follow an appended record");
+    require(scroll.target(140,false)==98,"Disabling tail following moved the reader");
+    scroll.capture(97.5,100);
+    require(!scroll.at_tail()&&scroll.target(140,true)==97.5,"Incoming record moved a history reader at the tolerance boundary");
+    require(scroll.target(60,true)==60,"Shrinking record content left the reader past its end");
+    require(scroll.target(200,true)==97.5,"An intermediate unresolved extent discarded retained history");
+    scroll.capture(100,100);
+    require(scroll.target(160,true)==160&&scroll.target(40,true)==40,"Viewport resize lost a tail reader");
+    scroll.capture(500,100);
+    require(scroll.position()==100&&scroll.target(150,false)==100,"Native overscroll leaked into retained history");
+    scroll.capture(0,0);
+    require(scroll.at_tail()&&scroll.target(50,true)==50,"An initially unscrollable list failed to follow incoming records");
+    require(ui::RecordScroll::reveal(60,30,30,100,300)==30,"Keyboard navigation failed to reveal a row above the viewport");
+    require(ui::RecordScroll::reveal(30,120,30,100,300)==50,"Keyboard navigation failed to reveal the entire row below the viewport");
+    require(ui::RecordScroll::reveal(50,60,30,100,300)==50,"Keyboard navigation moved an already visible row");
+    require(ui::RecordScroll::reveal(50,180,30,100,100)==100,"Keyboard reveal exceeded the native scroll extent");
+}
 void record_interactions() {
     using namespace std::chrono_literals;
     ui::FieldState state;
@@ -57,6 +79,7 @@ void record_interactions() {
 int main() {
     try {
         record_interactions();
+        record_scroll();
         ui::Control control{ui::Kind::label};
         control.click=ui::Command::clear_received;control.double_click=ui::Command::reset_zoom;
         control.wheel_up=ui::Command::zoom_in;control.wheel_down=ui::Command::zoom_out;

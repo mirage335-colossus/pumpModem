@@ -131,14 +131,15 @@ bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
     if(control.submit==ui::Command::none||shift)return false;
     const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
     if(ctrl!=wants_ctrl)return false;
-    if(impl_->controller.enabled(control.submit))impl_->controller.activate(control.submit);
+    const auto view=this->control(control);
+    if(view.enabled&&view.visible&&impl_->controller.enabled(control.submit))impl_->controller.activate(control.submit);
     return true; // Consume the declared submit gesture even when unavailable.
 }
 void Application::activate_record(const ui::Control& control,const std::string& id) {
     if(control.activate_record==ui::Command::none||control.field==ui::Field::count)return;
     const auto& state=impl_->controller.field(control.field);
     const auto found=std::find_if(state.records.begin(),state.records.end(),[&](const auto& record){return record.id==id;});
-    if(!state.enabled||found==state.records.end()||!found->enabled||!found->activatable)return;
+    if(!state.enabled||!state.visible||found==state.records.end()||!found->enabled||!found->activatable)return;
     impl_->controller.select(control.field,id);
     if(impl_->controller.field(control.field).selected==id&&impl_->controller.enabled(control.activate_record))impl_->controller.activate(control.activate_record);
 }

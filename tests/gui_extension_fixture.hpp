@@ -1,6 +1,7 @@
 #pragma once
 #include "../src/gui/ui_document.hpp"
 #include <memory>
+#include <span>
 
 // Shared extension fixture used unchanged by both native adapters. It adds only
 // existing semantic primitives above their factories, including a new record
@@ -33,6 +34,14 @@ inline const std::vector<ui::Control>& extension_controls() {
 inline ui::FieldState effective_choice() {
     ui::FieldState state;state.options={{"saved","Saved option"},{"other","Other option"}};
     state.selected="saved";state.display_text="Effective value";return state;
+}
+// Change the same shared label presentation after widgets already exist. Every
+// native text role must consume it on update, including literal labels/toggles.
+inline void relabel_extension_controls(std::span<ui::Control> controls) {
+    controls[0].label="Updated literal label";
+    controls[1].label="Updated action label";
+    controls[2].label="Updated editor label";
+    controls[3].label="Updated toggle label";
 }
 struct BitmapProbe {std::vector<BitmapRequest> requests;};
 // Arbitrary opaque rectangles, including padded strides and blocks taller than

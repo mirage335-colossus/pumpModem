@@ -100,6 +100,9 @@ void editors_and_records() {
     state.selected="10";records->apply(state);Fl::check();
     auto* retained=record_widget(*records,"row 10");require(retained,"Structured record lost its native text cells");
     require(records->yposition()>0,"Tail-following list did not reveal new rows");
+    const int initial_tail=records->yposition();records->scroll_to(0,initial_tail-2);
+    state.records.push_back({"near-tail",{{"Tail tolerance",8,3,-8,24,13}},true,true});records->apply(state);
+    require(records->yposition()==initial_tail+control.list_row_height,"Native list did not use the shared two-unit tail tolerance");
     const int tail=records->yposition();records->resize(10,130,560,140);
     require(records->yposition()==tail+40,"Shrinking a tail-following list hid the latest row");
     records->resize(10,130,560,180);
@@ -112,6 +115,10 @@ void editors_and_records() {
     require(record_widget(*records,"row 10")==retained,"Removing an older row changed stable record identity");
     state.records.front().cells.front().text=std::string(500,'W');records->apply(state);Fl::check();
     require(records->hscrollbar.visible(),"Long pending text has no native horizontal scrollbar");
+    records->scroll_to(0,0);state.selected="5";records->apply(state);
+    const auto navigation_key=Fl::e_keysym;Fl::e_keysym=FL_Down;records->handle(FL_KEYDOWN);Fl::e_keysym=navigation_key;
+    auto* revealed=record_widget(*records,"row 6");require(revealed,"Keyboard reveal fixture lost its selected record");
+    require(revealed->y()+revealed->h()<=records->y()+records->h()-Fl::scrollbar_size()-1,"Keyboard navigation left the selected row behind the horizontal scrollbar");
     records->scroll_to(120,records->yposition());require(records->xposition()==120,"Record horizontal scrolling did not retain full text access");
     auto extension=datapump::gui::test::extension_records();records->apply(extension);
     require(record_widget(*records,"Added field / &"),"Shared extension record cell did not render through the unchanged factory");
@@ -195,9 +202,15 @@ void prompts() {
     dialog=Fl::modal();require(dialog,"Native cancel prompt did not open");auto* cancel=find_button(*dialog,"Cancel");require(cancel,"Native prompt lost Cancel action");
     cancel->do_callback();services.poll();Fl::check();
     require(result&&result->id==89&&result->cancelled&&Fl::focus()==previous,"Native prompt cancellation changed state or lost focus");
+    result.reset();services.enqueue({{90,ui::ServiceKind::prompt,"Shutdown prompt",""},
+        {91,ui::ServiceKind::clipboard,"Queued copy","must not copy"}});
+    services.poll();Fl::check();require(Fl::modal(),"Shutdown fixture did not open a prompt");
+    services.queue.synchronize({},true);services.poll();Fl::check();
+    require(!Fl::modal()&&!result&&!services.queue.next(),"Closing left a native prompt or dispatched a queued platform request");
 }
 void extension_controls() {
-    Launch launch;launch.simulation=true;NativeApp app(launch,datapump::gui::test::extension_controls());Fl::check();
+    auto declarations=datapump::gui::test::extension_controls();
+    Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
     auto* window=Fl::first_window();require(window,"Extension fixture did not create a native window");
     for(const auto& page:ui::pages())require(find_button(*window,page.title),"Native tab label diverged from shared page title");
     require(find_label(*window,"Extension / literal & label"),"Shared extension label did not render through the unchanged control factory");
@@ -232,6 +245,11 @@ void extension_controls() {
     menu->picked(menu->menu());
     require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Filtered native menu dispatched the wrong shared entry");
     action->do_callback();require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Shared extension action did not reach the common controller");
+    datapump::gui::test::relabel_extension_controls(declarations);
+    const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+    for(std::size_t index=0;index<4;++index)
+        require(find_label(*window,app.application.control(declarations[index]).label.c_str()),"Existing native control retained a stale shared label");
+    require(std::string(toggle->label())==app.application.control(declarations[3]).label,"Native toggle retained a stale shared label");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 void document_geometry(Fl_Group& parent) {

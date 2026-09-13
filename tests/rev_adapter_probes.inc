@@ -1,4 +1,21 @@
 // Included inside RevApp only by the native conformance executable.
+    void verify_updated_labels() {
+        for(std::size_t index=0;index<4;++index) {
+            const auto& binding=bindings[index];
+            const auto label=application.control(binding.control).label;
+            auto* native=binding.toggle?binding.toggle->label:binding.button?binding.button->labelText:binding.label;
+            if(!native||native->content.get()!=label)throw std::runtime_error("Rev extension retained a stale shared control label");
+        }
+    }
+    void verify_service_shutdown() {
+        services.enqueue({{0,ui::ServiceKind::prompt,"Shutdown prompt",""},
+            {1,ui::ServiceKind::clipboard,"Queued copy","must not copy"}});
+        process_services();
+        if(!dialog)throw std::runtime_error("Rev shutdown fixture did not open a prompt");
+        application.close();apply();
+        if(dialog||modal||prompt||!services.closed()||services.next())
+            throw std::runtime_error("Rev closing retained a native dialog or queued platform request");
+    }
     void verify_editor_contract() {
         for(auto& binding:bindings)if(binding.control.kind==ui::Kind::text&&binding.control.multiline&&binding.editor) {
             const auto field=binding.control.field;auto& editor=*binding.editor;
@@ -110,6 +127,10 @@
         for(unsigned index=0;index<8;++index) {auto record=template_record;record.id="tail-"+std::to_string(index);state.records.push_back(std::move(record));}
         state.records[1].enabled=false;probe->apply(state);paint();
         if(!probe->at_tail())throw std::runtime_error("Rev smoke: new records did not follow the declared tail policy");
+        probe->resolved.scroll.y=static_cast<float>(probe->maximum_scroll()-2);
+        auto near_tail=template_record;near_tail.id="near-tail";state.records.push_back(std::move(near_tail));probe->apply(state);paint();
+        if(std::abs(probe->resolved.scroll.y-probe->maximum_scroll())>1)
+            throw std::runtime_error("Rev smoke: native list did not use the shared two-unit tail tolerance");
         place(probe,{0,0,400,80});probe->resize_content(400,80);paint();
         if(!probe->at_tail())throw std::runtime_error("Rev smoke: shrinking a record viewport lost the tail");
         probe->resolved.scroll.y=54;place(probe,{0,0,400,100});probe->resize_content(400,100);paint();
@@ -365,7 +386,7 @@
         auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){return binding.button&&!binding.button->disabled;});
         if(found==bindings.end())throw std::runtime_error("Rev smoke: missing action control");
         auto* button=found->button;focus_control(button);service_probe=true;
-        services.push_back({0,ui::ServiceKind::prompt,"Native prompt focus probe",""});process_services();
+        services.enqueue({{0,ui::ServiceKind::prompt,"Native prompt focus probe",""}});process_services();
         if(!prompt||focused_control()!=prompt||allows_input(button))throw std::runtime_error("Rev smoke: prompt did not isolate keyboard focus");
         re::Event key;key.keyboard.tab.id=1;keyDown(key);
         if(!focused_control()||!allows_input(focused_control()))throw std::runtime_error("Rev smoke: Tab escaped the prompt");

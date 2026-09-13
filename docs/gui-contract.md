@@ -46,7 +46,10 @@ ordinary menus on different pages remain separate. Only the first declaration
 in each group creates a native control and consumes layout space.
 
 `Application::control()` resolves bound text, command labels, visibility and
-eligibility. `Application::menu()` derives each entry from that same presentation,
+eligibility. Native control labels consume shared presentation on each update,
+including editor, choice and list headings. Bitmap titles and menu labels use
+their specialized shared presentations.
+`Application::menu()` derives each entry from that same presentation,
 omits hidden entries, and enables the menu when at least one visible entry is
 enabled. Returned option IDs retain declaration identity after filtering.
 Adapters pass those IDs to `select_menu()`; shared dispatch rechecks the chosen
@@ -82,7 +85,9 @@ quality and message text; files and unverified prefixes are not copyable as text
   and uses the same validated control edit path. Unknown or disabled presets
   cannot change text; a preset cannot bypass a control's byte limit.
   Enter/Ctrl+Enter/Shift+Enter submission is shared
-  command policy; native adapters translate modifiers only.
+  command policy; native adapters translate modifiers only. Shared dispatch
+  rechecks visibility and eligibility before submission or record activation,
+  including callbacks arriving after the control's state changed.
 - Declared click, double-click and wheel commands apply to every control kind.
   Adapters translate coordinates and wheel detents; shared interaction code
   chooses commands, recognizes double-clicks and caps coalesced wheel repetition.
@@ -99,6 +104,9 @@ quality and message text; files and unverified prefixes are not copyable as text
   Copy/Save actions remain separately reachable.
 - New records follow the tail only when the reader was already there. History
   review and long text remain accessible through native scrolling.
+  `record_scroll.hpp` owns tail detection, position retention when records or the
+  viewport change, and scrolling a selected row into view. Adapters supply
+  native measurements and apply the returned position.
 - Key-file failure acknowledgement is an explicit action. It does not depend
   on a toolkit reporting re-selection of an unchanged choice.
 - All input validation, transmit eligibility, preparation/revision checks,
@@ -180,6 +188,11 @@ using a unique request ID and opaque strings. Native adapters return cancellatio
 a value or an error. Dialogs must allow the shared polling loop to continue.
 The controller retains data behind pending saves and performs exclusive writes;
 platform dialogs never authorize silent overwrites.
+`service_queue.hpp` provides the request queue and completion-ID checks used by
+both adapters. Requests execute serially. Application shutdown cancels active
+and queued requests, so closing a dialog cannot launch another queued operation.
+Adapters own the native dialog and platform calls and close their active dialog
+when shared queue state is cancelled.
 
 `Application` polls controller/bitmap state at 25 Hz and requests ordinary
 presentation at 10 Hz. Adapters pump native events, call `tick()`, apply returned
@@ -196,9 +209,10 @@ requirements also remain adapter work.
 
 Shared extension fixtures exercise the same added controls, scoped/filtered
 menus, validated presets, record cells and document geometry in both native
-suites. Toolkit-free tests cover grouping, dispatch, record interaction policy
-and semantic palettes. The boundary guard also checks generic public helpers;
-its regressions reject application-ID decisions hidden behind helpers or aliases
+suites. Toolkit-free tests cover grouping, dispatch, record interaction policy,
+scrolling, service ordering/shutdown and semantic palettes. The boundary guard
+also checks generic public helpers; its regressions reject application-ID
+decisions hidden behind helpers or aliases
 and dependencies that cross into a toolkit or application internals.
 
 See [GUI architecture](gui-architecture.md) for file ownership, extension tests

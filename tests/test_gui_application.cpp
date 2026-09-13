@@ -145,6 +145,18 @@ void declared_edits() {
     editor.field=ui::Field::count;app.edit(editor,"other");
     check(app.field(ui::Field::status).text=="Inactive edit unchanged","Unbound declaration attempted an edit");
 }
+void declared_submission() {
+    Application app({.simulation=true});
+    ui::Control editor{ui::Kind::text};editor.submit=ui::Command::clear_received;
+    for(const auto field:{ui::Field::binary,ui::Field::payload_alphabet}) {
+        editor.field=field;app.report_error("Inactive submit unchanged");
+        check(app.submit(editor,false,false),"Inactive declared submit gesture was not consumed");
+        check(app.field(ui::Field::status).text=="Inactive submit unchanged","Stale submit callback bypassed hidden or disabled control eligibility");
+    }
+    editor.field=ui::Field::message;
+    check(app.submit(editor,false,false)&&app.field(ui::Field::status).text.find("cleared")!=std::string::npos,
+          "Eligible declared submission did not reach the shared command");
+}
 void menu_groups() {
     std::vector<ui::Control> controls(8,ui::Control{ui::Kind::action});
     for(auto& c:controls)c.menu=ui::Menu::keyfile;
@@ -198,6 +210,6 @@ void declarations() {
 }
 }
 int main() {
-    try {records();presentation();control_bindings();menu_bindings();declared_edits();menu_groups();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();menu_bindings();declared_edits();declared_submission();menu_groups();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

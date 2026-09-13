@@ -17,6 +17,8 @@ removed.
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
 | `document_layout.hpp` | Document flow, remaining widths, margins, padding, clipping and nested equal heights; adapters supply native glyph measurements only. |
 | `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
+| `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
+| `service_queue.hpp` | Serial platform-service requests, completion identity and cancellation of current/queued work during shutdown. |
 | `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 edit policy and declaration-specific byte limits. |
 | `theme.hpp`, `presentation_palette.hpp` | Shared RGB values and semantic text/document tone and fill resolution. |
 | `screen_console.cpp` | Page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
@@ -34,7 +36,7 @@ renderers consume `ui::DocumentNode` without knowing what an inspection model is
 Adapters call `Application` through fields, commands, service messages and
 presentation snapshots; no public controller or bitmap-producer access is
 available.
-`Application::control()` resolves bound labels and availability;
+`Application::control()` resolves labels and availability for every control kind;
 `Application::menu()` filters hidden entries and preserves their declaration IDs.
 Menu selection, action activation and presets return through shared dispatch,
 which rechecks eligibility and applies the control's edit constraints.
@@ -46,9 +48,10 @@ Both toolkits retain native text and controls. A signal row is not rasterized
 into a bitmap or flattened into one string. Stable record IDs preserve selection
 and widget identity when old signals are removed or records are reordered.
 Incoming records follow the newest row while the reader is already at the tail;
-reviewing history keeps the reader's scroll position. Signal frequency, status,
-preamble/data measurements, message text, completion tone, help, empty state and
-copy actions are shared presentation policy.
+reviewing history keeps the reader's scroll position. Both adapters use shared
+record scroll policy with native viewport and scroll measurements. Signal
+frequency, status, preamble/data measurements, message text, completion tone,
+help, empty state and copy actions are shared presentation policy.
 
 ## Adding functionality once
 
@@ -85,13 +88,17 @@ The application polls reception and captures plot history at 25 Hz while native
 state/plot presentation runs at 10 Hz. Native input can repaint immediately.
 Pointer double-click timing, wheel command repetition and record keyboard
 selection/activation use shared policy. Adapters translate keys and pointer
-coordinates, then focus and reveal the returned native row. Text tones for
-records, captions and documents, along with document fills, resolve to RGB in
-`presentation_palette.hpp`; native code only converts those values for drawing.
+coordinates, then focus the returned native row and apply the shared reveal
+position. Text tones for records, captions and documents, along with document
+fills, resolve to RGB in `presentation_palette.hpp`; native code only converts
+those values for drawing.
 Both use immutable document and bitmap identities so unchanged polling does not
 rebuild text trees or upload textures. Moving between pages and resizing cannot
 restart reception. File/prompt/clipboard services use request IDs and deferred
 results; a pending Save retains its bytes independently of inbox changes.
+`service_queue.hpp` serializes service requests and matches completion IDs for
+both backends. Closing the application cancels active and queued requests;
+adapters close native dialogs and cannot start another queued service.
 
 ## Verification and maintenance guardrails
 
@@ -116,9 +123,13 @@ record cells, relative document widths/margins, wrapped actions and opaque bitma
 rectangles with padded strides and multiple formats. `gui_document_layout` and
 `gui_interactions` test geometry and event policy without a toolkit, including
 record arrow navigation, disabled rows, Space/Enter, double-click identity and
-activation-on-selection. `gui_application` covers control/menu presentation,
-dispatch, preset validation and persistent menu grouping. Native tests
-verify that those descriptions reach real widgets and dispatch callbacks.
+activation-on-selection, along with record tail following, history retention and
+selection visibility. `gui_application` covers control/menu presentation,
+dispatch, stale submission callbacks, preset validation and persistent menu
+grouping. Native tests verify that those descriptions reach real widgets,
+refresh existing control labels and dispatch callbacks.
+`gui_services` tests service ordering, completion identity and shutdown
+cancellation without a toolkit.
 Rev also checks rendered pixels when leaving deeply nested clips, so later
 document siblings and persistent controls remain visible while overflow stays
 clipped.

@@ -5,6 +5,8 @@
 #include "text_policy.hpp"
 #include "control_interactions.hpp"
 #include "record_interactions.hpp"
+#include "service_queue.hpp"
+#include "record_scroll.hpp"
 #include <stdexcept>
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
@@ -28,7 +30,6 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
-#include <deque>
 #include <functional>
 #include <iostream>
 #include <limits>
@@ -303,9 +304,7 @@ public:
         interactions_.apply(state);
         if(records_==state.records&&selected_==state.selected)return;
         auto* previous_group=Fl_Group::current();
-        const int old_scroll=yposition();
-        const int previous_max=maximum_scroll();
-        const bool at_bottom=old_scroll>=previous_max-2;
+        scroll_.capture(yposition(),maximum_scroll());
         selected_=state.selected;records_=state.records;
         for(auto it=rows_.begin();it!=rows_.end();) {
             if(std::none_of(records_.begin(),records_.end(),[&](const auto& row){return row.id==it->first;})) {delete it->second;it=rows_.erase(it);}else ++it;
@@ -313,13 +312,13 @@ public:
         begin();for(const auto& record:records_)if(!rows_.contains(record.id))rows_.emplace(record.id,new Row(*this));end();
         layout_rows();
         const int maximum=maximum_scroll();
-        scroll_to(std::min(xposition(),std::max(0,content_width_-viewport_width())),control_.follow_tail&&at_bottom?maximum:std::min(old_scroll,maximum));redraw();Fl_Group::current(previous_group);
+        scroll_to(std::min(xposition(),std::max(0,content_width_-viewport_width())),static_cast<int>(scroll_.target(maximum,control_.follow_tail)));redraw();Fl_Group::current(previous_group);
     }
     void resize(int x,int y,int width,int height) override {
-        const auto previous_scroll=yposition();const bool at_bottom=previous_scroll>=maximum_scroll()-2;
+        scroll_.capture(yposition(),maximum_scroll());
         Fl_Scroll::resize(x,y,width,height);layout_rows();
         scroll_to(std::min(xposition(),std::max(0,content_width_-viewport_width())),
-                  control_.follow_tail&&at_bottom?maximum_scroll():std::min(previous_scroll,maximum_scroll()));
+                  static_cast<int>(scroll_.target(maximum_scroll(),control_.follow_tail)));
     }
     int handle(int event) override {
         if(event==FL_FOCUS||event==FL_UNFOCUS) {redraw();return 1;}
@@ -333,7 +332,7 @@ public:
                 const auto action=interactions_.key(selected_,*key);
                 if(dispatch(action)) {
                     const int top=static_cast<int>(action.index)*control_.list_row_height;
-                    if(top<yposition())scroll_to(xposition(),top);else if(top+control_.list_row_height>yposition()+h())scroll_to(xposition(),top+control_.list_row_height-h());
+                    scroll_to(xposition(),static_cast<int>(ui::RecordScroll::reveal(yposition(),top,control_.list_row_height,viewport_height(),maximum_scroll())));
                 }
                 return 1;
             }
@@ -343,12 +342,14 @@ public:
 private:
     ui::Control control_;
     ui::RecordInteractions interactions_;
+    ui::RecordScroll scroll_;
     std::vector<ui::Record> records_;
     std::map<std::string,Row*> rows_;
     std::string selected_;
     int content_width_=0;
     int viewport_width() const {return std::max(1,w()-Fl::scrollbar_size()-2);}
-    int maximum_scroll() const {return std::max(0,static_cast<int>(records_.size())*control_.list_row_height-h()+2+(content_width_>viewport_width()?Fl::scrollbar_size():0));}
+    int viewport_height() const {return std::max(1,h()-2-(content_width_>viewport_width()?Fl::scrollbar_size():0));}
+    int maximum_scroll() const {return std::max(0,static_cast<int>(records_.size())*control_.list_row_height-viewport_height());}
     bool dispatch(const ui::RecordInteraction& action) {
         return action.dispatch([this](const auto& id){selected_=id;layout_rows();if(selected)selected(id);},
             [this](const auto& id){if(activated)activated(id);});
@@ -373,18 +374,20 @@ private:
 class NativeServices {
 public:
     std::function<void(ui::ServiceResult)> complete;
-    void enqueue(std::vector<ui::ServiceRequest> requests) {for(auto& request:requests)pending_.push_back(std::move(request));}
+    ui::ServiceQueue queue;
+    void enqueue(std::vector<ui::ServiceRequest> requests) {queue.enqueue(std::move(requests));}
     void poll() {
-        if(current_) {
+        if(queue.closed()) {cancel();return;}
+        if(const auto* current=queue.current()) {
             if(chooser_&&!chooser_->shown()) {
-                ui::ServiceResult result{current_->id,false,{},{}};result.cancelled=!chooser_->value();
+                ui::ServiceResult result{current->id,false,{},{}};result.cancelled=!chooser_->value();
                 if(chooser_->value())result.value=chooser_->value();
                 finish(std::move(result));
             } else if(prompt_done_) {auto result=std::move(*prompt_done_);prompt_done_.reset();finish(std::move(result));}
             return;
         }
-        if(pending_.empty())return;
-        current_=std::move(pending_.front());pending_.pop_front();const auto& request=*current_;
+        const auto* next=queue.next();if(!next)return;
+        const auto request=*next;
         previous_focus_=std::make_unique<Fl_Widget_Tracker>(Fl::focus());
         try {
             if(request.kind==ui::ServiceKind::clipboard) {
@@ -397,9 +400,9 @@ public:
                 prompt_=std::make_unique<Fl_Double_Window>(560,132,request.title.c_str());prompt_->begin();
                 input_=new Fl_Input(14,18,532,30);input_->value(request.value.c_str());
                 auto* accept=new Fl_Return_Button(338,80,100,30,"Continue");auto* cancel=new Fl_Button(446,80,100,30,"Cancel");prompt_->end();
-                accept->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);self.prompt_done_=ui::ServiceResult{self.current_->id,false,self.input_->value(),{}};},this);
-                cancel->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);self.prompt_done_=ui::ServiceResult{self.current_->id,true,{},{}};},this);
-                prompt_->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);self.prompt_done_=ui::ServiceResult{self.current_->id,true,{},{}};},this);
+                accept->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,false,self.input_->value(),{}};},this);
+                cancel->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,true,{},{}};},this);
+                prompt_->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,true,{},{}};},this);
                 theme::apply_widgets(*prompt_);prompt_->set_modal();prompt_->show();input_->take_focus();
             } else {
                 chooser_=std::make_unique<Fl_File_Chooser>(request.value.c_str(),"*",request.kind==ui::ServiceKind::save_file?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,request.title.c_str());
@@ -408,20 +411,19 @@ public:
         } catch(const std::exception& error) {finish({request.id,false,{},error.what()});}
     }
     void cancel() {
-        pending_.clear();if(chooser_)chooser_->hide();if(prompt_)prompt_->hide();
-        chooser_.reset();prompt_.reset();current_.reset();prompt_done_.reset();
+        queue.cancel();if(chooser_)chooser_->hide();if(prompt_)prompt_->hide();
+        chooser_.reset();prompt_.reset();input_=nullptr;prompt_done_.reset();
         previous_focus_.reset();
     }
 private:
-    std::deque<ui::ServiceRequest> pending_;
-    std::optional<ui::ServiceRequest> current_;
     std::unique_ptr<Fl_File_Chooser> chooser_;
     std::unique_ptr<Fl_Double_Window> prompt_;
     Fl_Input* input_=nullptr;
     std::optional<ui::ServiceResult> prompt_done_;
     std::unique_ptr<Fl_Widget_Tracker> previous_focus_;
     void finish(ui::ServiceResult result) {
-        chooser_.reset();if(prompt_)prompt_->hide();prompt_.reset();input_=nullptr;current_.reset();
+        if(!queue.complete(result.id))return;
+        chooser_.reset();if(prompt_)prompt_->hide();prompt_.reset();input_=nullptr;
         if(previous_focus_&&previous_focus_->exists()) {
             auto* widget=previous_focus_->widget();if(widget&&widget->visible_r()&&widget->active_r())widget->take_focus();
         }
@@ -508,10 +510,8 @@ private:
         auto& self=*static_cast<NativeApp*>(context);
         try {
             if(self.application.tick()) {self.apply();if(self.application.launch.smoke)self.verify_layout();}
-            if(!self.application.closing()) {
-                self.services.enqueue(self.application.take_services());
-                if(!Fl::grab())self.services.poll();
-            } else self.services.cancel();
+            self.services.queue.synchronize(self.application.take_services(),self.application.closing());
+            if(self.services.queue.closed()||!Fl::grab())self.services.poll();
             if(self.application.page()!=self.shown_page)self.show_page();
             if(self.application.smoke_passed())self.scroll_to(self.application.launch.scroll);
         } catch(...) {self.failure_=std::current_exception();self.application.close();}
@@ -637,7 +637,7 @@ private:
                 if(b.choice) {int index=-1;for(std::size_t i=0;i<b.options.size();++i)if(b.options[i].id==state.selected)index=static_cast<int>(i);if(b.choice->value()!=index)b.choice->value(index);}
             }
             if(b.choice)b.choice->apply_display(state.display_text);
-            if(b.toggle)b.toggle->value(state.checked);
+            if(b.toggle) {b.toggle->value(state.checked);label(b.toggle,view.label);}
             if(b.records)b.records->apply(state);
             if(b.button) {enabled(b.button,view.enabled);label(b.button,view.label);}
             if(b.menu) {
