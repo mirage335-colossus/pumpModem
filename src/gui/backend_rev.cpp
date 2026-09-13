@@ -2,6 +2,7 @@
 #include "bitmap_sources.hpp"
 #include "gui_smoke.hpp"
 #include "plot_render.hpp"
+#include "inspection_page.hpp"
 #include "rev_platform.hpp"
 #include "theme.hpp"
 #include "datapump/runtime.hpp"
@@ -41,6 +42,8 @@ import Rev.Core.Observable;
 import Rev.Primitive.Video;
 import Rev.Graphics.Texture;
 import Rev.Graphics.Canvas;
+
+#include "backend_rev_inspection.hpp"
 
 namespace {
 using namespace datapump;
@@ -84,6 +87,24 @@ void configure_theme(bool color) {
     }
     t::CheckboxChecked.background.color=rgba(100,100,100,1);
     t::CheckboxBox.border.radius=0_px;
+    t::Control.margin={0_px,0_px,0_px,0_px};
+    t::Field.margin={0_px,0_px,0_px,0_px};
+    t::Field.padding={.left=5_px,.right=5_px,.top=2_px,.bottom=2_px};
+    t::ButtonSecondary.padding={.left=5_px,.right=5_px,.top=2_px,.bottom=2_px};
+}
+
+// Shared rectangles are logical client coordinates. Rev alone translates them
+// into retained element styles and physical backing pixels.
+void place(re::Element* element,ui::Rect rect) {
+    element->style->layout.position=Position::Absolute;
+    element->style->position={.left=Px(rect.x),.top=Px(rect.y)};
+    element->style->size={Px(rect.w),Px(rect.h),.min={Px(rect.w),Px(rect.h)},.max={Px(rect.w),Px(rect.h)}};
+    element->style->margin={0_px,0_px,0_px,0_px};
+}
+void compact_dropdown(re::Dropdown* choice) {
+    choice->label->style->visibility=Visibility::Hidden;
+    choice->optionsContainer->style->size.min.width=220_px;
+    choice->style->margin={0_px,0_px,0_px,0_px};
 }
 
 // Rev owns glyph layout, caret, selection and mouse editing. This small text
@@ -223,6 +244,7 @@ struct ListView : re::Box {
     std::function<void(std::string)> select;
     ListView(re::Element* parent):re::Box(parent,{&column}) {
         style->size.height=130_px;style->overflow=Overflow::Hide;style->scroll=Scroll::Both;
+        style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
     }
     void apply(const ui::FieldState& state) {
         options=state.options;
@@ -248,6 +270,7 @@ struct Binding {
     ui::Control control;
     re::Element* element=nullptr;
     re::Text* label=nullptr;
+    re::Text* caption=nullptr;
     Editor* editor=nullptr;
     re::Dropdown* suggestions=nullptr;
     re::Dropdown* choice=nullptr;
@@ -255,6 +278,8 @@ struct Binding {
     re::Button* button=nullptr;
     ListView* list=nullptr;
     BitmapView* bitmap=nullptr;
+    re::Dropdown* menu=nullptr;
+    std::vector<ui::Control> menu_items;
 };
 
 class RevApp : public Rev::Window {
@@ -264,6 +289,9 @@ public:
     Launch launch;
     std::array<re::Box*,3> pages{};
     re::Box* surface=nullptr;
+    re::Box* navigation=nullptr;
+    std::array<re::Button*,3> tabs{};
+    std::array<RevInspectionView*,2> inspection_views{};
     std::vector<Binding> bindings;
     BitmapSources bitmap_sources;
     std::set<ui::Bitmap> dirty_bitmaps;
@@ -275,25 +303,55 @@ public:
     re::Element* previous_focus=nullptr;
     std::optional<ui::ServiceResult> dialog_result;
     RevApp(std::vector<void*>& windows,Launch options)
-        :Rev::Window(windows,{.name="Data Pump — Rev",.size={1180,960,{820,640},{4096,4096}}}),
+        :Rev::Window(windows,{.name="Data Pump — Rev",.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{4096,4096}}}),
          controller({options.simulation || options.smoke,options.smoke}),launch(options),group(&windows) {
+        // Native sizes are physical pixels; the shared desktop dimensions are
+        // logical units, just as in FLTK at a scaled display setting.
+        if(details.scale!=1) {
+            int x=0,y=0;window->getClientPos(x,y);
+            const int center_x=x+window->size.w/2,center_y=y+window->size.h/2;
+            window->setSize(static_cast<int>(std::ceil(ui::default_width*details.scale)),static_cast<int>(std::ceil(ui::default_height*details.scale)));
+            // Native creation centered the unscaled size. Center the final
+            // physical size on that same display before showing the window.
+            for(const auto& display:Rev::NativeWindow::getDisplays())
+                if(center_x>=display.x && center_x<display.x+display.w && center_y>=display.y && center_y<display.y+display.h) {
+                    setPos(display.x+std::max(0,(display.w-window->size.w)/2),display.y+std::max(0,(display.h-window->size.h)/2));break;
+                }
+            Rev::Window::onResize(window->size.w,window->size.h);
+        }
         style->layout={Axis::Vertical,Align::Start,Align::Start,Wrap::False};
         surface=new re::Box(this,{&column});surface->style->size={100_pct,100_pct};
-        surface->style->background.color=rgba(0,0,0,1);surface->style->padding={.left=12_px,.right=12_px,.top=8_px,.bottom=8_px};
-        auto* nav=new re::Box(surface,{&row});
+        surface->style->background.color=rgba(0,0,0,1);
+        navigation=new re::Box(surface,{&row});
+        std::size_t tab=0;
         for(const auto& item:std::array<std::pair<const char*,ui::Page>,3>{{{"Console",ui::Page::console},{"Modem flow",ui::Page::flow},{"Transmission layout",ui::Page::transmission}}}) {
-            auto* button=new re::Button(nav,re::Button::Params::Secondary(item.first));
+            auto* button=new re::Button(navigation,re::Button::Params::Secondary(item.first));tabs[tab++]=button;
             button->onClick([this,page=item.second](re::Event&){select_page(page);});button->tabStop=true;
         }
         for(auto*& page:pages) {
             page=new re::Box(surface,{&column});page->style->size={Grow(),Grow()};
             page->style->overflow=Overflow::Hide;page->style->scroll=Scroll::Vertical;
         }
-        create_controls(ui::console_screen());create_controls(ui::inspection_screen());
-        select_page(launch.page);controller.start();apply();show();refresh(event);
+        create_controls(ui::console_screen());
+        for(std::size_t i=0;i<inspection_views.size();++i)
+            inspection_views[i]=new RevInspectionView(pages[i+1],i==0,launch.color,controller,
+                [this](re::Element* parent,const plots::PlotSnapshot& source)->re::Element* {
+                    auto* view=new BitmapView(parent,launch.color,[this]{return details.scale;});view->set(source);return view;
+                });
+        pages[0]->style->scroll=Scroll::None;
+        select_page(launch.page);controller.start();apply();layout_desktop();show();refresh(event);
     }
     ~RevApp() override {controller.close();}
     void onClose(bool& reject) override {reject=true;controller.close();}
+    void onResize(int width,int height) override {
+        const int minimum_width=static_cast<int>(std::ceil(ui::min_width*window->scale));
+        const int minimum_height=static_cast<int>(std::ceil(ui::min_height*window->scale));
+        if(width<minimum_width || height<minimum_height) {
+            width=std::max(width,minimum_width);height=std::max(height,minimum_height);window->setSize(width,height);
+        }
+        Rev::Window::onResize(width,height);if(surface)layout_desktop();
+    }
+    void onScale(float scale) override {Rev::Window::onScale(scale);if(surface)layout_desktop();}
     bool allows_input(re::Element* target) const {
         bool inside_dialog=!dialog;
         for(auto* element=target;element;element=element->parent) {
@@ -377,6 +435,10 @@ public:
     void select_page(ui::Page page) {
         launch.page=page;
         for(std::size_t i=0;i<pages.size();++i) {pages[i]->style->visibility=i==static_cast<std::size_t>(page)?Visibility::Visible:Visibility::Hidden;pages[i]->dirty.style=true;}
+        for(std::size_t i=0;i<tabs.size();++i)if(tabs[i]) {
+            if(i==static_cast<std::size_t>(page))tabs[i]->styles.add(&selectedStyle);
+            else tabs[i]->styles.remove(&selectedStyle);
+        }
         shared->layoutDirty=true;refresh(event);
     }
     void scroll_page(double fraction) {
@@ -388,9 +450,10 @@ public:
         }
     }
     void verify_layout() const {
+        const ui::DesktopLayout expected(details.size.width,details.size.height);
         std::map<std::pair<ui::Page,unsigned>,float> edges;
         for(const auto& binding:bindings) {
-            if(binding.control.page!=launch.page)continue;
+            if(binding.control.page!=launch.page && !ui::persistent_slot(binding.control.slot))continue;
             bool hidden=false;
             // Rev stops cascading below a hidden parent. Descendants can retain
             // earlier visibility flags and are not part of the painted layout.
@@ -399,6 +462,12 @@ public:
             if(hidden)continue;
             const auto& rect=binding.element->rect;
             if(rect.w<24 || rect.h<=0)throw Error("Rev smoke: control field="+std::to_string(static_cast<int>(binding.control.field))+" kind="+std::to_string(static_cast<int>(binding.control.kind))+" page="+std::to_string(static_cast<int>(binding.control.page))+" row="+std::to_string(binding.control.row)+" label="+binding.control.label+" has extent "+std::to_string(rect.w)+" x "+std::to_string(rect.h));
+            if(binding.control.slot!=ui::Slot::none) {
+                const auto frame=expected[binding.control.slot];
+                if(std::abs(rect.x-frame.x)>1 || std::abs(rect.y-frame.y)>1 || std::abs(rect.w-frame.w)>1 || std::abs(rect.h-frame.h)>1)
+                    throw Error("Rev smoke: shared desktop placement mismatch for "+std::string(binding.control.label)+" slot="+std::to_string(static_cast<int>(binding.control.slot))+" actual="+std::to_string(rect.x)+","+std::to_string(rect.y)+","+std::to_string(rect.w)+","+std::to_string(rect.h)+" expected="+std::to_string(frame.x)+","+std::to_string(frame.y)+","+std::to_string(frame.w)+","+std::to_string(frame.h));
+                continue;
+            }
             auto key=std::make_pair(binding.control.page,binding.control.row);
             if(auto found=edges.find(key);found!=edges.end() && rect.x<found->second-1)throw Error("Rev smoke: adjacent declared controls overlap");
             edges[key]=rect.x+rect.w;
@@ -409,19 +478,39 @@ public:
         std::map<std::pair<ui::Page,unsigned>,unsigned> weights;
         for(const auto& c:controls)weights[{c.page,c.row}]+=c.stretch;
         for(const auto& c:controls) {
+            if(c.menu!=ui::Menu::none) {
+                const auto found=std::find_if(bindings.begin(),bindings.end(),[&](const auto& binding){return binding.control.menu==c.menu;});
+                if(found!=bindings.end()) {found->menu_items.push_back(c);continue;}
+            }
             auto key=std::make_pair(c.page,c.row);
-            auto*& parent=rows[key];if(!parent) parent=new re::Box(pages[static_cast<std::size_t>(c.page)],{&row});
+            re::Element* parent=ui::persistent_slot(c.slot)?surface:pages[static_cast<std::size_t>(c.page)];
+            if(c.slot==ui::Slot::none) {
+                auto*& line=rows[key];if(!line)line=new re::Box(parent,{&row});parent=line;
+            }
             Binding b{c};
-            auto* container=new re::Box(parent,{&column,&cell});
-            // Rev's Grow distance has no weight; a positive value is a size
-            // ceiling. Convert declaration weights to the row's percentages.
-            container->style->size.width=Pct(100.0f*static_cast<float>(c.stretch)/static_cast<float>(weights[key]));
+            auto* container=new re::Box(parent,{&column});
+            if(c.slot==ui::Slot::none) {
+                container->styles.add(&cell);
+                container->style->size.width=Pct(100.0f*static_cast<float>(c.stretch)/static_cast<float>(weights[key]));
+            }
             b.element=container;
-            if(c.kind!=ui::Kind::action && c.kind!=ui::Kind::toggle && c.kind!=ui::Kind::choice)
+            if(c.menu!=ui::Menu::none) {
+                b.menu_items.push_back(c);
+                b.menu=new re::Dropdown(container,{.label="",.placeholder="Keyfile"});
+                compact_dropdown(b.menu);b.menu->dropdown->tabStop=true;
+                b.menu->onChange=[this,menu=c.menu,choice=b.menu](re::Event&){
+                    for(const auto& binding:bindings)if(binding.control.menu==menu)
+                        for(const auto& item:binding.menu_items)if(std::to_string(static_cast<int>(item.command))==choice->params.value) {
+                            controller.activate(item.command);choice->params.value.clear();return;
+                        }
+                };
+                bindings.push_back(std::move(b));continue;
+            }
+            if(c.kind!=ui::Kind::action && c.kind!=ui::Kind::toggle && c.kind!=ui::Kind::label && c.label[0])
                 b.label=new re::Text(container,c.label,{&smallText});
             switch(c.kind) {
             case ui::Kind::label:
-                b.label=new re::Text(container,"",{&plainText});break;
+                b.label=new re::Text(container,c.field==ui::Field::count?c.label:"",{&plainText});break;
             case ui::Kind::text:
                 b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
                 b.editor->changed=[this,field=c.field](std::string text){controller.edit(field,std::move(text));};
@@ -431,7 +520,8 @@ public:
                     b.editor->submit_key=[this](re::Event& e){return !e.keyboard.shift && (controller.field(ui::Field::send_key).selected=="ctrl-enter"?bool(e.keyboard.ctrl):!bool(e.keyboard.ctrl));};
                 }
                 if(!controller.field(c.field).options.empty()) {
-                    b.suggestions=new re::Dropdown(container,{.label="Presets",.placeholder="Choose a suggestion"});
+                    b.suggestions=new re::Dropdown(container,{.label="",.placeholder="",.openUpward=ui::persistent_slot(c.slot)});
+                    compact_dropdown(b.suggestions);b.suggestions->dropdownText->style->visibility=Visibility::Hidden;
                     b.suggestions->dropdown->tabStop=true;
                     b.suggestions->onChange=[this,field=c.field,choice=b.suggestions](re::Event&){
                         controller.edit(field,choice->params.value);choice->params.value.clear();
@@ -439,7 +529,8 @@ public:
                 }
                 break;
             case ui::Kind::choice:
-                b.choice=new re::Dropdown(container,{.label=c.label,.placeholder="None"});b.choice->dropdown->tabStop=true;
+                b.choice=new re::Dropdown(container,{.label="",.placeholder="None",.openUpward=c.slot>=ui::Slot::device});
+                compact_dropdown(b.choice);b.choice->dropdown->tabStop=true;
                 b.choice->onChange=[this,field=c.field,choice=b.choice](re::Event&){controller.select(field,choice->params.value);};break;
             case ui::Kind::toggle:
                 b.toggle=new re::Checkbox(container,{.label=c.label,.def=false});b.toggle->checkbox->tabStop=true;
@@ -451,19 +542,100 @@ public:
             case ui::Kind::list:
                 b.list=new ListView(container);b.list->select=[this,field=c.field](std::string id){controller.select(field,std::move(id));};break;
             case ui::Kind::bitmap:
-                b.bitmap=new BitmapView(container,launch.color,[this]{return details.scale;});break;
+                b.bitmap=new BitmapView(container,launch.color,[this]{return details.scale;});
+                if(c.slot!=ui::Slot::none)b.caption=new re::Text(container,"",{&smallText});
+                break;
             }
             bindings.push_back(std::move(b));
         }
     }
+    void layout_desktop() {
+        const ui::DesktopLayout layout(details.size.width,details.size.height);
+        const auto page=layout[ui::Slot::page];
+        auto tab_area=layout[ui::Slot::tabs];tab_area.h=28;place(navigation,tab_area);
+        int tab_x=0;
+        for(std::size_t i=0;i<tabs.size();++i) {
+            const int width=i==0?86:i==1?114:204;
+            place(tabs[i],{tab_x,0,width,28});tab_x+=width;
+        }
+        for(auto* body:pages)place(body,page);
+        for(auto& binding:bindings) {
+            const auto slot=binding.control.slot;
+            if(slot==ui::Slot::none)continue;
+            auto frame=layout[slot];
+            if(!ui::persistent_slot(slot)) {frame.x-=page.x;frame.y-=page.y;}
+            place(binding.element,frame);
+            const ui::Rect full{0,0,frame.w,frame.h};
+            if(binding.label) {
+                auto bounds=binding.control.kind==ui::Kind::label?full:full.label_above();
+                if(binding.control.kind==ui::Kind::bitmap || binding.control.kind==ui::Kind::list)bounds=full.label_above(23);
+                place(binding.label,bounds);
+                binding.label->style->text.wrap=Wrap::False;
+                binding.label->style->overflow=Overflow::Hide;
+                if(slot==ui::Slot::header)binding.label->style->text.size=22_px;
+            }
+            const auto fit_popup=[&](re::Dropdown* choice,ui::Rect screen_frame) {
+                const int width=std::max(screen_frame.w,220);
+                choice->optionsContainer->style->size.min.width=Px(width);
+                choice->optionsContainer->style->size.max.width=Px(width);
+                if(screen_frame.x+width>details.size.width-ui::margin)
+                    choice->optionsContainer->style->position.right=0_px;
+            };
+            if(binding.menu) {place(binding.menu,full);place(binding.menu->dropdown,full);fit_popup(binding.menu,layout[slot]);}
+            if(binding.editor) {
+                auto bounds=full;if(binding.suggestions)bounds.w-=23;
+                place(binding.editor,bounds);
+                binding.editor->style->text.size=binding.control.multiline?16_px:13_px;
+                binding.editor->style->padding.top=binding.control.multiline?5_px:4_px;
+                binding.editor->style->padding.bottom=binding.control.multiline?5_px:4_px;
+            }
+            if(binding.suggestions) {
+                const ui::Rect bounds{frame.w-23,0,23,frame.h};place(binding.suggestions,bounds);
+                place(binding.suggestions->dropdown,{0,0,23,frame.h});
+                auto screen_frame=layout[slot];screen_frame.x+=screen_frame.w-23;screen_frame.w=23;fit_popup(binding.suggestions,screen_frame);
+            }
+            if(binding.choice) {place(binding.choice,full);place(binding.choice->dropdown,full);fit_popup(binding.choice,layout[slot]);}
+            if(binding.toggle) {
+                place(binding.toggle,full);place(binding.toggle->checkbox,{0,3,20,20});
+                place(binding.toggle->label,{25,6,frame.w-25,20});
+            }
+            if(binding.button) {place(binding.button,full);if(frame.h<=20)binding.button->labelText->style->text.size=11_px;}
+            if(binding.list) {place(binding.list,slot==ui::Slot::signals?full.without_footer():full);}
+            if(binding.bitmap) {
+                auto bounds=full;
+                if(binding.control.bitmap!=ui::Bitmap::qr)binding.element->style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
+                if(slot==ui::Slot::waterfall || slot==ui::Slot::waveform)bounds=bounds.without_footer();
+                if(binding.control.bitmap==ui::Bitmap::qr) {
+                    place(binding.caption,{8,8,bounds.w-16,bounds.h-16});binding.caption->style->zIndex=1;
+                } else if(binding.caption) {
+                    place(binding.caption,{4,bounds.h-22,bounds.w-8,22});
+                    binding.caption->style->overflow=Overflow::Hide;
+                    bounds={4,4,bounds.w-8,bounds.h-30};
+                }
+                place(binding.bitmap,bounds);
+            }
+        }
+        for(auto* view:inspection_views)if(view)view->update();
+        shared->layoutDirty=true;refresh(event);
+    }
     void apply() {
         std::map<std::pair<ui::Page,unsigned>,unsigned> visible_weights;
-        for(const auto& binding:bindings)if(binding.control.field==ui::Field::count || controller.field(binding.control.field).visible)
+        for(const auto& binding:bindings)if(binding.control.slot==ui::Slot::none && (binding.control.field==ui::Field::count || controller.field(binding.control.field).visible))
             visible_weights[{binding.control.page,binding.control.row}]+=binding.control.stretch;
         for(auto& b:bindings) {
-            const auto weight=visible_weights[{b.control.page,b.control.row}];
-            b.element->parent->style->visibility=weight?Visibility::Visible:Visibility::Hidden;
-            if(weight)b.element->style->size.width=Pct(100.0f*static_cast<float>(b.control.stretch)/static_cast<float>(weight));
+            if(b.control.slot==ui::Slot::none) {
+                const auto weight=visible_weights[{b.control.page,b.control.row}];
+                b.element->parent->style->visibility=weight?Visibility::Visible:Visibility::Hidden;
+                if(weight)b.element->style->size.width=Pct(100.0f*static_cast<float>(b.control.stretch)/static_cast<float>(weight));
+            }
+            if(b.menu) {
+                b.menu->params.options.clear();bool enabled=false;
+                for(const auto& item:b.menu_items) {
+                    const bool available=controller.enabled(item.command);enabled=enabled || available;
+                    b.menu->params.options.push_back({item.label,std::to_string(static_cast<int>(item.command)),!available});
+                }
+                b.menu->setDisabled(!enabled);
+            }
             if(b.control.field!=ui::Field::count) {
                 const auto& value=controller.field(b.control.field);
                 b.element->style->visibility=value.visible?Visibility::Visible:Visibility::Hidden;
@@ -486,6 +658,7 @@ public:
             if(b.button) b.button->setDisabled(!controller.enabled(b.control.command));
         }
         update_plots();
+        for(auto* view:inspection_views)if(view)view->update();
         for(auto& request:controller.take_services())services.push_back(std::move(request));
         process_services();refresh(event);
     }
@@ -540,11 +713,19 @@ public:
         for(auto& binding:bindings) if(binding.bitmap) {
             const auto id=binding.control.bitmap;
             if(dirty_bitmaps.contains(id))binding.bitmap->set(bitmap_sources.get(id));
-            if(binding.label) {
+            if(binding.label || binding.caption) {
                 std::string title=bitmap_sources.title(id);
                 if(title.empty())title=binding.control.field==ui::Field::count?binding.control.label:controller.field(binding.control.field).text;
-                const auto caption=bitmap_sources.caption(id,std::max(1U,binding.bitmap->width));
-                binding.label->content=title+(caption.empty()?"":"\n"+caption);
+                const auto caption=id==ui::Bitmap::qr?bitmap_sources.error(id):bitmap_sources.caption(id,std::max(1U,binding.bitmap->width));
+                if(binding.caption) {
+                    if(binding.label)binding.label->content=title;
+                    binding.caption->content=caption;
+                    if(id==ui::Bitmap::qr) {
+                        binding.caption->style->visibility=caption.empty()?Visibility::Hidden:Visibility::Visible;
+                        binding.caption->style->text.color=controller.field(ui::Field::qr_brightness).selected=="normal"?rgba(0,0,0,1):rgba(160,160,160,1);
+                    }
+                }
+                else binding.label->content=title+(caption.empty()?"":"\n"+caption);
             }
         }
         dirty_bitmaps.clear();

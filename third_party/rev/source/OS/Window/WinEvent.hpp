@@ -15,6 +15,11 @@ struct WinEvent {
 
     Type type;
     uint64_t a, b;
+    // MouseMove / MouseButton: c,d are absolute screen coordinates in
+    // physical pixels. Window converts them once to client logical units.
+    // MouseWheel: c,d are deltas, 120 units per wheel notch. Emit MouseMove at
+    // the wheel event's screen position first so hit testing does not depend
+    // on an earlier pointer move.
     int64_t c, d;
 
     bool rejected = false;

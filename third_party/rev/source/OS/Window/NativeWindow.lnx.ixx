@@ -449,11 +449,8 @@ export namespace Rev {
         WinEvent notifyEvent(WinEvent event) {
             event.subject = this;
 
-            if (event.type == WinEvent::Type::MouseButton || event.type == WinEvent::Type::MouseMove) {
-                event.c = static_cast<uint64_t>(static_cast<float>(event.c) / scale);
-                event.d = static_cast<uint64_t>(static_cast<float>(event.d) / scale);
-            }
-
+            // Keep desktop coordinates in signed physical pixels. Window alone
+            // subtracts the client origin and applies the DPI scale.
             if (callback) callback(event);
             return event;
         }
@@ -1004,16 +1001,19 @@ export namespace Rev {
                         if (ev.xexpose.count == 0) self->notifyEvent({ WinEvent::Type::Paint });
                         break;
                     case MotionNotify:
-                        self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, ev.xmotion.x, ev.xmotion.y });
+                        self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, ev.xmotion.x_root, ev.xmotion.y_root });
                         break;
                     case ButtonPress:
-                        if (ev.xbutton.button == Button4) self->notifyEvent({ WinEvent::Type::MouseWheel, 0, 0, 0, 1 });
-                        else if (ev.xbutton.button == Button5) self->notifyEvent({ WinEvent::Type::MouseWheel, 0, 0, 0, -1 });
-                        else self->notifyEvent({ WinEvent::Type::MouseButton, buttonFromX(ev.xbutton.button), Press, ev.xbutton.x, ev.xbutton.y });
+                        if (ev.xbutton.button >= Button4 && ev.xbutton.button <= 7) {
+                            self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, ev.xbutton.x_root, ev.xbutton.y_root });
+                            const int dx=ev.xbutton.button==6?120:ev.xbutton.button==7?-120:0;
+                            const int dy=ev.xbutton.button==Button4?120:ev.xbutton.button==Button5?-120:0;
+                            self->notifyEvent({ WinEvent::Type::MouseWheel, 0, 0, dx, dy });
+                        } else self->notifyEvent({ WinEvent::Type::MouseButton, buttonFromX(ev.xbutton.button), Press, ev.xbutton.x_root, ev.xbutton.y_root });
                         break;
                     case ButtonRelease:
-                        if (ev.xbutton.button != Button4 && ev.xbutton.button != Button5)
-                            self->notifyEvent({ WinEvent::Type::MouseButton, buttonFromX(ev.xbutton.button), Release, ev.xbutton.x, ev.xbutton.y });
+                        if (ev.xbutton.button < Button4 || ev.xbutton.button > 7)
+                            self->notifyEvent({ WinEvent::Type::MouseButton, buttonFromX(ev.xbutton.button), Release, ev.xbutton.x_root, ev.xbutton.y_root });
                         break;
                     case KeyPress: {
                         KeySym sym = XLookupKeysym(&ev.xkey, 0);

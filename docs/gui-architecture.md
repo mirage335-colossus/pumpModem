@@ -9,9 +9,11 @@ widget toolkit.
 
 The build selector, shared presentation roles and bitmap producers, semantic
 screen declarations, toolkit-free controller and opt-in Rev adapter are
-implemented. Rev uses the shared controller and declarations. Existing FLTK plot
-widgets use the shared pixel producers while retaining native captions and
-interactions; FLTK's controller and procedural screen migration remain.
+implemented. Rev uses the shared controller, console declarations and inspection
+document. Both desktop adapters now use the same logical console rectangles,
+persistent header/footer and default/minimum sizes. Existing FLTK plot widgets
+use the shared pixel producers while retaining native captions and interactions;
+FLTK's controller and procedural screen migration remain.
 See [Rev backend](rev-backend.md) for the pinned `clean` revision, build profile
 and validation boundaries. The design below includes the extraction already
 completed for Rev and the remaining migration work.
@@ -40,11 +42,14 @@ Current and planned ownership:
 | Module | Responsibility |
 | --- | --- |
 | `ui_contract.hpp`, `bitmap.hpp` | Small IDs, control records, state/service records, pixel blocks. No toolkit, crypto, or modem headers. |
-| `screen_console.cpp`, `screen_inspection.cpp` | Ordered declarations and bindings; inherit the shared style. |
+| `desktop_layout.hpp` | Shared logical desktop rectangles, persistent header/footer placement, and default/minimum window sizes used by FLTK and Rev. |
+| `screen_console.cpp` | Ordered console declarations, desktop slots and application bindings. |
+| `inspection_page.hpp` | Toolkit-free inspection document: section order, responsive cards, native text/command nodes and named plot snapshots. |
+| `screen_inspection.cpp` | Compact inspection declarations retained in the contract; Rev's rich desktop inspection pages use the document above. |
 | `controller.hpp/.cpp` | Authoritative values, commands, validation, selection policies, availability, and notices. |
 | `controller.cpp` preparation workers | Debounce, workers, cancellation, and revisioned results; a separate `preparation.cpp` remains optional. |
 | `plot_render.cpp` | Shared monochrome raster generation and optional private point/segment helpers. |
-| `backend_rev.cpp`, `rev_platform.cpp` | Rev elements, event translation, presentation, bitmap transfer, and native services. |
+| `backend_rev.cpp`, `backend_rev_inspection.hpp`, `rev_platform.cpp` | Rev elements, native inspection document renderer, event translation, bitmap transfer, and platform services. |
 | `main.cpp`, `bitmap_fltk.hpp` | Existing FLTK widgets/controller and shared bitmap transfer; semantic migration remains. |
 | Future `gui_options.cpp` | Launch settings using shared parsers and validation. |
 | `gui_smoke.cpp` | Existing workflow checks separated from production control flow. |
@@ -56,8 +61,10 @@ This makes screen edits local, limits recompilation, and lets AI read the small
 contract plus one screen and its relevant action instead of the whole GUI.
 
 One event sink and one source of authoritative state are sufficient. Creation is
-retained; updates change existing controls without resetting focus, selection,
-editor scroll, or cursor. An adapter owns its widget mapping and suppresses
+retained; editor updates change existing controls without resetting focus,
+selection, scroll, or cursor. The readonly Rev inspection subtree is rebuilt
+when its immutable model, available width or chip page changes; ordinary polls
+reuse it. An adapter owns its widget mapping and suppresses
 callbacks during programmatic updates. Display changes must never restart the
 receiver. All workflow validation stays in the controller.
 
@@ -102,10 +109,31 @@ pure operations over immutable snapshots and support tiled repaint. FLTK's
 their existing mouse gestures and native navigation; migrating those interactions
 to the declarations remains.
 
-Inspection already supplies structured content. Present its prose and tables
-through ordinary labels/lists, and rasterize only actual plots. Rasterizing the
-entire inspection page would unnecessarily duplicate text rendering and make
-terminal adaptation harder.
+`inspection_page.hpp` now turns the structured `Inspection` model into native
+document nodes. Processing lanes use numbered status/title/detail cards;
+constellations precede the full pattern section, with preamble and integration
+notes last. Transmission separates physical and logical section cards, then
+proportional codeword bars and coding notes, and ends with the parameter table.
+Card columns respond to width using the established FLTK layout policy. Rev's
+native glyph measurement determines heights and its adapter equalizes cards in
+each row. FLTK's `InspectionDiagram` still renders the model directly with the
+same section order; sharing its document traversal is remaining migration work.
+
+Pattern inspection places navigation before the grid, keeps native binary-row
+and chip-coordinate labels, pairs the square distance matrix with explanatory
+text, and follows it with labeled correlation/residual evidence. Chip pagination
+changes only the visible coordinates; statistics still cover the full symbol.
+The document carries opaque named plot snapshots and logical dimensions. Native
+labels, notes, field rows and data/parity bars remain toolkit elements; no entire
+inspection page is rasterized. This preserves useful structure for a future
+terminal adapter without involving it in DSP or reproducing text from pixels.
+
+Native input coordinates stay in the adapter. Rev's native layer supplies
+physical screen positions; the window queries its current client origin and
+converts once to logical client coordinates for hit testing and text selection.
+Wheel events update the pointer target from their own location, and a DPI change
+invalidates layout even if physical dimensions are unchanged. Cached window
+positions are not a reliable client origin after moving or changing decorations.
 
 Point and straight-segment helpers can produce the early-computing appearance
 inside `plot_render.cpp`; the backend still receives only pixel rectangles.
@@ -217,7 +245,9 @@ Do not weaken that existing check for an adapter that is not being compiled.
 2. Extract authoritative state, workers, and platform requests (done for Rev),
    while preserving the existing FLTK workflows and tests.
 3. Replace procedural construction/layout with small screen declarations and
-   native-widget mappings; separate smoke orchestration (done for Rev).
+   native-widget mappings; separate smoke orchestration (done for Rev). Shared
+   desktop rectangles now preserve FLTK's console arrangement, and Rev's native
+   inspection document follows its existing section order.
 4. Extract pure pixel producers with equivalent complete-image and tiled output
    (done for both). Migrate FLTK plot interactions to semantic controls.
 5. Exercise Rev in a separate build (Linux/llvmpipe validated), migrate the remaining FLTK screen/controller
@@ -232,3 +262,14 @@ those seams are extracted. Preserve Linux virtual-display smoke workflows,
 Windows GUI/relocation checks, and packaged self-check. Reuse the core library
 and compile only the selected adapter; verify ordinary screen edits do not
 recompile DSP/crypto or require reading adapter internals.
+
+The current Linux validation includes passing `gui_layout`,
+`gui_inspection_page`, `gui_controller` and `gui_self_check` tests, plus the full
+Rev simulation smoke with shared desktop rectangle assertions. Native X11
+coordinate tests passed at 1x and 2x after moving windows and dispatching DPI
+transitions, including focus, UTF-8 caret and wheel targeting. They require a
+display and `libXtst.so.6` and run separately from default CTest; commands are in
+[Rev backend validation](rev-backend.md#software-rendering-and-validation).
+The Windows implementation remains untested at runtime. Earlier llvmpipe timing
+and portable-package results in that document describe the preceding layout
+revision and do not establish performance or packaging verification of this one.

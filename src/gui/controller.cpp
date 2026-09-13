@@ -467,6 +467,10 @@ PlotUpdate Controller::plot_update() const { const auto value=impl_->plot_update
 std::uint64_t Controller::revision() const { return impl_->revision; }
 double Controller::waveform_zoom() const { return impl_->zoom; }
 std::size_t Controller::pattern_first() const { return impl_->pattern_first; }
-void Controller::pattern_page_size(std::size_t size) { impl_->page_size=std::max<std::size_t>(1,size); impl_->pattern_first=std::min(impl_->pattern_first,impl_->last_pattern_page()); }
+void Controller::pattern_page_size(std::size_t size) {
+    impl_->page_size=std::max<std::size_t>(1,size);
+    impl_->pattern_first=std::min((impl_->pattern_first/impl_->page_size)*impl_->page_size,impl_->last_pattern_page());
+}
+std::size_t Controller::pattern_page_size() const { return impl_->page_size; }
 void Controller::report_error(std::string message) { impl_->notice(std::move(message),10); }
 }

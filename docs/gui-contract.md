@@ -130,7 +130,9 @@ reuse field metadata, defaults, and parsers independently of page identity.
    Declaration order also defines focus traversal. Hidden children occupy no
    space; disabled children retain space and produce no input actions. Tiny
    displays use an explicit compact layout; controls are not scaled below usable
-   sizes. The application does not specify pixel coordinates for ordinary controls.
+   sizes. Desktop declarations now name slots in `desktop_layout.hpp`, whose
+   shared logical coordinates keep FLTK and Rev aligned. Each adapter applies
+   its display scale; these are not physical pixel coordinates or plot samples.
 6. **Ownership.** Static declarations live for the UI lifetime. Dynamic update
    data is borrowed only during the update call; adapters copy anything retained.
    Event data remains valid for its dispatch call; the controller copies anything

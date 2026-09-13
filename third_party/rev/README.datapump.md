@@ -34,6 +34,10 @@ Local compiler and Linux compatibility fixes:
 - Include `<algorithm>` in DirtyFlag and Element, and `<cstdint>` in WinEvent.
 - Complete the Linux NativeWindow methods already used by the shared Window:
   `nativeFrameless`, EWMH `setIcon`, and root-relative `getClientPos`.
+- Linux mouse events now carry physical screen coordinates (`x_root/y_root`),
+  matching Win32 and `Window::screenToLocal`; the native layer no longer applies
+  a second DPI division. Wheel events refresh their own pointer location before
+  dispatch, and DPI changes invalidate layout through `onResize`.
 
 Build requirements: CMake 3.28+, Ninja, Clang 19 (verified), Python 3,
 OpenGL 4.4 or OpenGL 4.3 with `GL_ARB_buffer_storage`, GLEW, FreeType, and Linux X11/XRandR/Xext
@@ -76,6 +80,18 @@ Local text correctness patches:
 The standalone `test_rev_utf8` target covers decoding, invalid sequences,
 original byte ranges, and deletion boundaries without requiring a display or
 C++ modules.
+
+Local native input patches keep X11 mouse positions in physical screen pixels
+until `Window` converts them to client logical coordinates. Native scale changes
+invalidate the layout, and wheel events refresh their pointer position before
+hit testing. X11 wheel notches use the same 120-unit delta as Win32 so scrolling
+advances 60 logical pixels per notch at either DPI scale. The display-dependent
+`test_rev_coordinates` target checks moved windows, 1x/2x scaling, caret hits,
+wheel targeting and actual scroll distance through native event injection.
+On Windows, native `setSize` converts client extents to the outer frame at the
+window's DPI, and DPI changes publish the new scale before synchronous resize
+events can apply minimum sizes. These Windows paths still need runtime testing
+on Windows.
 
 Local paint optimization: `Graphics/Primitives/Rectangle/Rectangle.ixx` skips
 color submissions for rectangles with zero opacity or no visible fill, border

@@ -42,13 +42,13 @@ public:
                 brightness == "off" ? plots::QrBrightness::off : plots::QrBrightness::dark;
             put(ui::Bitmap::qr, plots::PlotSnapshot::qr(std::move(code), mode));
         }
-        controller.pattern_page_size(32);
         const auto model = controller.inspection();
         const auto first = controller.pattern_first();
-        if (inspected_ != model || pattern_first_ != first) {
-            inspected_ = model; pattern_first_ = first;
+        const auto page_size = controller.pattern_page_size();
+        if (inspected_ != model || pattern_first_ != first || pattern_page_size_ != page_size) {
+            inspected_ = model; pattern_first_ = first; pattern_page_size_ = page_size;
             if (model && model->pattern_space) {
-                put(ui::Bitmap::pattern, plots::PlotSnapshot::pattern_chips(*model->pattern_space, first, 32));
+                put(ui::Bitmap::pattern, plots::PlotSnapshot::pattern_chips(*model->pattern_space, first, controller.pattern_page_size()));
                 put(ui::Bitmap::pattern_distances, plots::PlotSnapshot::pattern_distances(*model->pattern_space));
                 put(ui::Bitmap::pattern_evidence, plots::PlotSnapshot::pattern_evidence(*model->pattern_space));
             } else {
@@ -73,6 +73,7 @@ public:
             result += " / " + std::to_string(constellation_dropped_) + " omitted";
         return result;
     }
+    std::string error(ui::Bitmap id) const { return id==ui::Bitmap::qr?qr_error_:std::string{}; }
     const char* title(ui::Bitmap id) const {
         switch (id) {
         case ui::Bitmap::waveform: return replaying_ ? "Simulation replay / waveform" : "Live waveform";
@@ -90,6 +91,7 @@ private:
     std::string qr_text_, brightness_, qr_error_;
     std::shared_ptr<const Inspection> inspected_;
     std::size_t pattern_first_ = 0;
+    std::size_t pattern_page_size_ = 0;
     std::uint64_t constellation_dropped_ = 0;
     double zoom_ = 0;
     bool replaying_ = false;

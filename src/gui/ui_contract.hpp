@@ -1,4 +1,5 @@
 #pragma once
+#include "desktop_layout.hpp"
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -24,8 +25,9 @@ enum class Bitmap {
     pattern_evidence, payload_alphabet, reference_alphabet
 };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
-// Page and row establish hierarchy. Rows and their children are ordered by
-// declaration order; widths come from font measurements, never screen pixels.
+enum class Menu { none, keyfile };
+// Slots share the desktop arrangement in logical layout units. Unslotted
+// content flows in declaration order within its page (inspection details).
 struct Control {
     Kind kind;
     Field field = Field::count;
@@ -37,6 +39,8 @@ struct Control {
     unsigned stretch = 1;
     bool multiline = false;
     std::size_t byte_limit = 1024 * 1024;
+    Slot slot = Slot::none;
+    Menu menu = Menu::none; // Group named actions into a compact native menu.
 };
 const std::vector<Control>& console_screen();
 const std::vector<Control>& inspection_screen();

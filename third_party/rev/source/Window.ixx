@@ -921,9 +921,11 @@ export namespace Rev {
             //dbg("[Window] scale");
 
             details.scale = scale;
-
-            details.size.width = window->size.w / scale;
-            details.size.height = window->size.h / scale;
+            // Native resize notifications can precede a DPI change (Win32's
+            // suggested rectangle is applied before Scale is dispatched).
+            // Recompute and invalidate at the new scale even when the physical
+            // client size itself did not change.
+            onResize(window->size.w, window->size.h);
         }
 
         // Mouse/keyboard callbacks (window only)

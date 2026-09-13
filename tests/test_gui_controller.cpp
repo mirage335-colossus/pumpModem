@@ -42,6 +42,11 @@ void bitmap_source_checks() {
     sources.update(controller);
     check(sources.caption(ui::Bitmap::qr).find("500") != std::string::npos,
           "Invalid QR message lost its ordinary-label error feedback");
+    check(sources.error(ui::Bitmap::qr).find("500") != std::string::npos,
+          "Invalid QR message lost its overlay error feedback");
+    controller.edit(ui::Field::message, "Valid QR again");
+    sources.update(controller);
+    check(sources.error(ui::Bitmap::qr).empty(), "Valid QR retained an error over its quiet zone");
     check(std::string(sources.title(ui::Bitmap::waveform)) == "Live waveform" &&
           std::string(sources.title(ui::Bitmap::constellation)) == "Receiver input I/Q",
           "Shared bitmap titles did not identify the actual measurement source");

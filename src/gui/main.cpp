@@ -1,4 +1,5 @@
 #include "live_widgets.hpp"
+#include "desktop_layout.hpp"
 #include "inspection_widgets.hpp"
 #include "theme_fltk.hpp"
 #include "datapump/audio.hpp"
@@ -126,6 +127,7 @@ struct Prepared {
 class App {
 public:
     explicit App(SmokeOptions smoke) : smoke_(std::move(smoke)),window_(std::make_unique<MainWindow>()) {
+        window_->size(gui::ui::default_width,gui::ui::default_height);
         window_->begin();
         header_=label("DATA PUMP",22,true); mode_=label("Listening",13);
         clear_=button("Clear received",[this] { clear_received(); });
@@ -245,7 +247,7 @@ public:
         bind(tabs_,[this] { layout_diagrams(); window_->redraw(); });
         window_->end();
         for (auto widget:std::array<Fl_Widget*,11>{callsign_,grid_,simulation_,key_entry_,device_,bandwidth_,snr_,pattern_,fec_,fec_off_,send_key_}) { widget->align(FL_ALIGN_TOP_LEFT); widget->labelsize(12); }
-        window_->size_range(1030,786);
+        window_->size_range(gui::ui::min_width,gui::ui::min_height);
         window_->callback([](Fl_Widget*,void* context) { static_cast<App*>(context)->close(); },this);
         window_->on_resize=[this] { layout(); };
         gui::theme::apply_widgets(*window_);
@@ -291,47 +293,27 @@ private:
         auto result=new Fl_Button(0,0,1,1,text); result->labelsize(13); bind(result,std::move(action)); return result;
     }
     void layout() {
-        const int width=window_->w(),height=window_->h(),margin=16;
-        header_->resize(margin,10,220,32); mode_->resize(235,13,width-420,28); clear_->resize(width-153,12,137,28);
-        callsign_->resize(margin,62,115,27); grid_->resize(142,62,85,27); repeatable_->resize(238,61,119,28);
-        simulation_->resize(366,62,183,27); key_browse_->resize(560,62,92,27);
-        key_path_->resize(660,62,std::max(90,width-926),27); key_entry_->resize(width-248,62,232,27);
-        tabs_->resize(margin,94,width-margin*2,height-210);
-        for (auto* page:std::initializer_list<Fl_Group*>{console_,flow_scroll_,transmission_scroll_})
-            page->resize(margin,126,width-margin*2,height-242);
-        const int qr_size=196,compose_y=152,compose_height=196;
-        const int binary_width=220,editor_width=width-margin*2-qr_size-binary_width-28;
-        const int binary_x=margin+editor_width+14;
-        source_->resize(margin,130,145,20); compose_label_->resize(margin+155,130,editor_width-155,20);
-        binary_label_->resize(binary_x,130,binary_width,20);
-        editor_->resize(margin,compose_y,editor_width,compose_height);
-        binary_editor_->resize(binary_x,compose_y,binary_width,compose_height);
-        qr_brightness_->resize(width-margin-qr_size,130,qr_size,20);
-        qr_->resize(width-margin-qr_size,compose_y,qr_size,qr_size);
-        const int buttons_y=compose_y+compose_height+8;
-        attach_->resize(margin,buttons_y,169,29); use_text_->resize(194,buttons_y,78,29);
-        send_key_->resize(281,buttons_y,129,29); transmit_->resize(419,buttons_y,112,29); cancel_->resize(540,buttons_y,106,29);
-        airtime_->resize(657,buttons_y,width-margin-657,29);
-        const int signal_y=buttons_y+56,files_width=252,signal_height=std::max(117,height-710);
-        signal_label_->resize(margin,signal_y-23,width-files_width-50,21); file_label_->resize(width-margin-files_width,signal_y-23,files_width,21);
-        signal_browser_->resize(margin,signal_y,width-margin*2-files_width-14,signal_height);
-        file_browser_->resize(width-margin-files_width,signal_y,files_width,signal_height-36);
-        save_->resize(width-margin-files_width,signal_y+signal_height-29,files_width,29);
-        const int plots_y=signal_y+signal_height+30,plot_h=height-plots_y-138;
-        const int waterfall_width=(width-margin*2)*44/100,other_width=(width-margin*2-waterfall_width-24)/2;
-        waterfall_label_->resize(margin,plots_y-23,waterfall_width,21); waterfall_->resize(margin,plots_y,waterfall_width,plot_h);
-        waveform_label_->resize(margin+waterfall_width+12,plots_y-23,other_width,21); waveform_->resize(margin+waterfall_width+12,plots_y,other_width,plot_h);
-        constellation_label_->resize(margin+waterfall_width+other_width+24,plots_y-23,other_width,21); constellation_->resize(margin+waterfall_width+other_width+24,plots_y,other_width,plot_h);
-        const int controls_y=height-92;
-        const int available=width-margin*2-40;
-        const int device_width=available*19/100,bw_width=available*14/100,snr_width=available*24/100,pattern_width=available*23/100;
-        int x=margin; device_->resize(x,controls_y,device_width,27); x+=device_width+10;
-        bandwidth_->resize(x,controls_y,bw_width,27); x+=bw_width+10;
-        snr_->resize(x,controls_y,snr_width,27); x+=snr_width+10;
-        pattern_->resize(x,controls_y,pattern_width,27); x+=pattern_width+10;
-        fec_->resize(x,controls_y,width-margin-x,27);
-        fec_off_->resize(x,controls_y,width-margin-x,27);
-        diagnostics_->resize(margin,height-56,width-margin*2,22); status_->resize(margin,height-31,width-margin*2,24);
+        using Slot=gui::ui::Slot;
+        const gui::ui::DesktopLayout geometry(window_->w(),window_->h());
+        for (const auto& [widget,slot]:std::initializer_list<std::pair<Fl_Widget*,Slot>>{
+                {header_,Slot::header},{mode_,Slot::mode},{clear_,Slot::clear},
+                {callsign_,Slot::callsign},{grid_,Slot::grid},{repeatable_,Slot::repeatable},
+                {simulation_,Slot::simulation},{key_browse_,Slot::key_actions},{key_path_,Slot::key_path},{key_entry_,Slot::key},
+                {tabs_,Slot::tabs},{console_,Slot::page},{flow_scroll_,Slot::page},{transmission_scroll_,Slot::page},
+                {source_,Slot::source},{compose_label_,Slot::message_label},{binary_label_,Slot::binary_label},
+                {editor_,Slot::message},{binary_editor_,Slot::binary},{qr_brightness_,Slot::qr_brightness},{qr_,Slot::qr},
+                {attach_,Slot::attach_file},{use_text_,Slot::use_text},{send_key_,Slot::send_key},
+                {transmit_,Slot::transmit},{cancel_,Slot::cancel},{airtime_,Slot::airtime},
+                {signal_label_,Slot::signal_label},{signal_browser_,Slot::signals},{file_label_,Slot::file_label},
+                {file_browser_,Slot::files},{save_,Slot::save_file},
+                {waterfall_label_,Slot::waterfall_label},{waterfall_,Slot::waterfall},
+                {waveform_label_,Slot::waveform_label},{waveform_,Slot::waveform},
+                {constellation_label_,Slot::constellation_label},{constellation_,Slot::constellation},
+                {device_,Slot::device},{bandwidth_,Slot::bandwidth},{snr_,Slot::snr},{pattern_,Slot::pattern},
+                {fec_,Slot::fec},{fec_off_,Slot::fec},{diagnostics_,Slot::diagnostics},{status_,Slot::status}}) {
+            const auto& rect=geometry[slot];
+            widget->resize(rect.x,rect.y,rect.w,rect.h);
+        }
         layout_diagrams();
         window_->redraw();
     }

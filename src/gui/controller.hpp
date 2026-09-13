@@ -41,6 +41,7 @@ public:
     double waveform_zoom() const;
     std::size_t pattern_first() const;
     void pattern_page_size(std::size_t size);
+    std::size_t pattern_page_size() const;
     void report_error(std::string message);
 private:
     struct Impl;

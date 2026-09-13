@@ -817,7 +817,12 @@ export namespace Rev {
             this->size.w = w;
             this->size.h = h;
             
-            SetWindowPos(handle, nullptr, 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
+            // The public size is the physical client extent on every platform.
+            // Passing it as the outer extent shrinks decorated clients and can
+            // recursively trigger a minimum-client-size clamp from WM_SIZE.
+            POINT outer = { w, h };
+            applyClientTrackSize(handle, w, h, outer);
+            SetWindowPos(handle, nullptr, 0, 0, outer.x, outer.y, SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOMOVE);
         }
 
         void setPos(int x, int y) {
@@ -1088,11 +1093,28 @@ export namespace Rev {
         static void applyClientTrackSize(HWND h, int clientW, int clientH, POINT& track) {
             if (clientW <= 0 || clientH <= 0) { return; }
 
+            NativeWindow* win = Self(h);
+            if (!win) { win = creatingWindow(); }
+            if (win && win->nativeFrameless) {
+                // Match our WM_NCCALCSIZE override: the normal client covers
+                // the complete outer rectangle; maximized clients keep only
+                // the frame insets used by that override.
+                int fx = IsZoomed(h) ? GetSystemMetrics(SM_CXFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER) : 0;
+                int fy = IsZoomed(h) ? GetSystemMetrics(SM_CYFRAME) + GetSystemMetrics(SM_CXPADDEDBORDER) : 0;
+                track = { clientW + 2 * fx, clientH + 2 * fy };
+                return;
+            }
+
             DWORD style = GetWindowLongW(h, GWL_STYLE);
             DWORD exStyle = GetWindowLongW(h, GWL_EXSTYLE);
             RECT rect = { 0, 0, clientW, clientH };
 
-            if (!AdjustWindowRectEx(&rect, style, FALSE, exStyle)) { return; }
+            using AdjustForDpi = BOOL (WINAPI*)(LPRECT, DWORD, BOOL, DWORD, UINT);
+            static auto adjustForDpi = reinterpret_cast<AdjustForDpi>(GetProcAddress(GetModuleHandleW(L"user32.dll"), "AdjustWindowRectExForDpi"));
+            const UINT dpi = GetDpiForWindow(h);
+            if (adjustForDpi && dpi) {
+                if (!adjustForDpi(&rect, style, FALSE, exStyle, dpi)) { return; }
+            } else if (!AdjustWindowRectEx(&rect, style, FALSE, exStyle)) { return; }
 
             track.x = rect.right - rect.left;
             track.y = rect.bottom - rect.top;
@@ -1303,8 +1325,15 @@ export namespace Rev {
 
                 case (WM_DPICHANGED): {
 
-                    UINT dpiX = HIWORD(wp);
-                    UINT dpiY = LOWORD(wp);
+                    UINT dpiX = LOWORD(wp);
+                    UINT dpiY = HIWORD(wp);
+                    float scaleX = dpiX / 96.0f;
+                    float scaleY = dpiY / 96.0f;
+
+                    // SetWindowPos synchronously sends WM_SIZE. Its handlers
+                    // must apply client minimums and logical layout at the new
+                    // DPI, especially when moving from a 2x to a 1x display.
+                    self->scale = scaleX;
 
                     RECT* const suggestedRect = reinterpret_cast<RECT*>(lp);
 
@@ -1315,11 +1344,6 @@ export namespace Rev {
                         suggestedRect->bottom - suggestedRect->top,
                         SWP_NOZORDER | SWP_NOACTIVATE
                     );
-
-                    float scaleX = dpiX / 96.0f;
-                    float scaleY = dpiY / 96.0f;
-
-                    self->scale = scaleX;
 
                     self->notifyEvent({
                         WinEvent::Type::Scale,
@@ -1389,6 +1413,7 @@ export namespace Rev {
                 // Vertical wheel (mouse or touchpad)
                 case WM_MOUSEWHEEL: {
 
+                    self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
                     self->notifyEvent({
                         WinEvent::Type::MouseWheel,
                         0, 0, 0, GET_WHEEL_DELTA_WPARAM(wp)
@@ -1400,6 +1425,7 @@ export namespace Rev {
                 // Horizontal wheel (mouse tilt or touchpad)
                 case WM_MOUSEHWHEEL: {
 
+                    self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
                     self->notifyEvent({
                         WinEvent::Type::MouseWheel,
                         0, 0, GET_WHEEL_DELTA_WPARAM(wp), 0
@@ -1411,6 +1437,7 @@ export namespace Rev {
                 // Vertical wheel (trackpad specifically)
                 case (WM_POINTERWHEEL): {
 
+                    self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
                     self->notifyEvent({
                         WinEvent::Type::MouseWheel,
                         0, 0, 0, GET_WHEEL_DELTA_WPARAM(wp)
@@ -1422,6 +1449,7 @@ export namespace Rev {
                 // Horizontal wheel (trackpad specifically)
                 case (WM_POINTERHWHEEL): {
 
+                    self->notifyEvent({ WinEvent::Type::MouseMove, 0, 0, GET_X_LPARAM(lp), GET_Y_LPARAM(lp) });
                     self->notifyEvent({
                         WinEvent::Type::MouseWheel,
                         0, 0, GET_WHEEL_DELTA_WPARAM(wp), 0
