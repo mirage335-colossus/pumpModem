@@ -1,4 +1,30 @@
 // Included inside RevApp only by the native conformance executable.
+    void verify_layout_lifecycle(std::span<ui::Control> controls) {
+        auto* editor=bindings[0].editor;auto* heading=bindings[0].label;
+        auto* bitmap=bindings[1].bitmap;auto* caption=bindings[1].caption;
+        if(!editor||!heading||!bitmap||!caption)throw std::runtime_error("Rev lifecycle fixture lost native presentation roles");
+        for(unsigned stage=0;stage<3;++stage) {
+            test::layout_lifecycle_stage(controls,stage);apply();
+            for(unsigned frame=0;frame<3;++frame){refresh(event);Rev::NativeWindow::pumpEvents();}
+            if(bindings[0].editor!=editor||bindings[0].label!=heading||bindings[1].bitmap!=bitmap||bindings[1].caption!=caption)
+                throw std::runtime_error("Rev shared layout update replaced existing native controls");
+            for(auto& binding:bindings) {
+                const auto geometry=ui::control_layout(binding.control,state(binding.control),details.size.width,details.size.height,declarations);
+                if((binding.label->style->visibility==Visibility::Visible)!=(geometry.has_label&&ui::drawable(geometry.label)))
+                    throw std::runtime_error("Rev failed to add or remove a shared heading after native construction");
+                if(binding.element->rect.x!=geometry.frame.x||binding.element->rect.y!=geometry.frame.y||
+                   binding.element->rect.w!=geometry.frame.w||binding.element->rect.h!=geometry.frame.h)
+                    throw std::runtime_error("Rev did not consume changed shared control geometry");
+                if(binding.element->style->border.width.val!=(geometry.border?1:0))
+                    throw std::runtime_error("Rev retained a stale shared control border");
+            }
+            const auto editor_geometry=ui::control_layout(controls[0],state(controls[0]),details.size.width,details.size.height,declarations);
+            if(editor->rect.h!=editor_geometry.widget.h||editor->style->text.size.val!=controls[0].font_size||heading->style->text.size.val!=controls[0].font_size)
+                throw std::runtime_error("Rev retained stale shared editor geometry or typography");
+            const auto bitmap_geometry=ui::control_layout(controls[1],state(controls[1]),details.size.width,details.size.height,declarations);
+            if(caption->style->zIndex!=(bitmap_geometry.caption_overlay?1:0))throw std::runtime_error("Rev retained a stale caption overlay layer");
+        }
+    }
     void verify_updated_labels() {
         for(std::size_t index=0;index<4;++index) {
             const auto& binding=bindings[index];
@@ -487,5 +513,13 @@
         if(!focused_control()||!allows_input(focused_control()))throw std::runtime_error("Rev smoke: Tab escaped the prompt");
         key.keyboard.tab.id=-1;key.keyboard.escape.id=1;key.propagate=true;keyDown(key);apply();
         if(dialog||focused_control()!=button||!allows_input(button))throw std::runtime_error("Rev smoke: prompt cancellation did not restore focus");
+        service_probe=true;services.enqueue({{1,ui::ServiceKind::prompt,"Declared prompt input limit","ab",3}});process_services();
+        if(!prompt||prompt->limit!=3||prompt->multiline)throw std::runtime_error("Rev prompt ignored shared input constraints");
+        unsigned errors=0;prompt->error=[&](std::string){++errors;};prompt->cursor=prompt->selectAnchor=prompt->selectEnd=2;
+        if(prompt->replace("cd")||errors!=1||prompt->content.get()!="ab"||prompt->cursor!=2||prompt->selectAnchor!=2||prompt->selectEnd!=2)
+            throw std::runtime_error("Rev prompt changed text or selection before rejecting an over-limit edit");
+        if(!prompt->replace("c")||prompt->content.get()!="abc")throw std::runtime_error("Rev prompt rejected an edit within its shared input limit");
+        dialog_result=ui::ServiceResult{1,true,{},{}};process_services();
+        if(dialog||focused_control()!=button)throw std::runtime_error("Rev limited prompt failed to restore native focus");
         focus_control(nullptr);
     }

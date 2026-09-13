@@ -378,6 +378,7 @@ private:
 class NativeServices {
 public:
     std::function<void(ui::ServiceResult)> complete;
+    std::function<void(std::string)> error;
     ui::ServiceQueue queue;
     void enqueue(std::vector<ui::ServiceRequest> requests) {queue.enqueue(std::move(requests));}
     void poll() {
@@ -391,28 +392,29 @@ public:
             return;
         }
         const auto* next=queue.next();if(!next)return;
-        const auto request=*next;
+        const auto request=*next;dialog_title_=request.title;
         previous_focus_=std::make_unique<Fl_Widget_Tracker>(Fl::focus());
         try {
             if(request.kind==ui::ServiceKind::clipboard) {
                 Fl::copy(request.value.data(),static_cast<int>(request.value.size()),1);finish({request.id,false,{},{}});
             } else if(request.kind==ui::ServiceKind::open_folder) {
-                std::array<char,512> error{};
-                if(!fl_open_uri(request.value.c_str(),error.data(),static_cast<int>(error.size())))throw std::runtime_error(error[0]?error.data():"Could not open folder");
+                std::array<char,512> failure{};
+                if(!fl_open_uri(request.value.c_str(),failure.data(),static_cast<int>(failure.size())))throw std::runtime_error(failure[0]?failure.data():"Could not open folder");
                 finish({request.id,false,{},{}});
             } else if(request.kind==ui::ServiceKind::prompt) {
-                prompt_=std::make_unique<Fl_Double_Window>(560,132,request.title.c_str());prompt_->begin();
-                input_=new Fl_Input(14,18,532,30);input_->value(request.value.c_str());
+                prompt_=std::make_unique<Fl_Double_Window>(560,132,dialog_title_.c_str());prompt_->begin();
+                input_=new NativeInput;input_->resize(14,18,532,30);input_->value(request.value.c_str());
+                input_->byte_limit=request.byte_limit;input_->error=[this](std::string message){if(error)error(std::move(message));};
                 auto* accept=new Fl_Return_Button(338,80,100,30,"Continue");auto* cancel=new Fl_Button(446,80,100,30,"Cancel");prompt_->end();
                 accept->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,false,self.input_->value(),{}};},this);
                 cancel->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,true,{},{}};},this);
                 prompt_->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,true,{},{}};},this);
                 theme::apply_widgets(*prompt_);prompt_->set_modal();prompt_->show();input_->take_focus();
             } else {
-                chooser_=std::make_unique<Fl_File_Chooser>(request.value.c_str(),"*",request.kind==ui::ServiceKind::save_file?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,request.title.c_str());
+                chooser_=std::make_unique<Fl_File_Chooser>(request.value.c_str(),"*",request.kind==ui::ServiceKind::save_file?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,dialog_title_.c_str());
                 chooser_->preview(0);chooser_->textfont(theme::font);chooser_->textcolor(theme::text_color());chooser_->show();
             }
-        } catch(const std::exception& error) {finish({request.id,false,{},error.what()});}
+        } catch(const std::exception& failure) {finish({request.id,false,{},failure.what()});}
     }
     void cancel() {
         queue.cancel();if(chooser_)chooser_->hide();if(prompt_)prompt_->hide();
@@ -420,13 +422,16 @@ public:
         previous_focus_.reset();
     }
 private:
+    // FLTK borrows window and chooser titles. Retain this text until after
+    // their destruction, including completion that releases the queued request.
+    std::string dialog_title_;
     std::unique_ptr<Fl_File_Chooser> chooser_;
     std::unique_ptr<Fl_Double_Window> prompt_;
-    Fl_Input* input_=nullptr;
+    NativeInput* input_=nullptr;
     std::optional<ui::ServiceResult> prompt_done_;
     std::unique_ptr<Fl_Widget_Tracker> previous_focus_;
     void finish(ui::ServiceResult result) {
-        if(!queue.complete(result.id))return;
+        if(!queue.complete(result))return;
         chooser_.reset();if(prompt_)prompt_->hide();prompt_.reset();input_=nullptr;
         if(previous_focus_&&previous_focus_->exists()) {
             auto* widget=previous_focus_->widget();if(widget&&widget->visible_r()&&widget->active_r())widget->take_focus();
@@ -476,6 +481,7 @@ public:
         window->callback([](Fl_Widget*,void* context){static_cast<NativeApp*>(context)->application.close();},this);
         window->resized=[this]{layout();};
         services.complete=[this](ui::ServiceResult result){application.complete_service(std::move(result));};
+        services.error=[this](std::string message){application.report_error(std::move(message));};
         layout();show_page();application.start();apply();window->show();
         Fl::add_timeout(.004,timer_callback,this);
     }
@@ -596,6 +602,12 @@ private:
             const auto geometry=ui::control_layout(c,state,window->w(),window->h(),controls_);
             const bool shown=b.menu?application.menu(b.menu_items).visible:application.control(c).visible;
             visible(b.group,shown&&ui::drawable(geometry.frame));
+            for(auto* widget:std::initializer_list<Fl_Widget*>{b.label,b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.suggestions})
+                if(widget&&widget->labelsize()!=c.font_size)widget->labelsize(c.font_size);
+            if(b.input&&b.input->textsize()!=c.font_size)b.input->textsize(c.font_size);
+            if(b.editor&&b.editor->textsize()!=c.font_size)b.editor->textsize(c.font_size);
+            for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.menu,b.suggestions})
+                if(menu&&menu->textsize()!=c.font_size)menu->textsize(c.font_size);
             place(b.group,geometry.frame);place(b.label,geometry.label);
             for(auto* widget:std::initializer_list<Fl_Widget*>{b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.records,b.bitmap}) {
                 place(widget,geometry.widget);visible(widget,ui::drawable(geometry.widget));

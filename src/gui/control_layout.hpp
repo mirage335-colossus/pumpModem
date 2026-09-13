@@ -8,7 +8,8 @@ inline constexpr int document_side_padding=20,document_top_padding=18,document_b
 inline bool drawable(Rect rect) {return rect.w>0&&rect.h>0;}
 struct ControlLayout {
     Rect frame,widget,label,suggestions,caption;
-    bool has_label=false,has_suggestions=false,has_caption=false,border=false;
+    bool has_label=false,has_suggestions=false,has_caption=false,border=false,caption_overlay=false;
+    bool operator==(const ControlLayout&) const = default;
 };
 // All rectangles are absolute logical client coordinates. No adapter knows the
 // meaning of a slot or independently reserves space for application controls.
@@ -19,12 +20,23 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
     out.frame=desktop[c.slot];
     if(c.slot==Slot::none) {
         std::uint64_t total=0,before=0;bool found=false;
+        // Use the actual declaration when available. Two ordinary controls can
+        // intentionally have the same binding (including unbound labels), but
+        // still occupy different positions in declaration order. A copied
+        // declaration falls back to binding identity within its full scope.
+        const bool declared=std::any_of(controls.begin(),controls.end(),[&](const auto& value){return &value==&c;});
+        const auto matches=[&](const Control& sibling) {
+            if(c.menu!=Menu::none)return same_menu(sibling,c);
+            if(declared)return &sibling==&c;
+            return sibling.menu==Menu::none&&sibling.kind==c.kind&&sibling.field==c.field&&
+                sibling.command==c.command&&sibling.bitmap==c.bitmap&&sibling.page==c.page&&
+                sibling.persistent==c.persistent&&sibling.instance==c.instance;
+        };
         for(std::size_t i=0;i<controls.size();++i) {
             const auto& sibling=controls[i];
             if(sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
             total+=sibling.stretch;
-            if(&sibling==&c || same_menu(sibling,c) || (sibling.kind==c.kind&&sibling.field==c.field&&sibling.command==c.command&&
-               sibling.bitmap==c.bitmap&&sibling.instance==c.instance))found=true;
+            if(matches(sibling))found=true;
             else if(!found)before+=sibling.stretch;
         }
         const auto page=desktop[Slot::page];
@@ -54,8 +66,11 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
     }
     if(c.kind==Kind::bitmap) {
         out.has_caption=true;
-        if(c.bitmap_caption==BitmapCaption::overlay_error)out.caption={out.widget.x+std::min(8,out.widget.w),out.widget.y+std::min(8,out.widget.h),
-            std::max(0,out.widget.w-16),std::max(0,out.widget.h-16)};
+        if(c.bitmap_caption==BitmapCaption::overlay_error) {
+            out.caption_overlay=true;
+            out.caption={out.widget.x+std::min(8,out.widget.w),out.widget.y+std::min(8,out.widget.h),
+                std::max(0,out.widget.w-16),std::max(0,out.widget.h-16)};
+        }
         else {
             out.border=true;
             const int inset_x=std::min(4,out.widget.w),inset_y=std::min(4,out.widget.h);

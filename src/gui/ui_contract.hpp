@@ -104,6 +104,10 @@ struct ServiceRequest {
     ServiceKind kind = ServiceKind::open_file;
     std::string title;
     std::string value; // suggested filename, prompt default, clipboard text, or folder URI
+    // Input policy belongs to the request, including custom prompt limits.
+    // Native file selectors can return OS paths containing line breaks; text
+    // prompts are single-line editors. Both return bounded UTF-8 without NUL.
+    std::size_t byte_limit = 32768;
 };
 struct ServiceResult {
     std::uint64_t id = 0;

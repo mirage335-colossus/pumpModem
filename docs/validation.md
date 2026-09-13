@@ -29,15 +29,15 @@ paths. A separate linked contract canary verifies that the application target
 does not export modem include directories. A fresh `BUILD_TESTING=OFF` FLTK
 configuration also passed its production boundary target.
 
-Linux Release FLTK passed all 20 GUI tests, including the simulated workflow,
-native adapter and document suites. The broader 45-test run passed 44 initially;
+Earlier Linux Release FLTK validation passed all 20 GUI tests, including the
+simulated workflow, native adapter and document suites. The broader 45-test run passed 44 initially;
 its live-simulation timeout passed when rerun alone (31.8 seconds). Native package
 relocation and corruption checks passed. ASan/UBSan passed all 19 GUI checks other
 than the separately validated workflow, with leak detection disabled for the
 native toolkit environment. These include the actual FLTK widget/document tests.
 
-Linux Release Rev passed all 22 GUI tests, including production workflow, native
-adapter workflow, clipboard/platform checks and 1x/2x coordinates. The exact
+Earlier Linux Release Rev validation passed all 22 GUI tests, including production
+workflow, native adapter workflow, clipboard/platform checks and 1x/2x coordinates. The exact
 profile was software OpenGL, `LP_NUM_THREADS=2`, and Xvfb at 2400x1800x24 with
 96 DPI. The native probes also verify zero-area document rectangles, retained
 action resizing and framebuffer extents from physical pixel endpoints. Rev
@@ -46,6 +46,48 @@ The default llvmpipe thread configuration repeatedly missed the final 50 ms
 raw-replay symbol observation on this host; the bounded profile passed the same
 unchanged assertions and is now used in the GUI-contract CI matrix. See
 [Rev software rendering](rev-backend.md#software-rendering-and-validation).
+
+The follow-up interface audit found and corrected additional gaps: repeated
+ordinary declarations could overlap in relative rows; Rev could miss changes to
+initially absent labels or shared geometry; typography and caption layers could
+remain stale; service editors used different hardcoded limits; and FLTK dialogs
+borrowed titles from temporary request storage. Layout identity and complete
+geometry results are shared, caption layering comes from `ControlLayout`, and
+service requests now declare input limits validated by the common queue. The
+Rev file dialog no longer duplicates the controller's no-overwrite promise.
+Both native suites use the same new layout lifecycle fixture and exercise
+atomic prompt edits with a custom input limit.
+
+Native conformance now runs separately from the production `gui_workflow` in
+both backends. Rev previously repeated the entire shared workflow after its
+widget probes; that second run repeatedly missed the short terminal raw-symbol
+snapshot on this software-rendering host. A later production run reproduced the
+same sampling sensitivity. All native probes remain, with the complete shared
+workflow executed once through the production binary. The smoke's raw replay
+check now accepts an unvisited tail only when completion returns live input,
+reports dropped points, and delivers a completed raw signal. Packet replay still
+requires observed received symbols, and timing, changing plots, pending reception
+and exact raw-bit assertions remain. Deterministic `live` tests additionally
+require received symbols in the terminal raw frame and verify skipped-terminal
+point accounting at exactly three seconds. This does not establish a guarantee
+that a slow native renderer displays every replay frame.
+
+Final follow-up Linux Release validation passed **20/20 FLTK GUI tests** in
+25.57 seconds and **22/22 Rev GUI tests** in 52.27 seconds. Both include the
+production workflow and dedicated native conformance; Rev also includes actual
+platform services and coordinates at 1x/2x. Builds and GUI workflows ran without
+overlapping workloads, using the software-GL/Xvfb profile above. Both fresh
+temporary directories were empty after success. The strengthened deterministic
+`live` suite passed in 31.51 seconds. The final independent source review found
+no remaining concrete application-ID decisions in either adapter, and the
+production boundary guard and diff whitespace check passed.
+
+The follow-up CLI-only contract/layout/application checks passed 9/9. Focused
+ASan/UBSan checks passed 4/4, including FLTK native service title lifetimes and
+input validation, with native-toolkit leak detection disabled. Successful smoke
+runs now remove automatically created fixtures; explicit output directories and
+failed-run evidence are retained. This prevents repeated GUI validation from
+exhausting a temporary filesystem with large generated key fixtures.
 
 The maintenance scope remains features expressed with existing primitives.
 New native primitive types, toolkit repairs and platform services still need

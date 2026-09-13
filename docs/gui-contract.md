@@ -211,7 +211,13 @@ a value or an error. Dialogs must allow the shared polling loop to continue.
 The controller retains data behind pending saves and performs exclusive writes;
 platform dialogs never authorize silent overwrites.
 `service_queue.hpp` provides the request queue and completion-ID checks used by
-both adapters. Requests execute serially. Application shutdown cancels active
+both adapters. `ServiceRequest::byte_limit` declares the input limit (32768 bytes
+by default). Prompts use the same atomic UTF-8 editor validation as controls;
+paths returned by native file selectors can also contain OS filename line breaks.
+The shared queue validates completed input before returning it to the application,
+including results supplied without an editor callback. Invalid input returns an
+error without the invalid value. Cancelled requests and platform errors retain
+their original meaning. Requests execute serially. Application shutdown cancels active
 and queued requests, so closing a dialog cannot launch another queued operation.
 Adapters own the native dialog and platform calls and close their active dialog
 when shared queue state is cancelled.
@@ -231,7 +237,11 @@ requirements also remain adapter work.
 
 Shared extension fixtures exercise the same added controls, scoped/filtered
 menus, validated presets, record cells and document geometry in both native
-suites. Toolkit-free tests cover grouping, dispatch, record interaction policy,
+suites. They also change existing label visibility, row placement, font size,
+footer allocation and bitmap caption mode without rebuilding native controls.
+Both adapters consume the complete shared geometry; native invalidation must not
+maintain a second list of which shared layout rules can change.
+Toolkit-free tests cover grouping, dispatch, record interaction policy,
 scrolling, service ordering/shutdown and semantic palettes. The boundary guard
 also checks generic public helpers; its regressions reject application-ID
 decisions hidden behind helpers or aliases

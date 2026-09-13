@@ -42,7 +42,7 @@ struct Smoke::Impl {
     struct Replay {
         bool active=false,binary=false,saw_symbols=false,resumed=false;
         std::uint64_t id=0,pending_poll=0,waterfall_version=0,waveform_version=0,constellation_version=0;
-        std::size_t frame=0,frames=0,waveform_changes=0;
+        std::size_t frame=0,frame_count=0,frames=0,waveform_changes=0;
         double fraction=0;
         Clock::time_point started;
         std::vector<float> waveform;
@@ -52,7 +52,7 @@ struct Smoke::Impl {
     double timeout,raw_seconds=0;
     Clock::time_point started=Clock::now(),cancelled_at;
     Phase phase=Phase::initialize;
-    bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false;
+    bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false,owns_directory=false;
     std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
     std::vector<float> idle_waveform;
     std::set<std::uint64_t> interrupted;
@@ -61,12 +61,21 @@ struct Smoke::Impl {
     std::string first_key_id;
     std::uintmax_t key_size=0;
     explicit Impl(std::filesystem::path path,double seconds):directory(std::move(path)),timeout(seconds) {
-        if(directory.empty()) directory=std::filesystem::temp_directory_path()/("datapump-shared-smoke-"+std::to_string(started.time_since_epoch().count()));
-        std::filesystem::create_directories(directory);
+        if(directory.empty()) {
+            directory=std::filesystem::temp_directory_path()/("datapump-shared-smoke-"+std::to_string(started.time_since_epoch().count()));
+            owns_directory=std::filesystem::create_directory(directory);
+            if(!owns_directory)throw Error("GUI smoke temporary directory already exists");
+        } else std::filesystem::create_directories(directory);
         const auto suffix=std::to_string(started.time_since_epoch().count());
         input_path=directory/("attachment-"+suffix+".bin"); save_path=directory/("received-"+suffix+".bin");
         const auto key_name="generated keys caf\xc3\xa9-"+suffix+".key";
         key_path=directory/std::filesystem::path(std::u8string(key_name.begin(),key_name.end()));
+    }
+    ~Impl() {
+        // A successful regression run creates a large key fixture. Retain
+        // explicitly requested output and failed-run evidence, but do not fill
+        // the host's temporary filesystem on repeated backend conformance runs.
+        if(owns_directory&&done) {std::error_code ignored;std::filesystem::remove_all(directory,ignored);}
     }
     ui::ServiceRequest take(Controller& controller,ui::ServiceKind kind) {
         auto requests=controller.take_services();
@@ -122,8 +131,10 @@ struct Smoke::Impl {
             if(beginning) {
                 require(!replay.active||interrupted.contains(replay.id),"An active replay was replaced without an explicit new transmission");
                 replay={};replay.active=true;replay.id=snapshot.transmission_id;replay.binary=launched_binary;replay.started=Clock::now();
+                replay.frame_count=snapshot.replay_frame_count;
             } else require(snapshot.replay_frame_index>=replay.frame&&snapshot.simulation_sample_fraction>=replay.fraction,
                            "Simulation replay moved backwards in transmission time");
+            require(snapshot.replay_frame_count==replay.frame_count,"Simulation replay changed its retained frame count");
             for(const auto& signal:snapshot.signals) {
                 require(!signal.validated&&!signal.complete&&signal.binary==replay.binary,"Replay delivered completed or incorrectly typed reception early");
                 const auto& lines=controller.signals().lines();
@@ -167,12 +178,24 @@ struct Smoke::Impl {
             replay.active=false;
             if(!interrupted.contains(replay.id)) {
                 const auto elapsed=std::chrono::duration<double>(Clock::now()-replay.started).count();
+                // Three raw bits can produce receiver symbols only in the
+                // final replay slice (as short as 50 ms). When native rendering
+                // spans that deadline, Session must return live input and account for skipped
+                // points, rather than extend playback to satisfy a UI poll.
+                // The deterministic live tests require the actual terminal
+                // receiver frame and independently check skipped-tail counts.
+                const bool accounted_raw_tail=replay.binary&&snapshot.transmission_id==replay.id&&
+                    replay.frame+1<replay.frame_count&&snapshot.constellation_source==live::ConstellationSource::input&&
+                    snapshot.constellation_dropped>0&&std::any_of(snapshot.signals.begin(),snapshot.signals.end(),
+                        [](const auto& signal){return signal.binary&&signal.complete;});
                 const auto replay_diagnostics=std::string("Replay did not show changing measured frames and pending reception over about three seconds")+
                         ": elapsed="+std::to_string(elapsed)+" frames="+std::to_string(replay.frames)+
                         " changes="+std::to_string(replay.waveform_changes)+" fraction="+std::to_string(replay.fraction)+
-                        " symbols="+std::to_string(replay.saw_symbols)+" pending="+std::to_string(replay.pending_poll);
+                        " symbols="+std::to_string(replay.saw_symbols)+" dropped="+std::to_string(snapshot.constellation_dropped)+
+                        " pending="+std::to_string(replay.pending_poll);
                 require(elapsed>=2.4&&elapsed<=8&&replay.frames>=(replay.binary?2U:10U)&&
-                        replay.waveform_changes>=(replay.binary?1U:5U)&&replay.fraction>=.9&&replay.saw_symbols&&replay.pending_poll,
+                        replay.waveform_changes>=(replay.binary?1U:5U)&&replay.fraction>=.9&&
+                        (replay.saw_symbols||accounted_raw_tail)&&replay.pending_poll,
                         replay_diagnostics.c_str());
                 completed_replay=replay.id;
             }

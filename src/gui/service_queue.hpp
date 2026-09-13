@@ -1,12 +1,22 @@
 #pragma once
-#include "ui_contract.hpp"
+#include "text_policy.hpp"
 #include <deque>
 #include <optional>
 #include <utility>
 
 namespace datapump::gui::ui {
+inline std::string service_input_error(const ServiceRequest& request,std::string_view value) {
+    switch(request.kind) {
+    case ServiceKind::prompt:return edit_error(value,false,request.byte_limit);
+    case ServiceKind::open_file:case ServiceKind::save_file:return edit_error(value,true,request.byte_limit);
+    case ServiceKind::clipboard:case ServiceKind::open_folder:return {};
+    }
+    return {};
+}
 // One in-flight platform request per adapter. Queue order, reply identity and
-// shutdown belong to the shared contract; dialogs and OS calls remain native.
+// input validation/shutdown belong to the shared contract; dialogs and OS calls
+// remain native. Even native selectors that cannot constrain editing validate
+// their final result through the same request policy before releasing a reply.
 class ServiceQueue {
 public:
     void enqueue(std::vector<ServiceRequest> requests) {
@@ -23,8 +33,12 @@ public:
         }
         return current();
     }
-    bool complete(std::uint64_t id) {
-        if(!current_||current_->id!=id)return false;
+    bool complete(ServiceResult& result) {
+        if(!current_||current_->id!=result.id)return false;
+        if(!result.cancelled&&result.error.empty()) {
+            result.error=service_input_error(*current_,result.value);
+            if(!result.error.empty())result.value.clear();
+        }
         current_.reset();return true;
     }
     void cancel() {closed_=true;pending_.clear();current_.reset();}

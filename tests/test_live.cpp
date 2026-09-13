@@ -347,8 +347,11 @@ void test_binary_simulation_replay_validation_and_cancel() {
     observe_pending(middle);
     replay_milliseconds = 2999;
     const auto last = session.snapshot();
-    check(last.simulation_replay && last.simulation_sample_fraction > .99,
-          "raw simulation remains visible through the full three-second presentation");
+    check(last.simulation_replay && last.simulation_sample_fraction > .99 &&
+          last.replay_frame_index + 1 == last.replay_frame_count &&
+          last.constellation_source == live::ConstellationSource::received && !last.constellation.empty(),
+          "raw simulation exposes measured received symbols in its final frame through 2999ms");
+    const auto terminal_points = last.constellation.size() + last.constellation_dropped;
     observe_pending(last);
     check(saw_pending_bits, "sample-derived binary bits must be visible as pending before replay completion");
     replay_milliseconds = 3000;
@@ -406,6 +409,42 @@ void test_binary_simulation_replay_validation_and_cancel() {
     const auto recovered = std::find_if(replacement.signals.begin(), replacement.signals.end(), [](const auto& signal) { return signal.complete; });
     check(recovered != replacement.signals.end() && recovered->text == "10" && recovered->id != replaced_id,
           "replacement presents its own recovered bits at its own three-second deadline");
+
+    // Repeat the same three-bit configuration with a GUI that misses only the
+    // final replay frame. The symbols measured above independently
+    // establish what must now be accounted for as undisplayed at the deadline.
+    const auto stalled_started_at = replay_milliseconds.load();
+    session.transmit_bits(bits);
+    const auto stalled_start = wait_for(session, [&](const auto& snapshot) {
+        check_binary_signals(snapshot, bits.size());
+        return snapshot.transmission_finished && snapshot.simulation_replay &&
+               snapshot.transmission_id != replacement.transmission_id;
+    });
+    check(stalled_start.replay_frame_count == first.replay_frame_count && terminal_points > 0,
+          "raw stalled-GUI fixture retains the same measured terminal frame");
+    // A single physical symbol may provide fewer than sixty replay frames.
+    // Stop at the last whole millisecond before its terminal interval begins.
+    const auto before_terminal = (3000 * (stalled_start.replay_frame_count - 1) - 1) / stalled_start.replay_frame_count;
+    replay_milliseconds = stalled_started_at + static_cast<std::int64_t>(before_terminal);
+    const auto before_stall = session.snapshot();
+    check_binary_signals(before_stall, bits.size());
+    check(before_stall.simulation_replay && before_stall.replay_frame_index + 2 == before_stall.replay_frame_count &&
+          before_stall.constellation_source == live::ConstellationSource::input,
+          "raw stalled-GUI fixture leaves received symbols in the unvisited final frame");
+    replay_milliseconds = stalled_started_at + 3000;
+    const auto after_stall = session.snapshot();
+    check_binary_signals(after_stall, bits.size());
+    check(!after_stall.simulation_replay && after_stall.replay_frame_count == 0 &&
+          after_stall.constellation_source == live::ConstellationSource::input && after_stall.received.empty(),
+          "missing the final raw frame still returns immediately to live input at exactly three seconds");
+    check(after_stall.constellation_dropped >= terminal_points,
+          "raw replay expiry accounts for measured symbols in its unvisited terminal frame");
+    const auto stalled_bits = std::find_if(after_stall.signals.begin(), after_stall.signals.end(), [](const auto& signal) { return signal.complete; });
+    check(stalled_bits != after_stall.signals.end() && stalled_bits->text == "001" && stalled_bits->received_bits == bits.size(),
+          "missing the final raw frame preserves exact sample-derived completion bits");
+    const auto stalled_again = session.snapshot();
+    check(stalled_again.signals.empty() && stalled_again.received.empty(),
+          "raw missed-frame completion is delivered exactly once");
 }
 void test_keyed_binary_reception_preserves_partial_symbols() {
     const Bytes bits{0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0};

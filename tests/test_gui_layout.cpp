@@ -113,6 +113,54 @@ void relative_controls() {
             "Zero-sized native content escaped its shared frame");
     }
 }
+void declaration_identity() {
+    // Ordinary labels have no field/action binding. Their declaration addresses
+    // still distinguish positions, as do repeated instances of the same action.
+    std::vector<Control> labels(3,Control{Kind::label});
+    labels[0].label="First";labels[1].label="Second";labels[2].label="Third";
+    const auto require_ordered=[](const std::vector<Control>& controls) {
+        auto previous=control_layout(controls.front(),{},default_width,default_height,controls).frame;
+        for(std::size_t index=1;index<controls.size();++index) {
+            const auto next=control_layout(controls[index],{},default_width,default_height,controls).frame;
+            check(previous.x+previous.w<next.x&&previous.y==next.y,
+                "Identically bound ordinary controls lost their declaration order");
+            previous=next;
+        }
+    };
+    require_ordered(labels);
+    std::vector<Control> actions(3,Control{Kind::action});
+    for(auto& action:actions)action.command=Command::clear_received;
+    require_ordered(actions);
+
+    // Copies are used by shared callers as well. Their binding identity must
+    // distinguish page/persistent scope, menu membership and explicit instance.
+    std::vector<Control> scoped(3,Control{Kind::text,Field::callsign});
+    scoped[1].persistent=true;scoped[2].instance=1;
+    require_ordered(scoped);
+    for(const auto& declaration:scoped) {
+        const auto copy=declaration;
+        check(control_layout(copy,{},default_width,default_height,scoped).frame==
+              control_layout(declaration,{},default_width,default_height,scoped).frame,
+              "Copied binding matched a different persistent scope or instance");
+    }
+    std::vector<Control> menu{
+        {Kind::action,Field::count,Command::clear_received},
+        {Kind::action,Field::count,Command::clear_received},
+        {Kind::action,Field::count,Command::clear_received}
+    };
+    menu[0].menu=Menu::keyfile;menu[2].menu=Menu::keyfile;menu[2].persistent=true;
+    require_ordered(menu);
+    for(const auto& declaration:menu) {
+        const auto copy=declaration;
+        check(control_layout(copy,{},default_width,default_height,menu).frame==
+              control_layout(declaration,{},default_width,default_height,menu).frame,
+              "Copied action confused a menu, ordinary action or persistent menu");
+    }
+    auto other_page=scoped[1];other_page.page=Page::flow;scoped.push_back(other_page);
+    const auto copy=scoped.back();
+    check(control_layout(copy,{},default_width,default_height,scoped).frame.x==24,
+        "Copied binding borrowed another page's row allocation");
+}
 }
 int main() {
     try {
@@ -120,6 +168,7 @@ int main() {
         supported_sizes();
         adapter_helpers();
         relative_controls();
+        declaration_identity();
         std::cout << "shared desktop layout passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

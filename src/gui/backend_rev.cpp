@@ -440,6 +440,8 @@ struct Binding {
     std::vector<const ui::Control*> menu_items;
     std::uint64_t bitmap_revision=std::numeric_limits<std::uint64_t>::max();
     bool has_suggestions=false;
+    std::optional<ui::ControlLayout> applied_layout;
+    int applied_font_size=0;
 };
 
 class RevApp : public Rev::Window {
@@ -683,7 +685,9 @@ public:
                 };
             } else {
                 const auto geometry=ui::control_layout(c,state(c),details.size.width,details.size.height,declarations);
-                if(geometry.has_label)b.label=new re::Text(container,c.kind==ui::Kind::label&&c.field!=ui::Field::count?"":c.label,{&plainText});
+                // Retain every native text role; shared geometry decides when
+                // it is allocated, including labels added after construction.
+                b.label=new re::Text(container,"",{&plainText});
                 switch(c.kind) {
                 case ui::Kind::label:break;
                 case ui::Kind::text:
@@ -753,6 +757,7 @@ public:
         for(auto& binding:bindings) {
             const auto& c=binding.control;
             const auto geometry=ui::control_layout(c,state(c),details.size.width,details.size.height,declarations);
+            binding.applied_layout=geometry;binding.applied_font_size=c.font_size;
             auto frame=geometry.frame;if(!c.persistent){frame.x-=viewport.x;frame.y-=viewport.y;}place(binding.element,frame);
             const bool shown=binding.menu?application.menu(binding.menu_items).visible:application.control(c).visible;
             binding.element->style->visibility=shown&&ui::drawable(geometry.frame)?Visibility::Visible:Visibility::Hidden;
@@ -767,18 +772,19 @@ public:
             };
             if(binding.label) {
                 place(binding.label,local(geometry.label));binding.label->style->text.wrap=Wrap::False;
+                binding.label->style->visibility=geometry.has_label&&ui::drawable(geometry.label)?Visibility::Visible:Visibility::Hidden;
                 binding.label->style->overflow=Overflow::Hide;binding.label->style->text.size=Px(c.font_size);
             }
             if(binding.menu) {const auto rect=local(geometry.widget);place(binding.menu,rect);place(binding.menu->dropdown,{0,0,rect.w,rect.h});popup(binding.menu,geometry.widget);}
             if(binding.editor) {place(binding.editor,local(geometry.widget));binding.editor->style->text.size=Px(c.font_size);}
             if(binding.suggestions&&geometry.has_suggestions) {const auto rect=local(geometry.suggestions);place(binding.suggestions,rect);place(binding.suggestions->dropdown,{0,0,rect.w,rect.h});popup(binding.suggestions,geometry.suggestions);}
             if(binding.choice) {const auto rect=local(geometry.widget);place(binding.choice,rect);place(binding.choice->dropdown,{0,0,rect.w,rect.h});popup(binding.choice,geometry.widget);}
-            if(binding.toggle) {const auto rect=local(geometry.widget);place(binding.toggle,rect);place(binding.toggle->checkbox,{0,3,20,20});place(binding.toggle->label,{25,6,rect.w-25,20});binding.toggle->label->style->text.size=Px(c.font_size);}
+            if(binding.toggle) {const auto rect=local(geometry.widget);place(binding.toggle,rect);place(binding.toggle->checkbox,{0,3,20,20});place(binding.toggle->label,{25,6,std::max(0,rect.w-25),20});binding.toggle->label->style->text.size=Px(c.font_size);}
             if(binding.button) {place(binding.button,local(geometry.widget));binding.button->labelText->style->text.size=Px(c.font_size);}
             if(binding.list) {place(binding.list,local(geometry.widget));binding.list->resize_content(geometry.widget.w,geometry.widget.h);}
             if(binding.bitmap)place(binding.bitmap,local(geometry.widget));
-            if(binding.caption) {place(binding.caption,local(geometry.caption));binding.caption->style->overflow=Overflow::Hide;if(c.bitmap_caption==ui::BitmapCaption::overlay_error)binding.caption->style->zIndex=1;}
-            if(geometry.border)binding.element->style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
+            if(binding.caption) {place(binding.caption,local(geometry.caption));binding.caption->style->overflow=Overflow::Hide;binding.caption->style->zIndex=geometry.caption_overlay?1:0;}
+            binding.element->style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=geometry.border?1_px:0_px};
         }
         update_documents();shared->layoutDirty=true;refresh(event);
     }
@@ -791,6 +797,9 @@ public:
         for(auto& b:bindings) {
             const auto presentation=application.control(b.control);
             const auto geometry=ui::control_layout(b.control,presentation.state,details.size.width,details.size.height,declarations);
+            // React to the complete shared layout result, so a new shared
+            // geometry rule never needs a matching native invalidation rule.
+            relayout=relayout||b.applied_layout!=geometry||b.applied_font_size!=b.control.font_size;
             const bool has_area=ui::drawable(geometry.frame);
             if(b.label)b.label->content=presentation.label;
             if(b.toggle)b.toggle->label->content=presentation.label;
@@ -845,7 +854,7 @@ public:
         }
         if(dialog_result) {
             auto result=std::move(*dialog_result);dialog_result.reset();
-            if(!services.complete(result.id))return;
+            if(!services.complete(result))return;
             delete modal;modal=nullptr;dialog=nullptr;prompt=nullptr;
             if(!service_probe)application.complete_service(std::move(result));service_probe=false;
             surface->setDisabled(false);focus_control(previous_focus);previous_focus=nullptr;
@@ -857,7 +866,7 @@ public:
             ui::ServiceResult result{request.id};
             try {if(request.kind==ui::ServiceKind::clipboard)platform.copy(request.value);else RevPlatform::open_folder(request.value);}
             catch(const std::exception& e){result.error=e.what();}
-            if(services.complete(result.id))application.complete_service(std::move(result));return;
+            if(services.complete(result))application.complete_service(std::move(result));return;
         }
         previous_focus=focused_control();
         modal=new re::Box(this);modal->style->layout.position=Position::Absolute;
@@ -870,8 +879,9 @@ public:
         dialog->style->zIndex=100;dialog->interceptHits=true;
         help_text->style->visibility=Visibility::Hidden;surface->setDisabled(true);
         new re::Text(dialog,request.title,{&plainText});
-        if(request.kind!=ui::ServiceKind::prompt)new re::Text(dialog,"Enter a path on this computer. Existing files are never overwritten.",{&smallText});
-        prompt=new Editor(dialog,false,32768,platform);prompt->apply(request.value);
+        if(request.kind!=ui::ServiceKind::prompt)new re::Text(dialog,"Enter a path on this computer.",{&smallText});
+        prompt=new Editor(dialog,request.kind!=ui::ServiceKind::prompt,request.byte_limit,platform);
+        prompt->style->size.height=30_px;prompt->apply(request.value);
         prompt->error=[this](std::string error){application.report_error(std::move(error));};
         prompt->submit=[this,id=request.id]{dialog_result=ui::ServiceResult{id,false,prompt->content.get(),{}};};
         auto* buttons=new re::Box(dialog,{&row});
@@ -884,20 +894,10 @@ public:
     }
 };
 
+#ifndef DATAPUMP_REV_ADAPTER_TEST
 int run(Launch launch) {
     configure_theme(launch.color);std::vector<void*> windows;
-#ifdef DATAPUMP_REV_ADAPTER_TEST
-    if(launch.smoke) {
-        Launch probe_options=launch;probe_options.smoke=false;probe_options.simulation=true;probe_options.page=ui::pages().front().id;
-        auto declarations=test::extension_controls();
-        RevApp probe(windows,probe_options,declarations);probe.verify_extension_contract();
-        test::relabel_extension_controls(declarations);probe.apply();probe.verify_updated_labels();probe.verify_service_shutdown();
-    }
-#endif
     auto app=std::make_unique<RevApp>(windows,launch);
-#ifdef DATAPUMP_REV_ADAPTER_TEST
-    if(launch.smoke){app->verify_editor_contract();app->verify_choice_contract();app->verify_record_contract();app->verify_prompt_focus();app->verify_native_resize();std::cout<<"Rev native adapter probes passed: declarative extensions, UTF-8 editing, choices, records, scrolling and modal focus.\n";}
-#endif
     while(!app->application.finished()) {
         Rev::NativeWindow::pumpEvents();app->platform.poll();
         if(app->application.tick()) {
@@ -909,8 +909,11 @@ int run(Launch launch) {
     }
     return app->application.result();
 }
+#endif
 }
+#ifndef DATAPUMP_REV_ADAPTER_TEST
 int datapump_rev_main(int argc,char** argv) {return datapump::gui::gui_main(argc,argv,"rev",run);}
 #ifndef _WIN32
 int main(int argc,char** argv) {return datapump_rev_main(argc,argv);}
+#endif
 #endif

@@ -143,10 +143,14 @@ text/file/raw simulation, effective FEC settings, encrypted exact bits, pending
 reception, replay cancellation/replacement, clipboard request payloads, stale
 drafts and retained saves. They also verify shared structured signal fields,
 replay timing and rendered measurement sources. The GUI smoke renders controls, switches pages and checks control layout.
-The separate `test_rev_adapter --simulation --smoke-test` executable also checks
+The separate `test_rev_adapter` executable checks
 shared extension fixtures, relative document geometry, padded bitmap transfers,
 UTF-8 editing, failed-paste selection preservation and modal focus
-isolation/restoration. These native probes are excluded from production builds. `test_rev_platform` checks actual clipboard round
+isolation/restoration. These native probes are excluded from production builds.
+As with FLTK, native conformance and the full shared workflow run in separate
+executables: `gui_workflow` runs the shared smoke through `datapump-gui`, while
+`gui_adapter_conformance` runs the widget probes. Native probe state and duration
+therefore cannot affect the workflow's startup clock. `test_rev_platform` checks actual clipboard round
 trips, failed/overlapping reads, stale replies and bounded incremental selections
 on a display. The updated `gui_layout`, `gui_inspection_page`, `gui_controller`
 and `gui_self_check` tests passed, as did the full Rev smoke with shared desktop

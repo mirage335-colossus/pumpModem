@@ -19,7 +19,7 @@ removed.
 | `document_actions.hpp` | Document action identity, inherited availability and eligibility for restoring focus after a document replacement. |
 | `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
 | `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
-| `service_queue.hpp` | Serial platform-service requests, completion identity and cancellation of current/queued work during shutdown. |
+| `service_queue.hpp` | Serial platform-service requests, completion identity, declared input validation and cancellation of current/queued work during shutdown. |
 | `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 replacement proposals, caret/selection boundaries and declaration-specific byte limits. |
 | `theme.hpp`, `presentation_palette.hpp` | Shared RGB values and semantic text/document tone and fill resolution. |
 | `screen_console.cpp` | Window/page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
@@ -91,6 +91,15 @@ menus share one scope regardless of their declarations' page values. Layout uses
 the same grouping, so additional menu entries do not allocate another widget or
 consume row space. Reusing a menu ID on another page or instance needs no adapter
 special case.
+Ordinary controls already in the declaration span use their actual declaration
+identity for layout, so unbound labels and repeated bindings retain separate row
+positions. A copied declaration uses its binding, instance and complete menu/
+persistent/page scope. Give copied repeated bindings distinct instances.
+
+Native control geometry is refreshed from `ControlLayout` as a complete value.
+Label appearance/disappearance, row movement, footer allocation and bitmap
+caption mode changes reach retained controls in both adapters. Native layout
+invalidation does not enumerate a separate subset of shared geometry rules.
 
 The application polls reception and captures plot history at 25 Hz while native
 state/plot presentation runs at 10 Hz. Native input can repaint immediately.
@@ -105,7 +114,11 @@ rebuild text trees or upload textures. Moving between pages and resizing cannot
 restart reception. File/prompt/clipboard services use request IDs and deferred
 results; a pending Save retains its bytes independently of inbox changes.
 `service_queue.hpp` serializes service requests and matches completion IDs for
-both backends. Closing the application cancels active and queued requests;
+both backends. The request also owns its input byte limit. Prompt editors use
+shared atomic text validation and every successful input completion is validated
+again by the queue, including native file chooser replies. Prompts remain
+single-line; OS paths may contain line breaks. Changing these constraints is
+shared contract work. Closing the application cancels active and queued requests;
 adapters close native dialogs and cannot start another queued service.
 
 ## Verification and maintenance guardrails
@@ -148,13 +161,18 @@ refresh existing control labels and dispatch callbacks.
 Additional cases cover stale choice/toggle/gesture callbacks, shared UTF-8 edit
 proposals, record widths, zero/large stretch weights, exhausted control space,
 and document action focus and availability after tree changes.
-`gui_services` tests service ordering, completion identity and shutdown
-cancellation without a toolkit.
+`gui_services` tests service ordering, completion identity, declared limits,
+UTF-8 validation and shutdown cancellation without a toolkit. Both native suites
+also exercise the same limited prompt edits and shared layout lifecycle fixture.
 Rev also checks rendered pixels when leaving deeply nested clips, so later
 document siblings and persistent controls remain visible while overflow stays
 clipped.
 Rev's native probes are compiled only into `test_rev_adapter`; production GUI
-sources no longer include domain-bearing test fixtures.
+sources no longer include domain-bearing test fixtures. Both native conformance
+executables run their widget probes separately from `gui_workflow`, which runs
+the complete shared smoke through the production executable. This keeps the
+workflow's initial state and clock independent of native probe duration, and
+avoids maintaining a second workflow lifecycle in an adapter's test code.
 
 The CI GUI-contract matrix builds **both FLTK and Rev** and runs the same shared
 suite and simulation workflow, plus their native conformance tests on a private
@@ -171,6 +189,8 @@ without a display. Native tests include clipboard, editor focus/selection,
 record history, document resizing and Rev coordinates at 1x and 2x. Windows
 runtime testing remains a separate platform requirement; Linux success does
 not establish Windows validation.
+Successful smoke runs remove their automatically created temporary fixtures;
+failed-run evidence and explicitly selected `--smoke-dir` output are retained.
 
 See [GUI contract](gui-contract.md) for the vocabulary and
 [Rev backend](rev-backend.md) for its pinned source, toolchain and software-GL

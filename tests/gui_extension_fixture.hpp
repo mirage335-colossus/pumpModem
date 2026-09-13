@@ -49,6 +49,22 @@ inline void relabel_extension_controls(std::span<ui::Control> controls) {
     controls[2].label="Updated editor label";
     controls[3].label="Updated toggle label";
 }
+// Presentation/layout changes must flow through the same existing native
+// roles. In particular, starting without a heading cannot prevent a later
+// shared heading or a new shared geometry rule from taking effect.
+inline std::vector<ui::Control> layout_lifecycle_controls() {
+    ui::Control text{ui::Kind::text,ui::Field::callsign};text.instance=51;
+    ui::Control bitmap{ui::Kind::bitmap};bitmap.bitmap=ui::Bitmap::waveform;
+    bitmap.slot=ui::Slot::waveform;bitmap.instance=52;
+    return {text,bitmap};
+}
+inline void layout_lifecycle_stage(std::span<ui::Control> controls,unsigned stage) {
+    auto& text=controls[0];auto& bitmap=controls[1];
+    text.label=stage==1?"Late editor heading":"";
+    text.row=stage;text.font_size=stage==1?19:13;text.footer_height=stage==1?6:0;
+    bitmap.label=stage==1?"Late bitmap heading":"";
+    bitmap.bitmap_caption=stage==1?ui::BitmapCaption::overlay_error:ui::BitmapCaption::footer;
+}
 struct BitmapProbe {std::vector<BitmapRequest> requests;};
 // Arbitrary opaque rectangles, including padded strides and blocks taller than
 // a native transfer tile. No plot/domain source is available to either adapter.

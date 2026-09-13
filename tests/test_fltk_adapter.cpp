@@ -204,6 +204,7 @@ void prompts() {
     services.complete=[&](ui::ServiceResult value){result=std::move(value);};
     services.enqueue({{88,ui::ServiceKind::prompt,"Native Enter prompt","initial"}});services.poll();Fl::check();
     auto* dialog=Fl::modal();require(dialog&&dialog!=&host,"Native prompt did not isolate input in a modal window");
+    require(dialog->label()&&std::string(dialog->label())=="Native Enter prompt","Native prompt retained a borrowed temporary title");
     auto* input=dynamic_cast<Fl_Input*>(Fl::focus());require(input&&input->window()==dialog,"Native prompt did not focus its editor");
     input->value("caf\xc3\xa9 \xf0\x9f\x8c\x8d");
     auto* accept=dynamic_cast<Fl_Return_Button*>(find_button(*dialog,"Continue"));require(accept,"Native prompt has no Enter default action");
@@ -215,11 +216,29 @@ void prompts() {
     dialog=Fl::modal();require(dialog,"Native cancel prompt did not open");auto* cancel=find_button(*dialog,"Cancel");require(cancel,"Native prompt lost Cancel action");
     cancel->do_callback();services.poll();Fl::check();
     require(result&&result->id==89&&result->cancelled&&Fl::focus()==previous,"Native prompt cancellation changed state or lost focus");
+    result.reset();unsigned errors=0;services.error=[&](std::string){++errors;};
+    services.enqueue({{92,ui::ServiceKind::prompt,"Declared prompt input limit","ab",3}});services.poll();Fl::check();
+    dialog=Fl::modal();auto* limited=dynamic_cast<NativeInput*>(Fl::focus());
+    require(limited&&limited->byte_limit==3,"Native prompt ignored its shared input limit");
+    limited->insert_position(2);
+    require(!limited->paste("cd")&&errors==1&&std::string(limited->value())=="ab"&&limited->insert_position()==2,
+        "Native prompt rejected input after altering its text or selection");
+    require(limited->paste("c")&&std::string(limited->value())=="abc","Native prompt rejected text within its shared input limit");
+    // The shared completion path also protects against a native widget or
+    // platform selector supplying a result without its ordinary edit callback.
+    limited->value("abcd");find_button(*dialog,"Continue")->do_callback();services.poll();Fl::check();
+    require(result&&result->id==92&&!result->error.empty()&&result->value.empty(),"Native prompt completion bypassed shared input validation");
     result.reset();services.enqueue({{90,ui::ServiceKind::prompt,"Shutdown prompt",""},
         {91,ui::ServiceKind::clipboard,"Queued copy","must not copy"}});
     services.poll();Fl::check();require(Fl::modal(),"Shutdown fixture did not open a prompt");
     services.queue.synchronize({},true);services.poll();Fl::check();
     require(!Fl::modal()&&!result&&!services.queue.next(),"Closing left a native prompt or dispatched a queued platform request");
+    NativeServices file_services;
+    file_services.enqueue({{93,ui::ServiceKind::open_file,"Native chooser retained title","/tmp"}});file_services.poll();Fl::check();
+    auto* file_dialog=Fl::modal();
+    require(file_dialog&&file_dialog->label()&&std::string(file_dialog->label())=="Native chooser retained title",
+        "Native file chooser retained a borrowed temporary title");
+    file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
 void extension_controls() {
     auto declarations=datapump::gui::test::extension_controls();
@@ -285,6 +304,36 @@ void extension_controls() {
     for(std::size_t index=0;index<4;++index)
         require(find_label(*window,app.application.control(declarations[index]).label.c_str()),"Existing native control retained a stale shared label");
     require(std::string(toggle->label())==app.application.control(declarations[3]).label,"Native toggle retained a stale shared label");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+void layout_lifecycle() {
+    auto declarations=datapump::gui::test::layout_lifecycle_controls();
+    Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
+    auto* window=Fl::first_window();require(window,"Layout lifecycle fixture has no native window");
+    NativeInput* editor=nullptr;NativeBitmap* bitmap=nullptr;
+    const std::function<void(Fl_Group&)> locate=[&](Fl_Group& parent) {
+        for(int i=0;i<parent.children();++i) {
+            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i)))editor=input;
+            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i)))bitmap=image;
+            if(auto* group=dynamic_cast<Fl_Group*>(parent.child(i)))locate(*group);
+        }
+    };
+    locate(*window);require(editor&&bitmap,"Layout lifecycle fixture lost native controls");
+    auto* heading=editor->parent()->child(0);auto* bitmap_heading=bitmap->parent()->child(0);
+    const auto rect=[](Fl_Widget* widget){return ui::Rect{widget->x(),widget->y(),widget->w(),widget->h()};};
+    for(unsigned stage=0;stage<3;++stage) {
+        datapump::gui::test::layout_lifecycle_stage(declarations,stage);
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+        const auto text=ui::control_layout(declarations[0],app.application.field(declarations[0].field),window->w(),window->h(),declarations);
+        const auto image=ui::control_layout(declarations[1],{},window->w(),window->h(),declarations);
+        require(heading->visible()==text.has_label&&bitmap_heading->visible()==image.has_label,
+            "Native layout failed to add or remove a shared heading after construction");
+        require(rect(editor->parent())==text.frame&&rect(editor)==text.widget&&rect(bitmap->parent())==image.frame&&rect(bitmap)==image.widget,
+            "Native controls retained stale shared control geometry");
+        require(editor->textsize()==declarations[0].font_size&&heading->labelsize()==declarations[0].font_size,
+            "Native controls retained stale shared typography");
+        require(bitmap->parent()->box()==(image.border?FL_DOWN_BOX:FL_NO_BOX),"Native bitmap retained a stale shared border");
+    }
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 void document_geometry(Fl_Group& parent) {
@@ -388,6 +437,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();layout_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
