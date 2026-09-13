@@ -63,7 +63,7 @@ struct Control {
     const char* help = "";
     const char* empty_text = "";
     bool persistent = false;
-    bool open_upward = false;
+    bool open_upward = false; // Placement preference; native popup fitting may override it.
     bool follow_tail = false;
     bool activate_on_select = false;
     int list_row_height = 28;

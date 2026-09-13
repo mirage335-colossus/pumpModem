@@ -1,5 +1,5 @@
 #include "rev_platform.hpp"
-#include "datapump/types.hpp"
+#include <stdexcept>
 #include <algorithm>
 #include <chrono>
 #include <cstring>
@@ -21,7 +21,7 @@ namespace datapump::gui {
 namespace {
 std::wstring wide(const std::string& text) {
     int n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,text.data(),static_cast<int>(text.size()),nullptr,0);
-    if(!n && !text.empty()) throw Error("Invalid UTF-8 text");
+    if(!n && !text.empty()) throw std::runtime_error("Invalid UTF-8 text");
     std::wstring out(static_cast<std::size_t>(n),L'\0');
     MultiByteToWideChar(CP_UTF8,0,text.data(),static_cast<int>(text.size()),out.data(),n); return out;
 }
@@ -35,25 +35,25 @@ std::string narrow(const wchar_t* text) {
 struct RevPlatform::Impl { HWND window=nullptr; std::function<void(ClipboardResult)> receive; ClipboardResult result; };
 RevPlatform::RevPlatform():impl_(std::make_unique<Impl>()) {
     impl_->window=CreateWindowExW(0,L"STATIC",L"Data Pump clipboard",0,0,0,0,0,HWND_MESSAGE,nullptr,GetModuleHandleW(nullptr),nullptr);
-    if(!impl_->window)throw Error("Cannot create the clipboard service window");
+    if(!impl_->window)throw std::runtime_error("Cannot create the clipboard service window");
 }
 RevPlatform::~RevPlatform() {if(impl_->window)DestroyWindow(impl_->window);}
 void RevPlatform::poll() { if(auto cb=std::exchange(impl_->receive,{})) cb(std::move(impl_->result)); }
 void RevPlatform::copy(const std::string& text) {
     auto value=wide(text);
-    if(!OpenClipboard(impl_->window)) throw Error("Clipboard is busy");
+    if(!OpenClipboard(impl_->window)) throw std::runtime_error("Clipboard is busy");
     HGLOBAL data=GlobalAlloc(GMEM_MOVEABLE,(value.size()+1)*sizeof(wchar_t));
-    if(!data) { CloseClipboard(); throw Error("Cannot allocate clipboard text"); }
+    if(!data) { CloseClipboard(); throw std::runtime_error("Cannot allocate clipboard text"); }
     auto* bytes=GlobalLock(data);
-    if(!bytes) {GlobalFree(data); CloseClipboard(); throw Error("Cannot lock clipboard text");}
+    if(!bytes) {GlobalFree(data); CloseClipboard(); throw std::runtime_error("Cannot lock clipboard text");}
     std::memcpy(bytes,value.c_str(),(value.size()+1)*sizeof(wchar_t)); GlobalUnlock(data);
-    if(!EmptyClipboard()) {GlobalFree(data);CloseClipboard();throw Error("Cannot clear the clipboard");}
-    if(!SetClipboardData(CF_UNICODETEXT,data)) {GlobalFree(data);CloseClipboard();throw Error("Cannot copy text");}
+    if(!EmptyClipboard()) {GlobalFree(data);CloseClipboard();throw std::runtime_error("Cannot clear the clipboard");}
+    if(!SetClipboardData(CF_UNICODETEXT,data)) {GlobalFree(data);CloseClipboard();throw std::runtime_error("Cannot copy text");}
     CloseClipboard();
 }
 void RevPlatform::paste(std::function<void(ClipboardResult)> result) {
-    if(impl_->receive)throw Error("A clipboard read is already pending");
-    if(!OpenClipboard(impl_->window)) throw Error("Clipboard is busy");
+    if(impl_->receive)throw std::runtime_error("A clipboard read is already pending");
+    if(!OpenClipboard(impl_->window)) throw std::runtime_error("Clipboard is busy");
     struct Close {~Close(){CloseClipboard();}} close;
     ClipboardResult value{std::nullopt,"Clipboard has no text"};
     auto data=GetClipboardData(CF_UNICODETEXT);
@@ -72,7 +72,7 @@ void RevPlatform::paste(std::function<void(ClipboardResult)> result) {
 }
 void RevPlatform::open_folder(const std::string& path) {
     if(reinterpret_cast<INT_PTR>(ShellExecuteW(nullptr,L"open",wide(path).c_str(),nullptr,nullptr,SW_SHOWNORMAL))<=32)
-        throw Error("Cannot open the keyfile folder");
+        throw std::runtime_error("Cannot open the requested folder");
 }
 #else
 struct RevPlatform::Impl {
@@ -110,7 +110,7 @@ struct RevPlatform::Impl {
 };
 RevPlatform::RevPlatform():impl_(std::make_unique<Impl>()) {
     auto& p=*impl_; p.display=XOpenDisplay(nullptr);
-    if(!p.display) throw Error("Cannot connect to X11 for clipboard services");
+    if(!p.display) throw std::runtime_error("Cannot connect to X11 for clipboard services");
     if(Impl::clipboard_displays.empty())Impl::previous_handler=XSetErrorHandler(Impl::xerror);
     Impl::clipboard_displays.push_back(p.display);
     p.window=XCreateSimpleWindow(p.display,DefaultRootWindow(p.display),0,0,1,1,0,0,0);
@@ -131,11 +131,11 @@ RevPlatform::~RevPlatform() {
 }
 void RevPlatform::copy(const std::string& text) {
     auto& p=*impl_; p.text=std::make_shared<const std::string>(text); XSetSelectionOwner(p.display,p.clipboard,p.window,CurrentTime); XFlush(p.display);
-    if(XGetSelectionOwner(p.display,p.clipboard)!=p.window) throw Error("Cannot own the X11 clipboard");
+    if(XGetSelectionOwner(p.display,p.clipboard)!=p.window) throw std::runtime_error("Cannot own the X11 clipboard");
 }
 void RevPlatform::paste(std::function<void(ClipboardResult)> result) {
     auto& p=*impl_;
-    if(p.receive)throw Error("A clipboard read is already pending");
+    if(p.receive)throw std::runtime_error("A clipboard read is already pending");
     p.receive=std::move(result);p.incoming.clear();p.incremental=false;
     p.requested=std::chrono::steady_clock::now();
     // A fresh requestor window gives every operation its own identity. Replies
@@ -210,10 +210,10 @@ void RevPlatform::open_folder(const std::string& path) {
     // Pass the path as one argument, never through a shell. Double fork avoids
     // blocking the GUI or retaining a zombie while the file manager is open.
     pid_t child=fork();
-    if(child<0) throw Error("Cannot start folder opener");
+    if(child<0) throw std::runtime_error("Cannot start folder opener");
     if(child==0) {pid_t grandchild=fork();if(grandchild==0){execlp("xdg-open","xdg-open",path.c_str(),static_cast<char*>(nullptr));_exit(127);} _exit(grandchild<0?127:0);}
     int status=0;waitpid(child,&status,0);
-    if(status!=0) throw Error("Cannot start folder opener");
+    if(status!=0) throw std::runtime_error("Cannot start folder opener");
 }
 #endif
 }

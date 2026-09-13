@@ -1,19 +1,20 @@
 #pragma once
 // Include after the Rev Element/Box/Text/Button/Appearance module imports.
-#include "ui_document.hpp"
+#include "document_layout.hpp"
 #include "theme.hpp"
 #include <functional>
 #include <cmath>
 #include <map>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace datapump::gui {
 // A toolkit adapter for ordinary document nodes. Application state, model
 // mapping, document invalidation and navigation remain outside this renderer.
 class RevDocumentView : public Rev::Element::Box {
 public:
-    using BitmapFactory=std::function<Rev::Element::Element*(Rev::Element::Element*,const plots::PlotSnapshot&)>;
+    using BitmapFactory=std::function<Rev::Element::Element*(Rev::Element::Element*,const BitmapSource&)>;
     using Action=std::function<void(ui::Command)>;
     RevDocumentView(Rev::Element::Element* parent,bool color,BitmapFactory factory,Action action)
         :Rev::Element::Box(parent,{},"Document"),color_(color),bitmap_factory_(std::move(factory)),action_(std::move(action)) {
@@ -31,12 +32,18 @@ public:
                 const auto occurrence=occurrences[command]++;
                 if(button->targetFlags.focus)focus=std::pair{command,occurrence};
             }
-            document_=std::move(document);equal_rows_.clear();buttons_.clear();
+            document_=std::move(document);root_.reset();labels_.clear();buttons_.clear();
             while(!children.empty())delete children.back();
-            if(document_)materialize(this,*document_);
+            if(document_)root_=materialize(this,*document_);
             if(focus) {
                 occurrences.clear();
                 for(const auto& [button,command]:buttons_)if(std::pair{command,occurrences[command]++}==*focus) {
+                    bool enabled=true;
+                    for(auto* ancestor=static_cast<Rev::Element::Element*>(button);ancestor;ancestor=ancestor->parent) {
+                        enabled=enabled&&!ancestor->targetFlags.disabled;
+                        if(ancestor==ancestor->parent)break;
+                    }
+                    if(!enabled)break;
                     for(auto* element=static_cast<Rev::Element::Element*>(button);element&&element!=element->parent;element=element->parent) {
                         element->targetFlags.focus=true;element->dirty.style=true;
                     }
@@ -53,36 +60,55 @@ public:
             if(ancestor->resolved.hidden||ancestor->style->visibility==Visibility::Hidden)return;
             if(ancestor==ancestor->parent)break;
         }
-        // Native glyph layout supplies card heights. Equalize only after that
-        // layout exists; the shared document never guesses text metrics.
-        const std::function<bool(Rev::Element::Element*)> measured=[&](auto* element) {
-            if(element->resolved.hidden)return false;
-            if(auto* label=dynamic_cast<Rev::Element::Text*>(element);label&&!label->content.get().empty()&&label->rect.h<1)return false;
-            if(!element->children.empty()&&element->layout.rect.h<=0)return false;
-            for(auto* child:element->children)if(!measured(child))return false;
-            return true;
-        };
-        for(auto* line:equal_rows_) {
-            bool ready=true;for(auto* child:line->children)ready=ready&&measured(child);
-            if(!ready)continue;
-            float height=0;
-            for(auto* child:line->children) {
-                const auto content=child->layout.rect.h+child->resolved.pad.t.val+child->resolved.pad.b.val;
-                if(child->layout.rect.h>0)height=std::max(height,std::ceil(content));
-            }
-            if(height<=0)continue;
-            for(auto* child:line->children)if(std::abs(child->style->size.min.height.val-height)>.5f)child->style->size.min.height=Px(height);
-        }
+        if(!root_ || !document_ || rect.w<=0)return;
+        const int left=ui::document_extent(resolved.pad.l.val),right=ui::document_extent(resolved.pad.r.val);
+        const int top=ui::document_extent(resolved.pad.t.val),bottom=ui::document_extent(resolved.pad.b.val);
+        const auto geometry=ui::layout_document(*document_,std::max(0,ui::document_extent(rect.w)-left-right),
+            [this](const ui::DocumentNode& node,int width) {return measure_text(node,width);});
+        apply_geometry(*root_,geometry.root,left,top);
+        const auto height=Px(geometry.height+top+bottom);
+        style->size.height=height;style->size.min.height=height;style->size.max.height=height;
+
     }
 private:
     bool color_;
     BitmapFactory bitmap_factory_;
     Action action_;
     std::shared_ptr<const ui::DocumentNode> document_;
-    std::vector<Rev::Element::Element*> equal_rows_;
+    struct Item {
+        Rev::Element::Element* element=nullptr;
+        std::vector<Item> children;
+    };
+    std::optional<Item> root_;
+    std::unordered_map<const ui::DocumentNode*,Rev::Element::Text*> labels_;
     std::vector<std::pair<Rev::Element::Button*,ui::Command>> buttons_;
 
-    Rev::Element::Element* materialize(Rev::Element::Element* parent,const ui::DocumentNode& node) {
+    float measure_text(const ui::DocumentNode& node,int width) {
+        auto* label=labels_.at(&node);
+        // Resolve the native font at the current display scale before asking
+        // Rev's own glyph wrapper for its intrinsic height. No geometry policy
+        // or text approximation is duplicated in this adapter.
+        if(shared->event && (!label->font || label->dirty.style || label->style->dirty || label->styles.dirty))
+            label->resolveStyle(*shared->event);
+        if(!label->font) {shared->layoutDirty=true;return 0;}
+        label->maxWidth=static_cast<float>(width);
+        label->allocatedTextWidth=static_cast<float>(width);
+        label->layoutText();
+        return label->height;
+    }
+    static void apply_geometry(Item& item,const ui::DocumentBox& geometry,int x=0,int y=0) {
+        using namespace Rev::Appearance;
+        auto* element=item.element;const auto& box=geometry.bounds;
+        element->style->position={.left=Px(x+box.x),.top=Px(y+box.y)};
+        const auto width=Px(static_cast<float>(box.width)),height=Px(static_cast<float>(box.height));
+        element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+        const auto& content=geometry.content;
+        element->style->padding={.left=Px(content.x),.right=Px(box.width-content.x-content.width),
+            .top=Px(content.y),.bottom=Px(box.height-content.y-content.height)};
+        for(std::size_t index=0;index<geometry.children.size();++index)
+            apply_geometry(item.children[index],geometry.children[index]);
+    }
+    Item materialize(Rev::Element::Element* parent,const ui::DocumentNode& node) {
         using namespace Rev::Appearance;
         namespace re=Rev::Element;
         using Kind=decltype(node.kind);using Tone=decltype(node.tone);using Fill=decltype(node.fill);
@@ -92,12 +118,11 @@ private:
         re::Element* element=nullptr;
         switch(node.kind) {
         case Kind::text: {
-            auto* label=new re::Text(parent,node.text);element=label;
+            auto* label=new re::Text(parent,node.text);element=label;labels_[&node]=label;
             label->style->text.size=Px(node.font_size);
             label->style->text.weight=node.bold?700:400;
             label->style->text.wrap=Wrap::BreakWord;
             label->style->text.color=color;
-            if(node.height>0)label->style->overflow=Overflow::Hide;
             break;
         }
         case Kind::bitmap:
@@ -108,6 +133,10 @@ private:
             button->labelText->style->text.color=color;
             button->labelText->style->text.size=Px(node.font_size);
             button->labelText->style->text.weight=node.bold?700:400;
+            button->labelText->style->text.wrap=Wrap::BreakWord;
+            button->labelText->style->size.width=100_pct;
+            button->labelText->style->size.min.width=0_px;
+            labels_[&node]=button->labelText;
             button->onClick([this,button,command=node.command](re::Event&){
                 for(auto* ancestor=static_cast<re::Element*>(button);ancestor;ancestor=ancestor->parent) {
                     if(ancestor->targetFlags.disabled)return;
@@ -118,22 +147,24 @@ private:
             buttons_.emplace_back(button,node.command);break;
         }
         case Kind::column:case Kind::row:
-            element=new re::Box(parent);element->style->layout={node.kind==Kind::row?Axis::Horizontal:Axis::Vertical,Align::Start,Align::Start,Wrap::False};
-            if(node.equal_height)equal_rows_.push_back(element);
+            element=new re::Box(parent);
             break;
         }
         element->setDisabled(!node.enabled);
-        element->style->size.width=node.width>0?Px(node.width):100_pct;
-        if(node.height>0)element->style->size.height=Px(node.height);
-        element->style->padding={.left=Px(node.padding),.right=Px(node.padding),.top=Px(node.padding),.bottom=Px(node.padding)};
-        element->style->margin={.left=0_px,.right=Px(node.right),.top=Px(node.top),.bottom=Px(node.bottom)};
+        element->style->layout.position=Position::Absolute;
+        element->style->size={.width=0_px,.height=0_px,.min={0_px,0_px},.max={0_px,0_px}};
+        element->style->overflow=Overflow::Hide;
+        element->style->padding={0_px,0_px,0_px,0_px};
+        element->style->margin={0_px,0_px,0_px,0_px};
         if(node.fill!=Fill::none) {
             const auto gray=node.fill==Fill::surface?theme::surface:node.fill==Fill::parity?theme::grid:theme::background;
             element->style->background.color=rgba(gray,gray,gray,1);
         }
         if(node.border) {element->style->border.width=1_px;element->style->border.color=rgba(theme::grid,theme::grid,theme::grid,1);}
-        for(const auto& child:node.children)materialize(element,child);
-        return element;
+        Item item;item.element=element;
+        if(node.kind==Kind::column || node.kind==Kind::row)
+            for(const auto& child:node.children)item.children.push_back(materialize(element,child));
+        return item;
     }
 };
 }

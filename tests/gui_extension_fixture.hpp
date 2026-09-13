@@ -1,5 +1,6 @@
 #pragma once
 #include "../src/gui/ui_document.hpp"
+#include <memory>
 
 // Shared extension fixture used unchanged by both native adapters. It adds only
 // existing semantic primitives above their factories, including a new record
@@ -9,12 +10,44 @@ inline const std::vector<ui::Control>& extension_controls() {
     static const auto values=[] {
         std::vector<ui::Control> controls{
             {ui::Kind::label,ui::Field::count,ui::Command::none,ui::Bitmap::none,ui::Page::console,0,"Extension / literal & label"},
-            {ui::Kind::action,ui::Field::count,ui::Command::clear_received,ui::Bitmap::none,ui::Page::console,0,"Extension action"}
+            {ui::Kind::action,ui::Field::count,ui::Command::clear_received,ui::Bitmap::none,ui::Page::console,0,"@circle & literal action"},
+            {ui::Kind::text,ui::Field::bandwidth,ui::Command::none,ui::Bitmap::none,ui::Page::console,1,"Multiline presets",1,true},
+            {ui::Kind::toggle,ui::Field::repeatable,ui::Command::none,ui::Bitmap::none,ui::Page::console,2,"@square & literal toggle"}
         };
         controls[0].instance=17;controls[1].instance=18;
+        controls[0].click=ui::Command::clear_received;controls[0].double_click=ui::Command::reset_zoom;
+        controls[0].wheel_up=ui::Command::zoom_in;controls[0].wheel_down=ui::Command::zoom_out;
+        controls[2].instance=19;controls[2].font_size=17;
         return controls;
     }();
     return values;
+}
+inline ui::FieldState effective_choice() {
+    ui::FieldState state;state.options={{"saved","Saved option"},{"other","Other option"}};
+    state.selected="saved";state.display_text="Effective value";return state;
+}
+struct BitmapProbe {std::vector<BitmapRequest> requests;};
+// Arbitrary opaque rectangles, including padded strides and blocks taller than
+// a native transfer tile. No plot/domain source is available to either adapter.
+inline BitmapSource rectangle_bitmap(std::shared_ptr<BitmapProbe> probe) {
+    return BitmapSource([probe=std::move(probe)](const BitmapRequest& request,const BitmapSink& sink,bool) {
+        probe->requests.push_back(request);
+        if(!request.width||!request.height)return;
+        const auto stride=static_cast<std::size_t>(request.width)+5;
+        std::vector<unsigned char> gray(stride*request.height,42);
+        sink(0,0,{request.width,request.height,stride,PixelFormat::gray8,gray.data()});
+        const auto mono_width=std::min(9U,request.width),mono_height=std::min(5U,request.height);
+        std::vector<unsigned char> mono(3*mono_height,0xaa);
+        sink(0,0,{mono_width,mono_height,3,PixelFormat::mono1,mono.data()});
+        if(request.supports_rgb24) {
+            const auto width=std::min(4U,request.width),height=std::min(3U,request.height);
+            std::vector<unsigned char> rgb(17*height,0);
+            for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x) {
+                rgb[17*y+3*x]=12;rgb[17*y+3*x+1]=34;rgb[17*y+3*x+2]=56;
+            }
+            sink(request.width-width,request.height-height,{width,height,17,PixelFormat::rgb24,rgb.data()});
+        }
+    });
 }
 inline ui::FieldState extension_records() {
     ui::FieldState state;

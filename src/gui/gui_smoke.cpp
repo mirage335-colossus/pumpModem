@@ -167,9 +167,13 @@ struct Smoke::Impl {
             replay.active=false;
             if(!interrupted.contains(replay.id)) {
                 const auto elapsed=std::chrono::duration<double>(Clock::now()-replay.started).count();
+                const auto replay_diagnostics=std::string("Replay did not show changing measured frames and pending reception over about three seconds")+
+                        ": elapsed="+std::to_string(elapsed)+" frames="+std::to_string(replay.frames)+
+                        " changes="+std::to_string(replay.waveform_changes)+" fraction="+std::to_string(replay.fraction)+
+                        " symbols="+std::to_string(replay.saw_symbols)+" pending="+std::to_string(replay.pending_poll);
                 require(elapsed>=2.4&&elapsed<=8&&replay.frames>=(replay.binary?2U:10U)&&
                         replay.waveform_changes>=(replay.binary?1U:5U)&&replay.fraction>=.9&&replay.saw_symbols&&replay.pending_poll,
-                        "Replay did not show changing measured frames and pending reception over about three seconds");
+                        replay_diagnostics.c_str());
                 completed_replay=replay.id;
             }
         }

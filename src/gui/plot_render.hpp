@@ -27,6 +27,8 @@ public:
     static PlotSnapshot codeword(std::size_t data, std::size_t parity);
     // color_enabled is user preference, independently gated by target support.
     void paint(const BitmapRequest& request, const BitmapSink& sink, bool color_enabled = true) const;
+    // Erase application-specific factories and data at the backend boundary.
+    operator BitmapSource() const;
     // Native labels may use this descriptive scale/capture text.
     std::string caption(unsigned width = 640) const;
 private:

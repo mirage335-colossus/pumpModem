@@ -2,6 +2,7 @@
 #include "record_presentations.hpp"
 #include <iostream>
 #include <set>
+#include <thread>
 
 using namespace datapump;
 using namespace datapump::gui;
@@ -36,23 +37,24 @@ void presentation() {
     Application app({.simulation=true});
     for(const auto field:{ui::Field::message,ui::Field::binary}) {
         const auto& editor=control(field);
-        app.controller.select(ui::Field::send_key,"enter");
+        app.select(ui::Field::send_key,"enter");
         check(!app.submit(editor,false,true),"Shift+Enter must insert a newline");
         check(app.submit(editor,false,false)&&!app.submit(editor,true,false),"Default submit modifier changed");
-        app.controller.select(ui::Field::send_key,"ctrl-enter");
+        app.select(ui::Field::send_key,"ctrl-enter");
         check(app.submit(editor,true,false)&&!app.submit(editor,false,false),"Shared Ctrl+Enter policy was not applied");
     }
     auto first=app.document(ui::Page::flow,900);
     check(first&&app.document(ui::Page::flow,900)==first,"Unchanged document was rebuilt");
     check(app.document(ui::Page::flow,650)!=first,"Resize retained a stale document layout");
     check(!app.document(ui::Page::console,900),"Control page acquired a duplicate document");
-    app.bitmaps.update(app.controller);
+    app.start();
     const auto& qr=*std::find_if(ui::console_screen().begin(),ui::console_screen().end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
-    const auto before=app.bitmap(qr);app.bitmaps.update(app.controller);
+    const auto before=app.bitmap(qr);app.tick();
     check(app.bitmap(qr).revision==before.revision,"Unchanged pixels were invalidated");
-    app.controller.edit(ui::Field::message,std::string(501,'a'));app.bitmaps.update(app.controller);
+    const auto refresh=[&] {std::this_thread::sleep_for(std::chrono::milliseconds(45));app.tick();};
+    app.edit(ui::Field::message,std::string(501,'a'));refresh();
     check(!app.bitmap(qr).caption.empty(),"QR validation error did not reach shared native-caption presentation");
-    app.controller.edit(ui::Field::message,"Good");app.bitmaps.update(app.controller);
+    app.edit(ui::Field::message,"Good");refresh();
     check(app.bitmap(qr).caption.empty()&&app.bitmap(qr).revision>before.revision,"Recovered QR retained an error or stale pixels");
 }
 void declarations() {

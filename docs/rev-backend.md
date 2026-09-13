@@ -54,7 +54,8 @@ asynchronous prompt services stay inside the adapter.
 Pending Save requests retain their payload across inbox eviction.
 
 `inspection_page.hpp` builds the inspection document from the shared `Inspection`
-model. `backend_rev_document.hpp` renders its headings, numbered step/section
+model. `document_layout.hpp` computes its document rectangles from native glyph
+measurements; `backend_rev_document.hpp` applies those rectangles and renders headings, numbered step/section
 cards, notes, navigation and parameter rows with native Rev elements. Modem flow
 follows the FLTK section order: processing lanes, chosen alphabets, full pattern
 inspection, then preamble and integration notes. Transmission separates on-air
@@ -133,9 +134,11 @@ same expanded workflow: production key generation/loading and failure recovery,
 text/file/raw simulation, effective FEC settings, encrypted exact bits, pending
 reception, replay cancellation/replacement, clipboard request payloads, stale
 drafts and retained saves. They also verify shared structured signal fields,
-replay timing and rendered measurement sources. The GUI smoke renders controls, switches pages and
-checks control layout, UTF-8 editing, failed-paste selection preservation and modal
-focus isolation/restoration. `test_rev_platform` checks actual clipboard round
+replay timing and rendered measurement sources. The GUI smoke renders controls, switches pages and checks control layout.
+The separate `test_rev_adapter --simulation --smoke-test` executable also checks
+shared extension fixtures, relative document geometry, padded bitmap transfers,
+UTF-8 editing, failed-paste selection preservation and modal focus
+isolation/restoration. These native probes are excluded from production builds. `test_rev_platform` checks actual clipboard round
 trips, failed/overlapping reads, stale replies and bounded incremental selections
 on a display. The updated `gui_layout`, `gui_inspection_page`, `gui_controller`
 and `gui_self_check` tests passed, as did the full Rev smoke with shared desktop
@@ -197,3 +200,12 @@ libraries such as GLEW and FreeType. The pinned checkout contains no license
 grant for Rev itself. Its distribution terms must be resolved with its owner
 before distributing a Rev-enabled release; the provenance record does not
 assign Rev a license.
+
+## Contract conformance
+
+Both native adapters expose only the shared `Application` facade and opaque
+`BitmapSource` handles. Document layout and gesture semantics are implemented
+once above the native boundary. The GUI-contract CI matrix builds both adapters
+and registers their native suites with `DATAPUMP_TEST_NATIVE_GUI=ON`; run them
+with `ctest --test-dir build-rev --output-on-failure -L gui` on a private display.
+Without that option, the native executables can still be run explicitly.

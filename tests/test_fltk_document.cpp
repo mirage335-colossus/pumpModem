@@ -1,5 +1,6 @@
 #include "backend_fltk_document.hpp"
 #include "gui_extension_fixture.hpp"
+#include "document_geometry_fixture.hpp"
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_Scroll.H>
 #include <iostream>
@@ -60,6 +61,14 @@ int main() {
         document.children.insert(document.children.begin()+1,label("Inserted native heading",400));
         view->update(document);
         require(Fl::focus()==find_button(*view),"Action focus was not restored after a document insertion");
+        auto replacement_document=document;replacement_document.children[2].command=ui::Command::clear_received;
+        view->update(replacement_document);
+        require(Fl::focus()!=find_button(*view),"Replacing a document action transferred focus to a different command");
+        view->update(document);find_button(*view)->take_focus();
+        replacement_document=document;replacement_document.children.erase(replacement_document.children.begin()+2);
+        view->update(replacement_document);
+        require(!find_button(*view),"Removing a document action retained its native button");
+        view->update(document);
         const int old_height=view->content_height();
         view->layout(250);
         require(view->content_height()>=old_height,"Narrower document width reduced wrapped content height");
@@ -73,6 +82,42 @@ int main() {
         require(extension_root&&std::string(extension_root->child(0)->label())=="Added document field","Shared extension document text did not render through the unchanged factory");
         button=find_button(*view);require(button&&std::string(button->label())=="Added document action","Shared extension document action did not render");
         const auto before=actions;button->do_callback();require(actions==before+1,"Shared extension document action did not dispatch");
+        auto bitmap_probe=std::make_shared<datapump::gui::test::BitmapProbe>();
+        auto border_probe=std::make_shared<datapump::gui::test::BitmapProbe>();
+        auto geometry_document=datapump::gui::test::document_geometry_fixture();
+        geometry_document.children[3].plot=datapump::gui::test::rectangle_bitmap(bitmap_probe);
+        geometry_document.children[6].plot=datapump::gui::test::rectangle_bitmap(border_probe);
+        view->layout(400);view->update(geometry_document);Fl::check();
+        require(!bitmap_probe->requests.empty()&&bitmap_probe->requests.back().width==86&&bitmap_probe->requests.back().height==36,
+            "FLTK document bitmap did not paint the shared padded framebuffer extent");
+        auto* geometry_root=dynamic_cast<Fl_Group*>(view->child(0));
+        const auto matches=[](Fl_Widget* widget,Fl_Widget* parent,const auto& expected) {
+            return widget->x()-parent->x()==expected[0] && widget->y()-parent->y()==expected[1] &&
+                widget->w()==expected[2] && widget->h()==expected[3];
+        };
+        for(std::size_t index=0;index<datapump::gui::test::document_geometry_rows.size();++index)
+            require(matches(geometry_root->child(static_cast<int>(index)),geometry_root,datapump::gui::test::document_geometry_rows[index]),"FLTK document parent geometry diverged from the shared fixture");
+        const auto verify_row=[&](int index,const auto& expected) {
+            auto* group=dynamic_cast<Fl_Group*>(geometry_root->child(index));
+            for(std::size_t child=0;child<expected.size();++child)
+                require(matches(group->child(static_cast<int>(child)),group,expected[child]),"FLTK document child geometry diverged from the shared fixture");
+        };
+        verify_row(0,datapump::gui::test::document_geometry_remainder);
+        verify_row(1,datapump::gui::test::document_geometry_margins);
+        verify_row(2,datapump::gui::test::document_geometry_equal);
+        verify_row(4,datapump::gui::test::document_geometry_overflow);
+        button=find_button(*view);
+        require(button&&button->h()>60,"FLTK document action did not measure its wrapped padded label");
+        require(button->color()==datapump::gui::theme::fltk_color(datapump::gui::theme::grid),
+            "FLTK document action ignored its explicit semantic fill");
+        geometry_document.children[5].fill=ui::DocumentFill::none;geometry_document.children[5].border=false;
+        view->update(geometry_document);
+        require(find_button(*view)->color()==datapump::gui::theme::fltk_color(datapump::gui::theme::surface),
+            "Clearing document action fill did not restore the native default");
+        // Reveal the fixture's final node even on this small test viewport.
+        view->update(geometry_document.children[6]);Fl::check();
+        require(!border_probe->requests.empty()&&border_probe->requests.back().width==98&&border_probe->requests.back().height==48,
+            "FLTK zero-padding document bitmap painted over its declared border");
         window.hide();
         std::cout<<"FLTK generic document checks passed.\n";
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

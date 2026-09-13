@@ -56,6 +56,11 @@ struct PlotSnapshot::Data {
 };
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
 PlotSnapshot::PlotSnapshot(std::shared_ptr<const Data> data) : data_(std::move(data)) {}
+PlotSnapshot::operator BitmapSource() const {
+    return BitmapSource([snapshot=*this](const BitmapRequest& request,const BitmapSink& sink,bool color) {
+        snapshot.paint(request,sink,color);
+    });
+}
 PlotSnapshot PlotSnapshot::waveform(std::vector<float> samples, modem::Config config, double zoom) {
     if (!(zoom > 0) || !std::isfinite(zoom)) throw Error("invalid waveform zoom");
     return PlotSnapshot(std::make_shared<Data>(Waveform{std::move(samples), config, zoom}));

@@ -1,12 +1,9 @@
 #pragma once
-#include "controller.hpp"
-#include "bitmap_sources.hpp"
+#include "bitmap.hpp"
 #include "control_layout.hpp"
 #include "ui_document.hpp"
-#include <chrono>
 #include <filesystem>
 #include <functional>
-#include <map>
 #include <memory>
 
 namespace datapump::gui {
@@ -17,26 +14,39 @@ struct Launch {
     std::filesystem::path smoke_directory;
 };
 struct BitmapPresentation {
-    plots::PlotSnapshot source;
+    BitmapSource source;
     std::uint64_t revision=0;
     std::string title,caption;
     ui::TextTone caption_tone=ui::TextTone::muted;
 };
-class Smoke;
 // Shared lifecycle, presentation and workflow. Adapters pump native events,
-// translate declared bindings, and render a tick; no modem policy lives there.
+// translate declared bindings, and render a tick. This facade exposes only the
+// toolkit-neutral vocabulary; models, workers and bitmap producers are private.
 class Application {
 public:
     explicit Application(Launch options);
     ~Application();
-    Controller controller;
     Launch launch;
-    BitmapSources bitmaps;
+    Application(const Application&) = delete;
+    Application& operator=(const Application&) = delete;
     void start();
-    bool tick(); // Polls at25Hz; true when native state should be presented.
+    bool tick(); // Polls at 25 Hz; true when native state should be presented.
     bool finished() const;
     int result() const;
     void close();
+    bool closing() const;
+    void edit(ui::Field field,std::string text);
+    void select(ui::Field field,std::string option_id);
+    void toggle(ui::Field field,bool value);
+    void activate(ui::Command command);
+    const ui::FieldState& field(ui::Field field) const;
+    bool enabled(ui::Command command) const;
+    std::string command_label(ui::Command command) const;
+    void complete_service(ui::ServiceResult result);
+    std::vector<ui::ServiceRequest> take_services();
+    void report_error(std::string message);
+    std::uint64_t revision() const;
+    std::uint64_t poll_count() const; // Native event-loop conformance diagnostic.
     void select_page(ui::Page page);
     ui::Page page() const;
     bool smoke_passed() const;

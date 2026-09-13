@@ -11,8 +11,11 @@ removed.
 
 | Shared module | Responsibility |
 | --- | --- |
+| `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
-| `ui_document.hpp`, `bitmap.hpp` | Generic native document nodes and opaque pixel transfer. |
+| `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
+| `document_layout.hpp` | Document flow, remaining widths, margins, padding, clipping and nested equal heights; adapters supply native glyph measurements only. |
+| `control_interactions.hpp`, `text_policy.hpp`, `utf8_policy.hpp` | Pointer/record double-click identity, wheel command repetition and atomic UTF-8 edit policy. |
 | `screen_console.cpp` | Page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
 | `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry and label/editor/preset/caption placement in logical units. |
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
@@ -25,6 +28,9 @@ removed.
 `backend_fltk.cpp` and `backend_rev.cpp` iterate the same control/page definitions
 and apply the same controller state and computed rectangles. Their document
 renderers consume `ui::DocumentNode` without knowing what an inspection model is.
+Adapters call `Application` through fields, commands, service messages and
+presentation snapshots; no public controller or bitmap-producer access is
+available.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
@@ -50,7 +56,10 @@ copy actions are shared presentation policy.
 4. Test the shared behavior and run the same workflow in both backend builds.
 
 These edits require no adapter changes when they use existing primitives. A new
-primitive requires generic support in each adapter once. Toolkit bugs, platform
+primitive requires generic support in each adapter once. Ordinary combinations
+of existing metadata, including multiline presets, gestures on any control,
+enabled choices with effective labels and padded bitmap documents, are covered
+by common conformance fixtures. Toolkit bugs, platform
 services and native rendering differences likewise remain adapter work.
 
 A `Control` stores behavior as named commands and ordinary metadata. Adapters
@@ -60,7 +69,8 @@ saved selected ID, for example FEC being off for binary or tiny input. Key label
 are literal UTF-8; FLTK-specific escaping stays in its menu adapter.
 
 The application polls reception and captures plot history at 25 Hz while native
-state/plot presentation runs at 10 Hz. Native input can repaint immediately.
+state/plot presentation runs at 10 Hz. Native input can repaint immediately. Pointer double-click timing and wheel
+command repetition use the same shared policy in both adapters.
 Both use immutable document and bitmap identities so unchanged polling does not
 rebuild text trees or upload textures. Moving between pages and resizing cannot
 restart reception. File/prompt/clipboard services use request IDs and deferred
@@ -68,31 +78,45 @@ results; a pending Save retains its bytes independently of inbox changes.
 
 ## Verification and maintenance guardrails
 
-`gui_adapter_boundary` rejects concrete application IDs or domain presentation
-includes in either adapter and rejects reintroducing the obsolete parallel GUI
-sources. Both backend profiles contain only their adapter/platform source lists;
-the common library owns application sources.
+`gui_adapter_boundary` recursively checks native entry points and their local
+header dependencies against the public contract/native helper boundary. It
+rejects domain headers, application-ID decisions in native adapters, toolkit
+headers in the public contract, native calls from shared feature code, and
+obsolete parallel GUI sources. Its regression
+suite deliberately introduces a domain include through a helper, a new adapter
+with an application command, and a toolkit dependency in the public interface;
+all must be rejected. `gui_contract` separately compiles the public interface
+without modem or toolkit include/link dependencies and checks that controller,
+producer and model access are unavailable.
 
-`tests/gui_extension_fixture.hpp` supplies an ordinary added control/action, an
-additional record cell and a document field/action to native adapter tests. It
-is shared unchanged by both backends. This checks that an existing primitive can
-be extended above the interface and reach native widgets and dispatch callbacks.
+`tests/gui_extension_fixture.hpp` and `tests/document_geometry_fixture.hpp` supply
+ordinary extensions unchanged to both native suites. They exercise added
+controls/actions, multiline presets, effective choice labels, generic gestures,
+record cells, relative document widths/margins, wrapped actions and opaque bitmap
+rectangles with padded strides and multiple formats. `gui_document_layout` and
+`gui_interactions` test geometry and event policy without a toolkit. Native tests
+verify that those descriptions reach real widgets and dispatch callbacks.
+Rev also checks rendered pixels when leaving deeply nested clips, so later
+document siblings and persistent controls remain visible while overflow stays
+clipped.
+Rev's native probes are compiled only into `test_rev_adapter`; production GUI
+sources no longer include domain-bearing test fixtures.
 
-`gui_application`, `gui_controller`, `gui_layout`, `gui_inspection_page` and the
-bitmap/state tests exercise the common implementation without a toolkit. Native
-adapter tests additionally cover literal menu labels, silent text updates,
-stable record identity, effective choice labels, focus, clipboard transfer and
-native document layout. Display-dependent tests run on an isolated display.
-The shared simulation smoke runs through the actual GUI executable in each
-build. Windows runtime testing remains a separate platform requirement; Linux
-success does not establish Windows validation.
+The CI GUI-contract matrix builds **both FLTK and Rev** and runs the same shared
+suite and simulation workflow, plus their native conformance tests on a private
+display. Register display-dependent tests explicitly with
+`-DDATAPUMP_TEST_NATIVE_GUI=ON`, then run:
 
-The migration was checked on Linux with 11 shared/model tests, both executable
-self-checks, both native adapter suites and the expanded simulation workflow in
-both GUIs. Visual checks cover the default/minimum console and inspection pages.
-Rev's input regression checks moved windows, caret placement, wheel targeting
-and scale changes at 1x and 2x. Parent-page visibility tests cover native document
-measurement and retained signal history across hide/show transitions.
+```sh
+LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+  ctest --test-dir build-gui --output-on-failure -L gui
+```
+
+The option defaults to OFF so ordinary CTest and CLI-only builds remain usable
+without a display. Native tests include clipboard, editor focus/selection,
+record history, document resizing and Rev coordinates at 1x and 2x. Windows
+runtime testing remains a separate platform requirement; Linux success does
+not establish Windows validation.
 
 See [GUI contract](gui-contract.md) for the vocabulary and
 [Rev backend](rev-backend.md) for its pinned source, toolchain and software-GL

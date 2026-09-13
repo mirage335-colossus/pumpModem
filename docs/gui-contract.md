@@ -1,16 +1,23 @@
 # Shared GUI contract
 
 FLTK and Rev implement the same application interface. Both compile the shared
-`datapump_gui_application` library and consume its controller, page/control
+`datapump_gui_application` library and consume its field state, page/control
 declarations, structured records, documents, bitmap sources and launch/workflow
 code. The contract is implemented in `src/gui/ui_contract.hpp`,
 `src/gui/ui_document.hpp` and `src/gui/bitmap.hpp`.
 
+`Application` is the only application-facing facade used by native adapters.
+It exposes generic field/action/service operations and presentation snapshots.
+Controller, modem models, workers and bitmap factories are private; the public
+header dependency tree contains only toolkit-neutral GUI headers.
+
 The maintenance rule is: an ordinary feature using existing primitives changes
 shared declarations and application mapping only. No backend reads modem state
 or contains application-specific field/command/page switches. Native adapters
-may differ in glyph metrics, popup appearance and platform dialogs, while
-preserving the same content, values, availability and actions.
+may differ in glyph metrics, popup appearance/placement and platform dialogs, while
+preserving the same content, values, availability and actions. `open_upward` is
+a preferred popup direction subject to native screen fitting; FLTK retains its
+platform popup placement policy.
 
 ## Controls and state
 
@@ -34,7 +41,8 @@ identity; `instance` distinguishes intentional repeated bindings on one page.
 `FieldState` carries authoritative text/selection/boolean values, visibility,
 eligibility, options and records. Options have IDs, literal labels and enabled
 flags. `display_text` optionally shows an effective value without replacing a
-saved selection. For example, the selected Reed-Solomon preset remains saved
+saved selection or disabling an otherwise enabled choice. For example, the
+selected Reed-Solomon preset remains saved
 while a tiny message reports `Off (under 16 B)`.
 
 A record has a stable ID, enabled/activation eligibility and ordered native text
@@ -53,9 +61,15 @@ quality and message text; files and unverified prefixes are not copyable as text
   cannot be newly selected. The controller chooses defaults and invalidation
   behavior; a native widget must not silently select the first entry.
 - Text is valid UTF-8 with a byte limit. Reject invalid/over-limit edits with
-  feedback; do not truncate them. Failed paste preserves selection. A preset
-  emits an ordinary edit. Enter/Ctrl+Enter/Shift+Enter submission is shared
+  feedback; do not truncate them. Failed paste preserves selection. Presets are
+  available on both single-line and multiline text controls and
+  emit ordinary edits. Enter/Ctrl+Enter/Shift+Enter submission is shared
   command policy; native adapters translate modifiers only.
+- Declared click, double-click and wheel commands apply to every control kind.
+  Adapters translate coordinates and wheel detents; shared interaction code
+  chooses commands, recognizes double-clicks and caps coalesced wheel repetition.
+  A declared pointer gesture consumes that press before native child handling;
+  input without a declared gesture retains its ordinary native behavior.
 - Record selection and activation are separate semantic operations. A
   declaration may activate an eligible row on selection, as for click-to-copy
   signals. The ordinary Copy/Save actions remain separately reachable.
@@ -77,8 +91,21 @@ arrangements. A new desktop slot is shared layout work, not adapter work.
 
 `ui::DocumentNode` is a generic tree of columns, rows, text, actions and bitmaps.
 Nodes carry widths, optional fixed heights, margins/padding, semantic tone/fill,
-emphasis, borders and equal-row-height intent. Toolkit font measurement supplies
-native text height. Dynamic content owns the tree and produces an immutable
+emphasis, borders and equal-row-height intent. `document_layout.hpp` computes
+all document rectangles. Toolkit callbacks measure glyph height; adapters apply
+the result without implementing a second flow/layout algorithm.
+
+Zero width fills the remaining row width or available column width; explicit
+widths clamp to available space. Right margins reserve space before allocation.
+Zero height grows to content; fixed heights include padding and clip overflow.
+Equal-height rows allocate their inner height to auto-height children after each
+child's top/bottom margins, recursively propagating final allocations into
+nested rows. Fixed child heights remain authoritative. Native text and action
+labels wrap inside the shared content rectangle; bitmap pixels use that same
+inner rectangle, preserving their declared padding and border. A bordered node
+reserves a minimum one-unit content inset; larger declared padding already
+includes that inset. Dynamic content
+owns the tree and produces an immutable
 snapshot; adapters do not invent sections or legends. Both native document
 renderers consume the same inspection tree and preserve action identity.
 
@@ -89,10 +116,18 @@ rendering. The same distinction applies to structured signal records.
 
 ## Bitmap boundary
 
-Shared code produces immutable `PlotSnapshot` sources. On repaint the adapter
+Shared code creates immutable `PlotSnapshot` producers and passes adapters an
+opaque `BitmapSource` handle exposing only pixel painting. Domain constructors
+for plots, QR codes and modem measurements are unavailable through that handle.
+On repaint the adapter
 provides actual backing-pixel dimensions, damage bounds, sample aspect ratio and
 pixel capabilities. The source emits borrowed pixel rectangles through
 `BitmapSink`; the adapter copies them synchronously or retains its own storage.
+Rectangles
+may span multiple rows, use padded strides and arrive in different supported
+formats. Native transfer batching must not impose producer-specific block sizes.
+Unpainted areas of a full replacement are black. Captions and painting receive
+the same actual backing-pixel width, including high DPI.
 
 Supported formats are Gray8 (one intensity byte), MSB-first Mono1, and optional
 RGB24 (three bytes R/G/B). Stride is explicit. Placement is 1:1 in actual drawable

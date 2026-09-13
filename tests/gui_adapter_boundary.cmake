@@ -1,25 +1,87 @@
-# Architectural regression: domain IDs and policies belong above the adapters.
-# Adding an ordinary feature may extend declarations/controller/presentation,
-# but must never introduce another application switch in a toolkit backend.
-foreach(name backend_fltk.cpp backend_rev.cpp backend_fltk_document.hpp backend_rev_document.hpp)
-  file(READ "${ROOT}/src/gui/${name}" source)
-  string(REGEX MATCHALL "(Field|Command|Page|Bitmap|Slot)::[A-Za-z_][A-Za-z_0-9]*" references "${source}")
-  foreach(reference IN LISTS references)
-    if(NOT reference MATCHES "::(none|count)$")
-      message(FATAL_ERROR "${name} contains application binding ${reference}; move that decision into a shared declaration or presentation.")
+cmake_minimum_required(VERSION 3.21)
+# Native adapters can see only the public GUI vocabulary and native helpers.
+# Traverse includes as well as entry points: moving a domain decision into a
+# helper must not bypass the boundary. New application fields/pages/producers
+# do not require changes to this list; a new public primitive does.
+set(contract_headers
+  application.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
+  desktop_layout.hpp control_layout.hpp document_layout.hpp
+  text_policy.hpp utf8_policy.hpp control_interactions.hpp theme.hpp)
+set(native_headers backend_fltk_document.hpp backend_rev_document.hpp
+  bitmap_fltk.hpp theme_fltk.hpp rev_platform.hpp)
+
+function(check_gui_boundary path native)
+  get_filename_component(path "${path}" ABSOLUTE)
+  get_property(visited GLOBAL PROPERTY gui_boundary_visited)
+  if(path IN_LIST visited)
+    return()
+  endif()
+  set_property(GLOBAL APPEND PROPERTY gui_boundary_visited "${path}")
+  file(READ "${path}" source)
+  get_filename_component(name "${path}" NAME)
+  if(native)
+    string(REGEX MATCHALL "(Field|Command|Page|Bitmap|Slot)::[A-Za-z_][A-Za-z_0-9]*" references "${source}")
+    foreach(reference IN LISTS references)
+      if(NOT reference MATCHES "::(none|count)$")
+        message(FATAL_ERROR "${name} contains application binding ${reference}; use the shared declaration/presentation.")
+      endif()
+    endforeach()
+  elseif(source MATCHES "#[ \t]*include[ \t]*[<\"]FL/|import[ \t]+Rev\\.")
+    message(FATAL_ERROR "Public GUI header ${name} depends on a native toolkit.")
+  endif()
+  if(source MATCHES "#[ \t]*include[ \t]*[<\"]datapump/")
+    message(FATAL_ERROR "${name} includes modem/application internals below the GUI boundary.")
+  endif()
+  string(REGEX MATCHALL "#[ \t]*include[ \t]*[<\"][^>\"]+[>\"]" includes "${source}")
+  foreach(include IN LISTS includes)
+    string(REGEX REPLACE "^[^<\"]*[<\"]([^>\"]+)[>\"]$" "\\1" header "${include}")
+    if(include MATCHES "<" AND NOT EXISTS "${ROOT}/src/gui/${header}" AND NOT header MATCHES "^(\\.\\./|src/|include/|datapump/)")
+      continue() # Standard library, system platform or toolkit header.
+    endif()
+    # Native regression methods are compiled only into the dedicated test
+    # executable. They may use fixtures but production must not include them.
+    if(header STREQUAL "../../tests/rev_adapter_probes.inc")
+      if(NOT source MATCHES "#ifdef DATAPUMP_REV_ADAPTER_TEST[ \t\r\n]+#include \"../../tests/rev_adapter_probes.inc\"[ \t\r\n]+#endif")
+        message(FATAL_ERROR "Rev native probes must be guarded by DATAPUMP_REV_ADAPTER_TEST.")
+      endif()
+      continue()
+    endif()
+    if(header IN_LIST contract_headers)
+      check_gui_boundary("${ROOT}/src/gui/${header}" FALSE)
+    elseif(native AND header IN_LIST native_headers)
+      check_gui_boundary("${ROOT}/src/gui/${header}" TRUE)
+    else()
+      message(FATAL_ERROR "${name} includes '${header}' outside the public GUI/native helper boundary.")
     endif()
   endforeach()
-  if(source MATCHES "#include \"(inspection_model|inspection_page|record_presentations|datapump/(tuning|live|transfer))")
-    message(FATAL_ERROR "${name} directly includes application/domain presentation.")
+endfunction()
+
+file(GLOB adapters "${ROOT}/src/gui/backend_*.cpp" "${ROOT}/src/gui/backend_*.hpp")
+list(APPEND adapters "${ROOT}/src/gui/bitmap_fltk.hpp" "${ROOT}/src/gui/theme_fltk.hpp"
+  "${ROOT}/src/gui/rev_platform.cpp" "${ROOT}/src/gui/rev_platform.hpp" "${ROOT}/src/gui/rev_entry_win.cpp")
+foreach(path IN LISTS adapters)
+  check_gui_boundary("${path}" TRUE)
+endforeach()
+foreach(name IN LISTS contract_headers)
+  check_gui_boundary("${ROOT}/src/gui/${name}" FALSE)
+endforeach()
+
+# The other direction matters too: feature code cannot call a toolkit directly.
+file(GLOB shared_sources "${ROOT}/src/gui/*.cpp" "${ROOT}/src/gui/*.hpp")
+foreach(path IN LISTS shared_sources)
+  if(path IN_LIST adapters)
+    continue()
   endif()
-  if(source MATCHES "controller\\.(snapshot|settings|inspection|inbox|signals)\\(")
-    message(FATAL_ERROR "${name} interprets application data instead of a shared presentation.")
+  file(READ "${path}" source)
+  if(source MATCHES "#[ \t]*include[^\n]*(FL/|backend_|bitmap_fltk|theme_fltk|rev_platform|third_party/(rev|fltk))|import[ \t]+Rev\\.")
+    message(FATAL_ERROR "Shared GUI source ${path} depends on a native adapter/toolkit.")
   endif()
 endforeach()
+
 foreach(name GuiFltk.cmake GuiRev.cmake)
   file(READ "${ROOT}/cmake/${name}" source)
-  if(source MATCHES "src/gui/(main|controller|screen_console|inspection_widgets|gui_smoke)\\.cpp")
-    message(FATAL_ERROR "${name} owns shared application source lists; link datapump_gui_application instead.")
+  if(source MATCHES "src/gui/(main|controller|application|state|plot_render|screen_console|inspection_model|inspection_widgets|gui_smoke)\\.cpp")
+    message(FATAL_ERROR "${name} duplicates shared application sources; link datapump_gui_application.")
   endif()
 endforeach()
 foreach(name main.cpp live_widgets.hpp inspection_widgets.cpp inspection_widgets.hpp pattern_space_view.hpp screen_inspection.cpp backend_rev_inspection.hpp)

@@ -5,6 +5,7 @@
 #include <functional>
 #include <limits>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace datapump::gui {
@@ -30,6 +31,20 @@ inline BitmapRequest full_bitmap_request(unsigned width, unsigned height,
 }
 // Pixel storage is borrowed only for the duration of this synchronous call.
 using BitmapSink = std::function<void(unsigned x, unsigned y, PixelBlock)>;
+// Opaque, immutable producer handle. Native adapters request pixels and copy
+// the borrowed blocks; creating or interpreting source data belongs above this
+// boundary. Copies retain the producer's snapshot for later damage repaints.
+class BitmapSource {
+public:
+    using Paint = std::function<void(const BitmapRequest&,const BitmapSink&,bool)>;
+    BitmapSource() = default;
+    explicit BitmapSource(Paint paint) : paint_(std::move(paint)) {}
+    void paint(const BitmapRequest& request,const BitmapSink& sink,bool color_enabled=true) const {
+        if(paint_)paint_(request,sink,color_enabled);
+    }
+private:
+    Paint paint_;
+};
 inline std::size_t pixel_row_bytes(unsigned width, PixelFormat format) {
     switch (format) {
     case PixelFormat::gray8: return width;

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/packet.hpp"
+#include "utf8_policy.hpp"
 #include <chrono>
 #include <deque>
 #include <filesystem>
@@ -108,9 +109,6 @@ private:
     std::deque<SignalLine> lines_;
 };
 
-// Clipboard text is UTF-8, with no embedded zero byte. Binary messages can
-// always be saved explicitly, but are never silently coerced to text.
-bool valid_clipboard_text(std::span<const std::uint8_t> bytes) noexcept;
 std::string id_label(const Message& message);
 std::string display_label(std::string_view text);
 }

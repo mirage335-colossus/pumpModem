@@ -642,21 +642,18 @@ export namespace Rev {
                 size_t size = stencilStack.size();
                 Element* back = size ? stencilStack.back() : nullptr;
 
-                // Ensure we don't run twice for the same element
-                if (back && back != this) {
+                // A sibling may leave several nested clipping ancestors at
+                // once. Unwind every exited clip before drawing it; popping
+                // only the leaf leaves later branches under a stale stencil.
+                while (back && back != this && element->resolved.depth <= back->resolved.depth) {
+                    stencilStack.pop_back();
+                    size = stencilStack.size();
+                    back = size ? stencilStack.back() : nullptr;
+                    canvas.stencilSet(size);
 
-                    if (element->resolved.depth <= back->resolved.depth) {
-
-                        // Pop back, get new size
-                        stencilStack.pop_back();
-                        size = stencilStack.size();
-                        back = size ? stencilStack.back() : nullptr;
-                        canvas.stencilSet(size);
-
-                        // Either draw stencil or reset
-                        if (back) { back->stencil(e); }
-                        else { canvas.stencilReset(0); }
-                    }
+                    // Restore the enclosing clip after each level is removed.
+                    if (back) { back->stencil(e); }
+                    else { canvas.stencilReset(0); }
                 }
 
                 // Do not draw hidden objects

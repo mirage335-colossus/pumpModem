@@ -14,7 +14,7 @@ template<class Operation> void rejected(Operation operation, const char* message
     try { operation(); } catch (const std::exception&) { caught = true; }
     check(caught, message);
 }
-BitmapImage render(const PlotSnapshot& source, BitmapRequest request, bool color = true) {
+BitmapImage render(const BitmapSource& source, BitmapRequest request, bool color = true) {
     BitmapImage result(request.width, request.height);
     source.paint(request, [&](unsigned x, unsigned y, PixelBlock block) {
         check(block.height == 1, "shared producer must use bounded scanline storage");
@@ -51,6 +51,14 @@ void transfer_contract() {
     rejected([&] { rgb.blit(0, 0, {2, 1, 6, PixelFormat::rgb24, nullptr}); }, "null pixel storage must fail");
     rgb.blit(0, 0, {0, 1, 0, PixelFormat::gray8, nullptr});
     check(pixel_row_bytes(9, PixelFormat::mono1) == 2, "Mono1 row length must round up");
+    BitmapSource retained;
+    {
+        const auto producer=PlotSnapshot::constellation({{.5,0},{0,.5}},true);
+        retained=producer;
+    }
+    const auto request=full_bitmap_request(71,53,false,true);
+    check(render(retained,request).pixels()==render(PlotSnapshot::constellation({{.5,0},{0,.5}},true),request).pixels(),
+          "Opaque source lost its producer snapshot when the factory handle expired");
 }
 inspection::PatternSpace pattern_fixture() {
     inspection::PatternSpace model;
@@ -83,7 +91,8 @@ void tiled_replay() {
     for (const auto& source : sources) for (unsigned mode = 0; mode < 3; ++mode) {
         auto request = full_bitmap_request(77, 43, mode == 2, mode == 1);
         request.sample_aspect_ratio = 1.75;
-        const auto complete = render(source, request);
+        const BitmapSource opaque=source;
+        const auto complete = render(opaque, request);
         BitmapImage tiled(request.width, request.height);
         // Deliberately unaligned damage and reverse row order exercise sources
         // which accidentally base phase, geometry or bit packing on tile origin.
@@ -91,7 +100,7 @@ void tiled_replay() {
             const unsigned top = static_cast<unsigned>(std::max(0, y - 6));
             for (unsigned x = 0; x < request.width; x += 11) {
                 request.damage = {x, top, std::min(11U, request.width - x), static_cast<unsigned>(y) - top + 1};
-                source.paint(request, [&](unsigned px, unsigned py, PixelBlock block) { tiled.blit(px, py, block); });
+                opaque.paint(request, [&](unsigned px, unsigned py, PixelBlock block) { tiled.blit(px, py, block); });
             }
         }
         check(complete.pixels() == tiled.pixels(), "complete image differs from tiled repaint using the same snapshot");

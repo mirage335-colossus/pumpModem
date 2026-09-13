@@ -1,6 +1,6 @@
 #pragma once
 #include "ui_contract.hpp"
-#include "plot_render.hpp"
+#include "bitmap.hpp"
 #include <string>
 #include <vector>
 
@@ -18,7 +18,7 @@ struct DocumentNode {
     DocumentFill fill=DocumentFill::none;
     bool bold=false,border=false,equal_height=false,enabled=true;
     Command command=Command::none;
-    plots::PlotSnapshot plot;
+    BitmapSource plot;
     std::vector<DocumentNode> children;
 };
 }

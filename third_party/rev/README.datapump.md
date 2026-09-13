@@ -111,3 +111,11 @@ eligibility when they are shown. `Window::calcFlexLayouts` rebuilds its visible
 queues before resetting dimensions, then reapplies inherited state. Newly
 revealed descendants therefore receive fresh size resolution instead of stale
 measurements from before their parent was hidden.
+
+Local nested-clipping fix: `Window.ixx` unwinds every exited stencil ancestor
+when drawing a later sibling or unrelated control. Popping only one level
+retained a deep document child's clip and hid later cards and persistent
+controls. This supports the generic document renderer's per-node overflow
+clipping without changing the shared layout contract. The Rev adapter suite
+checks actual rendered pixels across nested clips, sibling cards and a control
+outside the document.

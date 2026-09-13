@@ -1,6 +1,7 @@
 #define DATAPUMP_FLTK_ADAPTER_TEST
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
+#include <FL/Fl_Image_Surface.H>
 #ifdef __linux__
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -18,14 +19,51 @@ Fl_Group* record_widget(Fl_Group& group,const std::string& text) {
 }
 void menus() {
     Fl_Choice choice(0,0,200,30);
-    const std::vector<ui::Option> options{{"id:1","A|B",true},{"id:2","A&B",true},{"id:3","A/B\\C",false},{"id:4","A|B",true}};
+    const std::vector<ui::Option> options{{"id:1","@circle & literal",true},{"id:2","A&B",true},{"id:3","A/B\\C",false},{"id:4","@circle & literal",true}};
     populate(choice,options);
     require(choice.size()==5,"Menu interpreted literal labels as separators, paths or duplicate items");
     for(std::size_t i=0;i<options.size();++i)require(choice.text(static_cast<int>(i))==menu_text(options[i].label),"Menu lost a literal label");
     require(choice.mode(2)&FL_MENU_INACTIVE,"Disabled option remained selectable");
+    require(choice.menu()[0].labeltype()==literal_label_type(true)&&literal_menu_text(choice.text(0))==options[0].label,"Native menu label did not retain literal symbols and ampersands");
+    int literal_width=0,literal_height=0;fl_font(choice.textfont(),choice.textsize());fl_measure(options[0].label.c_str(),literal_width,literal_height,0);
+    require(choice.menu()[0].measure(nullptr,&choice)==literal_width,"Native menu measurement still interprets literal @ text as an icon");
     std::string selected;choice.callback([](Fl_Widget* widget,void* context){auto& pair=*static_cast<std::pair<const std::vector<ui::Option>*,std::string*>*>(context);*pair.second=pair.first->at(static_cast<std::size_t>(static_cast<Fl_Choice*>(widget)->value())).id;});
     std::pair context{&options,&selected};choice.user_data(&context);
     choice.picked(choice.menu()+3);require(selected=="id:4","Duplicate display names lost stable option identity");
+    const auto state=datapump::gui::test::effective_choice();NativeChoice effective;
+    populate(effective,state.options);effective.value(0);effective.apply_display(state.display_text);
+    require(effective.active_r()&&effective.value()==0&&effective.display_text()==state.display_text,"Effective display text disabled or changed its native choice");
+    unsigned changes=0;effective.callback([](Fl_Widget*,void* value){++*static_cast<unsigned*>(value);},&changes);
+    effective.picked(effective.menu()+1);
+    require(effective.value()==1&&changes==1,"Enabled effective choice did not allow selecting another saved option");
+    effective.apply_display("");require(effective.value()==1,"Clearing effective text changed the selected ID");
+}
+void generic_gestures_and_bitmaps() {
+    const auto& declaration=datapump::gui::test::extension_controls().front();
+    NativeControlGroup control(declaration);control.resize(0,0,160,40);control.end();
+    std::vector<ui::Command> commands;control.dispatch=[&](ui::Command command){commands.push_back(command);};
+    const auto button=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,dy=Fl::e_dy;
+    Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=8;Fl::e_y=8;
+    control.handle(FL_PUSH);control.handle(FL_PUSH);Fl::e_dy=-3;control.handle(FL_MOUSEWHEEL);Fl::e_dy=2;control.handle(FL_MOUSEWHEEL);
+    const std::vector<ui::Command> expected{declaration.click,declaration.double_click,declaration.wheel_up,declaration.wheel_up,declaration.wheel_up,declaration.wheel_down,declaration.wheel_down};
+    require(commands==expected,"Generic label gestures did not use the shared click/wheel commands and repetition");
+    control.deactivate();control.handle(FL_PUSH);control.handle(FL_MOUSEWHEEL);require(commands==expected,"Disabled generic control still dispatched gestures");
+    Fl::e_keysym=button;Fl::e_x=x;Fl::e_y=y;Fl::e_dy=dy;
+    for(float scale:{1.0f,2.0f}) {
+        Fl_Image_Surface surface(96,96);Fl_Surface_Device::push_current(&surface);
+        const auto previous_scale=fl_graphics_driver->scale();fl_graphics_driver->scale(scale);
+        auto probe=std::make_shared<datapump::gui::test::BitmapProbe>();
+        widgets::draw_bitmap(datapump::gui::test::rectangle_bitmap(probe),3,4,40,36);
+        fl_graphics_driver->scale(previous_scale);Fl_Surface_Device::pop_current();
+        std::unique_ptr<Fl_RGB_Image> image(surface.image());
+        require(!probe->requests.empty()&&probe->requests.back().width==static_cast<unsigned>(40*scale)&&probe->requests.back().height==static_cast<unsigned>(36*scale),"Native bitmap did not request physical backing dimensions");
+        const auto pixel=[&](unsigned px,unsigned py,unsigned channel) {return image->array[(py*image->data_w()+px)*image->d()+channel];};
+        const unsigned left=static_cast<unsigned>(3*scale),top=static_cast<unsigned>(4*scale),width=static_cast<unsigned>(40*scale),height=static_cast<unsigned>(36*scale);
+        require(pixel(left+12,top+20,0)==42&&pixel(left,top,0)==255&&pixel(left+1,top,0)==0,"Native gray/Mono1 rectangle transfer lost pixels or padded stride");
+        require(pixel(left+width-1,top+height-1,0)==12&&pixel(left+width-1,top+height-1,1)==34&&pixel(left+width-1,top+height-1,2)==56,"Native RGB rectangle transfer lost channels or padded stride");
+        Fl_Surface_Device::push_current(&surface);fl_graphics_driver->scale(scale);widgets::draw_bitmap({},3,4,40,36);fl_graphics_driver->scale(previous_scale);Fl_Surface_Device::pop_current();
+        image.reset(surface.image());require(pixel(left+12,top+20,0)==0,"Empty bitmap retained previous source pixels");
+    }
 }
 void editors_and_records() {
     Fl_Double_Window window(600,450,"FLTK generic adapter regression");
@@ -129,9 +167,23 @@ void extension_controls() {
     auto* window=Fl::first_window();require(window,"Extension fixture did not create a native window");
     for(const auto& page:ui::pages())require(find_button(*window,page.title),"Native tab label diverged from shared page title");
     require(find_label(*window,"Extension / literal & label"),"Shared extension label did not render through the unchanged control factory");
-    auto* action=find_button(*window,"Extension action");require(action,"Shared extension action did not render");
+    auto* action=find_button(*window,datapump::gui::test::extension_controls()[1].label);require(action,"Shared extension action did not render");
+    auto* toggle=find_label(*window,datapump::gui::test::extension_controls()[3].label);
+    require(action->labeltype()==literal_label_type()&&toggle&&toggle->labeltype()==literal_label_type(),"Action/toggle labels still interpret native symbol or shortcut syntax");
+    for(auto* widget:std::initializer_list<Fl_Widget*>{action,toggle}) {
+        int expected_width=0,expected_height=0,actual_width=0,actual_height=0;
+        fl_font(widget->labelfont(),widget->labelsize());fl_measure(widget->label(),expected_width,expected_height,0);widget->measure_label(actual_width,actual_height);
+        require(actual_width==expected_width&&actual_height==expected_height,"Native control label measurement does not preserve literal symbols and ampersands");
+    }
     require(action->labelsize()==datapump::gui::test::extension_controls()[1].font_size,"Native action lost its declared font size");
-    action->do_callback();require(app.application.controller.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Shared extension action did not reach the common controller");
+    auto* text_label=find_label(*window,"Multiline presets");require(text_label,"Multiline extension was not created");
+    auto* group=text_label->parent();Fl_Menu_Button* presets=nullptr;NativeEditor* editor=nullptr;
+    for(int i=0;i<group->children();++i){if(auto* menu=dynamic_cast<Fl_Menu_Button*>(group->child(i)))presets=menu;if(auto* text=dynamic_cast<NativeEditor*>(group->child(i)))editor=text;}
+    require(editor&&presets&&presets->visible()&&presets->size()>2,"Multiline text lost its declared presets");
+    require(editor->textsize()==17&&text_label->labelsize()==17&&presets->textsize()==17,"Multiline control lost its declared font sizes");
+    const auto& text_control=datapump::gui::test::extension_controls()[2];const auto preset=app.application.field(text_control.field).options[1].id;
+    presets->picked(presets->menu()+1);require(app.application.field(text_control.field).text==preset,"Multiline preset did not dispatch an ordinary shared edit");
+    action->do_callback();require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Shared extension action did not reach the common controller");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 void document_geometry(Fl_Group& parent) {
@@ -158,9 +210,9 @@ void popup_polling_and_document_layout() {
     }
     auto* menu=dynamic_cast<Fl_Menu_Button*>(find_label(*window,"Keyfile"));require(menu,"Native popup fixture did not find its declared menu");
     struct Probe {NativeApp& app;std::uint64_t before,after=0;bool grabbed=false;};
-    Probe probe{app,app.application.controller.snapshot().sequence};
+    Probe probe{app,app.application.poll_count()};
     Fl::add_timeout(.6,[](void* context) {
-        auto& value=*static_cast<Probe*>(context);value.after=value.app.application.controller.snapshot().sequence;
+        auto& value=*static_cast<Probe*>(context);value.after=value.app.application.poll_count();
         if(auto* popup=Fl::grab()) {
             value.grabbed=true;const auto key=Fl::e_keysym;Fl::e_keysym=FL_Escape;popup->handle(FL_KEYDOWN);Fl::e_keysym=key;
         }
@@ -235,6 +287,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();menus();editors_and_records();clipboard();prompts();extension_controls();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
