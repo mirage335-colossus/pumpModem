@@ -25,6 +25,10 @@ class RecordInteractions {
 public:
     using Clock=PointerClicks::Clock;
     explicit RecordInteractions(bool activate_on_select=false):activate_on_select_(activate_on_select) {}
+    void configure(bool activate_on_select) {
+        if(activate_on_select_!=activate_on_select)clicks_.reset();
+        activate_on_select_=activate_on_select;
+    }
     void apply(const FieldState& state) {
         enabled_=state.enabled&&state.visible;
         records_.clear();records_.reserve(state.records.size());

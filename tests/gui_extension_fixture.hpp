@@ -65,6 +65,33 @@ inline void layout_lifecycle_stage(std::span<ui::Control> controls,unsigned stag
     bitmap.label=stage==1?"Late bitmap heading":"";
     bitmap.bitmap_caption=stage==1?ui::BitmapCaption::overlay_error:ui::BitmapCaption::footer;
 }
+// Change optional behavior after construction, then remove it again. Native
+// factories must not make the initial absence of a capability permanent.
+inline std::vector<ui::Control> policy_lifecycle_controls() {
+    ui::Control text{ui::Kind::text,ui::Field::callsign};text.label="Policy editor";text.instance=61;text.byte_limit=1;
+    auto multi=text;multi.multiline=true;multi.row=1;multi.instance=62;multi.label="Policy multiline";
+    ui::Control records{ui::Kind::list};records.row=2;records.label="Policy records";records.instance=63;
+    ui::Control gestures{ui::Kind::label};gestures.row=3;gestures.label="Policy gestures";gestures.instance=64;
+    ui::Control toggle{ui::Kind::toggle};toggle.row=4;toggle.label="Unbound toggle";toggle.instance=65;
+    return {text,multi,records,gestures,toggle};
+}
+inline void policy_lifecycle_stage(std::span<ui::Control> controls,unsigned stage) {
+    const bool active=stage==1;
+    for(std::size_t index=0;index<2;++index) {
+        controls[index].byte_limit=active?5:1;
+        controls[index].submit=active?ui::Command::clear_received:ui::Command::none;
+        controls[index].help=active?"Updated editor help":"";
+    }
+    auto& records=controls[2];records.list_row_height=active?42:28;records.font_size=active?19:13;
+    records.empty_text=active?"Updated empty list":"";
+    records.activate_on_select=records.follow_tail=active;
+    records.activate_record=active?ui::Command::clear_received:ui::Command::none;
+    auto& gestures=controls[3];gestures.click=active?ui::Command::clear_received:ui::Command::none;
+    gestures.double_click=active?ui::Command::reset_zoom:ui::Command::none;
+    gestures.wheel_up=active?ui::Command::zoom_in:ui::Command::none;
+    gestures.wheel_down=active?ui::Command::zoom_out:ui::Command::none;
+    gestures.help=active?"Updated gesture help":"";
+}
 struct BitmapProbe {std::vector<BitmapRequest> requests;};
 // Arbitrary opaque rectangles, including padded strides and blocks taller than
 // a native transfer tile. No plot/domain source is available to either adapter.

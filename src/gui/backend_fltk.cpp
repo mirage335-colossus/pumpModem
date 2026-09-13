@@ -378,6 +378,16 @@ public:
         type(Fl_Scroll::BOTH);box(FL_DOWN_BOX);end();
     }
     std::function<void(std::string)> selected,activated;
+    void configure(const ui::Control& control) {
+        const bool geometry=control_.list_row_height!=control.list_row_height;
+        const bool appearance=geometry||control_.font_size!=control.font_size||std::string_view(control_.empty_text)!=control.empty_text;
+        if(geometry)scroll_.capture(yposition(),maximum_scroll());
+        control_=control;interactions_.configure(control.activate_on_select);
+        if(geometry) {
+            layout_rows();scroll_to(xposition(),static_cast<int>(scroll_.target(maximum_scroll(),control_.follow_tail)));
+        }
+        if(appearance)redraw();
+    }
     void apply(const ui::FieldState& state) {
         auto* previous_group=Fl_Group::current();
         scroll_.capture(yposition(),maximum_scroll());
@@ -746,9 +756,13 @@ private:
             const auto& state=view.control.state;
             relayout=relayout||b.presentation.needs_layout(view.geometry,c.font_size);
             visible(b.group,view.visible);enabled(b.group,view.enabled);
+            for(int i=0;i<b.group->children();++i) {
+                auto* child=b.group->child(i);
+                if(!child->tooltip()||std::string_view(child->tooltip())!=c.help)child->copy_tooltip(c.help);
+            }
             if(b.label)label(b.label,view.control.label);
-            if(b.input)b.input->apply(state.text);
-            if(b.editor)b.editor->apply(state.text);
+            if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text);}
+            if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text);}
             if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
                 for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                     if(menu)populate(*menu,b.presentation.options());
@@ -756,7 +770,7 @@ private:
             if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
             if(b.choice)b.choice->apply_display(state.display_text);
             if(b.toggle) {b.toggle->value(state.checked);label(b.toggle,view.control.label);}
-            if(b.records)b.records->apply(state);
+            if(b.records){b.records->configure(c);b.records->apply(state);}
             if(b.button) {enabled(b.button,view.enabled);label(b.button,view.control.label);}
             if(b.menu)label(b.menu,view.control.label);
         }

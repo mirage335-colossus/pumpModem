@@ -51,4 +51,11 @@ inline ui::DocumentNode document_empty_action_fixture() {
     action.command=ui::Command::clear_received;action.instance=3;
     ui::DocumentNode row;row.kind=ui::DocumentKind::row;row.width=100;row.children={bitmap,action};return row;
 }
+inline ui::DocumentNode document_clipped_action_fixture() {
+    ui::DocumentNode spacer;spacer.height=30;
+    ui::DocumentNode action;action.kind=ui::DocumentKind::action;action.text="Clipped action";
+    action.command=ui::Command::clear_received;action.instance=4;
+    ui::DocumentNode nested;nested.children={action};
+    ui::DocumentNode root;root.width=100;root.height=60;root.children={spacer,nested};return root;
+}
 }

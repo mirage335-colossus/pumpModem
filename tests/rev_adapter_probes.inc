@@ -132,6 +132,49 @@
             if(caption->style->zIndex!=(bitmap_geometry.caption_overlay?1:0))throw std::runtime_error("Rev retained a stale caption overlay layer");
         }
     }
+    void verify_policy_lifecycle(std::span<ui::Control> controls) {
+        auto* input=bindings[0].editor;auto* editor=bindings[1].editor;auto* list=bindings[2].list;
+        auto* gestures=bindings[3].element;
+        if(!input||!editor||!list||!gestures)throw std::runtime_error("Rev policy lifecycle lost a native primitive");
+        unsigned activated=0;list->activate=[&](const std::string&){++activated;};
+        std::vector<ui::Command> commands;command_observer=[&](ui::Command command){commands.push_back(command);};
+        for(unsigned stage=0;stage<3;++stage) {
+            test::policy_lifecycle_stage(controls,stage);apply();
+            for(unsigned frame=0;frame<3;++frame)native_frame();
+            const bool active=stage==1;
+            if(bindings[0].editor!=input||bindings[1].editor!=editor||bindings[2].list!=list||bindings[3].element!=gestures)
+                throw std::runtime_error("Rev policy update replaced an existing native control");
+            input->apply("");editor->apply("");
+            if(input->replace("12345")!=active||editor->replace("12345")!=active)
+                throw std::runtime_error("Rev retained editors ignored updated shared byte limits");
+            re::Event submit;
+            if(!input->submit_event||!editor->submit_event||input->submit_event(submit)!=active||editor->submit_event(submit)!=active)
+                throw std::runtime_error("Rev retained editor ignored adding or removing shared submit policy");
+            list->apply(test::extension_records());for(unsigned frame=0;frame<3;++frame)native_frame();
+            if(list->row_height!=controls[2].list_row_height||list->rows.at("record-a").button->rect.h!=controls[2].list_row_height||
+                list->empty->content.get()!=controls[2].empty_text||list->empty->style->text.size.val!=controls[2].font_size)
+                throw std::runtime_error("Rev retained list ignored shared row height or empty-state presentation");
+            activated=0;re::Event space;space.keyboard.space.id=1;list->rows.at("record-a").button->click(space);
+            if(activated!=static_cast<unsigned>(active))throw std::runtime_error("Rev retained list ignored changed activation-on-selection");
+            if(active&&list->resolved.scroll.y<1)throw std::runtime_error("Rev retained list ignored newly enabled tail following");
+            commands.clear();re::Event pointer;pointer.mouse.lb.id=1;pointer.mouse.pos={8,8};gestures->mouseDown(pointer);
+            pointer.propagate=true;pointer.mouse.wheel.y=120;gestures->mouseWheel(pointer);
+            if(commands!=(active?std::vector<ui::Command>{controls[3].click,controls[3].wheel_up}:std::vector<ui::Command>{}))
+                throw std::runtime_error("Rev retained control ignored adding or removing shared gestures");
+            gestures->mouseEnter(pointer);
+            if(active&&(help_owner!=gestures||help_text->content.get()!=controls[3].help))
+                throw std::runtime_error("Rev retained control ignored newly declared help");
+            if(!active&&help_owner==gestures)throw std::runtime_error("Rev retained removed shared help");
+        }
+        command_observer={};list->activate={};
+        auto* toggle=bindings[4].toggle;
+        if(!toggle)throw std::runtime_error("Rev unbound-control fixture lost its toggle");
+        const auto revision=application.revision();focus_control(toggle->checkbox);
+        re::Event enter;enter.keyboard.enter.id=1;keyDown(enter);
+        if(!toggle->value.get()||application.revision()!=revision)
+            throw std::runtime_error("Rev unbound toggle keyboard input bypassed declaration-aware dispatch");
+        focus_control(nullptr);
+    }
     void verify_updated_labels() {
         for(std::size_t index=0;index<4;++index) {
             const auto& binding=bindings[index];
@@ -424,6 +467,21 @@
                 (bitmap_probe->requests.empty()?std::string("none"):std::to_string(bitmap_probe->requests.back().width)+"x"+std::to_string(bitmap_probe->requests.back().height))+
                 " expected="+std::to_string(bitmap->sample_width())+"x"+std::to_string(expected_height)+" scale="+std::to_string(details.scale));
         if(!empty_probe->requests.empty())throw std::runtime_error("Rev smoke: zero-width document bitmap requested synthetic pixels");
+        unsigned attempts=0;const auto retained_texture=bitmap->video->texture;
+        const auto retry_source=test::rectangle_bitmap(std::make_shared<test::BitmapProbe>());
+        bitmap->set(BitmapSource([&](const BitmapRequest& request,const BitmapSink& sink,bool color) {
+            if(++attempts==1)throw std::runtime_error("Transient bitmap producer failure");
+            retry_source.paint(request,sink,color);
+        }));
+        bool failed=false;
+        try {bitmap->computePrimitives(*shared->event);}catch(const std::runtime_error&) {failed=true;}
+        if(!failed||!bitmap->needs_upload||bitmap->video->texture!=retained_texture)
+            throw std::runtime_error("Rev smoke: failed bitmap paint discarded the retained frame or pending upload");
+        bitmap->computePrimitives(*shared->event);
+        if(attempts!=2||bitmap->needs_upload||bitmap->video->texture!=retained_texture)
+            throw std::runtime_error("Rev smoke: unchanged bitmap revision/size failed to retry or reuse its texture");
+        // Discard the probe's borrowing callable before its local captures end.
+        bitmap->set(retry_source);bitmap->computePrimitives(*shared->event);
         auto* bordered_bitmap=dynamic_cast<BitmapView*>(geometry_root->children[6]);const auto bordered_area=bordered_bitmap->drawing_rect();
         if(std::abs(bordered_area.w-98)>1||std::abs(bordered_area.h-48)>1||std::abs(bordered_area.x-bordered_bitmap->rect.x-1)>1||std::abs(bordered_area.y-bordered_bitmap->rect.y-1)>1||
            border_probe->requests.empty()||border_probe->requests.back().width!=bordered_bitmap->sample_width()||border_probe->requests.back().height!=sample_height(bordered_area.y,48))
@@ -527,6 +585,21 @@
         }
         if(allows_input(view->children.front()->children.back()))
             throw std::runtime_error("Rev smoke: restoring document allocation enabled a declared-disabled action");
+        auto clipped_document=test::document_clipped_action_fixture();place(view,{20,200,100,600});
+        view->apply(std::make_shared<const ui::DocumentNode>(clipped_document));
+        for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
+        const auto clipped_action=[&] {return dynamic_cast<re::Button*>(view->children.front()->children.back()->children.front());};
+        focus_control(clipped_action());clipped_document.height=20;
+        view->apply(std::make_shared<const ui::DocumentNode>(clipped_document));
+        for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
+        auto* clipped_button=clipped_action();click.propagate=true;clipped_button->click(click);
+        if(clipped_button->rect.w<=0||clipped_button->rect.h<=0||allows_input(clipped_button)||clipped_button->targetFlags.focus||calls!=calls_before+1)
+            throw std::runtime_error("Rev smoke: fully clipped document action retained native focus or dispatched a command");
+        clipped_document.height=60;view->apply(std::make_shared<const ui::DocumentNode>(clipped_document));
+        for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
+        clipped_button=clipped_action();click.propagate=true;clipped_button->click(click);
+        if(!allows_input(clipped_button)||calls!=calls_before+2)
+            throw std::runtime_error("Rev smoke: restoring the document clip did not restore native action dispatch");
         delete document_parent;verify_record_contract();
     }
     void verify_document_clipping() {

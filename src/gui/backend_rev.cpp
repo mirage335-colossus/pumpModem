@@ -279,18 +279,20 @@ struct BitmapView : theme::RevBox {
         video->data->rect=area;video->data->opacity=1;
         if(!w||!h) {video->data->opacity=0;width=height=0;needs_upload=true;return;}
         if(!needs_upload && width==w && height==h) return;
-        width=w;height=h;needs_upload=false;
         BitmapImage image(w,h);
         snapshot.paint(full_bitmap_request(w,h,false,true),[&](unsigned x,unsigned y,PixelBlock pixels){image.blit(x,y,pixels);},color);
         // RGB is opaque: Gray8's alpha swizzle in Rev's glyph texture path must
         // never make a low-intensity plot sample translucent.
         const auto& bytes=image.pixels();
         if(!video->texture || video->texture->width!=w || video->texture->height!=h) {
-            delete video->texture;
-            video->texture=new Rev::Graphics::Texture(shared->canvas->context,{
+            // Construct before replacing the live resource. If allocation or
+            // painting fails, the old frame and pending upload remain valid.
+            auto* replacement=new Rev::Graphics::Texture(shared->canvas->context,{
                 .data=const_cast<unsigned char*>(bytes.data()),.width=w,.height=h,.channels=3,
                 .filter=Rev::Graphics::Texture::Filter::Nearest});
+            delete video->texture;video->texture=replacement;
         } else video->texture->update(bytes.data());
+        width=w;height=h;needs_upload=false;
     }
     void draw(re::Event& e) override {re::Box::draw(e);video->draw();}
 };
@@ -335,6 +337,17 @@ struct ListView : theme::RevBox {
         style->border={.color=theme::rev_color(theme::WidgetRole::border),.radius=0_px,.width=1_px};
         empty=new theme::RevText(this,control.empty_text,{&smallText});
         empty->style->text.size=Px(control.font_size);
+    }
+    void configure(const ui::Control& control) {
+        const bool geometry=row_height!=control.list_row_height;
+        if(geometry)capture_scroll();
+        row_height=control.list_row_height;follow_tail=control.follow_tail;
+        interactions.configure(control.activate_on_select);
+        empty->content=control.empty_text;empty->style->text.size=Px(control.font_size);
+        if(geometry) {
+            for(auto& [id,row]:rows)row.geometry_dirty=true;
+            layout_rows();restore_scroll=true;shared->layoutDirty=true;
+        }
     }
     bool hidden_page() {
         for(auto* ancestor=static_cast<re::Element*>(this);ancestor;ancestor=ancestor->parent) {
@@ -669,7 +682,7 @@ public:
             e.propagate=false;return;
         }
         for(auto& binding:bindings)if(binding.toggle && binding.toggle->checkbox->targetFlags.focus && allows_input(binding.toggle->checkbox) && (e.keyboard.enter || e.keyboard.space)) {
-            if(application.field(binding.control.field).enabled)binding.toggle->checkbox->click(e);
+            if(application.control(binding.control).enabled)binding.toggle->checkbox->click(e);
             e.propagate=false;return;
         }
         Rev::Window::keyDown(e);
@@ -770,7 +783,7 @@ public:
                     b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
                     b.editor->changed=[this,control=&c](std::string text){application.edit(*control,std::move(text));};
                     b.editor->error=[this](std::string error){application.report_error(std::move(error));};
-                    if(c.submit!=ui::Command::none)b.editor->submit_event=[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);};
+                    b.editor->submit_event=[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);};
                     {
                         b.suggestions=new ChoiceView(container,{.label="",.placeholder="",.openUpward=c.open_upward});
                         compact_dropdown(b.suggestions);b.suggestions->style->visibility=geometry.has_suggestions?Visibility::Visible:Visibility::Hidden;b.suggestions->dropdownText->style->visibility=Visibility::Hidden;
@@ -792,27 +805,26 @@ public:
                 case ui::Kind::list:
                     b.list=new ListView(container,c,launch.color);
                     b.list->select=[this,control=&c](std::string id){application.select(*control,std::move(id));};
-                    if(c.activate_record!=ui::Command::none)b.list->activate=[this,control=&c](std::string id){application.activate_record(*control,id);};
+                    b.list->activate=[this,control=&c](std::string id){application.activate_record(*control,id);};
                     break;
                 case ui::Kind::bitmap:
                     b.bitmap=new BitmapView(container,launch.color,[this]{return details.scale;});
                     if(geometry.has_caption)b.caption=new theme::RevText(container,"",{&smallText});break;
                 }
             }
-            if(c.click!=ui::Command::none||c.double_click!=ui::Command::none) {
+            {
                 auto interactions=std::make_shared<ui::ControlInteractions>();
                 container->onMouseDown([this,control=&c,interactions,container](re::Event& event){
-                    if(!event.mouse.lb||!allows_input(container))return;
+                    if(!event.mouse.lb||!allows_input(container)||(control->click==ui::Command::none&&control->double_click==ui::Command::none))return;
                     if(interactions->pointer(*control,event.mouse.pos.x,event.mouse.pos.y).dispatch([this,control](ui::Command command){application.gesture(*control,command);if(command_observer)command_observer(command);}))event.propagate=false;
                 });
             }
 
-            if(c.help[0]) {
-                container->onMouseEnter([this,control=&c,container](re::Event&){show_help(control->help,container);});
+            {
+                container->onMouseEnter([this,control=&c,container](re::Event&){if(control->help[0])show_help(control->help,container);});
                 container->onMouseLeave([this](re::Event&){hide_help();refresh(event);});
             }
-            if(c.wheel_up!=ui::Command::none||c.wheel_down!=ui::Command::none)
-                container->onMouseWheel([this,control=&c,container](re::Event& event){
+            container->onMouseWheel([this,control=&c,container](re::Event& event){
                     if(!allows_input(container))return;
                     // Rev reports 120 native wheel units per detent.
                     if(ui::ControlInteractions::wheel(*control,event.mouse.wheel.y/120.0).dispatch([this,control](ui::Command command){application.gesture(*control,command);if(command_observer)command_observer(command);}))event.propagate=false;
@@ -881,7 +893,11 @@ public:
             if(b.label)b.label->content=view.control.label;
             if(b.toggle)b.toggle->label->content=view.control.label;
             b.element->style->visibility=view.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!view.enabled);
-            if(b.editor){b.editor->apply(value.text);b.editor->editable=view.enabled;b.editor->setDisabled(!view.enabled);}
+            if(help_owner==b.element) {
+                if(!b.control.help[0]||!view.visible||!view.enabled)hide_help(true);
+                else help_text->content=b.control.help;
+            }
+            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->apply(value.text);b.editor->editable=view.enabled;b.editor->setDisabled(!view.enabled);}
             if(b.presentation.update_options(view.options)) {
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();
@@ -894,7 +910,7 @@ public:
                 if(!view.suggestions_allowed())b.suggestions->closeMenu();
             }
             if(b.toggle)b.toggle->value=value.checked;
-            if(b.list)b.list->apply(value);
+            if(b.list){b.list->configure(b.control);b.list->apply(value);}
             if(b.button) {b.button->setDisabled(!view.enabled);b.button->labelText->content=view.control.label;}
             if(b.menu) {
                 b.menu->params.placeholder=view.control.label;

@@ -22,6 +22,10 @@ int run_native_probes() {
         RevApp probe(windows,launch,lifecycle);probe.verify_layout_lifecycle(lifecycle);
     }
     {
+        auto lifecycle=test::policy_lifecycle_controls();
+        RevApp probe(windows,launch,lifecycle);probe.verify_policy_lifecycle(lifecycle);
+    }
+    {
         RevApp probe(windows,launch);
         probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();
     }

@@ -29,8 +29,24 @@ void structure_actions_and_allocation() {
     check(presentation.actions().restore_focus(identity)==identity,"Shared action identity failed to survive document replacement");
     presentation.reset({});check(!presentation.root()&&presentation.layout(100,[](const auto&,int){return 10;}).nodes.empty(),"Clearing a document retained native presentation nodes");
 }
+void inherited_clipping() {
+    auto source=std::make_shared<DocumentNode>();source->width=100;source->height=20;
+    DocumentNode spacer;spacer.height=30;
+    DocumentNode action;action.kind=DocumentKind::action;action.text="Action";action.command=Command::clear_received;
+    DocumentNode nested;nested.children={action};source->children={spacer,nested};
+    DocumentPresentation presentation;presentation.reset(source);
+    const auto layout=presentation.layout(100,[](const auto&,int){return 12;},11,13);
+    check(layout.nodes[1].allocated,"Partially clipped document content lost its visible allocation");
+    check(layout.nodes.back().absolute.y==43&&layout.nodes.back().absolute.height==25,
+        "Clipping changed declared document geometry");
+    check(!layout.nodes[2].allocated&&!layout.nodes.back().allocated&&!layout.nodes.back().enabled,
+        "Fully clipped document descendants retained native input eligibility");
+    auto restored=std::make_shared<DocumentNode>(*source);restored->height=60;presentation.reset(restored);
+    check(presentation.layout(100,[](const auto&,int){return 12;}).nodes.back().enabled,
+        "Restoring an inherited document clip did not re-enable its action");
+}
 }
 int main() {
-    try {structure_actions_and_allocation();std::cout<<"Shared document presentation passed\n";}
+    try {structure_actions_and_allocation();inherited_clipping();std::cout<<"Shared document presentation passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

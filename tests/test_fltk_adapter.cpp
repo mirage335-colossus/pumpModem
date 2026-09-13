@@ -357,6 +357,50 @@ void extension_controls() {
     require(std::string(toggle->label())==app.application.control(declarations[3]).label,"Native toggle retained a stale shared label");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
+void policy_lifecycle() {
+    auto declarations=datapump::gui::test::policy_lifecycle_controls();
+    Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
+    auto* window=Fl::first_window();require(window,"Policy lifecycle fixture has no native window");
+    const auto child=[&](std::size_t index,auto* type) {
+        using Widget=std::remove_pointer_t<decltype(type)>;
+        auto* heading=find_label(*window,declarations[index].label);require(heading,"Policy lifecycle heading is missing");
+        for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
+        return static_cast<Widget*>(nullptr);
+    };
+    auto* input=child(0,static_cast<NativeInput*>(nullptr));auto* editor=child(1,static_cast<NativeEditor*>(nullptr));
+    auto* records=child(2,static_cast<NativeRecords*>(nullptr));
+    auto* gestures=dynamic_cast<NativeControlGroup*>(find_label(*window,declarations[3].label)->parent());
+    require(input&&editor&&records&&gestures,"Policy lifecycle fixture lost a native primitive");
+    std::vector<ui::Command> commands;gestures->dispatch=[&](ui::Command command){commands.push_back(command);};
+    unsigned activated=0;records->activated=[&](const std::string&){++activated;};
+    const auto button=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,dy=Fl::e_dy;
+    for(unsigned stage=0;stage<3;++stage) {
+        datapump::gui::test::policy_lifecycle_stage(declarations,stage);
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+        const bool active=stage==1;
+        require(input==child(0,static_cast<NativeInput*>(nullptr))&&editor==child(1,static_cast<NativeEditor*>(nullptr))&&
+            records==child(2,static_cast<NativeRecords*>(nullptr)),"Policy update replaced an existing native control");
+        input->apply("");editor->apply("");
+        require(input->paste("12345")==active&&editor->paste("12345")==active,
+            "Retained native text controls ignored updated shared byte limits");
+        require(input->submit(false,false)==active&&editor->submit(false,false)==active,
+            "Retained native editor ignored adding or removing shared submit policy");
+        require(std::string_view(input->tooltip())==declarations[0].help&&std::string_view(gestures->child(0)->tooltip())==declarations[3].help,
+            "Retained native control ignored changed shared help");
+        records->apply(datapump::gui::test::extension_records());
+        auto* row=record_widget(*records,"Original");require(row&&row->h()==declarations[2].list_row_height,
+            "Retained native list ignored changed shared row height");
+        if(active)require(records->yposition()>0,"Retained native list ignored newly enabled tail following");
+        activated=0;Fl::e_keysym=' ';records->handle(FL_KEYDOWN);
+        require(activated==static_cast<unsigned>(active),"Retained native list ignored updated activation-on-selection");
+        commands.clear();Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=gestures->x()+8;Fl::e_y=gestures->y()+8;
+        gestures->handle(FL_PUSH);Fl::e_dy=-1;gestures->handle(FL_MOUSEWHEEL);
+        require(commands==(active?std::vector<ui::Command>{declarations[3].click,declarations[3].wheel_up}:std::vector<ui::Command>{}),
+            "Retained native control ignored adding or removing shared gestures");
+    }
+    Fl::e_keysym=button;Fl::e_x=x;Fl::e_y=y;Fl::e_dy=dy;
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void layout_lifecycle() {
     auto declarations=datapump::gui::test::layout_lifecycle_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -499,6 +543,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();layout_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

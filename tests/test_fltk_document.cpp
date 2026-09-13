@@ -159,6 +159,15 @@ int main() {
         button=find_button(*view);button->do_callback();
         require(button->w()==0&&!button->visible_r()&&Fl::focus()!=button&&!button->take_focus()&&actions==actions_before+1,
             "Empty document action retained native focus or dispatched a command");
+        auto clipped_document=datapump::gui::test::document_clipped_action_fixture();view->update(clipped_document);
+        button=find_button(*view);require(button->take_focus(),"Visible document action could not take focus");
+        clipped_document.height=20;view->update(clipped_document);button=find_button(*view);button->do_callback();
+        require(button->w()>0&&button->h()>0&&!button->visible_r()&&Fl::focus()!=button&&!button->take_focus()&&actions==actions_before+1,
+            "Fully clipped document action retained native focus or dispatched a command");
+        clipped_document.height=60;view->update(clipped_document);button=find_button(*view);
+        require(button->visible_r()&&button->active_r()&&button->take_focus(),
+            "Restoring the document clip did not restore native action availability");
+        button->do_callback();require(actions==actions_before+2,"Restored document action did not dispatch");
         window.hide();
         std::cout<<"FLTK generic document checks passed.\n";
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

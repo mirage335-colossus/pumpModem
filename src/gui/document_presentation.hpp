@@ -33,7 +33,9 @@ public:
     template<class MeasureText> Layout layout(int width,MeasureText measure,int x=0,int y=0) const {
         Layout result;if(!root_)return result;
         const auto geometry=layout_document(*source_,width,std::move(measure));result.height=geometry.height;
-        append(result,*root_,geometry.root,x,y,x,y,true);return result;
+        const auto& bounds=geometry.root.bounds;
+        append(result,*root_,geometry.root,x,y,x,y,
+            {x+bounds.x,y+bounds.y,bounds.width,bounds.height});return result;
     }
 private:
     std::shared_ptr<const DocumentNode> source_;
@@ -48,15 +50,25 @@ private:
         }
         return node;
     }
+    static DocumentRect intersect(DocumentRect first,DocumentRect second) {
+        const auto x=std::max(first.x,second.x),y=std::max(first.y,second.y);
+        const auto right=std::min(static_cast<long long>(first.x)+first.width,static_cast<long long>(second.x)+second.width);
+        const auto bottom=std::min(static_cast<long long>(first.y)+first.height,static_cast<long long>(second.y)+second.height);
+        return {x,y,static_cast<int>(std::max(0LL,right-x)),static_cast<int>(std::max(0LL,bottom-y))};
+    }
     static void append(Layout& layout,const Node& node,const DocumentBox& box,
-                       int origin_x,int origin_y,int parent_x,int parent_y,bool parent_allocated) {
+                       int origin_x,int origin_y,int parent_x,int parent_y,DocumentRect parent_clip) {
         const auto& bounds=box.bounds;
         const DocumentRect relative{origin_x+bounds.x,origin_y+bounds.y,bounds.width,bounds.height};
         const DocumentRect absolute{parent_x+bounds.x,parent_y+bounds.y,bounds.width,bounds.height};
-        const bool allocated=parent_allocated&&bounds.width>0&&bounds.height>0;
+        // Fixed-height containers clip their descendants in both toolkits.
+        // A positive child rectangle can still be entirely outside that clip;
+        // it must not retain keyboard focus or accept a queued activation.
+        const auto clip=intersect(absolute,parent_clip);
+        const bool allocated=clip.width>0&&clip.height>0;
         layout.nodes.push_back({&node,relative,absolute,box.content,allocated,node.enabled&&allocated});
         for(std::size_t index=0;index<node.children.size();++index)
-            append(layout,node.children[index],box.children[index],0,0,absolute.x,absolute.y,allocated);
+            append(layout,node.children[index],box.children[index],0,0,absolute.x,absolute.y,clip);
     }
 };
 }

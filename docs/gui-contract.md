@@ -42,6 +42,25 @@ optional pointer/wheel actions. Application behavior is not inferred from its
 label or from a particular widget type. Ordinary controls use stable binding
 identity; `instance` distinguishes intentional repeated bindings on one page.
 
+Control declarations have a construction lifetime. Their storage, referenced
+strings and the declaration span must remain valid while the native view exists.
+Keep each control's kind, single-line/multiline class, binding association,
+parent/page/persistent scope and menu membership fixed during that lifetime.
+Changing that structure requires constructing a new native view from the updated
+shared declarations. Adding controls or changing their classes in shared source
+before constructing or restarting the view does not require adapter changes.
+This interface does not promise arbitrary live replacement of the declaration
+array. The standalone reference interface uses handles and generations to make
+structural replacement explicit.
+
+Within an existing structure, shared presentation and behavior metadata update
+on each presentation pass. This includes labels, layout, fonts, help, input byte
+limits, submit and pointer/wheel commands, list row height, empty-list text,
+tail following and record activation policy. Adding or removing an optional
+behavior uses the same retained native control; its initial absence does not
+disable later updates. These updates remain silent. A byte-limit change governs
+subsequent user edits and does not truncate authoritative model text.
+
 `control_binding.hpp` provides the control groups consumed by both adapters and
 the layout engine. Menu identity combines the declared menu ID, its page or
 persistent scope, and `instance`. Persistent menus group across page values;
@@ -156,6 +175,9 @@ the result without implementing a second flow/layout algorithm.
 Zero width fills the remaining row width or available column width; explicit
 widths clamp to available space. Right margins reserve space before allocation.
 Zero height grows to content; fixed heights include padding and clip overflow.
+Fully clipped descendants lose allocation, focus and input eligibility even
+when their own declared width and height are positive. Expanding the containing
+clip restores eligible descendants through the same shared presentation path.
 Equal-height rows allocate their inner height to auto-height children after each
 child's top/bottom margins, recursively propagating final allocations into
 nested rows. Fixed child heights remain authoritative. Native text and action
@@ -213,6 +235,18 @@ may span multiple rows, use padded strides and arrive in different supported
 formats. Native transfer batching must not impose producer-specific block sizes.
 Unpainted areas of a full replacement are black. Captions and painting receive
 the same actual backing-pixel width, including high DPI.
+
+Native cache dimensions and clean flags commit only after pixel production and
+upload succeed. A failed attempt preserves the previous texture and pending
+work, so another paint attempt can retry the same source and dimensions. Native
+replacement resources are allocated before releasing their predecessors.
+Exceptions continue through the host's existing error handling; this contract
+does not promise an automatic recovery dialog.
+
+The pointer-based block interface requires producers to supply readable storage
+for every declared row until the synchronous sink returns. Dimension and stride
+validation cannot prove a raw pointer's allocation length. A bounded byte-view
+interface should be used when allocation-length validation is required.
 
 Supported formats are Gray8 (one intensity byte), MSB-first Mono1, and optional
 RGB24 (three bytes R/G/B). Stride is explicit. Placement is 1:1 in actual drawable

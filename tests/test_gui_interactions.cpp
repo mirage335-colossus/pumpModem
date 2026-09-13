@@ -94,6 +94,12 @@ void record_interactions() {
     dispatch(on_select.pointer("ready",10,10,now+100ms));
     require(selections==4&&activations==4,"Activate-on-select duplicated Enter/double-click activation or omitted Space");
     require(!on_select.key("pending",ui::RecordKey::space).activate,"Activate-on-select bypassed record eligibility");
+    on_select.configure(false);
+    require(!on_select.pointer("ready",10,10,now+150ms).activate,
+        "Changing record activation policy retained a completed click or stale activation-on-selection");
+    on_select.configure(true);
+    require(on_select.key("ready",ui::RecordKey::space).activate,
+        "A retained list did not accept a newly declared activation-on-selection policy");
     for(bool hidden:{false,true}) {
         state.enabled=hidden;state.visible=!hidden;on_select.apply(state);
         require(!on_select.pointer("ready",10,10)&&!on_select.key("ready",ui::RecordKey::enter)&&!on_select.key({},ui::RecordKey::down),
