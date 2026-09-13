@@ -58,7 +58,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
         placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Bandwidth"}, Slot::bandwidth),
-        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"Target tone SNR (dB)"}, Slot::snr),
+        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"Target 1Hz tone SNR (dB)"}, Slot::snr),
         placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Scrambler pattern / tone"}, Slot::pattern),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),

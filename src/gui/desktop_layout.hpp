@@ -109,7 +109,7 @@ struct DesktopLayout {
 
         const int controls_y = height - 92, available = width - 2 * margin - 50;
         const int device_width = available * 13 / 100, bandwidth_width = available * 12 / 100;
-        const int snr_width = available * 15 / 100, pattern_width = available * 21 / 100;
+        const int snr_width = std::max(196, available * 15 / 100), pattern_width = available * 21 / 100;
         const int fec_width = available * 19 / 100;
         int x = margin;
         out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + 10;
