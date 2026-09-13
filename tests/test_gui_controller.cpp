@@ -12,6 +12,43 @@ BitmapImage render(const plots::PlotSnapshot& source) {
     source.paint(full_bitmap_request(120, 120, false, true), [&](unsigned x, unsigned y, PixelBlock block) { image.blit(x, y, block); });
     return image;
 }
+void workspace_controls() {
+    Controller controller({true, true});
+    const auto workspace=ui::Field::dsp_workspace;
+    const auto declaration=std::find_if(ui::console_screen().begin(),ui::console_screen().end(),
+        [&](const auto& control) { return control.field==workspace; });
+    check(declaration!=ui::console_screen().end()&&declaration->kind==ui::Kind::choice&&declaration->persistent,
+          "DSP workspace must be a shared dropdown available on every page");
+    check(controller.field(workspace).selected=="ram-50"&&
+          controller.field(workspace).display_text.starts_with("50% RAM ("),
+          "DSP workspace did not default to half of available RAM with its resolved byte budget");
+    const auto initial_revision=controller.revision();
+    controller.select(workspace,"ram-25");
+    check(controller.revision()>initial_revision&&controller.field(workspace).selected=="ram-25"&&
+          controller.field(workspace).display_text.starts_with("25% RAM ("),
+          "Selecting the workspace budget did not reconfigure the modem and its airtime estimate");
+    check(controller.settings().dsp_workspace_bytes>0&&
+          controller.settings().dsp_workspace_bytes==controller.settings().transfer.dsp_workspace_bytes&&
+          controller.settings().content_limit==default_memory_limit,
+          "Live and estimated DSP budgets differ or changed the independent received-content limit");
+    const auto accepted_revision=controller.revision();
+    const auto accepted_budget=controller.settings().dsp_workspace_bytes;
+    controller.select(workspace,"unknown");
+    check(controller.revision()==accepted_revision&&controller.settings().dsp_workspace_bytes==accepted_budget&&
+          controller.field(workspace).selected=="ram-25", "Invalid workspace choice changed modem settings");
+    controller.select(workspace,"ram-75");
+    const auto chosen_budget=controller.settings().dsp_workspace_bytes;
+    controller.edit(ui::Field::snr,"6");
+    check(controller.field(workspace).selected=="ram-75"&&controller.field(workspace).display_text.starts_with("75% RAM (")&&
+          controller.settings().dsp_workspace_bytes==chosen_budget&&chosen_budget==controller.settings().transfer.dsp_workspace_bytes,
+          "Changing other modem settings recalculated or discarded the chosen workspace budget");
+    controller.close();
+    const auto closed_budget=controller.settings().dsp_workspace_bytes;
+    controller.select(workspace,"ram-50");
+    check(!controller.field(workspace).enabled&&controller.field(workspace).selected=="ram-75"&&
+          controller.settings().dsp_workspace_bytes==closed_budget,
+          "A stale workspace dropdown callback reconfigured a closing session");
+}
 void bitmap_source_checks() {
     Controller controller({true, true});
     BitmapSources sources;
@@ -56,6 +93,7 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});

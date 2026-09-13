@@ -199,33 +199,47 @@ limits. No thermal sensitivity or near-capacity claim follows from the planner.
 ## Incremental receiver and live audio
 
 `StreamingTransmitter` emits bounded PCM chunks or complex symbol integrals.
-`StreamingReceiver` accepts chunks, retains bounded acquisition/integration state,
-and emits newly decoded bytes. It does not retain the whole audio duration or
-allocate one sample buffer per long symbol. Packet bytes are accumulated under a
-separate content budget and pass the ordinary bootstrap, FEC, metadata and final
-digest/MAC checks before becoming a received message.
+`StreamingReceiver` accepts chunks and retains measured pattern-symbol recordings
+for its admitted timing/gain candidates. After the last symbol, it replays each
+complete recording, refines gain, and compares full-packet differential
+constellation residual SNR. An adequate digest/MAC-valid match stays provisional:
+live input allows one more symbol interval from the earliest complete fit so
+neighboring timing windows can finish. Finite captures compare all available
+final windows at `finish()`. Only the highest-SNR valid complete fit in the
+admitted search is emitted, with its original pre-FEC decisions and diagnostics.
+This also applies to frames larger than 2048 encoded bytes.
+
+The history stores despread complex symbol measurements, not hard-decision
+bytes alone; long symbols do not require a PCM allocation for their full duration.
+A finite bank of at most eight full recordings shares the configured DSP budget.
+The GUI DSP history dropdown offers 25%, 50% (default), or 75% of available RAM,
+resolved at startup or when that selection changes. The budget is a ceiling,
+not an upfront allocation; OS/container memory headroom is used where available.
+Received messages/files retain their separate default 256 MiB content quota.
+That content quota does not cap signal history. A frame still needs sufficient
+DSP space for its recorded measurements and replay; transmit estimates include
+that requirement. Idle keys in the live bank lend unused space to active
+recordings, and failed recordings release their storage.
 
 Acquisition searches a finite set of timing hypotheses at the configured carrier,
 using the pattern constellation's radial and differential-phase fit, followed by
 compact header checks. It does not require the five-second training bytes to
 be observable. Initial phase labels are tried explicitly; FEC Off no longer
-depends on RS repairing that ambiguity. For frames up to 2048 encoded bytes,
-header acceptance starts a bounded provisional decoder while other timing
-hypotheses keep searching. Only complete digest/MAC verification commits short-
-frame lock. Larger frames still acquire from their validated header and must
-pass full integrity before delivery. PCM mixing solves the I/Q Gram system so it does not assume
+depends on RS repairing that ambiguity. Header acceptance starts a provisional decoder while other timing
+hypotheses keep searching. Full-frame integrity and the completed SNR comparison
+commit the receive fit. PCM mixing solves the I/Q Gram system so it does not assume
 an integer number of carrier cycles per integration.
 Dense profiles first screen amplitude-lattice residuals using three times the
 radial noise standard deviation at the planner's geometric margin. Bounded gain
 hypotheses consider every possible highest occupied ring; full protected-header
-validation and complete short-frame checks resolve the ambiguity when outer rings are absent. This keeps idle
+validation and complete frame checks resolve the ambiguity when outer rings are absent. This keeps idle
 noise fitting inexpensive. The screen is designed for the stated AWGN margin;
 it is not a guarantee that every impulsively corrupted, otherwise RS-correctable
 waveform will be acquired.
 An additional differential phase/amplitude residual check includes the planner's
 allowed phase drift. Repeated decoded probes share bounded validation caches;
 they do not repeat RS and CRC work for every equivalent timing/gain hypothesis.
-Provisional short frames can supply measured constellation points and mutable
+Provisional frames can supply measured constellation points and mutable
 text previews, but they cannot select the active key, enter the verified inbox,
 or become copyable/savable content. Candidate rejection clears its tentative
 text. The full packet's digest or MAC remains the delivery condition.
@@ -518,8 +532,11 @@ nor validated text/file reception. There is no automatic unknown-beacon monitor.
 `Options::content_limit` defaults to 256 MiB and limits application content.
 The GUI receive cache is independently bounded to 256 MiB. Packet coding scratch,
 framing/parity and copies have checked bounds derived from content size; this is
-not a hard cap on process RSS. `dsp_workspace_bytes` defaults to 64 MiB and budgets
-streaming sample queues and DSP state independently of content and duration.
+not a hard cap on process RSS. `dsp_workspace_bytes` defaults to 50% of available
+RAM and budgets streaming sample queues, retained pattern-symbol recordings and
+DSP state independently of the content quota. The GUI dropdown offers 25%, 50%
+and 75%; it shows the resolved byte ceiling, which stays fixed until the choice
+changes. Signal history is not subject to the 256 MiB received-content limit.
 Increasing tone duration alone does not require a larger sample workspace.
 
 `transfer::estimate` allocates encoded packet data, never an audio waveform. It

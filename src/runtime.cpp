@@ -3,12 +3,72 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
 #include <istream>
 #include <limits>
 #include <memory>
 #include <openssl/evp.h>
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#elif defined(__unix__) || defined(__APPLE__)
+#include <unistd.h>
+#endif
 
 namespace datapump {
+namespace runtime {
+std::size_t available_memory_bytes() {
+    std::uint64_t available=0;
+#ifdef _WIN32
+    MEMORYSTATUSEX memory{};memory.dwLength=sizeof(memory);
+    if(GlobalMemoryStatusEx(&memory))available=std::min(memory.ullAvailPhys,memory.ullAvailVirtual);
+#elif defined(__linux__)
+    std::ifstream memory("/proc/meminfo");std::string name,line;std::uint64_t kib=0;
+    while(memory>>name>>kib) {
+        if(name=="MemAvailable:"){available=kib*1024;break;}
+        std::getline(memory,line);
+    }
+#endif
+#if defined(_SC_AVPHYS_PAGES) && defined(_SC_PAGESIZE)
+    if(!available) {
+        const auto pages=sysconf(_SC_AVPHYS_PAGES),page_size=sysconf(_SC_PAGESIZE);
+        if(pages>0 && page_size>0)available=static_cast<std::uint64_t>(pages)*static_cast<std::uint64_t>(page_size);
+    }
+#endif
+    // Retain a conservative fallback on hosts without an available-RAM API.
+    if(!available)available=128ULL*1024*1024;
+#ifdef __linux__
+    // Cgroup v2 can expose much less RAM to a process than /proc/meminfo.
+    // Check the mounted root and each process ancestor, including parent caps.
+    const std::filesystem::path root="/sys/fs/cgroup";
+    const auto constrain=[&](const std::filesystem::path& directory) {
+        std::uint64_t limit=0,used=0;
+        std::ifstream maximum(directory/"memory.max"),current(directory/"memory.current");
+        if(maximum>>limit && current>>used)available=std::min(available,limit>used?limit-used:0);
+    };
+    constrain(root);
+    std::ifstream groups("/proc/self/cgroup");std::string group;
+    while(std::getline(groups,group))if(group.starts_with("0::/")) {
+        const auto relative=std::filesystem::path(group.substr(4)).lexically_normal();
+        if(std::any_of(relative.begin(),relative.end(),[](const auto& part){return part=="..";}))break;
+        for(auto directory=root/relative;directory!=root && directory!=directory.root_path();directory=directory.parent_path())constrain(directory);
+        break;
+    }
+#endif
+    return static_cast<std::size_t>(std::min<std::uint64_t>(available,std::numeric_limits<std::size_t>::max()));
+}
+std::size_t dsp_workspace_budget(unsigned percent) {
+    if(!percent || percent>100)throw Error("DSP workspace percentage must be 1..100");
+    const auto available=available_memory_bytes();
+    return (available/100)*percent+((available%100)*percent)/100;
+}
+std::size_t default_dsp_workspace_bytes() {
+    static const auto budget=dsp_workspace_budget();return budget;
+}
+}
 ReceiveCache::ReceiveCache(std::size_t capacity):capacity_(capacity) {
     if(capacity==0) throw Error("cache capacity must be positive");
 }

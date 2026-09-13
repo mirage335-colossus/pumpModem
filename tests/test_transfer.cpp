@@ -361,8 +361,12 @@ void test_adaptive_symbol_airtime_and_padding() {
     }
 }
 void test_provisional_audio_validation() {
-    auto message=sample();message.repeatable=false;
-    for(const bool keyed:{false,true}) {
+    for(const bool keyed:{false,true})for(const std::size_t size:{0U,2048U,4097U,17003U}) {
+        auto message=sample();message.repeatable=false;
+        if(size) {
+            message.data.resize(size);
+            for(std::size_t i=0;i<size;++i)message.data[i]=static_cast<std::uint8_t>(i*71+i/17);
+        }
         auto value=options(keyed);value.fec=FecMode::off;value.compression=false;
         const auto wire=transfer::transmission_wire(message,value);
         const Bytes frame(wire.begin()+32,wire.end());
@@ -370,13 +374,19 @@ void test_provisional_audio_validation() {
         const auto extent=packet_header_extent(plain);
         check(extent.has_value()&&*extent<packet_prefix_size,"fixture uses a variable header shorter than probe capacity");
         const auto validators=transfer::audio_validators(value,value.timestamp);
+        check(transfer::audio_bootstrap_mask(value,value.timestamp).size()==transfer::audio_validation_limit,
+              "large frames expanded the per-receiver cached mask");
         check(!validators.bootstrap({}),"empty receive prefix acquires");
         const Bytes prefix(frame.begin(),frame.begin()+static_cast<std::ptrdiff_t>(*extent));
         check(validators.bootstrap(prefix)==frame.size(),"bootstrap callback lost declared frame extent");
-        check(validators.packet(frame),"complete provisional frame did not validate");
+        check(validators.packet(frame),"complete provisional frame did not validate across cached/chunked masks");
         check(!validators.packet(prefix),"header-only provisional frame was accepted as complete");
         auto damaged=frame;damaged.back()^=1;
         check(!validators.packet(damaged),"whole-frame callback ignores failed digest/MAC");
+        if(frame.size()>transfer::audio_validation_limit) {
+            damaged=frame;damaged[transfer::audio_validation_limit]^=1;
+            check(!validators.packet(damaged),"whole-frame callback ignores corruption after the cached mask");
+        }
         damaged=frame;damaged.push_back(0);
         check(!validators.packet(damaged),"whole-frame callback admits trailing bytes");
         auto small=value;small.content_limit=1;

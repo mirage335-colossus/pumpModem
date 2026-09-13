@@ -6,6 +6,16 @@ using namespace datapump;
 void check(bool good) { if(!good) throw Error("runtime test failed"); }
 template<class F> void rejects(F f) { bool caught=false; try {f();} catch(const Error&) {caught=true;} check(caught); }
 int main() { try {
+    rejects([]{runtime::dsp_workspace_budget(0);});
+    rejects([]{runtime::dsp_workspace_budget(101);});
+    rejects([]{runtime::dsp_workspace_budget(std::numeric_limits<unsigned>::max());});
+    const auto default_workspace=runtime::default_dsp_workspace_bytes();
+    // Host headroom is live data: verify supported endpoints without assuming
+    // identical available RAM on successive reads or a particular host size.
+    (void)runtime::available_memory_bytes();
+    (void)runtime::dsp_workspace_budget(1);
+    (void)runtime::dsp_workspace_budget(100);
+    check(runtime::default_dsp_workspace_bytes()==default_workspace);
     ReceiveCache cache(6);
     cache.put({"a","",{1,2,3},false,false});
     check(!cache.get("a",true));
@@ -16,6 +26,7 @@ int main() { try {
     check(!cache.get("a") && cache.size_bytes()==5);
     rejects([&]{cache.put({"d","",Bytes(7),true,false});});
     check(cache.get("b")->data.size()==4);
+    check(runtime::default_dsp_workspace_bytes()==default_workspace);
     check(cache.erase("c") && !cache.erase("missing"));
     TransmitGate gate;
     auto t=TransmitGate::Clock::time_point{};

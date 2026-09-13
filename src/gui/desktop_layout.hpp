@@ -17,7 +17,7 @@ enum class Slot {
     cancel, airtime, signal_label, signals, copy_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
-    constellation, device, bandwidth, snr, pattern, fec, diagnostics, status,
+    constellation, device, bandwidth, snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -26,7 +26,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::bandwidth: case Slot::snr: case Slot::pattern:
-    case Slot::fec: case Slot::diagnostics: case Slot::status: return true;
+    case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
 }
@@ -108,15 +108,17 @@ struct DesktopLayout {
         out[Slot::zoom_out] = {waveform.x + 72, waveform.y + waveform.h - 22, 72, compact_action_height};
         out[Slot::reset_zoom] = {waveform.x + 148, waveform.y + waveform.h - 22, 88, compact_action_height};
 
-        const int controls_y = height - 92, available = width - 2 * margin - 40;
-        const int device_width = available * 19 / 100, bandwidth_width = available * 14 / 100;
-        const int snr_width = available * 24 / 100, pattern_width = available * 23 / 100;
+        const int controls_y = height - 92, available = width - 2 * margin - 50;
+        const int device_width = available * 13 / 100, bandwidth_width = available * 12 / 100;
+        const int snr_width = available * 15 / 100, pattern_width = available * 21 / 100;
+        const int fec_width = available * 19 / 100;
         int x = margin;
         out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + 10;
         out[Slot::bandwidth] = {x, controls_y, bandwidth_width, field_height}; x += bandwidth_width + 10;
         out[Slot::snr] = {x, controls_y, snr_width, field_height}; x += snr_width + 10;
         out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + 10;
-        out[Slot::fec] = {x, controls_y, width - margin - x, field_height};
+        out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + 10;
+        out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
         out[Slot::diagnostics] = {margin, height - 56, width - 2 * margin, 22};
         out[Slot::status] = {margin, height - 31, width - 2 * margin, 24};
     }

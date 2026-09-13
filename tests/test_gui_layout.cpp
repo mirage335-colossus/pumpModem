@@ -26,7 +26,7 @@ void established_default() {
     check(layout[Slot::signals] == Rect{16, 412, 882, 156}, "received signals size changed");
     check(layout[Slot::files] == Rect{912, 412, 252, 120}, "received files size changed");
     check(layout[Slot::waterfall] == Rect{16, 598, 505, 130}, "waterfall size changed");
-    check(layout[Slot::device] == Rect{16, 774, 210, 27}, "persistent modem controls moved");
+    check(layout[Slot::device] == Rect{16, 774, 142, 27}, "persistent modem controls moved");
     check(layout[Slot::status] == Rect{16, 835, 1148, 24}, "persistent status moved");
 }
 void document_widths() {
@@ -75,7 +75,7 @@ void supported_sizes() {
         for (const auto slot : {Slot::zoom_in, Slot::zoom_out, Slot::reset_zoom})
             check(contains(waveform, layout[slot]), "waveform action escapes its block");
         auto previous = layout[Slot::device];
-        for (const auto slot : {Slot::bandwidth, Slot::snr, Slot::pattern, Slot::fec}) {
+        for (const auto slot : {Slot::bandwidth, Slot::snr, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
             const auto current = layout[slot];
             check(current.x == previous.x + previous.w + 10 && current.y == previous.y &&
                   current.h == previous.h, "modem control row is misaligned");

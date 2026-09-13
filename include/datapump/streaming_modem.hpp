@@ -22,8 +22,8 @@ struct ConstellationBatch {
 // Validation is deterministic for a given prefix within one receiver instance;
 // repeated identical prefixes may reuse the previous extent/rejection verdict.
 using BootstrapValidator = std::function<std::optional<std::size_t>(const Bytes&)>;
-// Exact complete packet bytes, without the synthetic training prefix. Short
-// frames remain provisional until their digest/MAC passes this callback.
+// Exact complete packet bytes, without the synthetic training prefix. Every
+// frame remains provisional until its digest/MAC passes this callback.
 using PacketValidator = std::function<bool(const Bytes&)>;
 
 // Unframed binary input: one meaningful 0/1 bit per element, including leading
@@ -81,7 +81,7 @@ public:
     // Does not insert silence or extra data symbols.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
-    // A plausible short header is collecting, but is not yet verified/locked.
+    // A plausible header is collecting or complete fits are still competing.
     bool acquiring() const;
     // Bounded, unverified encoded bytes from the best provisional fit. These
     // are for a clearly tentative preview, never packet/file delivery.
@@ -95,6 +95,12 @@ public:
     // Reset discards pending points and their overflow count.
     ConstellationBatch take_payload_constellation();
     std::size_t working_bytes() const;
+    // Shared receiver banks can lend unused DSP space to an active recording.
+    // The limit cannot be reduced below storage already in use.
+    void set_workspace_bytes(std::size_t bytes);
+    // Includes one complete matched-symbol recording and replay scratch.
+    // Independent of Config::memory_limit and the received-content quota.
+    bool frame_supported(std::size_t encoded_bytes) const;
     void reset();
 private:
     struct Impl;

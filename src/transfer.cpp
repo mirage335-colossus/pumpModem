@@ -80,11 +80,11 @@ Estimate estimate_encoded(const Message& message, const Options& options, std::s
         result.batch_memory_supported = modem::memory_supported(wire_bytes, training_bytes, options.modem);
     } catch (const Error&) { return result; }
     try {
-        // A real streaming receiver allocates only its finite hypothesis bank.
-        // Check that same allocation contract, not the hypothetical PCM vector.
+        // Complete-frame matching retains measured pattern symbols under the
+        // DSP budget, separately from content and a hypothetical PCM vector.
         modem::StreamingReceiver probe(options.modem,modem::preamble(options.modem),
             options.dsp_workspace_bytes-audio_validation_workspace);
-        result.memory_supported = probe.working_bytes()+audio_validation_workspace <= options.dsp_workspace_bytes;
+        result.memory_supported = probe.frame_supported(frame_size);
     } catch (const Error&) {
         result.memory_supported = false;
     }
@@ -172,11 +172,23 @@ AudioValidators audio_validators(const Options& options,std::uint64_t timestamp)
             return packet_probe_frame_size(plain,limit);
         } catch(const Error&) {return {};}
     };
-    result.packet=[mask,limit,content_limit=options.content_limit,codec=packet_options(options,timestamp)](const Bytes& bytes) {
+    result.packet=[mask,limit,key=options.key,timestamp,content_limit=options.content_limit,codec=packet_options(options,timestamp)](const Bytes& bytes) {
         try {
-            if(bytes.size()>mask->size())return false;
+            if(bytes.size()>limit)return false;
             auto plain=bytes;
-            for(std::size_t i=0;i<plain.size();++i)plain[i]^=(*mask)[i];
+            const auto cached=std::min(plain.size(),mask->size());
+            for(std::size_t i=0;i<cached;++i)plain[i]^=(*mask)[i];
+            for(std::size_t offset=cached;offset<plain.size();) {
+                const auto count=std::min(audio_validation_limit,plain.size()-offset);
+                auto chunk=std::span(plain).subspan(offset,count);
+                const auto wire_offset=audio_training_bytes+offset;
+                xor_audio_whitening(chunk,wire_offset);
+                if(key) {
+                    const auto private_mask=key->stream(StreamPurpose::Data,timestamp,wire_offset,count);
+                    for(std::size_t i=0;i<count;++i)chunk[i]^=private_mask[i];
+                }
+                offset+=count;
+            }
             const auto decoded=decode_packet(plain,codec,limit);
             return decoded.consumed_bytes==plain.size()&&decoded.message.data.size()<=content_limit;
         } catch(const Error&) {return false;}

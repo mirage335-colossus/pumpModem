@@ -63,7 +63,6 @@ std::string display_text(const Message& message) {
     const auto size = std::min<std::size_t>(message.data.size(), 4096);
     return terminal_text(std::span<const std::uint8_t>(message.data).first(size));
 }
-constexpr std::size_t default_workspace = 64 * 1024 * 1024;
 constexpr std::size_t minimum_workspace = 512 * 1024;
 std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double) + 3 * sizeof(std::complex<double>)) +
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
@@ -93,7 +92,7 @@ modem::ChannelConfig channel_config(const Settings& settings) {
 }
 Settings normalized(Settings value) {
     if (value.content_limit == default_memory_limit) value.content_limit = value.transfer.content_limit;
-    if (value.dsp_workspace_bytes == default_workspace) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
+    if (value.dsp_workspace_bytes == runtime::default_dsp_workspace_bytes()) value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes;
     value.transfer.content_limit = value.content_limit;
     value.transfer.dsp_workspace_bytes = value.dsp_workspace_bytes;
     modem::validate(value.transfer.modem);
@@ -677,6 +676,7 @@ struct Session::Impl {
     template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
                                         std::stop_token stop, Feed feed, Prepared* simulation_wave = nullptr) {
         bool complete = false;
+        const auto capacity = bank_capacity(value);
         bool locked = false, synchronized_points = false;
         Receiver* plotted_receiver = nullptr;
         modem::ConstellationBatch points;
@@ -685,8 +685,23 @@ struct Session::Impl {
         for (std::size_t index = first; index < last; ++index) {
             auto& receiver = bank.receivers[index];
             if (stop.stop_requested()) return;
+            auto accounted = receiver_workspace(receiver);
+            const auto update_workspace = [&] {
+                const auto actual = receiver_workspace(receiver);
+                bank.working_bytes = bank.working_bytes - accounted + actual;
+                accounted = actual;
+            };
             try {
+                const auto overhead = accounted - receiver.modem->working_bytes();
+                const auto other = bank.working_bytes - accounted;
+                if (other > capacity || overhead > capacity - other)
+                    throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
+                // Idle keys reserve their actual state. The receiver being
+                // fed can use all remaining shared space for recording and
+                // replay, while later keys see its measured growth.
+                receiver.modem->set_workspace_bytes(capacity - other - overhead);
                 auto wire = feed(*receiver.modem);
+                update_workspace();
                 const bool synchronized = receiver.modem->synchronized();
                 if (synchronized || receiver.modem->acquiring()) {
                     auto observed = receiver.modem->take_payload_constellation();
@@ -701,15 +716,17 @@ struct Session::Impl {
                     }
                 }
                 if (received_wire(receiver, std::move(wire), value, version, simulation_wave)) { complete = true; break; }
-                // Provisional short-frame diagnostics never exclude another
-                // admitted key. Large frames retain header-based selection;
-                // short frames synchronize only after full digest/MAC checks.
+                // Provisional diagnostics never exclude another admitted key.
+                // Synchronization requires full digest/MAC validation and the
+                // completed comparison of recording candidates.
                 if (synchronized) { bank.active = index; break; }
             } catch (const Error&) {
+                update_workspace();
                 if (stop.stop_requested()) return;
                 clear_provisional(receiver, value, version, simulation_wave);
                 receiver.modem->reset(); receiver.frame.clear(); receiver.wire_offset = receiver.last_preview_size = 0;
                 receiver.expected_size.reset(); receiver.signal_id = 0; receiver.last_preview.clear();
+                update_workspace();
                 if (bank.active) { complete = true; break; }
             }
         }

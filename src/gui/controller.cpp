@@ -43,6 +43,14 @@ std::string seconds_text(double seconds) {
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
 }
+std::string workspace_text(unsigned percent,std::size_t bytes) {
+    constexpr std::size_t gib=1024*1024*1024,mib=1024*1024;
+    std::ostringstream text;
+    text<<percent<<"% RAM ("<<std::fixed<<std::setprecision(bytes>=gib?1:0)
+        <<static_cast<double>(bytes)/static_cast<double>(bytes>=gib?gib:mib)
+        <<(bytes>=gib?" GiB)":" MiB)");
+    return text.str();
+}
 }
 struct Controller::Impl {
     Options options;
@@ -59,6 +67,8 @@ struct Controller::Impl {
     bool need_devices=true,settings_valid=true,transmit_requested=false,was_encrypted=false;
     bool binary_valid=false,attachment_image=false,target_supported=true;
     std::size_t binary_count=0,pattern_first=0,page_size=16;
+    std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
+    unsigned dsp_workspace_percent=50;
     double zoom=1,channel_snr=0,cpu_percent=0;
     std::string binary_error="Enter one or more binary bits",tuning_explanation;
     std::vector<KeyEntry> keys;
@@ -109,6 +119,8 @@ struct Controller::Impl {
         for(auto mode:tuning::pattern_modes()) { const std::string id(tuning::pattern_mode_name(mode)); auto label=id; std::replace(label.begin(),label.end(),'-',' '); f(UiField::pattern).options.push_back({id,label}); }
         f(UiField::pattern).selected="auto-pattern";
         f(UiField::fec).options={{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"},{"off","Off"}}; f(UiField::fec).selected="rs20";
+        f(UiField::dsp_workspace).options={{"ram-25","25% available RAM"},{"ram-50","50% available RAM"},{"ram-75","75% available RAM"}};
+        f(UiField::dsp_workspace).selected="ram-50";
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / 0 bits";
         f(UiField::mode).text="Starting continuous reception";
         encryption_changed(); configure(); dirty(); controls();
@@ -156,7 +168,14 @@ struct Controller::Impl {
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             const auto preset=tuning::parse_simulation_preset(f(UiField::simulation).selected); next.simulation=preset.enabled;
             if(preset.enabled) { const auto budget=tuning::link_budget(preset,next.transfer.modem.bandwidth_hz,next.transfer.modem.sample_rate); next.simulation_snr_db=budget.sample_snr_db; channel_snr=budget.snr_db; }
-            next.content_limit=default_memory_limit; next.dsp_workspace_bytes=64*1024*1024;
+            const auto workspace_percent=f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
+            if(workspace_percent!=dsp_workspace_percent) {
+                dsp_workspace_bytes=runtime::dsp_workspace_budget(workspace_percent);
+                dsp_workspace_percent=workspace_percent;
+            }
+            next.content_limit=default_memory_limit; next.dsp_workspace_bytes=dsp_workspace_bytes;
+            next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
+            f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             settings=std::move(next); settings_valid=true; target_supported=plan.target_supported; tuning_explanation=plan.explanation;
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
@@ -196,7 +215,7 @@ struct Controller::Impl {
     }
     void controls() {
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::pattern,UiField::fec,UiField::source}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::pattern,UiField::fec,UiField::dsp_workspace,UiField::source}) f(id).enabled=!busy;
         if(key_loading) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!binary()&&!closing;
         f(UiField::binary).enabled=binary()&&!closing; f(UiField::message).enabled=!binary()&&!attachment&&!closing;
@@ -450,7 +469,7 @@ void Controller::select(UiField field,std::string id) {
         if(!available)throw Error("Select an available item");
         state.selected=std::move(id);
         if(field==UiField::key) { p.encryption_changed(); p.configure(); }
-        else if(field==UiField::simulation||field==UiField::pattern||field==UiField::fec) p.configure();
+        else if(field==UiField::simulation||field==UiField::pattern||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
         else if(field==UiField::source) p.dirty();
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();

@@ -18,7 +18,7 @@ struct Settings {
     double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
     std::size_t content_limit = default_memory_limit;
-    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
+    std::size_t dsp_workspace_bytes = transfer.dsp_workspace_bytes;
     // Compatibility fields: streaming capture no longer retains a duration
     // window, and simulated media progresses as fast as bounded DSP permits.
     double receive_buffer_seconds = 30;

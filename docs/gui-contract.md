@@ -25,6 +25,13 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+The persistent **DSP workspace** choice selects 25%, 50% (default), or 75% of
+available RAM. Its display includes the resolved MiB/GiB ceiling. The value is
+sampled at controller startup and when the percentage changes; other modem edits
+keep the same ceiling. Both native adapters use this shared control. Live DSP
+and transfer estimates receive the same budget, independently of the 256 MiB
+received-message/file cache.
+
 | Vocabulary | Meaning |
 | --- | --- |
 | `Kind::label` | Literal or bound readonly native text. |

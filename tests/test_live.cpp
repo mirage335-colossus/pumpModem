@@ -897,6 +897,39 @@ void test_default_workspace_holds_three_long_keyed_banks() {
           "default DSP workspace admits three keys across thirteen epochs with long keyed patterns");
     check(result.received.empty(), "a loaded key collection never turns noise into validated content");
 }
+void test_growing_receiver_workspace_is_shared_and_reported() {
+    constexpr std::uint64_t epoch = 1800000000;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([] { return static_cast<double>(epoch); }, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value = settings();
+    value.dsp_workspace_bytes = 12 * 1024 * 1024;
+    value.transfer.timestamp = epoch; value.transfer.search_seconds = 0;
+    value.transfer.key.emplace(Bytes(32, 0x41));
+    value.receive_keys.emplace_back(Bytes(32, 0x42));
+    value.receive_keys.emplace_back(Bytes(32, 0x43));
+    value.simulation_snr_db = 40;
+    session.start(value);
+    const auto idle = wait_for(session, [](const auto& snapshot) { return snapshot.sequence >= 2; });
+    auto sent = message(39, 8192); sent.repeatable = false;
+    session.transmit(sent);
+    std::size_t peak = idle.dsp_buffered_bytes;
+    wait_for(session, [&](const auto& snapshot) {
+        peak = std::max(peak, snapshot.dsp_buffered_bytes);
+        check(snapshot.dsp_buffered_bytes <= value.dsp_workspace_bytes,
+              "growing recording candidates exceeded their shared receiver bank workspace");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    }, 60s);
+    check(peak > idle.dsp_buffered_bytes + value.dsp_workspace_bytes / 4 + 128 * 1024,
+          "live DSP accounting omitted recording growth after receiver admission");
+    replay_milliseconds = 3000;
+    const auto received = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); });
+    check(received.received.front().packet.message.data == sent.data,
+          "inactive keys prevented a large candidate from using available shared recording space");
+    check(received.dsp_buffered_bytes <= value.dsp_workspace_bytes,
+          "completed candidate left aggregate receiver accounting over budget");
+}
 void test_encrypted_epoch_bank_refreshes_while_idle() {
     constexpr std::uint64_t origin = 1800000000;
     std::atomic<std::uint64_t> local_epoch{origin};
@@ -1094,6 +1127,7 @@ int main(int argc, char** argv) {
         run("unpresented replay interruption", test_interrupt_discards_due_unpresented_reception);
         run("receive authentication policy", test_receive_authentication_policy);
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
+        run("growing receiver workspace", test_growing_receiver_workspace_is_shared_and_reported);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
         run("cancel, reconfigure and bounds", test_cancel_reconfigure_and_bounds);
         run("unrecoverable noise", test_unrecoverable_noise_does_not_validate);

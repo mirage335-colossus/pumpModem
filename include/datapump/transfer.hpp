@@ -2,6 +2,7 @@
 #include "datapump/crypto.hpp"
 #include "datapump/modem.hpp"
 #include "datapump/packet.hpp"
+#include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
 #include <functional>
 #include <optional>
@@ -19,7 +20,7 @@ struct RepeatPolicy {
 struct Options {
     modem::Config modem;
     std::size_t content_limit = default_memory_limit;
-    std::size_t dsp_workspace_bytes = 64 * 1024 * 1024;
+    std::size_t dsp_workspace_bytes = runtime::default_dsp_workspace_bytes();
     FecMode fec = FecMode::rs20;
     bool compression = true;
     std::optional<Crypto> key;
@@ -74,9 +75,9 @@ modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
 // include the fixed 32-byte training prefix, which is left untouched. Apply
 // after encryption on TX and before decryption on RX, with no added bytes.
 void xor_audio_whitening(std::span<std::uint8_t> bytes, std::uint64_t wire_offset = 0);
-// Combined public whitening/private data-stream mask for the bounded bootstrap
-// and provisional whole-frame checks. Cache once per receiver; no per-trial
-// crypto setup. The mask is not transmitted and adds no frame bytes.
+// Combined public whitening/private data-stream mask for bootstrap and the
+// start of whole-frame checks. Cache once per receiver; larger frames unmask
+// their remainder with bounded scratch. This cache adds no frame bytes.
 inline constexpr std::size_t audio_validation_limit = 2048;
 inline constexpr std::size_t audio_validation_workspace = audio_validation_limit + 4096;
 Bytes audio_bootstrap_mask(const Options& options, std::uint64_t timestamp);

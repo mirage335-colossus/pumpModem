@@ -20,6 +20,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr)control.bitmap_caption=BitmapCaption::overlay_error;
+    if(slot==Slot::dsp_workspace)control.help="Signal waveform history and DSP processing use this fraction of available RAM, measured at startup and when this choice changes. The default is 50%. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
     if(slot==Slot::waveform) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
@@ -58,6 +59,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"Target tone SNR (dB)"}, Slot::snr),
         placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Scrambler pattern / tone"}, Slot::pattern),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
+        placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
         placed({Kind::choice,Field::source,Command::none,Bitmap::none,Page::console,5,""}, Slot::source),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
         placed({Kind::label,Field::binary_label,Command::none,Bitmap::none,Page::console,6,"Binary"}, Slot::binary_label),

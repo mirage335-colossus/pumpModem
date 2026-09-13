@@ -5,6 +5,7 @@
 #include "../src/constellation.hpp"
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 #include <chrono>
 #include <thread>
@@ -247,21 +248,26 @@ void consumable_receive_constellation() {
     modem::StreamingTransmitter source(wire,config);
     modem::StreamingReceiver receiver(config,modem::preamble(config));
     const auto rotation=std::polar(2.6,.61);
-    std::vector<Complex> observed;
+    std::size_t observed=0;bool tentative=false;
+    const auto drain=[&] {
+        const auto batch=receiver.take_payload_constellation();
+        if(batch.dropped)throw std::runtime_error("regular RX constellation drains dropped points");
+        tentative=tentative || (receiver.acquiring() && !receiver.synchronized() && !batch.points.empty());
+        observed+=batch.points.size();
+        const auto history=receiver.diagnostics().constellation;
+        if(!batch.points.empty() && history.size()>1 &&
+           std::abs(batch.points.back()-decision_coordinates(history.back(),history[history.size()-2]))>1e-12)
+            throw std::runtime_error("RX plot retains absolute carrier rotation instead of measured decision coordinates");
+        if(!receiver.take_payload_constellation().points.empty())throw std::runtime_error("RX constellation drain repeated points");
+    };
     while(auto observation=source.next_symbol()) {
         observation->value*=rotation;receiver.push_symbols(std::span(&*observation,1));
-        const auto batch=receiver.take_payload_constellation();
-        if(batch.dropped || (!receiver.synchronized() && !batch.points.empty()))throw std::runtime_error("unlocked timing candidates leaked into payload constellation");
-        observed.insert(observed.end(),batch.points.begin(),batch.points.end());
-        if(!receiver.take_payload_constellation().points.empty())throw std::runtime_error("RX constellation drain repeated points");
-        if(receiver.synchronized())break;
+        drain();
+        if(receiver.acquiring() && source.samples_emitted()>=modem::training_sample_count(config)+128*modem::symbol_sample_count(config))break;
     }
-    if(!receiver.synchronized())throw std::runtime_error("rotated RX plot fixture did not acquire");
+    if(!receiver.acquiring() || receiver.synchronized() || !tentative || !observed)
+        throw std::runtime_error("rotated RX plot fixture missed tentative reception");
     const auto history=receiver.diagnostics().constellation;
-    if(observed.size()+1!=history.size())throw std::runtime_error("RX acquisition lost or repeated bootstrap constellation points");
-    for(std::size_t i=0;i<observed.size();++i)
-        if(std::abs(observed[i]-decision_coordinates(history[i+1],history[i]))>1e-12)
-            throw std::runtime_error("RX plot retains absolute carrier rotation instead of measured decision coordinates");
     // An off-grid measured sample must remain off-grid; plotting ideal decoded
     // points would conceal actual phase noise and amplitude errors.
     const modem::SymbolObservation off_grid{{.413,.177},modem::symbol_sample_count(config)};
@@ -351,11 +357,244 @@ void provisional_short_reception() {
         if(!receiver.acquiring() || receiver.synchronized())throw std::runtime_error("long-observation fixture missed provisional large-header selection");
         const modem::SymbolObservation enormous{{.35,0},std::uint64_t{1}<<42};
         const auto start=std::chrono::steady_clock::now();
-        const auto bytes=receiver.push_symbols(std::span(&enormous,1));
-        if(!receiver.synchronized() || bytes.size()>wire.size() || receiver.working_bytes()>8*1024*1024 ||
+        std::stop_source interrupt;
+        std::jthread request_stop([&]{std::this_thread::sleep_for(std::chrono::milliseconds(20));interrupt.request_stop();});
+        Bytes bytes;
+        try{bytes=receiver.push_symbols(std::span(&enormous,1),interrupt.get_token());}
+        catch(const Error& error){if(std::string_view(error.what())!="modem operation cancelled")throw;}
+        if(receiver.synchronized() || !bytes.empty() || receiver.working_bytes()>8*1024*1024 ||
            std::chrono::steady_clock::now()-start>std::chrono::seconds(2))
-            throw std::runtime_error("deferred large-header observation grew with virtual duration");
+            throw std::runtime_error("invalid large frame locked or grew with virtual observation duration");
     }
+}
+void best_complete_message_reception() {
+    // A timing window three samples early already passes the real packet
+    // validator during the final 30-sample symbol. In PCM it even needs FEC.
+    // The exact later window is noiseless, so publishing that first valid
+    // fit loses measurable signal quality and can needlessly correct bytes.
+    modem::Config config;config.spreading_mode=modem::SpreadingMode::tone;config.spreading_factor=3;
+    config.memory_limit=1024; // Legacy waveform storage does not limit the explicit DSP workspace.
+    PacketOptions options;options.fec=FecMode::rs60;options.compression=false;
+    const auto symbol=modem::symbol_sample_count(config);
+    for(const unsigned size:{71U,2057U}) {
+        Message message;message.id[0]=91;
+        for(unsigned i=0;i<size;++i)message.data.push_back(static_cast<std::uint8_t>(i*71+i/7+19));
+        const auto packet=encode_packet(message,options);
+        if(size>2048 && packet.size()<=2048)throw std::runtime_error("complete-message fixture does not exceed the old provisional limit");
+        Bytes wire(32);wire.insert(wire.end(),packet.begin(),packet.end());
+        for(const bool pcm:{false,true})for(const std::size_t chunk:{1U,317U})for(const bool finite:{false,true}) {
+            modem::StreamingTransmitter source(wire,config);
+            const auto complete=source.total_samples();
+            std::uint64_t observed=0,first_accepted=0;bool corrected_early=false;
+            modem::StreamingReceiver receiver(config,Bytes(32),8*1024*1024,{},[&](const Bytes& bytes) {
+                try {
+                    const auto decoded=decode_packet(bytes,options);
+                    if(!first_accepted)first_accepted=observed;
+                    corrected_early=corrected_early || (observed<complete && decoded.corrected_bytes!=0);
+                    return decoded.message.data==message.data;
+                } catch(const Error&){return false;}
+            });
+            const auto context=" at "+std::to_string(size)+" data bytes, pcm "+std::to_string(pcm)+
+                ", chunk "+std::to_string(chunk)+", finite "+std::to_string(finite);
+            while(!source.finished()) {
+                Bytes emitted;
+                if(pcm) {
+                    std::array<float,317> block{};
+                    // Always expose the state with precisely one real sample
+                    // missing, even when the other input chunks are large.
+                    const auto remaining=complete-observed;
+                    const auto count=source.read(std::span(block).first(static_cast<std::size_t>(std::min<std::uint64_t>(chunk,remaining>1?remaining-1:1))));
+                    observed=source.samples_emitted();emitted=receiver.push(std::span(block).first(count));
+                } else {
+                    std::vector<modem::SymbolObservation> block;block.reserve(chunk);
+                    while(block.size()<chunk && !source.finished()) {
+                        block.push_back(*source.next_symbol());
+                        if(source.samples_emitted()==complete-1)break;
+                    }
+                    observed=source.samples_emitted();emitted=receiver.push_symbols(block);
+                }
+                if(!emitted.empty() || receiver.synchronized())
+                    throw std::runtime_error("valid timing committed before complete-symbol search grace"+context);
+                if(receiver.working_bytes()>8*1024*1024)throw std::runtime_error("complete-message search exceeded workspace"+context);
+            }
+            if(chunk==1 && (!first_accepted || first_accepted<=complete-symbol || first_accepted>=complete))
+                throw std::runtime_error("fixture did not validate an early fit inside the final symbol"+context);
+            if(pcm && chunk==1 && size==71 && !corrected_early)
+                throw std::runtime_error("fixture no longer exposes avoidable early FEC corrections"+context);
+            Bytes received;
+            if(!finite) {
+                for(std::uint64_t padding=0;padding<2*symbol;) {
+                    const auto count=std::min<std::uint64_t>(chunk,2*symbol-padding);padding+=count;observed+=count;
+                    Bytes emitted;
+                    if(pcm)emitted=receiver.push(std::vector<float>(static_cast<std::size_t>(count)));
+                    else {
+                        const modem::SymbolObservation idle{{},count};emitted=receiver.push_symbols(std::span(&idle,1));
+                    }
+                    if(!emitted.empty() && chunk==1 && observed<first_accepted+symbol)
+                        throw std::runtime_error("complete-message timing search ended before its grace elapsed"+context);
+                    received.insert(received.end(),emitted.begin(),emitted.end());
+                }
+                if(received!=wire || !receiver.synchronized())throw std::runtime_error("live timing search did not publish the complete best frame once"+context);
+                const auto settled=receiver.diagnostics();receiver.take_payload_constellation();
+                Bytes extra;
+                if(pcm)extra=receiver.push(std::vector<float>(static_cast<std::size_t>(2*symbol),.13F));
+                else {
+                    const modem::SymbolObservation off_grid{{.413,.177},2*symbol};extra=receiver.push_symbols(std::span(&off_grid,1));
+                }
+                const auto after=receiver.diagnostics();
+                if(!extra.empty() || !receiver.take_payload_constellation().points.empty() ||
+                   after.snr_db!=settled.snr_db || after.sample_offset!=settled.sample_offset || after.constellation!=settled.constellation)
+                    throw std::runtime_error("later capture samples changed completed-message diagnostics"+context);
+            }
+            const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+            if(received!=wire || !receiver.synchronized() || !receiver.finish().empty())
+                throw std::runtime_error("complete-message selection changed uncorrected wire bytes or repeated delivery"+context);
+            const auto decoded=decode_packet(Bytes(received.begin()+32,received.end()),options);
+            if(decoded.corrected_bytes || !decoded.pre_fec_accuracy || decoded.pre_fec_accuracy->corrected_data_bits ||
+               receiver.diagnostics().snr_db<100 || receiver.diagnostics().sample_offset)
+                throw std::runtime_error("complete-message selection retained a lower-SNR timing fit"+context);
+        }
+    }
+    // Give the bootstrap a one-sample delay that the much longer body does
+    // not have. Its cleanest timing is then different from the complete
+    // message's cleanest timing; header-only SNR must not select the winner.
+    Message message;message.id[0]=91;
+    for(unsigned i=0;i<71;++i)message.data.push_back(static_cast<std::uint8_t>(i*71+i/7+19));
+    const auto packet=encode_packet(message,options);
+    Bytes wire(32);wire.insert(wire.end(),packet.begin(),packet.end());
+    modem::StreamingTransmitter source(wire,config);
+    modem::StreamingReceiver receiver(config,Bytes(32));
+    const auto bootstrap_end=modem::training_sample_count(config)+modem::payload_symbol_count(packet_prefix_size,config)*symbol;
+    Complex previous{};
+    while(auto observation=source.next_symbol()) {
+        const auto original=observation->value;
+        if(source.samples_emitted()>modem::training_sample_count(config) && source.samples_emitted()<=bootstrap_end)
+            observation->value=previous;
+        previous=original;
+        if(!receiver.push_symbols(std::span(&*observation,1)).empty())
+            throw std::runtime_error("shifted-bootstrap fixture committed before final timing comparison");
+    }
+    const auto received=receiver.finish();
+    if(received!=wire || receiver.diagnostics().sample_offset || receiver.diagnostics().snr_db<35 || receiver.diagnostics().snr_db>60)
+        throw std::runtime_error("bootstrap quality overrode the complete-message constellation SNR");
+
+    bool probed=false;
+    modem::StreamingTransmitter oversized_source(wire,config);
+    modem::StreamingReceiver oversized(config,Bytes(32),8*1024*1024,[&](const Bytes& prefix)->std::optional<std::size_t> {
+        if(!packet_probe_frame_size(prefix))return {};
+        probed=true;return 16*1024*1024;
+    });
+    while(auto observation=oversized_source.next_symbol()) {
+        if(!oversized.push_symbols(std::span(&*observation,1)).empty() || oversized.synchronized() || oversized.working_bytes()>8*1024*1024)
+            throw std::runtime_error("oversized provisional extent exceeded the DSP workspace or published bytes");
+    }
+    if(!probed || !oversized.finish().empty() || oversized.synchronized() || oversized.working_bytes()>8*1024*1024)
+        throw std::runtime_error("oversized bootstrap extent was not rejected within the DSP workspace");
+}
+void complete_bootstrap_extent() {
+    // Custom framing may end exactly where acquisition finishes. No extra
+    // body symbol may be required to validate or publish that complete frame.
+    for(const unsigned bits:{2U,5U,6U})for(const bool pcm:{false,true}) {
+        modem::Config config;config.constellation_bits=bits;config.spreading_mode=modem::SpreadingMode::tone;
+        Bytes packet(packet_prefix_size);
+        for(std::size_t i=0;i<packet.size();++i)packet[i]=static_cast<std::uint8_t>(i*71+19);
+        Bytes wire(32);wire.insert(wire.end(),packet.begin(),packet.end());
+        modem::StreamingTransmitter source(wire,config);
+        unsigned validated=0;
+        modem::StreamingReceiver receiver(config,Bytes(32),8*1024*1024,[&](const Bytes& prefix)->std::optional<std::size_t> {
+            return prefix==packet?std::optional<std::size_t>{packet.size()}:std::nullopt;
+        },[&](const Bytes& frame){++validated;return frame==packet;});
+        Bytes received;
+        while(!source.finished()) {
+            Bytes emitted;
+            if(pcm) {
+                std::array<float,17> block{};const auto count=source.read(block);
+                emitted=receiver.push(std::span(block).first(count));
+            } else {
+                const auto observation=*source.next_symbol();emitted=receiver.push_symbols(std::span(&observation,1));
+            }
+            if(!emitted.empty())throw std::runtime_error("complete bootstrap committed before all timing fits were compared");
+        }
+        received=receiver.finish();
+        if(!validated || received!=wire || !receiver.synchronized() || !receiver.finish().empty())
+            throw std::runtime_error("exact bootstrap extent required a nonexistent body symbol at "+std::to_string(bits)+" bits, pcm "+std::to_string(pcm));
+    }
+}
+void receiver_workspace_lending() {
+    modem::Config config;config.spreading_mode=modem::SpreadingMode::tone;config.memory_limit=1024;
+    constexpr std::size_t workspace=8*1024*1024;
+    modem::StreamingReceiver receiver(config,Bytes(32),workspace);
+    const auto base=receiver.working_bytes();
+    receiver.set_workspace_bytes(base);
+    if(receiver.working_bytes()!=base || receiver.frame_supported(4096) || receiver.frame_supported(std::numeric_limits<std::size_t>::max()))
+        throw std::runtime_error("receiver promised an unfunded complete recording or allocated on budget change");
+    bool rejected=false;
+    try{receiver.set_workspace_bytes(base-1);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("receiver released a budget still occupied by DSP state");
+    receiver.set_workspace_bytes(workspace);
+    if(!receiver.frame_supported(4096) || receiver.frame_supported(workspace) || receiver.frame_supported(0) || receiver.frame_supported(packet_prefix_size-1))
+        throw std::runtime_error("receiver frame feasibility ignored recording storage or an increased budget");
+    receiver.set_workspace_bytes(std::numeric_limits<std::size_t>::max());
+    if(receiver.frame_supported(std::numeric_limits<std::size_t>::max()/16))
+        throw std::runtime_error("receiver recording feasibility overflowed at a large explicit workspace");
+    receiver.set_workspace_bytes(workspace);
+
+    Message message;message.id[0]=91;
+    for(unsigned i=0;i<2057;++i)message.data.push_back(static_cast<std::uint8_t>(i*71+i/7+19));
+    PacketOptions options;options.compression=false;
+    const auto packet=encode_packet(message,options);
+    if(!receiver.frame_supported(packet.size()))throw std::runtime_error("large frame is limited by legacy waveform storage");
+    Bytes wire(32);wire.insert(wire.end(),packet.begin(),packet.end());
+    modem::StreamingTransmitter source(wire,config);
+    while(source.samples_emitted()<modem::training_sample_count(config)+64*modem::symbol_sample_count(config)) {
+        const auto observation=*source.next_symbol();
+        if(!receiver.push_symbols(std::span(&observation,1)).empty())throw std::runtime_error("workspace fixture committed on its header");
+    }
+    const auto retained=receiver.working_bytes();
+    if(!receiver.acquiring() || retained<=base)throw std::runtime_error("workspace fixture did not retain its complete recording allocation");
+    receiver.set_workspace_bytes(retained);
+    if(!receiver.frame_supported(packet.size()))throw std::runtime_error("feasibility counted existing recording capacity twice");
+    rejected=false;
+    try{receiver.set_workspace_bytes(retained-1);}catch(const Error&){rejected=true;}
+    if(!rejected)throw std::runtime_error("receiver lent out memory occupied by a provisional recording");
+    while(auto observation=source.next_symbol()) {
+        if(!receiver.push_symbols(std::span(&*observation,1)).empty() || receiver.working_bytes()>retained)
+            throw std::runtime_error("admitted complete recording exceeded its reduced workspace");
+    }
+    if(receiver.finish()!=wire || !receiver.finish().empty() || receiver.working_bytes()>retained)
+        throw std::runtime_error("workspace lending discarded a retained message or omitted replay storage");
+}
+void receiver_recording_reclamation() {
+    modem::Config config;config.spreading_mode=modem::SpreadingMode::tone;config.memory_limit=1024;
+    modem::StreamingReceiver receiver(config,Bytes(32));
+    const auto base=receiver.working_bytes(),workspace=base+256*1024;
+    receiver.set_workspace_bytes(workspace);
+    PacketOptions options;options.fec=FecMode::off;options.compression=false;
+    Bytes expected,received;std::size_t peak=base;
+    for(const bool invalid:{true,false}) {
+        Message message;message.id[0]=91;
+        for(unsigned i=0;i<(invalid?4096U:71U);++i)message.data.push_back(static_cast<std::uint8_t>(i*71+i/7+19));
+        auto packet=encode_packet(message,options);
+        if(invalid)packet.back()^=1;
+        Bytes wire(32);wire.insert(wire.end(),packet.begin(),packet.end());
+        if(!invalid)expected=wire;
+        modem::StreamingTransmitter source(wire,config);
+        while(auto observation=source.next_symbol()) {
+            const auto emitted=receiver.push_symbols(std::span(&*observation,1));
+            if(invalid && (!emitted.empty() || receiver.synchronized()))throw std::runtime_error("invalid large recording published packet bytes");
+            received.insert(received.end(),emitted.begin(),emitted.end());
+            peak=std::max(peak,receiver.working_bytes());
+            if(receiver.working_bytes()>workspace)throw std::runtime_error("recording reclamation exceeded its fixed workspace");
+        }
+        if(invalid) {
+            const modem::SymbolObservation idle{{},2*modem::symbol_sample_count(config)};
+            if(!receiver.push_symbols(std::span(&idle,1)).empty() || receiver.synchronized() || receiver.working_bytes()>=peak || peak<=base)
+                throw std::runtime_error("failed complete frame stranded its recording memory");
+        }
+    }
+    const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+    if(received!=expected || !receiver.synchronized() || receiver.working_bytes()>workspace)
+        throw std::runtime_error("failed large recording prevented a later valid frame in the same workspace");
 }
 void exact_pcm_boundaries() {
     // Ten- and nine-sample chips are deliberately not multiples of a four
@@ -473,8 +712,11 @@ void live_constellation_window() {
     PacketOptions options;options.compression=false;
     auto wire=modem::preamble(config);const auto frame=encode_packet(message,options);wire.insert(wire.end(),frame.begin(),frame.end());
     modem::StreamingTransmitter source(wire,config);modem::StreamingReceiver receiver(config,modem::preamble(config));
-    while(const auto observation=source.next_symbol()) {receiver.push_symbols(std::span(&*observation,1));if(receiver.synchronized())break;}
-    if(!receiver.synchronized())throw std::runtime_error("live constellation fixture failed acquisition");
+    while(const auto observation=source.next_symbol()) {
+        receiver.push_symbols(std::span(&*observation,1));
+        if(receiver.acquiring() && source.samples_emitted()>=modem::training_sample_count(config)+128*modem::symbol_sample_count(config))break;
+    }
+    if(!receiver.acquiring() || receiver.synchronized())throw std::runtime_error("live constellation fixture missed tentative reception");
     const modem::SymbolObservation outer{{.7,0},modem::symbol_sample_count(config)};
     for(unsigned i=0;i<2200;++i)receiver.push_symbols(std::span(&outer,1));
     const modem::SymbolObservation inner{{.35,0},modem::symbol_sample_count(config)};
@@ -799,7 +1041,10 @@ int main(int argc,char** argv) {
             long_keyed_pcm();std::cout<<"below-chip-noise PCM pattern acquisition tests passed\n";return 0;
         }
         if(argc>1 && std::string_view(argv[1])=="--provisional-only") {
-            provisional_short_reception();std::cout<<"provisional packet tests passed\n";return 0;
+            provisional_short_reception();best_complete_message_reception();std::cout<<"provisional packet tests passed\n";return 0;
+        }
+        if(argc>1 && std::string_view(argv[1])=="--complete-only") {
+            best_complete_message_reception();complete_bootstrap_extent();receiver_workspace_lending();receiver_recording_reclamation();std::cout<<"complete-message selection tests passed\n";return 0;
         }
         if(argc>1 && std::string_view(argv[1])=="--gain-only") {
             two_ring_gain_aliases();std::cout<<"two-ring gain tests passed\n";return 0;
@@ -816,6 +1061,10 @@ int main(int argc,char** argv) {
         received_preamble_evidence();
         if(argc>1 && std::string_view(argv[1])=="--preamble-only") {std::cout<<"preamble evidence tests passed\n";return 0;}
         provisional_short_reception();
+        best_complete_message_reception();
+        complete_bootstrap_extent();
+        receiver_workspace_lending();
+        receiver_recording_reclamation();
         two_ring_gain_aliases();
         short_noisy_bootstraps();
         consumable_transmit_constellation();

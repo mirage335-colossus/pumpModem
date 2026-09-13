@@ -17,9 +17,10 @@ coverage and boundaries. No unimplemented control is presented as functioning.
 Release 0.7.0 gives ordinary messages under 16 bytes a four-byte bootstrap and
 automatically disables all Reed–Solomon coding for them. Other short messages
 typically use six to nine bootstrap bytes with coding enabled. There is no
-magic marker or separate header symbol padding. Short frames remain provisional
-until complete integrity verification, so a plausible corrupted header cannot
-commit receiver lock. Both peers need the new format; legacy decoding is removed.
+magic marker or separate header symbol padding. Frames remain provisional until complete integrity verification and a final
+comparison of the recorded pattern-symbol fits. An early valid match does not
+commit receiver lock: the highest full-message constellation SNR in the admitted
+search wins after the final symbol. Both peers need the new format; legacy decoding is removed.
 Short content uses one fixed byte-prefix code that
 favors lowercase text; longer messages/files use raw LZMA2 with preset 9 extreme
 settings. Compression is automatic when smaller, and no dictionary or dictionary
@@ -49,7 +50,9 @@ continue while switching tabs. See [the inspection views](docs/inspection.md).
 The receiver integrates the configured sign pattern before making APSK symbol
 decisions; it does not require individual chips to be decoded above the noise.
 Its timing search is finite and it has no continuous clock or frequency tracking
-loop. Simulation feeds the same PCM acquisition path from independent sample
+loop. The DSP history budget defaults to 50% of available RAM; a dropdown selects
+25%, 50%, or 75%. The separate 256 MiB received-message/file quota does not cap
+signal history. Simulation feeds the same PCM acquisition path from independent sample
 and carrier phases; its finite search can fail to acquire a signal.
 
 The binary editor sits beside the message editor. Select Binary to
