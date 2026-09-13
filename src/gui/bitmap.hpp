@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <memory>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -38,12 +39,17 @@ class BitmapSource {
 public:
     using Paint = std::function<void(const BitmapRequest&,const BitmapSink&,bool)>;
     BitmapSource() = default;
-    explicit BitmapSource(Paint paint) : paint_(std::move(paint)) {}
+    explicit BitmapSource(Paint paint) {
+        if(paint)paint_=std::make_shared<const Paint>(std::move(paint));
+    }
     void paint(const BitmapRequest& request,const BitmapSink& sink,bool color_enabled=true) const {
-        if(paint_)paint_(request,sink,color_enabled);
+        // A receiver may release or replace its source during synchronous
+        // delivery. Retain the executing producer and its captures until return.
+        const auto paint=paint_;
+        if(paint)(*paint)(request,sink,color_enabled);
     }
 private:
-    Paint paint_;
+    std::shared_ptr<const Paint> paint_;
 };
 inline std::size_t pixel_row_bytes(unsigned width, PixelFormat format) {
     switch (format) {

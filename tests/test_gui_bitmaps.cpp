@@ -3,6 +3,7 @@
 #include <array>
 #include <iostream>
 #include <limits>
+#include <memory>
 
 using namespace datapump;
 using namespace datapump::gui;
@@ -59,6 +60,55 @@ void transfer_contract() {
     const auto request=full_bitmap_request(71,53,false,true);
     check(render(retained,request).pixels()==render(PlotSnapshot::constellation({{.5,0},{0,.5}},true),request).pixels(),
           "Opaque source lost its producer snapshot when the factory handle expired");
+}
+void producer_lifetime() {
+    const auto request=full_bitmap_request(2,1);
+    for(const bool replace:{false,true})for(const bool fail:{false,true}) {
+        auto content=std::make_shared<const std::array<unsigned char,2>>(std::array<unsigned char,2>{42,73});
+        const std::weak_ptr<const std::array<unsigned char,2>> lifetime=content;
+        BitmapSource source([content](const BitmapRequest&,const BitmapSink& sink,bool) {
+            sink(0,0,{1,1,1,PixelFormat::gray8,content->data()});
+            sink(1,0,{1,1,1,PixelFormat::gray8,content->data()+1});
+        });
+        content.reset();
+        unsigned replacement_calls=0,calls=0;
+        const BitmapSource replacement([&](const BitmapRequest&,const BitmapSink&,bool) {++replacement_calls;});
+        BitmapImage image(2,1,PixelFormat::gray8);
+        bool caught=false;
+        try {
+            source.paint(request,[&](unsigned x,unsigned y,PixelBlock block) {
+                source=replace?replacement:BitmapSource{};
+                check(!lifetime.expired(),"Receiver released the executing producer's captured pixels");
+                image.blit(x,y,block);
+                ++calls;
+                if(fail)throw Error("Receiver failed after releasing the source");
+            });
+        } catch(const Error&) {
+            if(!fail||calls!=1)throw;
+            caught=true;
+        }
+        check(caught==fail&&calls==(fail?1U:2U),"Source replacement interrupted or restarted the executing producer");
+        check(lifetime.expired(),"Completed or failed paint retained its released producer");
+        check(image.pixels()==std::vector<unsigned char>({42,static_cast<unsigned char>(fail?0:73)}),
+              "Source release corrupted borrowed pixels");
+        check(replacement_calls==0,"Replacement source ran before the original paint returned");
+        source.paint(request,{});
+        check(replacement_calls==(replace?1U:0U),"Later paint did not use the receiver's replacement source");
+    }
+    // Retaining the callable must preserve its state across paints, including
+    // a retry after a producer failure; copying the callable per paint does not.
+    BitmapSource retry([attempts=0](const BitmapRequest&,const BitmapSink& sink,bool) mutable {
+        if(attempts++==0)throw Error("Transient producer failure");
+        const unsigned char pixel=42;
+        sink(0,0,{1,1,1,PixelFormat::gray8,&pixel});
+    });
+    rejected([&]{retry.paint(request,{});},"Transient producer failure was swallowed");
+    unsigned calls=0;
+    retry.paint(request,[&](unsigned,unsigned,PixelBlock block) {
+        check(block.pixels[0]==42,"Retried producer lost its pixels");++calls;
+    });
+    check(calls==1,"Retaining the producer reset its retry state");
+    BitmapSource(BitmapSource::Paint{}).paint(request,{});
 }
 inspection::PatternSpace pattern_fixture() {
     inspection::PatternSpace model;
@@ -169,7 +219,7 @@ void qr_and_patterns() {
 }
 int main() {
     try {
-        transfer_contract(); tiled_replay(); measured_plots(); qr_and_patterns();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); qr_and_patterns();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

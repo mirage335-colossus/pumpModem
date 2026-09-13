@@ -230,6 +230,9 @@ On repaint the adapter
 provides actual backing-pixel dimensions, damage bounds, sample aspect ratio and
 pixel capabilities. The source emits borrowed pixel rectangles through
 `BitmapSink`; the adapter copies them synchronously or retains its own storage.
+Each paint retains the executing producer and its captured data until it returns
+or unwinds, even if the receiver releases or replaces the source during delivery.
+Replacement takes effect on subsequent paints.
 Rectangles
 may span multiple rows, use padded strides and arrive in different supported
 formats. Native transfer batching must not impose producer-specific block sizes.
