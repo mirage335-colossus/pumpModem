@@ -78,6 +78,11 @@ if(BUILD_TESTING)
   add_executable(test_gui_contract tests/test_gui_contract.cpp)
   target_include_directories(test_gui_contract PRIVATE src/gui)
   add_test(NAME gui_contract COMMAND test_gui_contract)
+  # Compile the same canary with the adapter's actual application dependency.
+  # This catches modem include paths leaking back through PUBLIC target usage.
+  add_executable(test_gui_link_boundary tests/test_gui_contract.cpp)
+  target_link_libraries(test_gui_link_boundary PRIVATE datapump_gui_application)
+  add_test(NAME gui_link_boundary COMMAND test_gui_link_boundary)
   add_executable(test_document_layout tests/test_document_layout.cpp)
   target_include_directories(test_document_layout PRIVATE src/gui)
   add_test(NAME gui_document_layout COMMAND test_document_layout)
@@ -108,10 +113,10 @@ if(BUILD_TESTING)
   add_test(NAME gui_inspection_page COMMAND test_inspection_page)
   add_executable(test_gui_controller tests/test_gui_controller.cpp)
   target_include_directories(test_gui_controller PRIVATE src/gui)
-  target_link_libraries(test_gui_controller PRIVATE datapump_gui_application)
+  target_link_libraries(test_gui_controller PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_controller COMMAND test_gui_controller)
   add_executable(test_gui_application tests/test_gui_application.cpp)
-  target_link_libraries(test_gui_application PRIVATE datapump_gui_application)
+  target_link_libraries(test_gui_application PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_application COMMAND test_gui_application)
   add_test(NAME gui_adapter_boundary COMMAND ${CMAKE_COMMAND}
     -DROOT=${CMAKE_CURRENT_SOURCE_DIR} -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_adapter_boundary.cmake)
@@ -158,7 +163,7 @@ if(BUILD_TESTING)
       set_tests_properties(gui_adapter_conformance PROPERTIES LABELS "gui;native_gui" TIMEOUT 330 RUN_SERIAL TRUE)
     endif()
   endif()
-  set_tests_properties(gui_layout gui_contract gui_document_layout gui_interactions gui_services gui_inspection gui_pattern_space
+  set_tests_properties(gui_layout gui_contract gui_link_boundary gui_document_layout gui_interactions gui_services gui_inspection gui_pattern_space
     gui_plots gui_bitmaps gui_inspection_page gui_controller gui_application gui_adapter_boundary gui_boundary_regression gui_native_policy
     PROPERTIES LABELS "gui")
   if(UNIX)

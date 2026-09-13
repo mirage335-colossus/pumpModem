@@ -118,6 +118,47 @@ int main() {
         view->update(geometry_document.children[6]);Fl::check();
         require(!border_probe->requests.empty()&&border_probe->requests.back().width==98&&border_probe->requests.back().height==48,
             "FLTK zero-padding document bitmap painted over its declared border");
+        auto action_document=datapump::gui::test::document_actions_fixture();
+        const auto second_action=[&] {
+            auto* body=dynamic_cast<Fl_Group*>(view->child(0));
+            auto* nested=dynamic_cast<Fl_Group*>(body->child(body->children()-1));
+            return dynamic_cast<Fl_Button*>(nested->child(0));
+        };
+        view->update(action_document);button=second_action();button->take_focus();
+        const auto actions_before=actions;
+        action_document.children.insert(action_document.children.begin(),label("Inserted heading",100));
+        view->update(action_document);
+        require(Fl::focus()==second_action()&&actions==actions_before,
+            "Repeated document command focus changed after a shared tree insertion");
+        second_action()->do_callback();require(actions==actions_before+1,"Repeated document action lost dispatch");
+        // Move the first command after the nested second command, then remove
+        // it. Explicit action identity must survive both changes.
+        auto first_action=action_document.children[1];action_document.children.erase(action_document.children.begin()+1);
+        action_document.children.back().children.push_back(first_action);view->update(action_document);
+        require(Fl::focus()==second_action(),"Reordering repeated document actions transferred native focus");
+        action_document.children.back().children.pop_back();view->update(action_document);
+        require(Fl::focus()==second_action(),"Removing another document action instance lost native focus");
+        action_document.children.back().enabled=false;view->update(action_document);
+        second_action()->do_callback();
+        require(Fl::focus()!=second_action()&&actions==actions_before+1,
+            "Disabled document ancestor retained focus or allowed a command");
+        action_document.children.back().enabled=true;view->update(action_document);second_action()->take_focus();
+        view->deactivate();view->update(action_document);second_action()->do_callback();
+        require(Fl::focus()!=second_action()&&actions==actions_before+1,
+            "Disabled native document host retained focus or allowed a command");
+        view->activate();view->update(action_document);second_action()->take_focus();
+        action_document.children.back().children={first_action};view->update(action_document);
+        require(Fl::focus()!=second_action(),"Removing a focused document action transferred focus to another instance");
+        view->hide();second_action()->do_callback();
+        require(actions==actions_before+1,"Hidden document host allowed a stale native action callback");
+        view->show();
+        second_action()->deactivate();second_action()->do_callback();
+        require(actions==actions_before+1,"Disabled native document action dispatched a command");
+        auto empty_action_document=datapump::gui::test::document_empty_action_fixture();view->update(empty_action_document);
+        find_button(*view)->take_focus();empty_action_document.width=50;view->update(empty_action_document);
+        button=find_button(*view);button->do_callback();
+        require(button->w()==0&&!button->visible_r()&&Fl::focus()!=button&&!button->take_focus()&&actions==actions_before+1,
+            "Empty document action retained native focus or dispatched a command");
         window.hide();
         std::cout<<"FLTK generic document checks passed.\n";
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}

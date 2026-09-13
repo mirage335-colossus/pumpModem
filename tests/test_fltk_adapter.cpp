@@ -79,7 +79,7 @@ void editors_and_records() {
     require(Fl::focus()==editor,"Silent text update reset native focus");
     editor->buffer()->insert(editor->buffer()->length(),"!");require(changes==1,"Native buffer edit did not emit one change");
     editor->apply("A\xc3\xa9" "B");editor->insert_position(3);editor->buffer()->select(1,3);
-    editor->validate=[](std::string_view value){return ui::edit_error(value,true,6);};
+    editor->byte_limit=6;
     unsigned errors=0;editor->error=[&](std::string){++errors;};
     require(!editor->paste("too long"),"Oversized native paste was accepted");
     require(!editor->paste(std::string("\xc3",1)),"Invalid UTF-8 native paste was accepted");
@@ -87,10 +87,16 @@ void editors_and_records() {
     require(buffer_text(*editor->buffer())=="A\xc3\xa9" "B"&&editor->insert_position()==3&&start==1&&end==3&&errors==2&&changes==1,
             "Rejected native paste changed UTF-8 buffer, cursor, selection or controller notification");
     require(editor->paste("\xf0\x9f\x8c\x8d")&&buffer_text(*editor->buffer())=="A\xf0\x9f\x8c\x8d" "B","UTF-8 byte-limit paste rejected a valid boundary value");
+    editor->buffer()->select(1,5);const auto before_same=changes;
+    require(!editor->paste("\xf0\x9f\x8c\x8d")&&changes==before_same&&editor->buffer()->selection_position(&start,&end)&&start==1&&end==5,
+            "Identical multiline replacement changed selection or emitted an edit");
     NativeInput input;input.value("A\xc3\xa9" "B");input.insert_position(3,1);
-    input.validate=[](std::string_view value){return ui::edit_error(value,false,6);};
+    input.byte_limit=6;
     require(!input.paste("line\nbreak")&&!input.paste("12345"),"Single-line native paste accepted newline or byte overflow");
     require(std::string(input.value())=="A\xc3\xa9" "B"&&input.insert_position()==3&&input.mark()==1,"Rejected single-line paste lost native selection");
+    require(!input.paste("\xc3\xa9")&&input.insert_position()==3&&input.mark()==1,"Identical single-line replacement changed native selection");
+    input.value("abcd");input.insert_position(2,1);input.apply("\xf0\x9f\x8c\x8d");
+    require(input.insert_position()==0&&input.mark()==0,"Silent single-line update retained offsets inside a replacement UTF-8 character");
     bool submitted=false;input.submit=[&](bool ctrl,bool shift){submitted=ctrl&&shift;return true;};
     const auto previous_key=Fl::e_keysym,previous_state=Fl::e_state;Fl::e_keysym=FL_Enter;Fl::e_state=FL_CTRL|FL_SHIFT;
     require(input.handle(FL_KEYDOWN)!=0&&submitted,"Single-line native editor ignored its declared submit action");
@@ -115,6 +121,13 @@ void editors_and_records() {
     require(record_widget(*records,"row 10")==retained,"Removing an older row changed stable record identity");
     state.records.front().cells.front().text=std::string(500,'W');records->apply(state);Fl::check();
     require(records->hscrollbar.visible(),"Long pending text has no native horizontal scrollbar");
+    auto fixed=state;fixed.records.front().cells.front().text="Fixed extent";fixed.records.front().cells.front().w=900;
+    records->apply(fixed);Fl::check();
+    auto* fixed_row=record_widget(*records,"Fixed extent");
+    require(fixed_row&&fixed_row->w()>=908&&records->hscrollbar.visible(),"Fixed-width record cell did not contribute to shared horizontal extent");
+    fixed.records.front().cells.front().w=0;fixed.records.front().cells.front().text=std::string(500,'W');records->apply(fixed);Fl::check();
+    require(records->hscrollbar.visible(),"Zero-inset remaining-width record cell clipped long text");
+    records->apply(state);
     records->scroll_to(0,0);state.selected="5";records->apply(state);
     const auto navigation_key=Fl::e_keysym;Fl::e_keysym=FL_Down;records->handle(FL_KEYDOWN);Fl::e_keysym=navigation_key;
     auto* revealed=record_widget(*records,"row 6");require(revealed,"Keyboard reveal fixture lost its selected record");
@@ -244,6 +257,28 @@ void extension_controls() {
     require(literal_menu_text(menu->menu()[0].label())=="Clear from shared menu","Filtered native menu lost its shared label");
     menu->picked(menu->menu());
     require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Filtered native menu dispatched the wrong shared entry");
+    auto* empty_action=find_button(*window,"Empty action");
+    require(empty_action&&empty_action->w()==0&&!empty_action->visible_r()&&!empty_action->take_focus(),
+        "Zero-stretch action retained native width, visibility or keyboard focus");
+    auto* narrow_label=find_label(*window,"Narrow presets");require(narrow_label,"Narrow preset fixture is missing");
+    NativeInput* narrow_input=nullptr;Fl_Menu_Button* narrow_presets=nullptr;
+    for(int i=0;i<narrow_label->parent()->children();++i) {
+        if(auto* input=dynamic_cast<NativeInput*>(narrow_label->parent()->child(i)))narrow_input=input;
+        if(auto* presets=dynamic_cast<Fl_Menu_Button*>(narrow_label->parent()->child(i)))narrow_presets=presets;
+    }
+    require(narrow_input&&narrow_input->w()==0&&!narrow_input->visible_r()&&!narrow_input->take_focus()&&
+        narrow_presets&&narrow_presets->w()>0&&narrow_presets->visible_r(),
+        "Empty editor retained native focus or hid its allocated preset button");
+    NativeBitmap* empty_bitmap=nullptr;
+    const std::function<void(Fl_Group&)> locate_bitmap=[&](Fl_Group& parent) {
+        for(int i=0;i<parent.children();++i) {
+            if(auto* bitmap=dynamic_cast<NativeBitmap*>(parent.child(i)))empty_bitmap=bitmap;
+            if(auto* nested=dynamic_cast<Fl_Group*>(parent.child(i)))locate_bitmap(*nested);
+        }
+    };
+    locate_bitmap(*window);require(empty_bitmap&&empty_bitmap->w()==0&&!empty_bitmap->visible_r(),"Empty bitmap retained a native drawable area");
+    auto empty_probe=std::make_shared<datapump::gui::test::BitmapProbe>();empty_bitmap->set(datapump::gui::test::rectangle_bitmap(empty_probe));
+    window->redraw();Fl::check();require(empty_probe->requests.empty(),"Empty native bitmap requested synthetic backing pixels");
     action->do_callback();require(app.application.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Shared extension action did not reach the common controller");
     datapump::gui::test::relabel_extension_controls(declarations);
     const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);

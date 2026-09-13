@@ -70,10 +70,11 @@ bool Application::finished() const { return impl_->controller.ready_to_close(); 
 int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
 void Application::close() { impl_->controller.close(); }
 bool Application::closing() const { return impl_->controller.closing(); }
-void Application::edit(ui::Field field,std::string text) { impl_->controller.edit(field,std::move(text)); }
+void Application::edit(ui::Field field,std::string text) {
+    if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.edit(field,std::move(text));
+}
 void Application::edit(const ui::Control& declaration,std::string text) {
-    const auto view=control(declaration);
-    if(declaration.field==ui::Field::count||!view.enabled||!view.visible)return;
+    if(declaration.field==ui::Field::count||!accepts_input(declaration))return;
     if(const auto problem=ui::edit_error(declaration,text);!problem.empty()) {report_error(problem);return;}
     edit(declaration.field,std::move(text));
 }
@@ -82,12 +83,32 @@ void Application::preset(const ui::Control& declaration,const std::string& id) {
     const auto found=std::find_if(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
     if(found!=options.end())edit(declaration,found->id);
 }
-void Application::select(ui::Field field,std::string id) { impl_->controller.select(field,std::move(id)); }
-void Application::toggle(ui::Field field,bool value) { impl_->controller.toggle(field,value); }
-void Application::activate(ui::Command command) { impl_->controller.activate(command); }
+void Application::select(ui::Field field,std::string id) {
+    if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.select(field,std::move(id));
+}
+void Application::select(const ui::Control& declaration,std::string id) {
+    if((declaration.kind==ui::Kind::choice||declaration.kind==ui::Kind::list)&&accepts_input(declaration))
+        select(declaration.field,std::move(id));
+}
+void Application::toggle(ui::Field field,bool value) {
+    if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.toggle(field,value);
+}
+void Application::toggle(const ui::Control& declaration,bool value) {
+    if(declaration.kind==ui::Kind::toggle&&accepts_input(declaration))toggle(declaration.field,value);
+}
+void Application::activate(ui::Command command) { if(!closing())impl_->controller.activate(command); }
 void Application::activate(const ui::Control& declaration) {
+    if(accepts_input(declaration))activate(declaration.command);
+}
+void Application::gesture(const ui::Control& declaration,ui::Command command) {
+    if(command==ui::Command::none)return;
+    if(command!=declaration.click&&command!=declaration.double_click&&command!=declaration.wheel_up&&command!=declaration.wheel_down)return;
+    if(accepts_input(declaration)&&enabled(command))activate(command);
+}
+bool Application::accepts_input(const ui::Control& declaration) const {
+    if(closing()||(!declaration.persistent&&declaration.page!=page()))return false;
     const auto view=control(declaration);
-    if(view.enabled&&view.visible)activate(declaration.command);
+    return view.enabled&&view.visible;
 }
 ControlPresentation Application::control(const ui::Control& declaration) const {
     static const ui::FieldState empty;
@@ -131,12 +152,11 @@ bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
     if(control.submit==ui::Command::none||shift)return false;
     const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
     if(ctrl!=wants_ctrl)return false;
-    const auto view=this->control(control);
-    if(view.enabled&&view.visible&&impl_->controller.enabled(control.submit))impl_->controller.activate(control.submit);
+    if(accepts_input(control)&&impl_->controller.enabled(control.submit))impl_->controller.activate(control.submit);
     return true; // Consume the declared submit gesture even when unavailable.
 }
 void Application::activate_record(const ui::Control& control,const std::string& id) {
-    if(control.activate_record==ui::Command::none||control.field==ui::Field::count)return;
+    if(control.activate_record==ui::Command::none||control.field==ui::Field::count||!accepts_input(control))return;
     const auto& state=impl_->controller.field(control.field);
     const auto found=std::find_if(state.records.begin(),state.records.end(),[&](const auto& record){return record.id==id;});
     if(!state.enabled||!state.visible||found==state.records.end()||!found->enabled||!found->activatable)return;

@@ -4,6 +4,54 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## GUI abstraction audit and completion
+
+The review traced native entry points and helpers, the public facade, control
+and document declarations, layout, editor/record input, bitmap transfers,
+platform-service dispatch, and CMake/CI dependencies. Three parallel reviews
+covered controls, documents/layout, and boundary enforcement, followed by an
+integration review and native regressions.
+
+Remaining gaps were corrected: exported modem include paths; stale declared
+callbacks after visibility, page or shutdown changes; duplicated UTF-8 edit and
+record extent policy; Rev horizontal record scrolling and stale native glyph
+measurement; duplicated document action identity/eligibility; unstable focus
+when repeated document actions move; and zero/exhausted control allocations.
+Native adapters now translate these shared decisions into toolkit operations.
+The window title also comes from the shared declaration module.
+
+The architecture check now runs in production builds, recursively checks
+alternate source extensions and helper aliases, and rejects hidden toolkit or
+backend-specific dependencies in shared code. Regression mutations cover both
+forbidden dependencies and valid constructs that must remain accepted. All 17
+public headers compiled individually as C++20 without modem/toolkit include
+paths. A separate linked contract canary verifies that the application target
+does not export modem include directories. A fresh `BUILD_TESTING=OFF` FLTK
+configuration also passed its production boundary target.
+
+Linux Release FLTK passed all 20 GUI tests, including the simulated workflow,
+native adapter and document suites. The broader 45-test run passed 44 initially;
+its live-simulation timeout passed when rerun alone (31.8 seconds). Native package
+relocation and corruption checks passed. ASan/UBSan passed all 19 GUI checks other
+than the separately validated workflow, with leak detection disabled for the
+native toolkit environment. These include the actual FLTK widget/document tests.
+
+Linux Release Rev passed all 22 GUI tests, including production workflow, native
+adapter workflow, clipboard/platform checks and 1x/2x coordinates. The exact
+profile was software OpenGL, `LP_NUM_THREADS=2`, and Xvfb at 2400x1800x24 with
+96 DPI. The native probes also verify zero-area document rectangles, retained
+action resizing and framebuffer extents from physical pixel endpoints. Rev
+record measurements and geometry now avoid invalidating unchanged rows.
+The default llvmpipe thread configuration repeatedly missed the final 50 ms
+raw-replay symbol observation on this host; the bounded profile passed the same
+unchanged assertions and is now used in the GUI-contract CI matrix. See
+[Rev software rendering](rev-backend.md#software-rendering-and-validation).
+
+The maintenance scope remains features expressed with existing primitives.
+New native primitive types, toolkit repairs and platform services still need
+adapter implementations. These Linux runs do not establish Windows runtime
+conformance or hardware audio validation.
+
 ## Rev backend and shared bitmap extraction
 
 The optional Rev backend pins upstream `clean` at

@@ -29,6 +29,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     return control;
 }
 }
+const char* window_title() {return "Data Pump";}
 const std::vector<PageDefinition>& pages() {
     static const std::vector<PageDefinition> definitions{
         {Page::console,"console","Console",false,86},

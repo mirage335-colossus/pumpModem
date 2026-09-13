@@ -1,7 +1,16 @@
 // Compile the public interface without a modem or native-toolkit dependency.
+#if __has_include("datapump/live.hpp") || __has_include("datapump/modem.hpp")
+#error "The GUI facade exposes the application's private modem include path."
+#endif
 #include "application.hpp"
+#include "control_binding.hpp"
+#include "control_interactions.hpp"
+#include "document_actions.hpp"
 #include "document_layout.hpp"
 #include "presentation_palette.hpp"
+#include "record_interactions.hpp"
+#include "record_scroll.hpp"
+#include "service_queue.hpp"
 #include "text_policy.hpp"
 #include <concepts>
 #include <iostream>
@@ -11,11 +20,13 @@ template<class T> concept ExposesController = requires(T& value) { value.control
 template<class T> concept ExposesProducers = requires(T& value) { value.bitmaps; };
 template<class T> concept ExposesModem = requires(T& value) { value.snapshot(); value.settings(); };
 template<class T> concept ExposesInspection = requires(T& value) { value.inspection(); };
+template<class T> concept ExposesImplementation = requires(T& value) { value.impl_; };
 template<class T> concept HasDomainFactory = requires { T::codeword(1, 1); };
 
 using namespace datapump::gui;
 static_assert(!ExposesController<Application> && !ExposesProducers<Application>);
 static_assert(!ExposesModem<Application> && !ExposesInspection<Application>);
+static_assert(!ExposesImplementation<Application>);
 static_assert(!HasDomainFactory<BitmapSource>);
 static_assert(std::same_as<decltype(ui::DocumentNode{}.plot), BitmapSource>);
 static_assert(std::same_as<decltype(BitmapPresentation{}.source), BitmapSource>);

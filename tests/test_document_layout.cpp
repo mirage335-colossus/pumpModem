@@ -1,4 +1,5 @@
 #include "document_layout.hpp"
+#include "document_actions.hpp"
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -84,9 +85,52 @@ void text_and_equal_height() {
     action.text="Action";action.padding=3;
     require(ui::layout_document(action,100,glyph_height).height==31,"Action clearance or padding became toolkit policy");
 }
+void action_identity_and_eligibility() {
+    ui::DocumentNode action;action.kind=ui::DocumentKind::action;action.command=ui::Command::clear_received;
+    ui::DocumentNode root;root.children={action,text("heading"),action};
+    // Unrendered leaf children cannot reserve occurrences or dispatch actions.
+    root.children[1].children={action};
+    ui::DocumentActions actions;actions.reset(&root);
+    const ui::DocumentActionIdentity first{action.command,0},second{action.command,1};
+    require(actions.find(&root.children[0])->identity==first && actions.find(&root.children[2])->identity==second,
+        "Document action identity depended on non-rendered leaf children");
+    require(!actions.find(&root.children[1].children[0]),"Leaf descendants became actionable");
+    require(actions.enabled(first)&&actions.restore_focus(second)==second,"Enabled repeated action lost its identity");
+    // Different commands and non-action tree insertions retain occurrence IDs.
+    auto another=action;another.command=ui::Command::reset_zoom;
+    ui::DocumentNode nested;nested.children={another,root.children[2]};root.children[2]=nested;
+    actions.reset(&root);
+    require(actions.find(&root.children[2].children[1])->identity==second && actions.restore_focus(second)==second,
+        "Nested action focus changed after an unrelated insertion");
+    root.children[2].enabled=false;actions.reset(&root);
+    require(actions.enabled(first)&&!actions.enabled(second)&&!actions.restore_focus(second),
+        "Disabled document ancestor retained an actionable or focusable descendant");
+    root.enabled=false;actions.reset(&root);
+    require(!actions.enabled(first)&&!actions.restore_focus(first),"Disabled root retained action input");
+    root.enabled=true;root.children.resize(1);actions.reset(&root);
+    require(!actions.find(second)&&!actions.restore_focus(second),"Removed command occurrence retained focus");
+    root.children[0].command=ui::Command::reset_zoom;actions.reset(&root);
+    require(!actions.restore_focus(first),"Replacing a command transferred document focus");
+    auto stable_first=action;stable_first.instance=17;
+    auto stable_second=action;stable_second.instance=28;
+    root.children={stable_first,stable_second};actions.reset(&root);
+    const auto stable_focus=actions.find(&root.children[1])->identity;
+    std::swap(root.children[0],root.children[1]);actions.reset(&root);
+    require(actions.find(&root.children[0])->identity==stable_focus && actions.restore_focus(stable_focus)==stable_focus,
+        "Reordering repeated document actions changed explicit identity");
+    root.children.pop_back();actions.reset(&root);
+    require(actions.restore_focus(stable_focus)==stable_focus,"Removing another command instance changed document focus");
+    root.children={stable_first};actions.reset(&root);
+    require(!actions.restore_focus(stable_focus),"Removed explicit action transferred focus to another instance");
+    root.children={stable_first,stable_first};bool duplicate_rejected=false;
+    try {actions.reset(&root);}catch(const std::invalid_argument&) {duplicate_rejected=true;}
+    require(duplicate_rejected,"Duplicate explicit document action identity was accepted");
+    actions.reset(nullptr);
+    require(!actions.find(first)&&!actions.restore_focus(std::nullopt),"Clearing a document retained actions");
+}
 }
 int main() {
-    try {relative_widths();padding_and_columns();text_and_equal_height();
+    try {relative_widths();padding_and_columns();text_and_equal_height();action_identity_and_eligibility();
         std::cout<<"Shared document layout checks passed.\n";
     }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

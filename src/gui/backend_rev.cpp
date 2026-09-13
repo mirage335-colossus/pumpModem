@@ -125,9 +125,7 @@ struct Editor : re::Text {
     }
     ~Editor() override {*alive=false;}
     static int boundary(const std::string& value,int position) {
-        position=std::clamp(position,0,static_cast<int>(value.size()));
-        while(position>0 && position<static_cast<int>(value.size()) && (static_cast<unsigned char>(value[static_cast<std::size_t>(position)])&0xc0)==0x80) --position;
-        return position;
+        return ui::text_boundary(value,position);
     }
     void clamp_positions() {
         const auto& value=content.get();cursor=boundary(value,cursor);
@@ -136,18 +134,12 @@ struct Editor : re::Text {
     void apply(const std::string& value) {if(content.get()!=value){content=value;clamp_positions();}}
     bool replace(const std::string& input) {
         if(!editable || targetFlags.disabled) return false;
-        if(const auto message=ui::edit_error(input,multiline,std::numeric_limits<std::size_t>::max());!message.empty()) {
-            if(error)error(message);return false;
-        }
-        auto proposed=content.get();
-        int left=boundary(proposed,std::min(selectAnchor,selectEnd)),right=boundary(proposed,std::max(selectAnchor,selectEnd));
-        if(left==right)left=right=boundary(proposed,cursor);
-        proposed.replace(static_cast<std::size_t>(left),static_cast<std::size_t>(right-left),input);
-        if(const auto message=ui::edit_error(proposed,multiline,limit);!message.empty()) {if(error)error(message);return false;}
-        if(proposed==content.get()) return false;
+        const auto edit=ui::text_edit(content.get(),{cursor,selectAnchor,selectEnd},input,multiline,limit);
+        if(!edit.error.empty()&&error)error(edit.error);
+        if(!edit)return false;
         resetVerticalCursor();
-        content=proposed;cursor=left+static_cast<int>(input.size());selectAnchor=selectEnd=cursor;
-        if(changed) changed(proposed);
+        content=edit.text;cursor=edit.cursor;selectAnchor=selectEnd=cursor;
+        if(changed) changed(edit.text);
         if(shared && shared->event) refresh(*shared->event);
         return true;
     }
@@ -261,32 +253,26 @@ struct ChoiceView : re::Dropdown {
     }
 };
 
-struct RecordText : re::Text {
-    using re::Text::Text;
-    void mouseWheel(re::Event& event) override {
-        const auto wheel=event.mouse.wheel;
-        if(event.keyboard.shift&&wheel.x==0) {event.mouse.wheel.x=wheel.y;event.mouse.wheel.y=0;}
-        re::Text::mouseWheel(event);event.mouse.wheel=wheel;
-    }
-};
-
 struct ListView : re::Box {
     struct RecordRow {
         re::Button* button=nullptr;
         std::vector<re::Text*> cells;
         ui::Record record;
+        int intrinsic_width=1;
+        bool measure_dirty=true,geometry_dirty=true;
     };
     std::map<std::string,RecordRow> rows;
     std::vector<std::string> order;
     std::function<void(std::string)> select,activate;
     re::Text* empty=nullptr;
-    bool color,follow_tail,restore_scroll=false;
-    ui::RecordScroll scroll;
+    bool color,follow_tail,restore_scroll=false,measure_pending=false;
+    ui::RecordScroll scroll,horizontal_scroll;
     ui::RecordInteractions interactions;
-    int row_height,width=1,height=1;
+    int row_height,width=1,height=1,content_width=1;
+    float measured_scale=0;
     ListView(re::Element* parent,const ui::Control& control,bool colored)
         :re::Box(parent,{&column}),color(colored),follow_tail(control.follow_tail),interactions(control.activate_on_select),row_height(control.list_row_height) {
-        style->overflow=Overflow::Hide;style->scroll=Scroll::Vertical;
+        style->overflow=Overflow::Hide;style->scroll=Scroll::Both;
         style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
         empty=new re::Text(this,control.empty_text,{&smallText});
         empty->style->text.size=Px(control.font_size);
@@ -308,9 +294,13 @@ struct ListView : re::Box {
         return std::max(0.0,static_cast<double>(order.size())*row_height-height);
     }
     void capture_scroll() {
-        if(!hidden_page()&&!restore_scroll)scroll.capture(resolved.scroll.y,maximum_scroll());
+        if(!hidden_page()&&!restore_scroll) {
+            scroll.capture(resolved.scroll.y,maximum_scroll());
+            horizontal_scroll.capture(resolved.scroll.x,std::max(0,content_width-width));
+        }
     }
     void computePrimitives(re::Event& event) override {
+        if(measure_pending)layout_rows();
         if(!hidden_page()) {
             if(restore_scroll) {
                 const float extent=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
@@ -318,10 +308,16 @@ struct ListView : re::Box {
                     shared->layoutDirty=true;refresh(event);re::Box::computePrimitives(event);return;
                 }
                 resolved.scroll.y=static_cast<float>(scroll.target(maximum_scroll(),follow_tail));
+                resolved.scroll.x=static_cast<float>(horizontal_scroll.target(std::max(0,content_width-width),false));
                 restore_scroll=false;shared->layoutDirty=true;refresh(event);
             } else capture_scroll();
         }
         re::Box::computePrimitives(event);
+    }
+    void mouseWheel(re::Event& event) override {
+        const auto wheel=event.mouse.wheel;
+        if(event.keyboard.shift&&wheel.x==0) {event.mouse.wheel.x=wheel.y;event.mouse.wheel.y=0;}
+        re::Box::mouseWheel(event);event.mouse.wheel=wheel;
     }
     void retain_for_page_change() {
         capture_scroll();
@@ -330,7 +326,7 @@ struct ListView : re::Box {
     void resize_content(int w,int h) {
         capture_scroll();restore_scroll=restore_scroll||hidden_page();width=w;height=h;
         place(empty,{15,std::max(0,(h-20)/2),std::max(1,w-30),20});
-        for(auto& [id,row]:rows)layout_cells(row);
+        layout_rows();
         resolved.scroll.y=static_cast<float>(scroll.target(maximum_scroll(),follow_tail));
     }
     re::Button* navigate(re::Element* current,int direction) {
@@ -345,11 +341,37 @@ struct ListView : re::Box {
         return action.dispatch([this](const auto& id){if(select)select(id);},[this](const auto& id){if(activate)activate(id);});
     }
     void layout_cells(RecordRow& row) {
-        row.button->style->size={Px(width),Px(row_height)};
+        row.button->style->size={Px(content_width),Px(row_height)};
         for(std::size_t i=0;i<row.cells.size();++i) {
             const auto& cell=row.record.cells[i];
-            place(row.cells[i],ui::record_cell_rect(cell,width));
+            place(row.cells[i],ui::record_cell_rect(cell,content_width));
         }
+    }
+    void layout_rows() {
+        int measured=std::max(1,width);measure_pending=false;
+        const auto scale=shared->canvas->details.scale;
+        for(auto& [id,row]:rows) {
+            if(measured_scale!=scale)row.measure_dirty=true;
+            if(row.measure_dirty) {
+                row.measure_dirty=false;
+                row.intrinsic_width=ui::record_content_width(row.record,1,[&](const auto&,std::size_t index) {
+                    auto* text=row.cells[index];
+                    if(shared->event&&(!text->font||text->strContent!=text->content.get()||text->dirty.style||text->style->dirty||text->styles.dirty||measured_scale!=scale))text->resolveStyle(*shared->event);
+                    if(!text->font) {row.measure_dirty=true;measure_pending=true;return 0.0f;}
+                    text->layoutText();return text->width;
+                });
+            }
+            measured=std::max(measured,row.intrinsic_width);
+        }
+        measured_scale=scale;
+        const bool resized=measured!=content_width;
+        if(resized||measure_pending)shared->layoutDirty=true;
+        content_width=measured;
+        // A changing pending row must not invalidate every settled native text
+        // primitive. Remeasure only changed rows; place all rows only when the
+        // shared horizontal extent actually changes.
+        for(auto& [id,row]:rows)if(resized||row.geometry_dirty) {layout_cells(row);row.geometry_dirty=false;}
+        resolved.scroll.x=static_cast<float>(horizontal_scroll.target(std::max(0,content_width-width),false));
     }
     void apply(const ui::FieldState& state) {
         interactions.apply(state);
@@ -374,12 +396,12 @@ struct ListView : re::Box {
                 });
             }
             if(row.record!=record || inserted) {
-                changed=true;row.record=record;
+                changed=true;row.record=record;row.measure_dirty=row.geometry_dirty=true;
                 while(row.cells.size()>record.cells.size()) {delete row.cells.back();row.cells.pop_back();}
                 while(row.cells.size()<record.cells.size()) {
-                    auto* text=new RecordText(row.button,"");
+                    auto* text=new re::Text(row.button,"");
                     text->style->text.wrap=Wrap::False;text->style->overflow=Overflow::Hide;
-                    text->style->scroll=Scroll::Horizontal;row.cells.push_back(text);
+                    text->style->scroll=Scroll::None;row.cells.push_back(text);
                 }
                 for(std::size_t i=0;i<record.cells.size();++i) {
                     const auto& cell=record.cells[i];auto* text=row.cells[i];text->content=cell.text;
@@ -387,15 +409,15 @@ struct ListView : re::Box {
                     const auto foreground=theme::text_rgb(cell.tone,color);
                     text->style->text.color=rgba(foreground.red,foreground.green,foreground.blue,1);
                 }
-                layout_cells(row);
             }
             row.button->setDisabled(!state.enabled||!record.enabled);
             if(record.id==state.selected)row.button->styles.add(&selectedStyle);else row.button->styles.remove(&selectedStyle);
             order.push_back(record.id);children_order.push_back(row.button);
         }
         // Reuse and reorder widgets by record identity so selection, focus and
-        // each long cell's horizontal scroll survive snapshot replacement.
+        // the list's shared horizontal scroll survive snapshot replacement.
         children=std::move(children_order);
+        if(changed)layout_rows();
         empty->style->visibility=order.empty()?Visibility::Visible:Visibility::Hidden;
         resolved.scroll.y=static_cast<float>(scroll.target(maximum_scroll(),follow_tail));
         if(changed||old_order!=order)shared->layoutDirty=true;
@@ -445,7 +467,7 @@ public:
     bool service_probe=false;
     bool smoke_layout_pending=false;
     RevApp(std::vector<void*>& windows,Launch options,std::span<const ui::Control> controls=ui::console_screen())
-        :Rev::Window(windows,{.name="Data Pump — Rev",.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{4096,4096}}}),
+        :Rev::Window(windows,{.name=ui::window_title(),.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{4096,4096}}}),
          application(options),launch(application.launch),declarations(controls),group(&windows) {
         // Native sizes are physical pixels; the shared desktop dimensions are
         // logical units, just as in FLTK at a scaled display setting.
@@ -680,17 +702,17 @@ public:
                 case ui::Kind::choice:
                     b.choice=new ChoiceView(container,{.label="",.placeholder="None",.openUpward=c.open_upward});
                     compact_dropdown(b.choice);b.choice->dropdown->tabStop=true;
-                    b.choice->onChange=[this,field=c.field,choice=b.choice](re::Event&){application.select(field,choice->params.value);};break;
+                    b.choice->onChange=[this,control=&c,choice=b.choice](re::Event&){application.select(*control,choice->params.value);};break;
                 case ui::Kind::toggle:
                     b.toggle=new re::Checkbox(container,{.label=c.label,.def=false});b.toggle->checkbox->tabStop=true;
-                    b.toggle->checkbox->onClick([this,field=c.field,toggle=b.toggle](re::Event&){application.toggle(field,toggle->value.get());});break;
+                    b.toggle->checkbox->onClick([this,control=&c,toggle=b.toggle](re::Event&){application.toggle(*control,toggle->value.get());});break;
                 case ui::Kind::action:
                     b.button=new re::Button(container,re::Button::Params::Secondary(c.label));b.button->tabStop=true;
                     b.button->styles.add(&disabledControl);b.button->labelText->styles.add(&disabledText);
                     b.button->onClick([this,control=&c](re::Event&){dispatch(*control);});break;
                 case ui::Kind::list:
                     b.list=new ListView(container,c,launch.color);
-                    b.list->select=[this,field=c.field](std::string id){application.select(field,std::move(id));};
+                    b.list->select=[this,control=&c](std::string id){application.select(*control,std::move(id));};
                     if(c.activate_record!=ui::Command::none)b.list->activate=[this,control=&c](std::string id){application.activate_record(*control,id);};
                     break;
                 case ui::Kind::bitmap:
@@ -702,7 +724,7 @@ public:
                 auto interactions=std::make_shared<ui::ControlInteractions>();
                 container->onMouseDown([this,control=&c,interactions,container](re::Event& event){
                     if(!event.mouse.lb||!allows_input(container))return;
-                    if(interactions->pointer(*control,event.mouse.pos.x,event.mouse.pos.y).dispatch([this](ui::Command command){dispatch(command);}))event.propagate=false;
+                    if(interactions->pointer(*control,event.mouse.pos.x,event.mouse.pos.y).dispatch([this,control](ui::Command command){application.gesture(*control,command);if(command_observer)command_observer(command);}))event.propagate=false;
                 });
             }
 
@@ -714,7 +736,7 @@ public:
                 container->onMouseWheel([this,control=&c,container](re::Event& event){
                     if(!allows_input(container))return;
                     // Rev reports 120 native wheel units per detent.
-                    if(ui::ControlInteractions::wheel(*control,event.mouse.wheel.y/120.0).dispatch([this](ui::Command command){dispatch(command);}))event.propagate=false;
+                    if(ui::ControlInteractions::wheel(*control,event.mouse.wheel.y/120.0).dispatch([this,control](ui::Command command){application.gesture(*control,command);if(command_observer)command_observer(command);}))event.propagate=false;
                 });
             bindings.push_back(std::move(b));
         }
@@ -732,6 +754,11 @@ public:
             const auto& c=binding.control;
             const auto geometry=ui::control_layout(c,state(c),details.size.width,details.size.height,declarations);
             auto frame=geometry.frame;if(!c.persistent){frame.x-=viewport.x;frame.y-=viewport.y;}place(binding.element,frame);
+            const bool shown=binding.menu?application.menu(binding.menu_items).visible:application.control(c).visible;
+            binding.element->style->visibility=shown&&ui::drawable(geometry.frame)?Visibility::Visible:Visibility::Hidden;
+            for(auto* widget:std::initializer_list<re::Element*>{binding.editor,binding.choice,binding.toggle,binding.button,binding.list,binding.bitmap,binding.menu})
+                if(widget)widget->style->visibility=ui::drawable(geometry.widget)?Visibility::Visible:Visibility::Hidden;
+            if(binding.suggestions)binding.suggestions->style->visibility=geometry.has_suggestions&&ui::drawable(geometry.suggestions)?Visibility::Visible:Visibility::Hidden;
             const auto local=[&](ui::Rect rect){rect.x-=geometry.frame.x;rect.y-=geometry.frame.y;return rect;};
             const auto popup=[&](ChoiceView* choice,ui::Rect screen) {
                 choice->font_size=c.font_size;
@@ -763,18 +790,20 @@ public:
         bool relayout=false;
         for(auto& b:bindings) {
             const auto presentation=application.control(b.control);
+            const auto geometry=ui::control_layout(b.control,presentation.state,details.size.width,details.size.height,declarations);
+            const bool has_area=ui::drawable(geometry.frame);
             if(b.label)b.label->content=presentation.label;
             if(b.toggle)b.toggle->label->content=presentation.label;
-            b.element->style->visibility=presentation.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!presentation.enabled);
+            b.element->style->visibility=presentation.visible&&has_area?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!presentation.enabled);
             if(b.control.field!=ui::Field::count) {
                 const auto& value=presentation.state;
                 if(b.editor){b.editor->apply(value.text);b.editor->editable=value.enabled;b.editor->setDisabled(!value.enabled);}
-                if(b.choice){b.choice->params.options.clear();for(const auto& item:value.options)b.choice->params.options.push_back({item.label,item.id,!item.enabled||!value.enabled});b.choice->params.value=value.selected;b.choice->display_text=value.display_text;if(!value.enabled)b.choice->closeMenu();}
+                if(b.choice){b.choice->params.options.clear();for(const auto& item:value.options)b.choice->params.options.push_back({item.label,item.id,!item.enabled||!value.enabled});b.choice->params.value=value.selected;b.choice->display_text=value.display_text;if(!value.enabled||!has_area||!ui::drawable(geometry.widget))b.choice->closeMenu();}
                 if(b.suggestions){
                     const bool wanted=!value.options.empty();relayout=relayout||wanted!=b.has_suggestions;b.has_suggestions=wanted;
-                    b.suggestions->style->visibility=wanted?Visibility::Visible:Visibility::Hidden;
+                    b.suggestions->style->visibility=wanted&&ui::drawable(geometry.suggestions)?Visibility::Visible:Visibility::Hidden;
                     b.suggestions->params.options.clear();for(const auto& item:value.options)b.suggestions->params.options.push_back({item.label,item.id,!item.enabled||!value.enabled});
-                    if(!value.enabled||!wanted)b.suggestions->closeMenu();
+                    if(!value.enabled||!wanted||!has_area||!ui::drawable(geometry.suggestions))b.suggestions->closeMenu();
                 }
                 if(b.toggle)b.toggle->value=value.checked;
                 if(b.list)b.list->apply(value);
@@ -782,9 +811,9 @@ public:
             if(b.button) {b.button->setDisabled(!presentation.enabled);b.button->labelText->content=presentation.label;}
             if(b.menu) {
                 const auto menu=application.menu(b.menu_items);
-                b.element->style->visibility=menu.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!menu.enabled);
+                b.element->style->visibility=menu.visible&&has_area?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!menu.enabled);
                 b.menu->params.options.clear();for(const auto& item:menu.options)b.menu->params.options.push_back({item.label,item.id,!item.enabled});
-                b.menu->setDisabled(!menu.enabled);if(!menu.visible||!menu.enabled)b.menu->closeMenu();
+                b.menu->setDisabled(!menu.enabled);if(!menu.visible||!menu.enabled||!has_area)b.menu->closeMenu();
             }
         }
         if(relayout)layout_desktop();
@@ -795,12 +824,14 @@ public:
 #endif
     void update_plots() {
         for(auto& binding:bindings)if(binding.bitmap) {
+            const auto geometry=ui::control_layout(binding.control,state(binding.control),details.size.width,details.size.height,declarations);
+            if(!ui::drawable(geometry.widget))continue;
             const auto presentation=application.bitmap(binding.control,binding.bitmap->sample_width());
             if(binding.bitmap_revision!=presentation.revision){binding.bitmap->set(presentation.source);binding.bitmap_revision=presentation.revision;}
             if(binding.label)binding.label->content=presentation.title;
             if(binding.caption) {
                 binding.caption->content=presentation.caption;
-                binding.caption->style->visibility=presentation.caption.empty()?Visibility::Hidden:Visibility::Visible;
+                binding.caption->style->visibility=presentation.caption.empty()||!ui::drawable(geometry.caption)?Visibility::Hidden:Visibility::Visible;
                 const auto foreground=theme::text_rgb(presentation.caption_tone,launch.color);
                 binding.caption->style->text.color=rgba(foreground.red,foreground.green,foreground.blue,1);
             }

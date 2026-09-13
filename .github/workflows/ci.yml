@@ -25,6 +25,8 @@ jobs:
     env:
       DEBIAN_FRONTEND: noninteractive
       LIBGL_ALWAYS_SOFTWARE: "1"
+      # Keep software rendering from saturating the UI polling thread's CPUs.
+      LP_NUM_THREADS: "2"
     steps:
       - name: Prepare shared native conformance environment
         run: |

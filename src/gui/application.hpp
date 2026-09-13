@@ -48,9 +48,12 @@ public:
     void edit(const ui::Control& control,std::string text);
     void preset(const ui::Control& control,const std::string& id);
     void select(ui::Field field,std::string option_id);
+    void select(const ui::Control& control,std::string option_id);
     void toggle(ui::Field field,bool value);
+    void toggle(const ui::Control& control,bool value);
     void activate(ui::Command command);
     void activate(const ui::Control& control);
+    void gesture(const ui::Control& control,ui::Command command);
     ControlPresentation control(const ui::Control& control) const;
     MenuPresentation menu(std::span<const ui::Control* const> items) const;
     void select_menu(std::span<const ui::Control* const> items,const std::string& id);
@@ -70,6 +73,7 @@ public:
     BitmapPresentation bitmap(const ui::Control& control,unsigned pixel_width=640) const;
     std::shared_ptr<const ui::DocumentNode> document(ui::Page page,int width);
 private:
+    bool accepts_input(const ui::Control& control) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;
 };

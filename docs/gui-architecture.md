@@ -16,13 +16,14 @@ removed.
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
 | `document_layout.hpp` | Document flow, remaining widths, margins, padding, clipping and nested equal heights; adapters supply native glyph measurements only. |
+| `document_actions.hpp` | Document action identity, inherited availability and eligibility for restoring focus after a document replacement. |
 | `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
 | `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
 | `service_queue.hpp` | Serial platform-service requests, completion identity and cancellation of current/queued work during shutdown. |
-| `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 edit policy and declaration-specific byte limits. |
+| `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 replacement proposals, caret/selection boundaries and declaration-specific byte limits. |
 | `theme.hpp`, `presentation_palette.hpp` | Shared RGB values and semantic text/document tone and fill resolution. |
-| `screen_console.cpp` | Page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
-| `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry and label/editor/preset/caption placement in logical units. |
+| `screen_console.cpp` | Window/page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
+| `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry, label/editor/preset/caption placement, and record cell/content extents in logical units. |
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
@@ -40,6 +41,10 @@ available.
 `Application::menu()` filters hidden entries and preserves their declaration IDs.
 Menu selection, action activation and presets return through shared dispatch,
 which rechecks eligibility and applies the control's edit constraints.
+Choice/list selection, toggles and gestures also return with their declaration;
+the facade rechecks visibility and availability at dispatch time. Gesture commands
+must occur in that declaration. Native state from an earlier frame cannot bypass
+these checks.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
@@ -52,6 +57,9 @@ reviewing history keeps the reader's scroll position. Both adapters use shared
 record scroll policy with native viewport and scroll measurements. Signal
 frequency, status, preamble/data measurements, message text, completion tone,
 help, empty state and copy actions are shared presentation policy.
+One shared record extent calculation reserves fixed cells and expands flexible
+cells to fit native glyph measurements. Both adapters expose the resulting width
+through the list's horizontal scroll container.
 
 ## Adding functionality once
 
@@ -111,6 +119,15 @@ application-ID decisions too. Its regression suite introduces domain includes,
 field/command/menu references, aliases and `using enum` imports, whitespace-split
 references, and toolkit dependencies in public or shared feature code; each
 forbidden dependency must be rejected. Legal sentinel aliases remain accepted.
+The check runs before building `datapump_gui_application`, including builds with
+`BUILD_TESTING=OFF`. It discovers nested sources and alternate C++ extensions,
+normalizes comments and continued lines, resolves aliases across helper headers,
+and rejects nonliteral dependencies and backend conditionals in shared features.
+Public headers accept only approved GUI headers and standard-library includes.
+This is a source architecture lint, not a general C++ parser or security boundary.
+The application library links the modem implementation privately; adapters no
+longer inherit its include directories. `gui_link_boundary` compiles the public
+contract using that actual link dependency and rejects exposed modem headers.
 `gui_contract` separately compiles the public interface
 without modem or toolkit include/link dependencies and checks that controller,
 producer and model access are unavailable, along with shared tone/fill values.
@@ -128,6 +145,9 @@ selection visibility. `gui_application` covers control/menu presentation,
 dispatch, stale submission callbacks, preset validation and persistent menu
 grouping. Native tests verify that those descriptions reach real widgets,
 refresh existing control labels and dispatch callbacks.
+Additional cases cover stale choice/toggle/gesture callbacks, shared UTF-8 edit
+proposals, record widths, zero/large stretch weights, exhausted control space,
+and document action focus and availability after tree changes.
 `gui_services` tests service ordering, completion identity and shutdown
 cancellation without a toolkit.
 Rev also checks rendered pixels when leaving deeply nested clips, so later
@@ -142,7 +162,7 @@ display. Register display-dependent tests explicitly with
 `-DDATAPUMP_TEST_NATIVE_GUI=ON`, then run:
 
 ```sh
-LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
+LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
   ctest --test-dir build-gui --output-on-failure -L gui
 ```
 

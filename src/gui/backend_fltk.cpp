@@ -160,20 +160,20 @@ public:
     ~NativeEditor() override {buffer(nullptr);}
     std::function<void(std::string)> changed;
     std::function<bool(bool,bool)> submit;
-    std::function<std::string(std::string_view)> validate;
+    std::size_t byte_limit=1024*1024;
     std::function<void(std::string)> error;
     bool paste(std::string_view text) {
         int start=insert_position(),end=start;buffer_.selection_position(&start,&end);
-        if(!acceptable(text,start,end))return false;
-        const std::string inserted(text);buffer_.replace(start,end,inserted.c_str(),static_cast<int>(inserted.size()));
-        buffer_.unselect();insert_position(start+static_cast<int>(inserted.size()));show_insert_position();return true;
+        const auto edit=propose(text,start,end);if(!edit)return false;
+        const std::string inserted(text);buffer_.replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));
+        buffer_.unselect();insert_position(edit.cursor);show_insert_position();return true;
     }
     void apply(const std::string& text) {
         if(buffer_text(buffer_)==text)return;
         const auto cursor=insert_position(),top=mTopLineNum,horizontal=mHorizOffset;
         int start=0,end=0;const bool selected=buffer_.selection_position(&start,&end)!=0;
         applying_=true;buffer_.text(text.c_str());
-        const auto clamp=[&](int position){return buffer_.utf8_align(std::clamp(position,0,buffer_.length()));};
+        const auto clamp=[&](int position){return ui::text_boundary(text,position);};
         insert_position(clamp(cursor));if(selected)buffer_.select(clamp(start),clamp(end));
         scroll(top,horizontal);applying_=false;
     }
@@ -190,17 +190,17 @@ public:
             else if(Fl::event_key()==FL_Tab)inserted="\t";
             else if(Fl::event_length()>0&&static_cast<unsigned char>(Fl::event_text()[0])>=32)inserted={Fl::event_text(),static_cast<std::size_t>(Fl::event_length())};
             int start=insert_position(),end=start;buffer_.selection_position(&start,&end);
-            if(!inserted.empty()&&!acceptable(inserted,start,end))return 1;
+            if(!inserted.empty()&&!propose(inserted,start,end))return 1;
         }
         return Fl_Text_Editor::handle(event);
     }
 private:
     Fl_Text_Buffer buffer_;
     bool applying_=false;
-    bool acceptable(std::string_view inserted,int start,int end) {
-        if(!validate)return true;
-        auto proposed=buffer_text(buffer_);proposed.replace(static_cast<std::size_t>(start),static_cast<std::size_t>(end-start),inserted);
-        const auto problem=validate(proposed);if(problem.empty())return true;if(error)error(problem);return false;
+    ui::TextEdit propose(std::string_view inserted,int start,int end) {
+        auto edit=ui::text_edit(buffer_text(buffer_),{insert_position(),start,end},inserted,true,byte_limit);
+        if(!edit.error.empty()&&error)error(edit.error);
+        return edit;
     }
 };
 
@@ -208,11 +208,16 @@ class NativeInput : public Fl_Input {
 public:
     NativeInput():Fl_Input(0,0,1,1) {}
     std::function<bool(bool,bool)> submit;
-    std::function<std::string(std::string_view)> validate;
+    std::size_t byte_limit=1024*1024;
     std::function<void(std::string)> error;
+    void apply(const std::string& text) {
+        if(text==value())return;
+        const auto selection=ui::TextSelection{insert_position(),mark(),insert_position()}.clamped(text);
+        value(text.c_str());insert_position(selection.cursor,selection.anchor);
+    }
     bool paste(std::string_view text) {
-        if(!acceptable(text))return false;
-        const std::string inserted(text);replace(std::min(insert_position(),mark()),std::max(insert_position(),mark()),inserted.c_str(),static_cast<int>(inserted.size()));return true;
+        const auto edit=propose(text);if(!edit)return false;
+        const std::string inserted(text);replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));return true;
     }
     int handle(int event) override {
         if(event==FL_PASTE) {
@@ -222,15 +227,14 @@ public:
         if(event==FL_KEYDOWN&&(Fl::event_key()==FL_Enter||Fl::event_key()==FL_KP_Enter)&&submit &&
            submit((Fl::event_state()&FL_CTRL)!=0,(Fl::event_state()&FL_SHIFT)!=0))return 1;
         if(event==FL_KEYDOWN&&!(Fl::event_state()&(FL_CTRL|FL_ALT|FL_META))&&Fl::event_length()>0&&
-           static_cast<unsigned char>(Fl::event_text()[0])>=32&&!acceptable({Fl::event_text(),static_cast<std::size_t>(Fl::event_length())}))return 1;
+           static_cast<unsigned char>(Fl::event_text()[0])>=32&&!propose({Fl::event_text(),static_cast<std::size_t>(Fl::event_length())}))return 1;
         return Fl_Input::handle(event);
     }
 private:
-    bool acceptable(std::string_view inserted) {
-        if(!validate)return true;
-        auto proposed=std::string(value());const auto start=std::min(insert_position(),mark()),end=std::max(insert_position(),mark());
-        proposed.replace(static_cast<std::size_t>(start),static_cast<std::size_t>(end-start),inserted);
-        const auto problem=validate(proposed);if(problem.empty())return true;if(error)error(problem);return false;
+    ui::TextEdit propose(std::string_view inserted) {
+        auto edit=ui::text_edit(value(),{insert_position(),mark(),insert_position()},inserted,false,byte_limit);
+        if(!edit.error.empty()&&error)error(edit.error);
+        return edit;
     }
 };
 
@@ -245,7 +249,7 @@ private:
 
 class NativeWindow : public Fl_Double_Window {
 public:
-    NativeWindow():Fl_Double_Window(ui::default_width,ui::default_height,"Data Pump") {}
+    NativeWindow():Fl_Double_Window(ui::default_width,ui::default_height,ui::window_title()) {}
     std::function<void()> resized;
     void resize(int x,int y,int width,int height) override {
         Fl_Double_Window::resize(x,y,width,height);if(resized)resized();
@@ -356,10 +360,10 @@ private:
     }
     void layout_rows() {
         const int width=viewport_width();content_width_=width;
-        for(const auto& record:records_)for(const auto& cell:record.cells)if(cell.w<0) {
+        for(const auto& record:records_)content_width_=ui::record_content_width(record,content_width_,[](const auto& cell,std::size_t) {
             fl_font(cell.bold?theme::bold_font:theme::font,cell.font_size);
-            content_width_=std::max(content_width_,cell.x+static_cast<int>(std::ceil(fl_width(cell.text.c_str())))-cell.w);
-        }
+            int text_width=0,text_height=0;fl_measure(cell.text.c_str(),text_width,text_height,0);return text_width;
+        });
         for(std::size_t i=0;i<records_.size();++i)if(auto found=rows_.find(records_[i].id);found!=rows_.end())
             found->second->apply(records_[i],x()+1-xposition(),y()+1+static_cast<int>(i)*control_.list_row_height-yposition(),content_width_,control_.list_row_height);
     }
@@ -522,7 +526,7 @@ private:
         auto value=std::make_unique<std::function<void()>>(std::move(callback));
         widget.callback([](Fl_Widget*,void* context){(*static_cast<std::function<void()>*>(context))();},value.get());callbacks.push_back(std::move(value));
     }
-    static void place(Fl_Widget* widget,ui::Rect bounds) {if(widget)widget->resize(bounds.x,bounds.y,std::max(1,bounds.w),std::max(1,bounds.h));}
+    static void place(Fl_Widget* widget,ui::Rect bounds) {if(widget)widget->resize(bounds.x,bounds.y,std::max(0,bounds.w),std::max(0,bounds.h));}
     static void label(Fl_Widget* widget,const std::string& value) {if(widget&&(!widget->label()||value!=widget->label()))widget->copy_label(value.c_str());}
     static void enabled(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->active())widget->activate();else if(!value&&widget->active())widget->deactivate();}}
     static void visible(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->visible())widget->show();else if(!value&&widget->visible())widget->hide();}}
@@ -531,7 +535,7 @@ private:
             const auto& control=*declaration.control;
             auto binding=std::make_unique<Binding>();auto& b=*binding;b.control=&control;
             auto* parent=control.persistent?static_cast<Fl_Group*>(window.get()):pages.at(control.page).group;parent->begin();
-            b.group=new NativeControlGroup(control);b.group->dispatch=[this](ui::Command command){application.activate(command);};b.group->begin();
+            b.group=new NativeControlGroup(control);b.group->dispatch=[this,c=&control](ui::Command command){application.gesture(*c,command);};b.group->begin();
             b.label=new NativeLiteralText;b.label->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);b.label->labelsize(control.font_size);
             if(control.menu!=ui::Menu::none) {
                 b.menu=new Fl_Menu_Button(0,0,1,1,control.menu_label);b.menu_items=declaration.menu_items;
@@ -543,12 +547,12 @@ private:
                     b.editor=new NativeEditor;b.editor->textsize(control.font_size);
                     b.editor->changed=[this,c=&control](std::string text){application.edit(*c,std::move(text));};
                     b.editor->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
-                    b.editor->validate=[c=&control](std::string_view text){return ui::edit_error(*c,text);};
+                    b.editor->byte_limit=control.byte_limit;
                     b.editor->error=[this](std::string error){application.report_error(std::move(error));};
                 } else {
                     b.input=new NativeInput;b.input->textsize(control.font_size);b.input->when(FL_WHEN_CHANGED);
                     b.input->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
-                    b.input->validate=[c=&control](std::string_view text){return ui::edit_error(*c,text);};
+                    b.input->byte_limit=control.byte_limit;
                     b.input->error=[this](std::string error){application.report_error(std::move(error));};
                     bind(*b.input,[this,p=&b]{application.edit(*p->control,p->input->value());});
                 }
@@ -557,16 +561,16 @@ private:
                 break;
             case ui::Kind::choice:
                 b.choice=new NativeChoice;b.choice->textsize(control.font_size);b.choice->when(FL_WHEN_RELEASE_ALWAYS);
-                bind(*b.choice,[this,p=&b]{const auto i=p->choice->value();if(i>=0&&static_cast<std::size_t>(i)<p->options.size())application.select(p->control->field,p->options[static_cast<std::size_t>(i)].id);});break;
+                bind(*b.choice,[this,p=&b]{const auto i=p->choice->value();if(i>=0&&static_cast<std::size_t>(i)<p->options.size())application.select(*p->control,p->options[static_cast<std::size_t>(i)].id);});break;
             case ui::Kind::toggle:
                 b.toggle=new Fl_Check_Button(0,0,1,1,control.label);
-                bind(*b.toggle,[this,p=&b]{application.toggle(p->control->field,p->toggle->value()!=0);});break;
+                bind(*b.toggle,[this,p=&b]{application.toggle(*p->control,p->toggle->value()!=0);});break;
             case ui::Kind::action:
                 b.button=new Fl_Button(0,0,1,1,control.label);
                 bind(*b.button,[this,c=&control]{application.activate(*c);});break;
             case ui::Kind::list:
                 b.records=new NativeRecords(control);
-                b.records->selected=[this,c=&control](std::string id){application.select(c->field,id);};
+                b.records->selected=[this,c=&control](std::string id){application.select(*c,id);};
                 b.records->activated=[this,c=&control](std::string id){application.activate_record(*c,id);};break;
             case ui::Kind::bitmap:
                 b.bitmap=new NativeBitmap;b.caption=new NativeLiteralText;b.caption->labelsize(11);b.caption->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
@@ -590,10 +594,15 @@ private:
             auto& b=*item;const auto& c=*b.control;const ui::FieldState empty;
             const auto& state=c.field==ui::Field::count?empty:application.field(c.field);
             const auto geometry=ui::control_layout(c,state,window->w(),window->h(),controls_);
-            place(b.group,geometry.frame);place(b.label,geometry.label);visible(b.label,geometry.has_label);
-            for(auto* widget:std::initializer_list<Fl_Widget*>{b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.records,b.bitmap})place(widget,geometry.widget);
-            place(b.suggestions,geometry.suggestions);visible(b.suggestions,geometry.has_suggestions);
-            place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption);
+            const bool shown=b.menu?application.menu(b.menu_items).visible:application.control(c).visible;
+            visible(b.group,shown&&ui::drawable(geometry.frame));
+            place(b.group,geometry.frame);place(b.label,geometry.label);
+            for(auto* widget:std::initializer_list<Fl_Widget*>{b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.records,b.bitmap}) {
+                place(widget,geometry.widget);visible(widget,ui::drawable(geometry.widget));
+            }
+            visible(b.label,geometry.has_label&&ui::drawable(geometry.label));
+            place(b.suggestions,geometry.suggestions);visible(b.suggestions,geometry.has_suggestions&&ui::drawable(geometry.suggestions));
+            place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption&&ui::drawable(geometry.caption));
             b.group->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);
         }
         update_documents();window->redraw();
@@ -627,10 +636,7 @@ private:
             const auto view=application.control(c);const auto& state=view.state;
             if(!b.menu) {visible(b.group,view.visible);enabled(b.group,view.enabled);}
             if(b.label)label(b.label,view.label);
-            if(b.input&&state.text!=b.input->value()) {
-                const auto position=b.input->insert_position(),mark=b.input->mark();b.input->value(state.text.c_str());
-                b.input->insert_position(std::min(position,b.input->size()),std::min(mark,b.input->size()));
-            }
+            if(b.input)b.input->apply(state.text);
             if(b.editor)b.editor->apply(state.text);
             if((b.choice||b.suggestions)&&!Fl::grab()) {
                 if(!same_options(b.options,state.options)) {b.options=state.options;if(b.choice)populate(*b.choice,b.options);if(b.suggestions)populate(*b.suggestions,b.options);}
@@ -644,7 +650,7 @@ private:
                 auto menu=application.menu(b.menu_items);visible(b.group,menu.visible);enabled(b.group,menu.enabled);
                 if(!Fl::grab()&&!same_options(menu.options,b.menu_options)) {b.menu_options=std::move(menu.options);populate(*b.menu,b.menu_options);}
             }
-            if(b.bitmap) {
+            if(b.bitmap&&b.bitmap->w()>0&&b.bitmap->h()>0) {
                 const auto presentation=application.bitmap(c,static_cast<unsigned>(std::max(1,widgets::bitmap_sample_extent(b.bitmap->x(),b.bitmap->w(),Fl::screen_scale(window->screen_num())))));
                 if(presentation.revision!=b.bitmap_revision) {b.bitmap_revision=presentation.revision;b.bitmap->set(presentation.source);}
                 label(b.label,presentation.title);label(b.caption,presentation.caption);b.caption->labelcolor(text_color(presentation.caption_tone));

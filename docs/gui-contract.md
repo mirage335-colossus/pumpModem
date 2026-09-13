@@ -55,6 +55,12 @@ enabled. Returned option IDs retain declaration identity after filtering.
 Adapters pass those IDs to `select_menu()`; shared dispatch rechecks the chosen
 control's current visibility and eligibility. Adapters do not reconstruct menu
 policy or map filtered indices to application commands.
+Native choice/list selection and toggles use the declaration-aware `select()`
+and `toggle()` overloads. Pointer/wheel commands use `gesture()`, which checks
+both the declared binding and current availability. These checks also apply to
+callbacks queued before a control became hidden, disabled or closed, including
+callbacks from a page that is no longer selected. Persistent controls continue
+to accept input across page changes.
 
 `FieldState` carries authoritative text/selection/boolean values, visibility,
 eligibility, options and records. Options have IDs, literal labels and enabled
@@ -88,6 +94,9 @@ quality and message text; files and unverified prefixes are not copyable as text
   command policy; native adapters translate modifiers only. Shared dispatch
   rechecks visibility and eligibility before submission or record activation,
   including callbacks arriving after the control's state changed.
+  Replacement text, byte boundaries and no-op/rejection outcomes are calculated
+  by shared edit policy. Applying model text clamps both ends of a native
+  selection to valid UTF-8 boundaries without emitting an edit callback.
 - Declared click, double-click and wheel commands apply to every control kind.
   Adapters translate coordinates and wheel detents; shared interaction code
   chooses commands, recognizes double-clicks and caps coalesced wheel repetition.
@@ -107,6 +116,9 @@ quality and message text; files and unverified prefixes are not copyable as text
   `record_scroll.hpp` owns tail detection, position retention when records or the
   viewport change, and scrolling a selected row into view. Adapters supply
   native measurements and apply the returned position.
+  Record rows share one horizontal content width. Fixed cells reserve their
+  declared widths; flexible cells expand for their measured text and trailing
+  inset. Adapters measure glyphs and apply that common extent to native scrolling.
 - Key-file failure acknowledgement is an explicit action. It does not depend
   on a toolkit reporting re-selection of an unchanged choice.
 - All input validation, transmit eligibility, preparation/revision checks,
@@ -120,6 +132,10 @@ editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display
 scale. Slot-free rows provide ordered stretch-weight placement for alternate
 arrangements. A new desktop slot is shared layout work, not adapter work.
+Zero stretch allocates zero width; large weights do not overflow the allocation.
+When space is exhausted, shared editor, preset and bitmap subrectangles stay
+nonnegative. Empty native allocations are not drawn and cannot take keyboard focus
+or request synthetic bitmap pixels.
 
 `ui::DocumentNode` is a generic tree of columns, rows, text, actions and bitmaps.
 Nodes carry widths, optional fixed heights, margins/padding, semantic tone/fill,
@@ -140,6 +156,12 @@ includes that inset. Dynamic content
 owns the tree and produces an immutable
 snapshot; adapters do not invent sections or legends. Both native document
 renderers consume the same inspection tree and preserve action identity.
+`document_actions.hpp` resolves inherited enabled state and focus restoration
+for both adapters. A nonzero action `instance` is stable within its command and
+survives insertion, reordering or removal of other actions; duplicate instances
+are rejected. Zero retains declaration-order occurrence identity for static
+documents. Removing or disabling the identified action clears its focus. The
+containing native view must also accept input before an action can dispatch.
 
 `inspection_page.hpp` is application presentation code above this interface.
 Changing a section, table, note or plot there reaches both backends. Ordinary

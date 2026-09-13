@@ -86,6 +86,7 @@ struct PageDefinition {
     int tab_width=100;
 };
 const std::vector<PageDefinition>& pages();
+const char* window_title();
 struct Option { std::string id, label; bool enabled = true; };
 struct FieldState {
     std::string text;

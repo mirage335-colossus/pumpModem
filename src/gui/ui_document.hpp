@@ -18,6 +18,9 @@ struct DocumentNode {
     DocumentFill fill=DocumentFill::none;
     bool bold=false,border=false,equal_height=false,enabled=true;
     Command command=Command::none;
+    // Nonzero action instances are stable within a command across insertions,
+    // removals and reordering. Zero retains declaration-occurrence identity.
+    unsigned instance=0;
     BitmapSource plot;
     std::vector<DocumentNode> children;
 };

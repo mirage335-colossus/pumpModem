@@ -1,5 +1,6 @@
 #pragma once
 #include "document_layout.hpp"
+#include "document_actions.hpp"
 #include "presentation_palette.hpp"
 #include "bitmap_fltk.hpp"
 #include "theme_fltk.hpp"
@@ -11,7 +12,6 @@
 #include <functional>
 #include <memory>
 #include <optional>
-#include <unordered_map>
 #include <utility>
 
 namespace datapump::gui {
@@ -26,11 +26,13 @@ public:
     void update(const ui::DocumentNode& document) {
         const auto focus=focused_action();
         document_=document;
-        reconcile(root_,this,document);
+        actions_.reset(&*document_);
+        reconcile(root_,this,*document_);
         layout(w());
         if(focus) {
-            std::size_t occurrence=focus->occurrence;
-            if(auto* target=find_action(root_.get(),focus->command,occurrence);target && target->active_r()) {
+            const auto restored=actions_.restore_focus(focus);
+            auto* target=restored?find_action(root_.get(),*restored):nullptr;
+            if(target && target->active_r() && target->visible_r()) {
                 if(Fl::focus()!=target)target->take_focus();
             } else Fl::focus(nullptr);
         }
@@ -131,12 +133,13 @@ private:
         ui::DocumentNode node;
         Fl_Widget* widget=nullptr;
         FltkDocumentView* owner=nullptr;
+        std::optional<ui::DocumentActionIdentity> action;
         std::vector<std::unique_ptr<Item>> children;
         // Delete descendants before the native group so ownership is singular.
         ~Item() {children.clear();delete widget;}
     };
-    struct Focus {ui::Command command;std::size_t occurrence;};
     Action action_;
+    ui::DocumentActions actions_;
     std::unique_ptr<Item> root_;
     std::optional<ui::DocumentNode> document_;
     int content_height_=1;
@@ -147,7 +150,8 @@ private:
     }
     static void activated(Fl_Widget*,void* data) {
         auto& item=*static_cast<Item*>(data);
-        if(item.node.enabled && item.widget->active_r() && item.owner->action_)item.owner->action_(item.node.command);
+        if(item.action && item.owner->actions_.enabled(*item.action) && item.widget->active_r() && item.widget->visible_r() && item.owner->action_)
+            item.owner->action_(item.action->command);
     }
     void reconcile(std::unique_ptr<Item>& item,Fl_Group* parent,const ui::DocumentNode& node) {
         if(item && item->node.kind!=node.kind)item.reset();
@@ -165,6 +169,8 @@ private:
         // The recursive widget records retain their own node values; avoid a
         // second recursively copied tree in each ancestor.
         item->node=node;item->node.children.clear();
+        const auto* action=actions_.find(&node);
+        item->action=action?std::optional{action->identity}:std::nullopt;
         auto& widget=*item->widget;
         if(node.enabled)widget.activate();else widget.deactivate();
         widget.labelfont(node.bold?theme::bold_font:theme::font);
@@ -200,6 +206,7 @@ private:
     static void place(Item& item,const ui::DocumentBox& geometry,int x,int y) {
         const auto& box=geometry.bounds;x+=box.x;y+=box.y;
         item.widget->resize(x,y,box.width,box.height);
+        if(box.width>0 && box.height>0)item.widget->show();else item.widget->hide();
         if(auto* text=dynamic_cast<Text*>(item.widget))text->content=geometry.content;
         if(auto* bitmap=dynamic_cast<Bitmap*>(item.widget))bitmap->content=geometry.content;
         if(auto* button=dynamic_cast<Button*>(item.widget))button->content=geometry.content;
@@ -207,26 +214,19 @@ private:
             place(*item.children[index],geometry.children[index],x,y);
         if(auto* group=dynamic_cast<Fl_Group*>(item.widget))group->init_sizes();
     }
-    std::optional<Focus> focused_action() const {
-        std::unordered_map<ui::Command,std::size_t> occurrences;
-        std::optional<Focus> result;
+    std::optional<ui::DocumentActionIdentity> focused_action() const {
+        std::optional<ui::DocumentActionIdentity> result;
         const std::function<void(const Item*)> visit=[&](const Item* item) {
             if(!item)return;
-            if(item->node.kind==Kind::action) {
-                const auto occurrence=occurrences[item->node.command]++;
-                if(Fl::focus()==item->widget)result=Focus{item->node.command,occurrence};
-            }
+            if(item->action && Fl::focus()==item->widget)result=item->action;
             for(const auto& child:item->children)visit(child.get());
         };
         visit(root_.get());return result;
     }
-    static Fl_Widget* find_action(Item* item,ui::Command command,std::size_t& occurrence) {
+    static Fl_Widget* find_action(Item* item,ui::DocumentActionIdentity identity) {
         if(!item)return nullptr;
-        if(item->node.kind==Kind::action && item->node.command==command) {
-            if(occurrence==0)return item->widget;
-            --occurrence;
-        }
-        for(auto& child:item->children)if(auto* target=find_action(child.get(),command,occurrence))return target;
+        if(item->action==identity)return item->widget;
+        for(auto& child:item->children)if(auto* target=find_action(child.get(),identity))return target;
         return nullptr;
     }
 };

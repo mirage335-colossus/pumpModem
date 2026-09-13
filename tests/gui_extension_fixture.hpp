@@ -27,6 +27,12 @@ inline const std::vector<ui::Control>& extension_controls() {
         menu.field=ui::Field::count;menu.label="Clear from shared menu";controls.push_back(menu);
         menu.page=ui::Page::flow;menu.menu_label="Other page menu";controls.push_back(menu);
         menu.page=ui::Page::console;menu.instance=21;menu.menu_label="Other instance menu";controls.push_back(menu);
+        auto empty_action=controls[1];empty_action.instance=31;empty_action.row=5;empty_action.stretch=0;empty_action.label="Empty action";
+        controls.push_back(empty_action);
+        auto narrow=controls[2];narrow.instance=32;narrow.row=6;narrow.multiline=false;narrow.label="Narrow presets";controls.push_back(narrow);
+        ui::Control spacer{ui::Kind::label};spacer.instance=33;spacer.row=6;spacer.stretch=40;spacer.label="Narrow preset spacer";controls.push_back(spacer);
+        ui::Control empty_bitmap{ui::Kind::bitmap};empty_bitmap.bitmap=ui::Bitmap::waveform;empty_bitmap.instance=34;
+        empty_bitmap.row=7;empty_bitmap.stretch=0;controls.push_back(empty_bitmap);
         return controls;
     }();
     return values;

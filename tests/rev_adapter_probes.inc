@@ -49,6 +49,12 @@
             editor.limit=byte_limit;editor.error=std::move(error_handler);
             if(malformed||oversized||rejected!=2||editor.content.get()!=before_rejected||editor.cursor!=1||editor.selectAnchor!=0||editor.selectEnd!=1)
                 throw std::runtime_error("Rev smoke: rejected edit changed UTF-8 text or native selection");
+            const auto before_identical=application.revision();
+            if(editor.replace(before_rejected.substr(0,1))||application.revision()!=before_identical||editor.cursor!=1||editor.selectAnchor!=0||editor.selectEnd!=1)
+                throw std::runtime_error("Rev smoke: identical replacement changed selection or emitted an edit");
+            editor.apply("abcd");editor.cursor=2;editor.selectAnchor=1;editor.selectEnd=4;editor.apply("\xf0\x9f\x8c\x8d");
+            if(editor.cursor!=0||editor.selectAnchor!=0||editor.selectEnd!=4)
+                throw std::runtime_error("Rev smoke: model update retained offsets inside a replacement UTF-8 character");
             editor.targetFlags.focus=false;application.edit(field,saved);apply();
             return;
         }
@@ -130,7 +136,7 @@
         probe->resolved.scroll.y=static_cast<float>(probe->maximum_scroll()-2);
         auto near_tail=template_record;near_tail.id="near-tail";state.records.push_back(std::move(near_tail));probe->apply(state);paint();
         if(std::abs(probe->resolved.scroll.y-probe->maximum_scroll())>1)
-            throw std::runtime_error("Rev smoke: native list did not use the shared two-unit tail tolerance");
+            throw std::runtime_error("Rev smoke: native list did not use the shared two-unit tail tolerance: scroll="+std::to_string(probe->resolved.scroll.y)+" maximum="+std::to_string(probe->maximum_scroll())+" inner="+std::to_string(probe->resolved.getInner(Axis::Vertical))+" content="+std::to_string(probe->layout.rect.h));
         place(probe,{0,0,400,80});probe->resize_content(400,80);paint();
         if(!probe->at_tail())throw std::runtime_error("Rev smoke: shrinking a record viewport lost the tail");
         probe->resolved.scroll.y=54;place(probe,{0,0,400,100});probe->resize_content(400,100);paint();
@@ -155,6 +161,23 @@
             probe_parent->style->visibility=Visibility::Visible;paint();
             if(std::abs(probe->resolved.scroll.y-60)>1)throw std::runtime_error("Rev smoke: hidden record updates lost the reader's historical position");
         }
+        state.records.front().cells={{std::string(500,'W'),8,0,-8,24,13}};probe->apply(state);paint();
+        auto& wide_row=probe->rows.at(state.records.front().id);
+        if(probe->content_width<=400||wide_row.button->rect.w<probe->content_width-1||wide_row.cells.front()->style->scroll!=Scroll::None)
+            throw std::runtime_error("Rev smoke: long record text did not use the shared horizontal list extent");
+        probe->resolved.scroll.x=120;paint();
+        if(std::abs(probe->resolved.scroll.x-120)>1)
+            throw std::runtime_error("Rev smoke: record list could not retain horizontal scroll");
+        state.records.front().cells={{"Fixed extent",8,0,900,24,13}};probe->apply(state);paint();
+        if(probe->content_width<908||std::abs(probe->resolved.scroll.x-120)>1)
+            throw std::runtime_error("Rev smoke: fixed record cell lost extent or horizontal scroll on replacement");
+        state.records.front().cells={{std::string(500,'W'),8,0,0,24,13}};probe->apply(state);paint();
+        if(probe->content_width<=400)
+            throw std::runtime_error("Rev smoke: zero-inset remaining-width record cell clipped long text");
+        probe_parent->style->visibility=Visibility::Hidden;paint();probe->apply(state);
+        probe_parent->style->visibility=Visibility::Visible;paint();
+        if(std::abs(probe->resolved.scroll.x-120)>1)
+            throw std::runtime_error("Rev smoke: hidden record updates lost horizontal reading position");
         delete probe_parent;paint();
     }
     void verify_extension_contract() {
@@ -197,6 +220,20 @@
         menu.menu->params.value=menu.menu->params.options[0].value;menu.menu->onChange(click);
         if(application.field(ui::Field::status).text.find("cleared")==std::string::npos)
             throw std::runtime_error("Rev smoke: filtered native menu dispatched the wrong shared entry");
+        for(auto& binding:bindings)if(binding.control.instance>=31&&binding.control.instance<=34) {
+            if(binding.control.instance==31 && (!binding.button||binding.element->rect.w!=0||allows_input(binding.button)))
+                throw std::runtime_error("Rev smoke: zero-stretch action retained native width or input eligibility");
+            if(binding.control.instance==32 && (!binding.editor||binding.editor->rect.w!=0||allows_input(binding.editor)||
+                !binding.suggestions||binding.suggestions->rect.w<=0||!allows_input(binding.suggestions)))
+                throw std::runtime_error("Rev smoke: empty editor retained input or hid its allocated preset button");
+            if(binding.control.instance==34) {
+                if(!binding.bitmap||binding.bitmap->rect.w!=0||allows_input(binding.bitmap))
+                    throw std::runtime_error("Rev smoke: empty bitmap retained native width or input eligibility");
+                auto probe=std::make_shared<test::BitmapProbe>();binding.bitmap->set(test::rectangle_bitmap(probe));
+                for(unsigned frame=0;frame<3;++frame){refresh(event);Rev::NativeWindow::pumpEvents();}
+                if(!probe->requests.empty())throw std::runtime_error("Rev smoke: empty bitmap requested synthetic backing pixels");
+            }
+        }
         auto document=std::make_shared<const ui::DocumentNode>(test::extension_document());
         auto* document_parent=new re::Box(this);place(document_parent,{0,0,600,800});
         auto* view=new RevDocumentView(document_parent,launch.color,
@@ -245,12 +282,18 @@
         auto* bitmap=dynamic_cast<BitmapView*>(geometry_root->children[3]);const auto area=bitmap->drawing_rect();
         if(std::abs(area.w-86)>1||std::abs(area.h-36)>1||std::abs(area.x-bitmap->rect.x-7)>1||std::abs(area.y-bitmap->rect.y-7)>1)
             throw std::runtime_error("Rev smoke: document bitmap painted outside its shared padding");
-        if(bitmap_probe->requests.empty()||bitmap_probe->requests.back().width!=bitmap->sample_width()||bitmap_probe->requests.back().height!=static_cast<unsigned>(std::round(36*details.scale)))
-            throw std::runtime_error("Rev smoke: document bitmap did not request its physical inner framebuffer dimensions");
+        const auto sample_height=[&](float top,float height) {
+            return static_cast<unsigned>(std::round((top+height)*details.scale)-std::round(top*details.scale));
+        };
+        const auto expected_height=sample_height(area.y,36);
+        if(bitmap_probe->requests.empty()||bitmap_probe->requests.back().width!=bitmap->sample_width()||bitmap_probe->requests.back().height!=expected_height)
+            throw std::runtime_error("Rev smoke: document bitmap did not request its physical inner framebuffer dimensions: actual="+
+                (bitmap_probe->requests.empty()?std::string("none"):std::to_string(bitmap_probe->requests.back().width)+"x"+std::to_string(bitmap_probe->requests.back().height))+
+                " expected="+std::to_string(bitmap->sample_width())+"x"+std::to_string(expected_height)+" scale="+std::to_string(details.scale));
         if(!empty_probe->requests.empty())throw std::runtime_error("Rev smoke: zero-width document bitmap requested synthetic pixels");
         auto* bordered_bitmap=dynamic_cast<BitmapView*>(geometry_root->children[6]);const auto bordered_area=bordered_bitmap->drawing_rect();
         if(std::abs(bordered_area.w-98)>1||std::abs(bordered_area.h-48)>1||std::abs(bordered_area.x-bordered_bitmap->rect.x-1)>1||std::abs(bordered_area.y-bordered_bitmap->rect.y-1)>1||
-           border_probe->requests.empty()||border_probe->requests.back().width!=bordered_bitmap->sample_width()||border_probe->requests.back().height!=static_cast<unsigned>(std::round(48*details.scale)))
+           border_probe->requests.empty()||border_probe->requests.back().width!=bordered_bitmap->sample_width()||border_probe->requests.back().height!=sample_height(bordered_area.y,48))
             throw std::runtime_error("Rev smoke: opaque bitmap pixels did not preserve the declared border inset");
         auto* wrapped_action=dynamic_cast<re::Button*>(geometry_root->children[5]);
         if(!wrapped_action||wrapped_action->rect.h<=60)throw std::runtime_error("Rev smoke: document action lost native wrapped label measurement");
@@ -289,6 +332,58 @@
         for(unsigned frame=0;frame<6;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
         const auto shown_height=view->children.front()->children.front()->children.front()->rect.h;
         if(std::abs(shown_height-wide_height)>1)throw std::runtime_error("Rev smoke: hiding a document parent changed its settled card geometry");
+        auto action_document=test::document_actions_fixture();
+        const auto second_action=[&] {return dynamic_cast<re::Button*>(view->children.front()->children.back()->children.front());};
+        view->apply(std::make_shared<const ui::DocumentNode>(action_document));focus_control(second_action());
+        const auto calls_before=calls;
+        ui::DocumentNode inserted;inserted.kind=ui::DocumentKind::text;inserted.text="Inserted heading";
+        action_document.children.insert(action_document.children.begin(),inserted);
+        view->apply(std::make_shared<const ui::DocumentNode>(action_document));
+        if(!second_action()->targetFlags.focus||calls!=calls_before)
+            throw std::runtime_error("Rev smoke: repeated document command focus changed after a shared tree insertion");
+        click.propagate=true;second_action()->click(click);
+        if(calls!=calls_before+1)throw std::runtime_error("Rev smoke: repeated document action lost dispatch");
+        auto first_action=action_document.children[1];action_document.children.erase(action_document.children.begin()+1);
+        action_document.children.back().children.push_back(first_action);
+        view->apply(std::make_shared<const ui::DocumentNode>(action_document));
+        if(!second_action()->targetFlags.focus)throw std::runtime_error("Rev smoke: reordering repeated document actions transferred native focus");
+        action_document.children.back().children.pop_back();view->apply(std::make_shared<const ui::DocumentNode>(action_document));
+        if(!second_action()->targetFlags.focus)throw std::runtime_error("Rev smoke: removing another document action instance lost native focus");
+        action_document.children.back().enabled=false;
+        view->apply(std::make_shared<const ui::DocumentNode>(action_document));click.propagate=true;second_action()->click(click);
+        if(second_action()->targetFlags.focus||calls!=calls_before+1)
+            throw std::runtime_error("Rev smoke: disabled document ancestor retained focus or allowed a command");
+        action_document.children.back().enabled=true;view->apply(std::make_shared<const ui::DocumentNode>(action_document));
+        focus_control(second_action());view->setDisabled(true);view->apply(std::make_shared<const ui::DocumentNode>(action_document));
+        click.propagate=true;second_action()->click(click);
+        if(second_action()->targetFlags.focus||calls!=calls_before+1)
+            throw std::runtime_error("Rev smoke: disabled native document host retained focus or allowed a command");
+        view->setDisabled(false);view->apply(std::make_shared<const ui::DocumentNode>(action_document));focus_control(second_action());
+        action_document.children.back().children={first_action};view->apply(std::make_shared<const ui::DocumentNode>(action_document));
+        if(second_action()->targetFlags.focus)throw std::runtime_error("Rev smoke: removing a focused document action transferred focus to another instance");
+        view->style->visibility=Visibility::Hidden;click.propagate=true;second_action()->click(click);
+        if(calls!=calls_before+1)throw std::runtime_error("Rev smoke: hidden document host allowed a stale native action callback");
+        view->style->visibility=Visibility::Visible;
+        second_action()->setDisabled(true);click.propagate=true;second_action()->click(click);
+        if(calls!=calls_before+1)throw std::runtime_error("Rev smoke: disabled native document action dispatched a command");
+        auto empty_action_document=test::document_empty_action_fixture();view->apply(std::make_shared<const ui::DocumentNode>(empty_action_document));
+        for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        focus_control(view->children.front()->children.back());place(view,{20,200,50,600});
+        for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        auto* empty_action=dynamic_cast<re::Button*>(view->children.front()->children.back());click.propagate=true;empty_action->click(click);
+        if(empty_action->rect.w!=0||allows_input(empty_action)||empty_action->targetFlags.focus||calls!=calls_before+1)
+            throw std::runtime_error("Rev smoke: empty document action retained native focus or dispatched a command");
+        place(view,{20,200,100,600});
+        for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        if(empty_action->rect.w<=0||!allows_input(empty_action))
+            throw std::runtime_error("Rev smoke: restoring document allocation did not re-enable its retained action");
+        empty_action_document.children.back().enabled=false;view->apply(std::make_shared<const ui::DocumentNode>(empty_action_document));
+        for(const int width:{50,100}) {
+            place(view,{20,200,width,600});
+            for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        }
+        if(allows_input(view->children.front()->children.back()))
+            throw std::runtime_error("Rev smoke: restoring document allocation enabled a declared-disabled action");
         delete document_parent;verify_record_contract();
     }
     void verify_document_clipping() {

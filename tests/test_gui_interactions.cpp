@@ -1,12 +1,38 @@
 #include "control_interactions.hpp"
 #include "record_interactions.hpp"
 #include "record_scroll.hpp"
+#include "control_layout.hpp"
+#include "text_policy.hpp"
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 
 namespace ui=datapump::gui::ui;
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+void text_edits_and_record_layout() {
+    const std::string current="A\xc3\xa9" "B";
+    auto edit=ui::text_edit(current,{3,1,3},"\xf0\x9f\x8c\x8d",false,6);
+    require(edit&&edit.text=="A\xf0\x9f\x8c\x8d" "B"&&edit.start==1&&edit.end==3&&edit.cursor==5,
+            "Shared replacement did not honor UTF-8 selection and exact byte limit");
+    edit=ui::text_edit(current,{3,3,1},"12345",false,6);
+    require(!edit&&!edit.error.empty(),"Shared replacement accepted oversized reversed selection");
+    require(!ui::text_edit(current,{3,1,3},"\xc3",false,6).error.empty(),"Shared replacement accepted malformed UTF-8");
+    require(!ui::text_edit(current,{3,1,3},"\n",false,6).error.empty(),"Single-line edit accepted a newline");
+    edit=ui::text_edit(current,{3,1,3},"\xc3\xa9",false,6);
+    require(!edit&&edit.error.empty()&&edit.text==current,"Identical replacement was not a silent no-op");
+    edit=ui::text_edit(current,{2,2,2},"!",false,6);
+    require(edit&&edit.text=="A!\xc3\xa9" "B"&&edit.start==1,"Replacement split a stale native caret's UTF-8 character");
+    const auto selection=ui::TextSelection{2,1,9}.clamped("\xf0\x9f\x8c\x8d");
+    require(selection.cursor==0&&selection.anchor==0&&selection.end==4,"Model replacement did not clamp all native selection offsets");
+    ui::Record record{"row",{{"fixed",100,0,400,20},{"flex",8,20,-8,20},{"zero",4,40,0,20}}};
+    unsigned measured=0;
+    const auto width=ui::record_content_width(record,100,[&](const auto& cell,std::size_t index) {
+        ++measured;require(index>0,"Fixed cells were incorrectly measured as expanding text");return cell.text=="flex"?600.25:640.0;
+    });
+    require(measured==2&&width==644,"Record extent lost fixed bounds, text rounding or a zero-inset flexible cell");
+    require(ui::record_cell_rect(record.cells[1],width).w==628&&ui::record_cell_rect(record.cells[0],width).w==400,
+            "Shared horizontal extent changed the declared fixed/flexible cell geometry");
+}
 void record_scroll() {
     ui::RecordScroll scroll;
     require(scroll.target(300,true)==300&&scroll.target(300,false)==0,"New list did not follow its declared initial tail policy");
@@ -78,6 +104,7 @@ void record_interactions() {
 }
 int main() {
     try {
+        text_edits_and_record_layout();
         record_interactions();
         record_scroll();
         ui::Control control{ui::Kind::label};

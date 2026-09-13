@@ -1,10 +1,10 @@
 #pragma once
 // Include after the Rev Element/Box/Text/Button/Appearance module imports.
 #include "document_layout.hpp"
+#include "document_actions.hpp"
 #include "presentation_palette.hpp"
 #include <functional>
 #include <cmath>
-#include <map>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -25,25 +25,15 @@ public:
     void apply(std::shared_ptr<const ui::DocumentNode> document) {
         if(document_!=document) {
             // Preserve native action focus when a new immutable description
-            // retains the same command occurrence (for example after resize).
-            std::optional<std::pair<ui::Command,std::size_t>> focus;
-            std::map<ui::Command,std::size_t> occurrences;
-            for(const auto& [button,command]:buttons_) {
-                const auto occurrence=occurrences[command]++;
-                if(button->targetFlags.focus)focus=std::pair{command,occurrence};
-            }
+            // retains the same shared action identity (for example after resize).
+            std::optional<ui::DocumentActionIdentity> focus;
+            for(const auto& [button,identity]:buttons_)if(button->targetFlags.focus)focus=identity;
             document_=std::move(document);root_.reset();labels_.clear();buttons_.clear();
             while(!children.empty())delete children.back();
+            actions_.reset(document_.get());
             if(document_)root_=materialize(this,*document_);
-            if(focus) {
-                occurrences.clear();
-                for(const auto& [button,command]:buttons_)if(std::pair{command,occurrences[command]++}==*focus) {
-                    bool enabled=true;
-                    for(auto* ancestor=static_cast<Rev::Element::Element*>(button);ancestor;ancestor=ancestor->parent) {
-                        enabled=enabled&&!ancestor->targetFlags.disabled;
-                        if(ancestor==ancestor->parent)break;
-                    }
-                    if(!enabled)break;
+            if(const auto restored=actions_.restore_focus(focus);restored && accepts_input()) {
+                for(const auto& [button,identity]:buttons_)if(identity==*restored) {
                     for(auto* element=static_cast<Rev::Element::Element*>(button);element&&element!=element->parent;element=element->parent) {
                         element->targetFlags.focus=true;element->dirty.style=true;
                     }
@@ -74,14 +64,24 @@ private:
     bool color_;
     BitmapFactory bitmap_factory_;
     Action action_;
+    ui::DocumentActions actions_;
     std::shared_ptr<const ui::DocumentNode> document_;
     struct Item {
         Rev::Element::Element* element=nullptr;
+        bool enabled=true;
         std::vector<Item> children;
     };
     std::optional<Item> root_;
     std::unordered_map<const ui::DocumentNode*,Rev::Element::Text*> labels_;
-    std::vector<std::pair<Rev::Element::Button*,ui::Command>> buttons_;
+    std::vector<std::pair<Rev::Element::Button*,ui::DocumentActionIdentity>> buttons_;
+
+    bool accepts_input(Rev::Element::Element* target=nullptr) {
+        for(auto* ancestor=target?target:static_cast<Rev::Element::Element*>(this);ancestor;ancestor=ancestor->parent) {
+            if(ancestor->targetFlags.disabled||ancestor->resolved.hidden||ancestor->style->visibility==Rev::Appearance::Visibility::Hidden)return false;
+            if(ancestor==ancestor->parent)break;
+        }
+        return true;
+    }
 
     float measure_text(const ui::DocumentNode& node,int width) {
         auto* label=labels_.at(&node);
@@ -96,17 +96,23 @@ private:
         label->layoutText();
         return label->height;
     }
-    static void apply_geometry(Item& item,const ui::DocumentBox& geometry,int x=0,int y=0) {
+    static void apply_geometry(Item& item,const ui::DocumentBox& geometry,int x=0,int y=0,bool parent_allocated=true) {
         using namespace Rev::Appearance;
         auto* element=item.element;const auto& box=geometry.bounds;
         element->style->position={.left=Px(x+box.x),.top=Px(y+box.y)};
         const auto width=Px(static_cast<float>(box.width)),height=Px(static_cast<float>(box.height));
         element->style->size={.width=width,.height=height,.min={width,height},.max={width,height}};
+        const bool allocated=parent_allocated&&box.width>0&&box.height>0;
+        // Hidden elements do not participate in Rev's layout. Keep empty nodes
+        // at their exact zero-area coordinates, with input disabled instead;
+        // their existing overflow clipping also suppresses native drawing.
+        element->setDisabled(!item.enabled||!allocated);
+        if(!allocated&&element->targetFlags.focus) {element->targetFlags.focus=false;element->dirty.style=true;}
         const auto& content=geometry.content;
         element->style->padding={.left=Px(content.x),.right=Px(box.width-content.x-content.width),
             .top=Px(content.y),.bottom=Px(box.height-content.y-content.height)};
         for(std::size_t index=0;index<geometry.children.size();++index)
-            apply_geometry(item.children[index],geometry.children[index]);
+            apply_geometry(item.children[index],geometry.children[index],0,0,allocated);
     }
     Item materialize(Rev::Element::Element* parent,const ui::DocumentNode& node) {
         using namespace Rev::Appearance;
@@ -136,14 +142,11 @@ private:
             button->labelText->style->size.width=100_pct;
             button->labelText->style->size.min.width=0_px;
             labels_[&node]=button->labelText;
-            button->onClick([this,button,command=node.command](re::Event&){
-                for(auto* ancestor=static_cast<re::Element*>(button);ancestor;ancestor=ancestor->parent) {
-                    if(ancestor->targetFlags.disabled)return;
-                    if(ancestor==ancestor->parent)break;
-                }
-                if(action_)action_(command);
+            const auto identity=actions_.find(&node)->identity;
+            button->onClick([this,button,identity](re::Event&){
+                if(actions_.enabled(identity) && accepts_input(button) && action_)action_(identity.command);
             });
-            buttons_.emplace_back(button,node.command);break;
+            buttons_.emplace_back(button,identity);break;
         }
         case Kind::column:case Kind::row:
             element=new re::Box(parent);
@@ -159,7 +162,7 @@ private:
             element->style->background.color=rgba(fill->red,fill->green,fill->blue,1);
         }
         if(node.border) {element->style->border.width=1_px;element->style->border.color=rgba(theme::grid,theme::grid,theme::grid,1);}
-        Item item;item.element=element;
+        Item item;item.element=element;item.enabled=node.enabled;
         if(node.kind==Kind::column || node.kind==Kind::row)
             for(const auto& child:node.children)item.children.push_back(materialize(element,child));
         return item;

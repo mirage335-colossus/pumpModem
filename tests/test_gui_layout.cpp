@@ -1,5 +1,7 @@
 #include "../src/gui/desktop_layout.hpp"
+#include "../src/gui/control_layout.hpp"
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace datapump::gui::ui;
@@ -83,12 +85,41 @@ void adapter_helpers() {
           persistent_slot(Slot::key_actions) && persistent_slot(Slot::status),
           "page membership changed");
 }
+void relative_controls() {
+    std::vector<Control> controls(3,Control{Kind::text});
+    for(std::size_t index=0;index<controls.size();++index)controls[index].instance=static_cast<unsigned>(index);
+    FieldState state;state.options={{"preset","Preset"}};
+    controls[0].stretch=0;
+    auto layout=control_layout(controls[0],state,default_width,default_height,controls);
+    check(layout.frame.w==0&&layout.widget.w==0&&layout.suggestions.w==0,
+        "Zero stretch produced a negative editor or suggestion width");
+    for(auto& control:controls)control.stretch=0;
+    for(const auto& control:controls) {
+        layout=control_layout(control,state,default_width,default_height,controls);
+        check(layout.frame.w==0&&layout.frame.x==24,"All-zero row did not remain empty");
+    }
+    for(auto& control:controls)control.stretch=std::numeric_limits<unsigned>::max();
+    for(std::size_t index=0;index<controls.size();++index) {
+        layout=control_layout(controls[index],state,default_width,default_height,controls);
+        check(layout.frame.x==24+1132*static_cast<int>(index)/3&&layout.frame.w==1132/3-8,
+            "Large relative stretch weights overflowed their shared allocation");
+    }
+    for(const auto kind:{Kind::text,Kind::bitmap})for(const auto caption:{BitmapCaption::footer,BitmapCaption::overlay_error}) {
+        controls[0].kind=kind;controls[0].bitmap_caption=caption;controls[0].stretch=0;controls[0].footer_height=100;
+        layout=control_layout(controls[0],state,default_width,default_height,controls);
+        for(const auto rect:{layout.widget,layout.suggestions,layout.caption})
+            check(rect.w>=0&&rect.h>=0,"Exhausted control allocation produced a negative native rectangle");
+        check(contains(layout.frame,layout.widget)&&(!layout.has_caption||contains(layout.frame,layout.caption)),
+            "Zero-sized native content escaped its shared frame");
+    }
+}
 }
 int main() {
     try {
         established_default();
         supported_sizes();
         adapter_helpers();
+        relative_controls();
         std::cout << "shared desktop layout passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

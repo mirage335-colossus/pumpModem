@@ -36,4 +36,19 @@ inline constexpr std::array<std::array<int,4>,2> document_geometry_remainder{{{{
 inline constexpr std::array<std::array<int,4>,2> document_geometry_margins{{{{0,0,100,20}},{{120,0,250,30}}}};
 inline constexpr std::array<std::array<int,4>,2> document_geometry_equal{{{{5,8,100,46}},{{105,10,100,50}}}};
 inline constexpr std::array<std::array<int,4>,2> document_geometry_overflow{{{{0,0,400,20}},{{400,0,0,30}}}};
+inline ui::DocumentNode document_actions_fixture() {
+    ui::DocumentNode first;first.kind=ui::DocumentKind::action;first.text="First occurrence";
+    first.command=ui::Command::clear_received;first.height=30;first.instance=1;
+    auto second=first;second.text="Second occurrence";second.instance=2;
+    ui::DocumentNode heading;heading.kind=ui::DocumentKind::text;heading.text="Literal heading";
+    heading.children={first}; // Leaf descendants do not materialize.
+    ui::DocumentNode nested;nested.children={second};
+    ui::DocumentNode root;root.children={first,heading,nested};return root;
+}
+inline ui::DocumentNode document_empty_action_fixture() {
+    ui::DocumentNode bitmap;bitmap.kind=ui::DocumentKind::bitmap;bitmap.width=50;bitmap.height=30;
+    ui::DocumentNode action;action.kind=ui::DocumentKind::action;action.text="Remainder action";
+    action.command=ui::Command::clear_received;action.instance=3;
+    ui::DocumentNode row;row.kind=ui::DocumentKind::row;row.width=100;row.children={bitmap,action};return row;
+}
 }

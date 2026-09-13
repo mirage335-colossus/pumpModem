@@ -101,9 +101,17 @@ an error before the rendering buffers are created. Software OpenGL is a valid
 profile; a separate native software renderer remains future upstream work.
 
 ```sh
-LIBGL_ALWAYS_SOFTWARE=1 ./build-rev/datapump-gui --smoke-test
+LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 ./build-rev/datapump-gui --smoke-test
 LIBGL_ALWAYS_SOFTWARE=1 ./build-rev/datapump-gui --simulation
 ```
+
+The GUI-contract CI profile limits llvmpipe to two rendering threads with
+`LP_NUM_THREADS=2`. On the local 12-CPU validation host, its default thread count
+repeatedly delayed native polling past the final 50 ms raw-replay frame, causing
+the smoke's received-symbol observation to fail. The bounded profile passed the
+same assertions. Poll and presentation frequencies are UI scheduling targets;
+slow rendering can still delay them. Replay intentionally accounts for skipped
+points and returns to live input at its deadline rather than extending playback.
 
 The implementation was exercised on Mesa llvmpipe (LLVM 19.1.7, OpenGL 4.5,
 Mesa 25.0.7) in a private X11 virtual display. Before the shared desktop and rich
