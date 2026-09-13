@@ -2,8 +2,40 @@
 namespace datapump::gui::ui {
 namespace {
 Control placed(Control control, Slot slot, Menu menu=Menu::none) {
-    control.slot=slot; control.menu=menu; return control;
+    control.slot=slot; control.menu=menu;
+    control.persistent=persistent_slot(slot);
+    control.open_upward=slot>=Slot::device;
+    control.font_size=control.multiline?16:13;
+    if(menu==Menu::keyfile)control.menu_label="Keyfile";
+    if(slot==Slot::header)control.font_size=22;
+    if(control.multiline) {
+        control.submit=Command::transmit;control.submit_mode=Field::send_key;
+        control.help="Enter transmits by default. Shift+Enter inserts a newline. The send-key choice can require Ctrl+Enter.";
+    }
+    if(slot==Slot::signals) {
+        control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
+        control.activate_record=Command::copy_signal;control.activate_on_select=true;
+        control.empty_text="Listening for signals...";
+        control.help="Preamble: recognized duration / expected five seconds (64 training segments); -- means unavailable.\nData: encoded body bits correct before error correction, measured after full verification.\nClick verified text or completed raw bits to copy. Files use the file list. Pending prefixes cannot be copied.";
+    }
+    if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
+    if(slot==Slot::qr)control.bitmap_caption=BitmapCaption::overlay_error;
+    if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
+    if(slot==Slot::waveform) {
+        control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
+        control.double_click=Command::reset_zoom;control.help="Wheel zooms the time span. Double-click resets zoom.";
+    }
+    if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
+    return control;
 }
+}
+const std::vector<PageDefinition>& pages() {
+    static const std::vector<PageDefinition> definitions{
+        {Page::console,"console","Console",false,86},
+        {Page::flow,"flow","Modem flow",true,114},
+        {Page::transmission,"transmission","Transmission layout",true,204}
+    };
+    return definitions;
 }
 const std::vector<Control>& console_screen() {
     static const std::vector<Control> controls{

@@ -60,9 +60,10 @@ int main(int argc,char** argv) {
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});
             datapump::gui::Smoke smoke({},100);
+            datapump::gui::BitmapSources bitmaps;
             controller.start();
             while(!smoke.done()) {
-                controller.poll(); smoke.step(controller);
+                controller.poll(); bitmaps.update(controller); smoke.step(controller, &bitmaps);
                 std::this_thread::sleep_for(std::chrono::milliseconds(40));
             }
             controller.close();

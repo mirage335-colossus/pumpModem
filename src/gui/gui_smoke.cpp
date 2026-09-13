@@ -1,5 +1,7 @@
 #include "gui_smoke.hpp"
+#include "bitmap_sources.hpp"
 #include "datapump/runtime.hpp"
+#include <cmath>
 #include <fstream>
 #include <set>
 #include <tuple>
@@ -9,99 +11,427 @@ namespace datapump::gui {
 namespace {
 using F=ui::Field;
 using C=ui::Command;
+using B=ui::Bitmap;
 using Clock=std::chrono::steady_clock;
-const std::string message="CQ Rev GUI smoke: exact UTF-8 caf\xc3\xa9. Shared controller and semantic controls.";
+const std::string message=
+    "CQ CQ - continuous reception\nClipboard caf\xc3\xa9 \xf0\x9f\x8c\x8d verified.\n"
+    "This message passes through the noisy symbol receiver while the waterfall keeps scrolling. "
+    "Text first appears as pending, then becomes available to copy after the complete packet "
+    "has passed error correction and integrity checks.";
+const std::string interrupted_message="Replace this pending replay. "+message;
+const std::string cancelled_message="Cancel this pending replay. "+message;
 const Bytes file_bytes{0,1,2,3,0xff,0xc0,0x80,'D','a','t','a','P','u','m','p','\n'};
 void require(bool condition,const char* message_) { if(!condition) throw Error(message_); }
 std::string path_text(const std::filesystem::path& path) { const auto s=path.u8string(); return {s.begin(),s.end()}; }
+std::string inspection_field(const Inspection& model,std::string_view name) {
+    for(const auto& field:model.fields) if(field.name==name) return field.value;
+    return {};
+}
+std::vector<unsigned char> preview_pixels(const plots::PlotSnapshot& source) {
+    BitmapImage pixels(96,64);
+    source.paint(full_bitmap_request(96,64,false,true),[&](unsigned x,unsigned y,PixelBlock block){pixels.blit(x,y,block);});
+    return pixels.pixels();
+}
 }
 struct Smoke::Impl {
-    std::filesystem::path directory,input_path,save_path;
-    double timeout;
-    Clock::time_point started=Clock::now();
-    unsigned phase=0;
-    bool done=false,pending_packet=false,pending_binary=false,replay_seen=false;
+    enum class Phase {
+        initialize,fec20,fec60,generate,generated,reloaded,key_failed,text_ready,text_received,
+        file_ready,file_received,interrupt_ready,interrupt_replay,replacement_ready,
+        replacement_replay,cancelled,raw_attachment,raw_ready,raw_received,tiny,long_text
+    };
+    struct Replay {
+        bool active=false,binary=false,saw_symbols=false,resumed=false;
+        std::uint64_t id=0,pending_poll=0,waterfall_version=0,waveform_version=0,constellation_version=0;
+        std::size_t frame=0,frames=0,waveform_changes=0;
+        double fraction=0;
+        Clock::time_point started;
+        std::vector<float> waveform;
+        std::vector<std::complex<double>> constellation;
+    } replay;
+    std::filesystem::path directory,input_path,save_path,key_path;
+    double timeout,raw_seconds=0;
+    Clock::time_point started=Clock::now(),cancelled_at;
+    Phase phase=Phase::initialize;
+    bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false;
+    std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
+    std::vector<float> idle_waveform;
+    std::set<std::uint64_t> interrupted;
+    std::set<std::string> verified_ids;
+    Bytes first_key_mac;
+    std::string first_key_id;
+    std::uintmax_t key_size=0;
     explicit Impl(std::filesystem::path path,double seconds):directory(std::move(path)),timeout(seconds) {
         if(directory.empty()) directory=std::filesystem::temp_directory_path()/("datapump-shared-smoke-"+std::to_string(started.time_since_epoch().count()));
         std::filesystem::create_directories(directory);
         const auto suffix=std::to_string(started.time_since_epoch().count());
         input_path=directory/("attachment-"+suffix+".bin"); save_path=directory/("received-"+suffix+".bin");
+        const auto key_name="generated keys caf\xc3\xa9-"+suffix+".key";
+        key_path=directory/std::filesystem::path(std::u8string(key_name.begin(),key_name.end()));
     }
     ui::ServiceRequest take(Controller& controller,ui::ServiceKind kind) {
         auto requests=controller.take_services();
         require(requests.size()==1&&requests.front().kind==kind,"Smoke received an unexpected platform service request");
         return std::move(requests.front());
     }
-    void check_copy(Controller& controller,std::string_view expected) {
-        controller.activate(C::copy_signal);
-        const auto request=take(controller,ui::ServiceKind::clipboard);
-        require(request.value==expected,"Shared GUI clipboard request changed the received payload");
-        controller.complete_service({request.id,false,{},{}});
+    void respond(Controller& controller,ui::ServiceKind kind,const std::string& value) {
+        const auto request=take(controller,kind);controller.complete_service({request.id,false,value,{}});
     }
-    void step(Controller& controller) {
-        if(done) return;
-        if(std::chrono::duration<double>(Clock::now()-started).count()>timeout) throw Error("Shared GUI smoke timed out: "+controller.field(F::status).text);
+    void generate(Controller& controller,const std::string& names) {
+        controller.activate(C::generate_keyfile);respond(controller,ui::ServiceKind::prompt,names);
+        respond(controller,ui::ServiceKind::save_file,path_text(key_path));
+    }
+    void attach(Controller& controller) {
+        controller.activate(C::attach_file);respond(controller,ui::ServiceKind::open_file,path_text(input_path));
+    }
+    void transmit(Controller& controller) {
+        require(controller.enabled(C::transmit),"Smoke attempted a transmission before its preparation finished");
+        launched_binary=controller.field(F::source).selected=="binary";
+        controller.activate(C::transmit);
+        require(!controller.enabled(C::transmit)&&controller.enabled(C::cancel),"Transmission did not immediately claim its single active slot");
+    }
+    ui::ServiceRequest copy(Controller& controller,std::string_view expected) {
+        require(controller.enabled(C::copy_signal),"Completed signal did not enable its clipboard action");
+        controller.activate(C::copy_signal);const auto request=take(controller,ui::ServiceKind::clipboard);
+        require(request.value==expected,"Shared GUI clipboard request changed the received payload");
+        return request;
+    }
+    void check_fec(Controller& controller,FecMode mode) {
+        const auto& model=controller.inspection();
+        require(model&&model->packet_layout&&!model->binary,"Packet inspection was unavailable after preparation");
+        const auto& layout=*model->packet_layout;
+        require(layout.fec==mode,"Packet inspection did not follow the selected effective FEC");
+        require((layout.header_parity_bytes>0)==(mode!=FecMode::off)&&
+                (layout.body_parity_bytes>0)==(mode!=FecMode::off),"FEC inspection disagrees with actual header/body parity");
+        require(model->lanes.size()==2&&model->constellations.size()==2&&!model->sections.empty(),"Packet inspection lost its flow, structure or alphabets");
+        bool unavailable=false;
+        for(const auto& lane:model->lanes)for(const auto& step:lane.steps)
+            unavailable=unavailable||step.state==InspectionState::unavailable;
+        require(unavailable,"Inspection falsely presented unimplemented receiver stages as available");
+    }
+    void inspect_replay(Controller& controller,const BitmapSources* bitmaps) {
+        const auto& snapshot=controller.snapshot();
+        if(snapshot.simulation_replay) {
+            require(snapshot.transmission_id&&snapshot.replay_frame_count>=2&&
+                    snapshot.replay_frame_index<snapshot.replay_frame_count&&
+                    std::isfinite(snapshot.simulation_sample_fraction)&&snapshot.simulation_sample_fraction>=0&&
+                    snapshot.simulation_sample_fraction<=1,"Simulation replay did not identify a chronological frame");
+            require(controller.field(F::mode).text.starts_with("Simulation replay "),"Replay mode label did not identify displayed frames");
+            if(bitmaps)require(std::string_view(bitmaps->title(B::waveform))=="Simulation replay / waveform"&&
+                    std::string_view(bitmaps->title(B::waterfall))=="Simulation replay / waterfall","Shared bitmap titles lost their replay source");
+            const bool beginning=!replay.active||replay.id!=snapshot.transmission_id;
+            if(beginning) {
+                require(!replay.active||interrupted.contains(replay.id),"An active replay was replaced without an explicit new transmission");
+                replay={};replay.active=true;replay.id=snapshot.transmission_id;replay.binary=launched_binary;replay.started=Clock::now();
+            } else require(snapshot.replay_frame_index>=replay.frame&&snapshot.simulation_sample_fraction>=replay.fraction,
+                           "Simulation replay moved backwards in transmission time");
+            for(const auto& signal:snapshot.signals) {
+                require(!signal.validated&&!signal.complete&&signal.binary==replay.binary,"Replay delivered completed or incorrectly typed reception early");
+                const auto& lines=controller.signals().lines();
+                const auto found=std::find_if(lines.begin(),lines.end(),[&](const auto& line){return line.id==signal.id;});
+                require(found!=lines.end()&&!found->validated&&!found->complete,"Pending replay signal was not presented");
+                const auto index=static_cast<std::size_t>(found-lines.begin());
+                require(!controller.signals().copy_id(index)&&!controller.signals().copy_bits(index),"Pending reception became copyable before completion");
+                require(signal_data_label(*found)==(replay.binary?"FEC off":"Data pre-FEC pending"),"Pending reception claimed measured data accuracy");
+                if(replay.binary)require(signal_status_label(*found)=="binary pending"&&signal_preamble_label(*found)=="Preamble none"&&
+                        found->expected_bits==3&&!found->preamble_received_percent&&!found->pre_fec_accuracy,"Pending raw bits acquired packet metadata");
+                if(!replay.pending_poll)replay.pending_poll=polls;
+            }
+            const auto source=snapshot.constellation_source;
+            require(source!=live::ConstellationSource::transmitted,"Simulation showed synthetic transmitted symbols as receiver measurements");
+            if(bitmaps)require(std::string_view(bitmaps->title(B::constellation))==(source==live::ConstellationSource::received?
+                    "Received constellation":"Receiver input I/Q"),"Constellation title did not identify the actual receiver source");
+            replay.saw_symbols=replay.saw_symbols||(source==live::ConstellationSource::received&&!snapshot.constellation.empty());
+            if(beginning||snapshot.replay_frame_index!=replay.frame) {
+                if(bitmaps)require(preview_pixels(bitmaps->get(B::constellation))==preview_pixels(plots::PlotSnapshot::constellation(
+                        snapshot.constellation,source!=live::ConstellationSource::input))&&
+                        preview_pixels(bitmaps->get(B::waveform))==preview_pixels(plots::PlotSnapshot::waveform(
+                        snapshot.waveform,controller.settings().transfer.modem,controller.waveform_zoom())),
+                        "Shared replay bitmaps retained measurements from a different frame");
+                if(!beginning) {
+                    if(bitmaps)require(bitmaps->version(B::waterfall)>replay.waterfall_version&&
+                            bitmaps->version(B::waveform)>replay.waveform_version&&bitmaps->version(B::constellation)>replay.constellation_version,
+                            "A new replay frame did not refresh the shared plots and waterfall");
+                    if(snapshot.waveform!=replay.waveform)++replay.waveform_changes;
+                }
+                replay.frame=snapshot.replay_frame_index;replay.fraction=snapshot.simulation_sample_fraction;
+                replay.waveform=snapshot.waveform;replay.constellation=snapshot.constellation;++replay.frames;
+                if(bitmaps){replay.waterfall_version=bitmaps->version(B::waterfall);replay.waveform_version=bitmaps->version(B::waveform);replay.constellation_version=bitmaps->version(B::constellation);}
+            } else {
+                require(snapshot.waveform==replay.waveform&&snapshot.constellation==replay.constellation,"Repeated replay polls changed an unchanged measurement frame");
+                if(bitmaps)require(bitmaps->version(B::waterfall)==replay.waterfall_version&&bitmaps->version(B::waveform)==replay.waveform_version&&
+                        bitmaps->version(B::constellation)==replay.constellation_version,"Repeated replay polls duplicated plot updates or waterfall rows");
+            }
+            return;
+        }
+        if(replay.active) {
+            replay.active=false;
+            if(!interrupted.contains(replay.id)) {
+                const auto elapsed=std::chrono::duration<double>(Clock::now()-replay.started).count();
+                require(elapsed>=2.4&&elapsed<=8&&replay.frames>=(replay.binary?2U:10U)&&
+                        replay.waveform_changes>=(replay.binary?1U:5U)&&replay.fraction>=.9&&replay.saw_symbols&&replay.pending_poll,
+                        "Replay did not show changing measured frames and pending reception over about three seconds");
+                completed_replay=replay.id;
+            }
+        }
+        if(replay.id&&snapshot.transmission_id==replay.id&&!snapshot.transmitting&&snapshot.constellation_source==live::ConstellationSource::input&&
+           snapshot.waveform!=replay.waveform&&(!bitmaps||bitmaps->version(B::waterfall)>replay.waterfall_version)) {
+            if(bitmaps)require(std::string_view(bitmaps->title(B::waveform))=="Live waveform"&&
+                    std::string_view(bitmaps->title(B::constellation))=="Receiver input I/Q","Replay completion did not restore live bitmap titles");
+            replay.resumed=true;
+        }
+    }
+    void inspect_packets(Controller& controller) {
+        for(const auto& packet:controller.inbox().items()) {
+            const auto id=id_label(packet.message);
+            if(verified_ids.contains(id))continue;
+            const auto text=std::string(packet.message.data.begin(),packet.message.data.end());
+            require(text!=interrupted_message&&text!=cancelled_message,"Replaced or cancelled replay delivered a late verified packet");
+            require(!controller.snapshot().transmitting&&!controller.snapshot().simulation_replay&&
+                    completed_replay==controller.snapshot().transmission_id&&replay.pending_poll&&replay.pending_poll<polls,
+                    "Verified packet bypassed an earlier pending replay poll");
+            require(text==message||packet.message.data==file_bytes,"Smoke received unexpected packet content");
+            verified_ids.insert(id);
+        }
+    }
+    void inspect_records(Controller& controller) {
+        const auto& records=controller.field(F::signals).records;
+        require(records.size()==controller.signals().lines().size(),"Signal collection did not present every retained reception");
+        for(const auto& signal:controller.signals().lines()) {
+            const auto row=std::find_if(records.begin(),records.end(),[&](const auto& value){return value.id==std::to_string(signal.id);});
+            require(row!=records.end(),"Signal collection lost its stable reception identity");
+            const auto has=[&](const std::string& text){return std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text==text;});};
+            require(has(std::to_string(static_cast<long long>(std::llround(signal.frequency_hz)))+" Hz")&&
+                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal.text)),
+                    "Signal record omitted frequency, status, preamble, data accuracy or complete received text");
+            require(row->activatable==(signal.binary?signal.complete:signal.validated&&signal.text_message),
+                    "Signal record activation disagreed with verified-text or completed-raw clipboard eligibility");
+        }
+    }
+    void step(Controller& controller,const BitmapSources* bitmaps) {
+        if(done)return;
+        if(std::chrono::duration<double>(Clock::now()-started).count()>timeout)
+            throw Error("Shared GUI smoke timed out in phase "+std::to_string(static_cast<int>(phase))+": "+controller.field(F::status).text);
+        ++polls;
         require(controller.settings().simulation,"Shared GUI smoke attempted hardware audio");
         const auto& snapshot=controller.snapshot();
-        replay_seen=replay_seen||snapshot.simulation_replay;
-        for(const auto& line:controller.signals().lines()) {
-            if(!line.binary&&!line.validated) pending_packet=true;
-            if(line.binary&&!line.complete) pending_binary=true;
+        inspect_replay(controller,bitmaps);inspect_packets(controller);inspect_records(controller);
+        if(!snapshot.waveform.empty()) {
+            if(!idle_waveform.empty()&&idle_waveform!=snapshot.waveform)saw_idle_change=true;
+            idle_waveform=snapshot.waveform;
         }
-        if(phase==0) {
-            controller.edit(F::message,"Discarded draft");
-            controller.edit(F::message,message);
-            controller.select(F::fec,"off");
+        if(phase==Phase::generated&&!controller.field(F::key).enabled&&snapshot.samples_received>key_samples)key_reception=true;
+        switch(phase) {
+        case Phase::initialize: {
+            controller.edit(F::message,"Discarded draft");controller.edit(F::message,message);
             const auto revision=controller.revision();
-            controller.select(F::qr_brightness,"dim");
-            controller.activate(C::zoom_in); controller.activate(C::reset_zoom);
-            require(controller.revision()==revision,"Display-only actions changed modem settings");
-            phase=1;
-        } else if(phase==1&&controller.enabled(C::transmit)) {
-            controller.activate(C::transmit); phase=2;
-        } else if(phase==2&&!snapshot.transmitting&&!snapshot.simulation_replay) {
-            const auto found=std::find_if(controller.inbox().items().begin(),controller.inbox().items().end(),[](const auto& packet) { return std::string(packet.message.data.begin(),packet.message.data.end())==message; });
-            if(found==controller.inbox().items().end()) return;
-            require(pending_packet&&replay_seen,"Packet skipped chronological pending/replay presentation");
+            controller.select(F::qr_brightness,"dim");controller.activate(C::zoom_in);controller.activate(C::reset_zoom);
+            controller.select(F::send_key,"ctrl-enter");controller.select(F::send_key,"enter");
+            require(controller.revision()==revision,"Display/input-preference actions changed modem settings");
+            phase=Phase::fec20;break;
+        }
+        case Phase::fec20:
+            if(!controller.estimate()||!saw_idle_change||!snapshot.samples_received)break;
+            check_fec(controller,FecMode::rs20);
+            require(controller.field(F::fec).enabled&&controller.field(F::fec).display_text.empty(),"Long text did not expose its retained FEC selection");
+            controller.select(F::fec,"rs60");phase=Phase::fec60;break;
+        case Phase::fec60:
+            if(!controller.estimate())break;
+            check_fec(controller,FecMode::rs60);controller.select(F::fec,"rs20");phase=Phase::generate;break;
+        case Phase::generate:
+            if(!controller.estimate())break;
+            key_samples=snapshot.samples_received;generate(controller,"A|B, None");
+            require(!controller.enabled(C::transmit)&&!controller.field(F::key).enabled,"Pending key generation did not gate transmission/key selection");
+            phase=Phase::generated;break;
+        case Phase::generated: {
+            if(!controller.field(F::key).enabled||!controller.estimate())break;
+            const auto& keys=controller.field(F::key);
+            require(keys.options.size()==3&&keys.options[1].label=="1. A|B"&&keys.options[2].label=="2. None"&&
+                    keys.selected=="key:A|B"&&controller.settings().transfer.key&&controller.settings().receive_keys.size()==2,
+                    "Production key generation did not preserve literal names and select its first key");
+            require(key_reception,"Production keyfile generation stopped continuous reception");
+            key_size=std::filesystem::file_size(key_path);
+            require(key_size>keyfile_header_bytes&&controller.enabled(C::show_key_folder),"Generated keyfile was not the production format or lost its folder action");
+            first_key_id=keys.selected;first_key_mac=controller.settings().transfer.key->mac(file_bytes);
+            controller.select(F::key,"key:None");
+            require(controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)!=first_key_mac,"Named None selected plaintext or the wrong key identity");
+            controller.select(F::key,first_key_id);
+            require(controller.settings().transfer.key->mac(file_bytes)==first_key_mac,"Key selection did not restore its original key identity");
+            generate(controller,"Replacement");
+            require(controller.field(F::key).enabled&&std::filesystem::file_size(key_path)==key_size&&
+                    controller.settings().transfer.key->mac(file_bytes)==first_key_mac&&
+                    controller.field(F::status).text.find("exist")!=std::string::npos,"Generating over an existing keyfile was not safely refused");
+            controller.activate(C::show_key_folder);const auto folder=take(controller,ui::ServiceKind::open_folder);
+            require(folder.value==folder_uri(std::filesystem::absolute(key_path).parent_path()),"Key folder service did not preserve its native path");
+            controller.complete_service({folder.id,false,{},{}});
+            controller.select(F::key,"none");controller.activate(C::open_keyfile);
+            respond(controller,ui::ServiceKind::open_file,path_text(key_path));phase=Phase::reloaded;break;
+        }
+        case Phase::reloaded:
+            if(!controller.field(F::key).enabled||!controller.estimate())break;
+            require(controller.field(F::key).selected==first_key_id&&controller.settings().transfer.key&&
+                    controller.settings().transfer.key->mac(file_bytes)==first_key_mac,"Loading a production keyfile did not restore and auto-select its first key");
+            controller.activate(C::open_keyfile);respond(controller,ui::ServiceKind::open_file,path_text(directory/"missing.key"));
+            phase=Phase::key_failed;break;
+        case Phase::key_failed:
+            if(!controller.enabled(C::acknowledge_key_failure))break;
+            require(!controller.enabled(C::transmit)&&controller.field(F::key).selected==first_key_id&&
+                    controller.settings().receive_keys.size()==2&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac,
+                    "Failed key load discarded the working keyring or permitted unacknowledged transmission");
+            controller.select(F::key,first_key_id);
+            require(controller.enabled(C::acknowledge_key_failure),"Unchanged key selection silently acknowledged a failed load");
+            controller.activate(C::acknowledge_key_failure);
+            require(!controller.enabled(C::acknowledge_key_failure)&&controller.field(F::key).selected==first_key_id,
+                    "Key failure acknowledgement changed the retained selected key");
+            controller.select(F::key,"none");phase=Phase::text_ready;break;
+        case Phase::text_ready:
+            if(!controller.enabled(C::transmit))break;
+            require(!controller.settings().transfer.key,"Plaintext smoke retained an encryption key");
+            transmit(controller);phase=Phase::text_received;break;
+        case Phase::text_received: {
+            if(verified_ids.size()!=1)break;
+            require(controller.inbox().file_items().empty(),"Received text appeared in the file-only collection");
             bool copied=false;
-            for(const auto& line:controller.signals().lines()) if(line.validated&&line.packet_id==id_label(found->message)) {
-                controller.select(F::signals,std::to_string(line.id)); check_copy(controller,message); copied=true; break;
+            for(const auto& line:controller.signals().lines())if(line.validated) {
+                require(line.preamble_received_percent&&line.pre_fec_accuracy&&line.pre_fec_accuracy->received_data_bits,
+                        "Verified text lost its measured preamble and pre-FEC diagnostics");
+                controller.select(F::signals,std::to_string(line.id));const auto request=copy(controller,message);
+                controller.complete_service({request.id,false,{},{}});copied=true;break;
             }
-            require(copied,"Verified received text was not available through signal selection");
-            write_new_file(path_text(input_path),file_bytes);
-            controller.activate(C::attach_file); const auto request=take(controller,ui::ServiceKind::open_file);
-            controller.complete_service({request.id,false,path_text(input_path),{}}); phase=3;
-        } else if(phase==3&&controller.enabled(C::transmit)) {
-            controller.activate(C::transmit); phase=4;
-        } else if(phase==4&&!snapshot.transmitting&&!snapshot.simulation_replay) {
+            require(copied,"Verified text was not selectable through its signal record");
+            write_new_file(path_text(input_path),file_bytes);attach(controller);phase=Phase::file_ready;break;
+        }
+        case Phase::file_ready:
+            if(!controller.enabled(C::transmit)||!controller.field(F::message_label).text.starts_with("Attached:"))break;
+            require(!controller.field(F::message).enabled,"Attached file did not make the inactive text draft read-only");
+            transmit(controller);phase=Phase::file_received;break;
+        case Phase::file_received: {
+            if(verified_ids.size()!=2)break;
             const auto files=controller.inbox().file_items();
-            const auto found=std::find_if(files.begin(),files.end(),[](const auto* packet) { return packet->message.data==file_bytes; });
-            if(found==files.end()) return;
-            controller.select(F::files,id_label((*found)->message)); controller.activate(C::save_file);
-            const auto request=take(controller,ui::ServiceKind::save_file);
-            controller.activate(C::clear_received); // The pending request must own the selected bytes.
-            controller.complete_service({request.id,false,path_text(save_path),{}});
-            std::ifstream input(save_path,std::ios::binary); require(static_cast<bool>(input),"Shared save service did not create the file");
-            require(read_bounded(input,1024)==file_bytes,"Clearing the inbox invalidated a pending save payload");
-            controller.activate(C::use_text); controller.select(F::source,"binary"); controller.edit(F::binary,"0 0\n1"); phase=5;
-        } else if(phase==5&&controller.enabled(C::transmit)) {
-            controller.activate(C::transmit); phase=6;
-        } else if(phase==6&&!snapshot.transmitting&&!snapshot.simulation_replay) {
-            for(const auto& line:controller.signals().lines()) if(line.binary&&line.complete) {
-                require(pending_binary,"Raw binary skipped pending reception");
-                require(!line.validated&&line.packet_id.empty()&&line.text=="001"&&line.received_bits==3&&line.expected_bits==3,"Raw binary changed bit count, leading zeros, or verification meaning");
-                controller.select(F::signals,std::to_string(line.id)); check_copy(controller,"001");
-                controller.select(F::source,"message");
-                require(controller.field(F::message).text==message&&controller.field(F::binary).text=="0 0\n1","Source switching discarded an inactive editor");
-                require(controller.inbox().items().empty(),"Raw binary was promoted to a verified packet");
-                done=true; break;
+            require(files.size()==1&&files.front()->message.data==file_bytes,"Received file list did not retain the exact binary attachment");
+            const auto id=id_label(files.front()->message);
+            bool measured_file=false;
+            for(const auto& line:controller.signals().lines())if(line.packet_id==id) {
+                require(line.preamble_received_percent&&line.pre_fec_accuracy&&files.front()->pre_fec_accuracy&&
+                        line.pre_fec_accuracy->received_data_bits==files.front()->pre_fec_accuracy->received_data_bits&&
+                        line.pre_fec_accuracy->corrected_data_bits==files.front()->pre_fec_accuracy->corrected_data_bits&&
+                        line.pre_fec_accuracy->received_data_bits,"Received file signal lost its validated packet's measured accuracy");
+                controller.select(F::signals,std::to_string(line.id));require(!controller.enabled(C::copy_signal),"Binary file was coerced to clipboard text");
+                measured_file=true;
             }
+            require(measured_file,"Received file had no measured signal record");
+            controller.select(F::files,id);controller.activate(C::save_file);const auto save=take(controller,ui::ServiceKind::save_file);
+            controller.activate(C::save_file);const auto second_save=take(controller,ui::ServiceKind::save_file);
+            ui::ServiceRequest retained_copy;
+            for(const auto& line:controller.signals().lines())if(line.validated&&line.text_message) {
+                controller.select(F::signals,std::to_string(line.id));retained_copy=copy(controller,message);break;
+            }
+            require(retained_copy.id!=0,"Text copy request could not be retained alongside a pending file save");
+            controller.activate(C::clear_received);
+            require(controller.inbox().items().empty()&&controller.signals().lines().empty()&&controller.field(F::files).records.empty()&&
+                    controller.field(F::signals).records.empty()&&!controller.enabled(C::save_file)&&!controller.enabled(C::copy_signal),
+                    "Clearing received content left stale collection records or actions");
+            require(retained_copy.value==message,"Clearing reception invalidated a queued clipboard payload");
+            controller.complete_service({retained_copy.id,false,{},{}});
+            controller.complete_service({save.id,false,path_text(save_path),{}});
+            {std::ifstream input(save_path,std::ios::binary);require(input&&read_bounded(input,1024)==file_bytes,"Clearing the inbox invalidated a pending save payload");}
+            controller.complete_service({second_save.id,false,path_text(save_path),{}});
+            require(controller.field(F::status).text.find("may already exist")!=std::string::npos,"Repeated save silently overwrote an existing file");
+            {std::ifstream input(save_path,std::ios::binary);require(input&&read_bounded(input,1024)==file_bytes,"Refused save changed the existing output file");}
+            controller.activate(C::use_text);controller.edit(F::message,interrupted_message);phase=Phase::interrupt_ready;break;
+        }
+        case Phase::interrupt_ready:
+            if(!controller.enabled(C::transmit)||!replay.resumed)break;
+            transmit(controller);phase=Phase::interrupt_replay;break;
+        case Phase::interrupt_replay:
+            if(!snapshot.simulation_replay)break;
+            controller.edit(F::message,cancelled_message);phase=Phase::replacement_ready;break;
+        case Phase::replacement_ready:
+            require(snapshot.simulation_replay,"Replacement preparation missed the active replay");
+            if(!controller.enabled(C::transmit)||!replay.pending_poll||replay.pending_poll>=polls||replay.frames<3)break;
+            interrupted.insert(replay.id);transmit(controller);phase=Phase::replacement_replay;break;
+        case Phase::replacement_replay:
+            if(!snapshot.simulation_replay||interrupted.contains(replay.id)||!replay.pending_poll||replay.pending_poll>=polls||replay.frames<3)break;
+            require(controller.command_label(C::cancel)=="Stop replay","Cancel action did not describe stopping the replay");
+            interrupted.insert(replay.id);controller.activate(C::cancel);cancelled_at=Clock::now();cancel_samples=snapshot.samples_received;
+            phase=Phase::cancelled;break;
+        case Phase::cancelled:
+            require(controller.inbox().items().empty()&&verified_ids.size()==2,"Interrupted replay added a received packet");
+            if(Clock::now()-cancelled_at>std::chrono::seconds(2))require(replay.resumed&&snapshot.samples_received>cancel_samples,
+                    "Stopping replay did not promptly resume live receiver samples and plots");
+            if(Clock::now()-cancelled_at<std::chrono::milliseconds(3250)||!replay.resumed)break;
+            controller.edit(F::message,"help");controller.toggle(F::repeatable,true);
+            require(controller.field(F::repeatable).checked,"Smoke could not establish a retained repeatable packet draft");
+            attach(controller);phase=Phase::raw_attachment;break;
+        case Phase::raw_attachment:
+            if(!controller.field(F::message_label).text.starts_with("Attached:")||!controller.estimate())break;
+            controller.select(F::source,"binary");controller.edit(F::binary,"001x");
+            require(!controller.enabled(C::transmit)&&!controller.estimate(),"Invalid binary draft retained a usable stale estimate");
+            controller.select(F::source,"message");
+            require(controller.field(F::binary).text=="001x"&&controller.field(F::message).text=="help"&&controller.field(F::fec).selected=="rs20"&&
+                    controller.field(F::fec).enabled,"Source switching discarded inactive drafts or the packet FEC choice");
+            controller.select(F::source,"binary");controller.edit(F::binary,"0 0\n1");controller.select(F::key,first_key_id);
+            phase=Phase::raw_ready;break;
+        case Phase::raw_ready: {
+            if(!controller.enabled(C::transmit))break;
+            const auto& model=controller.inspection();const auto& estimate=*controller.estimate();
+            const auto expected=transfer::estimate_binary(Bytes{0,0,1},controller.settings().transfer);
+            require(controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac,
+                    "Raw binary loopback did not use the selected production key");
+            require(model&&model->binary&&!model->packet_layout&&inspection_field(*model,"Meaningful bits")=="3"&&
+                    inspection_field(*model,"Body FEC")=="Off"&&inspection_field(*model,"Symbol padding")=="0 bits",
+                    "Raw inspection added packet framing, parity or padded bits");
+            require(estimate.total_seconds==expected.total_seconds&&estimate.packet_seconds==estimate.total_seconds&&
+                    estimate.content_seconds==estimate.total_seconds&&controller.field(F::airtime).text.starts_with("3 bits /"),
+                    "Raw airtime used packet/attachment overhead or padded the meaningful bit count");
+            raw_seconds=expected.total_seconds;
+            for(auto field:{F::callsign,F::grid,F::repeatable,F::fec,F::message})require(!controller.field(field).enabled,"Binary source left packet-only input active");
+            require(controller.field(F::binary).enabled&&controller.field(F::key).enabled&&controller.field(F::repeatable).checked&&
+                    controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off"&&
+                    !controller.enabled(C::attach_file)&&!controller.enabled(C::use_text),"Raw source did not preserve and disable inactive packet choices");
+            transmit(controller);phase=Phase::raw_received;break;
+        }
+        case Phase::raw_received:
+            if(snapshot.transmitting||snapshot.simulation_replay)break;
+            for(const auto& line:controller.signals().lines())if(line.binary&&line.complete) {
+                require(completed_replay==snapshot.transmission_id&&replay.pending_poll&&replay.pending_poll<polls,
+                        "Raw result skipped an earlier pending chronological replay");
+                require(!line.validated&&line.packet_id.empty()&&line.text=="001"&&line.received_bits==3&&line.expected_bits==3&&
+                        !line.preamble_received_percent&&!line.pre_fec_accuracy,"Encrypted raw loopback changed exact bits or claimed packet verification");
+                require(std::abs(snapshot.transmission_seconds-raw_seconds)<=1.0/controller.settings().transfer.modem.sample_rate+1e-12,
+                        "Raw transmitter emitted a duration different from its three meaningful bits");
+                require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary was promoted to a verified packet");
+                controller.select(F::signals,std::to_string(line.id));const auto request=copy(controller,"001");controller.complete_service({request.id,false,{},{}});
+                controller.select(F::source,"message");controller.activate(C::use_text);controller.toggle(F::repeatable,false);
+                require(controller.field(F::message).text=="help"&&controller.field(F::binary).text=="0 0\n1","Raw source switching discarded an inactive editor");
+                controller.select(F::key,"none");phase=Phase::tiny;break;
+            }
+            break;
+        case Phase::tiny:
+            if(!controller.estimate())break;
+            check_fec(controller,FecMode::off);
+            require(controller.inspection()->packet_layout->header_bytes==4&&controller.field(F::fec).selected=="rs20"&&
+                    !controller.field(F::fec).enabled&&controller.field(F::fec).display_text=="Off (under 16 B)",
+                    "Tiny packet inspection or effective FEC display did not disable all RS below sixteen bytes");
+            controller.edit(F::message,message);phase=Phase::long_text;break;
+        case Phase::long_text:
+            if(!controller.estimate()||!replay.resumed)break;
+            check_fec(controller,FecMode::rs20);
+            require(inspection_field(*controller.inspection(),"Compression").starts_with("LZMA2 preset 9e")&&
+                    controller.field(F::fec).enabled&&controller.field(F::fec).display_text.empty(),
+                    "Returning to long text failed to restore compression and retained FEC presentation");
+            require(verified_ids.size()==2&&interrupted.size()==2,"Smoke did not complete normal packet, replacement and cancellation workflows");
+            done=true;break;
         }
     }
 };
 Smoke::Smoke(std::filesystem::path directory,double timeout):impl_(std::make_unique<Impl>(std::move(directory),timeout)) {}
 Smoke::~Smoke()=default;
-void Smoke::step(Controller& controller) { impl_->step(controller); }
+void Smoke::step(Controller& controller,const BitmapSources* bitmaps) {
+    try { impl_->step(controller,bitmaps); }
+    catch(const std::exception& error) {
+        throw Error("Shared GUI smoke phase "+std::to_string(static_cast<int>(impl_->phase))+": "+error.what());
+    }
+}
 bool Smoke::done() const { return impl_->done; }
 void controller_self_check() {
     Controller controller({true,true});
@@ -129,11 +459,11 @@ void controller_self_check() {
     require(controller.field(F::message).text==before,"Invalid UTF-8 was accepted by shared text state");
     controller.edit(F::callsign,"two\nlines");
     require(controller.field(F::callsign).text.empty(),"Single-line field accepted a newline");
-    std::set<std::tuple<ui::Page,int,int>> identities;
-    for(const auto* screen:{&ui::console_screen(),&ui::inspection_screen()}) for(const auto& control:*screen) {
+    std::set<std::tuple<ui::Page,int,int,unsigned>> identities;
+    for(const auto& control:ui::console_screen()) {
         const auto kind=control.kind==ui::Kind::action?1:control.kind==ui::Kind::bitmap?2:0;
         const auto binding=kind==1?static_cast<int>(control.command):kind==2?static_cast<int>(control.bitmap):static_cast<int>(control.field);
-        require(identities.emplace(control.page,kind,binding).second,"Screen declares a duplicate binding identity");
+        require(identities.emplace(control.page,kind,binding,control.instance).second,"Screen declares a duplicate binding identity");
     }
     require(controller.field(F::key).selected=="none","Empty key list selected an imaginary key");
     require(!controller.enabled(C::acknowledge_key_failure),"Key failure acknowledgement is available without a failure");

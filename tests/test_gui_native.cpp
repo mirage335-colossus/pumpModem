@@ -186,7 +186,7 @@ int main() {
         check(gui::key_entry_names(" Home, Portable , Caf\xc3\xa9 ")==std::vector<std::string>({"Home","Portable","Caf\xc3\xa9"}));
         const std::vector<std::string> choice_names{"A|B","None","_Home","Home","A&B","AB","Path/Back\\slash"};
         check(gui::key_choice_labels(choice_names)==std::vector<std::string>({
-            "None","1. A|B","2. None","3. _Home","4. Home","5. A&&B","6. AB","7. Path/Back\\slash"}));
+            "None","1. A|B","2. None","3. _Home","4. Home","5. A&B","6. AB","7. Path/Back\\slash"}));
         check(gui::key_choice_labels({})==std::vector<std::string>({"None"}));
         for (const auto* invalid : {"", " ", ",Home", "Home,", "Home,,Portable"}) {
             bool invalid_names=false;

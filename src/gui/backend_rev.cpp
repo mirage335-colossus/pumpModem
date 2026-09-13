@@ -1,12 +1,9 @@
-#include "controller.hpp"
-#include "bitmap_sources.hpp"
-#include "gui_smoke.hpp"
-#include "plot_render.hpp"
-#include "inspection_page.hpp"
+#include "application.hpp"
+#include "text_policy.hpp"
+#include "../../tests/gui_extension_fixture.hpp"
 #include "rev_platform.hpp"
 #include "theme.hpp"
 #include "datapump/runtime.hpp"
-#include "datapump/tuning.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -16,6 +13,7 @@
 #include <functional>
 #include <iostream>
 #include <map>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -43,7 +41,7 @@ import Rev.Primitive.Video;
 import Rev.Graphics.Texture;
 import Rev.Graphics.Canvas;
 
-#include "backend_rev_inspection.hpp"
+#include "backend_rev_document.hpp"
 
 namespace {
 using namespace datapump;
@@ -115,7 +113,7 @@ struct Editor : re::Text {
     RevPlatform& platform;
     std::function<void(std::string)> changed;
     std::function<void()> submit;
-    std::function<bool(Rev::Element::Event&)> submit_key;
+    std::function<bool(Rev::Element::Event&)> submit_event;
     std::function<void(std::string)> error;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
     Editor(re::Element* parent, bool multi, std::size_t bytes, RevPlatform& services)
@@ -136,17 +134,16 @@ struct Editor : re::Text {
     void apply(const std::string& value) {if(content.get()!=value){content=value;clamp_positions();}}
     bool replace(const std::string& input) {
         if(!editable || targetFlags.disabled) return false;
-        if(!valid_clipboard_text(Bytes(input.begin(),input.end())) || (!multiline && input.find_first_of("\r\n")!=std::string::npos)) {
-            if(error) error(multiline?"Text must be valid UTF-8":"This field accepts one line");return false;
+        if(const auto message=ui::edit_error(input,multiline,std::numeric_limits<std::size_t>::max());!message.empty()) {
+            if(error)error(message);return false;
         }
-        resetVerticalCursor();
-        clamp_positions();
         auto proposed=content.get();
-        int left=std::min(selectAnchor,selectEnd),right=std::max(selectAnchor,selectEnd);
-        if(left==right) left=right=cursor;
+        int left=boundary(proposed,std::min(selectAnchor,selectEnd)),right=boundary(proposed,std::max(selectAnchor,selectEnd));
+        if(left==right)left=right=boundary(proposed,cursor);
         proposed.replace(static_cast<std::size_t>(left),static_cast<std::size_t>(right-left),input);
-        if(proposed.size()>limit) {if(error) error("Text exceeds this field's byte limit");return false;}
+        if(const auto message=ui::edit_error(proposed,multiline,limit);!message.empty()) {if(error)error(message);return false;}
         if(proposed==content.get()) return false;
+        resetVerticalCursor();
         content=proposed;cursor=left+static_cast<int>(input.size());selectAnchor=selectEnd=cursor;
         if(changed) changed(proposed);
         if(shared && shared->event) refresh(*shared->event);
@@ -181,8 +178,9 @@ struct Editor : re::Text {
                 });
             } catch(const std::exception& failure) {if(error)error(failure.what());}
         } else if(e.keyboard.enter) {
-            if(submit && (!multiline || (submit_key && submit_key(e)))) submit();
-            else if(multiline) replace("\n");
+            if(submit_event) {if(!submit_event(e)&&multiline)replace("\n");}
+            else if(submit)submit();
+            else if(multiline)replace("\n");
         } else if(e.keyboard.backspace || e.keyboard.del) {
             if(selectAnchor==selectEnd) {
                 const auto& value=content.get();int next=cursor;
@@ -238,63 +236,197 @@ struct BitmapView : re::Box {
     void draw(re::Event& e) override {re::Box::draw(e);video->draw();}
 };
 
-struct ListView : re::Box {
-    std::vector<re::Button*> rows;
-    std::vector<ui::Option> options;
-    std::function<void(std::string)> select;
-    ListView(re::Element* parent):re::Box(parent,{&column}) {
-        style->size.height=130_px;style->overflow=Overflow::Hide;style->scroll=Scroll::Both;
-        style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
-    }
-    void apply(const ui::FieldState& state) {
-        options=state.options;
-        while(rows.size()>options.size()) {delete rows.back();rows.pop_back();}
-        while(rows.size()<options.size()) {
-            const auto index=rows.size();
-            auto* button=new re::Button(this,re::Button::Params::Secondary(""),{&cell});
-            button->tabStop=true;
-            button->styles.add(&disabledControl);button->labelText->styles.add(&disabledText);
-            button->style->size.width=Grow();button->labelText->style->text.wrap=Wrap::False;
-            button->onClick([this,index](re::Event&){if(index<options.size() && options[index].enabled && select)select(options[index].id);});
-            rows.push_back(button);
-        }
-        for(std::size_t i=0;i<rows.size();++i) {
-            rows[i]->labelText->content=options[i].label;rows[i]->setDisabled(!state.enabled || !options[i].enabled);
-            if(options[i].id==state.selected) rows[i]->styles.add(&selectedStyle);else rows[i]->styles.remove(&selectedStyle);
-        }
+struct ChoiceView : re::Dropdown {
+    using re::Dropdown::Dropdown;
+    std::string display_text;
+    int font_size=13;
+    void computeChildren(re::Event& event) override {
+        re::Dropdown::computeChildren(event);
+        if(!display_text.empty())dropdownText->content=display_text;
+        dropdownText->style->text.size=Px(font_size);
+        for(auto* option:options)option->style->text.size=Px(font_size);
     }
 };
 
-struct Launch {bool color=true,simulation=false,smoke=false;double hold=0,timeout=100,scroll=0;ui::Page page=ui::Page::console;std::filesystem::path smoke_directory;};
+struct RecordText : re::Text {
+    using re::Text::Text;
+    void mouseWheel(re::Event& event) override {
+        const auto wheel=event.mouse.wheel;
+        if(event.keyboard.shift&&wheel.x==0) {event.mouse.wheel.x=wheel.y;event.mouse.wheel.y=0;}
+        re::Text::mouseWheel(event);event.mouse.wheel=wheel;
+    }
+};
+
+struct ListView : re::Box {
+    struct RecordRow {
+        re::Button* button=nullptr;
+        std::vector<re::Text*> cells;
+        ui::Record record;
+    };
+    std::map<std::string,RecordRow> rows;
+    std::vector<std::string> order;
+    std::function<void(std::string)> select,activate;
+    re::Text* empty=nullptr;
+    bool color,follow_tail,activate_on_select,tail_at_last_paint=true,restore_scroll=false;
+    float retained_scroll=0;
+    std::string last_click_id;
+    Clock::time_point last_click{};
+    float last_click_x=0,last_click_y=0;
+    int row_height,width=1,height=1;
+    ListView(re::Element* parent,const ui::Control& control,bool colored)
+        :re::Box(parent,{&column}),color(colored),follow_tail(control.follow_tail),activate_on_select(control.activate_on_select),row_height(control.list_row_height) {
+        style->overflow=Overflow::Hide;style->scroll=Scroll::Vertical;
+        style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
+        empty=new re::Text(this,control.empty_text,{&smallText});
+    }
+    bool hidden_page() {
+        for(auto* ancestor=static_cast<re::Element*>(this);ancestor;ancestor=ancestor->parent) {
+            if(ancestor->resolved.hidden||ancestor->style->visibility==Visibility::Hidden)return true;
+            if(ancestor==ancestor->parent)break;
+        }
+        return false;
+    }
+    bool at_tail() {
+        if(hidden_page()||restore_scroll)return tail_at_last_paint;
+        // Native hidden pages have no resolved inner height. These rows have
+        // declared fixed extents, so retain their tail semantics while hidden.
+        return resolved.scroll.y>=std::max(0.0f,static_cast<float>(order.size()*static_cast<std::size_t>(row_height))-static_cast<float>(height))-1;
+    }
+    void computePrimitives(re::Event& event) override {
+        if(!hidden_page()) {
+            if(restore_scroll) {
+                const float extent=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
+                if(std::abs(layout.rect.h-extent)>1||resolved.getInner(Axis::Vertical)<1) {
+                    shared->layoutDirty=true;refresh(event);re::Box::computePrimitives(event);return;
+                }
+                resolved.scroll.y=follow_tail&&tail_at_last_paint?
+                    std::max(0.0f,static_cast<float>(order.size()*static_cast<std::size_t>(row_height))-static_cast<float>(height)):retained_scroll;
+                restore_scroll=false;shared->layoutDirty=true;refresh(event);
+            } else {retained_scroll=resolved.scroll.y;tail_at_last_paint=at_tail();}
+        }
+        re::Box::computePrimitives(event);
+    }
+    void retain_for_page_change() {
+        if(!hidden_page()&&!restore_scroll) {retained_scroll=resolved.scroll.y;tail_at_last_paint=at_tail();}
+        restore_scroll=true;
+    }
+    void resize_content(int w,int h) {
+        const bool tail=follow_tail&&at_tail();restore_scroll=restore_scroll||hidden_page();width=w;height=h;
+        place(empty,{15,std::max(0,(h-20)/2),std::max(1,w-30),20});
+        for(auto& [id,row]:rows)layout_cells(row);
+        if(tail)resolved.scroll.y=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
+    }
+    re::Button* navigate(re::Element* current,int direction) {
+        auto found=std::find_if(order.begin(),order.end(),[&](const auto& id){return rows.at(id).button==current;});
+        auto index=found==order.end()?0:static_cast<int>(found-order.begin())+direction;
+        for(;index>=0&&index<static_cast<int>(order.size());index+=direction) {
+            auto& row=rows.at(order[static_cast<std::size_t>(index)]);
+            if(row.button->disabled)continue;
+            last_click_id.clear();if(select)select(row.record.id);
+            if(activate_on_select&&row.record.activatable&&activate)activate(row.record.id);
+            const float top=static_cast<float>(index*row_height),bottom=top+static_cast<float>(row_height);
+            if(top<resolved.scroll.y)resolved.scroll.y=top;
+            else if(bottom>resolved.scroll.y+resolved.getInner(Axis::Vertical))resolved.scroll.y=bottom-resolved.getInner(Axis::Vertical);
+            shared->layoutDirty=true;return row.button;
+        }
+        return nullptr;
+    }
+    void layout_cells(RecordRow& row) {
+        row.button->style->size={Px(width),Px(row_height)};
+        for(std::size_t i=0;i<row.cells.size();++i) {
+            const auto& cell=row.record.cells[i];
+            place(row.cells[i],ui::record_cell_rect(cell,width));
+        }
+    }
+    void apply(const ui::FieldState& state) {
+        const bool tail=follow_tail&&at_tail();restore_scroll=restore_scroll||hidden_page();bool changed=false;const auto old_order=order;
+        std::set<std::string> retained;for(const auto& record:state.records)retained.insert(record.id);
+        for(auto it=rows.begin();it!=rows.end();) {
+            if(!retained.contains(it->first)) {delete it->second.button;it=rows.erase(it);changed=true;}else ++it;
+        }
+        order.clear();std::vector<re::Element*> children_order{empty};
+        for(const auto& record:state.records) {
+            auto [found,inserted]=rows.try_emplace(record.id);auto& row=found->second;
+            if(inserted) {
+                row.button=new re::Button(this,re::Button::Params::Secondary(""));
+                row.button->labelText->style->visibility=Visibility::Hidden;
+                row.button->tabStop=true;row.button->style->padding={0_px,0_px,0_px,0_px};
+                row.button->style->margin={0_px,0_px,0_px,0_px};row.button->style->border.width=0_px;
+                row.button->onClick([this,id=record.id](re::Event& event){
+                    const auto found=rows.find(id);if(found==rows.end()||!found->second.record.enabled)return;
+                    const bool keyboard=event.keyboard.enter||event.keyboard.space;
+                    const auto now=Clock::now();
+                    const bool twice=!keyboard&&last_click_id==id&&now-last_click<std::chrono::milliseconds(450)&&
+                        std::abs(event.mouse.pos.x-last_click_x)<5&&std::abs(event.mouse.pos.y-last_click_y)<5;
+                    last_click_id=keyboard||twice?"":id;last_click=now;last_click_x=event.mouse.pos.x;last_click_y=event.mouse.pos.y;
+                    if(select)select(id);
+                    if(found->second.record.activatable&&activate&&(activate_on_select||event.keyboard.enter||twice))activate(id);
+                });
+            }
+            if(row.record!=record || inserted) {
+                changed=true;row.record=record;
+                while(row.cells.size()>record.cells.size()) {delete row.cells.back();row.cells.pop_back();}
+                while(row.cells.size()<record.cells.size()) {
+                    auto* text=new RecordText(row.button,"");
+                    text->style->text.wrap=Wrap::False;text->style->overflow=Overflow::Hide;
+                    text->style->scroll=Scroll::Horizontal;row.cells.push_back(text);
+                }
+                for(std::size_t i=0;i<record.cells.size();++i) {
+                    const auto& cell=record.cells[i];auto* text=row.cells[i];text->content=cell.text;
+                    text->style->text.size=Px(cell.font_size);text->style->text.weight=cell.bold?700:400;
+                    const auto gray=cell.tone==ui::TextTone::muted?theme::muted:cell.tone==ui::TextTone::inverse?0:color?theme::color_text:theme::text;
+                    text->style->text.color=cell.tone==ui::TextTone::data&&color?
+                        rgba(theme::data_tint.red,theme::data_tint.green,theme::data_tint.blue,1):rgba(gray,gray,gray,1);
+                }
+                layout_cells(row);
+            }
+            row.button->setDisabled(!state.enabled||!record.enabled);
+            if(record.id==state.selected)row.button->styles.add(&selectedStyle);else row.button->styles.remove(&selectedStyle);
+            order.push_back(record.id);children_order.push_back(row.button);
+        }
+        // Reuse and reorder widgets by record identity so selection, focus and
+        // each long cell's horizontal scroll survive snapshot replacement.
+        children=std::move(children_order);
+        empty->style->visibility=order.empty()?Visibility::Visible:Visibility::Hidden;
+        if(tail)resolved.scroll.y=static_cast<float>(order.size()*static_cast<std::size_t>(row_height));
+        if(changed||old_order!=order)shared->layoutDirty=true;
+    }
+};
+
 struct Binding {
-    ui::Control control;
+    const ui::Control& control;
     re::Element* element=nullptr;
     re::Text* label=nullptr;
     re::Text* caption=nullptr;
     Editor* editor=nullptr;
-    re::Dropdown* suggestions=nullptr;
-    re::Dropdown* choice=nullptr;
+    ChoiceView* suggestions=nullptr;
+    ChoiceView* choice=nullptr;
     re::Checkbox* toggle=nullptr;
     re::Button* button=nullptr;
     ListView* list=nullptr;
     BitmapView* bitmap=nullptr;
-    re::Dropdown* menu=nullptr;
+    ChoiceView* menu=nullptr;
     std::vector<ui::Control> menu_items;
+    std::uint64_t bitmap_revision=std::numeric_limits<std::uint64_t>::max();
+    bool has_suggestions=false;
 };
 
 class RevApp : public Rev::Window {
 public:
-    Controller controller;
+    Application application;
+    Controller& controller;
     RevPlatform platform;
-    Launch launch;
-    std::array<re::Box*,3> pages{};
+    Launch& launch;
+    std::map<ui::Page,re::Box*> pages;
     re::Box* surface=nullptr;
     re::Box* navigation=nullptr;
-    std::array<re::Button*,3> tabs{};
-    std::array<RevInspectionView*,2> inspection_views{};
+    re::Text* help_text=nullptr;
+    std::map<ui::Page,re::Button*> tabs;
+    std::optional<ui::Page> displayed_page;
+    std::map<ui::Page,RevDocumentView*> documents;
     std::vector<Binding> bindings;
-    BitmapSources bitmap_sources;
-    std::set<ui::Bitmap> dirty_bitmaps;
+    std::span<const ui::Control> declarations;
+    std::function<void(ui::Command)> command_observer;
     std::vector<void*>* group;
     std::deque<ui::ServiceRequest> services;
     re::Box* dialog=nullptr;
@@ -302,9 +434,10 @@ public:
     Editor* prompt=nullptr;
     re::Element* previous_focus=nullptr;
     std::optional<ui::ServiceResult> dialog_result;
-    RevApp(std::vector<void*>& windows,Launch options)
+    bool service_probe=false;
+    RevApp(std::vector<void*>& windows,Launch options,std::span<const ui::Control> controls=ui::console_screen())
         :Rev::Window(windows,{.name="Data Pump — Rev",.size={ui::default_width,ui::default_height,{ui::min_width,ui::min_height},{4096,4096}}}),
-         controller({options.simulation || options.smoke,options.smoke}),launch(options),group(&windows) {
+         application(options),controller(application.controller),launch(application.launch),declarations(controls),group(&windows) {
         // Native sizes are physical pixels; the shared desktop dimensions are
         // logical units, just as in FLTK at a scaled display setting.
         if(details.scale!=1) {
@@ -323,26 +456,28 @@ public:
         surface=new re::Box(this,{&column});surface->style->size={100_pct,100_pct};
         surface->style->background.color=rgba(0,0,0,1);
         navigation=new re::Box(surface,{&row});
-        std::size_t tab=0;
-        for(const auto& item:std::array<std::pair<const char*,ui::Page>,3>{{{"Console",ui::Page::console},{"Modem flow",ui::Page::flow},{"Transmission layout",ui::Page::transmission}}}) {
-            auto* button=new re::Button(navigation,re::Button::Params::Secondary(item.first));tabs[tab++]=button;
-            button->onClick([this,page=item.second](re::Event&){select_page(page);});button->tabStop=true;
-        }
-        for(auto*& page:pages) {
-            page=new re::Box(surface,{&column});page->style->size={Grow(),Grow()};
-            page->style->overflow=Overflow::Hide;page->style->scroll=Scroll::Vertical;
-        }
-        create_controls(ui::console_screen());
-        for(std::size_t i=0;i<inspection_views.size();++i)
-            inspection_views[i]=new RevInspectionView(pages[i+1],i==0,launch.color,controller,
+        for(const auto& definition:ui::pages()) {
+            auto* button=new re::Button(navigation,re::Button::Params::Secondary(definition.title));tabs[definition.id]=button;
+            button->onClick([this,id=definition.id](re::Event&){select_page(id);});button->tabStop=true;
+            auto* page=new re::Box(surface,{&column});pages[definition.id]=page;
+            page->style->overflow=Overflow::Hide;page->style->scroll=definition.document?Scroll::Vertical:Scroll::None;
+            if(definition.document) {documents[definition.id]=new RevDocumentView(page,launch.color,
                 [this](re::Element* parent,const plots::PlotSnapshot& source)->re::Element* {
                     auto* view=new BitmapView(parent,launch.color,[this]{return details.scale;});view->set(source);return view;
-                });
-        pages[0]->style->scroll=Scroll::None;
-        select_page(launch.page);controller.start();apply();layout_desktop();show();refresh(event);
+                },[this](ui::Command command){dispatch(command);});
+                documents[definition.id]->style->padding={.left=Px(ui::document_side_padding),.right=Px(ui::document_side_padding),.top=Px(ui::document_top_padding),.bottom=Px(ui::document_bottom_padding)};
+            }
+        }
+        help_text=new re::Text(this,"",{&smallText});
+        help_text->style->visibility=Visibility::Hidden;help_text->style->zIndex=1000;
+        help_text->style->background.color=rgba(theme::surface,theme::surface,theme::surface,1);
+        help_text->style->padding={8_px,8_px,8_px,8_px};help_text->style->overflow=Overflow::Hide;
+        help_text->style->border={.color=rgba(theme::grid,theme::grid,theme::grid,1),.width=1_px};
+        create_controls(declarations);
+        select_page(launch.page);application.start();apply();layout_desktop();show();refresh(event);
     }
-    ~RevApp() override {controller.close();}
-    void onClose(bool& reject) override {reject=true;controller.close();}
+    ~RevApp() override {application.close();}
+    void onClose(bool& reject) override {reject=true;application.close();}
     void onResize(int width,int height) override {
         const int minimum_width=static_cast<int>(std::ceil(ui::min_width*window->scale));
         const int minimum_height=static_cast<int>(std::ceil(ui::min_height*window->scale));
@@ -423,7 +558,9 @@ public:
         // Rev's Button invokes click on every key. The adapter limits activation
         // to the ordinary button keys while editors/dropdowns retain their keys.
         for(auto* element:topDown) if(element->targetFlags.focus && element->tabStop && allows_input(element) && dynamic_cast<re::Button*>(element)) {
-            if(e.keyboard.enter || e.keyboard.space)element->click(e);
+            if(auto* list=dynamic_cast<ListView*>(element->parent);list&&(e.keyboard.arrows.up||e.keyboard.arrows.down)) {
+                if(auto* target=list->navigate(element,e.keyboard.arrows.up?-1:1))focus_control(target);
+            } else if(e.keyboard.enter || e.keyboard.space)element->click(e);
             e.propagate=false;return;
         }
         for(auto& binding:bindings)if(binding.toggle && binding.toggle->checkbox->targetFlags.focus && allows_input(binding.toggle->checkbox) && (e.keyboard.enter || e.keyboard.space)) {
@@ -433,246 +570,216 @@ public:
         Rev::Window::keyDown(e);
     }
     void select_page(ui::Page page) {
-        launch.page=page;
-        for(std::size_t i=0;i<pages.size();++i) {pages[i]->style->visibility=i==static_cast<std::size_t>(page)?Visibility::Visible:Visibility::Hidden;pages[i]->dirty.style=true;}
-        for(std::size_t i=0;i<tabs.size();++i)if(tabs[i]) {
-            if(i==static_cast<std::size_t>(page))tabs[i]->styles.add(&selectedStyle);
-            else tabs[i]->styles.remove(&selectedStyle);
+        application.select_page(page);if(displayed_page&&*displayed_page==page)return;
+        if(displayed_page)for(auto& binding:bindings)
+            if(binding.list&&!binding.control.persistent&&binding.control.page==*displayed_page)binding.list->retain_for_page_change();
+        displayed_page=page;
+        for(const auto& [id,body]:pages) {body->style->visibility=id==page?Visibility::Visible:Visibility::Hidden;body->dirty.style=true;}
+        for(const auto& [id,button]:tabs) {
+            if(id==page)button->styles.add(&selectedStyle);else button->styles.remove(&selectedStyle);
         }
         shared->layoutDirty=true;refresh(event);
     }
     void scroll_page(double fraction) {
-        auto* page=pages[static_cast<std::size_t>(launch.page)];
+        auto* page=pages.at(application.page());
         const auto extent=std::max(0.0f,page->layout.rect.h-page->resolved.getInner(Axis::Vertical));
         const auto position=extent*static_cast<float>(fraction);
-        if(page->resolved.scroll.y!=position) {
-            page->resolved.scroll.y=position;shared->layoutDirty=true;refresh(event);
-        }
+        if(page->resolved.scroll.y!=position) {page->resolved.scroll.y=position;shared->layoutDirty=true;refresh(event);}
+    }
+    const ui::FieldState& state(const ui::Control& control) const {
+        static const ui::FieldState empty;
+        return control.field==ui::Field::count?empty:controller.field(control.field);
     }
     void verify_layout() const {
-        const ui::DesktopLayout expected(details.size.width,details.size.height);
-        std::map<std::pair<ui::Page,unsigned>,float> edges;
         for(const auto& binding:bindings) {
-            if(binding.control.page!=launch.page && !ui::persistent_slot(binding.control.slot))continue;
+            if(binding.button&&binding.button->labelText->content.get()!=action_label(binding.control))
+                throw Error("Rev smoke: native action label missed its current shared presentation");
+            if(binding.menu)for(std::size_t index=0;index<binding.menu_items.size();++index)
+                if(binding.menu->params.options[index].name!=action_label(binding.menu_items[index])||binding.menu->params.options[index].name.empty())
+                    throw Error("Rev smoke: native menu omitted its declared or current action label");
+            if(binding.control.page!=application.page()&&!binding.control.persistent)continue;
             bool hidden=false;
-            // Rev stops cascading below a hidden parent. Descendants can retain
-            // earlier visibility flags and are not part of the painted layout.
-            for(auto* element=binding.element;element && element!=this;element=element->parent)
-                hidden=hidden || element->resolved.hidden;
+            for(auto* element=binding.element;element&&element!=this;element=element->parent)hidden=hidden||element->resolved.hidden;
             if(hidden)continue;
+            if(application.smoke_passed()&&binding.list&&binding.control.follow_tail&&!binding.list->at_tail())
+                throw Error("Rev smoke: visible record tail lost after page changes: scroll="+std::to_string(binding.list->resolved.scroll.y)+" retained="+std::to_string(binding.list->retained_scroll)+" content="+std::to_string(binding.list->layout.rect.h)+" height="+std::to_string(binding.list->height)+" inner="+std::to_string(binding.list->resolved.getInner(Axis::Vertical)));
             const auto& rect=binding.element->rect;
-            if(rect.w<24 || rect.h<=0)throw Error("Rev smoke: control field="+std::to_string(static_cast<int>(binding.control.field))+" kind="+std::to_string(static_cast<int>(binding.control.kind))+" page="+std::to_string(static_cast<int>(binding.control.page))+" row="+std::to_string(binding.control.row)+" label="+binding.control.label+" has extent "+std::to_string(rect.w)+" x "+std::to_string(rect.h));
-            if(binding.control.slot!=ui::Slot::none) {
-                const auto frame=expected[binding.control.slot];
-                if(std::abs(rect.x-frame.x)>1 || std::abs(rect.y-frame.y)>1 || std::abs(rect.w-frame.w)>1 || std::abs(rect.h-frame.h)>1)
-                    throw Error("Rev smoke: shared desktop placement mismatch for "+std::string(binding.control.label)+" slot="+std::to_string(static_cast<int>(binding.control.slot))+" actual="+std::to_string(rect.x)+","+std::to_string(rect.y)+","+std::to_string(rect.w)+","+std::to_string(rect.h)+" expected="+std::to_string(frame.x)+","+std::to_string(frame.y)+","+std::to_string(frame.w)+","+std::to_string(frame.h));
-                continue;
-            }
-            auto key=std::make_pair(binding.control.page,binding.control.row);
-            if(auto found=edges.find(key);found!=edges.end() && rect.x<found->second-1)throw Error("Rev smoke: adjacent declared controls overlap");
-            edges[key]=rect.x+rect.w;
+            const auto frame=ui::control_layout(binding.control,state(binding.control),details.size.width,details.size.height,declarations).frame;
+            if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
+                throw Error("Rev smoke: shared desktop placement mismatch for "+std::string(binding.control.label));
         }
     }
-    void create_controls(const std::vector<ui::Control>& controls) {
-        std::map<std::pair<ui::Page,unsigned>,re::Box*> rows;
-        std::map<std::pair<ui::Page,unsigned>,unsigned> weights;
-        for(const auto& c:controls)weights[{c.page,c.row}]+=c.stretch;
+    void dispatch(ui::Command command) {
+        controller.activate(command);if(command_observer)command_observer(command);
+    }
+    void show_help(const char* text,re::Element* owner) {
+        const int width=std::min(600,details.size.width-32),height=120;
+        const int x=std::clamp(static_cast<int>(owner->rect.x),16,details.size.width-width-16);
+        const int y=owner->rect.y>details.size.height/2?std::max(8,static_cast<int>(owner->rect.y)-height-4):
+            std::min(details.size.height-height-8,static_cast<int>(owner->rect.y+owner->rect.h)+4);
+        place(help_text,{x,y,width,height});help_text->content=text;help_text->style->visibility=Visibility::Visible;refresh(event);
+    }
+    void create_controls(std::span<const ui::Control> controls) {
         for(const auto& c:controls) {
             if(c.menu!=ui::Menu::none) {
                 const auto found=std::find_if(bindings.begin(),bindings.end(),[&](const auto& binding){return binding.control.menu==c.menu;});
                 if(found!=bindings.end()) {found->menu_items.push_back(c);continue;}
             }
-            auto key=std::make_pair(c.page,c.row);
-            re::Element* parent=ui::persistent_slot(c.slot)?surface:pages[static_cast<std::size_t>(c.page)];
-            if(c.slot==ui::Slot::none) {
-                auto*& line=rows[key];if(!line)line=new re::Box(parent,{&row});parent=line;
-            }
             Binding b{c};
-            auto* container=new re::Box(parent,{&column});
-            if(c.slot==ui::Slot::none) {
-                container->styles.add(&cell);
-                container->style->size.width=Pct(100.0f*static_cast<float>(c.stretch)/static_cast<float>(weights[key]));
-            }
-            b.element=container;
+            b.element=new re::Box(c.persistent?surface:pages.at(c.page),{&column});
+            auto* container=b.element;
             if(c.menu!=ui::Menu::none) {
                 b.menu_items.push_back(c);
-                b.menu=new re::Dropdown(container,{.label="",.placeholder="Keyfile"});
+                b.menu=new ChoiceView(container,{.label="",.placeholder=c.menu_label,.openUpward=c.open_upward});
                 compact_dropdown(b.menu);b.menu->dropdown->tabStop=true;
                 b.menu->onChange=[this,menu=c.menu,choice=b.menu](re::Event&){
                     for(const auto& binding:bindings)if(binding.control.menu==menu)
                         for(const auto& item:binding.menu_items)if(std::to_string(static_cast<int>(item.command))==choice->params.value) {
-                            controller.activate(item.command);choice->params.value.clear();return;
+                            dispatch(item.command);choice->params.value.clear();return;
                         }
                 };
-                bindings.push_back(std::move(b));continue;
-            }
-            if(c.kind!=ui::Kind::action && c.kind!=ui::Kind::toggle && c.kind!=ui::Kind::label && c.label[0])
-                b.label=new re::Text(container,c.label,{&smallText});
-            switch(c.kind) {
-            case ui::Kind::label:
-                b.label=new re::Text(container,c.field==ui::Field::count?c.label:"",{&plainText});break;
-            case ui::Kind::text:
-                b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
-                b.editor->changed=[this,field=c.field](std::string text){controller.edit(field,std::move(text));};
-                b.editor->error=[this](std::string error){controller.report_error(std::move(error));};
-                if(c.multiline) {
-                    b.editor->submit=[this]{controller.activate(ui::Command::transmit);};
-                    b.editor->submit_key=[this](re::Event& e){return !e.keyboard.shift && (controller.field(ui::Field::send_key).selected=="ctrl-enter"?bool(e.keyboard.ctrl):!bool(e.keyboard.ctrl));};
+            } else {
+                const auto geometry=ui::control_layout(c,state(c),details.size.width,details.size.height,declarations);
+                if(geometry.has_label)b.label=new re::Text(container,c.kind==ui::Kind::label&&c.field!=ui::Field::count?"":c.label,{&plainText});
+                switch(c.kind) {
+                case ui::Kind::label:break;
+                case ui::Kind::text:
+                    b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
+                    b.editor->changed=[this,field=c.field](std::string text){controller.edit(field,std::move(text));};
+                    b.editor->error=[this](std::string error){controller.report_error(std::move(error));};
+                    if(c.submit!=ui::Command::none)b.editor->submit_event=[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);};
+                    {
+                        b.has_suggestions=geometry.has_suggestions;
+                        b.suggestions=new ChoiceView(container,{.label="",.placeholder="",.openUpward=c.open_upward});
+                        compact_dropdown(b.suggestions);b.suggestions->style->visibility=b.has_suggestions?Visibility::Visible:Visibility::Hidden;b.suggestions->dropdownText->style->visibility=Visibility::Hidden;
+                        b.suggestions->dropdown->tabStop=true;
+                        b.suggestions->onChange=[this,field=c.field,choice=b.suggestions](re::Event&){controller.edit(field,choice->params.value);choice->params.value.clear();};
+                    }
+                    break;
+                case ui::Kind::choice:
+                    b.choice=new ChoiceView(container,{.label="",.placeholder="None",.openUpward=c.open_upward});
+                    compact_dropdown(b.choice);b.choice->dropdown->tabStop=true;
+                    b.choice->onChange=[this,field=c.field,choice=b.choice](re::Event&){controller.select(field,choice->params.value);};break;
+                case ui::Kind::toggle:
+                    b.toggle=new re::Checkbox(container,{.label=c.label,.def=false});b.toggle->checkbox->tabStop=true;
+                    b.toggle->checkbox->onClick([this,field=c.field,toggle=b.toggle](re::Event&){controller.toggle(field,toggle->value.get());});break;
+                case ui::Kind::action:
+                    b.button=new re::Button(container,re::Button::Params::Secondary(c.label));b.button->tabStop=true;
+                    b.button->styles.add(&disabledControl);b.button->labelText->styles.add(&disabledText);
+                    b.button->onClick([this,command=c.command](re::Event&){dispatch(command);});break;
+                case ui::Kind::list:
+                    b.list=new ListView(container,c,launch.color);
+                    b.list->select=[this,field=c.field](std::string id){controller.select(field,std::move(id));};
+                    if(c.activate_record!=ui::Command::none)b.list->activate=[this,control=&c](std::string id){application.activate_record(*control,id);};
+                    break;
+                case ui::Kind::bitmap:
+                    b.bitmap=new BitmapView(container,launch.color,[this]{return details.scale;});
+                    if(geometry.has_caption)b.caption=new re::Text(container,"",{&smallText});break;
                 }
-                if(!controller.field(c.field).options.empty()) {
-                    b.suggestions=new re::Dropdown(container,{.label="",.placeholder="",.openUpward=ui::persistent_slot(c.slot)});
-                    compact_dropdown(b.suggestions);b.suggestions->dropdownText->style->visibility=Visibility::Hidden;
-                    b.suggestions->dropdown->tabStop=true;
-                    b.suggestions->onChange=[this,field=c.field,choice=b.suggestions](re::Event&){
-                        controller.edit(field,choice->params.value);choice->params.value.clear();
-                    };
-                }
-                break;
-            case ui::Kind::choice:
-                b.choice=new re::Dropdown(container,{.label="",.placeholder="None",.openUpward=c.slot>=ui::Slot::device});
-                compact_dropdown(b.choice);b.choice->dropdown->tabStop=true;
-                b.choice->onChange=[this,field=c.field,choice=b.choice](re::Event&){controller.select(field,choice->params.value);};break;
-            case ui::Kind::toggle:
-                b.toggle=new re::Checkbox(container,{.label=c.label,.def=false});b.toggle->checkbox->tabStop=true;
-                b.toggle->checkbox->onClick([this,field=c.field,toggle=b.toggle](re::Event&){controller.toggle(field,toggle->value.get());});break;
-            case ui::Kind::action:
-                b.button=new re::Button(container,re::Button::Params::Secondary(c.label));b.button->tabStop=true;
-                b.button->styles.add(&disabledControl);b.button->labelText->styles.add(&disabledText);
-                b.button->onClick([this,command=c.command](re::Event&){controller.activate(command);});break;
-            case ui::Kind::list:
-                b.list=new ListView(container);b.list->select=[this,field=c.field](std::string id){controller.select(field,std::move(id));};break;
-            case ui::Kind::bitmap:
-                b.bitmap=new BitmapView(container,launch.color,[this]{return details.scale;});
-                if(c.slot!=ui::Slot::none)b.caption=new re::Text(container,"",{&smallText});
-                break;
             }
+            if(c.click!=ui::Command::none||c.double_click!=ui::Command::none) {
+                struct ClickState {Clock::time_point time{};float x=0,y=0;};auto click=std::make_shared<ClickState>();
+                container->onClick([this,control=&c,click](re::Event& event){
+                    const auto now=Clock::now();const bool twice=now-click->time<std::chrono::milliseconds(450)&&
+                        std::abs(event.mouse.pos.x-click->x)<5&&std::abs(event.mouse.pos.y-click->y)<5;
+                    click->time=now;click->x=event.mouse.pos.x;click->y=event.mouse.pos.y;
+                    const auto command=twice&&control->double_click!=ui::Command::none?control->double_click:control->click;
+                    if(command!=ui::Command::none)dispatch(command);
+                });
+            }
+            if(c.help[0]) {
+                container->onMouseEnter([this,control=&c,container](re::Event&){show_help(control->help,container);});
+                container->onMouseLeave([this](re::Event&){help_text->style->visibility=Visibility::Hidden;refresh(event);});
+            }
+            if(c.wheel_up!=ui::Command::none||c.wheel_down!=ui::Command::none)
+                container->onMouseWheel([this,control=&c](re::Event& event){
+                    if(event.mouse.wheel.y==0)return;
+                    const auto command=event.mouse.wheel.y>0?control->wheel_up:control->wheel_down;
+                    if(command!=ui::Command::none){dispatch(command);event.propagate=false;}
+                });
             bindings.push_back(std::move(b));
         }
     }
     void layout_desktop() {
-        const ui::DesktopLayout layout(details.size.width,details.size.height);
-        const auto page=layout[ui::Slot::page];
-        auto tab_area=layout[ui::Slot::tabs];tab_area.h=28;place(navigation,tab_area);
+        const auto viewport=ui::page_rect(details.size.width,details.size.height);
+        place(navigation,ui::tabs_rect(details.size.width,details.size.height));
         int tab_x=0;
-        for(std::size_t i=0;i<tabs.size();++i) {
-            const int width=i==0?86:i==1?114:204;
-            place(tabs[i],{tab_x,0,width,28});tab_x+=width;
+        for(const auto& definition:ui::pages()) {
+            place(tabs.at(definition.id),{tab_x,0,definition.tab_width,28});tab_x+=definition.tab_width;
+            place(pages.at(definition.id),viewport);
         }
-        for(auto* body:pages)place(body,page);
         for(auto& binding:bindings) {
-            const auto slot=binding.control.slot;
-            if(slot==ui::Slot::none)continue;
-            auto frame=layout[slot];
-            if(!ui::persistent_slot(slot)) {frame.x-=page.x;frame.y-=page.y;}
-            place(binding.element,frame);
-            const ui::Rect full{0,0,frame.w,frame.h};
-            if(binding.label) {
-                auto bounds=binding.control.kind==ui::Kind::label?full:full.label_above();
-                if(binding.control.kind==ui::Kind::bitmap || binding.control.kind==ui::Kind::list)bounds=full.label_above(23);
-                place(binding.label,bounds);
-                binding.label->style->text.wrap=Wrap::False;
-                binding.label->style->overflow=Overflow::Hide;
-                if(slot==ui::Slot::header)binding.label->style->text.size=22_px;
-            }
-            const auto fit_popup=[&](re::Dropdown* choice,ui::Rect screen_frame) {
-                const int width=std::max(screen_frame.w,220);
-                choice->optionsContainer->style->size.min.width=Px(width);
-                choice->optionsContainer->style->size.max.width=Px(width);
-                if(screen_frame.x+width>details.size.width-ui::margin)
-                    choice->optionsContainer->style->position.right=0_px;
+            const auto& c=binding.control;
+            const auto geometry=ui::control_layout(c,state(c),details.size.width,details.size.height,declarations);
+            auto frame=geometry.frame;if(!c.persistent){frame.x-=viewport.x;frame.y-=viewport.y;}place(binding.element,frame);
+            const auto local=[&](ui::Rect rect){rect.x-=geometry.frame.x;rect.y-=geometry.frame.y;return rect;};
+            const auto popup=[&](ChoiceView* choice,ui::Rect screen) {
+                choice->font_size=c.font_size;
+                const int width=std::max(screen.w,220);choice->optionsContainer->style->size.min.width=Px(width);choice->optionsContainer->style->size.max.width=Px(width);
+                choice->optionsContainer->style->position.right=screen.x+width>details.size.width-ui::margin?0_px:Rev::Appearance::Dist{};
             };
-            if(binding.menu) {place(binding.menu,full);place(binding.menu->dropdown,full);fit_popup(binding.menu,layout[slot]);}
-            if(binding.editor) {
-                auto bounds=full;if(binding.suggestions)bounds.w-=23;
-                place(binding.editor,bounds);
-                binding.editor->style->text.size=binding.control.multiline?16_px:13_px;
-                binding.editor->style->padding.top=binding.control.multiline?5_px:4_px;
-                binding.editor->style->padding.bottom=binding.control.multiline?5_px:4_px;
+            if(binding.label) {
+                place(binding.label,local(geometry.label));binding.label->style->text.wrap=Wrap::False;
+                binding.label->style->overflow=Overflow::Hide;binding.label->style->text.size=Px(c.kind==ui::Kind::label?c.font_size:11);
             }
-            if(binding.suggestions) {
-                const ui::Rect bounds{frame.w-23,0,23,frame.h};place(binding.suggestions,bounds);
-                place(binding.suggestions->dropdown,{0,0,23,frame.h});
-                auto screen_frame=layout[slot];screen_frame.x+=screen_frame.w-23;screen_frame.w=23;fit_popup(binding.suggestions,screen_frame);
-            }
-            if(binding.choice) {place(binding.choice,full);place(binding.choice->dropdown,full);fit_popup(binding.choice,layout[slot]);}
-            if(binding.toggle) {
-                place(binding.toggle,full);place(binding.toggle->checkbox,{0,3,20,20});
-                place(binding.toggle->label,{25,6,frame.w-25,20});
-            }
-            if(binding.button) {place(binding.button,full);if(frame.h<=20)binding.button->labelText->style->text.size=11_px;}
-            if(binding.list) {place(binding.list,slot==ui::Slot::signals?full.without_footer():full);}
-            if(binding.bitmap) {
-                auto bounds=full;
-                if(binding.control.bitmap!=ui::Bitmap::qr)binding.element->style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
-                if(slot==ui::Slot::waterfall || slot==ui::Slot::waveform)bounds=bounds.without_footer();
-                if(binding.control.bitmap==ui::Bitmap::qr) {
-                    place(binding.caption,{8,8,bounds.w-16,bounds.h-16});binding.caption->style->zIndex=1;
-                } else if(binding.caption) {
-                    place(binding.caption,{4,bounds.h-22,bounds.w-8,22});
-                    binding.caption->style->overflow=Overflow::Hide;
-                    bounds={4,4,bounds.w-8,bounds.h-30};
-                }
-                place(binding.bitmap,bounds);
-            }
+            if(binding.menu) {const auto rect=local(geometry.widget);place(binding.menu,rect);place(binding.menu->dropdown,{0,0,rect.w,rect.h});popup(binding.menu,geometry.widget);}
+            if(binding.editor) {place(binding.editor,local(geometry.widget));binding.editor->style->text.size=Px(c.font_size);}
+            if(binding.suggestions&&geometry.has_suggestions) {const auto rect=local(geometry.suggestions);place(binding.suggestions,rect);place(binding.suggestions->dropdown,{0,0,rect.w,rect.h});popup(binding.suggestions,geometry.suggestions);}
+            if(binding.choice) {const auto rect=local(geometry.widget);place(binding.choice,rect);place(binding.choice->dropdown,{0,0,rect.w,rect.h});popup(binding.choice,geometry.widget);}
+            if(binding.toggle) {const auto rect=local(geometry.widget);place(binding.toggle,rect);place(binding.toggle->checkbox,{0,3,20,20});place(binding.toggle->label,{25,6,rect.w-25,20});binding.toggle->label->style->text.size=Px(c.font_size);}
+            if(binding.button) {place(binding.button,local(geometry.widget));binding.button->labelText->style->text.size=Px(c.font_size);}
+            if(binding.list) {place(binding.list,local(geometry.widget));binding.list->resize_content(geometry.widget.w,geometry.widget.h);}
+            if(binding.bitmap)place(binding.bitmap,local(geometry.widget));
+            if(binding.caption) {place(binding.caption,local(geometry.caption));binding.caption->style->overflow=Overflow::Hide;if(c.bitmap_caption==ui::BitmapCaption::overlay_error)binding.caption->style->zIndex=1;}
+            if(geometry.border)binding.element->style->border={.color=rgba(100,100,100,1),.radius=0_px,.width=1_px};
         }
-        for(auto* view:inspection_views)if(view)view->update();
-        shared->layoutDirty=true;refresh(event);
+        update_documents();shared->layoutDirty=true;refresh(event);
+    }
+    void update_documents() {
+        const auto viewport=ui::page_rect(details.size.width,details.size.height);
+        for(const auto& [page,view]:documents)view->apply(application.document(page,viewport.w-2*ui::document_side_padding));
+    }
+    std::string action_label(const ui::Control& control) const {
+        auto label=controller.command_label(control.command);return label.empty()?control.label:label;
     }
     void apply() {
-        std::map<std::pair<ui::Page,unsigned>,unsigned> visible_weights;
-        for(const auto& binding:bindings)if(binding.control.slot==ui::Slot::none && (binding.control.field==ui::Field::count || controller.field(binding.control.field).visible))
-            visible_weights[{binding.control.page,binding.control.row}]+=binding.control.stretch;
+        bool relayout=false;
         for(auto& b:bindings) {
-            if(b.control.slot==ui::Slot::none) {
-                const auto weight=visible_weights[{b.control.page,b.control.row}];
-                b.element->parent->style->visibility=weight?Visibility::Visible:Visibility::Hidden;
-                if(weight)b.element->style->size.width=Pct(100.0f*static_cast<float>(b.control.stretch)/static_cast<float>(weight));
-            }
             if(b.menu) {
                 b.menu->params.options.clear();bool enabled=false;
-                for(const auto& item:b.menu_items) {
-                    const bool available=controller.enabled(item.command);enabled=enabled || available;
-                    b.menu->params.options.push_back({item.label,std::to_string(static_cast<int>(item.command)),!available});
-                }
+                for(const auto& item:b.menu_items) {const bool available=controller.enabled(item.command);enabled=enabled||available;b.menu->params.options.push_back({action_label(item),std::to_string(static_cast<int>(item.command)),!available});}
                 b.menu->setDisabled(!enabled);
             }
             if(b.control.field!=ui::Field::count) {
-                const auto& value=controller.field(b.control.field);
-                b.element->style->visibility=value.visible?Visibility::Visible:Visibility::Hidden;
-                b.element->setDisabled(!value.enabled);
-                if(b.editor) {b.editor->apply(value.text);b.editor->editable=value.enabled;b.editor->setDisabled(!value.enabled);}
-                if(b.choice) {
-                    b.choice->params.options.clear();
-                    for(const auto& item:value.options)b.choice->params.options.push_back({item.label,item.id,!item.enabled || !value.enabled});
-                    b.choice->params.value=value.selected;
-                    if(!value.enabled) b.choice->closeMenu();
+                const auto& value=state(b.control);b.element->style->visibility=value.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!value.enabled);
+                if(b.editor){b.editor->apply(value.text);b.editor->editable=value.enabled;b.editor->setDisabled(!value.enabled);}
+                if(b.choice){b.choice->params.options.clear();for(const auto& item:value.options)b.choice->params.options.push_back({item.label,item.id,!item.enabled||!value.enabled});b.choice->params.value=value.selected;b.choice->display_text=value.display_text;if(!value.enabled)b.choice->closeMenu();}
+                if(b.suggestions){
+                    const bool wanted=!value.options.empty();relayout=relayout||wanted!=b.has_suggestions;b.has_suggestions=wanted;
+                    b.suggestions->style->visibility=wanted?Visibility::Visible:Visibility::Hidden;
+                    b.suggestions->params.options.clear();for(const auto& item:value.options)b.suggestions->params.options.push_back({item.label,item.id,!item.enabled||!value.enabled});
+                    if(!value.enabled||!wanted)b.suggestions->closeMenu();
                 }
-                if(b.suggestions) {
-                    b.suggestions->params.options.clear();
-                    for(const auto& item:value.options)b.suggestions->params.options.push_back({item.label,item.id,!item.enabled || !value.enabled});
-                }
-                if(b.toggle) b.toggle->value=value.checked;
-                if(b.list) b.list->apply(value);
-                if(b.control.kind==ui::Kind::label && b.label) b.label->content=value.text;
+                if(b.toggle)b.toggle->value=value.checked;
+                if(b.list)b.list->apply(value);
+                if(b.control.kind==ui::Kind::label&&b.label)b.label->content=value.text;
             }
-            if(b.button) b.button->setDisabled(!controller.enabled(b.control.command));
+            if(b.button) {b.button->setDisabled(!controller.enabled(b.control.command));b.button->labelText->content=action_label(b.control);}
         }
-        update_plots();
-        for(auto* view:inspection_views)if(view)view->update();
-        for(auto& request:controller.take_services())services.push_back(std::move(request));
-        process_services();refresh(event);
+        if(relayout)layout_desktop();
+        update_plots();update_documents();for(auto& request:controller.take_services())services.push_back(std::move(request));process_services();refresh(event);
     }
     void verify_editor_contract() {
-        for(auto& binding:bindings)if(binding.control.field==ui::Field::message && binding.editor) {
-            auto& editor=*binding.editor;
-            const auto saved=controller.field(ui::Field::message).text;
-            controller.edit(ui::Field::message,"A\xc3\xa9\xf0\x9f\x8c\x8d\nsecond line");apply();
+        for(auto& binding:bindings)if(binding.control.kind==ui::Kind::text&&binding.control.multiline&&binding.editor) {
+            const auto field=binding.control.field;auto& editor=*binding.editor;
+            const auto saved=controller.field(field).text;
+            controller.edit(field,"A\xc3\xa9\xf0\x9f\x8c\x8d\nsecond line");apply();
             const auto revision=controller.revision();apply();
             if(controller.revision()!=revision)throw Error("Rev smoke: applying state emitted an input event");
             editor.targetFlags.focus=true;editor.cursor=7;editor.selectAnchor=editor.selectEnd=7;
             re::Event key;
             key.keyboard.backspace.id=1;editor.keyDown(key);
-            if(controller.field(ui::Field::message).text!="A\xc3\xa9\nsecond line" || editor.cursor!=3)
+            if(controller.field(field).text!="A\xc3\xa9\nsecond line" || editor.cursor!=3)
                 throw Error("Rev smoke: backspace split a UTF-8 character");
             key.keyboard.backspace.id=-1;key.keyboard.arrows.left.id=1;editor.keyDown(key);
             if(editor.cursor!=1)throw Error("Rev smoke: left arrow split a UTF-8 character");
@@ -687,54 +794,189 @@ public:
             editor.complete_paste({std::string{}, {}});
             if(editor.content.get()!="A\nsecond line" || editor.cursor!=1 || editor.selectAnchor!=1 || editor.selectEnd!=1 || controller.revision()==before_paste)
                 throw Error("Rev smoke: successful empty clipboard text did not replace the selection");
-            editor.targetFlags.focus=false;controller.edit(ui::Field::message,saved);apply();
+            const auto before_rejected=editor.content.get();
+            editor.cursor=1;editor.selectAnchor=0;editor.selectEnd=1;
+            const auto byte_limit=editor.limit;editor.limit=before_rejected.size();
+            auto error_handler=std::move(editor.error);unsigned rejected=0;editor.error=[&](std::string){++rejected;};
+            const bool malformed=editor.replace("\xc3"),oversized=editor.replace("too much replacement");
+            editor.limit=byte_limit;editor.error=std::move(error_handler);
+            if(malformed||oversized||rejected!=2||editor.content.get()!=before_rejected||editor.cursor!=1||editor.selectAnchor!=0||editor.selectEnd!=1)
+                throw Error("Rev smoke: rejected edit changed UTF-8 text or native selection");
+            editor.targetFlags.focus=false;controller.edit(field,saved);apply();
             return;
         }
         throw Error("Rev smoke: missing semantic message editor");
     }
+    void verify_choice_contract() {
+        auto* choice=new ChoiceView(this,{.label="",.options={{"Saved option","saved"}},.value="saved"});
+        re::Event event;choice->font_size=19;choice->display_text="Effective value";choice->computeChildren(event);
+        if(choice->params.value!="saved"||choice->dropdownText->content.get()!="Effective value")
+            throw Error("Rev smoke: effective choice text changed the saved option");
+        if(choice->dropdownText->style->text.size.val!=19||choice->options.front()->style->text.size.val!=19)
+            throw Error("Rev smoke: dropdown field or menu ignored the declared font size");
+        choice->display_text.clear();choice->computeChildren(event);
+        if(choice->params.value!="saved"||choice->dropdownText->content.get()!="Saved option")
+            throw Error("Rev smoke: clearing effective choice text did not restore the saved option");
+        delete choice;
+    }
+    void verify_record_contract() {
+        ui::Control declaration{ui::Kind::list};declaration.list_row_height=54;declaration.activate_on_select=true;
+        auto* probe=new ListView(this,declaration,launch.color);probe->resize_content(400,110);
+        unsigned selections=0,activations=0;std::string selected;
+        probe->select=[&](std::string id){++selections;selected=std::move(id);};
+        probe->activate=[&](std::string){++activations;};
+        auto state=test::extension_records();const auto active_id=state.records[0].id,inactive_id=state.records[1].id;
+        probe->apply(state);auto* retained=probe->rows.at(active_id).button;retained->targetFlags.focus=true;
+        const auto initial_cells=state.records[0].cells.size();
+        state.records[0].cells.push_back({"Late metadata",8,24,-8,24,11,ui::TextTone::muted});
+        std::swap(state.records[0],state.records[1]);
+        state.records.push_back({"disabled",{{"Disabled",8,0,-8,24,13}},false,false});
+        probe->apply(state);
+        if(selections||activations||probe->rows.at(active_id).button!=retained||!retained->targetFlags.focus||
+           probe->rows.at(active_id).cells.size()!=initial_cells+1||probe->children[2]!=retained)
+            throw Error("Rev smoke: record replacement lost stable identity, focus, cell metadata or silent update");
+        re::Event click;retained->click(click);
+        if(selected!=active_id||selections!=1||activations!=1)throw Error("Rev smoke: record activation did not dispatch its stable ID");
+        probe->rows.at(inactive_id).button->click(click);
+        if(selected!=inactive_id||selections!=2||activations!=1)throw Error("Rev smoke: incomplete record was activated");
+        probe->rows.at("disabled").button->click(click);
+        if(selections!=2||activations!=1)throw Error("Rev smoke: disabled record was selected");
+        state.records.erase(state.records.begin());probe->apply(state);
+        if(probe->rows.contains(inactive_id)||probe->rows.at(active_id).button!=retained||!retained->targetFlags.focus)
+            throw Error("Rev smoke: record removal changed another record's focus");
+        delete probe;
+        declaration.activate_on_select=false;probe=new ListView(this,declaration,launch.color);
+        selections=activations=0;probe->select=[&](std::string){++selections;};probe->activate=[&](std::string){++activations;};
+        probe->apply(test::extension_records());retained=probe->rows.at(active_id).button;
+        click.propagate=true;retained->click(click);
+        if(selections!=1||activations)throw Error("Rev smoke: selecting a record ignored its separate activation policy");
+        click.keyboard.enter.id=1;retained->click(click);click.keyboard.enter.id=-1;
+        if(selections!=2||activations!=1)throw Error("Rev smoke: Enter did not activate a selected record");
+        retained->click(click);retained->click(click);
+        if(selections!=4||activations!=2)throw Error("Rev smoke: double-click did not activate a record");
+        delete probe;
+        const auto paint=[&]{refresh(event);for(unsigned frame=0;frame<4;++frame){Rev::NativeWindow::pumpEvents();std::this_thread::sleep_for(std::chrono::milliseconds(4));}};
+        declaration.follow_tail=true;declaration.activate_on_select=true;
+        auto* probe_parent=new re::Box(this);place(probe_parent,{20,200,400,600});
+        probe=new ListView(probe_parent,declaration,launch.color);place(probe,{0,0,400,180});probe->resize_content(400,180);
+        state=test::extension_records();const auto template_record=state.records.front();state.records.clear();
+        for(unsigned index=0;index<8;++index) {auto record=template_record;record.id="tail-"+std::to_string(index);state.records.push_back(std::move(record));}
+        state.records[1].enabled=false;probe->apply(state);paint();
+        if(!probe->at_tail())throw Error("Rev smoke: new records did not follow the declared tail policy");
+        place(probe,{0,0,400,80});probe->resize_content(400,80);paint();
+        if(!probe->at_tail())throw Error("Rev smoke: shrinking a record viewport lost the tail");
+        probe->resolved.scroll.y=54;place(probe,{0,0,400,100});probe->resize_content(400,100);paint();
+        if(std::abs(probe->resolved.scroll.y-54)>1)throw Error("Rev smoke: resizing a historical record viewport moved the reader: scroll="+std::to_string(probe->resolved.scroll.y)+" content="+std::to_string(probe->layout.rect.h)+" inner="+std::to_string(probe->resolved.getInner(Axis::Vertical)));
+        selections=activations=0;probe->select=[&](std::string id){++selections;selected=std::move(id);};probe->activate=[&](std::string){++activations;};
+        focus_control(probe->rows.at("tail-0").button);
+        re::Event key;key.keyboard.arrows.down.id=1;keyDown(key);
+        if(selected!="tail-2"||selections!=1||activations!=1||focused_control()!=probe->rows.at("tail-2").button)
+            throw Error("Rev smoke: Down did not select/focus the next enabled stable record");
+        key.keyboard.arrows.down.id=-1;key.keyboard.arrows.up.id=1;key.propagate=true;keyDown(key);
+        if(selected!="tail-0"||selections!=2||activations!=2||focused_control()!=probe->rows.at("tail-0").button||probe->resolved.scroll.y>1)
+            throw Error("Rev smoke: Up did not reveal and select the previous enabled stable record");
+        focus_control(nullptr);probe->resolved.scroll.y=10000;paint();
+        probe_parent->style->visibility=Visibility::Hidden;paint();
+        auto appended=template_record;appended.id="tail-appended";state.records.push_back(std::move(appended));probe->apply(state);
+        probe_parent->style->visibility=Visibility::Visible;paint();
+        if(!probe->at_tail())throw Error("Rev smoke: appending records on a hidden page lost the tail");
+        for(bool follows:{true,false}) {
+            probe->follow_tail=follows;probe->resolved.scroll.y=60;paint();
+            probe_parent->style->visibility=Visibility::Hidden;paint();
+            appended=template_record;appended.id=follows?"history-with-tail":"history-without-tail";state.records.push_back(std::move(appended));probe->apply(state);
+            probe_parent->style->visibility=Visibility::Visible;paint();
+            if(std::abs(probe->resolved.scroll.y-60)>1)throw Error("Rev smoke: hidden record updates lost the reader's historical position");
+        }
+        delete probe_parent;paint();
+    }
+    void verify_extension_contract() {
+        const auto& fixture=test::extension_controls();
+        if(bindings.size()!=fixture.size()||!bindings[0].label||bindings[0].label->content.get()!=fixture[0].label||!bindings[1].button)
+            throw Error("Rev smoke: declarative extension was not materialized literally");
+        unsigned calls=0;command_observer=[&](ui::Command command){if(command==fixture[1].command)++calls;};
+        re::Event click;bindings[1].button->click(click);command_observer={};
+        if(calls!=1)throw Error("Rev smoke: declarative extension action was not dispatched");
+        auto document=std::make_shared<const ui::DocumentNode>(test::extension_document());
+        auto* document_parent=new re::Box(this);place(document_parent,{0,0,600,800});
+        auto* view=new RevDocumentView(document_parent,launch.color,
+            [this](re::Element* parent,const plots::PlotSnapshot& source)->re::Element* {auto* bitmap=new BitmapView(parent,launch.color,[this]{return details.scale;});bitmap->set(source);return bitmap;},
+            [&](ui::Command command){if(command==document->children[1].command)++calls;});
+        view->apply(document);
+        auto* root=view->children.front();auto* button=dynamic_cast<re::Button*>(root->children[1]);
+        auto* text=dynamic_cast<re::Text*>(root->children[0]);
+        if(!button||!text||text->content.get()!=document->children[0].text)throw Error("Rev smoke: document extension did not retain native fields/actions");
+        button->click(click);if(calls!=2)throw Error("Rev smoke: document extension action was not dispatched");
+        auto disabled_document=std::make_shared<ui::DocumentNode>(*document);disabled_document->enabled=false;
+        view->apply(disabled_document);button=dynamic_cast<re::Button*>(view->children.front()->children[1]);
+        click.propagate=true;button->click(click);
+        if(allows_input(button)||calls!=2)throw Error("Rev smoke: disabled document parent allowed action input");
+        ui::DocumentNode wrapped_root;wrapped_root.width=460;
+        ui::DocumentNode cards;cards.kind=ui::DocumentKind::row;cards.width=460;cards.equal_height=true;cards.bottom=12;
+        for(unsigned index=0;index<2;++index) {
+            ui::DocumentNode card;card.width=220;card.padding=10;card.right=index?0:20;
+            auto paragraph=document->children.front();paragraph.width=200;
+            if(index)for(unsigned repeat=0;repeat<12;++repeat)paragraph.text+=" wrapped native text";
+            card.children.push_back(std::move(paragraph));cards.children.push_back(std::move(card));
+        }
+        wrapped_root.children={cards,document->children.front()};
+        const auto verify_wrapped=[&](int width) {
+            auto layout=wrapped_root;layout.width=static_cast<float>(width);layout.children[0].width=layout.width;
+            for(auto& card:layout.children[0].children) {card.width=static_cast<float>(width-20)/2;card.children[0].width=card.width-20;}
+            place(view,{20,200,width,600});view->apply(std::make_shared<const ui::DocumentNode>(std::move(layout)));
+            for(unsigned frame=0;frame<6;++frame) {view->update();refresh(event);Rev::NativeWindow::pumpEvents();std::this_thread::sleep_for(std::chrono::milliseconds(4));}
+            auto* body=view->children.front();auto* line=body->children.front();auto* following=body->children[1];
+            float bottom=0;
+            for(auto* card:line->children) {
+                if(card->rect.h+1<card->layout.rect.h+card->resolved.pad.t.val+card->resolved.pad.b.val)
+                    throw Error("Rev smoke: equal-height document card clipped native wrapped content");
+                if(std::abs(card->rect.h-line->children.front()->rect.h)>1)
+                    throw Error("Rev smoke: document row did not equalize native card heights");
+                bottom=std::max(bottom,card->rect.y+card->rect.h);
+            }
+            if(following->rect.y<bottom)throw Error("Rev smoke: following document section overlapped wrapped cards");
+            return line->children.front()->rect.h;
+        };
+        const auto wide_height=verify_wrapped(460),narrow_height=verify_wrapped(360),restored_height=verify_wrapped(460);
+        if(narrow_height<=wide_height||std::abs(restored_height-wide_height)>1)
+            throw Error("Rev smoke: wrapped document did not grow and shrink with native width");
+        document_parent->style->visibility=Visibility::Hidden;
+        for(unsigned frame=0;frame<4;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        document_parent->style->visibility=Visibility::Visible;
+        for(unsigned frame=0;frame<6;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        const auto shown_height=view->children.front()->children.front()->children.front()->rect.h;
+        if(std::abs(shown_height-wide_height)>1)throw Error("Rev smoke: hiding a document parent changed its settled card geometry");
+        delete document_parent;verify_record_contract();
+    }
     void verify_prompt_focus() {
-        auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){return binding.control.command==ui::Command::attach_file;});
-        if(found==bindings.end() || !found->button)throw Error("Rev smoke: missing attachment action");
-        auto* button=found->button;
-        focus_control(button);controller.activate(ui::Command::attach_file);apply();
-        if(!prompt || focused_control()!=prompt || allows_input(button))throw Error("Rev smoke: prompt did not isolate keyboard focus");
+        auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){return binding.button&&!binding.button->disabled;});
+        if(found==bindings.end())throw Error("Rev smoke: missing action control");
+        auto* button=found->button;focus_control(button);service_probe=true;
+        services.push_back({0,ui::ServiceKind::prompt,"Native prompt focus probe",""});process_services();
+        if(!prompt||focused_control()!=prompt||allows_input(button))throw Error("Rev smoke: prompt did not isolate keyboard focus");
         re::Event key;key.keyboard.tab.id=1;keyDown(key);
-        if(!focused_control() || !allows_input(focused_control()))throw Error("Rev smoke: Tab escaped the prompt");
+        if(!focused_control()||!allows_input(focused_control()))throw Error("Rev smoke: Tab escaped the prompt");
         key.keyboard.tab.id=-1;key.keyboard.escape.id=1;key.propagate=true;keyDown(key);apply();
-        if(dialog || focused_control()!=button || !allows_input(button))throw Error("Rev smoke: prompt cancellation did not restore focus");
+        if(dialog||focused_control()!=button||!allows_input(button))throw Error("Rev smoke: prompt cancellation did not restore focus");
         focus_control(nullptr);
     }
-    void capture_plots() {
-        const auto changed=bitmap_sources.update(controller);
-        dirty_bitmaps.insert(changed.begin(),changed.end());
-    }
     void update_plots() {
-        capture_plots();
-        for(auto& binding:bindings) if(binding.bitmap) {
-            const auto id=binding.control.bitmap;
-            if(dirty_bitmaps.contains(id))binding.bitmap->set(bitmap_sources.get(id));
-            if(binding.label || binding.caption) {
-                std::string title=bitmap_sources.title(id);
-                if(title.empty())title=binding.control.field==ui::Field::count?binding.control.label:controller.field(binding.control.field).text;
-                const auto caption=id==ui::Bitmap::qr?bitmap_sources.error(id):bitmap_sources.caption(id,std::max(1U,binding.bitmap->width));
-                if(binding.caption) {
-                    if(binding.label)binding.label->content=title;
-                    binding.caption->content=caption;
-                    if(id==ui::Bitmap::qr) {
-                        binding.caption->style->visibility=caption.empty()?Visibility::Hidden:Visibility::Visible;
-                        binding.caption->style->text.color=controller.field(ui::Field::qr_brightness).selected=="normal"?rgba(0,0,0,1):rgba(160,160,160,1);
-                    }
-                }
-                else binding.label->content=title+(caption.empty()?"":"\n"+caption);
+        for(auto& binding:bindings)if(binding.bitmap) {
+            const auto presentation=application.bitmap(binding.control,std::max(1U,binding.bitmap->width));
+            if(binding.bitmap_revision!=presentation.revision){binding.bitmap->set(presentation.source);binding.bitmap_revision=presentation.revision;}
+            if(binding.label)binding.label->content=presentation.title;
+            if(binding.caption) {
+                binding.caption->content=presentation.caption;
+                binding.caption->style->visibility=presentation.caption.empty()?Visibility::Hidden:Visibility::Visible;
+                const auto gray=presentation.caption_tone==ui::TextTone::inverse?0:presentation.caption_tone==ui::TextTone::muted?theme::muted:launch.color?theme::color_text:theme::text;
+                binding.caption->style->text.color=rgba(gray,gray,gray,1);
             }
         }
-        dirty_bitmaps.clear();
     }
     void process_services() {
         if(dialog_result) {
             auto result=std::move(*dialog_result);dialog_result.reset();
             delete modal;modal=nullptr;dialog=nullptr;prompt=nullptr;
-            controller.complete_service(std::move(result));
+            if(!service_probe)controller.complete_service(std::move(result));service_probe=false;
             if(!services.empty())services.pop_front();
             surface->setDisabled(false);focus_control(previous_focus);previous_focus=nullptr;
         }
@@ -755,7 +997,7 @@ public:
         dialog->style->padding={.left=16_px,.right=16_px,.top=16_px,.bottom=16_px};
         dialog->style->background.color=rgba(15,15,15,1);dialog->style->border={.color=rgba(220,220,220,1),.width=1_px};
         dialog->style->zIndex=100;dialog->interceptHits=true;
-        surface->setDisabled(true);
+        help_text->style->visibility=Visibility::Hidden;surface->setDisabled(true);
         new re::Text(dialog,request.title,{&plainText});
         if(request.kind!=ui::ServiceKind::prompt)new re::Text(dialog,"Enter a path on this computer. Existing files are never overwritten.",{&smallText});
         prompt=new Editor(dialog,false,32768,platform);prompt->apply(request.value);
@@ -772,85 +1014,26 @@ public:
 };
 
 int run(Launch launch) {
-    configure_theme(launch.color);
-    std::vector<void*> windows;
+    configure_theme(launch.color);std::vector<void*> windows;
+    if(launch.smoke) {
+        Launch probe_options=launch;probe_options.smoke=false;probe_options.simulation=true;probe_options.page=ui::pages().front().id;
+        RevApp probe(windows,probe_options,test::extension_controls());probe.verify_extension_contract();
+    }
     auto app=std::make_unique<RevApp>(windows,launch);
-    auto next=Clock::now(),next_presentation=next,started=next,completed=next;
-    std::unique_ptr<Smoke> smoke;
-    bool smoke_passed=false;
-    if(launch.smoke) {app->verify_editor_contract();app->verify_prompt_focus();smoke=std::make_unique<Smoke>(launch.smoke_directory,launch.timeout);}
-    while(!app->controller.ready_to_close()) {
+    if(launch.smoke){app->verify_editor_contract();app->verify_choice_contract();app->verify_record_contract();app->verify_prompt_focus();std::cout<<"Rev native adapter probes passed: declarative extensions, UTF-8 editing, choices, records, scrolling and modal focus.\n";}
+    while(!app->application.finished()) {
         Rev::NativeWindow::pumpEvents();app->platform.poll();
-        const auto now=Clock::now();
-        if(now>=next) {
-            next=now+std::chrono::milliseconds(40);app->controller.poll();app->capture_plots();
-            if(smoke) {
-                if(now-started>std::chrono::milliseconds(500))app->verify_layout();
-                smoke->step(app->controller);
-                if(!smoke_passed && smoke->done()) {
-                    smoke_passed=true;completed=now;app->select_page(launch.page);
-                    std::cout<<"Rev GUI smoke passed: text, files, exact bits, retained saves, live plots and page switching.\n";
-                }
-                if(!smoke_passed) {
-                    const auto page=static_cast<ui::Page>(static_cast<unsigned>(std::chrono::duration<double>(now-started).count())%3);
-                    if(page!=app->launch.page)app->select_page(page);
-                }
-                else if(std::chrono::duration<double>(now-completed).count()>=launch.hold)app->controller.close();
-            }
-        }
-        // Consume every modem snapshot at 25 Hz, retaining waterfall rows even
-        // when software GL paints less often. Native input still repaints at
-        // once; state and plot presentation run independently at 10 Hz.
-        if(now>=next_presentation) {
-            next_presentation=now+std::chrono::milliseconds(100);
-            app->apply();
-            if(smoke_passed)app->scroll_page(launch.scroll);
+        if(app->application.tick()) {
+            app->select_page(app->application.page());app->apply();
+            if(launch.smoke)app->verify_layout();
+            if(app->application.smoke_passed())app->scroll_page(launch.scroll);
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
-    return launch.smoke && !smoke_passed?1:0;
-}
-void self_check() {
-    controller_self_check();
-    Message message;const std::string text="Data Pump Rev self-check";message.data=Bytes(text.begin(),text.end());
-    transfer::Options options;options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
-    options.timestamp=1800000000;modem::ChannelConfig channel;channel.snr_db=18;channel.delay_samples=137;
-    auto result=transfer::simulate(message,options,channel);
-    if(result.packet.message.data!=message.data)throw Error("Rev transfer self-check failed");
-    BitmapImage bitmap(137,101);auto plot=plots::PlotSnapshot::qr(encode_qr(text),plots::QrBrightness::normal);
-    plot.paint(full_bitmap_request(137,101,false,true),[&](unsigned x,unsigned y,PixelBlock block){bitmap.blit(x,y,block);});
-    std::cout<<"Data Pump Rev GUI self-check passed; no display required.\n";
+    return app->application.result();
 }
 }
-int datapump_rev_main(int argc,char** argv) {
-    try {
-        Launch launch;
-        for(int i=1;i<argc;++i) {
-            const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: rev (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nRev uses OpenGL 4.3 + ARB_buffer_storage (or 4.4+) on X11/Windows. File prompts accept host paths.\n";return 0;}
-            if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<" GUI backend: rev\n";return 0;}
-            if(arg=="--self-check") {self_check();return 0;}
-            if(arg=="--color")launch.color=true;
-            else if(arg=="--monochrome")launch.color=false;
-            else if(arg=="--simulation")launch.simulation=true;
-            else if(arg=="--smoke-test")launch.smoke=true;
-            else if(arg=="--smoke-dir" && i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
-            else if((arg=="--smoke-hold" || arg=="--smoke-timeout" || arg=="--smoke-scroll") && i+1<argc) {
-                const std::string value=argv[++i];std::size_t used=0;double number=std::stod(value,&used);
-                if(used!=value.size() || !std::isfinite(number) || number<0)throw Error("Invalid smoke argument");
-                if(arg=="--smoke-hold" && number<=60)launch.hold=number;
-                else if(arg=="--smoke-timeout" && number>=10 && number<=600)launch.timeout=number;
-                else if(arg=="--smoke-scroll" && number<=1)launch.scroll=number;
-                else throw Error("Smoke argument out of range");
-            } else if(arg=="--smoke-view" && i+1<argc) {
-                const std::string view=argv[++i];
-                if(view=="console")launch.page=ui::Page::console;else if(view=="flow")launch.page=ui::Page::flow;
-                else if(view=="transmission")launch.page=ui::Page::transmission;else throw Error("Unknown smoke view");
-            } else throw Error("Unknown or incomplete option: "+arg);
-        }
-        return run(launch);
-    } catch(const std::exception& error){std::cerr<<"Data Pump Rev: "<<error.what()<<'\n';return 1;}
-}
+int datapump_rev_main(int argc,char** argv) {return datapump::gui::gui_main(argc,argv,"rev",run);}
 #ifndef _WIN32
 int main(int argc,char** argv) {return datapump_rev_main(argc,argv);}
 #endif

@@ -1,4 +1,6 @@
 #include "controller.hpp"
+#include "record_presentations.hpp"
+#include "text_policy.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/tuning.hpp"
@@ -201,16 +203,17 @@ struct Controller::Impl {
         f(UiField::repeatable).enabled=!binary()&&(!estimate||estimate->repeatable_allowed||f(UiField::repeatable).checked)&&!closing;
         const auto size=attachment?attachment->size():f(UiField::message).text.size();
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!binary()&&(file_loading||size>=16);
+        f(UiField::fec).display_text=binary()?"Off":!file_loading&&size<16?"Off (under 16 B)":"";
     }
     void refresh_files() {
-        auto& state=f(UiField::files); state.options.clear();
-        for(const auto* packet:inbox.file_items()) { const auto id=id_label(packet->message); state.options.push_back({id,(packet->message.filename.empty()?"file-"+id.substr(0,8):display_label(packet->message.filename))+" ("+std::to_string(packet->message.data.size())+" B)"}); }
-        if(std::none_of(state.options.begin(),state.options.end(),[&](const auto& o) { return o.id==state.selected; })) state.selected=state.options.empty()?"":state.options.back().id;
+        auto& state=f(UiField::files);
+        state.records=file_records(inbox);
+        if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;}))state.selected=state.records.empty()?"":state.records.back().id;
     }
     void refresh_signals() {
-        auto& state=f(UiField::signals); state.options.clear();
-        for(const auto& line:signals.lines()) state.options.push_back({std::to_string(line.id),signal_status_label(line)+" | "+signal_preamble_label(line)+" | "+signal_data_label(line)+" | "+display_label(line.text)});
-        if(std::none_of(state.options.begin(),state.options.end(),[&](const auto& o) { return o.id==state.selected; })) state.selected.clear();
+        auto& state=f(UiField::signals);
+        state.records=signal_records(signals);
+        if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;}))state.selected.clear();
     }
     void start_worker(std::function<void(Prepared&,std::stop_token)> work,Prepared result) {
         preparing=true;
@@ -263,7 +266,9 @@ struct Controller::Impl {
         if(result.kind==PrepKind::keys&&!pending_key) {
             key_failed=false; keys=std::move(result.keys); key_path=result.path;
             auto& state=f(UiField::key); state.options={{"none","None"}};
-            for(std::size_t i=0;i<keys.size();++i) state.options.push_back({"key:"+keys[i].name,std::to_string(i+1)+". "+keys[i].name});
+            std::vector<std::string> names;for(const auto& key:keys)names.push_back(key.name);
+            const auto labels=key_choice_labels(names);
+            for(std::size_t i=0;i<keys.size();++i)state.options.push_back({"key:"+keys[i].name,labels[i+1]});
             state.selected=keys.empty()?"none":"key:"+keys.front().name;
             f(UiField::key_path).text=path_text(key_path.filename()); encryption_changed(); configure(); notice(result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.");
         } else if(result.kind==PrepKind::file&&!pending_file) {
@@ -428,10 +433,7 @@ void Controller::edit(UiField field,std::string text) {
         const auto& screen=ui::console_screen();
         const auto declaration=std::find_if(screen.begin(),screen.end(),[&](const auto& c) { return c.field==field&&c.kind==ui::Kind::text; });
         if(declaration==screen.end()) throw Error("This field is not editable text");
-        const auto limit=declaration->byte_limit;
-        if(text.size()>limit) throw Error("Text exceeds this field's byte limit");
-        if(!valid_clipboard_text(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(text.data()),text.size()))) throw Error("Text must be valid UTF-8 without embedded zero bytes");
-        if(!declaration->multiline&&text.find_first_of("\r\n")!=std::string::npos) throw Error("This field accepts one line");
+        if(const auto error=ui::edit_error(*declaration,text);!error.empty())throw Error(error);
         p.f(field).text=std::move(text);
         if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::device||field==UiField::bandwidth||field==UiField::snr) p.configure();
@@ -442,8 +444,10 @@ void Controller::edit(UiField field,std::string text) {
 void Controller::select(UiField field,std::string id) {
     auto& p=*impl_; auto& state=p.f(field); if(!state.enabled||state.selected==id) return;
     try {
-        const auto found=std::find_if(state.options.begin(),state.options.end(),[&](const auto& option) { return option.id==id&&option.enabled; });
-        if(found==state.options.end()) throw Error("Select an available item");
+        const bool list=std::any_of(ui::console_screen().begin(),ui::console_screen().end(),[&](const auto& control){return control.field==field&&control.kind==ui::Kind::list;});
+        const bool available=list?std::any_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==id&&row.enabled;}):
+            std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
+        if(!available)throw Error("Select an available item");
         state.selected=std::move(id);
         if(field==UiField::key) { p.encryption_changed(); p.configure(); }
         else if(field==UiField::simulation||field==UiField::pattern||field==UiField::fec) p.configure();
@@ -457,6 +461,14 @@ void Controller::complete_service(ui::ServiceResult result) { try { impl_->compl
 std::vector<ui::ServiceRequest> Controller::take_services() { auto result=std::move(impl_->services); impl_->services.clear(); return result; }
 const ui::FieldState& Controller::field(UiField field) const { return impl_->f(field); }
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
+std::string Controller::command_label(Command command) const {
+    if(command==Command::cancel)return impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
+    if(command==Command::transmit) {
+        const auto remaining=impl_->gate.remaining(impl_->settings.simulation,impl_->encrypted()).count();
+        if(remaining>0&&!impl_->snapshot.transmitting)return "TX wait "+std::to_string((remaining+999)/1000)+"s";
+    }
+    return {};
+}
 const live::Snapshot& Controller::snapshot() const { return impl_->snapshot; }
 const live::Settings& Controller::settings() const { return impl_->settings; }
 const Inbox& Controller::inbox() const { return impl_->inbox; }

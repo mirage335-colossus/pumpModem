@@ -115,12 +115,7 @@ std::vector<std::string> key_choice_labels(std::span<const std::string> names) {
     std::vector<std::string> labels{"None"};
     labels.reserve(names.size()+1);
     for(std::size_t index=0;index<names.size();++index) {
-        std::string label=std::to_string(index+1)+". ";
-        for(const char c:display_label(names[index])) {
-            if(c=='&')label+='&';
-            label+=c;
-        }
-        labels.push_back(std::move(label));
+        labels.push_back(std::to_string(index+1)+". "+display_label(names[index]));
     }
     return labels;
 }

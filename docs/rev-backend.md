@@ -43,15 +43,18 @@ application bindings, shared desktop slots and grouped command menus.
 the persistent header/identity row and modem/status footer around the tab viewport.
 The shared default is 1180 by 866 logical pixels and the minimum is 1030 by 786.
 Rev maps controls to Text, Button, Checkbox, Dropdown and Box elements. Lists and
-tabs compose those
-elements. `controller.cpp` owns drafts, validation, eligibility, exact binary
+tabs compose those elements. FLTK uses the same declarations and shared
+application lifecycle with its own native widgets. `controller.cpp` owns drafts, validation, eligibility, exact binary
 bits, the 120 ms estimate debounce, revisioned workers, keys and received files.
 Silent state updates preserve existing editors, cursor and selection positions.
-Native clipboard and asynchronous prompt services stay inside the adapter.
+Structured signal rows, including frequency and reception quality, are defined
+once in `record_presentations.hpp`; native list rows preserve stable IDs and
+follow new arrivals only when already at the tail. Native clipboard and
+asynchronous prompt services stay inside the adapter.
 Pending Save requests retain their payload across inbox eviction.
 
 `inspection_page.hpp` builds the inspection document from the shared `Inspection`
-model. `backend_rev_inspection.hpp` renders its headings, numbered step/section
+model. `backend_rev_document.hpp` renders its headings, numbered step/section
 cards, notes, navigation and parameter rows with native Rev elements. Modem flow
 follows the FLTK section order: processing lanes, chosen alphabets, full pattern
 inspection, then preamble and integration notes. Transmission separates on-air
@@ -68,18 +71,19 @@ graphics. Rev uses opaque RGB textures, nearest filtering and actual backing
 pixels. Inspection plots use named snapshots with explicit logical dimensions:
 constellations and distance matrices stay square, chip rows retain their height,
 and responsive chip navigation sits above the grid. Axis labels, explanations
-and evidence values stay native text. FLTK's existing plot widgets use the same
-producers. FLTK's controller and procedural screen construction remain to be
-migrated to the semantic API; its inspection widget still renders the structured
-model directly. The shared desktop layout and pixel boundaries are already
-exercised by both toolkits.
+and evidence values stay native text. FLTK consumes the same control declarations,
+controller, bitmap presentation and document tree through its generic native
+adapter. Both link `datapump_gui_application`; the previous separate FLTK
+controller and inspection rendering path have been removed.
 
 Local Rev text fixes preserve UTF-8 byte indices while rendering Unicode glyphs
 and moving the caret across complete code points. Font coverage comes from the
 embedded DejaVu font; missing glyphs use its visible replacement box. This is
 not a shaping or font-fallback system. Original UTF-8 bytes are preserved for
 transmission and copying. X11 clipboard transfers include long incremental
-selections.
+selections. Rev's current text primitive does not provide undo/redo history or
+word-based Ctrl+Arrow and Ctrl+Backspace/Delete editing; those gestures currently
+move or delete individual code points. FLTK retains its native editor behavior.
 
 Native mouse events retain physical screen coordinates. Rev queries the current
 client origin and converts to logical client coordinates once for hit testing
@@ -124,9 +128,12 @@ proportions and the final parameter table without a toolkit.
 `gui_bitmaps` checks formats/strides, borrowed-storage lifetime, whole versus
 tiled replay, QR brightness, waveform peaks, I/Q scale and signed plots.
 `gui_controller` checks controller/declaration and named-bitmap policy without a
-display. `test_gui_controller --smoke` and `datapump-gui --smoke-test` cover
-text/file/raw simulation, pending reception, clipboard request payloads, stale
-drafts and retained saves. The latter also renders controls, switches pages and
+display. `test_gui_controller --smoke` and `datapump-gui --smoke-test` use the
+same expanded workflow: production key generation/loading and failure recovery,
+text/file/raw simulation, effective FEC settings, encrypted exact bits, pending
+reception, replay cancellation/replacement, clipboard request payloads, stale
+drafts and retained saves. They also verify shared structured signal fields,
+replay timing and rendered measurement sources. The GUI smoke renders controls, switches pages and
 checks control layout, UTF-8 editing, failed-paste selection preservation and modal
 focus isolation/restoration. `test_rev_platform` checks actual clipboard round
 trips, failed/overlapping reads, stale replies and bounded incremental selections
@@ -162,8 +169,12 @@ These native coordinate checks passed on Linux at both scales, including moved
 origins and scale transitions. The Windows event path and test are implemented
 but have not been runtime tested, including the corrected decorated client-size
 conversion and DPI-before-resize ordering. Automated GUI workflows use simulation;
-hardware audio still needs device testing. Existing FLTK GUI smoke workflows
-remain regression checks.
+hardware audio still needs device testing. FLTK now runs the same expanded
+application smoke through the same `Application` lifecycle. Its separate native
+adapter/document tests exercise toolkit input, records, clipboard and rendering.
+The native extension fixture is shared unchanged by both adapters, and
+`gui_adapter_boundary` prevents application bindings or parallel screen sources
+from returning to either adapter.
 
 Before the desktop/inspection alignment changes, the portable Linux package
 also passed the full GUI smoke after relocation to a directory with spaces,

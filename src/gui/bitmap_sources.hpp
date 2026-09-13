@@ -12,7 +12,7 @@ public:
     std::vector<ui::Bitmap> update(Controller& controller) {
         std::vector<ui::Bitmap> changed;
         const auto put = [&](ui::Bitmap id, plots::PlotSnapshot source) {
-            frames_[id] = std::move(source); changed.push_back(id);
+            frames_[id] = std::move(source); ++versions_[id]; changed.push_back(id);
         };
         const auto update = controller.plot_update();
         const auto& snapshot = controller.snapshot();
@@ -66,6 +66,7 @@ public:
         const auto found = frames_.find(id);
         return found == frames_.end() ? empty_ : found->second;
     }
+    std::uint64_t version(ui::Bitmap id) const { const auto it=versions_.find(id);return it==versions_.end()?0:it->second; }
     std::string caption(ui::Bitmap id, unsigned width = 640) const {
         if (id == ui::Bitmap::qr && !qr_error_.empty()) return qr_error_;
         auto result = get(id).caption(width);
@@ -86,6 +87,7 @@ public:
     }
 private:
     std::map<ui::Bitmap, plots::PlotSnapshot> frames_;
+    std::map<ui::Bitmap, std::uint64_t> versions_;
     plots::PlotSnapshot empty_;
     plots::SpectrumHistory history_;
     std::string qr_text_, brightness_, qr_error_;

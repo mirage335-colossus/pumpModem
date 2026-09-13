@@ -98,3 +98,16 @@ color submissions for rectangles with zero opacity or no visible fill, border
 or shadow. Stencil submissions remain unchanged, so transparent layout
 containers continue to clip their children. This avoids unnecessary software
 OpenGL work for the many containers that exist only to arrange controls.
+
+Local X11 event-loop fix: `NativeWindow.lnx.ixx` limits each `pumpEvents` call
+to its initial pending event count. Frames requested while drawing cannot keep
+that batch running indefinitely, so animations yield to application polling,
+model updates and shutdown. Native record/focus probes and the shared GUI smoke
+exercise this alongside normal input delivery.
+
+Local inherited-state/layout fix: `Element::cascadeStyle` propagates hidden,
+disabled and opacity state through hidden subtrees and restores parent-size
+eligibility when they are shown. `Window::calcFlexLayouts` rebuilds its visible
+queues before resetting dimensions, then reapplies inherited state. Newly
+revealed descendants therefore receive fresh size resolution instead of stale
+measurements from before their parent was hidden.

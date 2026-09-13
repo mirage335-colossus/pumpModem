@@ -2,6 +2,7 @@
 #include "inspection_model.hpp"
 #include "plot_render.hpp"
 #include "ui_contract.hpp"
+#include "ui_document.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -13,20 +14,10 @@
 // opaque plot snapshots. This description owns application mapping and section
 // order; adapters only arrange/render nodes and dispatch declared commands.
 namespace datapump::gui::inspection_page {
-enum class Kind { column, row, text, bitmap, action };
-enum class Tone { text, muted, accent };
-enum class Fill { none, surface, alternate, parity };
-struct Node {
-    Kind kind=Kind::column;
-    std::string text,plot_name;
-    float width=0,height=0,padding=0,top=0,bottom=0,right=0,font_size=12;
-    Tone tone=Tone::muted;
-    Fill fill=Fill::none;
-    bool bold=false,border=false,equal_height=false,enabled=true;
-    ui::Command command=ui::Command::none;
-    plots::PlotSnapshot plot;
-    std::vector<Node> children;
-};
+using Kind=ui::DocumentKind;
+using Tone=ui::DocumentTone;
+using Fill=ui::DocumentFill;
+using Node=ui::DocumentNode;
 struct Page {
     Node root;
     std::size_t page_size=32,first=0;

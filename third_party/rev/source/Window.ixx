@@ -406,10 +406,14 @@ export namespace Rev {
         // Top-level only
         void calcFlexLayouts() {
 
-            for (Element* element : topDown) { element->resetResolved(); }
-
+            // Rebuild visibility before resetting: a formerly hidden subtree
+            // was absent from the previous queue and still has old dimensions.
             this->cascadeStyle();
             this->calculateQueues();
+            for (Element* element : topDown) { element->resetResolved(); }
+            // resetResolved restores default parent-size eligibility, so apply
+            // inherited hidden/disabled state again before measuring children.
+            this->cascadeStyle();
 
             // Resolve minima, then maxima, then layout
             for (Element* element : bottomUp) { element->resolveMinima(); }

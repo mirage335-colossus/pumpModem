@@ -275,9 +275,8 @@ export namespace Rev::Element {
             if (parent->resolved.hidden) { resolved.hidden = true; }
             if (resolved.style.visibility == Visibility::Hidden) { resolved.hidden = true; }
 
-            if (resolved.hidden) {
-                resolved.affectsParentSize = false;
-            }
+            resolved.affectsParentSize = !resolved.hidden &&
+                resolved.style.layout.position != Position::Absolute;
 
             // Cascade disabled state: effective = own intent OR a disabled
             // ancestor. reset() leaves resolved.disabled alone, so its prior
@@ -296,11 +295,9 @@ export namespace Rev::Element {
             // opacity, so it compounds down the tree just like depth.
             resolved.opacity = parent->resolved.opacity * resolved.style.opacity.val;
 
-            if (resolved.hidden) {
-                return;
-            }
-
-            // Continue
+            // Hidden subtrees still inherit state. Layout/draw queues prune
+            // them separately; descendants must not retain visible, enabled
+            // or opaque state from before their ancestor was hidden.
             for (Element* child : children) {
                 child->cascadeStyle();
             }

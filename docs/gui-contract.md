@@ -1,318 +1,129 @@
-# Proposed minimal GUI contract
+# Shared GUI contract
 
-Status: FLTK is the default; the opt-in Rev adapter uses shared semantic
-declarations and a toolkit-free controller. Both adapters use shared bitmap
-producers. The remaining FLTK controller/screen migration and broader contract
-below remain work in progress. Implemented records are in `src/gui/ui_contract.hpp`
-and `src/gui/bitmap.hpp`; the nested declaration example below remains a design
-direction. See [Rev backend](rev-backend.md) for tested capabilities. The API
-declares semantic controls:
-choices/dropdowns, tabs, text fields, actions, and lists. Adapters map them to
-existing backend widgets. Bitmap output is a separate path for plots and images.
+FLTK and Rev implement the same application interface. Both compile the shared
+`datapump_gui_application` library and consume its controller, page/control
+declarations, structured records, documents, bitmap sources and launch/workflow
+code. The contract is implemented in `src/gui/ui_contract.hpp`,
+`src/gui/ui_document.hpp` and `src/gui/bitmap.hpp`.
 
-The maintenance rule is: adding or moving an ordinary control changes its
-declaration and, for new functionality, its state/action mapping. It does not
-require reading or editing a backend. Keep the vocabulary small and keep its
-meaning consistent across desktop and compact layouts. Share declarations,
-application state, validation, and actions once. Reuse each backend's existing
-widget behavior; do not duplicate it in application code or a universal widget
-renderer. Only an adapter for a target without a suitable widget library needs
-its own small widget implementation.
+The maintenance rule is: an ordinary feature using existing primitives changes
+shared declarations and application mapping only. No backend reads modem state
+or contains application-specific field/command/page switches. Native adapters
+may differ in glyph metrics, popup appearance and platform dialogs, while
+preserving the same content, values, availability and actions.
 
-## Declaration vocabulary
+## Controls and state
 
-Use compiled, typed C++ declarations with stable helper signatures. No runtime
-markup parser, generic property dictionary, or toolkit-specific properties are
-needed. One short screen declaration should show its hierarchy and bindings.
-
-| Kind | Meaning |
+| Vocabulary | Meaning |
 | --- | --- |
-| Label | Read-only text. |
-| Action | Invoke a named application operation. Usually a button. |
-| Toggle | Edit a boolean value. |
-| Choice | Select one stable option ID from a closed set. |
-| Text | Edit UTF-8 text; single/multiline and optional preset suggestions. |
-| List | Select a record by stable ID; activation is a separate action. |
-| Bitmap | Display a named graphical source; pixel displays map samples 1:1. |
-| Row / Column | Lay out children in declaration order. |
-| Tabs | Display one named page; pages have IDs and titles. |
-| Scroll | Provide vertical scrolling for one child. |
+| `Kind::label` | Literal or bound readonly native text. |
+| `Kind::action` | Invoke a declared command; optional grouping into a named native menu. |
+| `Kind::toggle` | Edit a boolean field. |
+| `Kind::choice` | Select a stable option ID from a closed set. |
+| `Kind::text` | Edit UTF-8 text, with optional presets and explicit submission. |
+| `Kind::list` | Stable-ID structured records composed from native text cells. |
+| `Kind::bitmap` | Display an immutable opaque pixel source and shared native captions. |
+| `PageDefinition` | Shared page ID, title, tab size and control/document content kind. |
 
-## Consistent presentation
+`Control` binds a field, command or bitmap and describes its shared placement,
+help, font size, menu label, persistence, submit policy, record activation and
+optional pointer/wheel actions. Application behavior is not inferred from its
+label or from a particular widget type. Ordinary controls use stable binding
+identity; `instance` distinguishes intentional repeated bindings on one page.
 
-Every backend follows the same early-computing instrument-panel style: black
-backgrounds, grey reference marks, bright data, monospaced labels, square borders,
-compact spacing, and explicit text status. The intensity roles are defined once
-in `src/gui/theme.hpp`; adapters map them through existing widget styling. A
-monochrome terminal may use stippling or reverse video where grey is unavailable.
-Focus and selection remain clearly visible through the backend's usual behavior.
+`FieldState` carries authoritative text/selection/boolean values, visibility,
+eligibility, options and records. Options have IDs, literal labels and enabled
+flags. `display_text` optionally shows an effective value without replacing a
+saved selection. For example, the selected Reed-Solomon preset remains saved
+while a tiny message reports `Off (under 16 B)`.
 
-The style applies to controls as well as plots, without recreating controls in a
-shared framebuffer. No decorative motion, glow, shadows, or animated ticker is
-required. A waterfall advances only to display signal history. The QR brightness
-dropdown defaults to Dark red on every startup (Dark gray in monochrome), with
-black modules on a dim background and quiet zone. Dim offers a brighter red or
-gray background; Off hides the preview on black. Black modules and their geometry
-are preserved; Normal restores a white background with full contrast for scanning.
-This control affects only the QR preview.
-Signed data needs an explicit midpoint or
-other distinguishable marks and a legend; status never depends on color alone.
-Physical glyph shapes and native popup details may differ while retaining these
-presentation rules. A control declaration does not repeat styling properties.
+A record has a stable ID, enabled/activation eligibility and ordered native text
+cells. Cells carry literal text, relative logical rectangles, font size, semantic
+tone and emphasis. Negative cell width means remaining row width minus that
+amount. The list declaration supplies row height, empty/help text, tail-following
+and activation policy. Signal records include frequency, status, preamble/data
+quality and message text; files and unverified prefixes are not copyable as text.
 
-Color is enabled by default when supported, tinting data field values, the
-waveform, and all constellation points with one fixed muted cyan hue; neutral
-text uses softer gray. `--monochrome` selects grayscale; `--color` re-enables color,
-and the last of these switches wins. Reference marks, status labels,
-and signed pattern diagrams remain grayscale. The waterfall maps its
-unchanged intensity values through one fixed muted multihue lookup table: black,
-dark blue, blue, cyan, green, yellow, orange, red, then soft off-white. Grayscale
-retains the original scalar intensities and text contrast rather than desaturating
-this palette. The global color preference and the QR brightness choice use
-existing control kinds. FLTK enables color only when an RGB visual is available; other displays
-retain the grayscale path. Future targets without color support likewise retain
-grayscale or monochrome.
+## Behavior every adapter preserves
 
-## Screen declaration
+- Applying state is silent and preserves unchanged native widgets, focus, text
+  cursor/selection, scroll and record identities. Removing or reordering records
+  never transfers focus to a different record merely because it took an index.
+- Selection uses IDs, never labels or native menu indices. Disabled entries
+  cannot be newly selected. The controller chooses defaults and invalidation
+  behavior; a native widget must not silently select the first entry.
+- Text is valid UTF-8 with a byte limit. Reject invalid/over-limit edits with
+  feedback; do not truncate them. Failed paste preserves selection. A preset
+  emits an ordinary edit. Enter/Ctrl+Enter/Shift+Enter submission is shared
+  command policy; native adapters translate modifiers only.
+- Record selection and activation are separate semantic operations. A
+  declaration may activate an eligible row on selection, as for click-to-copy
+  signals. The ordinary Copy/Save actions remain separately reachable.
+- New records follow the tail only when the reader was already there. History
+  review and long text remain accessible through native scrolling.
+- Key-file failure acknowledgement is an explicit action. It does not depend
+  on a toolkit reporting re-selection of an unchanged choice.
+- All input validation, transmit eligibility, preparation/revision checks,
+  file/clipboard eligibility and retention live in the shared controller.
 
-An illustrative declaration, not an implemented API:
+## Layout and documents
 
-```cpp
-page(Page::console, "Console",
-  column(
-    row(
-      choice(Field::source, "Source", Options::sources),
-      text(Field::bandwidth, "Bandwidth",
-           suggestions(Options::bandwidths))),
-    text(Field::message, "Message", multiline(6)),
-    row(
-      action(Command::transmit, "Transmit"),
-      action(Command::cancel, "Cancel TX")),
-    bitmap(PixelSource::waveform, grow(1))))
-```
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 866 logical
+pixels, with a 1030 by 786 minimum. `control_layout.hpp` computes frame, label,
+editor, preset, caption and footer rectangles once. Both adapters apply these
+rectangles and convert logical to physical coordinates using their display
+scale. Slot-free rows provide ordered stretch-weight placement for alternate
+arrangements. A new desktop slot is shared layout work, not adapter work.
 
-Reordering children moves controls. Bindings identify application values and
-commands; labels are literal text. A keyfile command menu is a presentation of
-Actions, not a Choice whose selected value unexpectedly executes a command.
-Ordinary control identity derives from its page, binding kind, and field/command/
-source ID. Do not repeat a separate widget ID for the same binding. Only a repeated
-binding within one page needs an explicit stable instance suffix. CLI settings
-reuse field metadata, defaults, and parsers independently of page identity.
+`ui::DocumentNode` is a generic tree of columns, rows, text, actions and bitmaps.
+Nodes carry widths, optional fixed heights, margins/padding, semantic tone/fill,
+emphasis, borders and equal-row-height intent. Toolkit font measurement supplies
+native text height. Dynamic content owns the tree and produces an immutable
+snapshot; adapters do not invent sections or legends. Both native document
+renderers consume the same inspection tree and preserve action identity.
 
-## Behavior that every adapter preserves
+`inspection_page.hpp` is application presentation code above this interface.
+Changing a section, table, note or plot there reaches both backends. Ordinary
+text, codeword bars and actions remain native elements, never whole-page bitmap
+rendering. The same distinction applies to structured signal records.
 
-1. **Stable identity.** Controls derive stable IDs from their bindings as above;
-   options, pages, and list records have explicit IDs. Labels, positions, and
-   array indices never identify application values.
-   Duplicate IDs in their declared scope are errors. Literal labels must not be
-   interpreted as toolkit menu paths, accelerators, or formatting syntax.
-2. **State and input.** Application state is authoritative. Applying state never
-   emits an input event. User events are delivered serially to the controller:
-   Activate, Toggle, Select, Edit, Submit, and SelectPage. Select reports a
-   committed selection change. Repeating the current selection need not emit an
-   event; acknowledgement or retry is a named Action, rather than a requirement
-   to emulate selection gestures that a backend's widget does not report.
-3. **Collections.** Replacing options or records preserves selection by ID when
-   possible; otherwise selection is empty until the controller chooses a value.
-   No implicit selection of the first item. Disabled items cannot be newly
-   selected by user input; an existing selection or controller update is allowed.
-4. **Text.** Choice stays closed; editable presets belong to Text. A suggestion
-   replaces the field's text and emits Edit only if the text changed. Text
-   declares a UTF-8 byte limit;
-   over-limit edits are rejected with feedback, never silently truncated. Edit
-   reports text changes; Submit is explicit. Multiline fields support newline
-   entry and submission through separately reachable actions. Enter/Ctrl+Enter/
-   Shift+Enter bindings are backend conveniences where distinguishable, not
-   requirements on terminal or MCU input. Validation and numeric/unit parsing
-   live in shared application code.
-5. **Layout.** Row/Column use ordered children, minimum sizes, standard gaps, and
-   integer stretch weights. Backend font measurements inform minimum sizes.
-   Declaration order also defines focus traversal. Hidden children occupy no
-   space; disabled children retain space and produce no input actions. Tiny
-   displays use an explicit compact layout; controls are not scaled below usable
-   sizes. Desktop declarations now name slots in `desktop_layout.hpp`, whose
-   shared logical coordinates keep FLTK and Rev aligned. Each adapter applies
-   its display scale; these are not physical pixel coordinates or plot samples.
-6. **Ownership.** Static declarations live for the UI lifetime. Dynamic update
-   data is borrowed only during the update call; adapters copy anything retained.
-   Event data remains valid for its dispatch call; the controller copies anything
-   retained. Apply changes without recreating unchanged controls or resetting an
-   editor's focus, cursor, selection, or scroll position. A changed text value may
-   clamp positions to valid boundaries. Toolkit objects stay inside adapters.
-7. **Capabilities.** Backend availability and profile requirements are checked
-   before startup. An unsupported operation needs a declared alternative or a
-   visibly unavailable action. Required controls cannot silently disappear.
-   Preserve values and actions, not identical appearance or physical gestures.
+## Bitmap boundary
 
-Optional platform services such as file pickers and clipboard operations are
-requested by application commands, outside the declaration vocabulary. Bitmap
-sources must not become an escape hatch for implementing ordinary controls that
-bypass this contract.
+Shared code produces immutable `PlotSnapshot` sources. On repaint the adapter
+provides actual backing-pixel dimensions, damage bounds, sample aspect ratio and
+pixel capabilities. The source emits borrowed pixel rectangles through
+`BitmapSink`; the adapter copies them synchronously or retains its own storage.
 
-## Widget adaptation
+Supported formats are Gray8 (one intensity byte), MSB-first Mono1, and optional
+RGB24 (three bytes R/G/B). Stride is explicit. Placement is 1:1 in actual drawable
+pixels, including high DPI. There is no application drawing-command API, alpha
+blending, arbitrary scaling or generic custom-widget callback. Shared producers
+own axes, scale and pixel geometry; captions and explanations remain native text.
 
-An ordinary screen declaration never contains dropdown drawing, tab hit testing,
-popup management, caret drawing, or toolkit-specific event handling. Those stay
-inside the selected widget library and its thin adapter. A small composition of
-existing controls is appropriate when there is no exact one-to-one equivalent.
+`BitmapSources` owns history, source invalidation and versions. `Application`
+provides titles/captions/error-overlay tone without any source-specific decision
+inside an adapter. Changing QR brightness affects only that bitmap and never
+changes modem state. Monochrome and color are shared presentation preferences;
+unsupported targets retain the grayscale path.
 
-| Backend | Implementation of semantic controls |
-| --- | --- |
-| FLTK / wxWidgets / LVGL | Corresponding library widgets and containers. |
-| Rev (`clean` pin) | Text, Button, Checkbox, Dropdown and Box; native-element composition for lists, tabs, multiline text and path prompts. |
-| HTML / JavaScript | DOM controls such as `select`, `input`, `textarea`, and `button`; tab/page composition in the adapter. |
-| ncurses | Menu/form facilities for selection and editing; small adapter composition for dropdown presentation and tabs/pages. |
-| SDL | An existing widget library hosted by SDL, not an application-owned SDL widget engine. |
-| Primitive-only MCU display | A compact widget implementation private to this adapter, only if no suitable existing library fits. |
+## Platform services and lifecycle
 
-HTML defines ordinary [form controls](https://html.spec.whatwg.org/multipage/form-elements.html)
-and the [tabs pattern](https://www.w3.org/WAI/ARIA/apg/patterns/tabs/) supplies a
-page interaction model. ncurses supplies [menus](https://invisible-island.net/ncurses/man/menu.3x.html)
-and [forms](https://invisible-island.net/ncurses/man/form.3x.html); neither mapping
-requires application code to rasterize its controls. The primitive-only widget
-implementation is linked only for targets that need it.
+Commands request `open_file`, `save_file`, `prompt`, `clipboard` or `open_folder`
+using a unique request ID and opaque strings. Native adapters return cancellation,
+a value or an error. Dialogs must allow the shared polling loop to continue.
+The controller retains data behind pending saves and performs exclusive writes;
+platform dialogs never authorize silent overwrites.
 
-## Bitmap output contract
+`Application` polls controller/bitmap state at 25 Hz and requests ordinary
+presentation at 10 Hz. Adapters pump native events, call `tick()`, apply returned
+state and render. Shared code owns page state, launch parsing, document caching,
+submission/record actions and smoke workflows. Both backends expose the same
+flags, including `--simulation`, `--self-check` and the smoke options.
 
-The backend receives only opaque pixel rectangles. Shared application code turns
-waveform, spectrum, constellation, or QR data into pixels. The backend needs no
-knowledge of traces, axes, points, fonts, or diagrams. There is no drawing-command
-API, alpha blending, scaling, interpolation, or general custom-widget callback.
+A build selects exactly one backend through `DATAPUMP_GUI_BACKEND=fltk|rev`.
+CLI-only builds can still compile and test the shared GUI application without a
+widget toolkit. New primitives or platform requirements need adapter work;
+features expressed with this existing vocabulary do not.
 
-Illustrative output interface:
-
-```cpp
-enum class PixelFormat { gray8, mono1, rgb24 };
-struct PixelBlock {
-    unsigned width, height, stride_bytes;
-    PixelFormat format;
-    const unsigned char* pixels;
-};
-void blit(Id bitmap, unsigned x, unsigned y, PixelBlock block);
-```
-
-- Coordinates start at the bitmap's upper left, in its advertised sample grid.
-  On pixel displays this is actual drawable pixels, including on high-DPI
-  desktops, and `blit` replaces an in-bounds rectangle 1:1. A terminal adapter
-  instead encodes the plot samples into character cells; physical pixel equality
-  is not promised. This adaptation applies only to Bitmap, never to controls.
-- `gray8` is one intensity byte per pixel: 0 black, 255 white. `mono1` packs
-  eight pixels per byte, leftmost pixel in the most significant bit, 0 black,
-  1 white. Rows start `stride_bytes` apart; unused end bits and padding are
-  ignored. Stride is at least the packed row size and storage covers every row.
-- Adapters accept `gray8` and `mono1` and convert to the display's native encoding.
-  Monochrome output thresholds gray8 at 128. A monochrome bitmap source uses
-  dotted white crosshairs to keep them visible instead of relying on grey.
-- `rgb24` is optional: three packed bytes per pixel in R, G, B order, with
-  `stride_bytes >= 3 * width` and no alpha. The target's `supports_rgb24`
-  capability defaults to false. Shared producers use it only when color is
-  enabled and supported; otherwise they produce the original gray/mono data,
-  never grayscale obtained by desaturating false color. No palette management
-  API is needed. The target may quantize RGB to its native color encoding.
-- Pixel storage is borrowed until `blit` returns. The backend consumes or copies
-  it before returning; asynchronous hardware transfers use backend-owned bounded
-  storage or finish before return.
-- On repaint, the backend supplies the actual bitmap width/height and damaged
-  rectangle, sample aspect ratio, whether output is monochrome, and
-  `supports_rgb24`. Shared code uses these to preserve I/Q geometry and choose
-  visible reference marks, renders that region using one consistent plot snapshot,
-  and emits one or more pixel
-  blocks. Resize or exposure can request a complete repaint. Retain enough
-  source/history to regenerate it. A terminal adapter requests damage aligned to
-  complete character cells, or retains the other samples of partially updated
-  cells. It declares its cell geometry instead of assuming square samples.
-
-A pixel block can be the entire image, a tile, or one scanline. A permanent full
-framebuffer and atomic whole-frame presentation are not requirements. For a
-128-by-64 image, gray8 is 8 KiB, mono1 is 1 KiB, and one gray8 row is 128 bytes.
-Tiling saves working memory; waterfall scrolling still requires transferring the
-affected pixels unless the backend independently optimizes display scrolling.
-
-The minimal shared bitmap producers retain this grayscale basis:
-
-| Source | Pixels |
-| --- | --- |
-| Waveform | Black background, optional grey baseline, white trace/envelope. |
-| Waterfall | Rows of grayscale intensities using a common signal-level scale. |
-| Constellation | Black background, grey crosshairs, white point pixels. |
-
-Optional color changes only the data tint or waterfall lookup described above.
-RGB24 uses three times the transfer bytes of Gray8; generate bounded rows or
-tiles only when needed. Both desktop adapters consume this pixel API. FLTK
-batches up to 16 rows per native image operation at ordinary scale and assembles
-a physical-pixel backing image at high DPI; Rev retains an opaque RGB texture.
-These adapter storage choices do not impose a framebuffer on other targets.
-
-Keep measured values and a common I/Q scale when mapping points to pixels;
-simplifying appearance must not normalize each point or erase amplitude meaning.
-Titles, units, status, and inspection explanations use ordinary labels/lists.
-Zoom, reset, clear, and diagram navigation use ordinary controls, keeping Bitmap
-output-only. Shared code may rasterize additional static images through the same
-pixel contract without adding backend methods.
-
-## One backend per build
-
-Implemented adapters are FLTK and Rev. Further candidates are wxWidgets, LVGL,
-ncurses, HTML/JavaScript, SDL with an existing widget library, and a primitive-only
-MCU adapter. Rev uses the semantic contract; FLTK still needs its screen/controller
-migration. Future adapters should expose the same contract. A browser adapter's hosting/transport is a separate
-implementation decision; it does not introduce a second UI definition.
-
-The implemented CMake cache option selects exactly one backend:
-
-```sh
-cmake -S . -B build-native -DDATAPUMP_GUI_BACKEND=fltk
-cmake --build build-native --target datapump-gui
-./build-native/datapump-gui --version
-```
-
-`fltk` is the default; `rev` selects the opt-in Rev profile. An empty,
-multiple, or unavailable selection fails configuration with the available choice.
-`DATAPUMP_BUILD_GUI=OFF` skips the backend and its dependencies altogether.
-Backend-independent GUI model tests remain available in CLI-only builds.
-
-`cmake/NativeGui.cmake` dispatches only the selected backend; its module owns its
-toolkit configuration, sources, libraries, and notices. Each build directory
-contains at most one GUI backend, including desktop builds. No runtime selector,
-backend registry, or plugin loader is needed. `--help` and `--version` identify
-the compiled backend. `--monochrome` and `--color` change presentation within that
-backend. Future runtime settings can choose page, layout, or plot cadence, but
-cannot switch toolkits.
-
-Use one default backend for each supported platform/profile and separate build
-directories for exceptional targets. Keep FLTK for the current desktop Linux and
-Windows releases; ncurses is the proposed SSH profile, and LVGL is a candidate
-for framebuffer/MCU targets. An SDL profile must name its accompanying widget
-library. The other alternatives are not currently buildable.
-
-The FLTK profile avoids application GL/EGL contexts. Rev's OpenGL profile is
-permitted, including software OpenGL; a future Rev software renderer must retain
-the same semantic and pixel boundaries. For a future SDL window-surface path, disable
-[framebuffer acceleration](https://wiki.libsdl.org/SDL3/SDL_HINT_FRAMEBUFFER_ACCELERATION)
-before acquiring the surface. The operating system's compositor/display path
-remains a separate deployment concern.
-
-GUI launch settings should reuse the same typed setting definitions, defaults,
-and validators as the controls. Command-line initialization updates shared state;
-it must not simulate clicks or implicitly activate Transmit. Introduce individual
-setting switches when their shared bindings exist.
-
-## First implementation boundary
-
-Rev now exercises the extracted controller and declarations, pure bitmap sources,
-ordinary zoom/reset/navigation actions and explicit keyfile-failure acknowledgement.
-Both adapters use the shared pixel producers. Complete the FLTK screen/controller
-migration while preserving its existing behavior, then confirm that moving or
-adding a control touches no adapter code in either toolkit.
-Test stable selection after reorder/removal,
-literal labels, silent state updates, explicit acknowledgement, text submission,
-visibility, and unavailable backend handling. Check pixel formats, 1:1 placement,
-buffer lifetimes, and identical complete-image versus tiled repaint output.
-Freeze the first contract only after both adapters demonstrate the same semantics
-in separate builds. The source review and staged extraction plan are in
-[GUI architecture](gui-architecture.md).
-
-Keep the declaration vocabulary and one complete example together in a short
-public header. Separate the screen declarations, application action/state
-mapping, and backend internals. A routine GUI edit should need the first two
-plus that header; graphics implementation details should not enter its context.
+See [GUI architecture](gui-architecture.md) for file ownership, extension tests
+and the architectural regression guard.

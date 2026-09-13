@@ -936,7 +936,11 @@ export namespace Rev {
 
         static void pumpEvents() {
             ensureDisplay();
-            while (XPending(xDisplay) > 0) {
+            // Painting can queue another frame. Bound this batch to the events
+            // already pending so continuous redraws yield to application work.
+            // A callback may remove queued events when destroying a window.
+            const int pending = XPending(xDisplay);
+            for (int processed = 0; processed < pending && XPending(xDisplay) > 0; ++processed) {
                 XEvent ev{};
                 XNextEvent(xDisplay, &ev);
 

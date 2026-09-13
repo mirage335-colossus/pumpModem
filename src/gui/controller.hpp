@@ -29,6 +29,7 @@ public:
     std::vector<ui::ServiceRequest> take_services();
     const ui::FieldState& field(ui::Field field) const;
     bool enabled(ui::Command command) const;
+    std::string command_label(ui::Command command) const; // Empty keeps the declaration label.
     const live::Snapshot& snapshot() const;
     const live::Settings& settings() const;
     const Inbox& inbox() const;
