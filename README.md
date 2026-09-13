@@ -356,6 +356,13 @@ acquisition, frequency/sample offsets, WAV parsing, CLI file transfer, and GUI
 cache/cooldown behavior. Seeded tests are reproducible within the same C++
 standard-library implementation.
 
+Automatic signal regressions use changing-sign fixed or seeded pseudorandom
+patterns to verify differential phase and amplitude measurements. They must not
+force tone patterns or require tone simulation to succeed. Tone operation needs
+suitable synchronization and hardware conditions, such as GNSS timing, low
+frequencies or high symbol rates; see the
+[regression signal policy](docs/validation.md#automatic-regression-signal-policy).
+
 For Windows, use a C++20 Visual Studio toolchain and OpenSSL 3 (for example the
 `openssl:x64-windows-static` vcpkg port). Configure with your vcpkg toolchain and
 `VCPKG_TARGET_TRIPLET=x64-windows-static`, then build Release and run CTest with

@@ -29,7 +29,7 @@ std::vector<float> convert(std::span<const float> input, std::uint32_t from, std
 }
 void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_card, unsigned bits, bool voice_channel=false) {
     transfer::Options options;
-    options.modem = tuning::resolve(bandwidth, 100, tuning::PatternMode::auto_tone, false).config;
+    options.modem = tuning::resolve(bandwidth, 100, tuning::PatternMode::pattern_3, false).config;
     options.modem.constellation_bits = bits;
     options.compression = false;
     options.fec = FecMode::rs20;

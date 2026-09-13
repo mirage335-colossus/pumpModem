@@ -312,7 +312,7 @@ void test_structured_payload_constellation_occupancy() {
     auto sent=sample();sent.repeatable=false;sent.data=Bytes(4096,0);
     for(const bool keyed:{false,true}) {
         auto value=options(keyed);value.compression=false;value.modem.constellation_bits=6;
-        value.modem.spreading_mode=modem::SpreadingMode::tone;
+        value.modem.spreading_factor=8;
         const auto wire=transfer::transmission_wire(sent,value);
         std::array<std::size_t,64> counts{};std::size_t count=0;
         const auto section=std::span(wire).subspan(32);
@@ -465,14 +465,14 @@ void test_valid_packet_ignores_trailing_capture() {
     check(result.packet.message.data==sent.data,"valid short packet survives a long trailing capture without caching noise or preamble");
 }
 void test_simulation_oscillator_limit() {
-    auto value=options();value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=.02;
+    auto value=options();value.modem.spreading_factor=8;value.modem.integration_seconds=.02;
     auto message=sample();message.repeatable=false;message.data={'x'};
     modem::ChannelConfig ideal;ideal.snr_db=30;ideal.clock_error_ppm=0;ideal.phase_noise_degrees_per_sqrt_second=0;
     check(transfer::simulate(message,value,ideal).packet.message.data==message.data,
           "unlocked sampled receiver acquires ideal oscillators");
-    auto crystal=ideal;crystal.frequency_offset_hz=1/value.modem.integration_seconds;
+    auto crystal=ideal;crystal.frequency_offset_hz=value.modem.bandwidth_hz/2;
     rejects([&]{transfer::simulate(message,value,crystal);},
-            "receiver without oscillator tracking claimed to decode a full carrier rotation per symbol");
+            "receiver without oscillator tracking claimed to decode a full carrier rotation per chip");
     auto invalid=ideal;invalid.clock_error_ppm=std::numeric_limits<double>::infinity();
     rejects([&]{transfer::simulate(message,value,invalid);},"simulation accepted infinite clock error");
     value.modem.integration_seconds=3600;

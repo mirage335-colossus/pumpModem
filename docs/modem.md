@@ -98,6 +98,13 @@ The named choices are:
 | `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | The named number of fixed-pattern chips. |
 | `tone-1`, `tone-2`, `tone-3`, `tone-4`, `tone-8`, `tone-32`, `tone-128`, `tone-1024`, `tone-4096`, `tone-16384` | The named tone duration in chips, without pattern sign changes. |
 
+Tone reception requires narrower operating conditions, such as GNSS timing
+synchronization, low frequencies, high symbol rates and suitable hardware.
+Automatic regression checks must not force these tone modes or expect their
+simulations to decode. They exercise frequent, measurable phase/amplitude shifts
+with fixed or seeded pseudorandom patterns instead; those differential
+measurements also underpin tone shifts when the operating conditions permit.
+
 Automatic integration can exceed the duration of the largest named tone through
 `Config::integration_seconds`. Named factors remain useful explicit choices;
 they no longer impose a 16,384-chip ceiling on automatic duration. Finite numeric

@@ -68,10 +68,11 @@ packet digest.
 
 The new GUI policy tests cover file-kind filtering, strict clipboard eligibility,
 one active transmission, and cooldown only for actual encrypted output. The
-regression suite covers long tones without duration-sized PCM, fractional-carrier
-24 kHz PCM reception, automatic integration beyond the previous ceiling and
-independent five-second training. Adding those tests is not a claim that they
-have passed on every target; execution evidence belongs in validation.md.
+regression suite now covers long changing-sign patterns without duration-sized
+PCM, fractional-carrier 24 kHz PCM reception, automatic integration beyond the
+previous ceiling and independent five-second training. Adding those tests is
+not a claim that they have passed on every target; execution evidence belongs
+in validation.md.
 
 Adaptive profiles use two through six bits per symbol with geometry-based noise
 and drift margins; they do not change cryptographic validation. Symbol padding

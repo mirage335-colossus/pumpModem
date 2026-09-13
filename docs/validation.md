@@ -4,6 +4,39 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Automatic regression signal policy
+
+Automatic regression checks must not force `tone-N`, `auto-tone`, or
+`SpreadingMode::tone` fixtures or require successful tone simulation/reception.
+Use changing-sign fixed or seeded pseudorandom patterns to check differential
+phase and amplitude measurements, acquisition, streaming memory and timing.
+Keep measurable transitions in signal fixtures; changing a mode name while
+leaving a constant one-chip code does not add pattern-transition coverage.
+Mode-name parsing can still cover the complete supported option catalog.
+Independent sine-wave checks of resampler/filter mathematics are not modem
+tone-pattern reception tests.
+
+Tone operation depends on narrower physical conditions, such as GNSS timing
+synchronization, low frequencies, high symbol rates and suitable hardware.
+Successful differential measurements with pseudorandom patterns exercise the
+measurements needed for tone shifts under those conditions; automatic tone
+loopbacks are not a requirement or evidence of general tone reliability.
+Historical tone results below are retained as records, not current regression
+requirements or hardware validation.
+
+After replacing the forced-tone fixtures, all eight affected C++ suites passed:
+`tuning`, `regressions`, `streaming_modem`, `transfer`, `live`, `audio_rates`,
+`gui_inspection` and `gui_pattern_space`. All 23 CLI tests also passed, including
+the 1,024-chip keyed simulation whose full PCM exceeds its batch memory limit.
+Dense PCM checks retain exact pre-FEC bytes and require frequent measured phase
+and amplitude changes with both fixed and seeded chip patterns.
+
+The weak-channel fixture uses a seeded pattern planned at 24 dB-Hz, 6 dB of
+acquisition margin, two channel seeds, ideal clocks and RS60; its shorter
+integration control must fail in the same channel. This checks integration
+behavior, not calibrated sensitivity at the planner's target. Long live-pattern
+fixtures use a bounded 2 MiB DSP budget for their larger timing search bank.
+
 ## Synchronized message and binary editors
 
 The Message/Binary source selector has been replaced by two views of the same

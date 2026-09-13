@@ -236,13 +236,9 @@ class CommandTests(PumpCase):
                       data=b"x" * (1024 * 1024 + 1), ok=False)
         self.run_pump("rx", "--device-type", "ethernet", ok=False)
 
-    def test_long_tone_simulation_and_slow_estimate(self):
-        result = self.run_pump("simulate", "--text", "long tone", "--bw", "2400",
-                               "--pattern", "tone-1024", "--memory-mb", "1", "--json",
-                               "--clock-error-ppm", "0", "--phase-noise", "0")
-        self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"long tone")
+    def test_slow_pattern_estimate(self):
         slow = json.loads(self.run_pump("estimate", "--text", "!", "--bw", "2400",
-                         "--target-snr", "-20", "--pattern", "auto-tone", "--repeatable").stdout)
+                         "--target-snr", "-20", "--pattern", "auto-pattern", "--repeatable").stdout)
         self.assertTrue(slow["target_supported"])
         self.assertTrue(slow["memory_supported"])
         self.assertFalse(slow["batch_memory_supported"])
@@ -271,9 +267,9 @@ class CommandTests(PumpCase):
         self.run_pump("estimate", "--text", "x", "--target-snr", "37.5", "--bw", "3000", "--sample-rate", "8000", ok=False)
         unsupported = self.run_pump("estimate", "--text", "!", "--target-snr", "-270", ok=False)
         self.assertIn(b"duration", unsupported.stderr)
-        result = self.run_pump("simulate", "--text", "tone test", "--pattern", "tone-3",
+        result = self.run_pump("simulate", "--text", "pattern test", "--pattern", "pattern-3",
                                "--simulation", "3dBm -120dB", "--json", "--bw", "1000")
-        self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"tone test")
+        self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"pattern test")
 
     def test_continuous_simulation(self):
         # Tiny packets have no FEC; this lifecycle fixture needs a healthy channel.
@@ -436,6 +432,20 @@ class EncryptedCommandTests(PumpCase):
         self.assertTrue(packet["authenticated"])
         self.assertEqual(packet["timestamp"], EPOCH)
         self.assertEqual(base64.b64decode(packet["data_base64"]), "Secure café 🌍".encode())
+
+    def test_long_pseudorandom_pattern_simulation(self):
+        # A keyed code provides frequent phase changes throughout integration.
+        options = ("--text", "long pattern", "--bw", "2400", "--keyfile", self.key,
+                   "--time", EPOCH, "--search-seconds", "0", "--scramble",
+                   "--spreading", "1024", "--memory-mb", "1")
+        estimate = json.loads(self.run_pump("estimate", *options).stdout)
+        self.assertTrue(estimate["memory_supported"])
+        self.assertFalse(estimate["batch_memory_supported"])
+        result = self.run_pump("simulate", *options, "--json",
+                               "--clock-error-ppm", "0", "--phase-noise", "0")
+        packet = json.loads(result.stdout)
+        self.assertTrue(packet["authenticated"])
+        self.assertEqual(base64.b64decode(packet["data_base64"]), b"long pattern")
 
     def test_encrypted_wav_positive_negative_epoch_drift(self):
         path = self.root / "encrypted.wav"

@@ -25,10 +25,10 @@ void exact_transmitter_templates() {
     config.bandwidth_hz = 1100; // Nonintegral chip clock: last chip is partial.
     for (const auto factor : {3U, 4U, 6U, 8U, 12U, 16U}) {
         config.spreading_factor = factor;
-        for (unsigned mode = 0; mode != 4; ++mode) {
-            config.spreading_mode = mode == 1 ? modem::SpreadingMode::tone : modem::SpreadingMode::pattern;
-            config.scramble = mode == 2;
-            config.dsss = mode == 3;
+        for (unsigned mode = 0; mode != 3; ++mode) {
+            config.spreading_mode = modem::SpreadingMode::pattern;
+            config.scramble = mode == 1;
+            config.dsss = mode == 2;
             config.spreading_seed[7] = 71; config.dsss_seed[3] = 19;
             for (unsigned width = 2; width <= 6; ++width) {
                 config.constellation_bits = width;
@@ -114,12 +114,10 @@ void durations_and_modes() {
     weighted_evidence(model);
 
     for (const auto factor : {1U, 2U, 3U, 4U, 8U, 32U, 128U, 1024U, 4096U, 16384U}) {
-        config.spreading_factor = factor; config.integration_seconds = 0; config.spreading_mode = modem::SpreadingMode::tone;
+        config.spreading_factor = factor; config.integration_seconds = 0;
         model = inspect_pattern_space(config, -10);
-        check(!model.code_selective && !model.timing_selective, "plain tones have no changing-sign code timing discrimination");
-        near(model.one_chip_shift.residual_fraction, 0, "a shifted tone is the same template");
-        check(model.unused_pattern.has_value() == (factor > 1), "a tone still rejects nonconstant chip vectors through integration");
-        near(model.processing_gain_db, 10 * std::log10(factor), "a tone still benefits from full-duration coherent integration");
+        check(model.unused_pattern.has_value() == (factor > 1), "multichip patterns retain off-code comparison directions");
+        near(model.processing_gain_db, 10 * std::log10(factor), "full-pattern coherent integration gain follows its duration");
         weighted_evidence(model);
     }
     config.spreading_mode = modem::SpreadingMode::pattern; config.spreading_factor = 1;

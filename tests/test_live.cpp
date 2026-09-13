@@ -171,7 +171,7 @@ void test_idle_noise_and_plots() {
 void test_audio_tx_publishes_fresh_payload_constellation() {
     live::Session session;
     auto value=settings();value.simulation=false;value.device="live-test-audio";
-    value.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
+    value.transfer.modem.spreading_mode=modem::SpreadingMode::pattern;
     value.transfer.modem.spreading_factor=128;
     session.start(value);
     wait_for(session,[](const auto& snapshot){return !snapshot.waveform.empty();});
@@ -192,7 +192,7 @@ void test_audio_tx_publishes_fresh_payload_constellation() {
 void test_audio_tx_empty_symbol_intervals_and_cancel() {
     live::Session session;
     auto value = settings(); value.simulation = false; value.device = "live-test-audio";
-    value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
+    value.transfer.modem.spreading_mode = modem::SpreadingMode::pattern;
     value.transfer.modem.spreading_factor = 16384;
     session.start(value);
     wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
@@ -202,7 +202,7 @@ void test_audio_tx_empty_symbol_intervals_and_cancel() {
                !snapshot.constellation.empty();
     });
     const auto between = wait_for(session, [&](const auto& snapshot) {
-        check(snapshot.transmitting, "long-tone fixture ended before its empty symbol interval");
+        check(snapshot.transmitting, "long-pattern fixture ended before its empty symbol interval");
         check(snapshot.constellation_source == live::ConstellationSource::transmitted,
               "an active transmitter cannot label its PCM as received input between slow symbols");
         return snapshot.sequence > symbol.sequence && snapshot.constellation.empty();
@@ -268,7 +268,7 @@ void test_binary_simulation_replay_validation_and_cancel() {
     const Bytes empty, invalid{0, 2, 1}, bits{0, 0, 1};
     rejects([&] { session.transmit_bits(bits); }, "stopped session rejects binary transmission");
     auto value = settings();
-    value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
+    value.transfer.modem.spreading_mode = modem::SpreadingMode::pattern;
     value.transfer.modem.spreading_factor = 128;
     value.transfer.fec = FecMode::rs60;
     value.simulation_snr_db = 40;
@@ -427,11 +427,12 @@ void test_binary_long_symbol_is_bounded_and_cancellable() {
     live::Session session;
     auto value = settings();
     value.transfer.modem.bandwidth_hz = 1;
-    value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
+    value.transfer.modem.spreading_mode = modem::SpreadingMode::pattern;
     value.transfer.modem.spreading_factor = 16384;
     value.transfer.modem.memory_limit = 1024;
     value.content_limit = 16;
-    value.dsp_workspace_bytes = 1024 * 1024;
+    // Changing-sign patterns require the receiver's wider blind timing bank.
+    value.dsp_workspace_bytes = 2 * 1024 * 1024;
     value.simulation_snr_db = -30;
     const Bytes bits{0, 0, 1};
     const auto expected = transfer::estimate_binary(bits, value.transfer);
@@ -446,7 +447,7 @@ void test_binary_long_symbol_is_bounded_and_cancellable() {
           std::abs(processing.transmission_seconds / processing.transmission_fraction - expected.total_seconds) < 1e-6,
           "an hours-long raw symbol must process samples without a symbol-statistics shortcut");
     check(processing.dsp_buffered_bytes <= value.dsp_workspace_bytes && !processing.simulation_replay,
-          "unfinished hours-long raw transmission fits a one-MiB DSP workspace without allocating its waveform");
+          "unfinished hours-long raw transmission fits a two-MiB DSP workspace without allocating its waveform");
     const auto before_cancel = std::chrono::steady_clock::now();
     session.cancel_transmit();
     check(std::chrono::steady_clock::now() - before_cancel < 100ms, "cancelling an hours-long sampled symbol returns promptly");
@@ -966,7 +967,7 @@ void test_cancel_reconfigure_and_bounds() {
     invalid = settings(); invalid.simulation_snr_db = std::numeric_limits<double>::quiet_NaN();
     rejects([&] { session.start(invalid); }, "nonfinite simulation SNR rejected");
     invalid = settings(); invalid.simulation = false;
-    invalid.transfer.modem = tuning::resolve(30000000,100,tuning::PatternMode::auto_tone,false).config;
+    invalid.transfer.modem = tuning::resolve(30000000,100,tuning::PatternMode::auto_pattern,false).config;
     rejects([&] { session.start(invalid); }, "30MHz plans cannot start an unusable audio upsampler");
     auto value = settings();
     session.start(value);
@@ -1069,12 +1070,12 @@ void test_long_packet_symbols_are_bounded_and_cancellable() {
         live::Session session;
         auto value = settings();
         value.transfer.modem.bandwidth_hz = 1;
-        value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
+        value.transfer.modem.spreading_mode = modem::SpreadingMode::pattern;
         value.transfer.modem.spreading_factor = factor;
         value.transfer.modem.memory_limit = 1024;
         value.receive_buffer_seconds = 0.01;
         value.content_limit = 1024;
-        value.dsp_workspace_bytes = 1024 * 1024;
+        value.dsp_workspace_bytes = 2 * 1024 * 1024;
         value.simulation_snr_db = -30;
         const auto sent = message(static_cast<std::uint8_t>(factor == 1024 ? 8 : 9), 96);
         const auto expected = transfer::estimate(sent, value.transfer);

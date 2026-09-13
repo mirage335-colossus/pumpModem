@@ -1,6 +1,8 @@
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/channel.hpp"
+#include "../src/spreading_code.hpp"
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -17,7 +19,7 @@ void check(bool condition, const char* description) {
 Message payload() {
     Message result;
     result.kind = MessageKind::file;
-    result.filename = "tone-regression.bin";
+    result.filename = "pattern-regression.bin";
     result.callsign = "N0CALL";
     result.grid = "AA00aa";
     for (std::size_t i = 0; i < result.id.size(); ++i) result.id[i] = static_cast<std::uint8_t>(i + 1);
@@ -33,6 +35,14 @@ transfer::Options options(double bandwidth, tuning::PatternMode mode) {
     result.content_limit = 64 * 1024;
     result.dsp_workspace_bytes = 8 * 1024 * 1024;
     return result;
+}
+void changing_pattern(const modem::Config& config) {
+    check(config.spreading_mode == modem::SpreadingMode::pattern,
+          "automatic regressions require phase-changing patterns");
+    const auto code = modem::detail::spreading_code(config);
+    check(std::find(code.begin(), code.end(), 1) != code.end() &&
+          std::find(code.begin(), code.end(), -1) != code.end(),
+          "sampled fixtures require measurable chip phase shifts");
 }
 modem::ChannelConfig ideal_channel() {
     // These regressions isolate AWGN integration and framing. Clock-error
@@ -52,6 +62,7 @@ void same_packet(const transfer::Received& received, const Message& sent) {
           "simulation must return measured signal diagnostics");
 }
 void bounded_sampled_prefix(const Message& sent,const transfer::Options& value) {
+    changing_pattern(value.modem);
     modem::StreamingTransmitter source(transfer::transmission_wire(sent,value),value.modem);
     modem::SampledSimulationChannel channel(value.modem,ideal_channel());
     std::array<float,2048> samples{};
@@ -67,25 +78,27 @@ void bounded_sampled_prefix(const Message& sent,const transfer::Options& value) 
     try{channel.read(source,samples,cancellation.get_token());}catch(const Error&){cancelled=true;}
     check(cancelled,"long sampled waveform ignores cancellation");
 }
-void long_tones_use_bounded_workspace() {
+void long_patterns_use_bounded_workspace() {
     auto sent = payload();
     sent.data.resize(2048,0x59); // Still exceeds full PCM capacity at the leaner DSP clock.
     double previous_airtime = 0;
-    for (const auto mode : {tuning::PatternMode::tone_128, tuning::PatternMode::tone_1024}) {
-        auto value = options(2400, mode);
+    for (const unsigned factor : {128U, 1024U}) {
+        auto value = options(2400, tuning::PatternMode::pattern_16);
+        value.modem.spreading_factor = factor;
         value.modem.memory_limit = value.dsp_workspace_bytes;
         const auto estimate = transfer::estimate(sent, value);
-        check(estimate.memory_supported, "2.4kHz long-tone streaming is feasible with bounded DSP memory");
+        check(estimate.memory_supported, "2.4kHz long-pattern streaming is feasible with bounded DSP memory");
         check(estimate.waveform_samples > value.dsp_workspace_bytes / sizeof(float),
-              "long-tone fixture must exceed the entire DSP budget if represented as PCM");
+              "long-pattern fixture must exceed the entire DSP budget if represented as PCM");
         check(!estimate.batch_memory_supported, "streaming eligibility must be independent of full-waveform allocation");
-        check(estimate.total_seconds > previous_airtime, "longer forced tones must change actual airtime");
+        check(estimate.total_seconds > previous_airtime, "longer patterns must change actual airtime");
         previous_airtime = estimate.total_seconds;
         bounded_sampled_prefix(sent,value);
     }
 }
 void wideband_fractional_carrier_pcm_roundtrip() {
-    auto value = options(24000, tuning::PatternMode::auto_pattern);
+    auto value = options(24000, tuning::PatternMode::pattern_3);
+    changing_pattern(value.modem);
     check(value.modem.sample_rate == 96000, "24kHz GUI preset must use a compatible PCM sample rate");
     value.modem.carrier_hz = 12731.375;
     const auto sent = payload();
@@ -100,12 +113,11 @@ void wideband_fractional_carrier_pcm_roundtrip() {
     same_packet(transfer::receive(samples, value), sent);
 }
 void weak_auto_and_fixed_training() {
-    const auto ordinary = tuning::resolve(2400, 40, tuning::PatternMode::auto_tone, false);
-    const auto weak = tuning::resolve(2400, -20, tuning::PatternMode::auto_tone, false);
-    const auto former_maximum = tuning::resolve(2400, -20, tuning::PatternMode::tone_16384, false);
-    check(weak.target_supported && modem::symbol_seconds(weak.config) > modem::symbol_seconds(former_maximum.config),
+    const auto ordinary = tuning::resolve(2400, 40, tuning::PatternMode::auto_pattern, false);
+    const auto weak = tuning::resolve(2400, -20, tuning::PatternMode::auto_pattern, false);
+    check(weak.target_supported && modem::symbol_seconds(weak.config) > 16384 * 2. / weak.config.bandwidth_hz,
           "automatic weak-signal tuning must extend past the former 16384-chip ceiling");
-    auto value = options(2400, tuning::PatternMode::auto_tone);
+    auto value = options(2400, tuning::PatternMode::auto_pattern);
     value.modem = ordinary.config;
     auto sent = payload();
     sent.data = {0x51};
@@ -124,7 +136,9 @@ void weak_auto_and_fixed_training() {
     bounded_sampled_prefix(sent,value);
 }
 void obscured_training_pcm_roundtrip() {
-    auto value = options(2400, tuning::PatternMode::tone_128);
+    auto value = options(2400, tuning::PatternMode::pattern_16);
+    value.modem.spreading_factor = 128;
+    changing_pattern(value.modem);
     value.modem.sample_rate = 8000;
     value.fec = FecMode::off; // The mandatory protected bootstrap remains enabled.
     auto sent = payload();
@@ -158,23 +172,33 @@ void weak_channels_use_the_planned_integration() {
     // Extremely weak plans are checked above without pretending their very
     // long integrations are instantaneous. Exercise actual acquisition at
     // practical sampled durations here.
-    for (const double target : {24., 18.}) {
-        auto value = options(2400, tuning::PatternMode::auto_tone);
-        value.modem = tuning::resolve(2400, target, tuning::PatternMode::auto_tone, false).config;
-        value.fec = FecMode::rs60;
-        const auto estimate = transfer::estimate(sent, value);
-        check(estimate.memory_supported, "weak-channel integration must remain streaming-feasible");
-        auto channel = ideal_channel();
-        channel.snr_db = target - 10 * std::log10(static_cast<double>(value.modem.sample_rate) / 2);
-        auto short_integration = value;
-        short_integration.modem = tuning::resolve(2400, 40, tuning::PatternMode::auto_tone, false).config;
-        bool short_rejected = false;
-        try { (void)transfer::simulate(sent, short_integration, channel); }
-        catch (const Error&) { short_rejected = true; }
-        check(short_rejected, "the weak-channel fixture must require longer symbol integration");
-        for (const std::uint64_t seed : {1ULL, 17ULL}) {
-            channel.seed = seed;
-            same_packet(transfer::simulate(sent, value, channel), sent);
+    constexpr double target = 24;
+    auto value = options(2400, tuning::PatternMode::auto_pattern);
+    value.key = Crypto(Bytes(32, 0x59));
+    value.modem = tuning::resolve(2400, target, tuning::PatternMode::auto_keystream, true).config;
+    changing_pattern(transfer::seeded_config(value, value.timestamp));
+    value.fec = FecMode::rs60;
+    const auto estimate = transfer::estimate(sent, value);
+    check(estimate.memory_supported, "weak-channel integration must remain streaming-feasible");
+    auto channel = ideal_channel();
+    // Packet acquisition needs margin beyond the symbol-energy planning
+    // estimate; the shorter integration must still fail in this channel.
+    channel.snr_db = target + 6 - 10 * std::log10(static_cast<double>(value.modem.sample_rate) / 2);
+    auto short_integration = value;
+    short_integration.modem = tuning::resolve(2400, 40, tuning::PatternMode::auto_keystream, true).config;
+    changing_pattern(transfer::seeded_config(short_integration, short_integration.timestamp));
+    check(modem::symbol_seconds(value.modem) > modem::symbol_seconds(short_integration.modem),
+          "weak-channel plans must exercise longer integration");
+    bool short_rejected = false;
+    try { (void)transfer::simulate(sent, short_integration, channel); }
+    catch (const Error&) { short_rejected = true; }
+    check(short_rejected, "the weak-channel fixture must require longer symbol integration");
+    for (const std::uint64_t seed : {1ULL, 17ULL}) {
+        channel.seed = seed;
+        try { same_packet(transfer::simulate(sent, value, channel), sent); }
+        catch (const Error& error) {
+            throw std::runtime_error("planned pattern integration at " + std::to_string(target) +
+                " dB-Hz, seed " + std::to_string(seed) + ": " + error.what());
         }
     }
 }
@@ -182,7 +206,7 @@ void weak_channels_use_the_planned_integration() {
 int main() {
     unsigned failures = 0;
     for (const auto& [name, test] : std::array{
-             std::pair{"long-tone workspace", &long_tones_use_bounded_workspace},
+             std::pair{"long-pattern workspace", &long_patterns_use_bounded_workspace},
              std::pair{"wideband fractional-carrier PCM", &wideband_fractional_carrier_pcm_roundtrip},
              std::pair{"weak auto and fixed training", &weak_auto_and_fixed_training},
              std::pair{"obscured training PCM", &obscured_training_pcm_roundtrip},
