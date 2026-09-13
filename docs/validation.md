@@ -89,6 +89,56 @@ runs now remove automatically created fixtures; explicit output directories and
 failed-run evidence are retained. This prevents repeated GUI validation from
 exhausting a temporary filesystem with large generated key fixtures.
 
+The subsequent consolidation moved the remaining shared presentation
+bookkeeping into `BindingState`, `RecordReconciliation` and
+`DocumentPresentation`. Both adapters now consume common option retention,
+record changes and document traversal/placement. Shared widget roles and chrome
+preferences also cover disabled/focus/hover/selection colors, dialog content and
+geometry, popup widths, tooltip timing, checkbox geometry, tab placement and
+document content widths. Native glyph measurement, widget ownership, popup
+screen fitting and file-browser controls remain toolkit responsibilities.
+
+An independent source audit was performed after this consolidation and before
+builds or regression execution. It caught missing bitmap-source and popup-
+direction cache dependencies, dialog text measurement inferred from font size,
+and native style precedence that could bypass shared disabled colors. These
+were corrected and added to the shared/native conformance coverage. The boundary
+guard additionally rejects new native RGB literals outside shared palette
+conversion.
+
+Final consolidation Release validation passed **24/24 FLTK GUI tests** in
+27.10 seconds and **26/26 Rev GUI tests** in 62.28 seconds. Both include the
+production workflow and native conformance; Rev also covers platform services
+and 1x/2x coordinates. All **21 public headers** compile independently as C++20
+without toolkit or modem include paths. Builds and native workflows ran
+sequentially with the software-rendering profile above, and successful smoke
+directories were empty afterward.
+
+The native runs exposed two integration details. FLTK retained an unnecessary
+hidden label for menus; it is now omitted, and the unchanged filtered-menu test
+passes. Rev's probes assumed immediate event pumping delivered a paint. On X11,
+the queued frame request may not have arrived yet, leaving the old geometry in
+place. Tests now await the existing native paint counter, preserving their frame
+counts and geometry/input assertions. Palette probes likewise inspect glyphs,
+caret and selection after actual layout in both monochrome and color modes.
+No production scheduling change was needed.
+
+Visual comparison also caught a Rev checkbox adapter consuming its observable
+change flag before the native checkbox could update, and missing disabled
+styles on dropdown children. The adapter now observes without consuming that
+flag, and maps disabled dropdown text, arrow and field colors explicitly.
+Native tests assert unchecked/checked/unchecked paint and active/disabled/
+re-enabled dropdown states in both palette modes. Both desktops use the shared
+surface background role. Fresh isolated production-window captures were
+visually checked for control state, disabled choices, layout, captions and
+bitmap areas. The added FLTK surface assertion also passed in a final focused
+native run; its production code was unchanged after the 24-test run.
+
+The CLI-only consolidation checks passed **13/13** in 7.44 seconds. Focused
+ASan/UBSan checks passed **15/15** in 8.46 seconds, including the new shared
+retention/layout/chrome checks and actual FLTK widgets/documents; leak detection
+was disabled for the native toolkit environment.
+
 The maintenance scope remains features expressed with existing primitives.
 New native primitive types, toolkit repairs and platform services still need
 adapter implementations. These Linux runs do not establish Windows runtime

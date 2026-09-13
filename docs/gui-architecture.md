@@ -15,13 +15,17 @@ removed.
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
+| `binding_state.hpp` | Resolved native control roles, effective option availability, deferred option identity, complete layout invalidation and bitmap revision retention. |
 | `document_layout.hpp` | Document flow, remaining widths, margins, padding, clipping and nested equal heights; adapters supply native glyph measurements only. |
 | `document_actions.hpp` | Document action identity, inherited availability and eligibility for restoring focus after a document replacement. |
+| `document_presentation.hpp` | Immutable document ownership, rendered child traversal, action association and local/absolute placement with inherited allocation and availability. |
 | `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
 | `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
+| `record_reconciliation.hpp` | Retained record identity, order, changed/added/removed rows, selection and availability. Native lists keep widget handles and glyph measurements. |
 | `service_queue.hpp` | Serial platform-service requests, completion identity, declared input validation and cancellation of current/queued work during shutdown. |
+| `chrome_layout.hpp` | Dialog wording/input shape and geometry, popup sizing preferences, tooltip metrics/placement, checkbox and empty-record geometry. |
 | `text_policy.hpp`, `utf8_policy.hpp` | Atomic UTF-8 replacement proposals, caret/selection boundaries and declaration-specific byte limits. |
-| `theme.hpp`, `presentation_palette.hpp` | Shared RGB values and semantic text/document tone and fill resolution. |
+| `theme.hpp`, `presentation_palette.hpp` | Shared widget states (border, hover, focus, selection, disabled and dialog colors), semantic text/document tones and fills. |
 | `screen_console.cpp` | Window/page titles, controls, bindings, menus, help, submit/activation/gesture policies. |
 | `desktop_layout.hpp`, `control_layout.hpp` | Desktop geometry, label/editor/preset/caption placement, and record cell/content extents in logical units. |
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
@@ -100,6 +104,28 @@ Native control geometry is refreshed from `ControlLayout` as a complete value.
 Label appearance/disappearance, row movement, footer allocation and bitmap
 caption mode changes reach retained controls in both adapters. Native layout
 invalidation does not enumerate a separate subset of shared geometry rules.
+`BindingState` also owns the options actually shown by a native popup. A toolkit
+may defer replacing them while its nested menu loop is running; callback indices
+still resolve against those displayed IDs. Both adapters consume one resolved
+binding presentation for visibility, optional areas and effective option state.
+Tab positions also come from shared declaration-order geometry.
+Document content widths share their margins and minimum; adapters supply only
+space consumed by a native scrollbar. Both windows use the shared initial and
+minimum dimensions without a separate application maximum in one backend.
+
+Native appearance values live in `theme::WidgetRole`; changing border, hover,
+focus, disabled, selection or dialog roles updates both adapters' mappings.
+`chrome_layout.hpp` supplies application-owned prompt content, button wording,
+dialog rectangles and popup/tooltip preferences. Native glyph measurement and
+host screen fitting remain toolkit work. FLTK's native file chooser owns its
+browse controls; the adapter supplies the shared request and action labels.
+
+Both record widgets use `RecordReconciliation` to decide which IDs are retained,
+inserted, removed, changed or reordered. Both document renderers use
+`DocumentPresentation` for rendered structure, inherited availability, action
+association and placement. FLTK can retain native widgets while Rev rebuilds a
+changed immutable document; neither independently derives document structure or
+geometry. Native ownership, focus calls and measurements remain adapter code.
 
 The application polls reception and captures plot history at 25 Hz while native
 state/plot presentation runs at 10 Hz. Native input can repaint immediately.
@@ -127,7 +153,8 @@ adapters close native dialogs and cannot start another queued service.
 header dependencies against the public contract/native helper boundary. It
 rejects domain headers, application-ID decisions in native adapters, toolkit
 headers in the public contract, native calls from shared feature code, and
-obsolete parallel GUI sources. Generic public helpers are checked for hidden
+obsolete parallel GUI sources. Native RGB literals are rejected so palette
+values must come from shared roles. Generic public helpers are checked for hidden
 application-ID decisions too. Its regression suite introduces domain includes,
 field/command/menu references, aliases and `using enum` imports, whitespace-split
 references, and toolkit dependencies in public or shared feature code; each
@@ -164,6 +191,12 @@ and document action focus and availability after tree changes.
 `gui_services` tests service ordering, completion identity, declared limits,
 UTF-8 validation and shutdown cancellation without a toolkit. Both native suites
 also exercise the same limited prompt edits and shared layout lifecycle fixture.
+`gui_bindings`, `gui_record_reconciliation`, `gui_document_presentation` and
+`gui_chrome` cover retained option identity during deferred native updates,
+complete cache invalidation, stable record changes, rendered document traversal,
+and shared service/control geometry and tooltip timing. Native probes check
+the resulting popup widths, dialog rectangles, checkboxes and resolved colors,
+including selection, hover and inherited disabled states.
 Rev also checks rendered pixels when leaving deeply nested clips, so later
 document siblings and persistent controls remain visible while overflow stays
 clipped.

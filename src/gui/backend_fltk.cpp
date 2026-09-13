@@ -1,4 +1,5 @@
 #include "application.hpp"
+#include "binding_state.hpp"
 #include "backend_fltk_document.hpp"
 #include "bitmap_fltk.hpp"
 #include "theme_fltk.hpp"
@@ -6,7 +7,9 @@
 #include "control_interactions.hpp"
 #include "record_interactions.hpp"
 #include "service_queue.hpp"
+#include "chrome_layout.hpp"
 #include "record_scroll.hpp"
+#include "record_reconciliation.hpp"
 #include <stdexcept>
 #include <FL/Fl.H>
 #include <FL/Fl_Box.H>
@@ -64,7 +67,7 @@ std::string literal_menu_text(const char* value) {
 }
 void draw_literal_label(const Fl_Label* label,int x,int y,int width,int height,Fl_Align align) {
     const auto shortcut=fl_draw_shortcut;fl_draw_shortcut=0;
-    fl_font(label->font,label->size);fl_color(label->color);
+    fl_font(label->font,label->size);fl_color(theme::label_foreground(label->color));
     fl_draw(label->value?label->value:"",x,y,width,height,align,nullptr,0);
     fl_draw_shortcut=shortcut;
 }
@@ -77,16 +80,21 @@ void draw_literal_menu_label(const Fl_Label* label,int x,int y,int width,int hei
     auto native=*label;const auto text=literal_menu_text(label->value);native.value=text.c_str();
     draw_literal_label(&native,x,y,width,height,align);
 }
+void draw_disabled_menu_label(const Fl_Label* label,int x,int y,int width,int height,Fl_Align align) {
+    auto native=*label;native.color=theme::fltk_color(theme::WidgetRole::disabled_text);
+    draw_literal_menu_label(&native,x,y,width,height,align);
+}
 void measure_literal_menu_label(const Fl_Label* label,int& width,int& height) {
     auto native=*label;const auto text=literal_menu_text(label->value);native.value=text.c_str();
     measure_literal_label(&native,width,height);
 }
-Fl_Labeltype literal_label_type(bool menu=false) {
+Fl_Labeltype literal_label_type(bool menu=false,bool disabled=false) {
     static const bool registered=[] {
         Fl::set_labeltype(FL_FREE_LABELTYPE,draw_literal_label,measure_literal_label);
-        Fl::set_labeltype(static_cast<Fl_Labeltype>(FL_FREE_LABELTYPE+1),draw_literal_menu_label,measure_literal_menu_label);return true;
+        Fl::set_labeltype(static_cast<Fl_Labeltype>(FL_FREE_LABELTYPE+1),draw_literal_menu_label,measure_literal_menu_label);
+        Fl::set_labeltype(static_cast<Fl_Labeltype>(FL_FREE_LABELTYPE+2),draw_disabled_menu_label,measure_literal_menu_label);return true;
     }();
-    (void)registered;return static_cast<Fl_Labeltype>(FL_FREE_LABELTYPE+(menu?1:0));
+    (void)registered;return static_cast<Fl_Labeltype>(FL_FREE_LABELTYPE+(menu?(disabled?2:1):0));
 }
 void populate(Fl_Menu_& menu,const std::vector<ui::Option>& options) {
     menu.clear();
@@ -97,33 +105,95 @@ void populate(Fl_Menu_& menu,const std::vector<ui::Option>& options) {
     }
     // add()/replace() above allocate mutable private menu storage.
     auto* items=const_cast<Fl_Menu_Item*>(menu.menu_end());
-    for(std::size_t i=0;i<options.size();++i)items[i].labeltype(literal_label_type(true));
+    for(std::size_t i=0;i<options.size();++i)items[i].labeltype(literal_label_type(true,!options[i].enabled));
 }
-bool same_options(const std::vector<ui::Option>& a,const std::vector<ui::Option>& b) {
-    if(a.size()!=b.size())return false;
-    for(std::size_t i=0;i<a.size();++i)if(a[i].id!=b[i].id||a[i].label!=b[i].label||a[i].enabled!=b[i].enabled)return false;
-    return true;
+// FLTK owns its popup loop, monitor fitting and selected-row positioning; the
+// shared layout supplies the application's width and horizontal anchor.
+bool popup_activation(Fl_Widget& widget,int event) {
+    return event==FL_PUSH ||
+        (event==FL_KEYBOARD&&Fl::event_key()==' '&&!(Fl::event_state()&(FL_SHIFT|FL_CTRL|FL_ALT|FL_META))) ||
+        (event==FL_SHORTCUT&&widget.Fl_Widget::test_shortcut());
 }
+const Fl_Menu_Item* native_popup(Fl_Menu_& widget,bool selected,bool prefer_upward) {
+    widget.menu_end();if(!widget.menu()||!widget.menu()->text)return nullptr;
+    const auto layout=ui::popup_layout({widget.x(),widget.y(),widget.w(),widget.h()},
+        widget.window()?widget.window()->w():ui::default_width,prefer_upward);
+    // pulldown has no direction argument: FLTK's selected-row positioning and
+    // monitor fitting take precedence over the retained upward preference.
+    Fl_Widget_Tracker tracker(&widget);
+    const auto* item=widget.menu()->pulldown(widget.x()+layout.left,widget.y(),layout.width,widget.h(),selected?widget.mvalue():nullptr,&widget);
+    if(tracker.exists()&&item&&!item->submenu()) {if(item!=widget.mvalue())widget.redraw();widget.picked(item);}
+    return item;
+}
+class NativeMenuButton : public Fl_Menu_Button {
+public:
+    using Fl_Menu_Button::Fl_Menu_Button;
+    bool popup_upward=false;
+    const Fl_Menu_Item* popup() {
+        if(type()||!box())return Fl_Menu_Button::popup();
+        pressed_menu_button_=this;redraw();Fl_Widget_Tracker tracker(this);
+        const auto* item=native_popup(*this,false,popup_upward);pressed_menu_button_=nullptr;
+        if(tracker.exists())redraw();
+        return item;
+    }
+    int handle(int event) override {
+        if(!type()&&box()&&menu()&&menu()->text&&popup_activation(*this,event)) {
+            if(Fl::visible_focus())Fl::focus(this);
+            popup();return 1;
+        }
+        return Fl_Menu_Button::handle(event);
+    }
+};
 class NativeChoice : public Fl_Choice {
 public:
     NativeChoice():Fl_Choice(0,0,1,1) {}
+    bool popup_upward=false;
     const std::string& display_text() const {return display_text_;}
     void apply_display(const std::string& value) {if(display_text_!=value){display_text_=value;redraw();}}
+    const Fl_Menu_Item* popup() {return native_popup(*this,true,popup_upward);}
+    int handle(int event) override {
+        if(event==FL_ENTER||event==FL_LEAVE||event==FL_FOCUS||event==FL_UNFOCUS)redraw();
+        if(menu()&&menu()->text&&popup_activation(*this,event)) {
+            if(Fl::visible_focus())Fl::focus(this);
+            popup();return 1;
+        }
+        return Fl_Choice::handle(event);
+    }
 private:
     std::string display_text_;
     void draw() override {
+        theme::DrawStyle style(*this);
         Fl_Choice::draw();
-        if(display_text_.empty())return;
+        if(display_text_.empty()&&mvalue())return;
+        const auto* text=display_text_.empty()?ui::choice_placeholder:display_text_.c_str();
         // Keep the native selector and its saved menu index intact. Only its
         // visible value is overridden; enabled choices remain interactive.
         const auto frame=Fl::scheme()?FL_UP_BOX:FL_DOWN_BOX;
         const int dx=Fl::box_dx(frame),dy=Fl::box_dy(frame);
-        auto background=color();
-        if(!Fl::scheme())background=fl_contrast(textcolor(),FL_BACKGROUND2_COLOR)==textcolor()?FL_BACKGROUND2_COLOR:fl_lighter(color());
         const int left=x()+dx,top=y()+dy+1,width=std::max(1,w()-20-2*dx),height=std::max(1,h()-2*dy-2);
-        fl_push_clip(left,top,width,height);fl_color(background);fl_rectf(left,top,width,height);
-        fl_color(active_r()?textcolor():fl_inactive(textcolor()));fl_font(textfont(),textsize());
-        fl_draw(display_text_.c_str(),left+3,top,width-6,height,FL_ALIGN_LEFT|FL_ALIGN_INSIDE,nullptr,0);
+        fl_push_clip(left,top,width,height);fl_color(color());fl_rectf(left,top,width,height);
+        fl_color(active_r()?textcolor():theme::fltk_color(theme::WidgetRole::disabled_text));fl_font(textfont(),textsize());
+        fl_draw(text,left+3,top,width-6,height,FL_ALIGN_LEFT|FL_ALIGN_INSIDE,nullptr,0);
+        fl_pop_clip();
+    }
+};
+
+class NativeCheckbox : public theme::Widget<Fl_Check_Button> {
+public:
+    using theme::Widget<Fl_Check_Button>::Widget;
+private:
+    void draw() override {
+        theme::DrawStyle style(*this);const auto geometry=ui::checkbox_layout(w(),h());
+        const auto& box=geometry.box;const auto& label=geometry.label;
+        fl_push_clip(x(),y(),w(),h());
+        if(ui::drawable(box)) {
+            const auto fill=Fl::pushed()==this?theme::WidgetRole::hover:value()?theme::WidgetRole::checked:theme::WidgetRole::canvas;
+            draw_box(FL_DOWN_BOX,x()+box.x,y()+box.y,box.w,box.h,theme::fltk_color(fill));
+            if(value()&&box.w>2&&box.h>2)
+                fl_draw_check(Fl_Rect(x()+box.x+1,y()+box.y+1,box.w-2,box.h-2),
+                    theme::fltk_color(active_r()?theme::WidgetRole::checked_text:theme::WidgetRole::disabled_text));
+        }
+        if(ui::drawable(label))draw_label(x()+label.x,y()+label.y,label.w,label.h,FL_ALIGN_LEFT|FL_ALIGN_INSIDE);
         fl_pop_clip();
     }
 };
@@ -151,7 +221,7 @@ class NativeEditor : public Fl_Text_Editor {
 public:
     NativeEditor():Fl_Text_Editor(0,0,1,1) {
         buffer(&buffer_);wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
-        textfont(theme::font);textsize(16);
+        textfont(theme::font);
         buffer_.add_modify_callback([](int,int inserted,int deleted,int,const char*,void* context) {
             auto& self=*static_cast<NativeEditor*>(context);
             if(!self.applying_&&(inserted||deleted)&&self.changed)self.changed(buffer_text(self.buffer_));
@@ -195,6 +265,7 @@ public:
         return Fl_Text_Editor::handle(event);
     }
 private:
+    void draw() override {theme::DrawStyle style(*this);Fl_Text_Editor::draw();}
     Fl_Text_Buffer buffer_;
     bool applying_=false;
     ui::TextEdit propose(std::string_view inserted,int start,int end) {
@@ -231,6 +302,7 @@ public:
         return Fl_Input::handle(event);
     }
 private:
+    void draw() override {theme::DrawStyle style(*this);Fl_Input::draw();}
     ui::TextEdit propose(std::string_view inserted) {
         auto edit=ui::text_edit(value(),{insert_position(),mark(),insert_position()},inserted,false,byte_limit);
         if(!edit.error.empty()&&error)error(edit.error);
@@ -256,15 +328,16 @@ public:
     }
 };
 
-Fl_Color text_color(ui::TextTone tone) {
-    return theme::fltk_color(theme::text_rgb(tone,theme::color_enabled));
+Fl_Color text_color(ui::TextTone tone,bool enabled=true) {
+    return theme::fltk_color(theme::text_rgb(tone,theme::color_enabled,enabled));
 }
 class NativeLiteralText : public Fl_Box {
 public:
     NativeLiteralText():Fl_Box(0,0,1,1) {}
 private:
     void draw() override {
-        draw_box();fl_color(active_r()?labelcolor():fl_inactive(labelcolor()));fl_font(labelfont(),labelsize());
+        theme::DrawStyle style(*this);
+        draw_box();fl_color(active_r()?labelcolor():theme::fltk_color(theme::WidgetRole::disabled_text));fl_font(labelfont(),labelsize());
         fl_push_clip(x(),y(),w(),h());
         fl_draw(label()?label():"",x(),y(),w(),h(),align(),nullptr,0);
         fl_pop_clip();
@@ -273,26 +346,27 @@ private:
 class NativeRecords : public Fl_Scroll {
     struct Row : Fl_Group {
         NativeRecords& owner;
-        ui::Record record;
+        std::string id;
         std::vector<Fl_Box*> labels;
-        Row(NativeRecords& owner_):Fl_Group(0,0,1,1),owner(owner_) {box(FL_FLAT_BOX);end();}
+        Row(NativeRecords& owner_,std::string id_):Fl_Group(0,0,1,1),owner(owner_),id(std::move(id_)) {box(FL_FLAT_BOX);end();}
         void apply(const ui::Record& value,int x,int y,int width,int height) {
             auto* previous_group=Fl_Group::current();
-            record=value;resize(x,y,width,height);color(owner.selected_==record.id?theme::fltk_color(theme::grid):theme::fltk_color(theme::background));
+            resize(x,y,width,height);color(theme::fltk_color(owner.records_.selected(id)?theme::WidgetRole::selection:theme::WidgetRole::canvas));
+            if(owner.records_.enabled(id))activate();else deactivate();
             while(labels.size()>value.cells.size()) {auto* label=labels.back();labels.pop_back();delete label;}
             begin();while(labels.size()<value.cells.size())labels.push_back(new NativeLiteralText);end();
             for(std::size_t i=0;i<labels.size();++i) {
                 const auto& cell=value.cells[i];auto* label=labels[i];
                 const auto bounds=ui::record_cell_rect(cell,width);
                 label->resize(x+bounds.x,y+bounds.y,bounds.w,bounds.h);label->copy_label(cell.text.c_str());
-                label->labelfont(cell.bold?theme::bold_font:theme::font);label->labelsize(cell.font_size);label->labelcolor(text_color(cell.tone));
+                label->labelfont(cell.bold?theme::bold_font:theme::font);label->labelsize(cell.font_size);label->labelcolor(text_color(cell.tone,value.enabled));
                 label->align(FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
             }
             redraw();Fl_Group::current(previous_group);
         }
         int handle(int event) override {
             if(event==FL_PUSH&&Fl::event_button()==FL_LEFT_MOUSE&&active_r()) {
-                const auto action=owner.interactions_.pointer(record.id,static_cast<float>(Fl::event_x()),static_cast<float>(Fl::event_y()));
+                const auto action=owner.interactions_.pointer(id,static_cast<float>(Fl::event_x()),static_cast<float>(Fl::event_y()));
                 if(action) {owner.take_focus();owner.dispatch(action);}
                 return 1;
             }
@@ -305,15 +379,11 @@ public:
     }
     std::function<void(std::string)> selected,activated;
     void apply(const ui::FieldState& state) {
-        interactions_.apply(state);
-        if(records_==state.records&&selected_==state.selected)return;
         auto* previous_group=Fl_Group::current();
         scroll_.capture(yposition(),maximum_scroll());
-        selected_=state.selected;records_=state.records;
-        for(auto it=rows_.begin();it!=rows_.end();) {
-            if(std::none_of(records_.begin(),records_.end(),[&](const auto& row){return row.id==it->first;})) {delete it->second;it=rows_.erase(it);}else ++it;
-        }
-        begin();for(const auto& record:records_)if(!rows_.contains(record.id))rows_.emplace(record.id,new Row(*this));end();
+        const auto changes=records_.apply(state);interactions_.apply(state);if(!changes)return;
+        for(const auto& id:changes.removed) {delete rows_.at(id);rows_.erase(id);}
+        begin();for(const auto& id:changes.added)rows_.emplace(id,new Row(*this,id));end();
         layout_rows();
         const int maximum=maximum_scroll();
         scroll_to(std::min(xposition(),std::max(0,content_width_-viewport_width())),static_cast<int>(scroll_.target(maximum,control_.follow_tail)));redraw();Fl_Group::current(previous_group);
@@ -333,7 +403,7 @@ public:
             else if(Fl::event_key()==FL_Up)key=ui::RecordKey::up;
             else if(Fl::event_key()==FL_Down)key=ui::RecordKey::down;
             if(key) {
-                const auto action=interactions_.key(selected_,*key);
+                const auto action=interactions_.key(records_.selected_id(),*key);
                 if(dispatch(action)) {
                     const int top=static_cast<int>(action.index)*control_.list_row_height;
                     scroll_to(xposition(),static_cast<int>(ui::RecordScroll::reveal(yposition(),top,control_.list_row_height,viewport_height(),maximum_scroll())));
@@ -347,29 +417,34 @@ private:
     ui::Control control_;
     ui::RecordInteractions interactions_;
     ui::RecordScroll scroll_;
-    std::vector<ui::Record> records_;
+    ui::RecordReconciliation records_;
     std::map<std::string,Row*> rows_;
-    std::string selected_;
     int content_width_=0;
     int viewport_width() const {return std::max(1,w()-Fl::scrollbar_size()-2);}
     int viewport_height() const {return std::max(1,h()-2-(content_width_>viewport_width()?Fl::scrollbar_size():0));}
     int maximum_scroll() const {return std::max(0,static_cast<int>(records_.size())*control_.list_row_height-viewport_height());}
     bool dispatch(const ui::RecordInteraction& action) {
-        return action.dispatch([this](const auto& id){selected_=id;layout_rows();if(selected)selected(id);},
+        return action.dispatch([this](const auto& id){records_.select(id);layout_rows();if(selected)selected(id);},
             [this](const auto& id){if(activated)activated(id);});
     }
     void layout_rows() {
         const int width=viewport_width();content_width_=width;
-        for(const auto& record:records_)content_width_=ui::record_content_width(record,content_width_,[](const auto& cell,std::size_t) {
+        for(const auto& id:records_.order())content_width_=ui::record_content_width(records_.record(id),content_width_,[](const auto& cell,std::size_t) {
             fl_font(cell.bold?theme::bold_font:theme::font,cell.font_size);
             int text_width=0,text_height=0;fl_measure(cell.text.c_str(),text_width,text_height,0);return text_width;
         });
-        for(std::size_t i=0;i<records_.size();++i)if(auto found=rows_.find(records_[i].id);found!=rows_.end())
-            found->second->apply(records_[i],x()+1-xposition(),y()+1+static_cast<int>(i)*control_.list_row_height-yposition(),content_width_,control_.list_row_height);
+        const auto& order=records_.order();
+        for(std::size_t i=0;i<order.size();++i)
+            rows_.at(order[i])->apply(records_.record(order[i]),x()+1-xposition(),y()+1+static_cast<int>(i)*control_.list_row_height-yposition(),content_width_,control_.list_row_height);
     }
     void draw() override {
+        theme::DrawStyle style(*this);
         Fl_Scroll::draw();
-        if(records_.empty()) {fl_color(theme::fltk_color(theme::muted));fl_font(theme::font,control_.font_size);fl_draw(control_.empty_text,x()+12,y()+8,w()-24,h()-16,FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE|FL_ALIGN_WRAP);}
+        if(records_.empty()) {
+            const auto area=ui::empty_record_rect(w(),h());
+            fl_color(theme::fltk_color(active_r()?theme::WidgetRole::secondary_text:theme::WidgetRole::disabled_text));fl_font(theme::font,control_.font_size);
+            fl_draw(control_.empty_text,x()+area.x,y()+area.y,area.w,area.h,FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE|FL_ALIGN_WRAP);
+        }
     }
 };
 
@@ -392,7 +467,7 @@ public:
             return;
         }
         const auto* next=queue.next();if(!next)return;
-        const auto request=*next;dialog_title_=request.title;
+        const auto request=*next;dialog_presentation_=ui::service_dialog(request);
         previous_focus_=std::make_unique<Fl_Widget_Tracker>(Fl::focus());
         try {
             if(request.kind==ui::ServiceKind::clipboard) {
@@ -402,17 +477,33 @@ public:
                 if(!fl_open_uri(request.value.c_str(),failure.data(),static_cast<int>(failure.size())))throw std::runtime_error(failure[0]?failure.data():"Could not open folder");
                 finish({request.id,false,{},{}});
             } else if(request.kind==ui::ServiceKind::prompt) {
-                prompt_=std::make_unique<Fl_Double_Window>(560,132,dialog_title_.c_str());prompt_->begin();
-                input_=new NativeInput;input_->resize(14,18,532,30);input_->value(request.value.c_str());
-                input_->byte_limit=request.byte_limit;input_->error=[this](std::string message){if(error)error(std::move(message));};
-                auto* accept=new Fl_Return_Button(338,80,100,30,"Continue");auto* cancel=new Fl_Button(446,80,100,30,"Cancel");prompt_->end();
+                auto* host=Fl::focus()?Fl::focus()->window():Fl::first_window();
+                const auto geometry=ui::service_dialog_layout(dialog_presentation_,host?host->w():ui::default_width,
+                    host?host->h():ui::default_height,[](const std::string& text,int size,int width,ui::ServiceTextRole) {
+                        fl_font(theme::font,size);int height=0;fl_measure(text.c_str(),width,height,0);return height;
+                    });
+                prompt_=std::make_unique<Fl_Double_Window>((host?host->x():0)+geometry.frame.x,(host?host->y():0)+geometry.frame.y,
+                    geometry.frame.w,geometry.frame.h,dialog_presentation_.title.c_str());prompt_->begin();
+                const auto text=[&](ui::Rect bounds,const std::string& value,int size) {
+                    auto* label=new NativeLiteralText;label->resize(bounds.x,bounds.y,bounds.w,bounds.h);label->copy_label(value.c_str());
+                    label->labelsize(size);label->align(FL_ALIGN_LEFT|FL_ALIGN_TOP|FL_ALIGN_INSIDE|FL_ALIGN_WRAP|FL_ALIGN_CLIP);
+                };
+                text(geometry.title,dialog_presentation_.title,ui::chrome_font_size);
+                text(geometry.body,dialog_presentation_.body,ui::tooltip_font_size);
+                input_=new NativeInput;input_->resize(geometry.input.x,geometry.input.y,geometry.input.w,geometry.input.h);input_->value(dialog_presentation_.value.c_str());
+                input_->textsize(ui::chrome_font_size);input_->byte_limit=dialog_presentation_.input.byte_limit;input_->error=[this](std::string message){if(error)error(std::move(message));};
+                auto* accept=new theme::Widget<Fl_Return_Button>(geometry.accept.x,geometry.accept.y,geometry.accept.w,geometry.accept.h,dialog_presentation_.accept_label.c_str());
+                auto* cancel=new theme::Widget<Fl_Button>(geometry.cancel.x,geometry.cancel.y,geometry.cancel.w,geometry.cancel.h,dialog_presentation_.cancel_label.c_str());
+                accept->labelsize(ui::chrome_font_size);cancel->labelsize(ui::chrome_font_size);prompt_->end();
                 accept->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,false,self.input_->value(),{}};},this);
                 cancel->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,true,{},{}};},this);
                 prompt_->callback([](Fl_Widget*,void* context){auto& self=*static_cast<NativeServices*>(context);if(const auto* active=self.queue.current())self.prompt_done_=ui::ServiceResult{active->id,true,{},{}};},this);
-                theme::apply_widgets(*prompt_);prompt_->set_modal();prompt_->show();input_->take_focus();
+                theme::apply_widgets(*prompt_);prompt_->box(theme::dialog_box);prompt_->color(theme::fltk_color(theme::WidgetRole::dialog));prompt_->set_modal();prompt_->show();input_->take_focus();
             } else {
-                chooser_=std::make_unique<Fl_File_Chooser>(request.value.c_str(),"*",request.kind==ui::ServiceKind::save_file?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,dialog_title_.c_str());
+                chooser_=std::make_unique<Fl_File_Chooser>(dialog_presentation_.value.c_str(),"*",request.kind==ui::ServiceKind::save_file?Fl_File_Chooser::CREATE:Fl_File_Chooser::SINGLE,dialog_presentation_.title.c_str());
+                chooser_->ok_label(dialog_presentation_.accept_label.c_str());
                 chooser_->preview(0);chooser_->textfont(theme::font);chooser_->textcolor(theme::text_color());chooser_->show();
+                if(auto* dialog=Fl::modal()) {theme::apply_widgets(*dialog);dialog->box(theme::dialog_box);dialog->redraw();}
             }
         } catch(const std::exception& failure) {finish({request.id,false,{},failure.what()});}
     }
@@ -424,7 +515,7 @@ public:
 private:
     // FLTK borrows window and chooser titles. Retain this text until after
     // their destruction, including completion that releases the queued request.
-    std::string dialog_title_;
+    ui::ServiceDialogPresentation dialog_presentation_;
     std::unique_ptr<Fl_File_Chooser> chooser_;
     std::unique_ptr<Fl_Double_Window> prompt_;
     NativeInput* input_=nullptr;
@@ -450,12 +541,11 @@ struct Binding {
     NativeChoice* choice=nullptr;
     Fl_Check_Button* toggle=nullptr;
     Fl_Button* button=nullptr;
-    Fl_Menu_Button *suggestions=nullptr,*menu=nullptr;
+    NativeMenuButton *suggestions=nullptr,*menu=nullptr;
     NativeRecords* records=nullptr;
     NativeBitmap* bitmap=nullptr;
-    std::vector<ui::Option> options,menu_options;
     std::vector<const ui::Control*> menu_items;
-    std::uint64_t bitmap_revision=std::numeric_limits<std::uint64_t>::max();
+    BindingState presentation;
 };
 
 class NativeApp {
@@ -463,7 +553,7 @@ public:
     explicit NativeApp(Launch launch,std::span<const ui::Control> controls=ui::console_screen()):application(std::move(launch)),controls_(controls) {
         window=std::make_unique<NativeWindow>();window->size_range(ui::min_width,ui::min_height);window->begin();
         for(const auto& definition:ui::pages()) {
-            auto* button=new Fl_Button(0,0,1,1,definition.title);
+            auto* button=new theme::Widget<Fl_Button>(0,0,1,1,definition.title);
             bind(*button,[this,id=definition.id]{application.select_page(id);show_page();});tabs.push_back({definition.id,button});
             Page page;page.definition=&definition;
             if(definition.document) {
@@ -542,10 +632,12 @@ private:
             auto binding=std::make_unique<Binding>();auto& b=*binding;b.control=&control;
             auto* parent=control.persistent?static_cast<Fl_Group*>(window.get()):pages.at(control.page).group;parent->begin();
             b.group=new NativeControlGroup(control);b.group->dispatch=[this,c=&control](ui::Command command){application.gesture(*c,command);};b.group->begin();
-            b.label=new NativeLiteralText;b.label->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);b.label->labelsize(control.font_size);
+            if(control.menu==ui::Menu::none) {
+                b.label=new NativeLiteralText;b.label->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);b.label->labelsize(control.font_size);
+            }
             if(control.menu!=ui::Menu::none) {
-                b.menu=new Fl_Menu_Button(0,0,1,1,control.menu_label);b.menu_items=declaration.menu_items;
-                bind(*b.menu,[this,p=&b]{const int index=p->menu->value();if(index>=0&&static_cast<std::size_t>(index)<p->menu_options.size())application.select_menu(p->menu_items,p->menu_options[static_cast<std::size_t>(index)].id);});
+                b.menu=new theme::Widget<NativeMenuButton>(0,0,1,1,control.menu_label);b.menu_items=declaration.menu_items;
+                bind(*b.menu,[this,p=&b]{if(const auto id=p->presentation.option_id(p->menu->value()))application.select_menu(p->menu_items,*id);});
             } else switch(control.kind) {
             case ui::Kind::label:break;
             case ui::Kind::text:
@@ -562,24 +654,24 @@ private:
                     b.input->error=[this](std::string error){application.report_error(std::move(error));};
                     bind(*b.input,[this,p=&b]{application.edit(*p->control,p->input->value());});
                 }
-                b.suggestions=new Fl_Menu_Button(0,0,1,1,"v");
-                bind(*b.suggestions,[this,p=&b]{const auto i=p->suggestions->value();if(i>=0&&static_cast<std::size_t>(i)<p->options.size())application.preset(*p->control,p->options[static_cast<std::size_t>(i)].id);});
+                b.suggestions=new theme::Widget<NativeMenuButton>(0,0,1,1,ui::preset_indicator);
+                bind(*b.suggestions,[this,p=&b]{if(const auto id=p->presentation.option_id(p->suggestions->value()))application.preset(*p->control,*id);});
                 break;
             case ui::Kind::choice:
                 b.choice=new NativeChoice;b.choice->textsize(control.font_size);b.choice->when(FL_WHEN_RELEASE_ALWAYS);
-                bind(*b.choice,[this,p=&b]{const auto i=p->choice->value();if(i>=0&&static_cast<std::size_t>(i)<p->options.size())application.select(*p->control,p->options[static_cast<std::size_t>(i)].id);});break;
+                bind(*b.choice,[this,p=&b]{if(const auto id=p->presentation.option_id(p->choice->value()))application.select(*p->control,*id);});break;
             case ui::Kind::toggle:
-                b.toggle=new Fl_Check_Button(0,0,1,1,control.label);
+                b.toggle=new NativeCheckbox(0,0,1,1,control.label);
                 bind(*b.toggle,[this,p=&b]{application.toggle(*p->control,p->toggle->value()!=0);});break;
             case ui::Kind::action:
-                b.button=new Fl_Button(0,0,1,1,control.label);
+                b.button=new theme::Widget<Fl_Button>(0,0,1,1,control.label);
                 bind(*b.button,[this,c=&control]{application.activate(*c);});break;
             case ui::Kind::list:
                 b.records=new NativeRecords(control);
                 b.records->selected=[this,c=&control](std::string id){application.select(*c,id);};
                 b.records->activated=[this,c=&control](std::string id){application.activate_record(*c,id);};break;
             case ui::Kind::bitmap:
-                b.bitmap=new NativeBitmap;b.caption=new NativeLiteralText;b.caption->labelsize(11);b.caption->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
+                b.bitmap=new NativeBitmap;b.caption=new NativeLiteralText;b.caption->labelsize(ui::bitmap_caption_font_size);b.caption->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
                 break;
             }
             for(int i=0;i<b.group->children();++i) {
@@ -593,15 +685,19 @@ private:
     }
     void layout() {
         const auto page_bounds=ui::page_rect(window->w(),window->h());
-        const auto tabs_bounds=ui::tabs_rect(window->w(),window->h());int x=tabs_bounds.x;
-        for(auto& [id,button]:tabs) {const auto width=pages.at(id).definition->tab_width;place(button,{x,tabs_bounds.y,width,tabs_bounds.h});x+=width;}
+        for(const auto& tab:ui::tab_layout(window->w(),window->h())) {
+            const auto found=std::find_if(tabs.begin(),tabs.end(),[&](const auto& item){return item.first==tab.page;});
+            place(found->second,tab.frame);
+        }
         for(auto& [id,page]:pages) {(void)id;place(page.group,page_bounds);}
         for(auto& item:bindings) {
-            auto& b=*item;const auto& c=*b.control;const ui::FieldState empty;
-            const auto& state=c.field==ui::Field::count?empty:application.field(c.field);
-            const auto geometry=ui::control_layout(c,state,window->w(),window->h(),controls_);
-            const bool shown=b.menu?application.menu(b.menu_items).visible:application.control(c).visible;
-            visible(b.group,shown&&ui::drawable(geometry.frame));
+            auto& b=*item;const auto& c=*b.control;
+            const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),controls_);
+            const auto& geometry=view.geometry;
+            b.presentation.applied_layout(geometry,c.font_size);
+            if(b.choice)b.choice->popup_upward=geometry.popup_upward;
+            for(auto* menu:{b.menu,b.suggestions})if(menu)menu->popup_upward=geometry.popup_upward;
+            visible(b.group,view.visible);
             for(auto* widget:std::initializer_list<Fl_Widget*>{b.label,b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.suggestions})
                 if(widget&&widget->labelsize()!=c.font_size)widget->labelsize(c.font_size);
             if(b.input&&b.input->textsize()!=c.font_size)b.input->textsize(c.font_size);
@@ -610,10 +706,10 @@ private:
                 if(menu&&menu->textsize()!=c.font_size)menu->textsize(c.font_size);
             place(b.group,geometry.frame);place(b.label,geometry.label);
             for(auto* widget:std::initializer_list<Fl_Widget*>{b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.records,b.bitmap}) {
-                place(widget,geometry.widget);visible(widget,ui::drawable(geometry.widget));
+                place(widget,geometry.widget);visible(widget,view.widget_visible);
             }
-            visible(b.label,geometry.has_label&&ui::drawable(geometry.label));
-            place(b.suggestions,geometry.suggestions);visible(b.suggestions,geometry.has_suggestions&&ui::drawable(geometry.suggestions));
+            visible(b.label,view.label_visible);
+            place(b.suggestions,geometry.suggestions);visible(b.suggestions,view.suggestions_visible);
             place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption&&ui::drawable(geometry.caption));
             b.group->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);
         }
@@ -622,7 +718,7 @@ private:
     void update_documents() {
         const auto bounds=ui::page_rect(window->w(),window->h());
         for(auto& [id,page]:pages)if(page.document) {
-            const int width=std::max(220,bounds.w-2*ui::document_side_padding-Fl::scrollbar_size());
+            const int width=ui::document_content_width(bounds.w,Fl::scrollbar_size());
             const auto source=application.document(id,width);
             if(source!=page.source) {page.source=source;page.document->update(*source);}
             const auto scroll=std::max(0,page.scroll->yposition());
@@ -643,32 +739,40 @@ private:
     }
     void apply() {
         auto* previous_group=Fl_Group::current();
+        bool relayout=false;
         for(auto& item:bindings) {
             auto& b=*item;const auto& c=*b.control;
-            const auto view=application.control(c);const auto& state=view.state;
-            if(!b.menu) {visible(b.group,view.visible);enabled(b.group,view.enabled);}
-            if(b.label)label(b.label,view.label);
+            const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),controls_);
+            const auto& state=view.control.state;
+            relayout=relayout||b.presentation.needs_layout(view.geometry,c.font_size);
+            visible(b.group,view.visible);enabled(b.group,view.enabled);
+            if(b.label)label(b.label,view.control.label);
             if(b.input)b.input->apply(state.text);
             if(b.editor)b.editor->apply(state.text);
-            if((b.choice||b.suggestions)&&!Fl::grab()) {
-                if(!same_options(b.options,state.options)) {b.options=state.options;if(b.choice)populate(*b.choice,b.options);if(b.suggestions)populate(*b.suggestions,b.options);}
-                if(b.choice) {int index=-1;for(std::size_t i=0;i<b.options.size();++i)if(b.options[i].id==state.selected)index=static_cast<int>(i);if(b.choice->value()!=index)b.choice->value(index);}
+            if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
+                for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
+                    if(menu)populate(*menu,b.presentation.options());
             }
+            if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
             if(b.choice)b.choice->apply_display(state.display_text);
-            if(b.toggle) {b.toggle->value(state.checked);label(b.toggle,view.label);}
+            if(b.toggle) {b.toggle->value(state.checked);label(b.toggle,view.control.label);}
             if(b.records)b.records->apply(state);
-            if(b.button) {enabled(b.button,view.enabled);label(b.button,view.label);}
-            if(b.menu) {
-                auto menu=application.menu(b.menu_items);visible(b.group,menu.visible);enabled(b.group,menu.enabled);
-                if(!Fl::grab()&&!same_options(menu.options,b.menu_options)) {b.menu_options=std::move(menu.options);populate(*b.menu,b.menu_options);}
-            }
+            if(b.button) {enabled(b.button,view.enabled);label(b.button,view.control.label);}
+            if(b.menu)label(b.menu,view.control.label);
+        }
+        if(relayout)layout();else update_documents();
+        update_bitmaps();show_page();Fl_Group::current(previous_group);
+    }
+    void update_bitmaps() {
+        for(auto& item:bindings) {
+            auto& b=*item;const auto& c=*b.control;
             if(b.bitmap&&b.bitmap->w()>0&&b.bitmap->h()>0) {
                 const auto presentation=application.bitmap(c,static_cast<unsigned>(std::max(1,widgets::bitmap_sample_extent(b.bitmap->x(),b.bitmap->w(),Fl::screen_scale(window->screen_num())))));
-                if(presentation.revision!=b.bitmap_revision) {b.bitmap_revision=presentation.revision;b.bitmap->set(presentation.source);}
-                label(b.label,presentation.title);label(b.caption,presentation.caption);b.caption->labelcolor(text_color(presentation.caption_tone));
+                if(b.presentation.update_bitmap(c.bitmap,presentation.revision))b.bitmap->set(presentation.source);
+                label(b.label,presentation.title);label(b.caption,presentation.caption);b.caption->labelcolor(text_color(presentation.caption_tone,b.group->active_r()));
+                visible(b.caption,!presentation.caption.empty()&&b.caption->w()>0&&b.caption->h()>0);
             }
         }
-        layout();show_page();Fl_Group::current(previous_group);
     }
     void scroll_to(double fraction) {
         auto& page=pages.at(shown_page);if(!page.scroll||!page.document)return;

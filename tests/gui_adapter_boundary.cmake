@@ -7,9 +7,10 @@ set(contract_headers
   application.hpp bitmap.hpp ui_contract.hpp ui_document.hpp
   desktop_layout.hpp control_layout.hpp document_layout.hpp document_actions.hpp
   control_binding.hpp record_interactions.hpp presentation_palette.hpp
-  text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp theme.hpp)
+  text_policy.hpp utf8_policy.hpp control_interactions.hpp record_scroll.hpp service_queue.hpp chrome_layout.hpp theme.hpp
+  binding_state.hpp record_reconciliation.hpp document_presentation.hpp)
 set(native_headers backend_fltk_document.hpp backend_rev_document.hpp
-  bitmap_fltk.hpp theme_fltk.hpp rev_platform.hpp)
+  bitmap_fltk.hpp theme_fltk.hpp backend_rev_theme.hpp rev_platform.hpp)
 
 # Public headers may depend only on each other and the standard library. An
 # unknown angle include is not automatically a system header: that used to let
@@ -133,6 +134,12 @@ function(check_gui_boundary path native)
   set_property(GLOBAL APPEND PROPERTY gui_boundary_visited "${path}")
   read_gui_source("${path}" source)
   get_filename_component(name "${path}" NAME)
+  if(native)
+    string(REGEX REPLACE "\"([^\"\\\\]|\\\\.)*\"|'([^'\\\\]|\\\\.)*'" " " color_source "${source}")
+    if(color_source MATCHES "(rgba|fl_rgb_color)[ \t\r\n]*\\([ \t\r\n]*[0-9]")
+      message(FATAL_ERROR "${name} defines a literal native color; use the shared theme palette.")
+    endif()
+  endif()
   # Store normalized source for the second pass, after aliases from all public
   # and native helpers are known. A helper alias must not conceal an application
   # binding in a translation unit that includes it.

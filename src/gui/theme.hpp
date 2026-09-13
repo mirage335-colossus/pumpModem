@@ -29,6 +29,45 @@ inline constexpr Rgb data_rgb(bool use_color, std::uint8_t fallback = accent) {
     return use_color ? data_tint : grayscale(fallback);
 }
 
+// Common native-widget appearance. Adapters map these roles to toolkit fields,
+// boxtypes and states; palette edits belong here, including disabled controls
+// and native popup/dialog decoration. Toolkit glyph/contrast mechanics remain
+// native, while record/document/bitmap data colors retain their semantic roles.
+enum class WidgetRole {
+    canvas, surface_fill, foreground, data, secondary_text, border, focus,
+    disabled_text, disabled_background, disabled_border,
+    selection, hover, checked, checked_text, dialog, dialog_border
+};
+inline constexpr Rgb widget_rgb(WidgetRole role,bool use_color=false) {
+    switch(role) {
+    case WidgetRole::canvas:return grayscale(background);
+    case WidgetRole::surface_fill:case WidgetRole::dialog:return grayscale(surface);
+    case WidgetRole::foreground:return text_rgb(use_color);
+    case WidgetRole::data:return data_rgb(use_color,text);
+    case WidgetRole::secondary_text:return grayscale(muted);
+    case WidgetRole::border:case WidgetRole::selection:return grayscale(grid);
+    case WidgetRole::focus:case WidgetRole::dialog_border:return grayscale(text);
+    case WidgetRole::disabled_text:return grayscale(90);
+    case WidgetRole::disabled_background:return grayscale(surface);
+    case WidgetRole::disabled_border:return grayscale(50);
+    case WidgetRole::hover:return grayscale(45);
+    case WidgetRole::checked:return grayscale(grid);
+    case WidgetRole::checked_text:return text_rgb(use_color);
+    }
+    return text_rgb(use_color);
+}
+inline constexpr float modal_overlay_opacity=.65f;
+inline constexpr float text_selection_opacity=.65f;
+// Software/native editors without alpha selection colors consume the same
+// selection overlay composited against the common editor background.
+inline constexpr Rgb text_selection_rgb(bool use_color=false) {
+    const auto foreground=widget_rgb(WidgetRole::selection,use_color),base=widget_rgb(WidgetRole::canvas,use_color);
+    const auto blend=[](std::uint8_t front,std::uint8_t back) {
+        return static_cast<std::uint8_t>(front*text_selection_opacity+back*(1.0f-text_selection_opacity)+.5f);
+    };
+    return {blend(foreground.red,base.red),blend(foreground.green,base.green),blend(foreground.blue,base.blue)};
+}
+
 // Muted multihue false color maps the same scalar intensity as grayscale, with
 // a soft off-white peak. Grayscale output uses the original intensity, never a
 // desaturation of this palette.

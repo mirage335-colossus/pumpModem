@@ -176,7 +176,7 @@ BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width
 std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int width) {
     const auto definition=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return p.id==page;});
     if(definition==ui::pages().end()||!definition->document)return {};
-    width=std::max(220,width);
+    width=std::max(ui::document_min_content_width,width);
     auto& cached=impl_->documents[page];
     const auto model=impl_->controller.inspection();
     const auto first=impl_->controller.pattern_first();

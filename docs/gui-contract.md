@@ -19,6 +19,9 @@ may differ in glyph metrics, popup appearance/placement and platform dialogs, wh
 preserving the same content, values, availability and actions. `open_upward` is
 a preferred popup direction subject to native screen fitting; FLTK retains its
 platform popup placement policy.
+Shared widget colors and application-owned chrome preferences are also defined
+once, in `theme.hpp` and `chrome_layout.hpp`. Native contrast, glyph metrics,
+screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
@@ -55,6 +58,10 @@ enabled. Returned option IDs retain declaration identity after filtering.
 Adapters pass those IDs to `select_menu()`; shared dispatch rechecks the chosen
 control's current visibility and eligibility. Adapters do not reconstruct menu
 policy or map filtered indices to application commands.
+`binding_state.hpp` resolves native control visibility, optional areas and
+effective option availability once. It retains the displayed option IDs when
+native popup replacement is deferred, and tracks complete geometry/font changes
+and bitmap source identity/revisions for both adapters.
 Native choice/list selection and toggles use the declaration-aware `select()`
 and `toggle()` overloads. Pointer/wheel commands use `gesture()`, which checks
 both the declared binding and current availability. These checks also apply to
@@ -119,6 +126,9 @@ quality and message text; files and unverified prefixes are not copyable as text
   Record rows share one horizontal content width. Fixed cells reserve their
   declared widths; flexible cells expand for their measured text and trailing
   inset. Adapters measure glyphs and apply that common extent to native scrolling.
+  `record_reconciliation.hpp` owns stable IDs, declaration order, selection,
+  availability and added/removed/changed rows. Native lists consume its change
+  plan and retain only widget handles and native glyph measurements.
 - Key-file failure acknowledgement is an explicit action. It does not depend
   on a toolkit reporting re-selection of an unchanged choice.
 - All input validation, transmit eligibility, preparation/revision checks,
@@ -162,6 +172,11 @@ survives insertion, reordering or removal of other actions; duplicate instances
 are rejected. Zero retains declaration-order occurrence identity for static
 documents. Removing or disabling the identified action clears its focus. The
 containing native view must also accept input before an action can dispatch.
+`document_presentation.hpp` owns immutable document descriptions, the rendered
+child tree, action association and inherited availability. It emits both local
+and absolute placements from the shared layout. The native renderers choose how
+to retain or replace toolkit handles, then apply those placements without a
+separate traversal or allocation policy.
 
 `inspection_page.hpp` is application presentation code above this interface.
 Changing a section, table, note or plot there reaches both backends. Ordinary
@@ -175,6 +190,14 @@ therefore keep the same meaning in monochrome and color modes. An action with
 no explicit fill uses the shared surface color; other unfilled document nodes
 remain transparent. Adding or changing a semantic palette role is shared
 presentation work.
+Native widget states use the same `theme::WidgetRole` palette: border, hover,
+focus, checked, selection, disabled text/background/border and dialog colors.
+Adapters convert these values and apply native drawing/contrast mechanics.
+Application-owned dialog labels/geometry, tooltip preferences, popup minimum
+width, checkbox geometry and empty-record insets come from `chrome_layout.hpp`.
+Both custom prompts consume the same description and input policy. FLTK's
+file browser consumes shared title/action labels and retains native browse UI;
+its popup loop retains native selected-row positioning and monitor fitting.
 
 ## Bitmap boundary
 

@@ -26,6 +26,16 @@ file(WRITE "${fixture}/src/gui/backend_extra.cpp" "auto command = ui::Command::t
 check_guard(FALSE "application binding Command::transmit")
 file(REMOVE "${fixture}/src/gui/backend_extra.cpp")
 
+# Native adapters convert shared colors; introducing another palette locally
+# must fail even in a newly discovered native helper.
+file(WRITE "${fixture}/src/gui/backend_extra.cpp" "auto native_color = rgba(value.red,value.green,value.blue,1);\nconst char* diagnostic=\"rgba(10,20,30,1)\";\n")
+check_guard(TRUE "")
+foreach(factory rgba fl_rgb_color)
+  file(WRITE "${fixture}/src/gui/backend_extra.cpp" "auto native_color = ${factory}(42,42,42);\n")
+  check_guard(FALSE "literal native color")
+endforeach()
+file(REMOVE "${fixture}/src/gui/backend_extra.cpp")
+
 # Allowed public helpers are generic vocabulary, not an escape hatch for native
 # code to hide feature decisions behind an otherwise permitted include.
 file(APPEND "${fixture}/src/gui/theme.hpp" "\ninline auto hidden_command() { return ui::Command::transmit; }\n")

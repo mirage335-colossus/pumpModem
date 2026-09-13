@@ -1,11 +1,118 @@
 // Included inside RevApp only by the native conformance executable.
+    void native_frame() {
+        // refresh queues an OS paint; an immediate pump can observe no event
+        // until that request has completed its native round trip. Preserve the
+        // probes' frame budgets by awaiting an actual visible surface paint.
+        const auto previous=surface->draws;
+        const auto deadline=Clock::now()+std::chrono::seconds(2);
+        refresh(event);
+        while(surface->draws==previous) {
+            Rev::NativeWindow::pumpEvents();
+            if(surface->draws!=previous)return;
+            if(Clock::now()>=deadline)throw std::runtime_error("Rev native probe timed out awaiting its requested paint");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    void verify_palette_roles() {
+        native_frame();
+        const auto matches=[](const auto& color,theme::WidgetRole role,float opacity=1.0f) {
+            const auto expected=theme::rev_primitive_color(role,opacity);
+            return color.r==expected.r&&color.g==expected.g&&color.b==expected.b&&color.a==expected.a;
+        };
+        namespace t=re::ControlTheme;
+        if(!matches(surface->resolved.style.background.color,theme::WidgetRole::surface_fill)||
+           !matches(t::Field.border.color,theme::WidgetRole::border)||
+           !matches(t::FieldFocus.border.color,theme::WidgetRole::focus)||
+           !matches(t::FieldTextDisabled.text.color,theme::WidgetRole::disabled_text)||
+           !matches(t::ButtonSecondaryHover.background.color,theme::WidgetRole::hover)||
+           !matches(t::CheckboxChecked.background.color,theme::WidgetRole::checked)||
+           !matches(t::CheckboxMark.text.color,theme::WidgetRole::checked_text))
+            throw std::runtime_error("Rev native controls bypassed a shared palette role");
+        for(auto& binding:bindings)if(binding.toggle) {
+            auto& toggle=*binding.toggle;const bool checked=toggle.value.get(),disabled=toggle.targetFlags.disabled;
+            const bool parent_disabled=binding.element->targetFlags.disabled;
+            binding.element->setDisabled(false);toggle.setDisabled(false);
+            for(const bool value:{false,true,false}) {
+                toggle.value=value;native_frame();
+                if(toggle.check->opacity!=(value?1.0f:0.0f)||
+                   !matches(toggle.checkbox->resolved.style.background.color,value?theme::WidgetRole::checked:theme::WidgetRole::canvas))
+                    throw std::runtime_error("Rev checkbox paint did not follow the shared false/true/false value sequence");
+            }
+            toggle.value=true;toggle.setDisabled(true);native_frame();
+            const bool themed=matches(toggle.checkbox->resolved.style.background.color,theme::WidgetRole::disabled_background)&&
+                matches(toggle.checkbox->resolved.style.border.color,theme::WidgetRole::disabled_border)&&
+                matches(toggle.label->resolved.style.text.color,theme::WidgetRole::disabled_text)&&
+                matches(toggle.check->resolved.style.text.color,theme::WidgetRole::disabled_text);
+            toggle.value=checked;toggle.setDisabled(disabled);binding.element->setDisabled(parent_disabled);native_frame();
+            if(!themed)throw std::runtime_error("Rev checked/disabled style ordering bypassed shared palette roles");
+            break;
+        }
+        for(auto& binding:bindings)if(binding.choice) {
+            auto& choice=*binding.choice;
+            const bool disabled=choice.targetFlags.disabled,parent_disabled=binding.element->targetFlags.disabled;
+            choice.setDisabled(false);
+            for(const bool parent_state:{false,true,false}) {
+                binding.element->setDisabled(parent_state);native_frame();
+                if(!matches(choice.dropdown->resolved.style.background.color,parent_state?theme::WidgetRole::disabled_background:theme::WidgetRole::canvas)||
+                   !matches(choice.dropdown->resolved.style.border.color,parent_state?theme::WidgetRole::disabled_border:theme::WidgetRole::border)||
+                   !matches(choice.dropdownText->resolved.style.text.color,parent_state?theme::WidgetRole::disabled_text:theme::WidgetRole::data)||
+                   !matches(choice.dropdownArrow->resolved.style.text.color,parent_state?theme::WidgetRole::disabled_text:theme::WidgetRole::foreground))
+                    throw std::runtime_error("Rev native choice failed active/parent-disabled/re-enabled shared palette states");
+            }
+            choice.setDisabled(disabled);binding.element->setDisabled(parent_disabled);native_frame();
+            break;
+        }
+        {
+            struct Sample {re::Element* element;Rev::Core::Color border,text;bool label;};
+            std::vector<Sample> samples;
+            const auto resolve=[&](auto&& self,re::Element* element,bool capture)->void {
+                element->resolveStyle(event);
+                const bool label=dynamic_cast<theme::RevText*>(element)!=nullptr;
+                if(capture&&(label||dynamic_cast<theme::RevBox*>(element)||dynamic_cast<theme::RevButton*>(element)))
+                    samples.push_back({element,element->resolved.style.border.color,element->resolved.style.text.color,label});
+                for(auto* child:element->children)self(self,child,capture);
+            };
+            const bool disabled=surface->targetFlags.disabled;surface->cascadeStyle();resolve(resolve,surface,true);
+            surface->setDisabled(true);surface->cascadeStyle();resolve(resolve,surface,false);
+            for(const auto& sample:samples)
+                if(!matches(sample.element->resolved.style.border.color,theme::WidgetRole::disabled_border)||
+                   (sample.label&&!matches(sample.element->resolved.style.text.color,theme::WidgetRole::disabled_text)))
+                    throw std::runtime_error("Rev inline captions, records or document decoration bypassed a disabled native ancestor");
+            surface->setDisabled(disabled);surface->cascadeStyle();resolve(resolve,surface,false);
+            const auto same=[](const auto& a,const auto& b){return a.r==b.r&&a.g==b.g&&a.b==b.b&&a.a==b.a;};
+            for(const auto& sample:samples)
+                if(!same(sample.element->resolved.style.border.color,sample.border)||
+                   (sample.label&&!same(sample.element->resolved.style.text.color,sample.text)))
+                    throw std::runtime_error("Rev re-enabling an ancestor retained transient disabled colors");
+            if(samples.empty())throw std::runtime_error("Rev parent-disabled palette fixture lacked native primitives");
+        }
+        for(auto& binding:bindings)if(binding.editor&&binding.editor->editable) {
+            auto& editor=*binding.editor;const auto saved=editor.content.get();
+            const auto cursor=editor.cursor,anchor=editor.selectAnchor,end=editor.selectEnd;
+            editor.apply("palette");editor.cursor=3;editor.selectAnchor=0;editor.selectEnd=3;
+            native_frame();
+            bool caret=false,selection=false;
+            for(const auto& strip:editor.line->lines) {
+                const bool vertical=strip.points.front().x==strip.points.back().x;
+                if(vertical)caret=matches(strip.color,theme::WidgetRole::data);
+                else selection=matches(strip.color,theme::WidgetRole::selection,theme::text_selection_opacity);
+            }
+            editor.apply(saved);editor.cursor=cursor;editor.selectAnchor=anchor;editor.selectEnd=end;
+            if(!caret||!selection)throw std::runtime_error("Rev native caret/selection retained toolkit colors outside the shared palette: color="+
+                std::to_string(launch.color)+" caret="+std::to_string(caret)+" selection="+std::to_string(selection)+
+                " strips="+std::to_string(editor.line->lines.size())+" glyph_lines="+std::to_string(editor.text->lines.size())+
+                " rect="+std::to_string(editor.rect.w)+","+std::to_string(editor.rect.h));
+            return;
+        }
+        throw std::runtime_error("Rev palette fixture lacked an editor");
+    }
     void verify_layout_lifecycle(std::span<ui::Control> controls) {
         auto* editor=bindings[0].editor;auto* heading=bindings[0].label;
         auto* bitmap=bindings[1].bitmap;auto* caption=bindings[1].caption;
         if(!editor||!heading||!bitmap||!caption)throw std::runtime_error("Rev lifecycle fixture lost native presentation roles");
         for(unsigned stage=0;stage<3;++stage) {
             test::layout_lifecycle_stage(controls,stage);apply();
-            for(unsigned frame=0;frame<3;++frame){refresh(event);Rev::NativeWindow::pumpEvents();}
+            for(unsigned frame=0;frame<3;++frame)native_frame();
             if(bindings[0].editor!=editor||bindings[0].label!=heading||bindings[1].bitmap!=bitmap||bindings[1].caption!=caption)
                 throw std::runtime_error("Rev shared layout update replaced existing native controls");
             for(auto& binding:bindings) {
@@ -151,7 +258,7 @@
         if(probe->navigate(retained,1)||selections!=5||activations!=2)
             throw std::runtime_error("Rev smoke: disabled list permitted shared pointer or keyboard selection");
         delete probe;
-        const auto paint=[&]{refresh(event);for(unsigned frame=0;frame<4;++frame){Rev::NativeWindow::pumpEvents();std::this_thread::sleep_for(std::chrono::milliseconds(4));}};
+        const auto paint=[&]{for(unsigned frame=0;frame<4;++frame)native_frame();};
         declaration.follow_tail=true;declaration.activate_on_select=true;
         auto* probe_parent=new re::Box(this);place(probe_parent,{20,200,400,600});
         probe=new ListView(probe_parent,declaration,launch.color);place(probe,{0,0,400,180});probe->resize_content(400,180);
@@ -227,7 +334,7 @@
         if(gestures!=expected)throw std::runtime_error("Rev smoke: disabled generic control dispatched gestures");
         target->setDisabled(false);command_observer={};
         auto& text_binding=bindings[2];auto* presets=text_binding.suggestions;
-        if(!text_binding.editor||!presets||!text_binding.has_suggestions||presets->params.options.size()<2)
+        if(!text_binding.editor||!presets||presets->style->visibility!=Visibility::Visible||presets->params.options.size()<2)
             throw std::runtime_error("Rev smoke: multiline text lost its declared presets");
         if(text_binding.editor->style->text.size.val!=fixture[2].font_size||text_binding.label->style->text.size.val!=fixture[2].font_size)
             throw std::runtime_error("Rev smoke: multiline text lost its declared font size");
@@ -256,7 +363,7 @@
                 if(!binding.bitmap||binding.bitmap->rect.w!=0||allows_input(binding.bitmap))
                     throw std::runtime_error("Rev smoke: empty bitmap retained native width or input eligibility");
                 auto probe=std::make_shared<test::BitmapProbe>();binding.bitmap->set(test::rectangle_bitmap(probe));
-                for(unsigned frame=0;frame<3;++frame){refresh(event);Rev::NativeWindow::pumpEvents();}
+                for(unsigned frame=0;frame<3;++frame)native_frame();
                 if(!probe->requests.empty())throw std::runtime_error("Rev smoke: empty bitmap requested synthetic backing pixels");
             }
         }
@@ -289,7 +396,7 @@
         geometry_document.children[4].children[1].plot=test::rectangle_bitmap(empty_probe);
         geometry_document.children[6].plot=test::rectangle_bitmap(border_probe);
         place(view,{20,100,400,600});view->apply(std::make_shared<const ui::DocumentNode>(geometry_document));
-        for(unsigned frame=0;frame<6;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        for(unsigned frame=0;frame<6;++frame){view->update();native_frame();}
         auto* geometry_root=view->children.front();
         const auto matches=[](re::Element* element,re::Element* parent,const auto& expected) {
             return std::abs(element->rect.x-parent->rect.x-expected[0])<1&&std::abs(element->rect.y-parent->rect.y-expected[1])<1&&
@@ -336,7 +443,7 @@
             auto layout=wrapped_root;layout.width=static_cast<float>(width);layout.children[0].width=layout.width;
             for(auto& card:layout.children[0].children) {card.width=static_cast<float>(width-20)/2;card.children[0].width=card.width-20;}
             place(view,{20,200,width,600});view->apply(std::make_shared<const ui::DocumentNode>(std::move(layout)));
-            for(unsigned frame=0;frame<6;++frame) {view->update();refresh(event);Rev::NativeWindow::pumpEvents();std::this_thread::sleep_for(std::chrono::milliseconds(4));}
+            for(unsigned frame=0;frame<6;++frame) {view->update();native_frame();}
             auto* body=view->children.front();auto* line=body->children.front();auto* following=body->children[1];
             float bottom=0;
             for(auto* card:line->children) {
@@ -353,9 +460,9 @@
         if(narrow_height<=wide_height||std::abs(restored_height-wide_height)>1)
             throw std::runtime_error("Rev smoke: wrapped document did not grow and shrink with native width");
         document_parent->style->visibility=Visibility::Hidden;
-        for(unsigned frame=0;frame<4;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        for(unsigned frame=0;frame<4;++frame){view->update();native_frame();}
         document_parent->style->visibility=Visibility::Visible;
-        for(unsigned frame=0;frame<6;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        for(unsigned frame=0;frame<6;++frame){view->update();native_frame();}
         const auto shown_height=view->children.front()->children.front()->children.front()->rect.h;
         if(std::abs(shown_height-wide_height)>1)throw std::runtime_error("Rev smoke: hiding a document parent changed its settled card geometry");
         auto action_document=test::document_actions_fixture();
@@ -393,20 +500,30 @@
         second_action()->setDisabled(true);click.propagate=true;second_action()->click(click);
         if(calls!=calls_before+1)throw std::runtime_error("Rev smoke: disabled native document action dispatched a command");
         auto empty_action_document=test::document_empty_action_fixture();view->apply(std::make_shared<const ui::DocumentNode>(empty_action_document));
-        for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
         focus_control(view->children.front()->children.back());place(view,{20,200,50,600});
-        for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+        for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
         auto* empty_action=dynamic_cast<re::Button*>(view->children.front()->children.back());click.propagate=true;empty_action->click(click);
         if(empty_action->rect.w!=0||allows_input(empty_action)||empty_action->targetFlags.focus||calls!=calls_before+1)
             throw std::runtime_error("Rev smoke: empty document action retained native focus or dispatched a command");
         place(view,{20,200,100,600});
-        for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
-        if(empty_action->rect.w<=0||!allows_input(empty_action))
-            throw std::runtime_error("Rev smoke: restoring document allocation did not re-enable its retained action");
+        for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
+        if(empty_action->rect.w<=0||!allows_input(empty_action)) {
+            std::ostringstream detail;detail<<"Rev smoke: restoring document allocation did not re-enable its retained action";
+            detail<<" view="<<view->rect.x<<','<<view->rect.y<<','<<view->rect.w<<','<<view->rect.h
+                  <<" pads="<<view->resolved.pad.l.val<<','<<view->resolved.pad.r.val<<','<<view->resolved.pad.t.val<<','<<view->resolved.pad.b.val;
+            for(auto* ancestor=static_cast<re::Element*>(empty_action);ancestor;ancestor=ancestor->parent) {
+                detail<<" ancestor="<<ancestor->name<<" rect="<<ancestor->rect.x<<','<<ancestor->rect.y<<','<<ancestor->rect.w<<','<<ancestor->rect.h
+                      <<" disabled="<<ancestor->targetFlags.disabled<<'/'<<ancestor->resolved.disabled<<" hidden="<<ancestor->resolved.hidden
+                      <<" visibility="<<static_cast<int>(ancestor->style->visibility.mode)<<" dirty="<<static_cast<bool>(ancestor->dirty.style);
+                if(ancestor==ancestor->parent)break;
+            }
+            throw std::runtime_error(detail.str());
+        }
         empty_action_document.children.back().enabled=false;view->apply(std::make_shared<const ui::DocumentNode>(empty_action_document));
         for(const int width:{50,100}) {
             place(view,{20,200,width,600});
-            for(unsigned frame=0;frame<3;++frame){view->update();refresh(event);Rev::NativeWindow::pumpEvents();}
+            for(unsigned frame=0;frame<3;++frame){view->update();native_frame();}
         }
         if(allows_input(view->children.front()->children.back()))
             throw std::runtime_error("Rev smoke: restoring document allocation enabled a declared-disabled action");
@@ -439,7 +556,7 @@
         place(view,{0,0,360,112});view->apply(std::make_shared<const ui::DocumentNode>(document));
         auto* outside=new re::Button(this,re::Button::Params::Secondary("Persistent outside document"));
         place(outside,{450,180,260,48});outside->style->zIndex=20;outside->style->background.color=rgba(120,35,75,1);
-        for(unsigned frame=0;frame<12;++frame) {view->update();refresh(event);Rev::NativeWindow::pumpEvents();std::this_thread::sleep_for(std::chrono::milliseconds(8));}
+        for(unsigned frame=0;frame<12;++frame) {view->update();native_frame();}
         view->update();draw(event);
         const auto pixel=[&](float x,float y) {
             window->makeContextCurrent();GLint previous_framebuffer=0,previous_buffer=0;
@@ -474,7 +591,7 @@
             const auto below=pixel(viewport->rect.x+40,viewport->rect.y+viewport->rect.h+16);
             if(below[0]>2||below[1]>2||below[2]>2)throw std::runtime_error("Rev clipping probe: overflowing document content escaped its viewport");
         }
-        delete outside;delete viewport;delete backdrop;refresh(event);Rev::NativeWindow::pumpEvents();
+        delete outside;delete viewport;delete backdrop;native_frame();
     }
     void verify_native_resize() {
         const auto initial_page=application.page();
@@ -496,19 +613,33 @@
                 std::to_string(width)+","+std::to_string(height)+" native="+std::to_string(physical_width)+","+std::to_string(physical_height)+
                 " actual logical="+std::to_string(details.size.width)+","+std::to_string(details.size.height)+" native="+std::to_string(window->size.w)+","+std::to_string(window->size.h)+
                 " scale="+std::to_string(details.scale)+" nativeScale="+std::to_string(window->scale));
-            apply();scroll_page(1);draw(event);verify_layout();
+            apply();scroll_page(1);native_frame();verify_layout();
         };
         for(const auto& page:ui::pages()) {
             select_page(page.id);resize(ui::min_width,ui::min_height);resize(ui::default_width,ui::default_height);
         }
-        select_page(initial_page);apply();draw(event);verify_layout();
+        select_page(initial_page);apply();native_frame();verify_layout();
     }
     void verify_prompt_focus() {
         auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){return binding.button&&!binding.button->disabled;});
         if(found==bindings.end())throw std::runtime_error("Rev smoke: missing action control");
         auto* button=found->button;focus_control(button);service_probe=true;
+        show_help("Shared tooltip geometry must fit measured text within the native viewport.",button);
+        native_frame();
+        if(help_text->rect.w<=0||help_text->rect.h<=0||help_text->rect.x<0||help_text->rect.y<0||help_text->rect.x+help_text->rect.w>details.size.width||
+           help_text->rect.y+help_text->rect.h>details.size.height||help_text->style->text.size.val!=ui::tooltip_font_size)
+            throw std::runtime_error("Rev tooltip did not consume shared chrome fitting or typography");
         services.enqueue({{0,ui::ServiceKind::prompt,"Native prompt focus probe",""}});process_services();
         if(!prompt||focused_control()!=prompt||allows_input(button))throw std::runtime_error("Rev smoke: prompt did not isolate keyboard focus");
+        native_frame();layout_service_dialog();native_frame();
+        const auto presentation=ui::service_dialog({0,ui::ServiceKind::prompt,"Native prompt focus probe",""});
+        const auto geometry=ui::service_dialog_layout(presentation,details.size.width,details.size.height,[this](const auto&,int,int width,ui::ServiceTextRole role) {
+            return native_text_height(role==ui::ServiceTextRole::title?dialog_title_text:dialog_body_text,width);
+        });
+        if(dialog_title_text->content.get()!=presentation.title||dialog_accept->labelText->content.get()!=presentation.accept_label||
+           dialog_cancel->labelText->content.get()!=presentation.cancel_label||dialog->rect.w!=geometry.frame.w||dialog->rect.h!=geometry.frame.h||
+           prompt->rect.x-dialog->rect.x!=geometry.input.x||prompt->rect.y-dialog->rect.y!=geometry.input.y)
+            throw std::runtime_error("Rev prompt did not consume the shared chrome presentation and layout");
         re::Event key;key.keyboard.tab.id=1;keyDown(key);
         if(!focused_control()||!allows_input(focused_control()))throw std::runtime_error("Rev smoke: Tab escaped the prompt");
         key.keyboard.tab.id=-1;key.keyboard.escape.id=1;key.propagate=true;keyDown(key);apply();
@@ -521,5 +652,11 @@
         if(!prompt->replace("c")||prompt->content.get()!="abc")throw std::runtime_error("Rev prompt rejected an edit within its shared input limit");
         dialog_result=ui::ServiceResult{1,true,{},{}};process_services();
         if(dialog||focused_control()!=button)throw std::runtime_error("Rev limited prompt failed to restore native focus");
+        service_probe=true;services.enqueue({{2,ui::ServiceKind::save_file,"Save path","/tmp",1024}});process_services();
+        const auto file_presentation=ui::service_dialog({2,ui::ServiceKind::save_file,"Save path","/tmp",1024});
+        if(!prompt||!prompt->multiline||prompt->limit!=file_presentation.input.byte_limit||
+           dialog_body_text->content.get()!=file_presentation.body||dialog_accept->labelText->content.get()!=file_presentation.accept_label)
+            throw std::runtime_error("Rev file prompt did not consume shared path policy and wording");
+        dialog_result=ui::ServiceResult{2,true,{},{}};process_services();
         focus_control(nullptr);
     }

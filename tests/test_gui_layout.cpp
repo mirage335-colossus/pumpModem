@@ -29,6 +29,15 @@ void established_default() {
     check(layout[Slot::device] == Rect{16, 774, 210, 27}, "persistent modem controls moved");
     check(layout[Slot::status] == Rect{16, 835, 1148, 24}, "persistent status moved");
 }
+void document_widths() {
+    for(const auto viewport:{480,1000,1400}) {
+        const auto full=document_content_width(viewport);
+        check(full+2*document_side_padding==viewport,"Document content lost its shared horizontal margins");
+        check(document_content_width(viewport,17)+17==full,"Native scrollbar reservation changed shared document margins");
+    }
+    check(document_content_width(100)==document_min_content_width&&document_content_width(240,30)==document_min_content_width,
+        "Small native viewports ignored the shared minimum document content width");
+}
 void supported_sizes() {
     for (const auto size : {Rect{0, 0, min_width, min_height},
                             Rect{0, 0, default_width, default_height},
@@ -84,6 +93,12 @@ void adapter_helpers() {
           !persistent_slot(Slot::tabs) && persistent_slot(Slot::callsign) &&
           persistent_slot(Slot::key_actions) && persistent_slot(Slot::status),
           "page membership changed");
+    const std::vector<PageDefinition> pages{{Page::flow,"first","First",true,180},{Page::console,"second","Second",false,75}};
+    const auto tabs=tab_layout(default_width,default_height,pages);
+    check(tabs.size()==2&&tabs[0].page==Page::flow&&tabs[1].page==Page::console&&
+          tabs[0].frame.w==180&&tabs[1].frame.w==75&&tabs[1].frame.x==tabs[0].frame.x+180&&
+          tabs[0].frame.y==tabs[1].frame.y,
+          "Native tab placement lost shared declaration order or widths");
 }
 void relative_controls() {
     std::vector<Control> controls(3,Control{Kind::text});
@@ -165,6 +180,7 @@ void declaration_identity() {
 int main() {
     try {
         established_default();
+        document_widths();
         supported_sizes();
         adapter_helpers();
         relative_controls();

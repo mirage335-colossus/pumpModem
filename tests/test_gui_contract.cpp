@@ -3,6 +3,10 @@
 #error "The GUI facade exposes the application's private modem include path."
 #endif
 #include "application.hpp"
+#include "binding_state.hpp"
+#include "chrome_layout.hpp"
+#include "document_presentation.hpp"
+#include "record_reconciliation.hpp"
 #include "control_binding.hpp"
 #include "control_interactions.hpp"
 #include "document_actions.hpp"
@@ -40,6 +44,18 @@ static_assert(theme::text_rgb(ui::TextTone::data,false)==theme::Rgb{255,255,255}
 static_assert(theme::text_rgb(ui::TextTone::data,true)==theme::Rgb{144,192,184});
 static_assert(theme::text_rgb(ui::DocumentTone::accent,false)==theme::Rgb{255,255,255});
 static_assert(theme::text_rgb(ui::DocumentTone::accent,true)==theme::Rgb{144,192,184});
+static_assert([] {
+    for(bool color:{false,true}) {
+        const auto disabled=theme::widget_rgb(theme::WidgetRole::disabled_text,color);
+        for(auto tone:{ui::TextTone::normal,ui::TextTone::muted,ui::TextTone::data,ui::TextTone::inverse})
+            if(theme::text_rgb(tone,color,false)!=disabled)return false;
+        for(auto tone:{ui::DocumentTone::text,ui::DocumentTone::muted,ui::DocumentTone::accent})
+            if(theme::text_rgb(tone,color,false)!=disabled)return false;
+    }
+    for(auto fill:{ui::DocumentFill::none,ui::DocumentFill::surface,ui::DocumentFill::alternate,ui::DocumentFill::parity})
+        if(theme::document_fill_rgb(fill,true,false)!=theme::widget_rgb(theme::WidgetRole::disabled_background))return false;
+    return true;
+}());
 static_assert([] {
     for(bool color:{false,true}) {
         if(theme::text_rgb(ui::TextTone::muted,color)!=theme::Rgb{160,160,160} ||

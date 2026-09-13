@@ -5,12 +5,17 @@
 #include <utility>
 
 namespace datapump::gui::ui {
-inline std::string service_input_error(const ServiceRequest& request,std::string_view value) {
+struct ServiceInputPolicy {bool multiline=false;std::size_t byte_limit=ServiceRequest{}.byte_limit;};
+inline std::optional<ServiceInputPolicy> service_input_policy(const ServiceRequest& request) {
     switch(request.kind) {
-    case ServiceKind::prompt:return edit_error(value,false,request.byte_limit);
-    case ServiceKind::open_file:case ServiceKind::save_file:return edit_error(value,true,request.byte_limit);
-    case ServiceKind::clipboard:case ServiceKind::open_folder:return {};
+    case ServiceKind::prompt:return ServiceInputPolicy{false,request.byte_limit};
+    case ServiceKind::open_file:case ServiceKind::save_file:return ServiceInputPolicy{true,request.byte_limit};
+    case ServiceKind::clipboard:case ServiceKind::open_folder:return std::nullopt;
     }
+    return std::nullopt;
+}
+inline std::string service_input_error(const ServiceRequest& request,std::string_view value) {
+    if(const auto input=service_input_policy(request))return edit_error(value,input->multiline,input->byte_limit);
     return {};
 }
 // One in-flight platform request per adapter. Queue order, reply identity and

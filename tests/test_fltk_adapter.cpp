@@ -9,6 +9,46 @@
 
 namespace {
 void require(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
+void palette_roles() {
+    for(bool color:{false,true}) {
+        theme::apply_palette(color);
+        require(Fl::get_color(FL_BACKGROUND_COLOR)==theme::fltk_color(theme::WidgetRole::surface_fill),
+            "Native desktop background ignored the shared surface role");
+        Fl_Group parent(0,0,240,120);NativeInput input;theme::Widget<Fl_Button> button(0,40,200,30);
+        parent.end();theme::apply_widgets(parent);
+        require(input.selection_color()==theme::fltk_color(theme::text_selection_rgb(color)),"Native editor selection ignored the shared opacity");
+        const auto background=input.color(),text=input.textcolor(),label=button.labelcolor();
+        parent.deactivate();
+        {
+            theme::DrawStyle input_style(input);
+            require(input.color()==theme::fltk_color(theme::WidgetRole::disabled_background)&&
+                input.textcolor()==theme::fltk_color(theme::WidgetRole::disabled_text),"Disabled input did not consume shared palette roles");
+            {
+                theme::DrawStyle button_style(button);
+                require(button.labelcolor()==theme::fltk_color(theme::WidgetRole::disabled_text)&&theme::drawing_widget==&button,
+                    "Disabled child button did not consume inherited shared palette roles");
+            }
+            require(theme::drawing_widget==&input,"Nested native drawing lost its palette context");
+        }
+        require(input.color()==background&&input.textcolor()==text&&button.labelcolor()==label&&!theme::drawing_widget,
+            "Native drawing retained transient disabled colors or widget pointers");
+        parent.activate();auto* previous=Fl::belowmouse();Fl::belowmouse(&button);
+        {theme::DrawStyle hover(button);require(button.color()==theme::fltk_color(theme::WidgetRole::hover),"Native hover ignored the shared palette");}
+        Fl::belowmouse(previous);
+        for(int height:{10,40}) {
+            NativeCheckbox check(0,0,120,height);check.labelsize(30);check.value(1);theme::apply_widgets(check);
+            Fl_Image_Surface surface(120,height);Fl_Surface_Device::push_current(&surface);
+            fl_color(theme::fltk_color(theme::WidgetRole::canvas));fl_rectf(0,0,120,height);
+            surface.draw(&check);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
+            const auto geometry=ui::checkbox_layout(check.w(),check.h());
+            const auto pixel=[&](int x,int y) {const auto* data=image->array+(y*image->data_w()+x)*image->d();return theme::Rgb{data[0],data[1],data[2]};};
+            require(pixel(geometry.box.x,geometry.box.y)==theme::widget_rgb(theme::WidgetRole::border,color)&&
+                pixel(geometry.box.x+geometry.box.w,geometry.box.y)==theme::widget_rgb(theme::WidgetRole::canvas,color),
+                "Native checkbox decoration ignored shared geometry or palette roles");
+        }
+    }
+    theme::apply_palette();
+}
 Fl_Group* record_widget(Fl_Group& group,const std::string& text) {
     for(int i=0;i<group.children();++i) {
         auto* child=group.child(i);
@@ -24,6 +64,7 @@ void menus() {
     require(choice.size()==5,"Menu interpreted literal labels as separators, paths or duplicate items");
     for(std::size_t i=0;i<options.size();++i)require(choice.text(static_cast<int>(i))==menu_text(options[i].label),"Menu lost a literal label");
     require(choice.mode(2)&FL_MENU_INACTIVE,"Disabled option remained selectable");
+    require(choice.menu()[2].labeltype()==literal_label_type(true,true),"Disabled native menu text bypassed its shared palette role");
     require(choice.menu()[0].labeltype()==literal_label_type(true)&&literal_menu_text(choice.text(0))==options[0].label,"Native menu label did not retain literal symbols and ampersands");
     int literal_width=0,literal_height=0;fl_font(choice.textfont(),choice.textsize());fl_measure(options[0].label.c_str(),literal_width,literal_height,0);
     require(choice.menu()[0].measure(nullptr,&choice)==literal_width,"Native menu measurement still interprets literal @ text as an icon");
@@ -208,6 +249,14 @@ void prompts() {
     auto* input=dynamic_cast<Fl_Input*>(Fl::focus());require(input&&input->window()==dialog,"Native prompt did not focus its editor");
     input->value("caf\xc3\xa9 \xf0\x9f\x8c\x8d");
     auto* accept=dynamic_cast<Fl_Return_Button*>(find_button(*dialog,"Continue"));require(accept,"Native prompt has no Enter default action");
+    const auto presentation=ui::service_dialog({88,ui::ServiceKind::prompt,"Native Enter prompt","initial"});
+    const auto geometry=ui::service_dialog_layout(presentation,host.w(),host.h(),[](const auto& text,int size,int width,ui::ServiceTextRole) {
+        fl_font(theme::font,size);int height=0;fl_measure(text.c_str(),width,height,0);return height;
+    });
+    require(dialog->w()==geometry.frame.w&&dialog->h()==geometry.frame.h&&input->x()==geometry.input.x&&
+        input->y()==geometry.input.y&&input->w()==geometry.input.w&&input->h()==geometry.input.h&&
+        accept->x()==geometry.accept.x&&accept->y()==geometry.accept.y,
+        "Native prompt did not consume the shared chrome layout");
     const auto old_key=Fl::e_keysym;Fl::e_keysym=FL_Enter;
     require(accept->handle(FL_SHORTCUT)!=0,"Native prompt default did not accept Enter");Fl::e_keysym=old_key;services.poll();Fl::check();
     require(result&&result->id==88&&!result->cancelled&&result->value=="caf\xc3\xa9 \xf0\x9f\x8c\x8d","Native prompt Enter changed UTF-8 text or did not complete");
@@ -238,6 +287,8 @@ void prompts() {
     auto* file_dialog=Fl::modal();
     require(file_dialog&&file_dialog->label()&&std::string(file_dialog->label())=="Native chooser retained title",
         "Native file chooser retained a borrowed temporary title");
+    require(find_button(*file_dialog,ui::service_cancel_label)&&find_button(*file_dialog,ui::service_dialog({93,ui::ServiceKind::open_file}).accept_label),
+        "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
 void extension_controls() {
@@ -358,17 +409,28 @@ void popup_polling_and_document_layout() {
             document_geometry(*window);
         }
     }
-    auto* menu=dynamic_cast<Fl_Menu_Button*>(find_label(*window,"Keyfile"));require(menu,"Native popup fixture did not find its declared menu");
-    struct Probe {NativeApp& app;std::uint64_t before,after=0;bool grabbed=false;};
+    auto* menu=dynamic_cast<NativeMenuButton*>(find_label(*window,"Keyfile"));require(menu,"Native popup fixture did not find its declared menu");
+    struct Probe {NativeApp& app;std::uint64_t before,after=0;bool grabbed=false;int width=0;};
     Probe probe{app,app.application.poll_count()};
     Fl::add_timeout(.6,[](void* context) {
         auto& value=*static_cast<Probe*>(context);value.after=value.app.application.poll_count();
         if(auto* popup=Fl::grab()) {
-            value.grabbed=true;const auto key=Fl::e_keysym;Fl::e_keysym=FL_Escape;popup->handle(FL_KEYDOWN);Fl::e_keysym=key;
+            value.grabbed=true;value.width=popup->w();const auto key=Fl::e_keysym;Fl::e_keysym=FL_Escape;popup->handle(FL_KEYDOWN);Fl::e_keysym=key;
         }
     },&probe);
     menu->popup();
     require(probe.grabbed&&probe.after>probe.before,"Opening a native popup paused the shared application poll loop");
+    require(probe.width>=ui::popup_min_width,"Native menu did not consume the shared popup minimum width");
+    window->begin();auto* choice=new NativeChoice;choice->resize(20,20,50,27);populate(*choice,{{"a","A"},{"b","B"}});choice->value(0);window->end();
+    probe.grabbed=false;probe.width=0;
+    Fl::add_timeout(.02,[](void* context) {
+        auto& value=*static_cast<Probe*>(context);
+        if(auto* popup=Fl::grab()) {
+            value.grabbed=true;value.width=popup->w();const auto key=Fl::e_keysym;Fl::e_keysym=FL_Escape;popup->handle(FL_KEYDOWN);Fl::e_keysym=key;
+        }
+    },&probe);
+    choice->popup();require(probe.grabbed&&probe.width>=ui::popup_min_width,"Native choice did not consume the shared popup minimum width");
+    window->remove(choice);delete choice;
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 class PasteProbe : public Fl_Widget {
@@ -437,6 +499,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();layout_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();layout_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

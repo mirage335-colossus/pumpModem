@@ -5,10 +5,16 @@
 
 namespace datapump::gui::ui {
 inline constexpr int document_side_padding=20,document_top_padding=18,document_bottom_padding=24;
+inline constexpr int document_min_content_width=220;
+// Native scrollbars can consume horizontal space; document margins and the
+// minimum content width remain common presentation policy.
+inline int document_content_width(int viewport_width,int native_reserved_width=0) {
+    return std::max(document_min_content_width,viewport_width-2*document_side_padding-std::max(0,native_reserved_width));
+}
 inline bool drawable(Rect rect) {return rect.w>0&&rect.h>0;}
 struct ControlLayout {
     Rect frame,widget,label,suggestions,caption;
-    bool has_label=false,has_suggestions=false,has_caption=false,border=false,caption_overlay=false;
+    bool has_label=false,has_suggestions=false,has_caption=false,border=false,caption_overlay=false,popup_upward=false;
     bool operator==(const ControlLayout&) const = default;
 };
 // All rectangles are absolute logical client coordinates. No adapter knows the
@@ -17,6 +23,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
                                     std::span<const Control> controls=console_screen()) {
     const DesktopLayout desktop(width,height);
     ControlLayout out;
+    out.popup_upward=c.open_upward;
     out.frame=desktop[c.slot];
     if(c.slot==Slot::none) {
         std::uint64_t total=0,before=0;bool found=false;
@@ -98,4 +105,13 @@ template<class Measure> int record_content_width(const Record& record,int minimu
 }
 inline Rect page_rect(int width,int height) { return DesktopLayout(width,height)[Slot::page]; }
 inline Rect tabs_rect(int width,int height) { auto rect=DesktopLayout(width,height)[Slot::tabs];rect.h=28;return rect; }
+struct TabLayout {Page page;Rect frame;};
+inline std::vector<TabLayout> tab_layout(int width,int height,std::span<const PageDefinition> definitions=pages()) {
+    const auto bounds=tabs_rect(width,height);int x=bounds.x;
+    std::vector<TabLayout> result;result.reserve(definitions.size());
+    for(const auto& page:definitions) {
+        result.push_back({page.id,{x,bounds.y,page.tab_width,bounds.h}});x+=page.tab_width;
+    }
+    return result;
+}
 }
