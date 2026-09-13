@@ -322,18 +322,19 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
     validate(c); finite_samples(samples, c.memory_limit);
     validate_channel(c,channel);
     const auto rate=1+static_cast<long double>(channel.clock_error_ppm)*1e-6L;
-    const auto receiver_count=std::ceil(static_cast<long double>(samples.size())/rate);
+    std::mt19937_64 startup_random(channel.seed^0x8ebc6af09c88c6e3ULL);
+    const auto uniform=[&]{return (static_cast<double>(startup_random()>>11)+.5)/9007199254740992.;};
+    const auto initial_phase=static_cast<long double>(tau)*(uniform()-.5L);
+    const auto startup=channel.delay_samples+std::floor((.05L+.25L*uniform())*c.sample_rate)+.05L+.9L*uniform();
+    const auto receiver_count=std::ceil(startup+static_cast<long double>(samples.size())/rate);
     check(receiver_count<=c.memory_limit/sizeof(float),"simulation duration exceeds memory limit");
     const auto count=static_cast<std::size_t>(receiver_count);
-    check(channel.delay_samples <= c.memory_limit / sizeof(float) - count, "simulation delay exceeds memory limit");
-    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count+channel.delay_samples,sizeof(float)}});
-    std::vector<float> out(count + channel.delay_samples);
+    budget(c.memory_limit, {{samples.size(),sizeof(float)}, {count,sizeof(float)}});
+    std::vector<float> out(count);
     double power = 0;
     for (auto v : samples) power += static_cast<double>(v) * v;
     power = samples.empty() ? 0 : power / static_cast<double>(samples.size());
-    if (channel.frequency_offset_hz==0 && channel.clock_error_ppm==0 && channel.phase_noise_degrees_per_sqrt_second==0)
-        std::copy(samples.begin(), samples.end(), out.begin() + channel.delay_samples);
-    else if (!samples.empty()) {
+    if (!samples.empty()) {
         const auto n = fft_size(samples.size(), c.memory_limit, sizeof(Complex));
         budget(c.memory_limit, {{samples.size(),sizeof(float)}, {out.size(),sizeof(float)}, {n,sizeof(Complex)}});
         std::vector<Complex> analytic(n);
@@ -346,7 +347,8 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
         const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi/180/std::sqrt(c.sample_rate);
         std::normal_distribution<double> phase_step(0,1);double phase=0;
         for (std::size_t i = 0; i < count; ++i) {
-            const auto position=static_cast<long double>(i)*rate;
+            const auto position=(static_cast<long double>(i)-startup)*rate;
+            if(position<0) {if(diffusion)phase+=phase_step(phase_random)*diffusion;continue;}
             const auto center=static_cast<std::int64_t>(std::floor(position));
             Complex value{};double weight=0;
             if(std::abs(position-center)<1e-10)value=analytic[static_cast<std::size_t>(center)];
@@ -359,8 +361,9 @@ std::vector<float> simulate(std::span<const float> samples, const Config& c, con
                 if(tap>=0 && tap<static_cast<std::int64_t>(samples.size()))value+=analytic[static_cast<std::size_t>(tap)]*coefficient;
             }
             if(weight)value/=weight;
-            const auto angle=std::remainder(static_cast<long double>(tau)*channel.frequency_offset_hz*i/c.sample_rate+phase,static_cast<long double>(tau));
-            out[i+channel.delay_samples]=static_cast<float>((value*std::polar(1.,static_cast<double>(angle))).real());
+            const auto angle=std::remainder(initial_phase+static_cast<long double>(tau)*
+                (channel.frequency_offset_hz*static_cast<long double>(i)+c.carrier_hz*rate*startup)/c.sample_rate+phase,static_cast<long double>(tau));
+            out[i]=static_cast<float>((value*std::polar(1.,static_cast<double>(angle))).real());
             if(diffusion)phase+=phase_step(phase_random)*diffusion;
         }
     }

@@ -87,6 +87,26 @@ void raw_layout() {
     check(result.constellations.back().points.size()==8,"raw final three-bit subset is not shown");
     check(field(result,"Symbol padding")=="0 bits","raw structure pads meaningful bits");
     check(text(result).find("The proposed packet")==std::string::npos,"raw transmit mode invents a proposed packet for continuous RX");
+    for(const bool simulation:{false,true}) {
+        request.simulation=simulation;
+        const auto model=gui::inspect(request);
+        const auto description=text(model);
+        check(description.find("Continuous raw discovery is not implemented")!=std::string::npos &&
+              description.find("does not create received text")!=std::string::npos,
+              "raw inspection must disclose missing blind reception for both channel modes");
+        check(description.find("aligned start")==std::string::npos && description.find("Already matched observations")==std::string::npos,
+              "simulation inspection still promises transmitter-assisted reception");
+        for(const auto& lane:model.lanes)for(const auto& step:lane.steps)
+            if(step.title=="Blind raw discovery")check(step.state==gui::InspectionState::unavailable,"raw discovery incorrectly marked available");
+        request.binary.reset();
+        const auto packet=gui::inspect(request);
+        check(text(packet).find("same continuous receiver processes simulation and hardware PCM")!=std::string::npos,
+              "packet inspection must describe the common blind PCM receiver");
+        if(simulation)check(field(packet,"Channel").starts_with("Unsynchronized sampled simulation") &&
+                           text(packet).find("unknown start timing and carrier phase")!=std::string::npos,
+                           "simulation inspection omits independent timing and phase");
+        request.binary=Bytes{0,0,1};
+    }
     request.options.modem.integration_seconds=3600;request.options.modem.memory_limit=1024;
     check(gui::inspect(request).estimate.total_seconds==3600,"inspection allocates an hour-long waveform");
     const auto plan=tuning::resolve(30000000,100,tuning::PatternMode::auto_pattern,false);

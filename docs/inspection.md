@@ -31,12 +31,12 @@ The receiver despreads and integrates the complex chip samples before its APSK
 decisions; no hard chip decisions or independently clean chip constellation are
 required. The chosen gain is held for body decoding. Timing hypotheses remain
 finite, with no continuous clock/frequency tracker, audio AGC or convolutional
-encoder/Viterbi decoder. Raw binary simulation has an aligned known-length
-receiver with nominal unit gain; continuous real audio reception still discovers
-framed packets. Simulation uses integrated channel observations, whereas real
-audio passes through the hardware/internal-clock conversion. Integrated
-simulation assumes matched chip despreading and does not demonstrate blind
-timing/phase acquisition below the chip noise floor.
+encoder/Viterbi decoder. Both simulation and real audio use this blind PCM
+receiver. Simulation supplies independent startup timing and phase, sample-clock
+error and noise; it supplies no matched chip observations. Raw binary has no
+acquisition framing, so its sampled waveform is displayed without a fabricated
+known-length receive result. Hardware audio additionally passes through the
+hardware/internal-clock conversion.
 
 **Transmission layout** shows the physical on-air sequence separately from the
 logical packet fields before interleaving. Blocks are schematic, with byte,

@@ -79,11 +79,11 @@ not a total process resource sandbox or a guarantee against CPU exhaustion.
 Actual acquisition evaluates a finite timing/key/epoch bank at one carrier.
 Too many candidate receivers can exceed the configured workspace and fail
 explicitly. Successful symbol correlation is never sufficient to accept content.
-Accelerated simulation supplies integrated AWGN, relative crystal error and phase
-noise while assuming matched chip despreading. Its bounded phase-noise approximation
-and analytic coherence calculation do not implement oscillator tracking. It still
-runs packet decoding and integrity/authentication, but success there does not
-validate arbitrary physical acquisition or receiver sensitivity. Blind
+Simulation supplies receiver-clock PCM with arbitrary startup timing and phase,
+relative crystal error and Wiener phase noise. It uses the same finite blind
+acquisition and spreading correlation as audio reception, without giving the
+receiver transmitter timing, length or epoch. Successful simulation does not
+establish calibrated hardware sensitivity or oscillator tracking. Blind
 protected-bootstrap acquisition avoids requiring detectable five-second training
 when payload symbols are much longer. Bootstrap correction remains provisional
 until complete packet digest/MAC verification succeeds.

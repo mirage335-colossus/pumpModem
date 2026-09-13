@@ -126,16 +126,7 @@ void check_packet_replay_start(const live::Snapshot& snapshot, const char* descr
         check(snapshot.signals.empty(), description);
         return;
     }
-    // Frame zero may identify an acquisition, but cannot disclose information
-    // learned by the CPU-bounded decoder from later points in the signal.
-    check(snapshot.replay_frame_index == 0 && snapshot.signals.size() <= 1, description);
-    for (const auto& signal : snapshot.signals) {
-        check(signal.text == "Receiving..." && !signal.validated && signal.packet_id.empty() &&
-              signal.received_bytes == 0 && signal.expected_bytes == 0 &&
-              !signal.preamble_received_percent && !signal.pre_fec_accuracy &&
-              !signal.binary && !signal.complete && signal.received_bits == 0 && signal.expected_bits == 0,
-              description);
-    }
+    check(snapshot.replay_frame_index == 0 && snapshot.signals.empty(), description);
 }
 template<class Predicate> live::Snapshot wait_for(live::Session& session, Predicate predicate,
                                                 std::chrono::milliseconds timeout = 30s) {
@@ -263,26 +254,11 @@ void test_binary_audio_preserves_exact_bit_length() {
     });
     check(!listening.transmitting, "raw audio completion resumes continuous reception");
 }
-void check_binary_signals(const live::Snapshot& snapshot, std::size_t expected_bits) {
-    check(snapshot.received.empty(), "received binary bits cannot become downloadable packet content");
-    for (const auto& signal : snapshot.signals) {
-        check(signal.binary && !signal.validated && signal.packet_id.empty(),
-              "raw reception must be identified as unverified binary data, without a packet identity");
-        check(signal.received_bytes == 0 && signal.expected_bytes == 0 && signal.expected_bits == expected_bits &&
-              signal.received_bits <= expected_bits,
-              "raw reception reports meaningful bit counts instead of framed byte counts");
-        check(!signal.preamble_received_percent && !signal.pre_fec_accuracy,
-              "unframed binary reception cannot claim preamble evidence, FEC correction or validated bit accuracy");
-        if (signal.text == "Receiving binary...") {
-            check(!signal.complete && signal.received_bits == 0, "binary placeholder cannot claim recovered content");
-        } else {
-            check(signal.text.size() == std::min<std::size_t>(signal.received_bits, 4096) &&
-                  std::all_of(signal.text.begin(), signal.text.end(), [](auto bit) { return bit == '0' || bit == '1'; }),
-                  "binary signal text must contain only its actual recovered bits");
-        }
-        if (signal.complete)
-            check(signal.received_bits == expected_bits, "completed binary reception must account for every meaningful bit");
-    }
+void check_no_raw_reception(const live::Snapshot& snapshot) {
+    check(snapshot.received.empty(), "raw PCM cannot become downloadable packet content");
+    check(snapshot.signals.empty(), "unsynchronized raw transmission cannot invent an acquisition, bit count or completed bits");
+    check(snapshot.constellation_source != live::ConstellationSource::received,
+          "raw transmission cannot supply receiver lock or matched symbol coordinates");
 }
 void test_binary_simulation_replay_validation_and_cancel() {
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -306,147 +282,89 @@ void test_binary_simulation_replay_validation_and_cancel() {
     check(!unchanged.transmitting && unchanged.transmission_id == idle.transmission_id && unchanged.error.empty(),
           "invalid binary input cannot mutate the transmit queue or poison the live session");
     const auto expected = transfer::estimate_binary(bits, value.transfer);
+    const auto await_replay = [&](std::uint64_t previous_id) {
+        return wait_for(session, [&](const auto& snapshot) {
+            check_no_raw_reception(snapshot);
+            return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != previous_id;
+        });
+    };
     session.transmit_bits(bits);
-    const auto first = wait_for(session, [&](const auto& snapshot) {
-        check_binary_signals(snapshot, bits.size());
-        if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "raw reception cannot appear during CPU computation");
-        return snapshot.transmission_finished && snapshot.simulation_replay;
-    });
+    const auto first = await_replay(0);
     check(first.replay_frame_count > 1 && first.replay_frame_count <= 60 && first.replay_frame_index == 0 &&
           std::abs(first.transmission_seconds - expected.total_seconds) < 1e-12,
           "raw simulation replays its exact unframed duration in bounded chronological frames");
-    std::uint64_t signal_id = 0, last_signal_sequence = 0;
-    bool saw_pending_bits = false;
-    const auto observe_pending = [&](const auto& snapshot) {
-        check_binary_signals(snapshot, bits.size());
-        for (const auto& signal : snapshot.signals) {
-            check(!signal.complete, "binary completion must wait for the full three-second replay deadline");
-            if (signal_id) check(signal.id == signal_id, "binary placeholder and recovered bits must retain a stable signal identity");
-            check(signal.sequence > last_signal_sequence, "binary signal updates must arrive in media order without duplication");
-            signal_id = signal.id; last_signal_sequence = signal.sequence;
-            if (signal.received_bits) {
-                check(std::string("001").starts_with(signal.text), "high-SNR pending binary content must be recovered correctly");
-                saw_pending_bits = true;
-            }
-        }
-    };
-    observe_pending(first);
     rejects([&] { session.transmit_bits(empty); }, "empty input cannot replace an active raw replay");
     rejects([&] { session.transmit_bits(invalid); }, "invalid bit input cannot replace an active raw replay");
     const auto still_first = session.snapshot();
-    observe_pending(still_first);
+    check_no_raw_reception(still_first);
     check(still_first.simulation_replay && still_first.transmission_id == first.transmission_id &&
           still_first.waveform == first.waveform && still_first.replay_frame_index == 0,
           "rejected raw input leaves the active replay and its queue untouched");
     replay_milliseconds = 1500;
     const auto middle = session.snapshot();
+    check_no_raw_reception(middle);
     check(middle.simulation_replay && middle.simulation_sample_fraction > .4 && middle.simulation_sample_fraction < .6 &&
           !middle.waveform.empty() && !middle.spectrum_db.empty() && !middle.constellation.empty() &&
-          middle.constellation_source == live::ConstellationSource::input,
-          "raw replay shows measured waveform, spectrum and input constellation halfway through its three seconds");
-    observe_pending(middle);
+          middle.waveform != first.waveform && middle.constellation_source == live::ConstellationSource::input,
+          "raw replay shows changing measured waveform, spectrum and input I/Q halfway through its three seconds");
     replay_milliseconds = 2999;
     const auto last = session.snapshot();
+    check_no_raw_reception(last);
     check(last.simulation_replay && last.simulation_sample_fraction > .99 &&
-          last.replay_frame_index + 1 == last.replay_frame_count &&
-          last.constellation_source == live::ConstellationSource::received && !last.constellation.empty(),
-          "raw simulation exposes measured received symbols in its final frame through 2999ms");
-    const auto terminal_points = last.constellation.size() + last.constellation_dropped;
-    observe_pending(last);
-    check(saw_pending_bits, "sample-derived binary bits must be visible as pending before replay completion");
+          last.replay_frame_index + 1 == last.replay_frame_count && !last.constellation.empty(),
+          "raw simulation retains actual input measurements in its last frame through 2999ms");
     replay_milliseconds = 3000;
     const auto completed = session.snapshot();
-    check_binary_signals(completed, bits.size());
-    check(completed.signals.size() == 1 && completed.signals.front().complete && completed.signals.front().text == "001" &&
-          completed.signals.front().id == signal_id && completed.signals.front().sequence > last_signal_sequence,
-          "raw simulation must deliver bits recovered from the channel at its presentation deadline");
-    check(!completed.simulation_replay && completed.received.empty() &&
-          completed.constellation_source == live::ConstellationSource::input,
-          "raw simulation completes received bit text at exactly three seconds without fabricating a file");
-    const auto completed_again = session.snapshot();
-    check(completed_again.signals.empty() && completed_again.received.empty(), "binary completion is delivered exactly once");
+    check_no_raw_reception(completed);
+    check(!completed.simulation_replay && completed.constellation_source == live::ConstellationSource::input,
+          "raw presentation ends at exactly three seconds without claiming recovered content");
     const auto noise = wait_for(session, [&](const auto& snapshot) {
-        check(snapshot.signals.empty() && snapshot.received.empty(), "returning raw simulation to noise cannot validate content");
+        check_no_raw_reception(snapshot);
         return snapshot.samples_received > completed.samples_received && snapshot.waveform != last.waveform;
     });
     check(!noise.simulation_replay, "noise reception resumes after raw simulation presentation");
+
     session.transmit_bits(bits);
-    const auto cancellable = wait_for(session, [&](const auto& snapshot) {
-        return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != first.transmission_id;
-    });
+    const auto cancellable = await_replay(first.transmission_id);
     replay_milliseconds = 4500;
     session.cancel_transmit();
     const auto cancelled = session.snapshot();
-    check(!cancelled.simulation_replay && cancelled.transmission_cancelled && !cancelled.transmitting &&
-          cancelled.signals.empty() && cancelled.received.empty(),
+    check_no_raw_reception(cancelled);
+    check(!cancelled.simulation_replay && cancelled.transmission_cancelled && !cancelled.transmitting,
           "raw replay can be cancelled immediately");
     replay_milliseconds = 6000;
     wait_for(session, [&](const auto& snapshot) {
-        check(!snapshot.simulation_replay && snapshot.received.empty() && snapshot.signals.empty(),
-              "cancelled raw replay cannot republish stale frames or fabricated packets");
+        check_no_raw_reception(snapshot);
+        check(!snapshot.simulation_replay, "cancelled raw replay cannot republish stale frames");
         return snapshot.samples_received > cancellable.samples_received && snapshot.waveform != cancellable.waveform;
     });
 
     session.transmit_bits(bits);
-    const auto replaceable = wait_for(session, [](const auto& snapshot) { return snapshot.transmission_finished && snapshot.simulation_replay; });
-    check_binary_signals(replaceable, bits.size());
-    check(!replaceable.signals.empty(), "raw replay starts with an explicit receiving placeholder");
-    const auto replaced_id = replaceable.signals.front().id;
+    const auto replaceable = await_replay(cancellable.transmission_id);
     replay_milliseconds = 8950;
-    const Bytes replacement_bits{1, 0};
-    session.transmit_bits(replacement_bits);
+    session.transmit_bits(Bytes{1, 0});
     const auto interrupted = session.snapshot();
-    check(!interrupted.simulation_replay && interrupted.signals.empty() && interrupted.received.empty(),
-          "replacement drops due but unpresented binary rows from the interrupted transmission");
-    wait_for(session, [&](const auto& snapshot) {
-        check_binary_signals(snapshot, replacement_bits.size());
-        for (const auto& signal : snapshot.signals) check(signal.id != replaced_id, "replaced binary acquisition cannot leak into its successor");
-        return snapshot.transmission_finished && snapshot.simulation_replay && snapshot.transmission_id != replaceable.transmission_id;
-    });
+    check_no_raw_reception(interrupted);
+    check(!interrupted.simulation_replay, "replacement drops due but unpresented frames from the interrupted transmission");
+    const auto replacement = await_replay(replaceable.transmission_id);
     replay_milliseconds = 11950;
-    const auto replacement = session.snapshot();
-    check_binary_signals(replacement, replacement_bits.size());
-    const auto recovered = std::find_if(replacement.signals.begin(), replacement.signals.end(), [](const auto& signal) { return signal.complete; });
-    check(recovered != replacement.signals.end() && recovered->text == "10" && recovered->id != replaced_id,
-          "replacement presents its own recovered bits at its own three-second deadline");
+    const auto replaced_done = session.snapshot();
+    check_no_raw_reception(replaced_done);
+    check(!replaced_done.simulation_replay && replaced_done.transmission_id == replacement.transmission_id,
+          "replacement completes its own three-second presentation without inheriting receiver state from transmitted bits");
 
-    // Repeat the same three-bit configuration with a GUI that misses only the
-    // final replay frame. The symbols measured above independently
-    // establish what must now be accounted for as undisplayed at the deadline.
-    const auto stalled_started_at = replay_milliseconds.load();
+    // A missed visual deadline must not manufacture decisions from the bits
+    // retained by the transmitter or prolong the replay to expose old frames.
     session.transmit_bits(bits);
-    const auto stalled_start = wait_for(session, [&](const auto& snapshot) {
-        check_binary_signals(snapshot, bits.size());
-        return snapshot.transmission_finished && snapshot.simulation_replay &&
-               snapshot.transmission_id != replacement.transmission_id;
-    });
-    check(stalled_start.replay_frame_count == first.replay_frame_count && terminal_points > 0,
-          "raw stalled-GUI fixture retains the same measured terminal frame");
-    // A single physical symbol may provide fewer than sixty replay frames.
-    // Stop at the last whole millisecond before its terminal interval begins.
-    const auto before_terminal = (3000 * (stalled_start.replay_frame_count - 1) - 1) / stalled_start.replay_frame_count;
-    replay_milliseconds = stalled_started_at + static_cast<std::int64_t>(before_terminal);
-    const auto before_stall = session.snapshot();
-    check_binary_signals(before_stall, bits.size());
-    check(before_stall.simulation_replay && before_stall.replay_frame_index + 2 == before_stall.replay_frame_count &&
-          before_stall.constellation_source == live::ConstellationSource::input,
-          "raw stalled-GUI fixture leaves received symbols in the unvisited final frame");
-    replay_milliseconds = stalled_started_at + 3000;
+    const auto stalled = await_replay(replacement.transmission_id);
+    replay_milliseconds = 14950;
     const auto after_stall = session.snapshot();
-    check_binary_signals(after_stall, bits.size());
+    check_no_raw_reception(after_stall);
     check(!after_stall.simulation_replay && after_stall.replay_frame_count == 0 &&
-          after_stall.constellation_source == live::ConstellationSource::input && after_stall.received.empty(),
-          "missing the final raw frame still returns immediately to live input at exactly three seconds");
-    check(after_stall.constellation_dropped >= terminal_points,
-          "raw replay expiry accounts for measured symbols in its unvisited terminal frame");
-    const auto stalled_bits = std::find_if(after_stall.signals.begin(), after_stall.signals.end(), [](const auto& signal) { return signal.complete; });
-    check(stalled_bits != after_stall.signals.end() && stalled_bits->text == "001" && stalled_bits->received_bits == bits.size(),
-          "missing the final raw frame preserves exact sample-derived completion bits");
-    const auto stalled_again = session.snapshot();
-    check(stalled_again.signals.empty() && stalled_again.received.empty(),
-          "raw missed-frame completion is delivered exactly once");
+          after_stall.transmission_id == stalled.transmission_id,
+          "missing raw replay frames still returns immediately to live input at the deadline");
 }
-void test_keyed_binary_reception_preserves_partial_symbols() {
+void test_keyed_binary_transmission_preserves_partial_symbols() {
     const Bytes bits{0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0};
     for (const auto fec : {FecMode::rs20, FecMode::rs60}) {
         std::atomic<std::int64_t> replay_milliseconds{0};
@@ -470,24 +388,18 @@ void test_keyed_binary_reception_preserves_partial_symbols() {
               "selected Reed-Solomon and compression cannot add overhead to keyed raw bits");
         session.start(value); session.transmit_bits(bits);
         const auto first = wait_for(session, [&](const auto& snapshot) {
-            check_binary_signals(snapshot, bits.size());
-            if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "keyed binary results cannot appear before replay starts");
+            check_no_raw_reception(snapshot);
             return snapshot.transmission_finished && snapshot.simulation_replay;
         });
         check(std::abs(first.transmission_seconds - expected.total_seconds) < 1e-12,
               "key masking and partial symbols preserve the exact raw transmission duration");
         replay_milliseconds = 2999;
-        const auto pending = session.snapshot();
-        check_binary_signals(pending, bits.size());
-        check(std::any_of(pending.signals.begin(), pending.signals.end(), [](const auto& signal) {
-            return !signal.complete && signal.text == "00010110010";
-        }), "keyed binary reception must recover leading zeros and the final partial symbol before completion");
+        check_no_raw_reception(session.snapshot());
         replay_milliseconds = 3000;
         const auto completed = session.snapshot();
-        check_binary_signals(completed, bits.size());
-        check(!completed.simulation_replay && completed.signals.size() == 1 && completed.signals.front().complete &&
-              completed.signals.front().text == "00010110010",
-              "selected receive key must recover the actual binary channel samples without framing or FEC");
+        check_no_raw_reception(completed);
+        check(!completed.simulation_replay,
+              "an admitted receive key cannot provide unknown raw start timing, bit count or initial phase");
     }
 }
 void test_noisy_binary_reception_does_not_echo_transmission() {
@@ -498,31 +410,21 @@ void test_noisy_binary_reception_does_not_echo_transmission() {
     auto value = settings(); value.simulation_snr_db = -100;
     value.transfer.fec = FecMode::rs60;
     Bytes bits(256);
-    std::string sent;
-    for (std::size_t i = 0; i < bits.size(); ++i) {
-        bits[i] = static_cast<std::uint8_t>((i * 7 + i / 3) & 1);
-        sent += bits[i] ? '1' : '0';
-    }
+    for (std::size_t i = 0; i < bits.size(); ++i) bits[i] = static_cast<std::uint8_t>((i * 7 + i / 3) & 1);
     session.start(value); session.transmit_bits(bits);
     wait_for(session, [&](const auto& snapshot) {
-        check_binary_signals(snapshot, bits.size());
-        if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "noisy binary results must still follow the replay clock");
+        check_no_raw_reception(snapshot);
         return snapshot.transmission_finished && snapshot.simulation_replay;
     });
-    replay_milliseconds = 3000;
-    const auto completed = session.snapshot();
-    check_binary_signals(completed, bits.size());
-    const auto recovered = std::find_if(completed.signals.begin(), completed.signals.end(), [](const auto& signal) { return signal.complete; });
-    check(!completed.simulation_replay && recovered != completed.signals.end() && recovered->text.size() == bits.size(),
-          "unverified binary decisions remain visible even when the channel is too noisy for reliable reception");
-    check(recovered->text != sent,
-          "noise-obscured binary reception must come from measured samples, not an echo of transmitted bits");
+    for (const auto milliseconds : {500, 1500, 2999, 3000}) {
+        replay_milliseconds = milliseconds;
+        const auto snapshot = session.snapshot();
+        check_no_raw_reception(snapshot);
+        check(!snapshot.waveform.empty() && !snapshot.spectrum_db.empty(), "noise-obscured raw transmission still supplies actual measured plots");
+    }
 }
-void test_binary_long_symbol_uses_bounded_virtual_time() {
-    std::atomic<std::int64_t> replay_milliseconds{0};
-    live::Session session({}, [&] {
-        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
-    });
+void test_binary_long_symbol_is_bounded_and_cancellable() {
+    live::Session session;
     auto value = settings();
     value.transfer.modem.bandwidth_hz = 1;
     value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
@@ -534,25 +436,29 @@ void test_binary_long_symbol_uses_bounded_virtual_time() {
     const Bytes bits{0, 0, 1};
     const auto expected = transfer::estimate_binary(bits, value.transfer);
     session.start(value);
-    const auto wall_start = std::chrono::steady_clock::now();
+    const auto idle = wait_for(session, [](const auto& snapshot) { return snapshot.samples_received > 0; });
     session.transmit_bits(bits);
-    const auto computed = wait_for(session, [&](const auto& snapshot) {
-        check_binary_signals(snapshot, bits.size());
-        if (!snapshot.simulation_replay) check(snapshot.signals.empty(), "long raw bit reception cannot bypass its visual timeline");
-        return snapshot.transmission_finished && snapshot.simulation_replay;
-    }, 60s);
-    const auto elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - wall_start).count();
-    check(computed.transmission_seconds > 3600 && computed.transmission_seconds > 100 * elapsed &&
-          std::abs(computed.transmission_seconds - expected.total_seconds) < 1e-9,
-          "one raw status symbol advances hours of exact media time at CPU speed without a fixed preamble");
-    check(computed.dsp_buffered_bytes <= value.dsp_workspace_bytes && computed.replay_frame_count > 1 && computed.replay_frame_count <= 60,
-          "hours-long raw binary transmission fits a one-MiB DSP workspace without allocating its waveform");
-    replay_milliseconds = 3000;
-    const auto completed = session.snapshot();
-    check_binary_signals(completed, bits.size());
-    const auto recovered = std::find_if(completed.signals.begin(), completed.signals.end(), [](const auto& signal) { return signal.complete; });
-    check(!completed.simulation_replay && recovered != completed.signals.end() && recovered->text == "001",
-          "hours-long raw simulation still presents its recovered bits after exactly three seconds");
+    const auto processing = wait_for(session, [&](const auto& snapshot) {
+        check_no_raw_reception(snapshot);
+        return snapshot.transmitting && snapshot.transmission_fraction > 0 && snapshot.samples_received > idle.samples_received;
+    });
+    check(expected.total_seconds > 3600 && processing.transmission_fraction < 1 && processing.transmission_seconds > 0 &&
+          std::abs(processing.transmission_seconds / processing.transmission_fraction - expected.total_seconds) < 1e-6,
+          "an hours-long raw symbol must process samples without a symbol-statistics shortcut");
+    check(processing.dsp_buffered_bytes <= value.dsp_workspace_bytes && !processing.simulation_replay,
+          "unfinished hours-long raw transmission fits a one-MiB DSP workspace without allocating its waveform");
+    const auto before_cancel = std::chrono::steady_clock::now();
+    session.cancel_transmit();
+    check(std::chrono::steady_clock::now() - before_cancel < 100ms, "cancelling an hours-long sampled symbol returns promptly");
+    const auto cancelled = session.snapshot();
+    check_no_raw_reception(cancelled);
+    check(cancelled.transmission_cancelled && !cancelled.transmitting && !cancelled.simulation_replay,
+          "long raw cancellation cannot present a completed simulation");
+    wait_for(session, [&](const auto& snapshot) {
+        check_no_raw_reception(snapshot);
+        check(!snapshot.simulation_replay, "cancelled long raw computation cannot publish a late replay");
+        return snapshot.samples_received > cancelled.samples_received;
+    });
 }
 void test_partial_back_to_back_and_resume() {
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -561,7 +467,9 @@ void test_partial_back_to_back_and_resume() {
     });
     auto value = settings();
     session.start(value);
-    const auto first = message(1, 1200), second = message(2, 96);
+    const auto idle = wait_for(session, [](const auto& snapshot) { return snapshot.samples_received > 8000; });
+    check(idle.received.empty() && idle.signals.empty(), "receiver begins freely running on idle noise before either queued transmitter starts");
+    const auto first = message(1, 384), second = message(2, 96);
     session.transmit(first);
     session.transmit(second);
     std::vector<Message> received;
@@ -627,7 +535,8 @@ void test_partial_back_to_back_and_resume() {
     check(resumed.received.empty(), "consumed waveform is not delivered repeatedly");
 }
 void test_encrypted_auto_epoch() {
-    live::Session session;
+    constexpr std::uint64_t local_epoch = 1800000000;
+    live::Session session([] { return static_cast<double>(local_epoch); });
     auto value = settings();
     value.transfer.compression = true;
     value.transfer.fec = FecMode::rs20;
@@ -637,11 +546,12 @@ void test_encrypted_auto_epoch() {
     value.transfer.modem.scramble = true;
     value.transfer.modem.dsss = true;
     value.transfer.timestamp = 0;
-    // Three epochs exercise automatic admission without making this semantic
-    // test a full-bank throughput benchmark under sanitizers. The separate
-    // three-key workspace test retains the default thirteen-epoch search.
+    // Keep wall time fixed while CPU-driven PCM is checked under sanitizers.
+    // Both sides still derive epochs from local time independently; the
+    // disjoint-clock and idle-refresh cases cover moving admission windows.
     value.transfer.search_seconds = 1;
     session.start(value);
+    wait_for(session, [](const auto& snapshot) { return snapshot.samples_received >= 800; });
     const auto sent = message(3, 700);
     session.transmit(sent);
     const auto final = wait_for(session, [](const auto& snapshot) {
@@ -650,39 +560,33 @@ void test_encrypted_auto_epoch() {
     }, 60s);
     check(final.received.front().packet.message.data == sent.data && final.received.front().packet.authenticated,
           "selected second named key verifies actual encrypted continuous audio");
-    check(final.received.front().timestamp > 1000000000, "zero timestamp selects the current epoch automatically");
+    check(final.received.front().timestamp == local_epoch, "zero timestamp selects the independent local clock epoch automatically");
 }
-void test_simulated_epoch_admission_survives_clock_jumps() {
+void test_simulation_does_not_admit_transmitter_epoch() {
     constexpr std::uint64_t origin = 1800000000;
     std::atomic<std::uint64_t> queries{0};
-    // Each clock query advances an hour. Re-reading wall time after encoding
-    // or during a burst therefore cannot accidentally retain the right epoch.
-    live::Session session([&] { return static_cast<double>(origin + 3600 * queries.fetch_add(1)); });
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    // Receiver admission and transmitter encoding each consult their own
+    // local time. Advancing an hour per query keeps their epochs disjoint.
+    live::Session session([&] { return static_cast<double>(origin + 3600 * queries.fetch_add(1)); }, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
     auto value = settings();
     value.transfer.key.emplace(Bytes(32, 0x72));
-    value.receive_keys.emplace_back(Bytes(32, 0x11));
-    value.receive_keys.emplace_back(Bytes(32, 0x72));
     value.transfer.modem.scramble = value.transfer.modem.dsss = true;
-    value.transfer.timestamp = 0;
-    value.transfer.search_seconds = 1;
+    value.transfer.search_seconds = 0;
     value.transfer.compression = true;
-    value.transfer.fec = FecMode::rs20;
     session.start(value);
-    std::uint64_t previous_epoch = 0;
-    for (const auto id : {25U, 26U}) {
-        const auto sent = message(static_cast<std::uint8_t>(id), 96);
-        session.transmit(sent);
-        std::optional<transfer::Received> decoded;
-        wait_for(session, [&](const auto& snapshot) {
-            if (!snapshot.received.empty()) decoded = snapshot.received.front();
-            return decoded.has_value() && snapshot.transmission_finished;
-        }, 60s);
-        check(decoded->packet.authenticated && decoded->packet.message.data == sent.data,
-              "clock jumps during packet preparation or simulated reception discard the admitted key epoch");
-        check(decoded->timestamp >= origin && decoded->timestamp > previous_epoch,
-              "the next burst must admit a fresh receiver epoch after releasing its predecessor");
-        previous_epoch = decoded->timestamp;
-    }
+    session.transmit(message(25, 32));
+    const auto first = wait_for(session, [](const auto& snapshot) {
+        check(snapshot.received.empty() && snapshot.signals.empty(), "transmitter epoch must never be injected into the local receive search");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
+    check(first.replay_frame_count > 0 && queries.load() > 2, "independent local-time candidate fixture did not process its sampled channel");
+    replay_milliseconds = 3000;
+    const auto completed = session.snapshot();
+    check(!completed.simulation_replay && completed.received.empty() && completed.signals.empty(),
+          "an out-of-window transmitter epoch cannot authenticate merely because both endpoints share a simulation");
     rejects([] { live::Session invalid([] { return -1.; }); }, "negative injected epoch rejected");
     rejects([] { live::Session invalid([] { return std::numeric_limits<double>::quiet_NaN(); }); }, "nonfinite injected epoch rejected");
     rejects([] { live::Session invalid([] { return static_cast<double>(std::numeric_limits<std::uint64_t>::max()); }); }, "out-of-range injected epoch rejected");
@@ -803,8 +707,9 @@ void test_simulation_replay_and_live_constellation() {
     check(live_again.waveform != last.waveform && live_again.constellation != last.constellation,
           "new receiver points keep replacing the completed simulation");
 
-    // Repeat the same seeded transmission: the observed frame point counts
-    // above provide an independent oracle for an otherwise invisible tail.
+    // Repeat after live noise: the persistent channel has advanced, so timing
+    // and measured point counts can differ. Missing actual symbol frames must
+    // still be reported instead of leaving stale measurements on screen.
     session.transmit(message(21, 96));
     const auto stalled_start = wait_for(session, [](const auto& snapshot) {
         check_packet_replay_start(snapshot, "repeated simulation must defer its new reception events");
@@ -820,8 +725,8 @@ void test_simulation_replay_and_live_constellation() {
     check(!after_stall.simulation_replay && after_stall.replay_frame_count == 0 &&
           after_stall.constellation_source == live::ConstellationSource::input,
           "a GUI that misses the final replay frames still returns to live input at exactly three seconds");
-    check(after_stall.constellation_dropped >= points_after_frame_40,
-          "replay expiry reports every symbol point in the frames the GUI never displayed");
+    check(after_stall.constellation_dropped > 0,
+          "replay expiry reports undisplayed symbol points from the continuing independent channel");
     check(after_stall.waveform != before_stall.waveform && after_stall.constellation != before_stall.constellation,
           "expired replay points cannot remain over the live waveform after a GUI stall");
     check(after_stall.received.size() == 1 && after_stall.signals.size() >= 2 &&
@@ -993,18 +898,28 @@ void test_default_workspace_holds_three_long_keyed_banks() {
     check(result.received.empty(), "a loaded key collection never turns noise into validated content");
 }
 void test_encrypted_epoch_bank_refreshes_while_idle() {
-    live::Session session;
+    constexpr std::uint64_t origin = 1800000000;
+    std::atomic<std::uint64_t> local_epoch{origin};
+    live::Session session([&] { return static_cast<double>(local_epoch.load()); });
     auto value = settings();
     value.transfer.key.emplace(Bytes(32, 0x39));
     value.transfer.search_seconds = 1;
     session.start(value);
-    const auto began = std::chrono::steady_clock::now();
-    wait_for(session, [&](const auto&) { return std::chrono::steady_clock::now() - began > 2200ms; }, 4s);
+    const auto initial = wait_for(session, [](const auto& snapshot) { return snapshot.samples_received >= 800; });
+    // Advance local time beyond the old search and bootstrap-retention spans
+    // while idle. Freeze it during CPU-driven decoding so this checks bank
+    // refresh independently of sanitizer throughput.
+    local_epoch = origin + 10;
+    wait_for(session, [&](const auto& snapshot) {
+        check(snapshot.received.empty() && snapshot.signals.empty(), "idle epoch refresh must not manufacture reception");
+        return snapshot.samples_received > initial.samples_received + 800;
+    });
     const auto sent = message(10, 64);
     session.transmit(sent);
     const auto received = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); }, 60s);
-    check(received.received.front().packet.authenticated && received.received.front().packet.message.data == sent.data,
-          "an idle encrypted listener refreshes epochs after its initial timing window expires");
+    check(received.received.front().packet.authenticated && received.received.front().packet.message.data == sent.data &&
+          received.received.front().timestamp == origin + 10,
+          "an idle encrypted listener independently refreshes epochs after its initial search window expires");
 }
 void test_cancel_reconfigure_and_bounds() {
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -1116,53 +1031,51 @@ void test_weak_and_wide_modes_keep_the_channel_running() {
     check(!current.constellation.empty() && current.constellation != previous.constellation,
           "one-hertz mode retains changing measured partial-chip constellation points");
 }
-void test_long_symbols_are_streamed_in_virtual_time() {
+void test_long_packet_symbols_are_bounded_and_cancellable() {
     for (const auto factor : {1024U, 16384U}) {
-        std::atomic<std::int64_t> replay_milliseconds{0};
-        live::Session session({}, [&] {
-            return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
-        });
+        live::Session session;
         auto value = settings();
         value.transfer.modem.bandwidth_hz = 1;
         value.transfer.modem.spreading_mode = modem::SpreadingMode::tone;
         value.transfer.modem.spreading_factor = factor;
-        // The obsolete monolithic allocation limit and ring duration cannot
-        // prevent an independently bounded stream from processing this packet.
         value.transfer.modem.memory_limit = 1024;
         value.receive_buffer_seconds = 0.01;
         value.content_limit = 1024;
         value.dsp_workspace_bytes = 1024 * 1024;
         value.simulation_snr_db = -30;
         const auto sent = message(static_cast<std::uint8_t>(factor == 1024 ? 8 : 9), 96);
+        const auto expected = transfer::estimate(sent, value.transfer);
         session.start(value);
-        const auto wall_start = std::chrono::steady_clock::now();
         session.transmit(sent);
         const auto result = wait_for(session, [](const auto& snapshot) {
-            check_packet_replay_start(snapshot, "hours-long virtual reception cannot bypass its bounded visual presentation");
-            return snapshot.transmission_finished && snapshot.simulation_replay;
-        }, 60s);
-        const auto elapsed = std::chrono::steady_clock::now() - wall_start;
-        check(result.transmission_seconds > 3600, "long symbols actually advance hours of virtual media");
-        check(result.transmission_seconds > std::chrono::duration<double>(elapsed).count() * 100,
-              "accelerated simulation is driven by DSP work rather than wall-clock airtime");
-        check(result.dsp_buffered_bytes <= value.dsp_workspace_bytes, "long virtual duration does not grow DSP buffers");
-        check(result.simulation_replay && result.replay_frame_count > 1 && result.replay_frame_count <= 60,
-              "one-MiB weak-mode budget retains a bounded replay without storing hours of samples");
-        replay_milliseconds = 3000;
-        const auto decoded = wait_for(session, [](const auto& snapshot) { return !snapshot.received.empty(); });
-        check_signal_metrics(decoded);
-        check(!decoded.simulation_replay && decoded.received.front().packet.message.data == sent.data,
-              "long-tone sampled statistics decode real bytes and present them after exactly three seconds");
-        const auto content_seconds = static_cast<double>(decoded.received.front().packet.consumed_bytes) * 8 /
-                                     modem::bit_rate(value.transfer.modem);
-        check(std::abs(result.transmission_seconds - content_seconds - 5) < 1e-6,
-              "training remains exactly five seconds even when a data symbol lasts hours");
+            check(snapshot.received.empty() && snapshot.signals.empty() && !snapshot.simulation_replay,
+                  "unfinished hours-long packet cannot bypass sample processing or its later presentation");
+            return snapshot.transmitting && snapshot.transmission_fraction > 0;
+        });
+        check(expected.total_seconds > 3600 && result.transmission_seconds > 0 &&
+              std::abs(result.transmission_seconds / result.transmission_fraction - expected.total_seconds) < 1e-6 &&
+              result.transmission_fraction < 1, "long packet fixture retains its exact on-air duration while sample processing remains unfinished");
+        check(result.dsp_buffered_bytes <= value.dsp_workspace_bytes,
+              "hours-long packet PCM and blind acquisition fit bounded working memory");
+        const auto before_cancel = std::chrono::steady_clock::now();
+        session.cancel_transmit();
+        check(std::chrono::steady_clock::now() - before_cancel < 100ms,
+              "cancelling an hours-long packet never waits for a symbol boundary");
+        const auto cancelled = session.snapshot();
+        wait_for(session, [&](const auto& snapshot) {
+            check(snapshot.transmission_cancelled && !snapshot.transmitting && !snapshot.simulation_replay &&
+                  snapshot.received.empty() && snapshot.signals.empty(),
+                  "cancelled long packet must resume the free-running channel without a fabricated completion");
+            return snapshot.samples_received > cancelled.samples_received;
+        });
     }
 }
+
 }
-int main() {
+int main(int argc, char** argv) {
     try {
-        const auto run = [](const char* name, auto test) {
+        const auto run = [&](const char* name, auto test) {
+            if (argc > 1 && std::string_view(name).find(argv[1]) == std::string_view::npos) return;
             try { test(); } catch (const std::exception& error) { throw std::runtime_error(std::string(name) + ": " + error.what()); }
         };
         run("idle noise and plots", test_idle_noise_and_plots);
@@ -1170,12 +1083,12 @@ int main() {
         run("actual audio empty symbols and cancel", test_audio_tx_empty_symbol_intervals_and_cancel);
         run("binary audio exact bit length", test_binary_audio_preserves_exact_bit_length);
         run("binary simulation replay and cancellation", test_binary_simulation_replay_validation_and_cancel);
-        run("keyed binary partial-symbol reception", test_keyed_binary_reception_preserves_partial_symbols);
+        run("keyed binary partial-symbol transmission", test_keyed_binary_transmission_preserves_partial_symbols);
         run("noisy binary is sample-derived", test_noisy_binary_reception_does_not_echo_transmission);
-        run("binary long symbol bounded simulation", test_binary_long_symbol_uses_bounded_virtual_time);
+        run("binary long symbol bounded simulation", test_binary_long_symbol_is_bounded_and_cancellable);
         run("partial back-to-back reception", test_partial_back_to_back_and_resume);
         run("encrypted automatic epoch", test_encrypted_auto_epoch);
-        run("simulated epoch admission across clock jumps", test_simulated_epoch_admission_survives_clock_jumps);
+        run("independent local epoch admission", test_simulation_does_not_admit_transmitter_epoch);
         run("simulation replay", test_simulation_replay_and_live_constellation);
         run("default crystal", test_default_crystal_simulation);
         run("unpresented replay interruption", test_interrupt_discards_due_unpresented_reception);
@@ -1185,7 +1098,7 @@ int main() {
         run("cancel, reconfigure and bounds", test_cancel_reconfigure_and_bounds);
         run("unrecoverable noise", test_unrecoverable_noise_does_not_validate);
         run("weak and wide modes", test_weak_and_wide_modes_keep_the_channel_running);
-        run("long symbols in virtual time", test_long_symbols_are_streamed_in_virtual_time);
+        run("long packet sample processing and cancellation", test_long_packet_symbols_are_bounded_and_cancellable);
         std::cout << "Continuous receiver and simulation tests passed\n";
         return 0;
     } catch (const std::exception& exception) {

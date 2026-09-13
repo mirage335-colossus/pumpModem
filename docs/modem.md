@@ -248,9 +248,9 @@ they do not accumulate an unlimited set of new wall-clock epochs.
 Streaming reception assumes carrier error is within the chosen integration's
 tolerance. The generic batch known-training decoder can estimate a small static
 carrier offset, but that search is not part of the blind streaming packet path.
-Accelerated simulation assumes matched chip despreading while modeling carrier
-and symbol-clock error; it cannot establish arbitrary long encrypted-pattern
-acquisition on real audio or demonstrate a tracking loop that is not implemented.
+Simulation exercises this same PCM acquisition and chip correlation with
+arbitrary startup phase and offset. It cannot establish arbitrary long
+encrypted-pattern acquisition or demonstrate an unimplemented tracking loop.
 
 `live::Session` owns continuous capture, preparation and decoding workers. Normal
 GUI startup opens the OS-default input; an optional device override is available.
@@ -347,73 +347,68 @@ verified result. If polling stalls, due events are delivered in chronological
 order on the next poll without extending the presentation to force a visible
 pause between them.
 
-## CPU-bounded simulation
+## Sampled simulation
 
-The continuous simulator uses the same symbol mapping, training schedule,
-receiver decisions, packet correction and validation as the PCM path. It advances
-virtual media time by the processed symbol durations. It runs as fast as bounded
-DSP work permits, yielding between chunks; it does not sleep for the advertised
-on-air duration or allocate that duration as PCM. No fixed real-time multiplier
-is required. TX progress distinguishes virtual elapsed seconds from wall-clock
-CPU time, and completion/cancellation remain observable between GUI polls.
-The receiver's candidate epoch window is admitted before packet preparation and
-held through that simulated burst and its tail. A slow CPU or wall-clock jump
-does not expire its candidates. Idle reception and each subsequent burst admit
-current epochs again; the key search still includes all configured receive keys.
+The continuous simulator sends the transmitter's actual carrier and spreading
+waveform through a channel into the ordinary PCM receiver. The receiver starts
+unlocked, processes idle noise before transmission, and continues through burst
+boundaries without a transmitter-triggered reset. It receives no symbol
+boundaries, spreading decisions, payload size or transmitter epoch. Its candidate
+keys and epochs come from its own settings and clock and follow the same finite
+search and retention policy as audio reception.
+For one-shot `transfer::simulate`, `ChannelConfig::receiver_timestamp` optionally
+sets an independent receiver search center; the CLI exposes it as
+`--receiver-time SECONDS`, separately from transmitter `--time SECONDS`. Omission
+uses the explicitly configured transfer timestamp. An encrypted epoch outside
+the receiver's `--search-seconds` window is not supplied by the transmitter.
 
-Complex integrated observations receive AWGN with the variance implied by
-sample-domain white noise and their sample counts. The channel also defaults to
-**100 ppm relative transmitter/receiver crystal error** and a separate Wiener
-phase-diffusion assumption of **0.5 degrees per square root second**. The crystal
-parameter represents the combined relative clock error, not two independent
-100 ppm oscillators. Positive error raises the received carrier and makes symbols
-arrive sooner:
+The channel uses a seeded arbitrary initial carrier phase, a fractional sample
+startup offset, and a random idle interval before each burst. Its default
+**100 ppm relative transmitter/receiver crystal error** and separate Wiener
+phase-diffusion assumption of **0.5 degrees per square root second** model the
+relative oscillators of free-running computers. The crystal parameter represents
+the combined relative error. Positive error raises the received carrier and makes
+symbols arrive sooner:
 
 ```text
 clock_ratio       = 1 + clock_error_ppm * 1e-6
-receiver_endpoint = ceil(transmitted_samples / clock_ratio)
 carrier_error_Hz  = explicit_frequency_offset + carrier_Hz * (clock_ratio - 1)
 RMS_phase_change  = phase_noise_degrees_per_sqrt_second * sqrt(elapsed_seconds)
 ```
 
-The accelerated path joins Wiener phase endpoints with linear ramps over at most
-16 subintervals per observation. It integrates each carrier/phase ramp analytically
-using its sinc coherence loss, including when an observation spans billions of
-carrier cycles. A mean attenuation term accounts for unresolved Brownian-bridge
-variance. This is a bounded stochastic approximation, not an exact sampled
-phase-noise trace over arbitrarily long symbols. Timing boundaries accumulate
-clock error; the decoder is not given corrected boundaries or phase values.
+Receiver samples include AWGN and the altered carrier, sample timing and phase
+trajectory. Sample-clock error can reduce the actual spreading correlation; no
+matched-despreading statistic is handed to the receiver. The receiver must find
+a valid bootstrap and complete packet from these samples. It has no continuous
+clock or frequency tracking loop, so an impaired signal can fail acquisition or
+validation. Longer integration alone cannot repair oscillator coherence loss.
+Use `--clock-error-ppm 0 --phase-noise 0` with CLI `simulate` or `listen` when
+intentionally testing ideal oscillator stability; startup remains unsynchronized.
 
-Observation bins cross training/payload boundaries without framing labels.
-Chip despreading remains matched in this statistical model, so clock-dependent
-chip-correlation loss is not fully reproduced. The receiver still searches
-phase/header hypotheses, but has no clock/phase tracking loop. Consequently,
-long weak-signal integration can fail through coherence loss even when an ideal
-oscillator AWGN loopback would succeed. Longer integration alone cannot repair
-that error. Use `--clock-error-ppm 0 --phase-noise 0` with CLI `simulate` or
-`listen` when intentionally measuring the ideal-oscillator case.
+Samples are processed in bounded chunks at CPU speed without sleeping for the
+advertised on-air duration or retaining the whole waveform. Memory stays bounded
+with airtime, but CPU work scales with the number of samples. High sample rates
+and hour-long symbols can therefore take substantial time. Cancellation is
+checked between and within chunks. The model does not establish fading/multipath
+performance, nonlinear hardware behavior or interference rejection.
 
-The model avoids synthesizing every sample of a very long tone. It does not
-establish arbitrary PCM acquisition, fading/multipath performance, nonlinear
-hardware behavior or interference rejection. Plots use bounded signal/noise
-previews rather than a retained whole transmission.
 During computation, snapshots are captured at evenly spaced media positions from
 the start of fixed training to the end of the transmitted packet, including the
 protected header and encoded body. The normal timeline contains 60 frames. Each
 stores a compact 256-sample waveform, 257 peak-pooled spectrum bins, the fresh
 measured constellation for its interval and up to 4096 bytes of browser preview
-text. Its source and lock state are captured at that position, before the receiver's artificial
-end-of-capture tail; a later lock cannot be applied to an earlier frame.
-A bounded transmitter segment history reconstructs the actual local waveform,
-including carrier phase and spreading. The preview is time-warped and
-phase-rotated using the simulated channel trajectory; its independent display
-noise does not change decoder randomness.
+text. Its source and lock state are captured at that position. Reception continues
+through ordinary channel noise after the source stops; a later lock cannot be
+applied to an earlier frame.
+Waveform previews retain bounded recent receiver samples from the actual
+channel, including its noise, carrier phase and spreading.
 
-After CPU-bounded computation completes, the GUI plays the entire timeline over
+After sampled computation completes, the GUI plays the entire timeline over
 three wall-clock seconds. Preparation does not wait for simulated airtime.
 Every new frame updates waveform and constellation and adds one waterfall row.
 Decoded text and metadata are withheld until their scheduled preview positions;
-the browser first shows provisional reception. Complete verified text, received
+the browser shows provisional reception when the receiver produces it. A short
+packet may validate without a separate provisional event. Complete verified text, received
 file entries and pre-FEC accuracy are released together at the three-second
 deadline. Failed decoding supplies no verified result. A prepared packet cannot
 be copied or saved before its presentation completes.
@@ -468,7 +463,7 @@ The GUI's Binary editor is an alternative to its message/file source. It accepts
 `0` and `1`, preserves leading zeros and ignores whitespace. Its estimate and
 transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter`.
 `Session::transmit_bits` queues the same bounded streaming transmitter for audio
-or the accelerated simulation channel. Binary mode does not send callsign/grid
+or the sampled simulation channel. Binary mode does not send callsign/grid
 metadata, an attachment, repeat requests, compression, fixed training, a packet
 header, integrity tag or error correction.
 
@@ -478,28 +473,17 @@ remaining bits. Airtime is the number of groups times the quantized symbol durat
 without byte padding or a five-second preamble. Selected keys mask only the actual
 bits with the data stream and seed the normal scrambler/spreading configuration.
 
-Raw signals have no packet bootstrap or authentication. Binary simulation uses
-`modem::BinaryReceiver` to integrate the channel's noisy complex observations and
-choose the nearest point in each symbol's APSK alphabet, including the final
-partial alphabet. The receiver knows the requested bit count, nominal burst start,
-unit channel gain and initial carrier reference. It never reads the transmitted
-bit values or the channel's hidden phase/noise trajectory. Subsequent symbols use
-the previous measured phase. A final symbol with at least 99% of its nominal
-sample duration can complete after the small clock-length mismatch; shorter
-captures remain incomplete. This is aligned reception, not blind beacon discovery
-or a new carrier/clock tracking loop.
+Raw signals have no packet bootstrap or authentication. Simulation feeds their
+actual waveform to the same continuous blind receiver as packet and audio input.
+It does not construct an aligned receiver from the transmitted bit count, key,
+start time or initial carrier phase. Automatic raw discovery is not implemented,
+so transmitting raw bits does not produce a received bit string or a verified
+packet result. Transmitted waveform and constellation previews remain available.
 
-Only the receiver's decided bits are decrypted with the configured data stream,
-at their exact bit offsets. There is no Reed–Solomon, packet checksum, MAC, padding
-or correction pass. Noise can therefore change the received bit sequence; a raw
-result is never labeled verified or assigned a fabricated accuracy percentage.
-During the three-second replay the browser shows pending reception and newly
-decoded bits, while the constellation shows measured symbol points when available.
-The complete result arrives at the deadline, when plots return to live noise.
-Complete bit strings can be copied; raw signals do not enter the file/packet inbox.
-Browser previews retain at most 4096 bits and indicate a longer result's prefix,
-which cannot be copied as a complete signal. Automatic raw real-audio discovery
-is not implemented. The following CLI status API retains its separate DBPSK format.
+The low-level `modem::BinaryReceiver` API remains an explicitly aligned diagnostic
+that requires a known bit count, symbol origin, gain and carrier reference. It is
+not used as evidence of unsynchronized simulation reception. The following CLI
+status API retains its separate DBPSK format.
 
 ## Batch PCM, WAV and few-bit status
 
@@ -509,8 +493,8 @@ They use the shared 0.5 modem configuration; streaming support does not make an
 arbitrarily large WAV fit in memory. The sample-domain channel adds leading delay,
 AWGN, fixed frequency shift, relative sample-clock error and Wiener phase noise.
 It interpolates the analytic PCM waveform at the altered clock and applies phase
-noise sample by sample. This path exercises waveform timing and chip correlation
-that the accelerated matched-chip statistic simplifies.
+noise sample by sample. The continuous sampled channel exercises the same
+waveform timing and chip correlation without retaining a complete PCM vector.
 
 The generic raw-byte `modem::demodulate` API uses known-training timing and
 constant carrier-offset acquisition with the shared adaptive APSK quantizer. Normal

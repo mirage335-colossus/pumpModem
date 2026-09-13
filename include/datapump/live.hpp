@@ -113,8 +113,8 @@ public:
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no packet framing, preamble or FEC. Raw
-    // simulations decode aligned channel observations and deliver raw bits
-    // through signals, without claiming verified packet reception.
+    // simulations pass sampled audio to ordinary blind acquisition. Without
+    // raw discovery framing, no timing/length-assisted raw result is emitted.
     void transmit_bits(std::span<const std::uint8_t> bits);
     void cancel_transmit();
     Snapshot snapshot();

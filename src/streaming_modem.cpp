@@ -603,6 +603,19 @@ std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token s
     }
     return count;
 }
+std::size_t StreamingTransmitter::read_analytic(std::span<Complex> output,std::stop_token stop) {
+    auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
+    const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.total-s.position));
+    const auto start_angle=std::remainder(static_cast<long double>(s.position)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
+    Complex oscillator=std::polar(1.,static_cast<double>(start_angle));const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
+    for(std::size_t i=0;i<count;++i,++s.position) {
+        if((i&4095U)==0)cancelled(stop);
+        while(s.position>=s.segment_end && s.position<s.total)s.advance();
+        output[i]=s.point*oscillator*static_cast<double>(s.sign(s.position));
+        oscillator*=step;
+    }
+    return count;
+}
 std::optional<SymbolObservation> StreamingTransmitter::next_symbol(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.pcm)throw Error("cannot mix integrated and PCM reads on one transmitter");s.analytical=true;
     if(finished())return std::nullopt;

@@ -40,6 +40,10 @@ public:
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;
     std::size_t read(std::span<float> output, std::stop_token stop = {});
+    // The same sampled waveform before real projection, for physical channel
+    // resampling and carrier rotation. Carries no symbol/framing metadata.
+    std::size_t read_analytic(std::span<std::complex<double>> output,
+                              std::stop_token stop = {});
     std::optional<SymbolObservation> next_symbol(std::stop_token stop = {});
     bool finished() const;
     std::uint64_t total_samples() const;

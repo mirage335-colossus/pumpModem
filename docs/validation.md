@@ -887,3 +887,40 @@ sensitivity, arbitrary long encrypted-pattern acquisition, near-capacity
 throughput, physical SDR operation, low probability of intercept, or Windows
 driver reliability. See [offline-installation.md](offline-installation.md) for
 bundle compatibility and copying requirements.
+
+### Unsynchronized sampled simulation (2026-09-13)
+
+Production simulation now sends receiver-clock PCM to the same blind acquisition
+path as hardware audio. Earlier matched-observation sensitivity and constant-work
+simulation measurements above describe the previous model. The matched-channel
+API remains a low-level analytical test helper, outside the simulation transport.
+
+The new channel tests verify arbitrary seeded carrier phase and fractional start
+timing, positive and negative clock error, sample-identical results with one-sample
+and 4096-sample reads, continuous oscillator/noise state during idle and later
+bursts, and equivalence between analytic source PCM and hardware transmitter PCM
+through fixed training and keyed spreading. Memory is bounded; CPU work now scales
+with sample count. Long-symbol cases exercise cancellation instead of asserting
+instant completion of hours of audio.
+
+Transfer tests exercise independent receive epochs inside and outside the search
+window, actual spreading correlation at weak sample SNR, and failed acquisition
+under carrier incoherence. Live tests cover reception after idle noise and across
+consecutive transmissions without a TX-triggered receiver reset. Raw-waveform
+replays produce no timing/length-assisted received bits; blind raw discovery
+remains unavailable. Very short packets may verify without a provisional browser
+row, because transmission alone no longer creates a receiving event.
+
+Release channel, modem, streaming-modem, transfer, regression and live tests
+passed, as did the 22 CLI tests, GUI inspection/controller checks, controller
+smoke workflow and native GUI self-check. These checks do not establish physical
+hardware sensitivity, continuous clock tracking, fading or multipath performance.
+
+AddressSanitizer and UndefinedBehaviorSanitizer checks passed for the final
+channel suite and all live cases (the full-run prefix plus focused epoch and
+remaining-case runs). LeakSanitizer is unavailable under this host's ptrace
+sandbox, so those checks used `detect_leaks=0`. Automatic-epoch and idle-refresh
+fixtures now use controlled local clocks: they test timestamp selection and an
+explicit idle epoch advance without making sanitizer CPU throughput determine
+key admission. Separate tests still require mismatched/out-of-window epochs to
+fail. Production clock admission and retention are unchanged by these test fixes.

@@ -1,4 +1,5 @@
 #include "datapump/modem.hpp"
+#include "datapump/channel.hpp"
 #include "datapump/packet.hpp"
 #include <algorithm>
 #include <chrono>
@@ -98,12 +99,15 @@ int main() {
         channel.delay_samples = 1237; // Not a chip, symbol, or byte boundary.
         // Four-bit differential APSK requires more uncoded symbol energy than
         // the previous two-bit phase constellation. Packet FEC is tested separately.
-        channel.snr_db = 8;
+        // Keep margin for the independently seeded startup and carrier phase;
+        // these are unprotected raw bytes, with no packet FEC correction.
+        channel.snr_db = 10;
         channel.seed = 731;
         auto noisy = m::simulate(wave, c, channel);
         decoded = m::demodulate(noisy, c, pre);
         require(decoded.bytes == data, "AWGN delayed loopback");
-        require(std::abs(static_cast<long long>(decoded.diagnostics.sample_offset) - 1237) <= 2,
+        const m::SampledSimulationChannel timing(c,channel);
+        require(std::abs(static_cast<double>(decoded.diagnostics.sample_offset)-timing.startup_offset_samples()) <= 2,
                 "sample timing acquisition");
         require(noisy == m::simulate(wave, c, channel), "deterministic simulation");
         channel.snr_db = 12;

@@ -1,12 +1,15 @@
 #include "datapump/transfer.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/channel.hpp"
 #include "../src/constellation.hpp"
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 using namespace datapump;
 namespace {
@@ -452,16 +455,71 @@ void test_valid_packet_ignores_trailing_capture() {
     check(result.packet.message.data==sent.data,"valid short packet survives a long trailing capture without caching noise or preamble");
 }
 void test_simulation_oscillator_limit() {
-    auto value=options();value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=3600;
+    auto value=options();value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=.02;
     auto message=sample();message.repeatable=false;message.data={'x'};
     modem::ChannelConfig ideal;ideal.snr_db=30;ideal.clock_error_ppm=0;ideal.phase_noise_degrees_per_sqrt_second=0;
     check(transfer::simulate(message,value,ideal).packet.message.data==message.data,
-          "hour-long ideal symbols must remain CPU-bounded and decodable");
-    const modem::ChannelConfig crystal;
+          "unlocked sampled receiver acquires ideal oscillators");
+    auto crystal=ideal;crystal.frequency_offset_hz=1/value.modem.integration_seconds;
     rejects([&]{transfer::simulate(message,value,crystal);},
-            "receiver without oscillator tracking claimed to decode incoherent100ppm hour-long symbols");
+            "receiver without oscillator tracking claimed to decode a full carrier rotation per symbol");
     auto invalid=ideal;invalid.clock_error_ppm=std::numeric_limits<double>::infinity();
     rejects([&]{transfer::simulate(message,value,invalid);},"simulation accepted infinite clock error");
+    value.modem.integration_seconds=3600;
+    std::stop_source cancellation;
+    std::jthread cancel([&] {
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));cancellation.request_stop();
+    });
+    const auto before=std::chrono::steady_clock::now();
+    rejects([&]{transfer::simulate(message,value,ideal,{},cancellation.get_token());},
+            "sampled simulation ignores cancellation during an hour-long symbol");
+    check(std::chrono::steady_clock::now()-before<std::chrono::seconds(2),
+          "sampled simulation cancellation waits for an entire symbol");
+}
+void test_unsynchronized_sampled_simulation() {
+    auto value=options();value.search_seconds=0;
+    auto message=sample();message.repeatable=false;message.data={'s','a','m','p','l','e','s'};
+    for(const auto seed:{3U,17U,811U}) {
+        modem::ChannelConfig channel;channel.seed=seed;channel.snr_db=30;
+        channel.delay_samples=seed%191;
+        const auto result=transfer::simulate(message,value,channel);
+        check(result.packet.message.data==message.data,"independent sample/carrier startup changed a packet");
+        check(result.diagnostics.sample_offset>0,"sampled simulation receiver began at the transmitted training boundary");
+    }
+    auto keyed=options(true);keyed.search_seconds=1;
+    modem::ChannelConfig independent;independent.seed=23;independent.snr_db=40;
+    independent.receiver_timestamp=keyed.timestamp+1;
+    std::vector<std::uint64_t> visited;
+    const auto shifted=transfer::simulate(message,keyed,independent,[&](auto timestamp){visited.push_back(timestamp);});
+    check(shifted.packet.authenticated&&shifted.timestamp==keyed.timestamp&&shifted.packet.message.data==message.data,
+          "independent receiver epoch within its search window did not acquire");
+    check(visited.front()==*independent.receiver_timestamp,"simulation supplied transmitter epoch as receiver search center");
+    keyed.search_seconds=0;
+    rejects([&]{transfer::simulate(message,keyed,independent);},"simulation overrode an out-of-window receiver epoch with transmitter metadata");
+    auto config=value.modem;config.dsss=true;config.spreading_factor=128;config.dsss_seed.fill(0x63);
+    auto wrong=config;wrong.dsss_seed.fill(0xa6);
+    const auto wire=transfer::transmission_wire(message,value);
+    modem::StreamingTransmitter source(wire,config);
+    const auto validators=transfer::audio_validators(value,value.timestamp);
+    modem::StreamingReceiver receiver(config,modem::preamble(config),8*1024*1024,validators.bootstrap,validators.packet);
+    modem::StreamingReceiver mismatched(wrong,modem::preamble(wrong),8*1024*1024,validators.bootstrap,validators.packet);
+    // Distinct finite codes can have nonzero cross-correlation, so sufficiently
+    // strong signals may decode with either. At this sample SNR the actual
+    // correlation gain is required for the packet to acquire.
+    modem::ChannelConfig model;model.seed=37;model.snr_db=-3;model.clock_error_ppm=0;model.phase_noise_degrees_per_sqrt_second=0;
+    modem::SampledSimulationChannel channel(config,model);
+    Bytes received;std::array<float,2048> samples{};
+    while(const auto count=channel.read(source,samples)) {
+        const auto input=std::span(samples).first(count);
+        const auto bytes=receiver.push(input);received.insert(received.end(),bytes.begin(),bytes.end());
+        check(mismatched.push(input).empty()&&!mismatched.synchronized(),"simulation supplied transmitter-matched spreading to the wrong receiver code");
+    }
+    channel.read_noise(samples);
+    const auto trailing=receiver.push(samples);received.insert(received.end(),trailing.begin(),trailing.end());
+    check(mismatched.push(samples).empty()&&!mismatched.synchronized(),"wrong spreading acquired in trailing channel noise");
+    const auto tail=receiver.finish();received.insert(received.end(),tail.begin(),tail.end());
+    check(received==wire,"sampled simulation failed to acquire the actual transmitted spreading code");
+    check(mismatched.finish().empty()&&!mismatched.synchronized(),"wrong spreading acquired at end of sampled capture");
 }
 void test_full_content_capacity_with_independent_scratch() {
     auto value=options();value.content_limit=1024*1024;
@@ -477,6 +535,12 @@ void test_full_content_capacity_with_independent_scratch() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--simulation-only") {
+            test_simulation_validation_and_cancellation();
+            test_simulation_oscillator_limit();
+            test_unsynchronized_sampled_simulation();
+            std::cout<<"sampled simulation transfer tests passed\n";return 0;
+        }
         test_raw_binary_transfer();
         if(argc>1 && std::string_view(argv[1])=="--binary-only") {std::cout<<"raw binary transfer tests passed\n";return 0;}
         test_callback_lifetime_and_epoch_binding();
@@ -492,6 +556,7 @@ int main(int argc,char** argv) {
         test_simulation_validation_and_cancellation();
         test_valid_packet_ignores_trailing_capture();
         test_simulation_oscillator_limit();
+        test_unsynchronized_sampled_simulation();
         test_full_content_capacity_with_independent_scratch();
         std::cout << "transfer tests passed\n";
         return 0;

@@ -62,6 +62,10 @@ struct ChannelConfig {
     // Wiener phase diffusion: RMS phase change over one second, scaling as
     // sqrt(elapsed seconds). This is separate from deterministic clock error.
     double phase_noise_degrees_per_sqrt_second = .5;
+    // Optional independent receiver wall-clock center for transfer::simulate.
+    // Omission uses the explicitly configured transfer timestamp; the receiver
+    // still searches its configured finite epoch window from this center.
+    std::optional<std::uint64_t> receiver_timestamp;
 };
 struct Wav { std::uint32_t sample_rate; std::vector<float> samples; };
 // Raises Error for invalid configuration, insufficient memory, or absent preamble.

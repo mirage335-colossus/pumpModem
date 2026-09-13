@@ -2,7 +2,7 @@
 
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
-waveform and accelerated channel simulation, and a documented compact packet format. Received content
+waveform and sampled channel simulation, and a documented compact packet format. Received content
 stays in memory until an explicit save; no network listener or routable packet
 addressing is implemented.
 
@@ -49,19 +49,18 @@ continue while switching tabs. See [the inspection views](docs/inspection.md).
 The receiver integrates the configured sign pattern before making APSK symbol
 decisions; it does not require individual chips to be decoded above the noise.
 Its timing search is finite and it has no continuous clock or frequency tracking
-loop. The accelerated simulation assumes matched despreading, so it does not
-establish blind acquisition below the chip noise floor.
+loop. Simulation feeds the same PCM acquisition path from independent sample
+and carrier phases; its finite search can fail to acquire a signal.
 
 The binary editor sits beside the message editor. Select Binary to
 transmit an exact sequence such as `001`, using the shared streaming phase/amplitude
 modulator with no packet preamble, header, compression or error correction.
 Leading zeros are preserved; whitespace is ignored. The GUI shows the bit count
 and airtime, and selected keys apply stream encryption without adding bytes.
-Version 0.5.6 decodes raw binary simulation observations and shows the recovered
-bits in the signal browser: pending during the three-second replay, received at
-its end. Complete bit strings can be copied. These raw results have no packet
-validation or error correction and never become file entries. The legacy CLI
-DBPSK status format is separate.
+Raw binary simulation sends that waveform through the ordinary blind receiver.
+Raw signals have no discovery framing, so automatic raw reception is not
+implemented and simulation does not invent a received bit string from the
+transmitter's bit count or phase. The legacy CLI DBPSK status format is separate.
 
 The GUI presents the entire simulated transmission over three seconds,
 including fixed training, live plots and pending signal-browser text. Verified
@@ -188,10 +187,10 @@ for this source; the selected encryption key still applies.
 Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep
-updating while idle. Transmissions run at CPU speed through noisy complex
-observations, with virtual airtime reported separately. Packet simulations use
-the same symbol decoder; unframed binary simulations use an aligned APSK decoder
-with the requested bit length and nominal carrier reference.
+updating while idle. Transmissions run at CPU speed through noisy PCM, with
+virtual airtime reported separately. The receiver runs independently through
+idle noise and burst starts and derives timing, phase and spreading correlation
+from its samples. Transmit start and completion do not reset its acquisition.
 After computation completes, the entire transmission, including fixed training,
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and signal-browser previews follow the same timeline. Each frame shows the
@@ -207,9 +206,9 @@ All plots return to live input afterward so new noise, lock attempts and
 transmissions remain visible.
 Simulation defaults to 100 ppm relative crystal error and phase diffusion of
 0.5 degrees per square root second. It models carrier coherence loss and changing
-symbol timing, while assuming matched chip despreading. It does not provide an
-oscillator tracking loop. Raw PCM acquisition is tested separately and remains
-available in CLI WAV simulation.
+symbol timing and chip correlation. Startup includes an arbitrary sample offset
+and carrier phase. It does not provide an oscillator tracking loop; unsuccessful
+acquisition remains an unsuccessful simulation.
 Real audio reception pauses during transmission and resumes afterward.
 Bandwidth and target C/N0 determine constellation size and automatic integration length; forced pattern
 and tone modes are also available. Auto keystream is enabled with encryption.
@@ -317,6 +316,10 @@ integration can lose coherence and fail even when ideal-clock AWGN would decode.
 For a deliberately ideal oscillator diagnostic, use
 `--clock-error-ppm 0 --phase-noise 0` with `simulate` or `listen`. This does not
 demonstrate sensitivity or clock tracking on physical hardware.
+For independent wall clocks, `simulate --time TX_SECONDS --receiver-time RX_SECONDS`
+searches from the receiver's epoch using `--search-seconds`; an encrypted transmitter
+outside that finite window fails reception. Shared modem settings and keys remain
+receiver configuration, independent of waveform synchronization.
 
 Repeatable eligibility is at most two seconds of incremental encoded content
 airtime, excluding preamble and fixed framing, with a minimum one-byte allowance.
@@ -327,7 +330,9 @@ The received text/file cache defaults to 256 MiB (`--cache-mb`); streaming DSP h
 a separate 64 MiB workspace (`--dsp-mb`, shared by the key/epoch receiver bank).
 Neither is a process RSS cap: encoded
 packets, codec workspaces and caller-owned buffers can coexist. Live audio and
-accelerated simulation never allocate PCM proportional to transmission duration.
+sampled simulation never allocate PCM proportional to transmission duration.
+Simulation CPU work does grow with the number of samples, so long integrations
+and high sample rates can take substantial time and remain cancellable.
 Explicit batch WAV operations still use `--memory-mb` and can reject recordings
 that exceed that workspace. There is no disk-backed receive cache or chunked file
 transport.

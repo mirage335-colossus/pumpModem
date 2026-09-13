@@ -372,32 +372,43 @@ Received simulate(const Message& message, const Options& options, const modem::C
     const auto config = seeded_config(options, options.timestamp);
     modem::validate_channel(config,channel);
     const auto wire=transmission_wire(message,options);
-    auto candidates=drift_candidates(options.timestamp,options.search_seconds,options.key.has_value());
-    if(!options.key)candidates={options.timestamp};
+    const auto receiver_center=channel.receiver_timestamp.value_or(options.timestamp);
+    auto candidates=drift_candidates(receiver_center,options.search_seconds,options.key.has_value());
+    if(!options.key)candidates={receiver_center};
     std::string last_error;
     for(const auto timestamp:candidates) {
         check_cancelled(stop);if(progress)progress(timestamp);check_cancelled(stop);
         try {
             modem::StreamingTransmitter source(wire,config,options.dsp_workspace_bytes);
             auto decoder=receiver(options,timestamp);
-            modem::SimulationChannel impairments(config,channel);
+            modem::SampledSimulationChannel impairments(config,channel);
             Bytes received;
-            auto delay=static_cast<std::uint64_t>(channel.delay_samples);
-            const auto quantum=std::max<std::uint64_t>(1,modem::symbol_sample_count(config)/32);
-            while(delay) {
-                check_cancelled(stop);
-                const auto count=std::min(delay,quantum);
-                const auto noise=impairments.noise(count);
-                append_wire(received,decoder.push_symbols(std::span(&noise,1),stop),options);
-                delay-=count;
+            std::array<float,2048> samples{},preview{};
+            std::size_t preview_count=0;
+            while(const auto count=impairments.read(source,samples,stop)) {
+                // The receiver sees only its own clocked PCM, including idle
+                // noise and arbitrary burst/carrier phase. It derives chip
+                // correlation and packet timing from those samples.
+                append_wire(received,decoder.push(std::span(samples).first(count),stop),options);
+                const auto retained=std::min(preview_count,preview.size()-count);
+                std::move(preview.begin()+static_cast<std::ptrdiff_t>(preview_count-retained),
+                          preview.begin()+static_cast<std::ptrdiff_t>(preview_count),preview.begin());
+                std::copy_n(samples.begin(),count,preview.begin()+static_cast<std::ptrdiff_t>(retained));
+                preview_count=retained+count;
             }
-            while(const auto observation=source.next_symbol(stop)) {
-                if(const auto noisy=impairments.process(*observation))
-                    append_wire(received,decoder.push_symbols(std::span(&*noisy,1),stop),options);
+            // Receiver integration continues after the source stops. Do not
+            // finish the capture at a transmitter-provided symbol boundary.
+            auto trailing=modem::symbol_sample_count(config);
+            while(trailing) {
+                const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(trailing,samples.size()));
+                const auto tail=std::span(samples).first(count);
+                impairments.read_noise(tail,stop);
+                append_wire(received,decoder.push(tail,stop),options);
+                trailing-=count;
             }
             append_wire(received,decoder.finish(stop),options);
-            auto diagnostics=decoder.diagnostics();diagnostics.waveform.resize(2048);
-            impairments.preview_last(source,diagnostics.waveform);
+            auto diagnostics=decoder.diagnostics();
+            diagnostics.waveform.assign(preview.begin(),preview.begin()+static_cast<std::ptrdiff_t>(preview_count));
             return verified(std::move(received),std::move(diagnostics),options,timestamp);
         } catch(const Error& error) {check_cancelled(stop);last_error=error.what();}
     }

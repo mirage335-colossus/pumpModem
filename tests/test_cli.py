@@ -52,6 +52,8 @@ class CommandTests(PumpCase):
         self.run_pump("simulate", "--text", "x", "--search-seconds", "121", ok=False)
         self.run_pump("simulate", "--text", "x", "--clock-error-ppm", "nan", ok=False)
         self.run_pump("simulate", "--text", "x", "--phase-noise", "-1", ok=False)
+        self.run_pump("tx", "--text", "x", "--receiver-time", EPOCH, ok=False)
+        self.run_pump("simulate", "--text", "x", "--receiver-time", "-1", ok=False)
 
     def test_bandwidth_clock_and_impaired_channel(self):
         default=json.loads(self.run_pump("estimate","--text","x").stdout)
@@ -75,9 +77,11 @@ class CommandTests(PumpCase):
                 self.assertEqual(wav.getframerate(), 6000)
             result = self.run_pump("rx", "--input", path, "--bw", "100", "--json")
             self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"independent clock")
-        result = self.run_pump("simulate", "--text", "bad crystal", "--bw", "30MHz",
-                               "--target-snr", "110", "--snr", "30", "--json")
+        result = self.run_pump("simulate", "--text", "bad crystal", "--bw", "2400",
+                               "--spreading", "1", "--snr", "30", "--json",
+                               "--time", EPOCH, "--receiver-time", EPOCH + 2)
         self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"bad crystal")
+        self.assertEqual(json.loads(result.stdout)["timestamp"], EPOCH + 2)
         self.run_pump("listen", "--bw", "30MHz", "--seconds", "0.1", ok=False)
 
     @unittest.skipUnless(sys.platform.startswith("linux"), "uses the deterministic ALSA fixture")

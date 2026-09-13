@@ -38,7 +38,7 @@ namespace {
 const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text and file modem
 
 Usage: pump COMMAND [OPTIONS]
-  simulate     Accelerated AWGN loopback; --output WAV uses raw sampled audio
+  simulate     Free-running sampled channel and blind receiver acquisition
   listen       Continuous live receiver (or noise/loopback with --simulation)
   estimate     Calculate exact message airtime without creating a waveform
   tx           Encode text/file to WAV (--output) or live audio (--device)
@@ -79,7 +79,7 @@ Modem:
   --key-name NAME       Select a named key set (default: first)
   --key-names A,B,C     Names to create with keygen (default: Default)
   --pad PATH            Required external >1GiB pad when bound to keyfile
-  --time SECONDS        Shared start epoch; default current UNIX second
+  --time SECONDS        Local epoch; default current UNIX second
   --search-seconds N    RX epoch trials ±N seconds, nearest first; default6
   --progress            Emit timing-search progress to stderr
 
@@ -93,6 +93,7 @@ Audio/simulation:
   --seed N --delay-samples N --frequency-offset HZ
   --clock-error-ppm N   Relative crystal error; default100 (0 for ideal clock)
   --phase-noise N       Phase diffusion, degrees/sqrt(second); default0.5
+  --receiver-time N     Independent receive epoch for simulate (default --time)
 
 Very slow status:
   --bits 010            Exact known callsign bits (1..4096), no MAC or FEC
@@ -117,7 +118,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise"};
+            "target-snr","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -172,6 +173,7 @@ public:
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
         if(command!="simulate" && command!="listen") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen");
+        if(command!="simulate") reject({"receiver-time"},"is only valid for simulate");
         if(command=="listen") reject({"snr","frequency-offset","delay-samples","output","tx-delay"},"is not a listen option; choose a simulation preset for its continuous channel");
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
@@ -535,13 +537,16 @@ int main(int argc,char** argv) {
         channel.frequency_offset_hz=a.number("frequency-offset",0);
         channel.clock_error_ppm=a.number("clock-error-ppm",100);
         channel.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+        if(a.has("receiver-time")) channel.receiver_timestamp=a.integer("receiver-time",timestamp);
         const auto outgoing=message(a);
         transfer::Received result;
         if(a.has("output")) {
             const auto samples=transfer::transmit(outgoing,settings);
             const auto noisy=modem::simulate(samples,transfer::seeded_config(settings,timestamp),channel);
             output_wave(a,noisy,c);
-            result=transfer::receive(noisy,settings,progress);
+            auto receiver_settings=settings;
+            receiver_settings.timestamp=channel.receiver_timestamp.value_or(timestamp);
+            result=transfer::receive(noisy,receiver_settings,progress);
         } else result=transfer::simulate(outgoing,settings,channel,progress);
         report(a,result.packet,result.diagnostics,result.timestamp);
         return 0;

@@ -79,9 +79,9 @@ before APSK symbol decisions. It does not first require hard chip decisions or
 a visibly clean phase/amplitude cloud. This order permits whole-pattern evidence
 to emerge when individual chip samples resemble noise. The current implementation
 searches a finite set of timing origins and initial phase/gain hypotheses; it has
-no continuous clock or frequency tracking loop. Accelerated simulation assumes
-matched chip despreading, so its successful decoding does not demonstrate blind
-acquisition below the chip noise floor. Real PCM acquisition is tested separately.
+no continuous clock or frequency tracking loop. Simulation now sends sampled
+waveforms with independent startup timing and phase through this same blind
+acquisition path. Successful simulation is not calibrated hardware sensitivity.
 
 This inspection changes neither the wire format, keyfiles, decoding, nor the
 three-second simulation replay. It introduces no runtime dependency.
