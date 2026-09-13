@@ -222,6 +222,13 @@ public:
     NativeEditor():Fl_Text_Editor(0,0,1,1) {
         buffer(&buffer_);wrap_mode(Fl_Text_Display::WRAP_AT_BOUNDS,0);
         textfont(theme::font);
+        // FLTK's default paste binding deletes the selection before the
+        // clipboard arrives. Keep it intact until our atomic FL_PASTE edit
+        // has validated the replacement and its byte limit.
+        const auto request_paste=[](int,Fl_Text_Editor* editor){Fl::paste(*editor,1);return 1;};
+        add_key_binding('v',FL_CTRL,request_paste);
+        if(FL_COMMAND!=FL_CTRL)add_key_binding('v',FL_COMMAND,request_paste);
+        add_key_binding(FL_Insert,FL_SHIFT,request_paste);
         buffer_.add_modify_callback([](int,int inserted,int deleted,int,const char*,void* context) {
             auto& self=*static_cast<NativeEditor*>(context);
             if(!self.applying_&&(inserted||deleted)&&self.changed)self.changed(buffer_text(self.buffer_));

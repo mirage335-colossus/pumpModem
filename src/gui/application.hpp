@@ -8,7 +8,7 @@
 
 namespace datapump::gui {
 struct Launch {
-    bool color=true,simulation=false,smoke=false,raw_view=false;
+    bool color=true,simulation=false,smoke=false;
     double hold=0,timeout=100,scroll=0;
     ui::Page page=ui::Page::console;
     std::filesystem::path smoke_directory;

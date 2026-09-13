@@ -55,15 +55,14 @@ loop. The DSP history budget defaults to 50% of available RAM; a dropdown select
 signal history. Simulation feeds the same PCM acquisition path from independent sample
 and carrier phases; its finite search can fail to acquire a signal.
 
-The binary editor sits beside the message editor. Select Binary to
-transmit an exact sequence such as `001`, using the shared streaming phase/amplitude
-modulator with no packet preamble, header, compression or error correction.
-Leading zeros are preserved; whitespace is ignored. The GUI shows the bit count
-and airtime, and selected keys apply stream encryption without adding bytes.
-Raw binary simulation sends that waveform through the ordinary blind receiver.
-Raw signals have no discovery framing, so automatic raw reception is not
-implemented and simulation does not invent a received bit string from the
-transmitter's bit count or phase. The legacy CLI DBPSK status format is separate.
+The message and binary editors show the same payload. Binary displays the first
+16 bytes as eight-bit groups, most significant bit first; editing either field
+updates the other. Ctrl+C and Ctrl+V copy and paste normally. Binary replacements
+preserve any content after the first 16 bytes. Incomplete bytes remain editable
+and pause transmission until completed. Zero bytes and bytes that cannot display
+as text appear as `\xNN` escapes in the message field; its label identifies this
+mode, where `\\` represents a literal backslash. Transmit sends the resulting
+message with the usual packet framing, encryption and error correction.
 
 The GUI presents the entire simulated transmission over three seconds,
 including fixed training, live plots and pending signal-browser text. Verified
@@ -182,10 +181,11 @@ the QR preview changes, and the selection is kept while you edit the message.
 Monochrome displays offer Dim gray and Dark gray instead, with Dark gray selected
 on startup. Choose Normal to restore the full-contrast QR code for scanning.
 
-Use the source selector above the editors to choose Message/File or Binary.
-Binary accepts a few bits such as `001`, without converting them into a text
-packet. Packet metadata, attachments and error correction controls are inactive
-for this source; the selected encryption key still applies.
+Both editors are available together, with no Message/Binary source selector.
+For example, entering `01000001` in Binary produces `A` in Message. Binary is
+limited to 128 meaningful bits, with optional whitespace between groups. While
+an attachment is selected, both message draft views are inactive; Use text
+restores the synchronized draft.
 
 Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same

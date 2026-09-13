@@ -12,6 +12,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.submit=Command::transmit;control.submit_mode=Field::send_key;
         control.help="Enter transmits by default. Shift+Enter inserts a newline. The send-key choice can require Ctrl+Enter.";
     }
+    if(slot==Slot::message)control.help="Edits also update the first 16 bytes in Binary. In escaped-byte mode, use \\xNN for byte values and \\\\ for a literal backslash. Enter transmits; Shift+Enter inserts a newline.";
+    if(slot==Slot::binary)control.help="Edit the first 16 message bytes, most significant bit first. Use eight 0/1 bits per byte; whitespace is optional. Ctrl+C copies and Ctrl+V pastes. Incomplete bytes pause transmission. Enter transmits; Shift+Enter inserts a newline.";
     if(slot==Slot::signals) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
@@ -60,10 +62,9 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Scrambler pattern / tone"}, Slot::pattern),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
-        placed({Kind::choice,Field::source,Command::none,Bitmap::none,Page::console,5,""}, Slot::source),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
         placed({Kind::label,Field::binary_label,Command::none,Bitmap::none,Page::console,6,"Binary"}, Slot::binary_label),
-        placed({Kind::text,Field::message,Command::none,Bitmap::none,Page::console,7,"",2,true}, Slot::message),
+        placed({Kind::text,Field::message,Command::none,Bitmap::none,Page::console,7,"",2,true,4*1024*1024}, Slot::message),
         placed({Kind::text,Field::binary,Command::none,Bitmap::none,Page::console,7,"",1,true}, Slot::binary),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::qr,Page::console,7,""}, Slot::qr),
         placed({Kind::action,Field::count,Command::attach_file,Bitmap::none,Page::console,8,"Attach file"}, Slot::attach_file),

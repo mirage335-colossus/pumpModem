@@ -8,7 +8,7 @@
 namespace datapump::gui::ui {
 enum class Page { console, flow, transmission, count };
 enum class Field {
-    callsign, grid, repeatable, simulation, key, source, message, binary,
+    callsign, grid, repeatable, simulation, key, message, binary,
     qr_brightness, send_key, device, bandwidth, snr, pattern, fec, dsp_workspace,
     files, signals, mode, status, airtime, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,

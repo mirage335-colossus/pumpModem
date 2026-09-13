@@ -23,13 +23,6 @@ int main() {
             try { (void)gui::parse_binary_bits(invalid); } catch (const Error&) { rejected_bits=true; }
             check(rejected_bits);
         }
-        auto source=gui::TransmitSource::message_file;
-        check(!gui::selected_binary_bits(source,"000101"));
-        check(!gui::selected_binary_bits(source,"invalid stale binary text"));
-        source=gui::TransmitSource::binary;
-        check(gui::selected_binary_bits(source,"000101")==std::optional<Bytes>(Bytes{0,0,0,1,0,1}));
-        source=gui::TransmitSource::message_file;
-        check(!gui::selected_binary_bits(source,"000101"));
         gui::Inbox inbox(5);
         inbox.put(packet(1,3));
         inbox.put(packet(1,2));

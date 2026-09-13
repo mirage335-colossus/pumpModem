@@ -39,6 +39,7 @@ public:
     // Consumes accumulated invalidation flags once for all bitmap producers.
     PlotUpdate plot_update() const;
     std::uint64_t revision() const;
+    const Bytes& message_bytes() const;
     double waveform_zoom() const;
     std::size_t pattern_first() const;
     void pattern_page_size(std::size_t size);

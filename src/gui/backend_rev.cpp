@@ -201,7 +201,11 @@ struct Editor : theme::RevText {
     }
     void textInput(re::Event& e) override {
         if(!targetFlags.focus || !editable || targetFlags.disabled) return;
-        if(e.keyboard.input=="\b" || e.keyboard.input=="\r" || e.keyboard.input=="\n" || e.keyboard.input=="\t") return;
+        // Native backends can emit a text event after a shortcut or editing
+        // key (Ctrl+A/C/V, Delete, etc.). Its control byte is not draft text.
+        const bool control_byte=e.keyboard.input.size()==1 &&
+            (static_cast<unsigned char>(e.keyboard.input.front())<32 || e.keyboard.input.front()==127);
+        if((e.keyboard.ctrl&&!e.keyboard.alt)||control_byte) {e.propagate=false;return;}
         replace(e.keyboard.input);e.propagate=false;
     }
     void complete_paste(ClipboardResult result) {

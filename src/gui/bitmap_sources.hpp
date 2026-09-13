@@ -31,7 +31,8 @@ public:
         }
         if (update.clear_waterfall || update.append_waterfall)
             put(ui::Bitmap::waterfall, plots::PlotSnapshot::waterfall(history_));
-        const auto& text = controller.field(ui::Field::message).text;
+        const auto& bytes = controller.message_bytes();
+        const std::string text(bytes.begin(), bytes.end());
         const auto& brightness = controller.field(ui::Field::qr_brightness).selected;
         if (qr_text_ != text || brightness_ != brightness) {
             qr_text_ = text; brightness_ = brightness; qr_error_.clear();

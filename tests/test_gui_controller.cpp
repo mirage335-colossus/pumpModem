@@ -1,5 +1,6 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
+#include "../src/gui/binary_editor.hpp"
 #include <iostream>
 #include <thread>
 
@@ -7,6 +8,69 @@ namespace {
 using namespace datapump;
 using namespace datapump::gui;
 void check(bool value, const char* message) { if (!value) throw Error(message); }
+void binary_editor_controls() {
+    using F=ui::Field; using C=ui::Command;
+    Controller controller({true,true});
+    check(controller.field(F::message).enabled&&controller.field(F::binary).enabled,
+          "Both payload editors must be editable without a source choice");
+    controller.edit(F::message,"abcdefghijklmnopTAIL");
+    check(parse_binary_bits(controller.field(F::binary).text).size()==128,
+          "Binary view must stop at sixteen bytes");
+    BinaryEditor prefix(Bytes(16,'A'));
+    controller.edit(F::binary,prefix.binary());
+    check(controller.field(F::message).text==std::string(16,'A')+"TAIL",
+          "Binary edit changed the suffix beyond sixteen bytes");
+    controller.edit(F::binary,"01000010");
+    check(controller.field(F::message).text=="BTAIL"&&
+          parse_binary_bits(controller.field(F::binary).text).size()==40,
+          "Shortened prefix did not preserve and display the shifted suffix");
+    controller.edit(F::message,"A");
+    const auto prepare=[&] {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(3);
+        while(!controller.estimate()&&std::chrono::steady_clock::now()<deadline) {
+            controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(controller.estimate().has_value(),"Payload estimate was not prepared");
+    };
+    prepare();
+    controller.edit(F::binary,"001");
+    check(controller.field(F::binary).text=="001"&&controller.field(F::message).text=="A"&&
+          !controller.estimate()&&!controller.enabled(C::transmit),
+          "Partial byte was hidden, changed the payload or left transmission enabled");
+    for(int poll=0;poll<40;++poll) {
+        controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(!controller.estimate(),"A delayed estimate made an incomplete binary draft transmittable");
+    controller.edit(F::message,"A");
+    check(controller.field(F::binary).text=="01000001",
+          "Reapplying the displayed message did not repair an invalid binary draft");
+    controller.edit(F::binary,"00000000 11111111");
+    check(controller.message_bytes()==Bytes({0,255})&&controller.field(F::message).text=="\\x00\\xFF"&&
+          controller.field(F::message_label).text.find("escaped")!=std::string::npos,
+          "Arbitrary binary bytes were lost or displayed as ordinary text");
+    prepare();
+    check(!controller.inspection()->binary&&controller.inspection()->packet_layout->original_bytes==2,
+          "Binary editing changed the dispatch mode or encoded the escape characters");
+    controller.start();controller.activate(C::transmit);
+    const auto receive_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    while(controller.inbox().items().empty()&&std::chrono::steady_clock::now()<receive_deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(!controller.inbox().items().empty()&&controller.inbox().items().front().message.data==Bytes({0,255}),
+          "Binary-edited zero and non-UTF-8 bytes did not arrive as the exact verified payload");
+    controller.edit(F::message,"\\x0\\xFF");
+    check(controller.field(F::message).text=="\\x0\\xFF"&&!controller.estimate()&&
+          controller.message_bytes()==Bytes({0,255}),"Incomplete escape lost its draft or changed committed bytes");
+    controller.edit(F::message,"\\x01\\xFF");
+    check(controller.message_bytes()==Bytes({1,255})&&controller.field(F::binary).text=="00000001 11111111",
+          "Completing an escape did not update the binary view");
+    controller.edit(F::binary,std::string(136,'0'));
+    check(controller.message_bytes()==Bytes({1,255})&&!controller.enabled(C::transmit),
+          "Oversized binary paste changed the payload");
+    controller.edit(F::binary,"");
+    check(controller.message_bytes().empty()&&controller.field(F::message).text.empty()&&
+          controller.field(F::message_label).text=="Message","Clearing binary did not clear the short payload");
+}
 BitmapImage render(const plots::PlotSnapshot& source) {
     BitmapImage image(120, 120);
     source.paint(full_bitmap_request(120, 120, false, true), [&](unsigned x, unsigned y, PixelBlock block) { image.blit(x, y, block); });
@@ -93,6 +157,7 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        binary_editor_controls();
         workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

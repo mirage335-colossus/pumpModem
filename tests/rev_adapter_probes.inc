@@ -236,6 +236,44 @@
         }
         throw std::runtime_error("Rev smoke: missing semantic message editor");
     }
+    void verify_clipboard_shortcuts() {
+        for(const bool multiline:{false,true}) {
+            auto source=std::make_unique<Editor>(this,multiline,128,platform);
+            auto target=std::make_unique<Editor>(this,multiline,64,platform);
+            source->targetFlags.focus=target->targetFlags.focus=true;
+            const auto shortcut=[](Editor& editor,const char* key) {
+                re::Event event;event.keyboard.ctrl.id=1;event.keyboard.key=key;editor.keyDown(event);
+                if(event.propagate)throw std::runtime_error("Rev editor ignored a clipboard shortcut");
+                const auto text=editor.content.get();const auto cursor=editor.cursor,anchor=editor.selectAnchor,end=editor.selectEnd;
+                re::Event input;input.keyboard.ctrl.id=1;input.keyboard.input=std::string(1,static_cast<char>(key[0]&31));editor.textInput(input);
+                if(editor.content.get()!=text||editor.cursor!=cursor||editor.selectAnchor!=anchor||editor.selectEnd!=end||input.propagate)
+                    throw std::runtime_error("Rev shortcut text event inserted a control byte or changed the selection");
+            };
+            const auto wait=[&](auto completed) {
+                const auto deadline=Clock::now()+std::chrono::seconds(3);
+                while(!completed()&&Clock::now()<deadline) {
+                    platform.poll();std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                }
+                if(!completed())throw std::runtime_error("Rev editor clipboard shortcut timed out");
+            };
+            unsigned changes=0,errors=0;
+            target->changed=[&](std::string){++changes;};target->error=[&](std::string){++errors;};
+            const std::string value=multiline?"caf\xc3\xa9\n\xf0\x9f\x8c\x8d":"01000001 01000010";
+            source->apply(value);source->selectAnchor=source->selectEnd=source->cursor=static_cast<int>(value.size());shortcut(*source,"a");
+            shortcut(*source,"c");target->apply("replace");target->selectAnchor=0;target->selectEnd=target->cursor=7;
+            shortcut(*target,"v");wait([&]{return changes||errors;});
+            if(target->content.get()!=value||changes!=1||errors||source->content.get()!=value||source->selectAnchor!=0||source->selectEnd!=static_cast<int>(value.size()))
+                throw std::runtime_error("Rev Ctrl+C / Ctrl+V changed selected binary or UTF-8 text or emitted multiple edits");
+            source->apply(std::string(65,'1'));source->selectAnchor=0;source->selectEnd=source->cursor=65;shortcut(*source,"c");
+            target->selectAnchor=0;target->selectEnd=target->cursor=static_cast<int>(value.size());shortcut(*target,"v");
+            wait([&]{return errors>0;});
+            if(target->content.get()!=value||changes!=1||errors!=1||target->selectAnchor!=0||target->selectEnd!=static_cast<int>(value.size())||target->cursor!=static_cast<int>(value.size()))
+                throw std::runtime_error("Rev rejected keyboard paste changed selected text or emitted an edit");
+            re::Event deletion;deletion.keyboard.input=std::string(1,'\x7f');target->textInput(deletion);
+            if(target->content.get()!=value||changes!=1||deletion.propagate)
+                throw std::runtime_error("Rev Delete text event inserted a control byte");
+        }
+    }
     void verify_choice_contract() {
         const auto state=test::effective_choice();
         auto* choice=new ChoiceView(this,{.label="",.value=state.selected});

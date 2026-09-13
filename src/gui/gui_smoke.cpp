@@ -37,7 +37,7 @@ struct Smoke::Impl {
     enum class Phase {
         initialize,fec20,fec60,generate,generated,reloaded,key_failed,text_ready,text_received,
         file_ready,file_received,interrupt_ready,interrupt_replay,replacement_ready,
-        replacement_replay,cancelled,raw_attachment,raw_ready,raw_received,tiny,long_text
+        replacement_replay,cancelled,binary_attachment,binary_ready,binary_received,tiny,long_text
     };
     struct Replay {
         bool active=false,binary=false,pending_required=false,saw_symbols=false,resumed=false;
@@ -49,7 +49,7 @@ struct Smoke::Impl {
         std::vector<std::complex<double>> constellation;
     } replay;
     std::filesystem::path directory,input_path,save_path,key_path;
-    double timeout,raw_seconds=0;
+    double timeout;
     Clock::time_point started=Clock::now(),cancelled_at;
     Phase phase=Phase::initialize;
     bool done=false,launched_binary=false,launched_compact_packet=false,saw_idle_change=false,key_reception=false,owns_directory=false;
@@ -94,7 +94,7 @@ struct Smoke::Impl {
     }
     void transmit(Controller& controller) {
         require(controller.enabled(C::transmit),"Smoke attempted a transmission before its preparation finished");
-        launched_binary=controller.field(F::source).selected=="binary";
+        launched_binary=controller.inspection()&&controller.inspection()->binary;
         launched_compact_packet=controller.inspection()&&controller.inspection()->packet_layout&&
             controller.inspection()->packet_layout->original_bytes<256;
         controller.activate(C::transmit);
@@ -211,7 +211,7 @@ struct Smoke::Impl {
                     completed_replay==controller.snapshot().transmission_id&&
                     (!replay.pending_required||(replay.pending_poll&&replay.pending_poll<polls)),
                     "Verified packet bypassed an earlier pending replay poll");
-            require(text==message||packet.message.data==file_bytes,"Smoke received unexpected packet content");
+            require(text==message||text=="Help"||packet.message.data==file_bytes,"Smoke received unexpected packet content");
             verified_ids.insert(id);
         }
     }
@@ -383,44 +383,35 @@ struct Smoke::Impl {
             if(Clock::now()-cancelled_at<std::chrono::milliseconds(3250)||!replay.resumed)break;
             controller.edit(F::message,"help");controller.toggle(F::repeatable,true);
             require(controller.field(F::repeatable).checked,"Smoke could not establish a retained repeatable packet draft");
-            attach(controller);phase=Phase::raw_attachment;break;
-        case Phase::raw_attachment:
+            attach(controller);phase=Phase::binary_attachment;break;
+        case Phase::binary_attachment:
             if(!controller.field(F::message_label).text.starts_with("Attached:")||!controller.estimate())break;
-            controller.select(F::source,"binary");controller.edit(F::binary,"001x");
-            require(!controller.enabled(C::transmit)&&!controller.estimate(),"Invalid binary draft retained a usable stale estimate");
-            controller.select(F::source,"message");
-            require(controller.field(F::binary).text=="001x"&&controller.field(F::message).text=="help"&&controller.field(F::fec).selected=="rs20"&&
-                    controller.field(F::fec).enabled,"Source switching discarded inactive drafts or the packet FEC choice");
-            controller.select(F::source,"binary");controller.edit(F::binary,"0 0\n1");controller.select(F::key,first_key_id);
-            phase=Phase::raw_ready;break;
-        case Phase::raw_ready: {
+            require(!controller.field(F::binary).enabled,"Attachment left its inactive binary draft editable");
+            controller.activate(C::use_text);controller.toggle(F::repeatable,false);
+            controller.edit(F::binary,"001x");
+            require(!controller.enabled(C::transmit)&&!controller.estimate()&&controller.field(F::message).text=="help",
+                    "Invalid binary draft changed committed bytes or retained a usable estimate");
+            controller.edit(F::binary,"01001000 01100101\n01101100 01110000");controller.select(F::key,first_key_id);
+            require(controller.field(F::message).text=="Help","Binary edit did not update the message");
+            phase=Phase::binary_ready;break;
+        case Phase::binary_ready: {
             if(!controller.enabled(C::transmit))break;
-            const auto& model=controller.inspection();const auto& estimate=*controller.estimate();
-            const auto expected=transfer::estimate_binary(Bytes{0,0,1},controller.settings().transfer);
+            const auto& model=controller.inspection();
             require(controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac,
-                    "Raw binary transmitter did not use the selected production key");
-            require(model&&model->binary&&!model->packet_layout&&inspection_field(*model,"Meaningful bits")=="3"&&
-                    inspection_field(*model,"Body FEC")=="Off"&&inspection_field(*model,"Symbol padding")=="0 bits",
-                    "Raw inspection added packet framing, parity or padded bits");
-            require(estimate.total_seconds==expected.total_seconds&&estimate.packet_seconds==estimate.total_seconds&&
-                    estimate.content_seconds==estimate.total_seconds&&controller.field(F::airtime).text.starts_with("3 bits /"),
-                    "Raw airtime used packet/attachment overhead or padded the meaningful bit count");
-            raw_seconds=expected.total_seconds;
-            for(auto field:{F::callsign,F::grid,F::repeatable,F::fec,F::message})require(!controller.field(field).enabled,"Binary source left packet-only input active");
-            require(controller.field(F::binary).enabled&&controller.field(F::key).enabled&&controller.field(F::repeatable).checked&&
-                    controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off"&&
-                    !controller.enabled(C::attach_file)&&!controller.enabled(C::use_text),"Raw source did not preserve and disable inactive packet choices");
-            transmit(controller);phase=Phase::raw_received;break;
+                    "Binary-edited message did not retain the selected production key");
+            require(model&&!model->binary&&model->packet_layout&&model->packet_layout->original_bytes==4,
+                    "Binary edit did not prepare an ordinary message with its exact payload size");
+            require(controller.field(F::message).enabled&&controller.field(F::binary).enabled&&
+                    controller.field(F::callsign).enabled&&controller.field(F::grid).enabled&&
+                    controller.field(F::fec).selected=="rs20"&&controller.field(F::fec).display_text=="Off (under 16 B)",
+                    "Synchronized editors changed packet settings or disabled the other editor");
+            transmit(controller);phase=Phase::binary_received;break;
         }
-        case Phase::raw_received:
+        case Phase::binary_received:
             if(snapshot.transmitting||snapshot.simulation_replay||completed_replay!=snapshot.transmission_id)break;
-            require(!replay.pending_poll&&std::none_of(controller.signals().lines().begin(),controller.signals().lines().end(),
-                    [](const auto& line){return line.binary;}),"Unsynchronized raw transmission fabricated pending or completed bits");
-            require(std::abs(snapshot.transmission_seconds-raw_seconds)<=1.0/controller.settings().transfer.modem.sample_rate+1e-12,
-                    "Raw transmitter emitted a duration different from its three meaningful bits");
-            require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary was promoted to a verified packet");
-            controller.select(F::source,"message");controller.activate(C::use_text);controller.toggle(F::repeatable,false);
-            require(controller.field(F::message).text=="help"&&controller.field(F::binary).text=="0 0\n1","Raw source switching discarded an inactive editor");
+            require(controller.inbox().items().size()==1&&verified_ids.size()==3&&
+                    controller.inbox().items().front().message.data==Bytes({'H','e','l','p'}),
+                    "Binary-edited bytes did not arrive as the exact verified message");
             controller.select(F::key,"none");phase=Phase::tiny;break;
         case Phase::tiny:
             if(!controller.estimate())break;
@@ -435,7 +426,7 @@ struct Smoke::Impl {
             require(inspection_field(*controller.inspection(),"Compression").starts_with("LZMA2 preset 9e")&&
                     controller.field(F::fec).enabled&&controller.field(F::fec).display_text.empty(),
                     "Returning to long text failed to restore compression and retained FEC presentation");
-            require(verified_ids.size()==2&&interrupted.size()==2,"Smoke did not complete normal packet, replacement and cancellation workflows");
+            require(verified_ids.size()==3&&interrupted.size()==2,"Smoke did not complete normal packet, replacement and cancellation workflows");
             done=true;break;
         }
     }
@@ -452,7 +443,7 @@ bool Smoke::done() const { return impl_->done; }
 void controller_self_check() {
     Controller controller({true,true});
     require(controller.field(F::qr_brightness).selected=="dark","QR brightness must start Dark");
-    require(!controller.field(F::binary).enabled,"Inactive binary editor must not control message dispatch");
+    require(controller.field(F::binary).enabled&&controller.field(F::message).enabled,"Both synchronized editors must be available");
     controller.edit(F::message,"Preserve this message");
     const auto revision=controller.revision();
     controller.edit(F::message,"Preserve this message");
@@ -465,9 +456,10 @@ void controller_self_check() {
     require(controller.settings().transfer.modem.bandwidth_hz==settings.bandwidth_hz,"Invalid draft replaced the last valid modem settings");
     require(!controller.enabled(C::transmit),"Invalid settings enabled transmission");
     controller.edit(F::bandwidth,"1.2 kHz");
-    controller.select(F::source,"binary"); controller.edit(F::binary,"001");
-    controller.select(F::source,"message");
-    require(controller.field(F::message).text=="Preserve this message"&&controller.field(F::binary).text=="001","Source switching discarded editor text");
+    controller.edit(F::binary,"001");
+    require(controller.field(F::message).text=="Preserve this message"&&!controller.estimate(),"Partial byte changed committed message bytes");
+    controller.edit(F::message,"Preserve this message!");
+    require(controller.field(F::binary).text.starts_with("01010000"),"Message edit did not restore the synchronized binary view");
     const auto before=controller.field(F::message).text;
     controller.edit(F::message,std::string(1024*1024+1,'a'));
     require(controller.field(F::message).text==before,"Over-limit edit was truncated or accepted");

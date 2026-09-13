@@ -27,7 +27,7 @@ int run_native_probes() {
     }
     {
         RevApp probe(windows,launch);
-        probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();
+        probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_clipboard_shortcuts();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();
     }
     {
         launch.color=true;configure_theme(launch.color);

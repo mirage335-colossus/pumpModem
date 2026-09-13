@@ -12,7 +12,7 @@ inline constexpr int compose_height = 196, qr_size = 196;
 
 enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation, key_actions,
-    key_path, key, tabs, page, source, message_label, binary_label, message,
+    key_path, key, tabs, page, message_label, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit,
     cancel, airtime, signal_label, signals, copy_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
@@ -64,8 +64,7 @@ struct DesktopLayout {
         constexpr int compose_y = 152, binary_width = 220;
         const int editor_width = width - 2 * margin - qr_size - binary_width - 28;
         const int binary_x = margin + editor_width + 14;
-        out[Slot::source] = {margin, 130, 145, 20};
-        out[Slot::message_label] = {margin + 155, 130, editor_width - 155, 20};
+        out[Slot::message_label] = {margin, 130, editor_width, 20};
         out[Slot::binary_label] = {binary_x, 130, binary_width, 20};
         out[Slot::message] = {margin, compose_y, editor_width, compose_height};
         out[Slot::binary] = {binary_x, compose_y, binary_width, compose_height};

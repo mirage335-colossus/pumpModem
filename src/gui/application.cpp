@@ -53,8 +53,7 @@ bool Application::tick() {
             impl_->smoke->step(impl_->controller, &impl_->bitmaps);
             if(!impl_->passed&&impl_->smoke->done()) {
                 impl_->passed=true;impl_->completed=now;impl_->page=launch.page;
-                if(launch.raw_view)impl_->controller.select(ui::Field::source,"binary");
-                std::cout<<"Shared GUI smoke passed: keys, text, files, exact bits, cancellation, retained saves, live plots and page switching.\n";
+                std::cout<<"Shared GUI smoke passed: keys, text, files, binary editing, cancellation, retained saves, live plots and page switching.\n";
             }
             if(!impl_->passed) {
                 const auto& definitions=ui::pages();
@@ -209,14 +208,13 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
         Launch launch;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: "<<backend<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-raw-view --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: "<<backend<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<" GUI backend: "<<backend<<'\n';return 0;}
             if(arg=="--self-check") {gui_self_check();return 0;}
             if(arg=="--color")launch.color=true;
             else if(arg=="--monochrome")launch.color=false;
             else if(arg=="--simulation")launch.simulation=true;
             else if(arg=="--smoke-test")launch.smoke=true;
-            else if(arg=="--smoke-raw-view")launch.raw_view=true;
             else if(arg=="--smoke-dir"&&i+1<argc)launch.smoke_directory=std::filesystem::u8path(argv[++i]);
             else if((arg=="--smoke-hold"||arg=="--smoke-timeout"||arg=="--smoke-scroll")&&i+1<argc) {
                 const std::string value=argv[++i];std::size_t used=0;const double number=std::stod(value,&used);

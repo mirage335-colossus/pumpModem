@@ -20,14 +20,6 @@ Bytes parse_binary_bits(std::string_view text) {
         if (value=='0' || value=='1') bits.push_back(static_cast<std::uint8_t>(value-'0'));
     return bits;
 }
-std::optional<Bytes> selected_binary_bits(TransmitSource source, std::string_view text) {
-    switch (source) {
-    case TransmitSource::message_file: return std::nullopt;
-    case TransmitSource::binary: return parse_binary_bits(text);
-    }
-    throw Error("Select Message / File or Binary input");
-}
-
 Inbox::Inbox(std::size_t capacity) : capacity_(capacity) {
     if (!capacity) throw Error("Receive cache capacity must be positive");
 }

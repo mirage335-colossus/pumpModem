@@ -487,6 +487,47 @@ public:
     }
     void draw() override {}
 };
+void clipboard_shortcuts() {
+    Fl_Double_Window host(600,220,"Native editor clipboard shortcuts");
+    auto* source=new NativeEditor;source->resize(10,10,580,90);
+    auto* target=new NativeEditor;target->resize(10,110,580,90);
+    host.end();host.show();Fl::check();
+    const auto shortcut=[](NativeEditor& editor,int key,int state) {
+        const auto previous_key=Fl::e_keysym,previous_state=Fl::e_state,previous_length=Fl::e_length;
+        auto* previous_text=Fl::e_text;char text[]{static_cast<char>(key&31),0};
+        Fl::e_keysym=key;Fl::e_state=state;Fl::e_text=text;Fl::e_length=1;
+        const auto handled=editor.handle(FL_KEYDOWN);
+        Fl::e_keysym=previous_key;Fl::e_state=previous_state;Fl::e_text=previous_text;Fl::e_length=previous_length;
+        require(handled!=0,"Native editor ignored a clipboard shortcut");
+    };
+    unsigned changes=0,errors=0;
+    target->changed=[&](std::string){++changes;};target->error=[&](std::string){++errors;};
+    source->apply("01000001 01000010");source->buffer()->select(0,8);source->insert_position(8);source->take_focus();
+    shortcut(*source,'c',FL_CTRL);
+    target->apply("00000000 11111111");target->buffer()->select(9,17);target->insert_position(17);target->take_focus();
+    shortcut(*target,'v',FL_CTRL);
+    auto deadline=Clock::now()+std::chrono::seconds(3);
+    while(changes==0&&Clock::now()<deadline)Fl::wait(.005);
+    require(buffer_text(*target->buffer())=="00000000 01000001"&&changes==1&&errors==0,
+        "Ctrl+C / Ctrl+V did not replace selected binary text in one atomic edit");
+    int start=0,end=0;
+    require(buffer_text(*source->buffer())=="01000001 01000010"&&source->buffer()->selection_position(&start,&end)&&start==0&&end==8,
+        "Ctrl+C changed source binary text or selection");
+    source->apply("111111111");source->buffer()->select(0,9);source->insert_position(9);source->take_focus();shortcut(*source,'c',FL_CTRL);
+    target->byte_limit=17;target->buffer()->select(0,8);target->insert_position(8);target->take_focus();
+    for(const auto [key,state]:std::array<std::pair<int,int>,2>{{{'v',FL_CTRL},{FL_Insert,FL_SHIFT}}}) {
+        const auto previous_errors=errors;shortcut(*target,key,state);deadline=Clock::now()+std::chrono::seconds(3);
+        while(errors==previous_errors&&Clock::now()<deadline)Fl::wait(.005);
+        require(buffer_text(*target->buffer())=="00000000 01000001"&&changes==1&&errors==previous_errors+1&&
+            target->insert_position()==8&&target->buffer()->selection_position(&start,&end)&&start==0&&end==8,
+            "Rejected keyboard paste deleted selected binary text or emitted an edit");
+    }
+    const std::string message="caf\xc3\xa9\n\xf0\x9f\x8c\x8d";
+    source->apply(message);source->buffer()->select(0,static_cast<int>(message.size()));source->take_focus();shortcut(*source,'c',FL_CTRL);
+    target->byte_limit=64;target->buffer()->select(0,target->buffer()->length());target->take_focus();shortcut(*target,'v',FL_CTRL);
+    deadline=Clock::now()+std::chrono::seconds(3);while(changes==1&&Clock::now()<deadline)Fl::wait(.005);
+    require(buffer_text(*target->buffer())==message&&changes==2,"Keyboard clipboard round trip changed multiline UTF-8 text or emitted multiple edits");
+}
 void clipboard() {
     Fl_Double_Window host(260,100,"Native clipboard regression");host.end();host.show();Fl::check();
     const std::string value="Native clipboard caf\xc3\xa9 \xf0\x9f\x8c\x8d\nsecond line";
@@ -543,6 +584,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editors_and_records();clipboard();clipboard_shortcuts();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

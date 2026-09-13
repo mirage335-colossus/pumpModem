@@ -70,7 +70,7 @@ void control_bindings() {
     check(app.control(action).label==action.label&&app.control(action).enabled,"Action lost its fallback label or command availability");
     action.command=ui::Command::cancel;action.label="Stale cancel label";
     check(app.control(action).label=="Cancel TX"&&!app.control(action).enabled,"Action did not use the command's current label and eligibility");
-    action.command=ui::Command::clear_received;action.field=ui::Field::binary;
+    action.command=ui::Command::clear_received;action.field=ui::Field::fec;
     check(app.enabled(action.command)&&!app.control(action).enabled&&app.control(action).visible,"Disabled field did not restrict an otherwise enabled action");
     app.activate(action);
     check(app.field(ui::Field::status).text=="Shared status text","Disabled bound action still dispatched its command");
@@ -85,7 +85,7 @@ void menu_bindings() {
     Application app({.simulation=true});
     std::vector<ui::Control> declarations{
         {ui::Kind::action,ui::Field::payload_alphabet,ui::Command::open_keyfile},
-        {ui::Kind::action,ui::Field::binary,ui::Command::open_keyfile},
+        {ui::Kind::action,ui::Field::fec,ui::Command::open_keyfile},
         {ui::Kind::action,ui::Field::count,ui::Command::clear_received},
         {ui::Kind::action,ui::Field::count,ui::Command::cancel}
     };
@@ -111,7 +111,7 @@ void menu_bindings() {
     const auto empty=app.menu({});
     check(!empty.visible&&!empty.enabled&&empty.options.empty(),"Empty menu acquired a native target");
 
-    app.select(ui::Field::source,"binary");
+    app.edit(ui::Field::message,"A sixteen-byte message");
     const auto changed=app.menu(items);
     check(changed.options[0].id=="1"&&changed.options[0].enabled,"Menu retained stale item eligibility after shared state changed");
     app.select_menu(items,"1");const auto requests=app.take_services();
@@ -138,17 +138,18 @@ void declared_edits() {
     auto disabled_preset=control(ui::Field::pattern);app.preset(disabled_preset,"auto-keystream");
     check(app.field(disabled_preset.field).selected=="auto-pattern"&&app.field(ui::Field::status).text=="Preset unchanged","Disabled preset attempted to edit its bound field");
 
-    app.select(ui::Field::source,"binary");app.report_error("Inactive edit unchanged");app.edit(editor,"other");
-    check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text=="Inactive edit unchanged","Disabled declaration attempted an edit");
+    app.report_error("Inactive edit unchanged");
     editor.field=ui::Field::payload_alphabet;const auto hidden_text=app.field(editor.field).text;app.edit(editor,"other");
     check(app.field(editor.field).text==hidden_text&&app.field(ui::Field::status).text=="Inactive edit unchanged","Hidden declaration attempted an edit");
     editor.field=ui::Field::count;app.edit(editor,"other");
     check(app.field(ui::Field::status).text=="Inactive edit unchanged","Unbound declaration attempted an edit");
+    app.close();app.report_error("Inactive edit unchanged");editor.field=ui::Field::message;app.edit(editor,"other");
+    check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text=="Inactive edit unchanged","Disabled declaration attempted an edit");
 }
 void declared_submission() {
     Application app({.simulation=true});
     ui::Control editor{ui::Kind::text};editor.submit=ui::Command::clear_received;
-    for(const auto field:{ui::Field::binary,ui::Field::payload_alphabet}) {
+    for(const auto field:{ui::Field::fec,ui::Field::payload_alphabet}) {
         editor.field=field;app.report_error("Inactive submit unchanged");
         check(app.submit(editor,false,false),"Inactive declared submit gesture was not consumed");
         check(app.field(ui::Field::status).text=="Inactive submit unchanged","Stale submit callback bypassed hidden or disabled control eligibility");
@@ -159,12 +160,12 @@ void declared_submission() {
 }
 void declared_native_input() {
     Application app({.simulation=true});
-    auto choice=control(ui::Field::source);
-    app.select(choice,"binary");
-    check(app.field(choice.field).selected=="binary","Declared choice did not select its stable option ID");
-    choice.kind=ui::Kind::label;app.select(choice,"message");
-    check(app.field(choice.field).selected=="binary","Nonselectable declaration changed its bound selection");
-    choice.kind=ui::Kind::choice;app.select(choice,"message");
+    auto choice=control(ui::Field::send_key);
+    app.select(choice,"ctrl-enter");
+    check(app.field(choice.field).selected=="ctrl-enter","Declared choice did not select its stable option ID");
+    choice.kind=ui::Kind::label;app.select(choice,"enter");
+    check(app.field(choice.field).selected=="ctrl-enter","Nonselectable declaration changed its bound selection");
+    choice.kind=ui::Kind::choice;app.select(choice,"enter");
 
     auto toggle=control(ui::Field::repeatable);
     const bool original=app.field(toggle.field).checked;
@@ -187,7 +188,7 @@ void declared_native_input() {
           "Hidden or unbound native input changed state or attempted invalid field access");
 
     ui::Control gesture{ui::Kind::label};gesture.click=ui::Command::clear_received;
-    for(const auto field:{ui::Field::binary,ui::Field::payload_alphabet}) {
+    for(const auto field:{ui::Field::fec,ui::Field::payload_alphabet}) {
         gesture.field=field;app.gesture(gesture,gesture.click);
         check(app.field(ui::Field::status).text=="Inactive native input unchanged","Stale gesture bypassed declaration visibility or availability");
     }
@@ -200,21 +201,21 @@ void declared_native_input() {
     gesture.kind=ui::Kind::label;app.gesture(gesture,gesture.click);
     check(app.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Eligible generic gesture did not dispatch");
     app.close();app.report_error("Closing input unchanged");
-    choice=control(ui::Field::source);toggle=control(ui::Field::repeatable);
-    app.select(choice,"binary");app.toggle(toggle,original);app.gesture(gesture,gesture.click);
+    choice=control(ui::Field::send_key);toggle=control(ui::Field::repeatable);
+    app.select(choice,"ctrl-enter");app.toggle(toggle,original);app.gesture(gesture,gesture.click);
     // Readonly/list fields can retain their presentation while workers stop.
     // Shutdown eligibility must not depend on every field being disabled.
     const auto status_checked=app.field(ui::Field::status).checked;
     app.select(control(ui::Field::signals),"missing");
     app.toggle(ui::Field::status,!status_checked);app.edit(ui::Field::status,"closing edit");
     app.activate(ui::Command::open_keyfile);
-    check(app.field(choice.field).selected=="message"&&app.field(toggle.field).checked!=original&&
+    check(app.field(choice.field).selected=="enter"&&app.field(toggle.field).checked!=original&&
           app.field(ui::Field::status).checked==status_checked&&app.field(ui::Field::status).text=="Closing input unchanged"&&
           app.take_services().empty(),"Delayed native input changed a closing application");
 }
 void stale_page_input() {
     Application app({.simulation=true});
-    auto editor=control(ui::Field::message),choice=control(ui::Field::source),toggle=control(ui::Field::repeatable);
+    auto editor=control(ui::Field::message),choice=control(ui::Field::send_key),toggle=control(ui::Field::repeatable);
     editor.persistent=choice.persistent=toggle.persistent=false;
     editor.submit=ui::Command::clear_received;editor.submit_mode=ui::Field::count;
     ui::Control action{ui::Kind::action};action.command=ui::Command::open_keyfile;
@@ -223,18 +224,18 @@ void stale_page_input() {
     const auto original_text=app.field(editor.field).text,original_preset=app.field(preset.field).text;
     const bool original_toggle=app.field(toggle.field).checked;
     app.select_page(ui::Page::flow);app.report_error("Hidden page input unchanged");
-    app.edit(editor,"stale text");app.preset(preset,"1 Hz");app.select(choice,"binary");app.toggle(toggle,!original_toggle);
+    app.edit(editor,"stale text");app.preset(preset,"1 Hz");app.select(choice,"ctrl-enter");app.toggle(toggle,!original_toggle);
     app.activate(action);app.gesture(action,action.click);
     check(app.submit(editor,false,false),"A stale page's declared submit gesture was not consumed");
     check(app.field(editor.field).text==original_text&&app.field(preset.field).text==original_preset&&
-          app.field(choice.field).selected=="message"&&app.field(toggle.field).checked==original_toggle&&
+          app.field(choice.field).selected=="enter"&&app.field(toggle.field).checked==original_toggle&&
           app.take_services().empty()&&app.field(ui::Field::status).text=="Hidden page input unchanged",
           "Delayed callback from a hidden page reached shared application behavior");
     // Persistent declarations deliberately remain interactive on every page.
     editor.persistent=choice.persistent=toggle.persistent=action.persistent=true;
-    app.edit(editor,"persistent text");app.toggle(toggle,!original_toggle);app.select(choice,"binary");app.activate(action);
+    app.edit(editor,"persistent text");app.toggle(toggle,!original_toggle);app.select(choice,"ctrl-enter");app.activate(action);
     check(app.field(editor.field).text=="persistent text"&&app.field(toggle.field).checked!=original_toggle&&
-          app.field(choice.field).selected=="binary"&&app.take_services().size()==1,
+          app.field(choice.field).selected=="ctrl-enter"&&app.take_services().size()==1,
           "Persistent controls lost input while another page was selected");
 }
 void menu_groups() {

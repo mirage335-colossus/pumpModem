@@ -76,9 +76,10 @@ applicable encoder/decoder scratch separately from retained content. Incoming
 packets select these paths from their own compression flag and original length;
 outgoing settings do not disable receiver capabilities.
 
-Selecting Binary instead shows the exact bit count, full symbols and any final
-partial alphabet. This path has no preamble, packet header, compression,
-Reed–Solomon parity or integrity tag. Selected stream encryption adds no bits.
+The binary editor changes the first 16 bytes of the message payload. Its edits
+use the same packet inspection as text edits, including framing, compression,
+encryption and error correction. Incomplete binary bytes pause preparation until
+the draft is complete.
 
 Inspection shares the asynchronous airtime calculation and current edit
 revision. Its packet layout comes from the real encoder, including whether
