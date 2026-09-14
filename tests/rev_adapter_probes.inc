@@ -721,6 +721,119 @@
         }
         delete outside;delete viewport;delete backdrop;native_frame();
     }
+    void native_overlay_frame() {
+        if(!overlay_view)throw std::runtime_error("Rev fixture has no native overlay");
+        const auto draws=overlay_view->element->draws;
+        const auto deadline=Clock::now()+std::chrono::seconds(2);refresh(event);
+        while(overlay_view->element->draws==draws) {
+            Rev::NativeWindow::pumpEvents();
+            if(Clock::now()>=deadline)throw std::runtime_error("Rev shared overlay did not render");
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+    }
+    Binding& overlay_binding(unsigned instance) {
+        if(overlay_view)for(auto& binding:overlay_view->bindings)if(binding.control.instance==instance)return binding;
+        throw std::runtime_error("Rev shared overlay lost a declared control instance");
+    }
+    void verify_overlay_composition() {
+        const auto page=application.page();const auto windows=group->size();auto* native_window=window;
+        const auto callsign=application.field(ui::Field::callsign).text;
+        const auto brightness=application.field(ui::Field::qr_brightness).selected;
+        const bool repeatable=application.field(ui::Field::repeatable).checked;
+        const auto fixture=[](unsigned stage=0) {
+            auto definition=test::overlay_fixture(stage);
+            ui::Control toggle{ui::Kind::toggle,ui::Field::repeatable};toggle.instance=706;toggle.label="Overlay repeatable";
+            toggle.placement={.left=268,.bottom=16,.width=200,.height=28,.anchor_bottom=true};
+            definition.controls.push_back(toggle);return definition;
+        };
+        const auto geometry=[&] {
+            for(auto& binding:overlay_view->bindings) {
+                const auto expected=application.control_layout(binding.control,details.size.width,details.size.height,overlay_view->definition->controls);
+                if(binding.element->rect.x!=expected.frame.x||binding.element->rect.y!=expected.frame.y||
+                   binding.element->rect.w!=expected.frame.w||binding.element->rect.h!=expected.frame.h)
+                    throw std::runtime_error("Rev shared overlay did not consume declared control placement");
+            }
+            if(group->size()!=windows||window!=native_window)throw std::runtime_error("Rev shared composition created a native window");
+        };
+        application.show_overlay(fixture());apply();native_overlay_frame();geometry();
+        if(overlay_view->element->resolved.style.background.color.a!=1)
+            throw std::runtime_error("Rev hidden-background overlay did not use opaque shared canvas color");
+        if(!overlay_binding(701).bitmap||!overlay_binding(702).choice||!overlay_binding(703).editor||
+           !overlay_binding(704).button||!overlay_binding(705).menu||!overlay_binding(706).toggle||overlay_view->bindings.size()!=6)
+            throw std::runtime_error("Rev shared overlay did not use the ordinary control factory and menu grouping");
+        auto* choice=overlay_binding(702).choice;
+        choice->params.value="normal";re::Event changed;choice->onChange(changed);
+        if(application.field(ui::Field::qr_brightness).selected!="normal")throw std::runtime_error("Rev overlay choice did not dispatch its declared field");
+        auto* editor=overlay_binding(703).editor;focus_control(editor);
+        editor->apply("");editor->cursor=editor->selectAnchor=editor->selectEnd=0;
+        re::Event typed;typed.keyboard.input="OVR42";textInput(typed);
+        if(application.field(ui::Field::callsign).text!="OVR42")throw std::runtime_error("Rev overlay editor did not receive native text input");
+        auto* toggle=overlay_binding(706).toggle;focus_control(toggle->checkbox);
+        re::Event space;space.keyboard.space.id=1;keyDown(space);
+        if(application.field(ui::Field::repeatable).checked==repeatable)throw std::runtime_error("Rev overlay toggle did not receive keyboard activation");
+        focus_control(choice->dropdown);choice->openMenu();native_overlay_frame();
+        re::Event escape;escape.keyboard.escape.id=1;keyDown(escape);
+        if(choice->open||!application.overlay())throw std::runtime_error("Rev overlay policy bypassed an open native popup's Escape handling");
+        const auto generation=application.overlay()->generation;
+        std::weak_ptr<const ui::OverlayDefinition> old_definition=application.overlay();
+        auto stale_choice=choice->onChange;
+        auto stale_menu=overlay_binding(705).menu->onChange;
+        auto stale_editor=editor->changed;
+        choice->params.value="off";
+        // Replacing from within a native callback must not destroy its sender.
+        command_observer=[&](ui::Command){application.show_overlay(fixture(1));apply();};
+        re::Event close;overlay_binding(704).button->click(close);command_observer={};
+        native_overlay_frame();geometry();
+        if(application.overlay()->generation==generation||overlay_binding(703).label->content.get()!="Updated callsign"||
+           overlay_binding(702).label->content.get()!="Preview brightness"||surface->resolved.hidden||
+           overlay_view->element->resolved.style.background.color.a!=0)
+            throw std::runtime_error("Rev overlay replacement retained old labels, order, geometry or background policy");
+        const auto field_before=application.field(ui::Field::callsign).text;
+        const auto choice_before=application.field(ui::Field::qr_brightness).selected;
+        re::Event stale;stale_choice(stale);stale_menu(stale);stale_editor("STALE");
+        if(old_definition.expired()||application.field(ui::Field::callsign).text!=field_before||
+           application.field(ui::Field::qr_brightness).selected!=choice_before)
+            throw std::runtime_error("Rev overlay replacement invalidated callback declarations or accepted a retired callback");
+        stale_choice={};stale_menu={};stale_editor={};
+        if(!old_definition.expired())throw std::runtime_error("Rev retained an obsolete overlay after native callbacks completed");
+        focus_control(overlay_binding(703).editor);
+        re::Event blocked;blocked.keyboard.input="BLOCKED";textInput(blocked);
+        if(application.field(ui::Field::callsign).text!=field_before)throw std::runtime_error("Rev overlay consume policy leaked native text input");
+        re::Event remapped;remapped.keyboard.escape.id=1;keyDown(remapped);
+        if(!application.overlay())throw std::runtime_error("Rev hard-coded Escape instead of using the shared overlay key map");
+        dispatch(ui::Command::dismiss_overlay);
+        re::Event tab_click;tabs.at(ui::pages().back().id)->click(tab_click);
+        if(!application.overlay()||application.page()!=page)throw std::runtime_error("Rev blocked overlay leaked desktop document or tab actions");
+        service_probe=true;services.enqueue({{710,ui::ServiceKind::prompt,"Deferred shared overlay prompt",""}});process_services();
+        if(dialog||services.current())throw std::runtime_error("Rev overlay ignored shared service deferral");
+        re::Event return_key;return_key.keyboard.enter.id=1;return_key.keyboard.ctrl.id=1;keyDown(return_key);apply();
+        if(application.overlay()||overlay_view||!dialog||focused_control()!=prompt)
+            throw std::runtime_error("Rev shared key dismissal did not release the deferred service");
+        dialog_result=ui::ServiceResult{710,true,{},{}};process_services();native_frame();
+        application.show_overlay(fixture());apply();native_overlay_frame();
+        editor=overlay_binding(703).editor;focus_control(editor);
+        service_probe=true;services.enqueue({{711,ui::ServiceKind::prompt,"Service above shared overlay",""}});process_services();
+        native_overlay_frame();
+        if(!dialog||focused_control()!=prompt||allows_input(editor)||
+           modal->style->zIndex<=overlay_view->element->style->zIndex)
+            throw std::runtime_error("Rev shared service priority did not isolate the overlay's controls");
+        re::Event cancel;cancel.keyboard.escape.id=1;keyDown(cancel);apply();native_overlay_frame();
+        if(dialog||!application.overlay()||focused_control()!=editor||!allows_input(editor))
+            throw std::runtime_error("Rev service cancellation did not resume its shared overlay");
+        auto* menu=overlay_binding(705).menu;menu->params.value=menu->params.options.back().value;
+        re::Event picked;menu->onChange(picked);apply();native_frame();
+        if(application.overlay()||overlay_view)throw std::runtime_error("Rev overlay menu did not dispatch its declared close action");
+        auto unblocked=fixture();unblocked.policy.hide_background=false;unblocked.policy.block_background=false;
+        unblocked.policy.restore_focus=false;unblocked.policy.dismiss_on_page_change=false;
+        application.show_overlay(std::move(unblocked));apply();native_overlay_frame();
+        const auto next=ui::pages().back().id;re::Event navigate;tabs.at(next)->click(navigate);apply();native_overlay_frame();
+        if(application.page()!=next||!application.overlay()||surface->targetFlags.disabled||overlay_view->element->interceptHits)
+            throw std::runtime_error("Rev overlay ignored shared background eligibility or page persistence");
+        focus_control(overlay_binding(703).editor);dispatch(ui::Command::dismiss_overlay);apply();native_frame();
+        if(application.overlay()||focused_control())throw std::runtime_error("Rev overlay ignored disabled focus restoration");
+        application.edit(ui::Field::callsign,callsign);application.select(ui::Field::qr_brightness,brightness);
+        application.toggle(ui::Field::repeatable,repeatable);select_page(page);apply();native_frame();
+    }
     void verify_expanded_bitmap() {
         const auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){
             return binding.bitmap&&binding.control.click==ui::Command::toggle_qr_expanded;
@@ -744,12 +857,18 @@
             onMouseButton(Rev::NativeWindow::Left,Rev::NativeWindow::Press,px,py);
             onMouseButton(Rev::NativeWindow::Left,Rev::NativeWindow::Release,px,py);
         };
+        const auto overlay_bitmap=[&]() -> Binding& {
+            if(!overlay_view)throw std::runtime_error("Rev QR expansion has no shared overlay");
+            const auto binding=std::find_if(overlay_view->bindings.begin(),overlay_view->bindings.end(),[](const auto& value){return value.bitmap!=nullptr;});
+            if(binding==overlay_view->bindings.end())throw std::runtime_error("Rev QR overlay has no declared bitmap control");
+            return *binding;
+        };
         const auto render_expanded=[&] {
-            if(!expanded)throw std::runtime_error("Rev declared bitmap click did not expand within the app");
-            const auto draws=expanded->bitmap->draws;
+            if(!overlay_view)throw std::runtime_error("Rev declared bitmap click did not expand within the app");
+            const auto draws=overlay_bitmap().bitmap->draws;
             const auto deadline=Clock::now()+std::chrono::seconds(2);
             refresh(event);
-            while(expanded->bitmap->draws==draws) {
+            while(overlay_bitmap().bitmap->draws==draws) {
                 Rev::NativeWindow::pumpEvents();
                 if(Clock::now()>=deadline)throw std::runtime_error("Rev expanded bitmap did not paint");
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -763,15 +882,15 @@
         };
         const auto verify_coverage=[&](int width,int height) {
             render_expanded();verify_window(width,height);
-            if(expanded->parent!=this||expanded->shared!=shared||expanded->rect.x!=0||expanded->rect.y!=0||
-               expanded->rect.w!=details.size.width||expanded->rect.h!=details.size.height||
-               expanded->bitmap->width!=static_cast<unsigned>(width)||expanded->bitmap->height!=static_cast<unsigned>(height))
+            if(overlay_view->element->parent!=this||overlay_view->element->shared!=shared||overlay_view->element->rect.x!=0||overlay_view->element->rect.y!=0||
+               overlay_view->element->rect.w!=details.size.width||overlay_view->element->rect.h!=details.size.height||
+               overlay_bitmap().bitmap->width!=static_cast<unsigned>(width)||overlay_bitmap().bitmap->height!=static_cast<unsigned>(height))
                 throw std::runtime_error("Rev expanded bitmap does not fill the existing app client area");
         };
         const auto verify_restore=[&](int width,int height) {
             apply();native_frame();verify_window(width,height);
             const auto geometry=ui::control_layout(found->control,state(found->control),details.size.width,details.size.height,declarations);
-            if(expanded||application.expanded_control()||found->bitmap!=original||surface->resolved.hidden||
+            if(overlay_view||application.overlay()||found->bitmap!=original||surface->resolved.hidden||
                original->rect.x!=geometry.widget.x||original->rect.y!=geometry.widget.y||
                original->rect.w!=geometry.widget.w||original->rect.h!=geometry.widget.h)
                 throw std::runtime_error("Rev collapse did not restore the original retained bitmap and app layout");
@@ -783,7 +902,7 @@
         if(focused_control())throw std::runtime_error("Rev expanded bitmap allowed keyboard focus behind the overlay");
         const auto pixels=[&] {
             BitmapImage image(100,100);
-            expanded->bitmap->snapshot.paint(full_bitmap_request(100,100,false,true),
+            overlay_bitmap().bitmap->snapshot.paint(full_bitmap_request(100,100,false,true),
                 [&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);},launch.color);
             return image.pixels();
         };
@@ -793,7 +912,7 @@
         const auto normal=pixels();
         application.select(ui::Field::qr_brightness,"dark");
         std::this_thread::sleep_for(std::chrono::milliseconds(45));application.tick();apply();render_expanded();
-        if(normal==pixels()||expanded->caption->content.get()!=application.bitmap(found->control,100).caption)
+        if(normal==pixels()||overlay_bitmap().caption->content.get()!=application.bitmap(found->control,100).caption)
             throw std::runtime_error("Rev expanded bitmap did not retain live brightness and caption presentation");
         application.select(ui::Field::qr_brightness,brightness);
         click(details.size.width/2,details.size.height/2);verify_restore(original_width,original_height);

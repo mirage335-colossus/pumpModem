@@ -18,7 +18,7 @@ enum class Command {
     none, transmit, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
-    pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded
+    pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
@@ -28,6 +28,19 @@ enum class Kind { label, action, toggle, choice, text, list, bitmap };
 enum class Menu { none, keyfile };
 enum class TextTone { normal, muted, data, inverse };
 enum class BitmapCaption { footer, overlay_error };
+// Overlay controls use viewport-relative insets and optional fixed dimensions.
+// A zero width/height fills the space between the corresponding insets.
+struct OverlayPlacement {
+    int left=0,top=0,right=0,bottom=0,width=0,height=0;
+    bool anchor_right=false,anchor_bottom=false;
+};
+enum class Key { other,escape,enter,space,tab,left,right,up,down,backspace,del };
+struct KeyStroke {
+    Key key=Key::other;
+    bool ctrl=false,shift=false,alt=false;
+    bool operator==(const KeyStroke&) const = default;
+};
+struct KeyBinding {KeyStroke stroke;Command command=Command::none;};
 // The same structured record can be composed from native labels in any toolkit.
 // Cell coordinates are logical units within one row. Negative width means the
 // remaining width minus its magnitude; positive widths are fixed.
@@ -76,6 +89,10 @@ struct Control {
     Command click = Command::none, double_click = Command::none;
     Command wheel_up = Command::none, wheel_down = Command::none;
     unsigned instance=0; // Distinguishes intentional repeated bindings on a page.
+    // Zero identifies the desktop; Application stamps an immutable overlay's
+    // controls with its generation so delayed native callbacks remain scoped.
+    std::uint64_t surface=0;
+    OverlayPlacement placement;
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

@@ -1,6 +1,8 @@
 #define DATAPUMP_FLTK_ADAPTER_TEST
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
+#include "overlay_fixture.hpp"
+#include <cstring>
 #include <FL/Fl_Image_Surface.H>
 #ifdef __linux__
 #include <X11/Xlib.h>
@@ -454,12 +456,12 @@ void expanded_bitmap_clicks() {
         unsigned count=0;for(auto* candidate=Fl::first_window();candidate;candidate=Fl::next_window(candidate))++count;
         return count;
     };
-    const auto expanded=[&]() -> NativeExpandedBitmap* {
+    const auto expanded=[&]() -> NativeOverlay* {
         for(int i=0;i<window->children();++i)
-            if(auto* overlay=dynamic_cast<NativeExpandedBitmap*>(window->child(i)))return overlay;
+            if(auto* overlay=dynamic_cast<NativeOverlay*>(window->child(i)))return overlay;
         return nullptr;
     };
-    const auto bitmap=[](NativeExpandedBitmap& overlay) -> NativeBitmap* {
+    const auto bitmap=[](NativeOverlay& overlay) -> NativeBitmap* {
         auto* group=dynamic_cast<Fl_Group*>(overlay.child(0));
         if(group)for(int i=0;i<group->children();++i)if(auto* view=dynamic_cast<NativeBitmap*>(group->child(i)))return view;
         return nullptr;
@@ -515,7 +517,7 @@ void expanded_bitmap_clicks() {
         require(overlay->w()==window->w()&&overlay->h()==window->h()&&view->w()==window->w()&&view->h()==window->h()&&
             window_count()==original_windows,"Expanded bitmap did not follow an app window resize");
         click(window->w()/2,window->h()/2);refresh();
-        require(!expanded()&&!app.application.expanded_control()&&window->shown()&&window_count()==original_windows,
+        require(!expanded()&&!app.application.overlay()&&window->shown()&&window_count()==original_windows,
             "Second bitmap click did not restore the existing app view");
         require(Fl::focus()==previous_focus,"Second bitmap click did not restore the original keyboard focus");
         const auto restored=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h()).widget;
@@ -534,7 +536,7 @@ void expanded_bitmap_clicks() {
         require(!error.caption.empty()&&caption&&caption->visible_r()&&caption->labelcolor()==text_color(error.caption_tone),
             "Expanded bitmap lost its error caption or caption tone");
         Fl::e_keysym=FL_Escape;Fl::e_state=0;Fl::handle(FL_KEYDOWN,window);refresh();
-        require(!expanded()&&!app.application.expanded_control()&&!app.application.closing()&&window_count()==original_windows&&
+        require(!expanded()&&!app.application.overlay()&&!app.application.closing()&&window_count()==original_windows&&
             ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
             "Escape did not dismiss only the expanded bitmap within the original app window");
         app.application.edit(ui::Field::message,"Native expanded bitmap");refresh();
@@ -542,6 +544,102 @@ void expanded_bitmap_clicks() {
     Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
+void shared_overlay_controls() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Shared overlay fixture has no native window");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto overlay=[&]() -> NativeOverlay* {
+        for(int i=0;i<window->children();++i)if(auto* surface=dynamic_cast<NativeOverlay*>(window->child(i)))return surface;
+        return nullptr;
+    };
+    const auto key=[&](int symbol,int modifiers=0,const char* text="") {
+        const auto previous_key=Fl::e_keysym,previous_state=Fl::e_state,previous_length=Fl::e_length;
+        auto* previous_text=Fl::e_text;Fl::e_keysym=symbol;Fl::e_state=modifiers;Fl::e_text=const_cast<char*>(text);Fl::e_length=static_cast<int>(std::strlen(text));
+        Fl::handle(FL_KEYDOWN,window);
+        Fl::e_keysym=previous_key;Fl::e_state=previous_state;Fl::e_text=previous_text;Fl::e_length=previous_length;
+    };
+    const auto field_widget=[]<class Widget>(NativeOverlay& surface,const char* label) -> Widget* {
+        auto* heading=find_label(surface,label);if(!heading)return nullptr;
+        for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
+        return nullptr;
+    };
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();
+    auto* surface=overlay();require(surface,"Shared declaration did not create the generic native surface");
+    auto* choice=field_widget.template operator()<NativeChoice>(*surface,"Brightness");
+    auto* editor=field_widget.template operator()<NativeInput>(*surface,"Callsign in overlay");
+    auto* close=find_button(*surface,"Close preview");
+    auto* menu=dynamic_cast<NativeMenuButton*>(find_label(*surface,"Overlay actions"));
+    require(choice&&editor&&close&&menu,"Ordinary factory did not create shared overlay choice, editor, action and scoped menu");
+    const auto definition=app.application.overlay();
+    require(menu->size()==3,"Overlay menu merged with the desktop's same named menu");
+    auto* desktop_menu=dynamic_cast<NativeMenuButton*>(find_label(*window,"Keyfile"));
+    require(desktop_menu&&!desktop_menu->visible_r()&&!desktop_menu->active_r(),"Shared overlay layers did not hide and block desktop controls");
+    for(const auto& declaration:definition->controls) {
+        const auto geometry=app.application.control_layout(declaration,window->w(),window->h(),definition->controls);
+        const auto heading=declaration.menu==ui::Menu::none?declaration.label:declaration.menu_label;
+        auto* widget=find_label(*surface,heading);require(widget,"Shared overlay declaration lost its label");
+        const auto* group=widget->parent();require(ui::Rect{group->x(),group->y(),group->w(),group->h()}==geometry.frame,
+            "Shared overlay control bypassed ordinary shared layout");
+    }
+    choice->picked(choice->menu()+0);refresh();
+    require(app.application.field(ui::Field::qr_brightness).selected=="normal","Native overlay choice did not apply its declared field binding");
+    editor->value("W1ABC");editor->do_callback();editor->take_focus();editor->insert_position(5);key('Z',0,"Z");refresh();
+    require(app.application.field(ui::Field::callsign).text=="W1ABCZ","Shared controls keyboard policy did not route editing through the ordinary native editor");
+    close->do_callback();refresh();require(!overlay()&&!app.application.overlay(),"Shared overlay close action did not dismiss through its ordinary command binding");
+
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();
+    menu=dynamic_cast<NativeMenuButton*>(find_label(*overlay(),"Overlay actions"));menu->picked(menu->menu()+1);refresh();
+    require(!overlay()&&!app.application.overlay(),"Shared scoped menu did not dispatch its ordinary close action");
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();surface=overlay();
+    menu=dynamic_cast<NativeMenuButton*>(find_label(*surface,"Overlay actions"));
+    struct PopupProbe {NativeApp& app;NativeOverlay* surface;Fl_Window* window;NativeMenuButton* menu;Fl_Widget_Tracker tracker;bool retained=false,stale_ignored=false;};
+    PopupProbe probe{app,surface,window,menu,Fl_Widget_Tracker(menu)};
+    Fl::add_timeout(.03,[](void* context) {
+        auto& value=*static_cast<PopupProbe*>(context);value.app.application.show_overlay(datapump::gui::test::overlay_fixture(1));
+    },&probe);
+    Fl::add_timeout(.18,[](void* context) {
+        auto& value=*static_cast<PopupProbe*>(context);value.retained=value.tracker.exists()&&Fl::grab();
+        if(value.retained) {
+            value.menu->picked(value.menu->menu()+1);
+            value.stale_ignored=bool(value.app.application.overlay());
+        }
+        if(auto* popup=Fl::grab()) {const auto previous=Fl::e_keysym;Fl::e_keysym=FL_Escape;popup->handle(FL_KEYDOWN);Fl::e_keysym=previous;}
+    },&probe);
+    menu->popup();require(probe.retained&&probe.stale_ignored,"Replacing an overlay during a native popup invalidated its callbacks or let a stale menu dismiss the replacement");
+    refresh();surface=overlay();require(surface&&probe.tracker.deleted(),"Native overlay replacement did not finish after its popup unwound");
+    choice=field_widget.template operator()<NativeChoice>(*surface,"Preview brightness");
+    editor=field_widget.template operator()<NativeInput>(*surface,"Updated callsign");
+    require(choice&&editor&&find_button(*surface,"Return to console"),"Shared overlay reorder or relabel required a native factory change");
+    require(desktop_menu->visible_r()&&!desktop_menu->active_r(),"Updated shared overlay layers did not show and block the desktop");
+    editor->take_focus();const auto before=app.application.field(ui::Field::callsign).text;key('Q',0,"Q");refresh();
+    require(app.application.field(ui::Field::callsign).text==before,"Shared consume keyboard policy allowed a native editor to change");
+    key(FL_Escape);refresh();require(app.application.overlay()&&overlay(),"Native adapter hardcoded Escape dismissal instead of the updated shared key binding");
+    key(FL_Enter,FL_CTRL);refresh();require(!app.application.overlay()&&!overlay(),"Shared Ctrl+Enter dismissal was not routed before native editor handling");
+
+    app.application.show_overlay(datapump::gui::test::overlay_fixture());refresh();
+    app.application.activate(ui::Command::generate_keyfile);refresh();
+    auto* dialog=Fl::modal();require(dialog&&overlay()&&!overlay()->active_r(),"Shared service-above policy did not present a native service over a disabled overlay");
+    const auto generation=app.application.overlay()->generation;
+    key(FL_Escape);refresh();require(app.application.overlay()&&app.application.overlay()->generation==generation,
+        "An active service allowed the overlay's Escape binding to run");
+    if((dialog=Fl::modal())) {
+        auto* cancel=find_button(*dialog,ui::service_cancel_label);require(cancel,"Native service has no cancel action");cancel->do_callback();refresh();
+    }
+    require(!Fl::modal(),"Closing a native service retained its modal window");
+    require(app.application.overlay()&&app.application.overlay()->generation==generation,
+        "Closing a native service dismissed or replaced the shared overlay");
+    require(overlay()->active_r(),"Closing a native service failed to restore the overlay's native eligibility");
+    app.application.show_overlay(datapump::gui::test::overlay_fixture(1));refresh();
+    app.application.activate(ui::Command::generate_keyfile);refresh();
+    require(!Fl::modal()&&overlay(),"Shared deferred service policy started a dialog while its overlay was open");
+    key(FL_Enter,FL_CTRL);refresh();dialog=Fl::modal();require(dialog&&!overlay(),"Deferred native service did not start after overlay dismissal");
+    auto* cancel=find_button(*dialog,ui::service_cancel_label);require(cancel,"Deferred native service has no cancel action");cancel->do_callback();refresh();
+    require(!Fl::modal(),"Deferred service fixture failed to cancel its native dialog");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+
 void extension_controls() {
     auto declarations=datapump::gui::test::extension_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -835,6 +933,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

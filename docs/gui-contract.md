@@ -315,6 +315,59 @@ state and render. Shared code owns page state, launch parsing, document caching,
 submission/record actions and smoke workflows. Both backends expose the same
 flags, including `--simulation`, `--self-check` and the smoke options.
 
+## Editing full-window views from shared code
+
+`screen_overlay.hpp` defines the expanded QR view. `OverlayDefinition` contains
+ordinary `Control` declarations. Both backends instantiate them through the
+same factory used for desktop controls. For example, adding a brightness choice
+requires only shared definition changes:
+
+```cpp
+Control brightness{Kind::choice, Field::qr_brightness};
+brightness.instance = 2;
+brightness.label = "Brightness";
+brightness.placement = {.left=16, .top=32, .width=180, .height=28};
+view.controls.front().placement.top = 80;
+view.controls.push_back(brightness);
+view.policy.keyboard = OverlayKeyboard::controls;
+```
+
+`placement` is relative to the app client area in logical units. Positive
+`width`/`height` give fixed extents; zero fills the space between corresponding
+insets. `anchor_right`/`anchor_bottom` anchor fixed extents to those edges. Shared
+layout also supplies labels, presets, bitmap captions and borders. Controls paint
+in declaration order; menu continuation declarations share one widget. Give
+repeated controls distinct `instance` values; menu entries use the same menu and
+instance when they should share a popup.
+
+`OverlayPolicy.keys` maps logical key strokes and modifiers to commands.
+Named keys are Escape, Enter, Space, Tab, arrows, Backspace and Delete, with
+Ctrl/Shift/Alt modifiers. `Key::other` reports unrecognized keys and cannot be
+bound as a shortcut; printable text goes through the ordinary editor path.
+`keyboard=controls` sends unbound keys to eligible native controls; `consume`
+discards them. Native popups and active services retain their own key handling.
+`hide_background` controls desktop visibility independently of `block_background`
+input eligibility. `services=above` allows queued services over the view; `defer`
+postpones starting them until dismissal. Already active services retain priority.
+`restore_focus` and `dismiss_on_page_change` are shared policy too.
+`overlay_layers()` supplies effective visibility, eligibility and stacking order.
+
+`show_overlay()` owns an immutable definition and assigns a fresh generation to
+every control's `surface`; zero identifies desktop declarations. Handlers use
+the same declared edit, choice, toggle, gesture, action, preset, record and submit
+operations as the desktop. The facade rejects closed or replaced generations,
+including stale menu callbacks. Native document actions use scoped `dispatch`
+and native tabs use `navigate`; programmatic shared workflows retain `activate`
+and `select_page`. Covered desktop callbacks cannot change shared state, and
+disabling the desktop does not disable a field's separate overlay control.
+
+Both native conformance suites consume `tests/overlay_fixture.hpp` unchanged.
+It adds a brightness choice, editor, close action and scoped menu beside the
+bitmap, then changes declaration order, geometry, labels and key/service policy.
+`gui_overlay` tests the policies and generation lifetimes without a toolkit.
+New combinations of existing controls belong in the shared definition; native
+painting, widget ownership and event translation remain backend responsibilities.
+
 A build selects exactly one backend through `DATAPUMP_GUI_BACKEND=fltk|rev`.
 CLI-only builds can still compile and test the shared GUI application without a
 widget toolkit. Features expressed with this existing vocabulary require only

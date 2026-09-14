@@ -188,10 +188,10 @@ void declaration_identity() {
         "Copied binding borrowed another page's row allocation");
 }
 void expanded_bitmaps() {
-    Control bitmap{Kind::bitmap};bitmap.bitmap_caption=BitmapCaption::overlay_error;
+    Control bitmap{Kind::bitmap};bitmap.bitmap_caption=BitmapCaption::overlay_error;bitmap.surface=1;
     for(const auto bounds:{Rect{0,0,default_width,default_height},Rect{0,0,min_width,min_height},
                           Rect{0,0,1920,1080},Rect{0,0,1080,1920},Rect{0,0,0,0}}) {
-        const auto layout=expanded_control_layout(bitmap,bounds.w,bounds.h);
+        const auto layout=control_layout(bitmap,{},bounds.w,bounds.h,{});
         check(layout.frame==bounds&&layout.widget==bounds,"Expanded bitmap did not fill the available viewport");
         check(layout.caption_overlay&&contains(bounds,layout.caption)&&!layout.has_label,
               "Expanded error caption escaped the viewport or reserved an ordinary desktop label");

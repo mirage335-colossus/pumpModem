@@ -4,12 +4,14 @@
 #include "gui_smoke.hpp"
 #include "inspection_page.hpp"
 #include "text_policy.hpp"
+#include "screen_overlay.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
 #include <map>
+#include <stdexcept>
 
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
@@ -21,7 +23,9 @@ struct Application::Impl {
     std::unique_ptr<Smoke> smoke;
     bool started_session=false,passed=false;
     std::uint64_t poll_count=0,presentation_revision=0;
-    const ui::Control* expanded=nullptr;
+    std::shared_ptr<const ui::OverlayDefinition> overlay;
+    std::uint64_t overlay_generation=0;
+    bool service_active=false;
     ui::Page page=ui::Page::console;
     struct Document {
         std::shared_ptr<const Inspection> model;
@@ -68,7 +72,7 @@ bool Application::tick() {
 }
 bool Application::finished() const { return impl_->controller.ready_to_close(); }
 int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
-void Application::close() { dismiss_expanded();impl_->controller.close(); }
+void Application::close() { dismiss_overlay();impl_->controller.close(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
     if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.edit(field,std::move(text));
@@ -100,10 +104,9 @@ void Application::activate(ui::Command command) {
     if(closing())return;
     if(command==ui::Command::toggle_qr_expanded) {
         if(!enabled(command))return;
-        if(impl_->expanded) {dismiss_expanded();return;}
-        const auto& controls=ui::console_screen();
-        const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
-        if(found!=controls.end()) {impl_->expanded=&*found;++impl_->presentation_revision;}
+        if(impl_->overlay)dismiss_overlay();else show_overlay(ui::qr_overlay_definition());
+    } else if(command==ui::Command::dismiss_overlay) {
+        dismiss_overlay();
     } else impl_->controller.activate(command);
 }
 void Application::activate(const ui::Control& declaration) {
@@ -114,15 +117,44 @@ void Application::gesture(const ui::Control& declaration,ui::Command command) {
     if(command!=declaration.click&&command!=declaration.double_click&&command!=declaration.wheel_up&&command!=declaration.wheel_down)return;
     if(accepts_input(declaration)&&enabled(command))activate(command);
 }
-const ui::Control* Application::expanded_control() const {
-    const auto* declaration=impl_->expanded;
-    return declaration&&accepts_input(*declaration)?declaration:nullptr;
+std::shared_ptr<const ui::OverlayDefinition> Application::overlay() const {return impl_->overlay;}
+void Application::show_overlay(ui::OverlayDefinition definition) {
+    if(closing())return;
+    for(const auto& binding:definition.policy.keys)
+        if(binding.stroke.key==ui::Key::other)throw std::invalid_argument("Overlay key bindings require a named key");
+    definition.generation=++impl_->overlay_generation;
+    for(auto& control:definition.controls)control.surface=definition.generation;
+    impl_->overlay=std::make_shared<const ui::OverlayDefinition>(std::move(definition));
+    ++impl_->presentation_revision;
 }
-void Application::dismiss_expanded() {
-    if(impl_->expanded) {impl_->expanded=nullptr;++impl_->presentation_revision;}
+void Application::dismiss_overlay() {
+    if(impl_->overlay) {impl_->overlay.reset();++impl_->presentation_revision;}
+}
+bool Application::overlay_key(ui::KeyStroke key,bool service_active,bool popup_active) {
+    if(closing())return false;
+    const auto action=ui::overlay_key_action(impl_->overlay.get(),key,service_active||impl_->service_active,popup_active);
+    if(action.consumed&&action.command!=ui::Command::none&&enabled(action.command))activate(action.command);
+    return action.consumed;
+}
+ui::OverlayLayers Application::overlay_layers(bool service_active) const {
+    return ui::overlay_layers(impl_->overlay.get(),service_active||impl_->service_active);
+}
+void Application::set_service_active(bool active) {impl_->service_active=active;}
+bool Application::accepts_surface(std::uint64_t surface) const {
+    if(closing()||impl_->service_active)return false;
+    if(surface)return impl_->overlay&&impl_->overlay->generation==surface;
+    const auto layers=overlay_layers();return layers.enable_background;
+}
+void Application::dispatch(ui::Command command,std::uint64_t surface) {
+    if(accepts_surface(surface)&&enabled(command))activate(command);
+}
+void Application::navigate(ui::Page page) {if(accepts_surface(0))select_page(page);}
+ui::ControlLayout Application::control_layout(const ui::Control& declaration,int width,int height,
+        std::span<const ui::Control> declarations) const {
+    return ui::control_layout(declaration,control(declaration).state,width,height,declarations);
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
-    if(closing()||(!declaration.persistent&&declaration.page!=page()))return false;
+    if(!accepts_surface(declaration.surface)||(!declaration.surface&&!declaration.persistent&&declaration.page!=page()))return false;
     const auto view=control(declaration);
     return view.enabled&&view.visible;
 }
@@ -130,6 +162,10 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     static const ui::FieldState empty;
     const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
+    if(declaration.surface) {
+        view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
+    }
+    view.enabled=view.enabled&&accepts_surface(declaration.surface);
     if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count)view.label=state.text;
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
@@ -154,6 +190,7 @@ void Application::select_menu(std::span<const ui::Control* const> items,const st
 const ui::FieldState& Application::field(ui::Field field) const { return impl_->controller.field(field); }
 bool Application::enabled(ui::Command command) const {
     if(command==ui::Command::toggle_qr_expanded)return !closing()&&page()==ui::Page::console;
+    if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
     return impl_->controller.enabled(command);
 }
 std::string Application::command_label(ui::Command command) const { return impl_->controller.command_label(command); }
@@ -164,7 +201,7 @@ std::uint64_t Application::revision() const { return impl_->controller.revision(
 std::uint64_t Application::poll_count() const { return impl_->poll_count; }
 void Application::select_page(ui::Page page) {
     if(std::any_of(ui::pages().begin(),ui::pages().end(),[&](const auto& value){return value.id==page;})) {
-        if(impl_->page!=page)dismiss_expanded();
+        if(impl_->page!=page&&impl_->overlay&&impl_->overlay->policy.dismiss_on_page_change)dismiss_overlay();
         impl_->page=page;
     }
 }
@@ -174,7 +211,7 @@ bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
     if(control.submit==ui::Command::none||shift)return false;
     const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
     if(ctrl!=wants_ctrl)return false;
-    if(accepts_input(control)&&impl_->controller.enabled(control.submit))impl_->controller.activate(control.submit);
+    if(accepts_input(control)&&enabled(control.submit))activate(control.submit);
     return true; // Consume the declared submit gesture even when unavailable.
 }
 void Application::activate_record(const ui::Control& control,const std::string& id) {
@@ -183,7 +220,7 @@ void Application::activate_record(const ui::Control& control,const std::string& 
     const auto found=std::find_if(state.records.begin(),state.records.end(),[&](const auto& record){return record.id==id;});
     if(!state.enabled||!state.visible||found==state.records.end()||!found->enabled||!found->activatable)return;
     impl_->controller.select(control.field,id);
-    if(impl_->controller.field(control.field).selected==id&&impl_->controller.enabled(control.activate_record))impl_->controller.activate(control.activate_record);
+    if(impl_->controller.field(control.field).selected==id&&enabled(control.activate_record))activate(control.activate_record);
 }
 BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width) const {
     BitmapPresentation view;view.source=impl_->bitmaps.get(control.bitmap);view.revision=impl_->bitmaps.version(control.bitmap);

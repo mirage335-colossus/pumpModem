@@ -20,6 +20,7 @@ removed.
 | `document_actions.hpp` | Document action identity, inherited availability and eligibility for restoring focus after a document replacement. |
 | `document_presentation.hpp` | Immutable document ownership, rendered child traversal, action association and local/absolute placement with inherited allocation and availability. |
 | `control_interactions.hpp`, `record_interactions.hpp` | Pointer double-click identity, wheel command repetition, record keyboard navigation, selection and activation eligibility. |
+| `overlay.hpp`, `screen_overlay.hpp` | Shared overlay composition, key bindings, background access, service priority and focus-restoration policy; the expanded QR definition. |
 | `record_scroll.hpp` | Record tail detection, scroll retention across data and viewport changes, and revealing selected rows. |
 | `record_reconciliation.hpp` | Retained record identity, order, changed/added/removed rows, selection and availability. Native lists keep widget handles and glyph measurements. |
 | `service_queue.hpp` | Serial platform-service requests, completion identity, declared input validation and cancellation of current/queued work during shutdown. |
@@ -52,6 +53,31 @@ these checks.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
+
+Full-window views use `OverlayDefinition.controls`, the same `Control` vocabulary
+and native factories as the desktop. Edit the QR view in `screen_overlay.hpp`:
+add a choice, editor, action, list, label or bitmap; set its placement and ordinary
+bindings; and change `OverlayPolicy` for dismissal keys, keyboard routing,
+background access or service priority. These changes require no backend edits.
+The default QR view still contains just the QR bitmap and its error caption.
+Its Escape binding and keyboard policy are shared data.
+
+`Application::show_overlay()` owns an immutable definition and stamps every
+control with a new surface generation. Native callbacks retain that definition;
+the facade rejects input from a closed or replaced generation, including after
+the same view is reopened. Native page and document actions use `navigate()` and
+`dispatch()` so covered desktop content cannot bypass the same input policy.
+`activate()` and `select_page()` remain programmatic shared-workflow entry points.
+Native services report their active state; overlay policy can defer queued
+services, while an already active service retains priority.
+
+Native overlay code handles widget ownership, popup lifetimes, painting and
+focus mechanics. Both adapters consume `overlay_layers()` and `overlay_key()`;
+neither defines its own Escape command or assumes that an expanded view is only
+a bitmap. `tests/overlay_fixture.hpp` supplies an identical bitmap, brightness
+choice, editor, action and grouped menu to both native suites, including a
+replacement that changes layout and key/service policy. `gui_overlay` verifies
+the shared contract and stale-callback rejection without a toolkit.
 
 Both toolkits retain native text and controls. A signal row is not rasterized
 into a bitmap or flattened into one string. Stable record IDs preserve selection

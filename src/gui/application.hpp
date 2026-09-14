@@ -2,6 +2,7 @@
 #include "bitmap.hpp"
 #include "control_layout.hpp"
 #include "ui_document.hpp"
+#include "overlay.hpp"
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -54,10 +55,18 @@ public:
     void activate(ui::Command command);
     void activate(const ui::Control& control);
     void gesture(const ui::Control& control,ui::Command command);
-    // Present this declaration's live bitmap across the app window's client area.
-    // The declaration remains owned by the shared application.
-    const ui::Control* expanded_control() const;
-    void dismiss_expanded();
+    std::shared_ptr<const ui::OverlayDefinition> overlay() const;
+    void show_overlay(ui::OverlayDefinition definition);
+    void dismiss_overlay();
+    bool overlay_key(ui::KeyStroke key,bool service_active=false,bool popup_active=false);
+    ui::OverlayLayers overlay_layers(bool service_active=false) const;
+    void set_service_active(bool active);
+    // Native callbacks use scoped dispatch. Programmatic activate/select_page
+    // remain available to shared workflows independently of displayed layers.
+    void dispatch(ui::Command command,std::uint64_t surface=0);
+    void navigate(ui::Page page);
+    ui::ControlLayout control_layout(const ui::Control& control,int width,int height,
+        std::span<const ui::Control> declarations=ui::console_screen()) const;
     ControlPresentation control(const ui::Control& control) const;
     MenuPresentation menu(std::span<const ui::Control* const> items) const;
     void select_menu(std::span<const ui::Control* const> items,const std::string& id);
@@ -77,6 +86,7 @@ public:
     BitmapPresentation bitmap(const ui::Control& control,unsigned pixel_width=640) const;
     std::shared_ptr<const ui::DocumentNode> document(ui::Page page,int width);
 private:
+    bool accepts_surface(std::uint64_t surface) const;
     bool accepts_input(const ui::Control& control) const;
     struct Impl;
     std::unique_ptr<Impl> impl_;

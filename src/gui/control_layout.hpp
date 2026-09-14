@@ -34,17 +34,36 @@ inline void layout_bitmap_content(const Control& c,ControlLayout& out) {
         }
     }
 }
-// Expanded bitmaps fill the app client area with the same caption policy.
-inline ControlLayout expanded_control_layout(const Control& c,int width,int height) {
-    ControlLayout out;
-    out.frame=out.widget={0,0,std::max(0,width),std::max(0,height)};
+inline ControlLayout control_content_layout(const Control& c,const FieldState& state,Rect frame) {
+    ControlLayout out;out.frame=frame;out.popup_upward=c.open_upward;
+    out.widget=out.frame;
+    out.has_label=c.kind==Kind::label || (c.kind!=Kind::action&&c.kind!=Kind::toggle&&c.label[0]);
+    out.label=c.kind==Kind::label?out.frame:out.frame.label_above(
+        c.kind==Kind::bitmap||c.kind==Kind::list?23:label_height);
+    if(c.footer_height)out.widget=out.widget.without_footer(c.footer_height);
+    if(c.kind==Kind::text&&!state.options.empty()) {
+        out.has_suggestions=true;
+        const int suggestions_width=std::min(23,out.widget.w);
+        out.suggestions={out.widget.x+out.widget.w-suggestions_width,out.widget.y,suggestions_width,out.widget.h};
+        out.widget.w-=suggestions_width;
+    }
     layout_bitmap_content(c,out);
     return out;
+}
+inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height) {
+    width=std::max(0,width);height=std::max(0,height);
+    const int left=std::clamp(p.left,0,width),top=std::clamp(p.top,0,height);
+    const int right=std::clamp(p.right,0,width-left),bottom=std::clamp(p.bottom,0,height-top);
+    const int available_width=width-left-right,available_height=height-top-bottom;
+    const int w=p.width>0?std::min(p.width,available_width):available_width;
+    const int h=p.height>0?std::min(p.height,available_height):available_height;
+    return {p.anchor_right?width-right-w:left,p.anchor_bottom?height-bottom-h:top,w,h};
 }
 // All rectangles are absolute logical client coordinates. No adapter knows the
 // meaning of a slot or independently reserves space for application controls.
 inline ControlLayout control_layout(const Control& c,const FieldState& state,int width,int height,
                                     std::span<const Control> controls=console_screen()) {
+    if(c.surface)return control_content_layout(c,state,overlay_control_rect(c.placement,width,height));
     const DesktopLayout desktop(width,height);
     ControlLayout out;
     out.popup_upward=c.open_upward;
@@ -59,13 +78,13 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
         const auto matches=[&](const Control& sibling) {
             if(c.menu!=Menu::none)return same_menu(sibling,c);
             if(declared)return &sibling==&c;
-            return sibling.menu==Menu::none&&sibling.kind==c.kind&&sibling.field==c.field&&
+            return sibling.surface==c.surface&&sibling.menu==Menu::none&&sibling.kind==c.kind&&sibling.field==c.field&&
                 sibling.command==c.command&&sibling.bitmap==c.bitmap&&sibling.page==c.page&&
                 sibling.persistent==c.persistent&&sibling.instance==c.instance;
         };
         for(std::size_t i=0;i<controls.size();++i) {
             const auto& sibling=controls[i];
-            if(sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
+            if(sibling.surface!=c.surface||sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
             total+=sibling.stretch;
             if(matches(sibling))found=true;
             else if(!found)before+=sibling.stretch;
@@ -84,19 +103,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
                    std::max(0,allocate(c.stretch)-8),28};
     }
     out.frame.w=std::max(0,out.frame.w);out.frame.h=std::max(0,out.frame.h);
-    out.widget=out.frame;
-    out.has_label=c.kind==Kind::label || (c.kind!=Kind::action&&c.kind!=Kind::toggle&&c.label[0]);
-    out.label=c.kind==Kind::label?out.frame:out.frame.label_above(
-        c.kind==Kind::bitmap||c.kind==Kind::list?23:label_height);
-    if(c.footer_height)out.widget=out.widget.without_footer(c.footer_height);
-    if(c.kind==Kind::text&&!state.options.empty()) {
-        out.has_suggestions=true;
-        const int suggestions_width=std::min(23,out.widget.w);
-        out.suggestions={out.widget.x+out.widget.w-suggestions_width,out.widget.y,suggestions_width,out.widget.h};
-        out.widget.w-=suggestions_width;
-    }
-    layout_bitmap_content(c,out);
-    return out;
+    return control_content_layout(c,state,out.frame);
 }
 inline Rect record_cell_rect(const RecordCell& cell,int row_width) {
     return {cell.x,cell.y,cell.w>0?cell.w:std::max(1,row_width-cell.x+cell.w),cell.h};
