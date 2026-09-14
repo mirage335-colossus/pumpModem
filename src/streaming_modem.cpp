@@ -13,29 +13,40 @@ void cancelled(std::stop_token stop) {if(stop.stop_requested())throw Error("mode
 
 struct StreamingTransmitter::Impl {
     std::unique_ptr<PatternTransmitter> pattern;
-    std::array<Complex,StreamingTransmitter::constellation_history_limit> constellation{};
+    std::vector<Complex> constellation;
     std::size_t constellation_begin=0,constellation_count=0,pending_count=0;
     std::uint64_t dropped=0;
+    std::size_t initialize_constellation(const Config& config,std::size_t workspace) {
+        const auto count=StreamingTransmitter::constellation_history_capacity(config);
+        const auto fixed=sizeof(StreamingTransmitter)+sizeof(Impl);
+        if(fixed>workspace || count>(workspace-fixed)/sizeof(Complex))
+            throw Error("pattern transmitter workspace is too small");
+        constellation.resize(count);
+        const auto bytes=fixed+constellation.capacity()*sizeof(Complex);
+        if(bytes>workspace)throw Error("pattern transmitter workspace is too small");
+        return workspace-bytes;
+    }
     Impl(Bytes wire,Config config,std::size_t workspace) {
         validate(config);
+        const auto remaining=initialize_constellation(config,workspace);
         if(wire.size()>std::numeric_limits<std::size_t>::max()/8 ||
-           sizeof(Impl)>workspace || wire.capacity()>workspace-sizeof(Impl) ||
-           wire.size()>(workspace-sizeof(Impl)-wire.capacity())/8)
+           wire.capacity()>remaining || wire.size()>(remaining-wire.capacity())/8)
             throw Error("pattern transmitter workspace is too small");
-        config.memory_limit=workspace-sizeof(Impl);
+        config.memory_limit=remaining;
         Bytes bits;bits.reserve(wire.size()*8);
         for(const auto byte:wire)for(unsigned bit=0;bit<8;++bit)
             bits.push_back(static_cast<std::uint8_t>((byte>>(7-bit))&1U));
         pattern=std::make_unique<PatternTransmitter>(std::move(bits),config,config.stream_epoch);
-        if(pattern->working_bytes()>workspace-sizeof(Impl))throw Error("pattern transmitter workspace is too small");
+        if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
     Impl(RawBits input,Config config,std::size_t workspace) {
         validate(config);
         if(input.bits.empty())throw Error("raw binary transmission requires at least one bit");
-        if(sizeof(Impl)>workspace || input.bits.size()>workspace-sizeof(Impl))throw Error("pattern transmitter workspace is too small");
-        config.memory_limit=workspace-sizeof(Impl);
+        const auto remaining=initialize_constellation(config,workspace);
+        if(input.bits.capacity()>remaining)throw Error("pattern transmitter workspace is too small");
+        config.memory_limit=remaining;
         pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch);
-        if(pattern->working_bytes()>workspace-sizeof(Impl))throw Error("pattern transmitter workspace is too small");
+        if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
     void retain_constellation(Complex value) {
         if(constellation_count==constellation.size()) {
@@ -46,6 +57,17 @@ struct StreamingTransmitter::Impl {
         else if(dropped<std::numeric_limits<std::uint64_t>::max())++dropped;
     }
 };
+std::size_t StreamingTransmitter::constellation_history_capacity(const Config& config) {
+    const auto chip=pattern_chip_samples(config),symbol=symbol_sample_count(config);
+    const auto chips=symbol/chip+(symbol%chip!=0);
+    const auto samples=config.sample_rate/constellation_frame_rate+(config.sample_rate%constellation_frame_rate!=0);
+    const auto remainder=samples%symbol;
+    // Every complete symbol contributes all of its chips. A leftover span
+    // can straddle a shortened final chip, and its first chip may have begun
+    // before the frame. Keep both boundary observations as well.
+    const auto partial=remainder?std::min(chips,remainder/chip+(remainder%chip!=0)+1):0;
+    return std::max(constellation_history_limit,static_cast<std::size_t>((samples/symbol)*chips+partial+1));
+}
 StreamingTransmitter::StreamingTransmitter(Bytes wire,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(wire),c,workspace)){}
 StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(bits),c,workspace)){}
 StreamingTransmitter::~StreamingTransmitter()=default;
@@ -54,7 +76,8 @@ StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) no
 bool StreamingTransmitter::finished()const{return impl_->pattern->finished();}
 std::uint64_t StreamingTransmitter::total_samples()const{return impl_->pattern->total_samples();}
 std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->pattern->samples_emitted();}
-std::size_t StreamingTransmitter::working_bytes()const{return sizeof(StreamingTransmitter)+sizeof(Impl)+impl_->pattern->working_bytes();}
+std::size_t StreamingTransmitter::working_bytes()const{return sizeof(StreamingTransmitter)+sizeof(Impl)+
+    impl_->constellation.capacity()*sizeof(Complex)+impl_->pattern->working_bytes();}
 std::vector<Complex> StreamingTransmitter::payload_constellation()const {
     const auto& s=*impl_;std::vector<Complex> result;result.reserve(s.constellation_count);
     for(std::size_t i=0;i<s.constellation_count;++i)result.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);

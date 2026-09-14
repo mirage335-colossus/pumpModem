@@ -27,7 +27,11 @@ struct RawBits { Bytes bits; };
 class StreamingTransmitter {
 public:
     static constexpr std::size_t analytic_preview_limit=2112;
-    static constexpr std::size_t constellation_history_limit=2048;
+    static constexpr std::size_t constellation_history_limit=2048; // Minimum retained history.
+    static constexpr unsigned constellation_frame_rate=60;
+    // Preserve the existing narrow-band history and at least one nominal
+    // bitmap frame of physical chips, including a chip already in progress.
+    static std::size_t constellation_history_capacity(const Config& config);
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();

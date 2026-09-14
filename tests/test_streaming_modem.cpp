@@ -83,9 +83,79 @@ void pattern_transmit_constellation() {
     }
 }
 
+void frame_wide_transmit_constellation() {
+    modem::Config config;
+    config.sample_rate=1200003;config.bandwidth_hz=300000;config.carrier_hz=450000;
+    config.integration_seconds=11;config.scramble=true;config.spreading_seed[0]=37;
+    // The rounded hardware prefix is empty for this long-symbol fixture, so
+    // it can exercise wideband history without rendering five seconds of PCM.
+    if(modem::training_sample_count(config))throw std::runtime_error("frame history fixture unexpectedly has a preamble");
+    const auto frame=config.sample_rate/modem::StreamingTransmitter::constellation_frame_rate+
+        (config.sample_rate%modem::StreamingTransmitter::constellation_frame_rate!=0);
+    const auto chip=modem::pattern_chip_samples(config);
+    const auto capacity=modem::StreamingTransmitter::constellation_history_capacity(config);
+    const auto endpoint=4*frame+chip/2;
+    const auto total_chips=endpoint/chip+(endpoint%chip!=0);
+    const auto first_frame_chip=(endpoint-frame)/chip;
+    if(total_chips-first_frame_chip<=modem::StreamingTransmitter::constellation_history_limit)
+        throw std::runtime_error("wideband fixture must exceed the old chip history");
+    modem::StreamingTransmitter fragmented(modem::RawBits{Bytes{0,1}},config),whole(modem::RawBits{Bytes{0,1}},config);
+    std::vector<float> pcm(endpoint);
+    if(whole.read(pcm)!=pcm.size())throw std::runtime_error("frame history PCM fixture ended early");
+    modem::PatternCode code(config);
+    std::vector<Complex> expected;
+    for(std::uint64_t i=0;i<total_chips;++i)
+        expected.push_back(std::sqrt(2*modem::nominal_signal_power)*code.value(i,0));
+    std::array<Complex,317> output{};
+    constexpr std::array<std::size_t,5> requests{1,3,317,10,71};
+    std::size_t iteration=0,observed=0;
+    while(fragmented.samples_emitted()<endpoint) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(requests[iteration++%requests.size()],
+            endpoint-fragmented.samples_emitted()));
+        fragmented.read_analytic(std::span(output).first(count));
+        const auto batch=fragmented.take_payload_constellation();
+        if(batch.dropped || observed+batch.points.size()>expected.size() ||
+           !std::equal(batch.points.begin(),batch.points.end(),expected.begin()+static_cast<std::ptrdiff_t>(observed)))
+            throw std::runtime_error("wideband callback fragmentation lost or repeated chip observations");
+        observed+=batch.points.size();
+    }
+    const auto history=whole.payload_constellation();
+    if(observed!=expected.size() || history.size()!=capacity || history!=fragmented.payload_constellation() ||
+       !std::equal(history.begin(),history.end(),expected.end()-static_cast<std::ptrdiff_t>(capacity)))
+        throw std::runtime_error("wideband history did not preserve its chronological frame capacity");
+    const auto frame_points=static_cast<std::size_t>(total_chips-first_frame_chip);
+    if(frame_points>history.size() || !std::equal(history.end()-static_cast<std::ptrdiff_t>(frame_points),history.end(),
+                                               expected.begin()+static_cast<std::ptrdiff_t>(first_frame_chip)))
+        throw std::runtime_error("wideband history lost the chip overlapping the start of the bitmap frame");
+    const auto pending=whole.take_payload_constellation();
+    if(pending.points!=history || pending.dropped!=expected.size()-capacity || !whole.take_payload_constellation().points.empty())
+        throw std::runtime_error("wideband bounded history reported incorrect omitted points");
+    const auto bytes=whole.working_bytes();
+    if(bytes<capacity*sizeof(Complex))throw std::runtime_error("wideband history allocation is absent from DSP accounting");
+    modem::StreamingTransmitter exact(modem::RawBits{Bytes{0,1}},config,bytes);
+    bool rejected=false;
+    try{modem::StreamingTransmitter too_small(modem::RawBits{Bytes{0,1}},config,bytes-1);}
+    catch(const Error&){rejected=true;}
+    if(!rejected || exact.working_bytes()!=bytes)throw std::runtime_error("wideband history did not enforce its exact workspace budget");
+
+    // Short final chips can put more physical points in a frame than a
+    // bandwidth-only estimate. Check every possible frame boundary phase.
+    config.integration_seconds=10.5/config.sample_rate;
+    const auto symbol=modem::symbol_sample_count(config),chips=modem::pattern_chips_per_symbol(config);
+    const auto partial_capacity=modem::StreamingTransmitter::constellation_history_capacity(config);
+    if(symbol%chip==0)throw std::runtime_error("frame boundary fixture needs shortened final chips");
+    for(std::uint64_t start=0;start<symbol;++start) {
+        const auto end=start+frame;
+        const auto first=start/symbol*chips+start%symbol/chip;
+        const auto last=end/symbol*chips+(end%symbol)/chip+((end%symbol)%chip!=0);
+        if(last-first>partial_capacity)throw std::runtime_error("short final chips exceed the reserved bitmap frame history");
+    }
+}
+
 int main() {
     try {
         pattern_transmit_constellation();
+        frame_wide_transmit_constellation();
         modem::Config config;config.memory_limit=1024; // Batch PCM ceiling does not limit explicit streaming DSP.
         const Bytes bits{0,0,1,1,0,1,0,1,1};
         modem::StreamingTransmitter source(modem::RawBits{bits},config);

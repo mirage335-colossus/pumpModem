@@ -26,7 +26,11 @@ constexpr std::size_t maximum_events = 64;
 constexpr std::size_t replay_frames = 60;
 constexpr std::size_t replay_wave_samples = 256;
 constexpr std::size_t replay_bins = 257;
-constexpr std::size_t constellation_limit = 2048;
+constexpr std::size_t minimum_constellation_limit = 2048;
+std::size_t constellation_limit(const modem::Config& config) {
+    return std::max({minimum_constellation_limit, detail::SignalWindow::constellation_capacity(config),
+                     modem::StreamingTransmitter::constellation_history_capacity(config)});
+}
 constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
 constexpr auto replay_duration = std::chrono::seconds(3);
 constexpr std::size_t replay_text_limit = 4096;
@@ -44,10 +48,10 @@ constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
 // One verified packet is moved into the receive-content cache at the deadline.
 // Its payload uses the content quota; its diagnostics and caption use DSP space.
 constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
-    sizeof(SignalUpdate) + replay_text_limit + 64 + constellation_limit * sizeof(std::complex<double>);
+    sizeof(SignalUpdate) + replay_text_limit + 64 + minimum_constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {
     return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
-        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit * sizeof(std::complex<float>))) : 0;
+        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value.transfer.modem) * sizeof(std::complex<float>))) : 0;
 }
 double epoch_now() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -66,7 +70,9 @@ std::string display_text(const Message& message) {
     return terminal_text(std::span<const std::uint8_t>(message.data).first(size));
 }
 constexpr std::size_t minimum_workspace = 512 * 1024;
-std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double) + 3 * sizeof(std::complex<double>)) +
+std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double)) +
+                                       constellation_limit(value.transfer.modem) * 3 * sizeof(std::complex<double>) +
+                                       detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
                                        pattern_score_limit * (4 * sizeof(std::complex<double>) + sizeof(modem::PatternEvidence)) +
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
                                        plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
@@ -130,7 +136,7 @@ void count_dropped(std::uint64_t& total, std::uint64_t count) {
     total += std::min(count, std::numeric_limits<std::uint64_t>::max() - total);
 }
 void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch batch,
-                   std::size_t limit = constellation_limit) {
+                   std::size_t limit) {
     count_dropped(target.dropped, batch.dropped);
     if (batch.points.size() > limit) {
         count_dropped(target.dropped, batch.points.size() - limit);
@@ -269,7 +275,7 @@ struct Session::Impl {
         if (batch.points.empty() && !batch.dropped) return;
         if (pending_source != source_kind) pending_points = {};
         pending_source = source_kind;
-        append_points(pending_points, std::move(batch));
+        append_points(pending_points, std::move(batch), constellation_limit(settings.transfer.modem));
     }
     void advance_replay(Clock::time_point now) {
         if (replay.empty()) return;
@@ -322,7 +328,7 @@ struct Session::Impl {
             if (replay[i].source != frame.source) { visible = {}; continue; }
             modem::ConstellationBatch points; points.dropped = replay[i].dropped;
             for (const auto point : replay[i].constellation) points.points.emplace_back(point.real(), point.imag());
-            append_points(visible, std::move(points));
+            append_points(visible, std::move(points), constellation_limit(settings.transfer.modem));
         }
         result.constellation = std::move(visible.points); result.constellation_dropped = visible.dropped;
         // Each frame already contains a bounded history; replacing it keeps
@@ -766,7 +772,7 @@ struct Session::Impl {
                 if (local_generation != version) {
                     local_generation = version; wave.reset(); simulation_bank.reset(); simulation_channel.reset();
                     last_plot = {};
-                    plot_window.reset();
+                    plot_window = detail::SignalWindow(value.transfer.modem);
                     idle_fraction = 0;
                 }
                 if (wave && wave->stop.stop_requested()) {
@@ -937,10 +943,13 @@ struct Session::Impl {
                     const auto reserved = replay_workspace(value);
                     if (reserved <= replay_result_workspace) throw Error("DSP workspace cannot hold simulation results");
                     const auto budget = reserved - replay_result_workspace;
-                    prepared->replay_count = std::min(replay_frames, budget / (replay_frame_base + 32 * sizeof(std::complex<float>)));
+                    // Keep a complete measured constellation in each frame;
+                    // reduce replay cadence when its rate-sized points need
+                    // more room, instead of clipping it to the old PCM tail.
+                    prepared->point_limit = std::max<std::size_t>(32, detail::SignalWindow::constellation_capacity(value.transfer.modem));
+                    prepared->replay_count = std::min(replay_frames,
+                        budget / (replay_frame_base + prepared->point_limit * sizeof(std::complex<float>)));
                     if (prepared->replay_count < 2) throw Error("DSP workspace cannot hold a simulation replay");
-                    prepared->point_limit = std::min(constellation_limit,
-                        (budget / prepared->replay_count - replay_frame_base) / sizeof(std::complex<float>));
                     prepared->replay.reserve(prepared->replay_count);
                     prepared->signals.resize(prepared->replay_count);
                 }

@@ -2,6 +2,7 @@
 #include "datapump/audio.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_code.hpp"
+#include "../src/signal_view.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -1283,10 +1284,17 @@ void test_weak_and_wide_modes_keep_the_channel_running() {
     value.transfer.modem = tuning::resolve(192000, 120, tuning::PatternMode::auto_pattern, false).config;
     session.configure(value);
     previous = wait_for(session, [](const auto& snapshot) { return snapshot.sequence >= 3; });
-    current = wait_for(session, [&](const auto& snapshot) { return snapshot.sequence > previous.sequence + 2; });
+    const auto frame_samples = live::detail::SignalWindow::sample_capacity(value.transfer.modem);
+    const auto frame_points = live::detail::SignalWindow::constellation_capacity(value.transfer.modem);
+    current = wait_for(session, [&](const auto& snapshot) {
+        return snapshot.sequence > previous.sequence + 2 && snapshot.samples_received >= previous.samples_received + frame_samples;
+    });
     check(current.samples_received > previous.samples_received && current.waveform != previous.waveform,
           "384k sample rate retains bounded blocks while wideband noise and plots continue");
     check(current.dsp_buffered_bytes <= value.dsp_workspace_bytes, "wideband DSP workspace stays within its independent budget");
+    check(frame_samples > 2048 && current.constellation.size() + 1 >= frame_points &&
+          current.constellation.size() <= frame_points && current.waveform.size() == 2048 && current.spectrum_db.size() == 1025,
+          "live wideband publication clipped its 60 Hz constellation frame to the waveform tail");
     value.transfer.modem = tuning::resolve(1, 6, tuning::PatternMode::auto_pattern, false).config;
     session.configure(value);
     previous = wait_for(session, [](const auto& snapshot) { return snapshot.sequence >= 3; });

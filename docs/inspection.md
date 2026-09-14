@@ -27,8 +27,14 @@ comparisons fit common complex amplitude and phase. Keyed rows use public
 illustration seeds and never expose the actual private epoch stream. There is no separate APSK view. See
 [geometry and interpretation](pattern-constellation.md).
 
-During audio transmission, **Transmitted constellation** retains up to 2,048
-actual emitted payload chip I/Q values. Polling faster than the chip rate does
+Constellation capture covers at least one nominal 60 Hz frame (16.7 ms) of
+signal time, independent of GUI polling and without VSYNC or display-backend
+timing. Its sample and point capacities grow with the selected signal rate;
+the waveform and spectrum continue to use their latest 2,048 PCM samples.
+
+During audio transmission, **Transmitted constellation** retains actual emitted
+payload chip I/Q values, with a minimum history capacity of 2,048 points and
+enough room for every chip overlapping a nominal frame. Polling faster than the chip rate does
 not erase earlier points or substitute measured samples between chips. Settling
 audio uses measured outgoing I/Q until the first payload chip is emitted.
 Simulation and reception continue to show measured receiver input I/Q.

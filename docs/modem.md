@@ -322,9 +322,12 @@ delivered batch within the same source coordinates, subject to a
 bounded capacity and an explicit overflow count. Duplicate polls do not append
 duplicate rows. Due browser events are delivered in chronological order.
 Replay workspace uses at most one eighth of the configured DSP budget, capped
-at roughly 1.4 MiB. This includes roughly 38 KiB for the prepared result's
+at the storage needed for 60 frames at the selected signal rate. Each captured
+constellation covers at least 1/60 second of signal time; waveform and spectrum
+previews retain their fixed sizes. The reservation includes the prepared result's
 diagnostics and caption, plus the frames' plots, points and preview text. Smaller
-budgets reduce frame and point capacities. This bounded workspace is independent
+budgets reduce the frame count while retaining each frame's complete measured
+constellation. This bounded workspace is independent
 of simulated airtime; the prepared packet's content is charged to the separate
 receive-content quota.
 
