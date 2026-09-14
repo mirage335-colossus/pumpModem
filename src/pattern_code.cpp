@@ -7,7 +7,6 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
-#include <string_view>
 
 namespace datapump::modem {
 namespace {
@@ -29,16 +28,20 @@ struct StreamCache {
     static constexpr std::size_t capacity = 512;
     Crypto key;
     StreamPurpose purpose;
+    StreamDomain domain;
     std::uint64_t epoch = 0, begin = 0;
     bool valid = false;
     std::array<std::uint8_t, capacity> bytes{};
+    StreamCache(const Crypto& source, StreamPurpose use, std::uint64_t time,
+                StreamDomain counter_domain):key(source),purpose(use),domain(counter_domain),epoch(time) {}
     StreamCache(std::span<const std::uint8_t> seed, StreamPurpose use,
-                std::uint64_t time): key(seed), purpose(use), epoch(time) {}
+                std::uint64_t time, StreamDomain counter_domain=StreamDomain::Payload):
+        StreamCache(Crypto(seed),use,time,counter_domain) {}
     ~StreamCache() { OPENSSL_cleanse(bytes.data(), bytes.size()); }
     std::uint8_t byte(std::uint64_t offset) {
         const auto aligned = offset - offset % capacity;
         if (!valid || aligned != begin) {
-            auto generated = key.stream(purpose, epoch, aligned, capacity);
+            auto generated = key.stream(purpose, epoch, aligned, capacity, domain);
             std::copy(generated.begin(), generated.end(), bytes.begin());
             OPENSSL_cleanse(generated.data(), generated.size());
             begin = aligned; valid = true;
@@ -68,15 +71,6 @@ struct StreamCache {
         return std::polar(radius/normalization,tau*uniform(position*8+4));
     }
 };
-std::unique_ptr<StreamCache> hardware_stream(std::span<const std::uint8_t> source,
-                                           std::string_view label,StreamPurpose purpose,
-                                           std::uint64_t epoch) {
-    const Crypto domain(source);
-    auto seed=domain.mac(std::span(reinterpret_cast<const std::uint8_t*>(label.data()),label.size()));
-    auto result=std::make_unique<StreamCache>(seed,purpose,epoch);
-    OPENSSL_cleanse(seed.data(),seed.size());
-    return result;
-}
 }
 
 std::uint64_t pattern_chip_samples(const Config& config) {
@@ -169,23 +163,23 @@ struct PatternTransmitter::Impl {
         const auto chip_count = static_cast<std::uint64_t>(bits.size()) * code.chips_per_symbol();
         require(chip_count - 1 <= std::numeric_limits<std::uint64_t>::max() - start,
                 "pattern transmission chip address would overflow");
-        const auto caches=training?1U+static_cast<unsigned>(config.hardware_data_seed.has_value())+
+        const auto caches=training?1U+static_cast<unsigned>(config.data_key.has_value())+
             static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss):0U;
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+caches*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
         if(training) {
-            // Encrypt public noise bytes before I/Q mapping, then apply the
-            // enabled spreading layers. Separate hardware domains keep every
-            // prefix stream independent of payload stream fragments.
-            settling=hardware_stream(public_seed,
-                "DataPump/hardware-settling/noise/v1",StreamPurpose::Scrambler,epoch);
-            if(config.hardware_data_seed)settling_data=hardware_stream(*config.hardware_data_seed,
-                "DataPump/hardware-settling/data/v1",StreamPurpose::Data,epoch);
-            if(config.scramble)settling_pattern=hardware_stream(config.spreading_seed,
-                "DataPump/hardware-settling/scrambler/v1",StreamPurpose::Scrambler,epoch);
-            if(config.dsss)settling_dsss=hardware_stream(config.dsss_seed,
-                "DataPump/hardware-settling/dsss/v1",StreamPurpose::Dsss,epoch);
+            // Private layers use the same keys, purposes and epoch as the
+            // payload; only the fixed CTR pad changes. Encrypt noise bytes
+            // before I/Q mapping, then apply every enabled spreading layer.
+            constexpr auto domain=StreamDomain::Preamble;
+            settling=std::make_unique<StreamCache>(public_seed,StreamPurpose::Scrambler,epoch,domain);
+            if(config.data_key)settling_data=std::make_unique<StreamCache>(
+                *config.data_key,StreamPurpose::Data,epoch,domain);
+            if(config.scramble)settling_pattern=std::make_unique<StreamCache>(
+                config.spreading_seed,StreamPurpose::Scrambler,epoch,domain);
+            if(config.dsss)settling_dsss=std::make_unique<StreamCache>(
+                config.dsss_seed,StreamPurpose::Dsss,epoch,domain);
         }
     }
     template<class Output, class Convert>

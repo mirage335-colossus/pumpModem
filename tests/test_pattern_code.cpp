@@ -9,7 +9,6 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
-#include <string_view>
 
 using namespace datapump;
 namespace {
@@ -95,7 +94,7 @@ void alphabet_and_repetition() {
 }
 void exact_pcm_and_chunks() {
     auto c = config(); c.scramble = true; c.dsss = true;
-    c.hardware_data_seed=c.spreading_seed;
+    c.data_key.emplace(c.spreading_seed);
     c.bandwidth_hz = 1100; c.integration_seconds = .071; // Partial final chip.
     const Bytes bits{0,1,0};
     modem::PatternTransmitter whole(bits, c, 91, 3), chunked(bits, c, 91, 3);
@@ -238,13 +237,13 @@ void hardware_noise_keystreams() {
         tx.read(samples);return samples;
     };
     auto c=config();c.scramble=true;c.dsss=true;
-    c.hardware_data_seed=std::array<std::uint8_t,32>{};c.hardware_data_seed->fill(0x37);
+    c.data_key.emplace(Bytes(32,0x37));
     const auto both=prefix(c,epoch);
     auto changed=c;changed.spreading_seed[0]^=0x80;
     check(prefix(changed,epoch)!=both,"Scrambler must affect settling when DSSS is also enabled");
     changed=c;changed.dsss_seed[0]^=0x80;
     check(prefix(changed,epoch)!=both,"DSSS must affect settling when Scrambler is also enabled");
-    changed=c;(*changed.hardware_data_seed)[0]^=0x80;
+    changed=c;changed.data_key.emplace(Bytes(32,0xb7));
     check(prefix(changed,epoch)!=both,"hardware Data encryption key must affect the prefix");
     check(prefix(c,epoch+1)!=both,"hardware streams must advance with the clock epoch");
     check(prefix(c,epoch,Bytes{1,1,0,1})==both,"settling cannot encode payload bits or length");
@@ -277,22 +276,20 @@ void hardware_noise_keystreams() {
     const auto first=transfer::seeded_config(options,epoch);
     options.key.emplace(Bytes(32,0xa7));
     const auto second=transfer::seeded_config(options,epoch);
-    check(first.hardware_data_seed && second.hardware_data_seed && !first.scramble && !first.dsss,
-          "data-only encryption must supply a dedicated hardware Data encryption seed");
+    check(first.data_key && second.data_key && !first.scramble && !first.dsss,
+          "data-only encryption must supply the selected Data key to the waveform");
     check(prefix(first,epoch)!=prefix(second,epoch) && prefix(first,epoch)!=prefix(options.modem,epoch),
           "data-only encrypted settling must depend on the selected key rather than the public waveform");
 }
 void hardware_data_byte_encryption() {
     // Recover the phase word from the transmitted I/Q waveform, then verify
-    // that encryption changes those bytes by exactly the dedicated Data mask.
+    // that encryption changes those bytes by exactly the selected key's Data mask.
     // Positions straddle cache boundaries; neither source has spreading enabled.
     constexpr std::uint64_t epoch=1800000000;
-    auto plain=config(),encrypted=plain;
-    encrypted.hardware_data_seed=plain.spreading_seed;
-    constexpr std::string_view domain="DataPump/hardware-settling/data/v1";
-    const Crypto source(*encrypted.hardware_data_seed);
-    const Crypto data(source.mac(std::span(reinterpret_cast<const std::uint8_t*>(domain.data()),domain.size())));
-    const auto mask=data.stream(StreamPurpose::Data,epoch,0,513*8);
+    auto plain=config();
+    transfer::Options options;options.modem=plain;options.key.emplace(plain.spreading_seed);
+    auto encrypted=transfer::seeded_config(options,epoch);
+    const auto mask=options.key->stream(StreamPurpose::Data,epoch,0,513*8,StreamDomain::Preamble);
     modem::PatternTransmitter public_tx({0},plain,epoch),encrypted_tx({0},encrypted,epoch);
     const auto refresh=std::max<std::uint64_t>(1,modem::pattern_chip_samples(plain)/2);
     std::vector<std::complex<double>> a(513*refresh),b(a.size());
@@ -309,6 +306,23 @@ void hardware_data_byte_encryption() {
         const auto sample=position*refresh;
         check((phase_word(a[sample],sample)^phase_word(b[sample],sample))==word,
               "preamble bytes must be XOR-encrypted by the Data stream before noise mapping");
+    }
+    for(unsigned layers=1;layers<=3;++layers) {
+        auto spread=encrypted;spread.scramble=(layers&1U)!=0;spread.dsss=(layers&2U)!=0;
+        modem::PatternTransmitter tx({0},spread,epoch);
+        std::vector<std::complex<double>> observed(b.size());tx.read_analytic(observed);
+        const Crypto pattern(spread.spreading_seed),dsss(spread.dsss_seed);
+        const auto chips=observed.size()/modem::pattern_chip_samples(spread)+1;
+        const auto pattern_mask=pattern.stream(StreamPurpose::Scrambler,epoch,0,(chips+7)/8,StreamDomain::Preamble);
+        const auto dsss_mask=dsss.stream(StreamPurpose::Dsss,epoch,0,(chips+7)/8,StreamDomain::Preamble);
+        for(std::size_t i=0;i<observed.size();++i) {
+            const auto chip=i/modem::pattern_chip_samples(spread);
+            unsigned bit=0;
+            if(spread.scramble)bit^=(pattern_mask[chip/8]>>(chip%8))&1U;
+            if(spread.dsss)bit^=(dsss_mask[chip/8]>>(chip%8))&1U;
+            check(std::abs(observed[i]-(bit?-b[i]:b[i]))<1e-11,
+                  "preamble spreading must use existing payload keys with only the preamble CTR pad");
+        }
     }
     const auto used=encrypted_tx.working_bytes();
     encrypted.memory_limit=used-1;

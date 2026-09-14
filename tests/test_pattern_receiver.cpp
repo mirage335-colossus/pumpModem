@@ -266,14 +266,14 @@ void hardware_settling_is_not_payload() {
         c.bandwidth_hz=bandwidth;c.stream_epoch=epoch;
         for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(5*i+11);
         if(data){
-            c.hardware_data_seed.emplace();
-            for(std::size_t i=0;i<c.hardware_data_seed->size();++i)
-                (*c.hardware_data_seed)[i]=static_cast<std::uint8_t>(7*i+13);
+            std::array<std::uint8_t,32> key{};
+            for(std::size_t i=0;i<key.size();++i)key[i]=static_cast<std::uint8_t>(7*i+13);
+            c.data_key.emplace(key);
         }
         const Bytes bits{0,0,1};
         modem::PatternTransmitter source(bits,c,c.stream_epoch);
         std::vector<float> samples(static_cast<std::size_t>(source.total_samples()));source.read(samples);
-        c.hardware_data_seed.reset(); // Acquisition needs no knowledge of the settling Data stream.
+        c.data_key.reset(); // Acquisition needs no knowledge of the settling Data stream.
         const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c));
         check(prefix>0,"hardware-settling fixture must contain a physical prefix");
         const std::vector<float> settling(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(prefix));

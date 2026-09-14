@@ -29,13 +29,20 @@ The caller maps its symbol/sample schedule to byte positions; this library does
 not convert fractional seconds or automatically advance the anchor during a
 transmission.
 
-For byte offset `o`, the AES-256-CTR initial 128-bit counter is the big-endian
-integer `floor(o / 16)`. Discard the first `o % 16` keystream bytes and produce
-the requested count. OpenSSL increments the whole counter in big-endian order.
-The API rejects an offset/count combination whose final byte exceeds `2^64-1`.
+For byte offset `o`, the AES-256-CTR initial 128-bit counter is
+`domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
+argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
+all zero, preserving existing payload output. `StreamDomain::Preamble` uses
+the eight ASCII bytes `preamble`. Both domains use the same purpose and epoch
+key; the counter pad is not another key derivation. Discard the first `o % 16`
+keystream bytes and produce the requested count. OpenSSL increments the whole
+counter in big-endian order. The API rejects an offset/count combination whose
+final byte exceeds `2^64-1`, so neither domain can carry into the high counter
+bytes or overlap the other domain.
 Changing the whole-second anchor derives a fresh epoch key; counter positions
 therefore do not collide merely because adjacent transmissions cross a second.
-Within one anchor and purpose, random access and sequential generation agree.
+Within one anchor, purpose and domain, random access and sequential generation
+agree.
 
 ### Binary pattern chip addressing
 
@@ -70,24 +77,26 @@ receiver seeks without storing a keystream proportional to hours of airtime.
 Cache contents are cleansed when released.
 
 The hardware-settling prefix starts with public pseudorandom noise bytes. Any
-selected transfer key derives a dedicated preamble Data key through HMAC-SHA256
-with the label `DataPump/hardware-data-seed/v1`. Its Data-purpose AES-CTR stream
-XOR-encrypts those bytes before waveform mapping, including when payload
-spreading is disabled. Every half-chip interval consumes eight bytes: two
-big-endian 32-bit uniform words mapped into circular I/Q noise using a Gaussian
-transform. Its radius is capped and mean power normalized to stay within PCM
-headroom. Enabled Scrambler and DSSS layers then each multiply their own
-independent prefix signs into the noise. All selected layers apply together.
+selected transfer key supplies its existing Data-purpose, transmission-epoch
+key to XOR-encrypt those bytes before waveform mapping, including when payload
+spreading is disabled. `Config::data_key` retains that original `Crypto` key;
+it is not reconstructed from a new seed. Every half-chip interval consumes
+eight bytes: two big-endian 32-bit uniform words mapped into circular I/Q noise
+using a Gaussian transform. Its radius is capped and mean power normalized to
+stay within PCM headroom. Enabled Scrambler and DSSS layers then each multiply
+their own independent prefix signs into the noise. All selected layers apply
+together.
 
-Each prefix stream derives a separate key from its source seed using the
-labels `DataPump/hardware-settling/noise/v1`,
-`DataPump/hardware-settling/data/v1`,
-`DataPump/hardware-settling/scrambler/v1` and
-`DataPump/hardware-settling/dsss/v1`. The derived keys use the existing
-epoch-separated AES-CTR machinery, with at most four fixed 512-byte seek caches.
-The public noise generator uses the Scrambler purpose; byte encryption uses
-the Data purpose under its dedicated key. The local Data seed and labels are
-never transmitted. Removing the spreading layers still leaves independent
+Data, enabled Scrambler and enabled DSSS use their existing payload keys and
+epoch, with `StreamDomain::Preamble` selecting the separate counter range.
+The Scrambler and DSSS waveform seeds remain exactly those supplied to
+`PatternCode`; the public noise generator uses the existing public seed,
+Scrambler purpose and transmission epoch. Its public payload row instead uses
+epoch zero. At most four fixed 512-byte seek caches hold these streams.
+No preamble-specific key is generated or derived. The earlier extra HMAC
+derivations were deterministic, not random-key generation, and are no longer
+used. The fixed `preamble` counter pad is local state, never a transmitted
+field. Removing the spreading layers still leaves independent
 noise, not a legal payload codeword. The receiver never matches the prefix as
 a synchronization marker. It consumes no Data, Scrambler or DSSS payload
 positions. The epoch is fixed at transmission start, before that prefix;
@@ -118,8 +127,8 @@ unambiguous encoding. Verification requires a 32-byte tag and compares it with
 `CRYPTO_memcmp`. HMAC does not require a unique message nonce. Packet framing
 decides where the tag is placed and which surrounding coding is applied.
 
-Reusing the same key, timestamp, purpose, and byte positions repeats CTR output
-and exposes the XOR of the plaintexts. Known plaintext reveals those reused
+Reusing the same key, timestamp, purpose, domain and byte positions repeats CTR
+output and exposes the XOR of the plaintexts. Known plaintext reveals those reused
 positions. It does not directly reveal other CTR positions or the independent
 MAC key. HMAC still rejects altered authenticated content. This is not a claim
 that CTR reuse preserves confidentiality. Use transmission spacing and coordinate

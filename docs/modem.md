@@ -55,13 +55,15 @@ mask. It helps external gain control and muting settle before
 fast payload symbols arrive, and is not made from the legal payload patterns.
 It supplies no training, header or acquisition condition: pattern evidence
 alone accepts the following symbols even when the prefix is lost or distorted.
-Any selected key XOR-encrypts the preamble noise bytes with a dedicated
-Data-purpose CTR stream before I/Q mapping, even with payload spreading
-disabled. Enabled Scrambler and DSSS layers then both apply through separate
-hardware derivation domains. Tone mode uses the same noise prefix, refreshing
-phase and amplitude at roughly twice the nominal chip rate; it reserves no
-payload constellation points. The transmission epoch is
-fixed before the prefix, and clock-start hypotheses include its elapsed time.
+Any selected key XOR-encrypts the preamble noise bytes with its existing
+Data-purpose key and transmission epoch before I/Q mapping, even with payload
+spreading disabled. Enabled Scrambler and DSSS layers then both apply using
+the same keys and epoch as their payload streams. The high eight CTR counter
+bytes contain the fixed ASCII pad `preamble`, separating prefix positions
+without generating or deriving extra keys. Tone mode uses the same noise
+prefix, refreshing phase and amplitude at roughly twice the nominal chip rate;
+it reserves no payload constellation points. The transmission epoch is fixed
+before the prefix, and clock-start hypotheses include its elapsed time.
 Airtime estimates include the prefix without adding to meaningful payload bits.
 
 ### Explicit legacy APSK waveform and training
@@ -524,7 +526,9 @@ uses the same rounded duration as other pattern transmissions.
 In default pattern mode, each bit occupies exactly one complete pattern symbol,
 so a three-bit draft occupies three payload symbols with no byte padding. Any
 hardware-settling prefix adds airtime but no payload symbols or bits. Selected keys
-mask only the actual data bits and seed independent pattern/DSSS streams.
+mask the actual data bits and seed independent pattern/DSSS streams. When a
+prefix is present, those same keys also mask its noise through the separate
+`preamble` CTR range; they add no transmitted data bits.
 
 Raw signals have no packet bootstrap or authentication. Simulation and audio
 feed their waveform to the same blind pattern receiver, without transmitting

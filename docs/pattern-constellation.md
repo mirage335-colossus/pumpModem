@@ -33,19 +33,22 @@ marker, and the receiver never requires or fits
 it to establish lock. A missing or distorted prefix does not change the payload
 format or the evidence needed to accept a symbol.
 
-The prefix begins with public noise bytes, XOR-encrypted by a dedicated
-Data-purpose CTR stream whenever an encryption key is selected, before their
-mapping into I/Q noise. This also applies with payload spreading disabled.
-Every enabled Scrambler and DSSS layer then applies its own independent prefix
-keystream; all layers remain active together. Separate hardware derivation
-domains keep these fragments independent of the payload streams. With no
+The prefix begins with public noise bytes, XOR-encrypted by the existing
+Data-purpose key and transmission epoch whenever an encryption key is selected,
+before their mapping into I/Q noise. This also applies with payload spreading
+disabled.
+Every enabled Scrambler and DSSS layer then applies its existing key and epoch;
+all layers remain active together. Each stream uses the fixed ASCII `preamble`
+pad in the high eight CTR counter bytes, separating prefix fragments from
+payload positions without deriving additional keys. With no
 Data key or spreading layer, the prefix is public. Its samples are
 reproducible for previews without reusing payload stream positions. At most
 four fixed 512-byte caches hold these streams. This avoids a predictable
 public preamble in keyed transmissions; it does not by itself demonstrate
 physical low probability of intercept. The epoch is fixed at transmission
-start; payload Data and pattern positions still begin
-at zero. System-clock hypotheses account for the prefix's elapsed duration
+start, before the prefix; this does not change the time schedule, and payload
+Data and pattern positions still begin at zero. System-clock hypotheses
+account for the prefix's elapsed duration
 when predicting the first payload symbol. Estimates and transmission layouts
 include its airtime separately from meaningful bits and payload symbols.
 

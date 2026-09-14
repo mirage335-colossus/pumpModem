@@ -4,6 +4,29 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Shared preamble keys and CTR pad — September 2026
+
+The preamble now uses the same Data key and the same enabled Scrambler/DSSS
+waveform keys and transmission epoch as the payload. Its only cryptographic
+distinction is the fixed eight-byte ASCII `preamble` pad in the high half of
+the AES-CTR counter; the low half contains the ordinary block offset. All
+preamble-specific HMAC key derivations have been removed. Those derivations
+were deterministic, and neither version generates random preamble keys.
+
+Frozen Crypto vectors check unchanged payload output and the preamble counter
+format at the beginning and end of the 64-bit byte-address range. All four
+stream purposes have domain, epoch, chunk and random-access coverage. The
+waveform checks recover the actual encrypted phase words against the selected
+Data key, then verify each spreading layer against its existing payload key
+with the preamble counter pad. Payload samples and positions remain unchanged;
+the existing prefix-only rejection, full-prefix and lost-prefix cases remain
+part of receiver validation.
+
+All 48 Release CTest suites passed in 173.81 seconds. The four focused
+ASan/UBSan suites (`crypto`, `pattern_code`,
+`pattern_receiver`, `pattern_transfer`) passed in 19.61 seconds with leak
+detection disabled.
+
 ## Preamble Data encryption — September 2026
 
 Preamble noise bytes now pass through bytewise Data-purpose AES-CTR encryption
