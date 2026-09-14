@@ -4,6 +4,7 @@
 #include "overlay_fixture.hpp"
 #include <cstring>
 #include <FL/Fl_Image_Surface.H>
+#include <FL/Fl_Tooltip.H>
 #ifdef __linux__
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
@@ -544,6 +545,78 @@ void expanded_bitmap_clicks() {
     Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
+void expanded_bitmap_hover_repaint() {
+#ifdef __linux__
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"QR hover fixture has no native window");
+    std::unique_ptr<Display,decltype(&XCloseDisplay)> display(XOpenDisplay(nullptr),XCloseDisplay);
+    require(display!=nullptr,"QR hover fixture could not open a native pointer connection");
+    struct TooltipSettings {
+        float delay=Fl_Tooltip::delay(),hover=Fl_Tooltip::hoverdelay(),hide=Fl_Tooltip::hidedelay();int enabled=Fl_Tooltip::enabled();
+        ~TooltipSettings() {Fl_Tooltip::exit(nullptr);Fl_Tooltip::delay(delay);Fl_Tooltip::hoverdelay(hover);Fl_Tooltip::hidedelay(hide);Fl_Tooltip::enable(enabled);}
+    } tooltip_settings;
+    Fl_Tooltip::delay(.02f);Fl_Tooltip::hoverdelay(.02f);Fl_Tooltip::hidedelay(5);Fl_Tooltip::enable();
+    const auto move=[&](int x,int y) {
+        XWarpPointer(display.get(),None,DefaultRootWindow(display.get()),0,0,0,0,window->x()+x,window->y()+y);
+        XSync(display.get(),False);
+    };
+    const auto settle=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.002);
+    };
+    const auto pixels=[&] {
+        window->make_current();std::unique_ptr<unsigned char[]> data(fl_read_image(nullptr,0,0,window->w(),window->h()));
+        require(data!=nullptr,"QR hover fixture could not capture the visible client area");
+        return std::vector<unsigned char>(data.get(),data.get()+static_cast<std::size_t>(window->w())*window->h()*3);
+    };
+    const auto surface=[&]() -> NativeOverlay* {
+        for(int i=0;i<window->children();++i)if(auto* value=dynamic_cast<NativeOverlay*>(window->child(i)))return value;
+        return nullptr;
+    };
+    window->position(80,80);move(window->w()+30,window->h()+30);
+    app.application.edit(ui::Field::message,"Keep the complete expanded QR visible while the pointer moves");
+    app.application.select(ui::Field::qr_brightness,"normal");app.application.activate(ui::Command::toggle_qr_expanded);settle();
+    const auto observe=[&](const std::vector<unsigned char>& expected,int milliseconds,bool* saw_tooltip=nullptr) {
+        const auto until=Clock::now()+std::chrono::milliseconds(milliseconds);
+        do {
+            // Process genuine pointer, tooltip and expose events. Do not ask
+            // the app or root window for a full repaint to repair the image.
+            Fl::wait(.002);
+            require(surface()&&surface()->x()==0&&surface()->y()==0&&surface()->w()==window->w()&&surface()->h()==window->h(),
+                "Hovering changed the expanded QR surface geometry");
+            ui::Rect tip{};
+            if(auto* tooltip=Fl_Tooltip::current_window();tooltip&&tooltip->shown()) {
+                if(saw_tooltip)*saw_tooltip=true;
+                tip={tooltip->x()-window->x()-1,tooltip->y()-window->y()-1,tooltip->w()+2,tooltip->h()+2};
+            }
+            const auto actual=pixels();
+            for(int y=0;y<window->h();++y)for(int x=0;x<window->w();++x) {
+                if(x>=tip.x&&x<tip.x+tip.w&&y>=tip.y&&y<tip.y+tip.h)continue;
+                const auto offset=(static_cast<std::size_t>(y)*window->w()+x)*3;
+                if(!std::equal(actual.begin()+offset,actual.begin()+offset+3,expected.begin()+offset))
+                    throw std::runtime_error("Pointer/tooltip repaint lost expanded QR pixels outside the tooltip at "+std::to_string(x)+","+std::to_string(y));
+            }
+        } while(Clock::now()<until);
+    };
+    const auto initial=pixels();
+    for(const auto& point:{std::pair{32,32},std::pair{window->w()/2,window->h()/2},std::pair{window->w()-32,window->h()-32}}) {
+        move(point.first,point.second);observe(initial,70);
+    }
+    // A native label provides an ordinary tooltip target over the same full
+    // client QR; moving off it generates a real tooltip-uncover expose region.
+    move(window->w()+30,window->h()+30);
+    auto definition=*app.application.overlay();ui::Control hotspot{ui::Kind::label};
+    hotspot.label="QR preview";hotspot.help="Move away to uncover the QR image beneath this native tooltip.";
+    hotspot.placement={.left=24,.top=24,.width=180,.height=28};definition.controls.push_back(hotspot);
+    app.application.show_overlay(std::move(definition));settle();const auto with_hotspot=pixels();
+    bool saw_tooltip=false;move(40,40);observe(with_hotspot,160,&saw_tooltip);
+    require(saw_tooltip,"Native pointer hover did not open the QR fixture tooltip");
+    move(window->w()/2,window->h()/2);observe(with_hotspot,160);
+    require(!Fl_Tooltip::current_window()||!Fl_Tooltip::current_window()->shown(),"Moving off the QR tooltip target did not dismiss its native window");
+    move(window->w()-32,window->h()-32);observe(with_hotspot,70);
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+#endif
+}
+
 void shared_overlay_controls() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=Fl::first_window();require(window,"Shared overlay fixture has no native window");
@@ -933,6 +1006,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -119,3 +119,10 @@ controls. This supports the generic document renderer's per-node overflow
 clipping without changing the shared layout contract. The Rev adapter suite
 checks actual rendered pixels across nested clips, sibling cards and a control
 outside the document.
+
+Local overlay-layer fix: `Window.ixx` orders deferred layers by effective depth,
+preserving queue insertion order for equal depths. A tooltip created before a
+dynamic overlay therefore still paints above it. Stencil unwinding also checks
+ancestry so one branch cannot clip an unrelated branch with a different layer
+depth. The native QR hover regression compares rendered pixels through tooltip
+appearance, pointer movement, dismissal and resizing.

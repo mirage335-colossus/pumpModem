@@ -684,6 +684,13 @@
         place(view,{0,0,360,112});view->apply(std::make_shared<const ui::DocumentNode>(document));
         auto* outside=new re::Button(this,re::Button::Params::Secondary("Persistent outside document"));
         place(outside,{450,180,260,48});outside->style->zIndex=20;outside->style->background.color=rgba(120,35,75,1);
+        // An unrelated sibling can have a greater numeric paint depth than
+        // the clip just left. Its ancestry must still release that clip.
+        auto* ancestry=new re::Box(this);place(ancestry,{450,300,260,64});ancestry->style->zIndex=30;
+        auto* clipped=new re::Box(ancestry);place(clipped,{0,0,48,48});
+        clipped->style->overflow=Overflow::Hide;clipped->style->background.color=rgba(35,75,120,1);
+        auto* deeper_sibling=new re::Box(ancestry);place(deeper_sibling,{64,0,64,48});
+        deeper_sibling->style->zIndex=-2;deeper_sibling->style->background.color=rgba(75,120,35,1);
         for(unsigned frame=0;frame<12;++frame) {view->update();native_frame();}
         view->update();draw(event);
         const auto pixel=[&](float x,float y) {
@@ -716,10 +723,14 @@
                 throw std::runtime_error("Rev clipping probe: native action lost its declared border");
             expect(body->children[1],theme::grid,theme::grid,theme::grid,"Rev clipping probe: row clipped the following section");
             expect(outside,120,35,75,"Rev clipping probe: document stencil clipped a persistent outside control");
+            if(deeper_sibling->resolved.depth<=clipped->resolved.depth)
+                throw std::runtime_error("Rev clipping probe: unrelated branch did not exercise increasing numeric depth");
+            expect(clipped,35,75,120,"Rev clipping probe: ancestry fixture did not render");
+            expect(deeper_sibling,75,120,35,"Rev clipping probe: unrelated deeper sibling inherited a stale stencil");
             const auto below=pixel(viewport->rect.x+40,viewport->rect.y+viewport->rect.h+16);
             if(below[0]>2||below[1]>2||below[2]>2)throw std::runtime_error("Rev clipping probe: overflowing document content escaped its viewport");
         }
-        delete outside;delete viewport;delete backdrop;native_frame();
+        delete ancestry;delete outside;delete viewport;delete backdrop;native_frame();
     }
     void native_overlay_frame() {
         if(!overlay_view)throw std::runtime_error("Rev fixture has no native overlay");
@@ -839,7 +850,13 @@
             return binding.bitmap&&binding.control.click==ui::Command::toggle_qr_expanded;
         });
         if(found==bindings.end())throw std::runtime_error("Rev expansion probe has no declared toggle bitmap");
-        const auto initial_page=application.page();select_page(found->control.page);apply();native_frame();
+        const auto initial_page=application.page();
+        const auto original_message=application.field(ui::Field::message).text;
+        const auto original_brightness=application.field(ui::Field::qr_brightness).selected;
+        application.edit(ui::Field::message,"Native QR tooltip hover regression");
+        application.select(ui::Field::qr_brightness,"normal");
+        std::this_thread::sleep_for(std::chrono::milliseconds(45));application.tick();
+        select_page(found->control.page);apply();native_frame();
         auto* original=found->bitmap;const auto original_rect=original->rect;
         const auto input=std::find_if(bindings.begin(),bindings.end(),[&](const auto& binding){
             return binding.editor&&binding.editor->editable&&allows_input(binding.editor);
@@ -887,6 +904,65 @@
                overlay_bitmap().bitmap->width!=static_cast<unsigned>(width)||overlay_bitmap().bitmap->height!=static_cast<unsigned>(height))
                 throw std::runtime_error("Rev expanded bitmap does not fill the existing app client area");
         };
+        const auto verify_visible_pixels=[&](const char* phase) {
+            auto& binding=overlay_bitmap();auto* bitmap=binding.bitmap;
+            BitmapImage expected(bitmap->width,bitmap->height);
+            bitmap->snapshot.paint(full_bitmap_request(bitmap->width,bitmap->height,false,true),
+                [&](unsigned x,unsigned y,PixelBlock block){expected.blit(x,y,block);},launch.color);
+            window->makeContextCurrent();GLint previous_framebuffer=0,previous_buffer=0;
+            glGetIntegerv(GL_READ_FRAMEBUFFER_BINDING,&previous_framebuffer);glGetIntegerv(GL_READ_BUFFER,&previous_buffer);
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,shared->canvas->frameBuffer->buffer);glReadBuffer(GL_COLOR_ATTACHMENT0);
+            std::vector<unsigned char> actual(static_cast<std::size_t>(window->size.w)*window->size.h*4);
+            glReadPixels(0,0,window->size.w,window->size.h,GL_RGBA,GL_UNSIGNED_BYTE,actual.data());
+            glBindFramebuffer(GL_READ_FRAMEBUFFER,static_cast<GLuint>(previous_framebuffer));glReadBuffer(static_cast<GLenum>(previous_buffer));
+            const auto covered=[&](re::Element* element,unsigned x,unsigned y) {
+                return element&&!element->resolved.hidden&&x>=std::floor(element->rect.x*details.scale)&&
+                    y>=std::floor(element->rect.y*details.scale)&&x<std::ceil((element->rect.x+element->rect.w)*details.scale)&&
+                    y<std::ceil((element->rect.y+element->rect.h)*details.scale);
+            };
+            const auto& source=expected.pixels();std::size_t checked=0;
+            for(unsigned y=0;y<bitmap->height;++y)for(unsigned x=0;x<bitmap->width;++x) {
+                if(covered(help_text,x,y)||(binding.caption&&!binding.caption->content.get().empty()&&covered(binding.caption,x,y)))continue;
+                const auto target=(static_cast<std::size_t>(window->size.h-1-y)*window->size.w+x)*4;
+                const auto sample=(static_cast<std::size_t>(y)*bitmap->width+x)*3;
+                for(unsigned channel=0;channel<3;++channel)
+                    if(std::abs(static_cast<int>(actual[target+channel])-source[sample+channel])>2)
+                        throw std::runtime_error(std::string("Rev expanded QR pixels changed during ")+phase+" at "+
+                            std::to_string(x)+","+std::to_string(y)+": expected="+std::to_string(source[sample+channel])+
+                            " actual="+std::to_string(actual[target+channel]));
+                ++checked;
+            }
+            if(checked<static_cast<std::size_t>(bitmap->width)*bitmap->height*3/4)
+                throw std::runtime_error("Rev expanded QR hover probe did not inspect most of the visible bitmap");
+            if(!help_text->resolved.hidden) {
+                const auto x=static_cast<unsigned>(std::floor((help_text->rect.x+3)*details.scale));
+                const auto y=static_cast<unsigned>(std::floor((help_text->rect.y+3)*details.scale));
+                const auto offset=(static_cast<std::size_t>(window->size.h-1-y)*window->size.w+x)*4;
+                for(unsigned channel=0;channel<3;++channel)
+                    if(std::abs(static_cast<int>(actual[offset+channel])-theme::surface)>2)
+                        throw std::runtime_error("Rev expanded QR painted over its tooltip");
+            }
+        };
+        const auto verify_hover=[&] {
+            const auto move=[&](float x,float y) {
+                int left=0,top=0;window->getClientPos(left,top);
+                onCursorPos(left+x*details.scale,top+y*details.scale);render_expanded();
+            };
+            move(-8,-8);verify_visible_pixels("pointer leave");
+            for(unsigned cycle=0;cycle<2;++cycle) {
+                move(details.size.width/2,details.size.height/2);
+                if(help_owner!=overlay_bitmap().element||help_text->resolved.hidden)
+                    throw std::runtime_error("Rev expanded QR native hover did not show its tooltip");
+                verify_visible_pixels("tooltip show");
+                for(const auto point:std::array<std::array<float,2>,3>{{{.15f,.3f},{.85f,.8f},{.4f,.6f}}}) {
+                    move(details.size.width*point[0],details.size.height*point[1]);
+                    verify_visible_pixels("pointer motion with tooltip");
+                }
+                move(-8,-8);
+                if(!help_text->resolved.hidden)throw std::runtime_error("Rev expanded QR tooltip remained visible after pointer leave");
+                verify_visible_pixels("tooltip hide");
+            }
+        };
         const auto verify_restore=[&](int width,int height) {
             apply();native_frame();verify_window(width,height);
             const auto geometry=ui::control_layout(found->control,state(found->control),details.size.width,details.size.height,declarations);
@@ -897,6 +973,7 @@
         };
         click(original_rect.x+original_rect.w/2,original_rect.y+original_rect.h/2);apply();
         verify_coverage(original_width,original_height);
+        verify_hover();
         onKeyboard(static_cast<int>(Rev::NativeWindow::Key::Tab),Rev::NativeWindow::Press);
         onKeyboard(static_cast<int>(Rev::NativeWindow::Key::Tab),Rev::NativeWindow::Release);
         if(focused_control())throw std::runtime_error("Rev expanded bitmap allowed keyboard focus behind the overlay");
@@ -930,12 +1007,15 @@
         const int resized_height=static_cast<int>(std::ceil(ui::min_height*details.scale));
         window->setSize(resized_width,resized_height);onResize(resized_width,resized_height);
         verify_coverage(resized_width,resized_height);
+        verify_hover();
         click(details.size.width/2,details.size.height/2);verify_restore(resized_width,resized_height);
         window->setSize(original_width,original_height);onResize(original_width,original_height);apply();native_frame();
         click(original_rect.x+original_rect.w/2,original_rect.y+original_rect.h/2);apply();render_expanded();
         onKeyboard(static_cast<int>(Rev::NativeWindow::Key::Escape),Rev::NativeWindow::Press);
         onKeyboard(static_cast<int>(Rev::NativeWindow::Key::Escape),Rev::NativeWindow::Release);
         verify_restore(original_width,original_height);
+        application.edit(ui::Field::message,original_message);application.select(ui::Field::qr_brightness,original_brightness);
+        std::this_thread::sleep_for(std::chrono::milliseconds(45));application.tick();
         select_page(initial_page);apply();native_frame();
     }
     void verify_native_resize() {
