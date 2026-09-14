@@ -271,10 +271,15 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& optio
     const auto symbol_samples=modem::symbol_sample_count(value.modem);
     if(symbols>std::numeric_limits<std::uint64_t>::max()/symbol_samples)
         throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto samples=static_cast<std::uint64_t>(symbols)*symbol_samples;
+    const auto content_samples=static_cast<std::uint64_t>(symbols)*symbol_samples;
+    const auto hardware_samples=value.modem.pattern_symbols?modem::training_sample_count(value.modem):0;
+    if(hardware_samples>std::numeric_limits<std::uint64_t>::max()-content_samples)
+        throw Error("transmission duration exceeds 64-bit sample counter");
+    const auto samples=hardware_samples+content_samples;
     Estimate result;
     result.content_bytes=result.packet_bytes=bits.size()/8+(bits.size()%8!=0);
-    result.content_seconds=result.packet_seconds=result.total_seconds=static_cast<double>(samples)/value.modem.sample_rate;
+    result.content_seconds=result.packet_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
+    result.total_seconds=static_cast<double>(samples)/value.modem.sample_rate;
     result.repeatable_allowed=true;
     std::size_t scratch=std::numeric_limits<std::size_t>::max();
     if(value.modem.pattern_symbols) {
@@ -441,7 +446,8 @@ Received receive(std::span<const float> samples, const Options& options, Progres
             check_cancelled(stop);if(progress)progress(epoch);
             try {
             auto value=options;value.modem=profile;
-            modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(options.timestamp);
+            modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(options.timestamp)+
+                static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
             search.bit_limit=packet_budget(value);
             search.start_uncertainty_seconds=options.search_seconds+1.;
             modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
@@ -517,7 +523,8 @@ Received simulate(const Message& message, const Options& options, const modem::C
             check_cancelled(stop);if(progress)progress(epoch);
             try {
             auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
-            modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center);
+            modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
+                static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
             search.bit_limit=packet_budget(value);
             search.start_uncertainty_seconds=options.search_seconds+1.;
             modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);

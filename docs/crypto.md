@@ -39,6 +39,10 @@ Within one anchor and purpose, random access and sequential generation agree.
 
 ### Binary pattern chip addressing
 
+The planned Auto Pattern and fixed-length pattern modes enable private
+Scrambler fragments whenever a key is selected. Public and different-key
+receive hypotheses therefore have different acquisition patterns; Data-only
+masking would leave them indistinguishable at the pattern decoder.
 The binary `PatternCode` waveform addresses Scrambler and DSSS independently.
 Transfer first derives each 32-byte waveform seed from that purpose's original
 key stream at the selected epoch and byte offset zero. `PatternCode` constructs
@@ -64,6 +68,14 @@ transmitted at that time. DSSS, when enabled, applies signs from its separate
 purpose and seed. Small fixed caches support both sequential output and
 receiver seeks without storing a keystream proportional to hours of airtime.
 Cache contents are cleansed when released.
+
+The hardware-settling prefix uses a separate derivation domain and an
+independent stream, seeded privately when keyed pattern or DSSS spreading is
+active and publicly otherwise. It does not consume Data, Scrambler or DSSS payload
+positions. The epoch is fixed at transmission start, before that prefix;
+payload positions begin at zero afterward. Clock-start hypotheses add the
+rounded prefix duration when predicting the first payload symbol. No epoch,
+prefix length or stream index is transmitted as a field.
 
 The epoch and chip coordinates are local transmitter state and receiver clock
 hypotheses. They add no sender identifier, nonce, slot, symbol index or chip

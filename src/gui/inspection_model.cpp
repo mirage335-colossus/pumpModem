@@ -61,10 +61,15 @@ Inspection inspect(const InspectionRequest& request) {
     const auto keyed=options.key.has_value();
     if(config.pattern_symbols) {
         const bool short_text=!result.binary && request.message.kind==MessageKind::text && request.message.data.size()<16;
-        const auto meaningful=result.binary?request.binary->size():result.estimate.waveform_samples/symbol_samples;
+        const auto hardware_samples=result.estimate.packet_seconds>0?modem::training_sample_count(config):0;
+        const auto hardware_symbols=hardware_samples/symbol_samples;
+        const auto hardware_seconds=static_cast<double>(hardware_samples)/config.sample_rate;
+        const auto meaningful=result.binary?request.binary->size():
+            (result.estimate.waveform_samples>=hardware_samples?(result.estimate.waveform_samples-hardware_samples)/symbol_samples:0);
         result.title=result.binary?"Raw bit pattern transmission":short_text?"Short text pattern transmission":"Message / file pattern transmission";
         result.summary=count(meaningful)+" meaningful bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
-        result.preamble_description="No modem framing or training is required for pattern acquisition. Pattern-versus-noise evidence determines signal start, end, timing and key-stream synchronization.";
+        result.preamble_description="Hardware settling sends independent noise-like chips for five seconds rounded to the nearest whole payload-symbol duration: "+
+            count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than ten seconds need no prefix. The receiver does not require or lock to this prefix; payload pattern evidence determines signal start, end, timing and keystream synchronization.";
         result.chip_description="Each meaningful bit selects one of two distinguishable internal patterns. The nominal chip duration follows the selected bandwidth. Keyed pattern and DSSS streams use separate purposes and advancing stream addresses.";
         result.fields={{"Source",result.binary?"Raw bits":short_text?"Short text":"Message / file"},
             {"Bandwidth",number(config.bandwidth_hz)+" Hz"},{"TX target C/N0",number(request.target_snr)+" dB-Hz"},
@@ -72,12 +77,14 @@ Inspection inspect(const InspectionRequest& request) {
             {"Pattern symbols","2 distinguishable patterns / 1 meaningful bit each"},
             {"Pattern selection",request.requested_pattern.empty()?"Configured modem":request.requested_pattern},
             {"Symbol duration",number(symbol_seconds)+" s"},{"Meaningful bits",count(meaningful)},
-            {"Symbol padding","0 bits"},{"Total on-air time",number(result.estimate.total_seconds)+" s"},
+            {"Symbol padding","0 bits"},{"Hardware settling",number(hardware_seconds)+" s / "+count(hardware_symbols)+" symbol durations"},
+            {"Payload time",number(result.estimate.packet_seconds)+" s"},{"Total on-air time",number(result.estimate.total_seconds)+" s"},
             {"Acquisition evidence","Received pattern evidence versus noise; APSK geometry is diagnostic only"}};
         const std::string encoding=result.binary?"Raw bits are used exactly as supplied, preserving leading zeros.":
             short_text?"The built-in short-text dictionary produces a self-delimiting bit string. No byte padding, packet header, checksum, integrity tag or FEC is added.":
             "The existing byte-oriented packet codec supplies the content bitstream. Packet parsing and optional error correction follow pattern acquisition.";
-        result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,result.estimate.total_seconds});
+        if(hardware_samples)result.sections.push_back({"Hardware settling", "Independent noise-like chips let audio gain control and gating settle. They convey no data bits and use no payload keystream positions.",{},hardware_symbols,hardware_seconds});
+        result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,result.estimate.packet_seconds});
         if(short_text || result.binary)result.fields.insert(result.fields.end(),{{"Packet header","0 bits"},{"Checksum / integrity tag","0 bits"},{"FEC","Off"},
             {"Compression",short_text?"Built-in short-text dictionary":"Off (raw bits)"}});
         else {
@@ -86,7 +93,8 @@ Inspection inspect(const InspectionRequest& request) {
                 {"Body FEC",fec_name(layout.fec)}});
         }
         result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
-        result.lanes.push_back({"Transmit • pattern symbols",{{"Content bits",encoding},
+        result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
+            {"Content bits",encoding},
             {"Private data stream",keyed?"Mask the meaningful bitstream with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
             {"Pattern selection","Map each bit to a distinguishable internal pattern. A keyed symbol advances to a fresh scrambler fragment; configured DSSS uses its independent stream."},
             {request.simulation?"Sampled channel":"Audio output",request.simulation?"Transmit sampled PCM through independent clock, frequency, phase-noise and additive-noise simulation.":"Generate PCM at the internal clock and resample to the selected audio output."}}});

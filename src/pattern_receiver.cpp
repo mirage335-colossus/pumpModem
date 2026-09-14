@@ -246,6 +246,15 @@ struct PatternReceiver::Impl {
                 if(best.score<search.retain_score || best.score-best.alternative_score<1) {
                     publish(track,true);ended=true;break;
                 }
+                const auto standalone=best.score>=threshold();
+                if(!track.admitted && standalone) {
+                    // A confident new start cannot lend its evidence to an
+                    // earlier unconfirmed noise candidate. Keep weak chains
+                    // that already established their own confidence.
+                    track.burst.bits.clear();track.burst.first_sample=best.first_sample;
+                    track.burst.first_stream_symbol=best.stream_symbol;
+                    track.total_score=track.pending_score=track.penalty=0;
+                }
                 append_bit(track.burst.bits,static_cast<std::uint8_t>(best.bit));track.burst.end_sample=best.end_sample;
                 track.total_score+=best.score;track.pending_score+=best.score;track.penalty+=std::log(10.);
                 const auto count=static_cast<double>(track.burst.bits.size()-track.confirmed);
@@ -254,7 +263,7 @@ struct PatternReceiver::Impl {
                 // bins at the start of this window were excluded by measure,
                 // so an earlier timing correction never counts evidence twice.
                 const auto bound=track.pending_score>count?track.pending_score-count-count*std::log(track.pending_score/count)-track.penalty:0;
-                if(bound>=threshold() || best.score>=threshold()) {
+                if(bound>=threshold() || standalone) {
                     track.admitted=true;track.confirmed=track.burst.bits.size();track.confirmed_end=best.end_sample;
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                 }

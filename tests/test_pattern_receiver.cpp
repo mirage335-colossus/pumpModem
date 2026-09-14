@@ -27,7 +27,8 @@ modem::Config config(unsigned chips=128,bool keyed=false) {
 // aligned symbol observations or a transmitter callback reach acquisition.
 std::vector<float> waveform(const modem::Config& c,const Bytes& bits,std::size_t delay,
                             std::size_t trailing,double phase,double sigma=0,std::uint64_t seed=173) {
-    modem::PatternTransmitter tx(bits,c,c.stream_epoch);
+    // Bare payload models capture after the hardware lead-in was lost.
+    modem::PatternTransmitter tx(bits,c,c.stream_epoch,0,false);
     std::vector<std::complex<double>> analytic(static_cast<std::size_t>(tx.total_samples()));tx.read_analytic(analytic);
     std::vector<float> samples(delay+analytic.size()+trailing);
     std::mt19937_64 random(seed);std::normal_distribution<double> noise(0,sigma);
@@ -97,6 +98,18 @@ void changing_chunks_and_late_start() {
     const auto& first=exact(a,{0,0,1});const auto& second=exact(b,{0,0,1});
     check(first.first_sample==second.first_sample && first.end_sample==second.end_sample && first.score==second.score,
           "PCM push chunk boundaries changed acquisition evidence");
+}
+void weak_prefix_cannot_borrow_payload_confidence() {
+    const auto c=config(64);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    constexpr std::size_t delay=137;
+    auto samples=waveform(c,{1,0,0,1},delay,3*symbol,.73);
+    std::mt19937_64 random(197);std::normal_distribution<double> noise(0,2.);
+    for(std::size_t i=0;i<delay+symbol;++i)samples[i]+=static_cast<float>(noise(random));
+    constexpr std::array<std::size_t,4> chunks{137,503,17,1021};
+    const auto result=receive(samples,c,chunks);
+    const auto& burst=exact(result,{0,0,1});
+    check(burst.first_sample>=delay+symbol-10,
+          "a strong payload symbol must not retroactively confirm a weak candidate before its start");
 }
 void noise_hidden_chips() {
     const auto c=config(4096,true);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -215,6 +228,23 @@ void long_clock_window_fallback() {
     std::stop_source stop;stop.request_stop();
     rejects([&]{receiver.push(quiet,stop.get_token());},"long correlation fallback ignored cancellation");
 }
+void hardware_settling_is_not_payload() {
+    constexpr std::array<std::size_t,3> chunks{509,37,1021};
+    for(bool keyed:{false,true}) {
+        const auto c=config(128,keyed);const Bytes bits{0,0,1};
+        modem::PatternTransmitter source(bits,c,c.stream_epoch);
+        std::vector<float> samples(static_cast<std::size_t>(source.total_samples()));source.read(samples);
+        const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c));
+        check(prefix>0,"hardware-settling fixture must contain a physical prefix");
+        const std::vector<float> settling(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(prefix));
+        check(receive(settling,c,chunks).bursts.empty(),"hardware settling must not become extra decoded payload bits");
+        samples.resize(samples.size()+2*modem::symbol_sample_count(c));
+        const auto result=receive(samples,c,chunks);
+        const auto& burst=exact(result,bits);
+        check(burst.first_sample>=prefix-10 && burst.first_sample<=prefix+10,
+              "acquisition must select the payload pattern start, not the hardware lead-in");
+    }
+}
 }
 int main() {
     unsigned failures=0;
@@ -223,11 +253,13 @@ int main() {
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+    run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);
     run("independent sampled crystal and phase",independent_sampled_channel);
     run("shared projection and workspace updates",shared_projection_and_workspace_update);
     run("bounded long clock-window fallback",long_clock_window_fallback);
+    run("hardware settling remains outside payload",hardware_settling_is_not_payload);
     return failures?1:0;
 }

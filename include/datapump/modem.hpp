@@ -23,7 +23,7 @@ struct Config {
     unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
     double carrier_hz = 1500;
     double bandwidth_hz = 1200;
-    double training_seconds = 5; // The physical format requires exactly five seconds.
+    double training_seconds = 5; // Hardware target; pattern mode rounds to whole symbols.
     unsigned spreading_factor = 1;
     // Automatic plans can request integration beyond the named chip factors.
     // Zero retains spreading_factor * quantized chip duration.
@@ -101,7 +101,8 @@ std::vector<float> simulate(std::span<const float> samples, const Config& config
 void write_wav(std::ostream& output, std::span<const float> samples,
                std::uint32_t sample_rate);
 Wav read_wav(std::istream& input, std::size_t memory_limit = default_memory_limit);
-// Each element is one 0/1 bit. These functions add no preamble or padding bits.
+// Each element is one 0/1 payload bit, with no padding bits. Pattern output
+// includes rounded hardware-settling audio, which carries no payload.
 std::vector<float> modulate_status(std::span<const std::uint8_t> bits, const Config& config);
 double detect_status(std::span<const float> samples, std::span<const std::uint8_t> known_bits,
                      const Config& config);

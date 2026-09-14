@@ -460,7 +460,16 @@ struct Session::Impl {
                 tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,key.has_value()):
                 std::vector<modem::Config>{value.transfer.modem};
             for(const auto& profile:profiles) {
-            const auto epochs = key ? drift_candidates(center, value.transfer.search_seconds, true) : std::vector<std::uint64_t>{center};
+            auto epochs = key ? drift_candidates(center, value.transfer.search_seconds, true) : std::vector<std::uint64_t>{center};
+            if(key && profile.pattern_symbols && !value.transfer.timestamp) {
+                // A listener can start after hardware settling has begun. Its
+                // clock-error window still describes clock uncertainty; the
+                // older transmit epochs below cover the physical prefix.
+                const auto settling=static_cast<unsigned>(std::ceil(
+                    static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate));
+                for(unsigned age=value.transfer.search_seconds+1;age<=value.transfer.search_seconds+settling;++age)
+                    if(center>=age)epochs.push_back(center-age);
+            }
             for (const auto epoch : epochs) {
                 const auto tag = key ? key->mac(Bytes{'D','P','-','R','X','-','B','A','N','K'}) : Bytes{};
                 const auto existing = std::find_if(bank.receivers.begin(), bank.receivers.end(), [&](const auto& receiver) {
@@ -493,7 +502,8 @@ struct Session::Impl {
                 try {
                     modem::PatternSearch search;
                     search.bit_limit=packet_budget(value.content_limit);
-                    search.start_offset_seconds=static_cast<double>(epoch)-(value.transfer.timestamp?static_cast<double>(value.transfer.timestamp):now);
+                    search.start_offset_seconds=static_cast<double>(epoch)-(value.transfer.timestamp?static_cast<double>(value.transfer.timestamp):now)+
+                        static_cast<double>(modem::training_sample_count(config))/config.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
                     receiver.modem = std::make_unique<modem::StreamingReceiver>(config, std::move(expected),
                         std::min(value.dsp_workspace_bytes / 2, capacity - bank.working_bytes - control_margin),
@@ -524,7 +534,8 @@ struct Session::Impl {
         if(value.transfer.modem.pattern_symbols) {
             const auto oldest=now-value.transfer.search_seconds-1;
             std::erase_if(bank.receivers,[&](const auto& receiver){
-                const auto keep=2*modem::symbol_seconds(receiver.options.modem);
+                const auto keep=static_cast<double>(modem::training_sample_count(receiver.options.modem))/receiver.options.modem.sample_rate+
+                    2*modem::symbol_seconds(receiver.options.modem);
                 const auto candidate=receiver.modem->provisional_pattern();
                 if(!candidate.bits.empty() && !candidate.complete)return false;
                 // A public long-symbol fallback covers only its admitted
@@ -820,7 +831,8 @@ struct Session::Impl {
                     }
                     bank.limited=true;
                     modem::PatternSearch search;search.bit_limit=packet_budget(value.content_limit);
-                    search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch();
+                    search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch()+
+                        static_cast<double>(modem::training_sample_count(receiver.options.modem))/receiver.options.modem.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
                     const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
                     if(other>capacity || overhead>capacity-other)throw;

@@ -8,6 +8,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <thread>
@@ -16,6 +17,7 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace live_test_audio {
 std::atomic<std::uint64_t> played_samples{0};
+std::atomic<std::shared_ptr<const std::vector<float>>> capture_samples;
 }
 // Link-time audio adapter: exercise Session's actual playback/capture branch
 // without a host sound card. Simulation must never call this adapter.
@@ -25,8 +27,14 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
     if(device!="live-test-audio")throw Error("unexpected audio capture in live test");
     if(format)format({rate,rate,.42*rate,4096});
     const std::vector<float> silence(std::max<std::uint32_t>(1,rate/20));
+    const auto recording=live_test_audio::capture_samples.load();
+    std::size_t captured=0;
     while(!stop.stop_requested()) {
-        if(!callback(silence))return;
+        if(recording && captured<recording->size()) {
+            const auto count=std::min(silence.size(),recording->size()-captured);
+            if(!callback(std::span<const float>(*recording).subspan(captured,count)))return;
+            captured+=count;
+        } else if(!callback(silence))return;
         std::this_thread::sleep_for(2ms);
     }
 }
@@ -978,6 +986,66 @@ void test_pattern_epoch_boundary() {
         });
     },10s);
 }
+void test_pattern_listener_starts_after_hardware_prefix() {
+    constexpr std::uint64_t origin=1800000000;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.key.emplace(Bytes(32,0x29));
+    value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_keystream,true).config;
+    value.transfer.search_seconds=0;value.dsp_workspace_bytes=16*1024*1024;
+    auto transmit_options=value.transfer;transmit_options.timestamp=origin;
+    const Bytes bits{0,0,1};
+    auto source=transfer::binary_transmitter(bits,transmit_options);
+    const auto prefix=modem::training_sample_count(value.transfer.modem);
+    const auto payload=3*modem::symbol_sample_count(value.transfer.modem);
+    std::vector<float> recording(static_cast<std::size_t>(source->total_samples()+payload));
+    std::size_t written=0;
+    while(!source->finished())written+=source->read(std::span(recording).subspan(written));
+    recording.erase(recording.begin(),recording.begin()+static_cast<std::ptrdiff_t>(prefix));
+    live_test_audio::capture_samples=std::make_shared<const std::vector<float>>(std::move(recording));
+    const auto listen_epoch=static_cast<double>(origin)+static_cast<double>(prefix)/value.transfer.modem.sample_rate;
+    live::Session session([=]{return listen_epoch;});
+    session.start(value);
+    const auto received=wait_for(session,[](const auto& snapshot){
+        return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[](const auto& signal){
+            return signal.binary && signal.complete && signal.text=="001" && signal.pattern_score.has_value();
+        });
+    });
+    check(received.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+          "older hardware-prefix epochs must remain within the DSP memory ceiling");
+    session.stop();live_test_audio::capture_samples.store({});
+}
+void test_plaintext_pattern_with_loaded_receive_keys() {
+    std::atomic<double> epoch{1800000000.};
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([&]{return epoch.load();},[&]{
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
+    value.transfer.automatic_receive_profiles=true;value.transfer.receive_pattern_mode=tuning::PatternMode::auto_pattern;
+    value.transfer.search_seconds=0;value.dsp_workspace_bytes=32*1024*1024;
+    value.transfer.compression=true;value.transfer.fec=FecMode::rs20;
+    value.receive_keys.emplace_back(Bytes(32,0x19));value.receive_keys.emplace_back(Bytes(32,0xa7));
+    session.start(value);
+    wait_for(session,[](const auto& snapshot){return snapshot.samples_received>=800;});
+    const auto receive_message=[&](const Message& sent) {
+        const auto deadline=replay_milliseconds.load()+4000;
+        session.transmit(sent);
+        const auto result=wait_for(session,[&](const auto& snapshot){
+            if(snapshot.simulation_replay)replay_milliseconds=deadline;
+            return !snapshot.received.empty();
+        },90s); // Multiple private key/epoch banks also run under instrumentation.
+        check(result.received.size()==1 && result.received.front().packet_validated &&
+              !result.received.front().packet.authenticated && result.received.front().packet.message.data==sent.data &&
+              result.received.front().packet.message.filename==sent.filename,
+              "loaded receive keys must not replace a plaintext pattern result with a different data-mask interpretation");
+        check(result.dsp_buffered_bytes<=value.dsp_workspace_bytes,"parallel key hypotheses exceeded the configured DSP ceiling");
+    };
+    receive_message(message(0x71,80));
+    epoch=1800000007.;
+    Message file;file.kind=MessageKind::file;file.filename="received-file.bin";file.id.fill(0x72);
+    file.data={0,1,2,3,0xff,0xc0,0x80,'D','a','t','a','P','u','m','p','\n'};
+    receive_message(file);
+}
 void test_cancel_reconfigure_and_bounds() {
     std::atomic<std::int64_t> replay_milliseconds{0};
     live::Session session({}, [&] {
@@ -1154,6 +1222,8 @@ int main(int argc, char** argv) {
         run("growing receiver workspace", test_growing_receiver_workspace_is_shared_and_reported);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
         run("pattern epoch boundary", test_pattern_epoch_boundary);
+        run("pattern listener after hardware prefix", test_pattern_listener_starts_after_hardware_prefix);
+        run("plaintext pattern and loaded receive keys", test_plaintext_pattern_with_loaded_receive_keys);
         run("cancel, reconfigure and bounds", test_cancel_reconfigure_and_bounds);
         run("unrecoverable noise", test_unrecoverable_noise_does_not_validate);
         run("weak and wide modes", test_weak_and_wide_modes_keep_the_channel_running);

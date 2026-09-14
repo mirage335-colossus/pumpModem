@@ -16,7 +16,7 @@ modem::Config config() {
     c.spreading_seed[3]=51;c.dsss_seed[13]=171;return c;
 }
 std::vector<float> waveform(const Bytes& bits,const modem::Config& c,std::size_t delay,double rate=1) {
-    modem::PatternTransmitter source(bits,c,c.stream_epoch);
+    modem::PatternTransmitter source(bits,c,c.stream_epoch,0,false);
     std::vector<std::complex<double>> analytic(static_cast<std::size_t>(source.total_samples()));source.read_analytic(analytic);
     const auto count=delay+static_cast<std::size_t>(std::ceil(static_cast<double>(analytic.size())/rate))+2*modem::symbol_sample_count(c);
     std::vector<float> pcm(count);
@@ -76,6 +76,23 @@ void late_clock_fragment() {
     check(best(result).bits==Bytes({0,1,0}) && best(result).first_stream_symbol==2,
           "clock-derived cropped reception must use the surviving symbols' actual stream positions");
 }
+void weak_prefix_does_not_borrow_confidence() {
+    auto c=config();c.scramble=false;c.dsss=false;c.spreading_factor=64;
+    constexpr std::size_t delay=137;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    auto samples=waveform({1,0,0,1},c,delay);
+    std::mt19937_64 random(197);std::normal_distribution<double> noise(0,3.5);
+    for(std::size_t i=0;i<delay+symbol;++i)samples[i]+=static_cast<float>(noise(random));
+    modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;
+    search.start_uncertainty_seconds=0;search.frequency_offsets_hz={0};
+    modem::PatternCorrelator prefix(c,search,4*1024*1024);
+    prefix.push(std::span(samples).first(delay+symbol+2));
+    check(prefix.acquiring() && !prefix.synchronized(),
+          "weak-prefix fixture must retain a candidate without admitting it");
+    const auto result=capture(samples,c,search,127);
+    check(best(result).bits==Bytes({0,0,1}) && best(result).first_sample>=delay+symbol,
+          "a strong clock-window symbol cannot confirm an earlier weak noise candidate");
+}
 void bounded_hours_and_noise() {
     auto c=config();c.integration_seconds=4*3600;
     modem::PatternSearch search;search.start_offset_seconds=.03;search.start_uncertainty_seconds=.002;
@@ -111,4 +128,4 @@ void bounded_hours_and_noise() {
     rejects([&]{cancelled.push(noise,stop.get_token());},"streaming long search must honor cancellation");
 }
 }
-int main(){try{sampled_bits_and_rates();late_clock_fragment();bounded_hours_and_noise();std::cout<<"Streaming clock-window pattern correlator tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{sampled_bits_and_rates();late_clock_fragment();weak_prefix_does_not_borrow_confidence();bounded_hours_and_noise();std::cout<<"Streaming clock-window pattern correlator tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

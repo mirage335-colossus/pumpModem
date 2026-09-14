@@ -8,8 +8,10 @@ three-second simulation replay running.
 **Modem flow** shows the selected transmit and receive paths as ordered stage
 cards. Automatic profiles carry one meaningful bit in each of two distinguishable
 patterns. Their cards show content-bit encoding, optional private Data masking,
-pattern selection, audio or sampled simulation, and reception by pattern evidence.
-Short raw bits and text have no modem training or packet stages. Larger text,
+pattern selection, hardware settling, audio or sampled simulation, and reception
+by pattern evidence. Short raw bits and text have no modem training or packet
+stages. The separate settling waveform helps external hardware prepare for
+payload reception and is never an acquisition condition. Larger text,
 files and screenshots retain their packet codec after pattern acquisition.
 Explicit manual APSK configurations retain separate training/data alphabets and
 their legacy framed receiver. Active, disabled and unavailable stages have
@@ -51,15 +53,20 @@ Hardware audio additionally converts between hardware and internal sample clocks
 
 **Transmission layout** shows the physical on-air sequence and its meaningful
 bit count, symbol count and duration. Blocks are schematic rather than scaled
-to airtime. Automatic pattern transmission uses exactly one symbol per bit,
-with zero training and symbol padding. The diagrams show counts and placeholders,
+to airtime. Automatic pattern transmission uses exactly one payload symbol per
+bit, with zero modem training and symbol padding. A separate hardware-settling
+block rounds five seconds to the nearest whole payload-symbol duration, with
+ties upward; it is absent for symbols longer than ten seconds. Its duration
+contributes to total airtime without adding meaningful bits. The diagrams show
+counts and placeholders,
 never input contents, metadata values, key bytes or private spreading sequences.
 
 For raw input, the layout reports the exact supplied bits, including leading
 zeros and partial bytes, with compression, header, checksum and FEC all off.
 For text below 16 original UTF-8 bytes, it reports the exact fixed-dictionary
 bits with the same absence of framing, integrity and padding. For example,
-`e` occupies its three-bit code and therefore exactly three pattern symbols.
+`e` occupies its three-bit code and therefore exactly three payload pattern
+symbols, in addition to any settling prefix.
 This short-text dictionary is used regardless of the packet compression/FEC
 settings. An empty text draft adds no transmission.
 

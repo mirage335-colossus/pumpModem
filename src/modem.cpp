@@ -265,7 +265,14 @@ std::uint64_t symbol_sample_count(const Config& c) {
     check(samples>=4 && samples<static_cast<long double>(std::numeric_limits<std::uint64_t>::max()),"symbol duration exceeds 64-bit sample counter");
     return static_cast<std::uint64_t>(samples);
 }
-std::uint64_t training_sample_count(const Config& c) { return c.pattern_symbols?0:static_cast<std::uint64_t>(c.sample_rate)*5; }
+std::uint64_t training_sample_count(const Config& c) {
+    const auto target=static_cast<std::uint64_t>(c.sample_rate)*5;
+    if(!c.pattern_symbols)return target;
+    const auto symbol=symbol_sample_count(c);
+    const auto count=target/symbol+(target%symbol>=symbol/2+symbol%2);
+    check(count<=std::numeric_limits<std::uint64_t>::max()/symbol,"hardware preamble duration overflow");
+    return count*symbol;
+}
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
 double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }
 std::size_t payload_symbol_count(std::size_t payload_bytes,const Config& c) {
@@ -287,7 +294,7 @@ std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     const auto duration=symbol_sample_count(c);
     check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
     const auto payload=product(count,static_cast<std::size_t>(duration),std::numeric_limits<std::size_t>::max());
-    const auto training=c.pattern_symbols?0:training_sample_count(c);
+    const auto training=training_sample_count(c);
     check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");
     return payload+static_cast<std::size_t>(training);
 }
@@ -437,10 +444,9 @@ Wav read_wav(std::istream& in, std::size_t limit) {
 std::vector<float> modulate_status(std::span<const std::uint8_t> bits, const Config& c) {
     validate(c);
     if(c.pattern_symbols) {
-        const auto duration=symbol_sample_count(c);
-        check(duration<=std::numeric_limits<std::size_t>::max(),"pattern symbol duration exceeds platform sample counter");
-        const auto count=product(bits.size(),static_cast<std::size_t>(duration),c.memory_limit/sizeof(float));
         PatternTransmitter source(Bytes(bits.begin(),bits.end()),c,c.stream_epoch);
+        check(source.total_samples()<=c.memory_limit/sizeof(float),"pattern waveform exceeds memory limit");
+        const auto count=static_cast<std::size_t>(source.total_samples());
         budget(c.memory_limit,{{count,sizeof(float)},{source.working_bytes(),1}});
         std::vector<float> output(count);
         for(std::size_t position=0;position<output.size();)
@@ -469,7 +475,10 @@ double detect_status(std::span<const float> samples, std::span<const std::uint8_
     check(!bits.empty(),"known status bits are required");
     const auto duration=c.pattern_symbols?symbol_sample_count(c):symbol_samples(c);
     check(duration<=std::numeric_limits<std::size_t>::max(),"status symbol duration exceeds platform sample counter");
-    const auto expected_count = product(bits.size(),static_cast<std::size_t>(duration),c.memory_limit/sizeof(float));
+    const auto payload_count = product(bits.size(),static_cast<std::size_t>(duration),c.memory_limit/sizeof(float));
+    const auto training=c.pattern_symbols?training_sample_count(c):0;
+    check(training<=c.memory_limit/sizeof(float)-payload_count,"status waveform exceeds memory limit");
+    const auto expected_count=payload_count+static_cast<std::size_t>(training);
     if(c.pattern_symbols)
         budget(c.memory_limit,{{samples.size(),sizeof(float)},{expected_count,sizeof(float)},{bits.size(),1},{16384,1}});
     else

@@ -36,10 +36,30 @@ The nominal gross bit rate is selected bits per symbol divided by nominal symbol
 duration, before packet and training overhead. Audio conversion does not alter
 these modem settings or rates.
 
+### Automatic-pattern hardware settling
+
+A nonempty automatic-pattern transmission starts with a hardware-settling
+waveform lasting approximately five seconds, rounded to the nearest whole
+sample-quantized payload-symbol duration, with half-symbol ties rounded up.
+For symbol duration `T`, the prefix contains `floor(5 / T + 0.5)` intervals of
+length `T`; it is absent when `T` exceeds ten seconds. The first payload symbol
+then follows at its normal duration, starting at payload stream position zero.
+An empty payload emits no prefix.
+
+The settling waveform uses a separate noise-like sign stream at normal transmit
+amplitude and chip rate. It helps external gain control and muting settle before
+fast payload symbols arrive, and is not made from the legal payload patterns.
+It supplies no training, header or acquisition condition: pattern evidence
+alone accepts the following symbols even when the prefix is lost or distorted.
+Keyed generation uses a separate derivation domain; the transmission epoch is
+fixed before the prefix, and clock-start hypotheses include its elapsed time.
+Airtime estimates include the prefix without adding to meaningful payload bits.
+
 ### Explicit legacy APSK waveform and training
 
 The following training, whitening and APSK details apply only when
-`pattern_symbols` is false. Default pattern transmission has no training.
+`pattern_symbols` is false. Default pattern transmission uses only the separate
+hardware-settling waveform described above, without modem training.
 
 Bytes are sent most-significant bits first. Two-bit and three-bit profiles use
 two amplitude rings and two/four differential phases; four through six-bit
@@ -73,7 +93,8 @@ b8 4d 03 e7 9a 61 35 cf 28 d0 7e 94 ab 16 f3 59
 ```
 
 The full preamble, framed packet and parity are encrypted together when a key is
-selected. The separate few-bit status API has no preamble.
+selected. The separate legacy few-bit waveform has no training prefix; default
+pattern-mode status transmissions use the hardware-settling rule above.
 
 After private encryption, the audio transfer layer XORs the frame after its
 32-byte training prefix with a public whitening stream. This removes the strong
@@ -108,9 +129,9 @@ and data streams share the candidate epoch and searched stream position.
 | Mode | Behavior |
 | --- | --- |
 | `auto-keystream` | Automatic binary pattern integration with fresh keyed chips; falls back to public `auto-pattern` without a key. |
-| `auto-pattern` | Automatic integration of two fixed rare pattern codewords. |
+| `auto-pattern` | Automatic integration of two rare codewords: public without a key, fresh keyed fragments with encryption. |
 | `auto-tone` | Automatic integration of two continuous tones. |
-| `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | Preserve the named short pattern duration; do not meet the automatic rarity floor. |
+| `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | Preserve the named short pattern duration, mixing with fresh keyed fragments when encrypted; do not meet the automatic rarity floor. |
 | `tone-1`, `tone-2`, `tone-3`, `tone-4`, `tone-8`, `tone-32`, `tone-128`, `tone-1024`, `tone-4096`, `tone-16384` | Preserve the named tone duration in chips. |
 
 Tone codewords use opposite quarter-turn progression per chip, producing
@@ -118,6 +139,9 @@ frequencies at carrier ± chip_rate/4. Distinguishing tone identity requires
 carrier uncertainty smaller than chip_rate/4. A long tone can accumulate energy
 without becoming a rapidly changing pattern; tone acquisition has narrower
 frequency and clock conditions. Automatic tests need not force tone modes.
+Data masking alone does not give tone templates a key identity. Selecting
+among receive keys by pattern evidence requires keyed patterns or independent
+keyed DSSS; plain tone fits cannot resolve that ambiguity.
 
 Automatic integration can exceed the largest named factor through
 `Config::integration_seconds`. Duration is quantized once to a sample boundary,
@@ -195,7 +219,9 @@ integration alone does not establish tolerance of clock drift or interference.
 
 ## Incremental pattern receiver and live audio
 
-`StreamingTransmitter` emits bounded PCM chunks with no default preamble.
+`StreamingTransmitter` emits bounded PCM chunks, including the rounded
+hardware-settling prefix when nonzero. It does not allocate a whole prefix
+waveform or require the receiver to recognize it.
 `StreamingReceiver` dispatches pattern transport to `PatternReceiver`; explicit
 legacy packet configurations retain their earlier APSK path. The pattern
 receiver mixes input into a short complex baseband ring, uses FFT correlation
@@ -410,8 +436,8 @@ checked between and within chunks. The model does not establish fading/multipath
 performance, nonlinear hardware behavior or interference rejection.
 
 During computation, snapshots are captured at evenly spaced media positions from
-the start to the end of the transmitted signal. Legacy packet snapshots also
-include their fixed training and protected header. The normal timeline contains 60 frames. Each
+the start to the end of the transmitted signal, including any hardware-settling
+prefix. Legacy packet snapshots include their fixed training and protected header. The normal timeline contains 60 frames. Each
 stores a compact 256-sample waveform, 257 peak-pooled spectrum bins, the fresh
 measured constellation for its interval and up to 4096 bytes of browser preview
 text. Its source and lock state are captured at that position. Reception continues
@@ -482,11 +508,13 @@ The GUI's Binary editor is an alternative to its message/file source. It accepts
 transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter`.
 `Session::transmit_bits` queues the same bounded streaming transmitter for audio
 or the sampled simulation channel. Binary mode does not send callsign/grid
-metadata, an attachment, repeat requests, compression, fixed training, a packet
-header, integrity tag or error correction.
+metadata, an attachment, repeat requests, compression, modem training, a packet
+header, integrity tag or error correction. The separate hardware-settling prefix
+uses the same rounded duration as other pattern transmissions.
 
 In default pattern mode, each bit occupies exactly one complete pattern symbol,
-so a three-bit draft occupies three symbols with no byte padding. Selected keys
+so a three-bit draft occupies three payload symbols with no byte padding. Any
+hardware-settling prefix adds airtime but no payload symbols or bits. Selected keys
 mask only the actual data bits and seed independent pattern/DSSS streams.
 
 Raw signals have no packet bootstrap or authentication. Simulation and audio

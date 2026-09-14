@@ -122,7 +122,9 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     base.carrier_hz=recommended_carrier_hz(bandwidth_hz);
     const bool tone=mode==PatternMode::auto_tone || index>=9;
     base.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
-    base.scramble=mode==PatternMode::auto_keystream && encryption;
+    // The pattern itself must identify a keyed signal. Public templates with
+    // only a Data mask give every receive key the same acquisition evidence.
+    base.scramble=!tone && encryption;
     const double chip_seconds=2/bandwidth_hz;
     plan.target_symbol_snr_db=pattern_target_symbol_snr_db;
     const double exponent=(plan.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);

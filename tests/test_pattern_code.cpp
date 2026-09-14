@@ -97,8 +97,8 @@ void exact_pcm_and_chunks() {
     c.bandwidth_hz = 1100; c.integration_seconds = .071; // Partial final chip.
     const Bytes bits{0,1,0};
     modem::PatternTransmitter whole(bits, c, 91, 3), chunked(bits, c, 91, 3);
-    check(whole.total_samples() == bits.size() * modem::symbol_sample_count(c),
-          "three bits must contain exactly three symbols with no preamble/padding");
+    check(whole.total_samples() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c),
+          "three bits must contain exactly three payload symbols after hardware settling");
     const auto count = static_cast<std::size_t>(whole.total_samples());
     std::vector<std::complex<double>> a(count), b(count);
     check(whole.read_analytic(a) == count && whole.finished(), "complete analytic capture must end exactly");
@@ -135,7 +135,7 @@ void streaming_and_modem_integration() {
     modem::StreamingTransmitter wrapped(modem::RawBits{bits}, c);
     modem::PatternTransmitter direct(bits, c, c.stream_epoch);
     check(wrapped.total_samples() == direct.total_samples(),
-          "streaming raw wrapper must preserve exact bit count and no training");
+          "streaming raw wrapper must preserve exact bit count and hardware settling");
     rejects([&] { (void)wrapped.next_symbol(); },
             "pattern mode must not provide oracle-despread symbol observations");
     std::array<std::complex<double>, 37> blank;
@@ -154,13 +154,13 @@ void streaming_and_modem_integration() {
               "streaming wrapper preview must retain actual pattern samples");
     const Bytes packed{0xa5};
     modem::StreamingTransmitter packed_tx(packed, c);
-    const auto packed_samples = 8 * modem::symbol_sample_count(c);
+    const auto packed_samples = modem::training_sample_count(c)+8 * modem::symbol_sample_count(c);
     check(packed_tx.total_samples() == packed_samples && modem::waveform_sample_count(packed.size(), c) == packed_samples,
-          "packed bytes must expand to eight meaningful bits without training");
+          "packed bytes must expand to eight meaningful bits after hardware settling");
     check(modem::preamble(c).empty() && modem::memory_supported(packed.size(), 0, c),
           "pattern modem estimation must accept a zero-length preamble");
     const auto status = modem::modulate_status(bits, c);
-    check(status.size() == bits.size() * modem::symbol_sample_count(c) && modem::detect_status(status, bits, c) > .999999,
+    check(status.size() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c) && modem::detect_status(status, bits, c) > .999999,
           "status helper must use the same exact unframed pattern waveform");
     rejects([&] { (void)modem::demodulate(status, c, {}); },
             "legacy known-training demodulator must reject pattern mode explicitly");
@@ -173,7 +173,7 @@ void tones_and_bounded_state() {
           std::abs(tone.value(1, 0) - std::conj(quarter)) < 1e-12,
           "tone templates must use opposite quarter-turn chip increments");
     rejects([&] { (void)tone.sign(0, 0); }, "real sign API must not silently approximate a complex tone");
-    modem::PatternTransmitter tx({1}, c);
+    modem::PatternTransmitter tx({1}, c,0,0,false);
     std::array<std::complex<double>, 19> samples{}; tx.read_analytic(samples);
     const auto angular = 2 * std::numbers::pi * c.carrier_hz / c.sample_rate +
                          std::numbers::pi / (2 * static_cast<double>(tone.chip_samples()));
@@ -205,11 +205,23 @@ void tones_and_bounded_state() {
     rejects([&] { long_tx.read_analytic(samples, stop.get_token()); }, "waveform generation must honor cancellation");
     check(long_tx.samples_emitted() == 0, "cancelled generation must not advance time");
 }
+void rounded_hardware_duration() {
+    auto c=config();
+    for(const auto [seconds,expected]:std::array<std::pair<double,unsigned>,7>{{{.1,50},{1,5},{6,1},{10,1},{10.01,0},{20,0},{3600,0}}}) {
+        c.integration_seconds=seconds;
+        check(modem::training_sample_count(c)==expected*modem::symbol_sample_count(c),
+              "hardware settling must round five seconds to the nearest whole payload symbol");
+    }
+    c.integration_seconds=.1;
+    modem::PatternTransmitter framed({0,0,1},c,73),bare({0,0,1},c,73,0,false);
+    check(framed.total_samples()-bare.total_samples()==modem::training_sample_count(c),
+          "optional settling must not change the exact payload length");
+}
 }
 int main() {
     try {
         seek_and_domains(); alphabet_and_repetition(); exact_pcm_and_chunks(); tones_and_bounded_state();
-        streaming_and_modem_integration();
+        streaming_and_modem_integration();rounded_hardware_duration();
         std::cout << "Pattern code and binary waveform tests passed\n";
         return 0;
     } catch (const std::exception& error) {

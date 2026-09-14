@@ -185,6 +185,9 @@ struct PatternCorrelator::Impl {
         PatternEvidence e{h.observed_start,end,h.index,config.carrier_hz+search.frequency_offsets_hz[h.frequency],
             std::max(a,b),std::min(a,b),b>a?1U:0U};
         remember(e);
+        // An individually confident symbol starts its own burst unless the
+        // preceding weak chain already established confidence independently.
+        if(!h.admitted && e.score>=threshold())h.burst.bits.clear();
         if(h.burst.bits.size()==bit_limit && e.score>=search.retain_score)
             throw Error("pattern bit retention limit reached");
         if(e.score>=search.retain_score && e.score-e.alternative_score>=1 && h.burst.bits.size()<bit_limit) {

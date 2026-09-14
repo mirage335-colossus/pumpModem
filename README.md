@@ -29,7 +29,11 @@ a demonstration of extreme weak-signal performance.
 
 Text shorter than 16 original bytes uses the built-in bit-prefix dictionary and
 sends exactly the resulting bits, without byte padding, packet fields or FEC.
-For example, `e` is three transmitted bits. The Binary editor preserves exact
+For example, `e` is three transmitted payload bits. A hardware-settling prefix
+lasts approximately five seconds, rounded to the nearest whole payload-symbol
+duration; symbols longer than ten seconds need no prefix. The prefix helps
+external gain control and muting settle, but supplies no acquisition evidence
+and adds no payload bits. The Binary editor preserves exact
 0/1 drafts, including incomplete bytes and leading zeros, and sends those bits
 directly. Larger messages and attachments retain the compact packet codec,
 compression and optional FEC downstream of pattern acquisition. No dictionary
@@ -212,7 +216,7 @@ updating while idle. Transmissions run at CPU speed through noisy PCM, with
 virtual airtime reported separately. The receiver runs independently through
 idle noise and burst starts and derives timing, phase and spreading correlation
 from its samples. Transmit start and completion do not reset its acquisition.
-After computation completes, the entire transmission (including training only in legacy mode)
+After computation completes, the entire transmission (including any hardware-settling prefix or legacy training)
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and signal-browser previews follow the same timeline. Each frame shows the
 receiver state at that transmission position, with fresh constellation
@@ -233,7 +237,9 @@ and carrier phase. It does not provide an oscillator tracking loop; unsuccessful
 acquisition remains an unsuccessful simulation.
 Real audio reception pauses during transmission and resumes afterward.
 Bandwidth and the TX target C/N0 determine binary-pattern integration length; forced pattern
-and tone modes are also available. Auto keystream is enabled with encryption.
+and tone modes are also available. With encryption, Auto Pattern and the forced
+pattern lengths use private keystream fragments, so pattern evidence also
+distinguishes the receive key. Auto keystream remains an equivalent choice.
 The editor shows estimated airtime. Streaming transmission uses bounded chunks; reception bounds waveform history
 and retained candidate/bit records within its workspace. Compression is always chosen automatically.
 Pattern-only results show a model log-evidence score, not an SNR or calibrated
@@ -295,7 +301,7 @@ printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 ./build/pump qr --text 'clipboard text' --output clipboard.svg
 ./build/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
 
-# Exactly three pattern symbols; no preamble, padding, authentication, or FEC.
+# Three payload symbols plus the hardware-settling prefix; no padding, MAC or FEC.
 ./build/pump status-tx --bits 010 --output status.wav
 ./build/pump status-rx --bits 010 --input status.wav
 

@@ -4,10 +4,44 @@ Automatic tuning uses a binary pattern alphabet: each complete pattern carries
 one meaningful bit. The two legal waveforms have different internal phase
 transitions. They are not merely opposite absolute phases of the same waveform,
 so their identity does not require a preceding payload symbol or preamble.
-Raw `001` occupies exactly three pattern symbols, with no transmitted byte
-padding, training, header, checksum, or correction bits.
+Raw `001` occupies exactly three payload pattern symbols, with no transmitted
+byte padding, header, checksum, or correction bits. A separate hardware-settling
+prefix can precede those symbols; reception does not depend on receiving it.
+
+## Hardware-settling prefix
+
+For a nonempty transmission, the transmitter first emits approximately five
+seconds of settling waveform, rounded to the nearest whole payload-symbol
+duration, with half-symbol ties rounded up. If `T` is the actual sample-quantized
+symbol duration, its count is `floor(5 / T + 0.5)` and its duration is that count
+multiplied by `T`. Thus 0.1-second symbols get 50 settling intervals, four-second
+symbols get one, ten-second symbols get one, and symbols longer than ten seconds
+get none. Empty payloads emit nothing.
+
+This prefix brings external automatic gain control, audio muting and similar
+hardware toward their transmit operating level before the first payload symbol.
+It uses an independent noise-like sign stream at the normal amplitude and chip
+rate, rather than sending legal payload codewords. It is neither a training
+sequence nor a synchronization marker, and the receiver never requires or fits
+it to establish lock. A missing or distorted prefix does not change the payload
+format or the evidence needed to accept a symbol.
+
+The prefix stream has its own derivation domain, with a private seed when
+keyed pattern or DSSS spreading is active and a public seed otherwise. Its samples are
+reproducible for previews without reusing payload stream positions. The epoch
+is fixed at transmission start; payload Data and pattern positions still begin
+at zero. System-clock hypotheses account for the prefix's elapsed duration
+when predicting the first payload symbol. Estimates and transmission layouts
+include its airtime separately from meaningful bits and payload symbols.
 
 ## Pattern waveform
+
+Auto Pattern and the forced pattern lengths use keyed, advancing pattern
+fragments whenever encryption is selected. This lets pattern evidence identify
+the receive key and epoch without packet validation; a public template with
+only an encrypted Data stream could not distinguish those hypotheses. The
+Auto keystream choice has the same keyed behavior and falls back to public
+patterns without a key. Explicit tone modes retain their separate waveform.
 
 `PatternCode` generates a public pseudorandom sign row for ordinary patterns or
 a private Scrambler stream for keyed patterns. Bit zero uses that row; bit one
@@ -88,7 +122,7 @@ error instead of silently reducing timing resolution.
 
 ## Streaming long-symbol correlation
 
-`PatternSearch.start_offset_seconds` predicts the first transmitted symbol's
+`PatternSearch.start_offset_seconds` predicts the first payload symbol's
 start relative to the first captured sample. `start_uncertainty_seconds`
 defines its uncertainty window; `clock_errors_ppm` and
 `frequency_offsets_hz` define finite clock-rate and frequency hypotheses.

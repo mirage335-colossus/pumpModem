@@ -6,13 +6,55 @@ it is not installed with the application.
 
 ## Binary pattern transport — September 2026
 
-The current working-tree automatic transport uses pattern evidence for
+The hardware-settling follow-up rounds the five-second target to whole
+sample-quantized payload-symbol durations, with ties upward. Duration checks
+cover subsecond symbols, the ten-second boundary and hour-long symbols. Exact
+three-bit PCM checks cover reception with the full prefix and with the entire
+prefix removed, public and keyed spreading, and a listener whose local clock
+starts after the keyed prefix with zero additional epoch-search radius.
+Inspection and airtime estimates count settling separately from payload bits.
+These are software checks; physical gain-control and muting behavior has not
+been measured.
+
+The follow-up also fixes weak candidates borrowing confidence from a later
+individually strong symbol. An unadmitted prefix is discarded when that strong
+symbol establishes a new burst; already admitted chains retain their pending
+continuations. A retained failing 512-byte file recording previously produced
+4,075 raw bits starting at sample 28,150. It now produces exactly 4,072 bits
+starting at the actual payload boundary, sample 30,080, and validates the
+original file. Both receiver paths have deterministic weak-prefix regressions.
+No preamble recognition or packet validity enters the timing decision.
+
+The consecutive text/file smoke workflow also exposed identical public
+templates in plaintext and keyed Auto Pattern receive banks. The file's raw
+symbol count was correct, but another bank could apply the wrong Data mask
+while reporting the same pattern evidence. Auto Pattern and forced pattern
+lengths now use private pattern fragments whenever a key is selected. The
+key hypothesis is distinguished at pattern acquisition, without using packet
+validity to select a key or adding any transmitted fields.
+
+The completed follow-up Release run passed **48/48 CTest suites** in 95.69
+seconds. The strict shared GUI smoke workflow also passed, including
+consecutive plaintext text/file reception with receive keys loaded and exact
+encrypted raw bits. Its existing deadline and acceptance checks were retained.
+All six affected suites have passing ASan/UBSan coverage: pattern generation,
+both correlation paths, transfer integration, tuning and live sessions. The
+live coverage combines the full-run prefix with focused completion of the new
+multiple-key case and the remaining cases. That new case initially reached
+61% of a transmission before its 30-second test allowance expired under
+instrumentation; it passed with a dedicated 90-second allowance and unchanged
+content and memory assertions. Leak detection was disabled. The strengthened
+long-correlator fixture was additionally linked against a
+temporary copy of the pre-fix implementation and failed at its boundary
+assertion, confirming that the regression exercises the corrected behavior.
+
+The initial automatic transport used pattern evidence for
 acquisition and exact burst endpoints. It preserves explicit legacy APSK
-fixtures separately. The final Release build passed **48/48 CTest suites**
+fixtures separately. That initial Release build passed **48/48 CTest suites**
 in 78.05 seconds, including the CLI, shared GUI controller, live session,
 resampling, packet, crypto and new pattern suites.
 
-All **six focused ASan/UBSan suites** also passed (11.30 seconds): short
+The initial **six focused ASan/UBSan suites** also passed (11.30 seconds): short
 compression, pattern generation, both correlation paths, transfer integration,
 and the exact-bit editor. Leak detection was disabled for this execution
 environment; this is not a leak-sanitizer result.

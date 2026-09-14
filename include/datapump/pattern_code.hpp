@@ -37,14 +37,16 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// Constant-amplitude binary pattern PCM: exactly bits.size() symbols, with no
-// training, headers, checksum, framing, or transmitted bit/byte padding. Input
-// bytes are individual 0/1 bits. start_chip addresses the first stream fragment.
+// Constant-amplitude binary pattern PCM: exactly bits.size() payload symbols,
+// optionally preceded by rounded hardware-settling audio. The lead-in carries
+// no payload or acquisition marker. Input bytes are individual 0/1 bits;
+// start_chip addresses the first payload stream fragment. Disable the lead-in
+// explicitly when generating a bare capture or testing preamble loss.
 class PatternTransmitter {
 public:
     static constexpr std::size_t analytic_preview_limit = 2112;
     PatternTransmitter(Bytes bits, Config config, std::uint64_t stream_epoch = 0,
-                       std::uint64_t start_chip = 0);
+                       std::uint64_t start_chip = 0, bool hardware_preamble = true);
     ~PatternTransmitter();
     PatternTransmitter(PatternTransmitter&&) noexcept;
     PatternTransmitter& operator=(PatternTransmitter&&) noexcept;

@@ -39,6 +39,7 @@ void modes_and_patterns() {
                          tuning::PatternMode::pattern_12,tuning::PatternMode::pattern_16}) {
         const auto plan=tuning::resolve(24000,40,mode,true);
         modem::validate(plan.config);
+        check(plan.config.scramble,"every keyed pattern mode needs private acquisition evidence");
         changing_pattern(plan.config);
         const Bytes bits{0,1,1,0};
         const auto wave=modem::modulate_status(bits,plan.config);
@@ -233,6 +234,9 @@ void receive_target_lists() {
     for(const auto& profile:profiles)
         check(profile.bandwidth_hz==1200 && profile.spreading_mode==modem::SpreadingMode::pattern && !profile.scramble,
               "receive targets must not search other bandwidths or pattern modes");
+    const auto keyed_profiles=tuning::receive_profiles(1200,targets,tuning::PatternMode::auto_pattern,true);
+    check(keyed_profiles.size()==profiles.size() && std::all_of(keyed_profiles.begin(),keyed_profiles.end(),[](const auto& c){return c.scramble;}),
+          "default keyed receive profiles must distinguish keys using pattern evidence");
     check(tuning::receive_profiles(1200,targets,tuning::PatternMode::pattern_8,false).size()==1,
           "forced length profiles must deduplicate independently of target labels");
     auto customized=profiles.front();customized.sample_rate=8000;customized.carrier_hz=1750;

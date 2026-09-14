@@ -2,6 +2,7 @@
 import base64
 import errno
 import json
+import math
 import os
 import pathlib
 import stat
@@ -35,7 +36,9 @@ class CommandTests(PumpCase):
             self.run_pump("status-tx", "--bits", "001", "--time", EPOCH, "--output", path)
             plan = json.loads(self.run_pump("estimate", "--text", "e").stdout)
             with wave.open(str(path), "rb") as wav:
-                self.assertEqual(wav.getnframes(), round(3 * plan["symbol_seconds"] * wav.getframerate()))
+                symbol_samples = round(plan["symbol_seconds"] * wav.getframerate())
+                hardware_symbols = (5 * wav.getframerate() + symbol_samples // 2) // symbol_samples
+                self.assertEqual(wav.getnframes(), (hardware_symbols + 3) * symbol_samples)
             for comparison, matches in (("001", True), ("110", False)):
                 received = json.loads(self.run_pump("status-rx", "--bits", comparison,
                     "--time", EPOCH, "--search-seconds", "0", "--input", path).stdout)
@@ -286,7 +289,9 @@ class CommandTests(PumpCase):
         slow = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "6").stdout)
         self.assertGreater(slow["spreading"], normal["spreading"])
         self.assertGreater(slow["total_seconds"], normal["total_seconds"])
-        self.assertEqual(normal["total_seconds"], normal["content_seconds"])
+        settling_symbols = math.floor(5 / normal["symbol_seconds"] + .5)
+        self.assertAlmostEqual(normal["total_seconds"] - normal["content_seconds"],
+                               settling_symbols * normal["symbol_seconds"])
         self.assertEqual(normal["constellation_bits"], 1)
         self.assertGreaterEqual(normal["spreading"], 64)
         self.assertFalse(normal["repeatable_allowed"])

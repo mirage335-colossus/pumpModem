@@ -78,7 +78,8 @@ void pattern_roundtrip(bool keyed) {
         pcm=convert(pcm,internal,44100);pcm=convert(pcm,44100,48000);return convert(pcm,48000,internal);
     };
     const Bytes bits{0,0,1};auto source=transfer::binary_transmitter(bits,options);
-    check(source->total_samples()==3*symbol,"three raw bits must occupy exactly three pattern symbols");
+    check(source->total_samples()==modem::training_sample_count(options.modem)+3*symbol,
+          "three raw bits must occupy exactly three payload symbols after separate hardware settling");
     std::vector<float> pcm(static_cast<std::size_t>(source->total_samples()));
     std::size_t offset=0;while(!source->finished())offset+=source->read(std::span(pcm).subspan(offset));
     const auto raw=transfer::receive(cross_cards(std::move(pcm)),options);

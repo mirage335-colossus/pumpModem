@@ -51,11 +51,12 @@ Estimate estimate(const Message& message, const Options& options);
 // Optional numeric layout comes from that same encoded packet, avoiding a
 // second full content encoding when presenting a transmission inspection.
 Estimate estimate(const Message& message, const Options& options, PacketLayout* layout);
-// Raw binary has no training, framing, compression, FEC or authentication.
+// Raw binary has no framing, compression, FEC or authentication. Pattern mode
+// can add a hardware-settling prefix that carries no meaningful bits.
 // Input elements are individual 0/1 bits. Byte estimates are ceil(bits/8)
-// storage equivalents; only the supplied meaningful bits are modulated.
+// storage equivalents; payload time excludes that prefix, total time includes it.
 Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& options);
-// Uses the selected APSK modem and seeded spreading. A selected key masks
+// Uses the selected pattern or legacy APSK modem. A selected key masks
 // MSB-first bits with its data stream at options.timestamp; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);

@@ -144,11 +144,23 @@ void binary_pattern_transport() {
           "binary pattern inspector must bind independent codeword rows");
     check(text(raw).find("APSK geometry is diagnostic only")!=std::string::npos,
           "pattern inspector must identify its sole acquisition evidence");
+    const auto hardware_samples=modem::training_sample_count(request.options.modem);
+    check(hardware_samples>0 && raw.sections.size()==2 && raw.sections.front().title=="Hardware settling" &&
+          raw.sections.back().symbols==3 && raw.sections.back().duration_seconds==raw.estimate.packet_seconds &&
+          raw.estimate.total_seconds>raw.estimate.packet_seconds,
+          "hardware prefix must have separate airtime and cannot inflate the three meaningful bits");
     request.binary.reset();request.message.data=Bytes{'h','e','l','p'};
     const auto short_text=gui::inspect(request);
     check(!short_text.packet_layout && field(short_text,"Packet header")=="0 bits" &&
           field(short_text,"Checksum / integrity tag")=="0 bits" && field(short_text,"Compression")=="Built-in short-text dictionary",
           "short text inspection must describe raw dictionary bits without packet overhead");
+    check(field(short_text,"Meaningful bits")==std::to_string(transfer::message_bits(request.message,request.options).size()),
+          "hardware settling symbol durations cannot be reported as meaningful dictionary bits");
+    request.options.modem.integration_seconds=3600;
+    const auto slow=gui::inspect(request);
+    check(slow.sections.size()==1 && field(slow,"Hardware settling")=="0 s / 0 symbol durations" &&
+          slow.estimate.total_seconds==slow.estimate.packet_seconds,
+          "hour-long pattern inspection must show zero hardware prefix");
 }
 }
 int main(){try{packet_layout();tiny_packet_layout();raw_layout();static_pattern_binding();binary_pattern_transport();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

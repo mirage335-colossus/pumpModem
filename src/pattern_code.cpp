@@ -7,6 +7,7 @@
 #include <cmath>
 #include <limits>
 #include <numbers>
+#include <string_view>
 
 namespace datapump::modem {
 namespace {
@@ -120,8 +121,9 @@ struct PatternTransmitter::Impl {
     Bytes bits;
     Config config;
     PatternCode code;
-    std::uint64_t start = 0, position = 0, total = 0;
-    Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip):
+    std::unique_ptr<StreamCache> settling;
+    std::uint64_t start = 0, position = 0, total = 0, training = 0;
+    Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool hardware_preamble):
         bits(std::move(input)), config(value), code(config, epoch), start(start_chip) {
         require(!bits.empty(), "pattern transmission requires at least one bit");
         require(std::all_of(bits.begin(), bits.end(), [](auto bit) { return bit <= 1; }),
@@ -129,14 +131,28 @@ struct PatternTransmitter::Impl {
         require(bits.size() <= std::numeric_limits<std::uint64_t>::max() / code.symbol_samples(),
                 "pattern transmission duration would overflow");
         total = static_cast<std::uint64_t>(bits.size()) * code.symbol_samples();
+        training=hardware_preamble?training_sample_count(config):0;
+        require(training<=std::numeric_limits<std::uint64_t>::max()-total,"pattern transmission duration would overflow");
+        total+=training;
         require(bits.size() <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
                 "pattern transmission chip count would overflow");
         const auto chip_count = static_cast<std::uint64_t>(bits.size()) * code.chips_per_symbol();
         require(chip_count - 1 <= std::numeric_limits<std::uint64_t>::max() - start,
                 "pattern transmission chip address would overflow");
-        const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes();
+        const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+(training?sizeof(StreamCache):0);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
+        if(training) {
+            // A separate PRF domain produces noise-like settling chips. It
+            // consumes no payload, Scrambler or DSSS stream positions and is
+            // reproducible for previews without retaining its waveform.
+            const auto& source=config.scramble?config.spreading_seed:config.dsss?config.dsss_seed:public_seed;
+            const Crypto domain(source);
+            constexpr std::string_view label="DataPump/hardware-settling/v1";
+            auto seed=domain.mac(std::span(reinterpret_cast<const std::uint8_t*>(label.data()),label.size()));
+            settling=std::make_unique<StreamCache>(seed,StreamPurpose::Scrambler,epoch);
+            OPENSSL_cleanse(seed.data(),seed.size());
+        }
     }
     template<class Output, class Convert>
     std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert, std::stop_token stop) {
@@ -149,8 +165,19 @@ struct PatternTransmitter::Impl {
         const auto amplitude = std::sqrt(2 * nominal_signal_power);
         for (std::size_t i = 0; i < count;) {
             cancelled(stop);
-            const auto symbol = cursor / code.symbol_samples();
-            const auto within = cursor % code.symbol_samples();
+            if(cursor<training) {
+                const auto pattern=static_cast<double>(settling->sign(cursor/code.chip_samples()));
+                const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-i,training-cursor,
+                    code.chip_samples()-cursor%code.chip_samples()}));
+                for(std::size_t j=0;j<run;++j,++i,++cursor) {
+                    if((i&4095U)==0)cancelled(stop);
+                    output[i]=convert(amplitude*oscillator*pattern);oscillator*=step;
+                }
+                continue;
+            }
+            const auto payload=cursor-training;
+            const auto symbol = payload / code.symbol_samples();
+            const auto within = payload % code.symbol_samples();
             const auto chip = start + symbol * code.chips_per_symbol() + within / code.chip_samples();
             const auto fraction = static_cast<double>(within % code.chip_samples()) / static_cast<double>(code.chip_samples());
             const auto bit = bits[static_cast<std::size_t>(symbol)];
@@ -170,8 +197,8 @@ struct PatternTransmitter::Impl {
     }
 };
 
-PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip):
-    impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip)) {}
+PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool hardware_preamble):
+    impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip, hardware_preamble)) {}
 PatternTransmitter::~PatternTransmitter() = default;
 PatternTransmitter::PatternTransmitter(PatternTransmitter&&) noexcept = default;
 PatternTransmitter& PatternTransmitter::operator=(PatternTransmitter&&) noexcept = default;
@@ -194,7 +221,8 @@ std::uint64_t PatternTransmitter::total_samples() const { return impl_->total; }
 std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->position; }
 double PatternTransmitter::bit_rate() const { return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples()); }
 std::size_t PatternTransmitter::working_bytes() const {
-    return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->bits.capacity();
+    return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->bits.capacity()+
+        (impl_->settling?sizeof(StreamCache):0);
 }
 
 } // namespace datapump::modem

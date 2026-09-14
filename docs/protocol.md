@@ -15,8 +15,16 @@ matching legacy APSK settings; the receiver does not negotiate this over air.
 
 Raw binary input is transmitted exactly as entered, including leading zeros
 and lengths not divisible by eight. Three input bits produce exactly three
-pattern symbols. There is no preamble, packet header, checksum, MAC, FEC,
+payload pattern symbols. There is no packet header, checksum, MAC, FEC,
 byte-padding bit, or transmitted length field on this path.
+
+A separate hardware-settling prefix precedes a nonempty transmission when five
+seconds rounds to at least one whole payload-symbol duration. Rounding is to
+nearest, with ties upward: symbols longer than ten seconds add no prefix. This
+independent noise-like waveform helps external gain control and muting settle;
+it carries no payload or training information and is not required for reception.
+Payload stream positions start at zero after the prefix. See
+[settling waveform and timing](pattern-constellation.md#hardware-settling-prefix).
 
 Normal text below 16 original UTF-8 bytes uses the fixed short-byte dictionary
 described below, emitted as exact prefix-code bits. It carries no compression
@@ -44,8 +52,9 @@ tag is silently added to them.
 
 The packet contains a **variable compact bootstrap**, then the optionally
 Reed–Solomon-coded and interleaved body. Automatic binary pattern modulation
-sends each packed packet bit as a separate pattern symbol, without physical
-training or symbol padding.
+sends each packed packet bit as a separate pattern symbol, without symbol
+padding. The same hardware-settling prefix described above can precede it;
+it is separate from the packet and supplies no modem training.
 
 Manual legacy APSK configurations additionally send five seconds of training:
 32 input bytes mapped onto 64 four-bit APSK segments, independent of the payload

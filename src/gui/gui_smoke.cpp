@@ -329,7 +329,18 @@ struct Smoke::Impl {
             require(!controller.field(F::message).enabled,"Attached file did not make the inactive text draft read-only");
             transmit(controller);phase=Phase::file_received;break;
         case Phase::file_received: {
-            if(verified_ids.size()!=2)break;
+            if(verified_ids.size()!=2) {
+                if(!snapshot.transmitting&&!snapshot.simulation_replay&&completed_replay==snapshot.transmission_id&&replay.resumed) {
+                    std::string detail="Completed file replay did not validate; fixture="+path_text(directory)+
+                        "; expected bits="+(controller.inspection()?inspection_field(*controller.inspection(),"Meaningful bits"):"none");
+                    for(const auto& line:controller.signals().lines())detail+=" [id="+std::to_string(line.id)+
+                        " status="+signal_status_label(line)+" bits="+std::to_string(line.received_bits)+
+                        " score="+(line.pattern_score?std::to_string(*line.pattern_score):"none")+
+                        " text="+line.text.substr(0,64)+(line.text.size()>64?"..."+line.text.substr(line.text.size()-32):"")+"]";
+                    throw Error(detail);
+                }
+                break;
+            }
             const auto files=controller.inbox().file_items();
             require(files.size()==1&&files.front()->message.data==file_bytes,"Received file list did not retain the exact binary attachment");
             const auto id=id_label(files.front()->message);
