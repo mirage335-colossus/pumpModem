@@ -9,6 +9,7 @@
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <string_view>
 
 using namespace datapump;
 namespace {
@@ -94,6 +95,7 @@ void alphabet_and_repetition() {
 }
 void exact_pcm_and_chunks() {
     auto c = config(); c.scramble = true; c.dsss = true;
+    c.hardware_data_seed=c.spreading_seed;
     c.bandwidth_hz = 1100; c.integration_seconds = .071; // Partial final chip.
     const Bytes bits{0,1,0};
     modem::PatternTransmitter whole(bits, c, 91, 3), chunked(bits, c, 91, 3);
@@ -182,6 +184,15 @@ void tones_and_bounded_state() {
     for (std::size_t i = 1; i < samples.size(); ++i)
         check(std::abs(samples[i] / samples[i - 1] - std::polar(1., angular)) < 1e-12,
               "tone PCM must use the advertised carrier frequency offset");
+    modem::PatternTransmitter tone_prefix({1},c);
+    tone_prefix.read_analytic(samples);
+    const auto refresh=std::max<std::uint64_t>(1,tone.chip_samples()/2);
+    for(std::size_t i=1;i<samples.size();++i) {
+        const auto change=std::abs(samples[i]-samples[i-1]*
+            std::polar(1.,2*std::numbers::pi*c.carrier_hz/c.sample_rate));
+        check(i%refresh==0?change>1e-6:change<1e-12,
+              "tone settling must refresh independent I/Q noise at twice the chip cadence");
+    }
     c = config(); c.scramble = true; c.integration_seconds = 4 * 3600;
     modem::PatternCode long_code(c, 73);
     modem::PatternTransmitter long_tx({0,1,0}, c, 73);
@@ -227,14 +238,14 @@ void hardware_noise_keystreams() {
         tx.read(samples);return samples;
     };
     auto c=config();c.scramble=true;c.dsss=true;
-    c.hardware_noise_seed=std::array<std::uint8_t,32>{};c.hardware_noise_seed->fill(0x37);
+    c.hardware_data_seed=std::array<std::uint8_t,32>{};c.hardware_data_seed->fill(0x37);
     const auto both=prefix(c,epoch);
     auto changed=c;changed.spreading_seed[0]^=0x80;
     check(prefix(changed,epoch)!=both,"Scrambler must affect settling when DSSS is also enabled");
     changed=c;changed.dsss_seed[0]^=0x80;
     check(prefix(changed,epoch)!=both,"DSSS must affect settling when Scrambler is also enabled");
-    changed=c;(*changed.hardware_noise_seed)[0]^=0x80;
-    check(prefix(changed,epoch)!=both,"independent hardware-noise key must affect the prefix");
+    changed=c;(*changed.hardware_data_seed)[0]^=0x80;
+    check(prefix(changed,epoch)!=both,"hardware Data encryption key must affect the prefix");
     check(prefix(c,epoch+1)!=both,"hardware streams must advance with the clock epoch");
     check(prefix(c,epoch,Bytes{1,1,0,1})==both,"settling cannot encode payload bits or length");
     for(bool scrambler:{false,true}) {
@@ -257,7 +268,7 @@ void hardware_noise_keystreams() {
           std::abs(power/observations-1)<.1,
           "hardware noise must fill both quadratures with the payload's mean power, not a binary line");
     check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(offset),a.end(),b.begin()+static_cast<std::ptrdiff_t>(offset)),
-          "hardware-noise key must not change the following payload");
+          "hardware Data encryption key must not change the following payload");
     const auto rotation=std::polar(1.,2*std::numbers::pi*static_cast<double>(offset)*c.carrier_hz/c.sample_rate);
     for(std::size_t i=0;i<payload.size();++i)
         check(std::abs(a[offset+i]-payload[i]*rotation)<1e-8,"settling must not consume or reset payload stream positions");
@@ -266,16 +277,50 @@ void hardware_noise_keystreams() {
     const auto first=transfer::seeded_config(options,epoch);
     options.key.emplace(Bytes(32,0xa7));
     const auto second=transfer::seeded_config(options,epoch);
-    check(first.hardware_noise_seed && second.hardware_noise_seed && !first.scramble && !first.dsss,
-          "data-only encryption must supply a private independent hardware-noise seed");
+    check(first.hardware_data_seed && second.hardware_data_seed && !first.scramble && !first.dsss,
+          "data-only encryption must supply a dedicated hardware Data encryption seed");
     check(prefix(first,epoch)!=prefix(second,epoch) && prefix(first,epoch)!=prefix(options.modem,epoch),
           "data-only encrypted settling must depend on the selected key rather than the public waveform");
+}
+void hardware_data_byte_encryption() {
+    // Recover the phase word from the transmitted I/Q waveform, then verify
+    // that encryption changes those bytes by exactly the dedicated Data mask.
+    // Positions straddle cache boundaries; neither source has spreading enabled.
+    constexpr std::uint64_t epoch=1800000000;
+    auto plain=config(),encrypted=plain;
+    encrypted.hardware_data_seed=plain.spreading_seed;
+    constexpr std::string_view domain="DataPump/hardware-settling/data/v1";
+    const Crypto source(*encrypted.hardware_data_seed);
+    const Crypto data(source.mac(std::span(reinterpret_cast<const std::uint8_t*>(domain.data()),domain.size())));
+    const auto mask=data.stream(StreamPurpose::Data,epoch,0,513*8);
+    modem::PatternTransmitter public_tx({0},plain,epoch),encrypted_tx({0},encrypted,epoch);
+    const auto refresh=std::max<std::uint64_t>(1,modem::pattern_chip_samples(plain)/2);
+    std::vector<std::complex<double>> a(513*refresh),b(a.size());
+    public_tx.read_analytic(a);encrypted_tx.read_analytic(b);
+    const auto phase_word=[&](std::complex<double> value,std::size_t sample) {
+        value*=std::polar(1.,-2*std::numbers::pi*sample*plain.carrier_hz/plain.sample_rate);
+        auto angle=std::arg(value);
+        if(angle<0)angle+=2*std::numbers::pi;
+        return static_cast<std::uint32_t>(std::llround(angle/(2*std::numbers::pi)*4294967296.-.5));
+    };
+    for(const auto position:{0U,1U,63U,64U,65U,127U,128U,511U,512U}) {
+        std::uint32_t word=0;
+        for(unsigned j=4;j<8;++j)word=(word<<8)|mask[position*8+j];
+        const auto sample=position*refresh;
+        check((phase_word(a[sample],sample)^phase_word(b[sample],sample))==word,
+              "preamble bytes must be XOR-encrypted by the Data stream before noise mapping");
+    }
+    const auto used=encrypted_tx.working_bytes();
+    encrypted.memory_limit=used-1;
+    rejects([&] { modem::PatternTransmitter too_small({0},encrypted,epoch); },
+            "hardware Data cache must count toward the transmitter memory ceiling");
 }
 }
 int main() {
     try {
         seek_and_domains(); alphabet_and_repetition(); exact_pcm_and_chunks(); tones_and_bounded_state();
         streaming_and_modem_integration();rounded_hardware_duration();hardware_noise_keystreams();
+        hardware_data_byte_encryption();
         std::cout << "Pattern code and binary waveform tests passed\n";
         return 0;
     } catch (const std::exception& error) {

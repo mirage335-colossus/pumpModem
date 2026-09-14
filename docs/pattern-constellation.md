@@ -25,22 +25,26 @@ power, with bounded peaks and updates approximately every half chip, rather
 than sending legal payload codewords. This avoids the duplicated, single-axis
 structure of full-chip random signs. The rectangular updates have a wider
 first-null spectrum than the payload pulses; no strict spectral mask is claimed.
-It is neither a training
-sequence nor a synchronization marker, and the receiver never requires or fits
+Tone modes use the same independent I/Q prefix, with phase and amplitude
+refreshed at approximately twice the nominal chip rate, independent of the
+longer payload-symbol duration. No phase/amplitude constellation points are
+reserved for settling. It is neither a training sequence nor a synchronization
+marker, and the receiver never requires or fits
 it to establish lock. A missing or distorted prefix does not change the payload
 format or the evidence needed to accept a symbol.
 
-The prefix begins with independent noise, privately seeded whenever an
-encryption key is selected, including Data-only encryption. Every enabled
-Scrambler and DSSS layer also applies its own independent prefix keystream;
-both layers remain active when both are selected. Separate hardware derivation
+The prefix begins with public noise bytes, XOR-encrypted by a dedicated
+Data-purpose CTR stream whenever an encryption key is selected, before their
+mapping into I/Q noise. This also applies with payload spreading disabled.
+Every enabled Scrambler and DSSS layer then applies its own independent prefix
+keystream; all layers remain active together. Separate hardware derivation
 domains keep these fragments independent of the payload streams. With no
-private seed or spreading layer the prefix is public. Its samples are
+Data key or spreading layer, the prefix is public. Its samples are
 reproducible for previews without reusing payload stream positions. At most
-three fixed 512-byte caches hold these streams. This avoids a predictable
+four fixed 512-byte caches hold these streams. This avoids a predictable
 public preamble in keyed transmissions; it does not by itself demonstrate
-physical low probability of intercept. The epoch
-is fixed at transmission start; payload Data and pattern positions still begin
+physical low probability of intercept. The epoch is fixed at transmission
+start; payload Data and pattern positions still begin
 at zero. System-clock hypotheses account for the prefix's elapsed duration
 when predicting the first payload symbol. Estimates and transmission layouts
 include its airtime separately from meaningful bits and payload symbols.

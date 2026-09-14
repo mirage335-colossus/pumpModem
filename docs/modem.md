@@ -55,9 +55,12 @@ mask. It helps external gain control and muting settle before
 fast payload symbols arrive, and is not made from the legal payload patterns.
 It supplies no training, header or acquisition condition: pattern evidence
 alone accepts the following symbols even when the prefix is lost or distorted.
-Any selected key makes the independent prefix noise private, even with
-payload spreading disabled. Enabled Scrambler and DSSS layers both apply
-through separate hardware derivation domains. The transmission epoch is
+Any selected key XOR-encrypts the preamble noise bytes with a dedicated
+Data-purpose CTR stream before I/Q mapping, even with payload spreading
+disabled. Enabled Scrambler and DSSS layers then both apply through separate
+hardware derivation domains. Tone mode uses the same noise prefix, refreshing
+phase and amplitude at roughly twice the nominal chip rate; it reserves no
+payload constellation points. The transmission epoch is
 fixed before the prefix, and clock-start hypotheses include its elapsed time.
 Airtime estimates include the prefix without adding to meaningful payload bits.
 

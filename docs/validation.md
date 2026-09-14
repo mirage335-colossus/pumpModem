@@ -4,6 +4,29 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Preamble Data encryption — September 2026
+
+Preamble noise bytes now pass through bytewise Data-purpose AES-CTR encryption
+before I/Q mapping, followed by every enabled Scrambler and DSSS layer. The
+selected key derives a dedicated hardware Data key; the prefix consumes no
+payload keystream positions. At most four fixed 512-byte caches are allocated,
+and the extra Data cache is included in the transmitter memory ceiling.
+
+An analytic-waveform test recovers the transmitted phase words and verifies
+their bytewise XOR against the dedicated Data stream across cache boundaries.
+Chunked output with all three private layers preserves the waveform and PCM
+headroom. A transmitter-only tone check verifies half-chip noise refreshes;
+it adds no tone reception test and reserves no payload constellation points.
+The receiver matrix retains its 32 existing cases and adds Data-only and
+Data-plus-Scrambler-plus-DSSS preambles. These cases clear the preamble Data
+seed at the receiver, reject prefix-only captures, and recover exact `001`
+with the prefix present or entirely removed.
+
+All 48 Release CTest suites passed in 165.38 seconds. The three focused
+ASan/UBSan suites (`pattern_code`, `pattern_receiver`, `pattern_transfer`)
+passed in 20.15 seconds with leak detection disabled. These software checks
+do not measure physical low probability of intercept or external AGC behavior.
+
 ## Private hardware-noise preamble — September 2026
 
 Hardware settling now uses independent circular Gaussian-derived I/Q noise,

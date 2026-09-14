@@ -261,14 +261,19 @@ void hardware_settling_is_not_payload() {
     constexpr std::array<std::size_t,3> chunks{509,37,1021};
     constexpr std::size_t workspace=2*1024*1024;
     constexpr std::array<const char*,4> modes{"public","scrambler only","DSSS only","scrambler and DSSS"};
-    for(const auto bandwidth:{100.,1200.})for(const auto chips:{64U,128U})
-    for(const auto epoch:{1800000025ULL,1800000174ULL})for(unsigned mode=0;mode<modes.size();++mode)try {
+    const auto verify=[&](double bandwidth,unsigned chips,std::uint64_t epoch,unsigned mode,bool data=false) {try {
         auto c=config(chips,(mode&1U)!=0);c.dsss=(mode&2U)!=0;
         c.bandwidth_hz=bandwidth;c.stream_epoch=epoch;
         for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(5*i+11);
+        if(data){
+            c.hardware_data_seed.emplace();
+            for(std::size_t i=0;i<c.hardware_data_seed->size();++i)
+                (*c.hardware_data_seed)[i]=static_cast<std::uint8_t>(7*i+13);
+        }
         const Bytes bits{0,0,1};
         modem::PatternTransmitter source(bits,c,c.stream_epoch);
         std::vector<float> samples(static_cast<std::size_t>(source.total_samples()));source.read(samples);
+        c.hardware_data_seed.reset(); // Acquisition needs no knowledge of the settling Data stream.
         const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c));
         check(prefix>0,"hardware-settling fixture must contain a physical prefix");
         const std::vector<float> settling(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(prefix));
@@ -284,8 +289,13 @@ void hardware_settling_is_not_payload() {
         const auto& late=exact(late_result,bits);
         check(late.first_sample<=10 && late.first_stream_symbol==0,
               "losing the entire hardware prefix must preserve payload acquisition and stream position");
-    } catch(const Error& error){throw Error(std::string(modes[mode])+" / "+std::to_string(chips)+" chips / "+
-        std::to_string(bandwidth)+" Hz / epoch "+std::to_string(epoch)+": "+error.what());}
+    } catch(const Error& error){throw Error(std::string(modes[mode])+(data?" with preamble Data":"")+
+        " / "+std::to_string(chips)+" chips / "+std::to_string(bandwidth)+" Hz / epoch "+
+        std::to_string(epoch)+": "+error.what());}};
+    for(const auto bandwidth:{100.,1200.})for(const auto chips:{64U,128U})
+    for(const auto epoch:{1800000025ULL,1800000174ULL})for(unsigned mode=0;mode<modes.size();++mode)
+        verify(bandwidth,chips,epoch,mode);
+    for(const auto mode:{0U,3U})verify(100.,64,1800000174ULL,mode,true);
 }
 }
 int main() {

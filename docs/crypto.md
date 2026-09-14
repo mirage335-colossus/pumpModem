@@ -69,23 +69,27 @@ purpose and seed. Small fixed caches support both sequential output and
 receiver seeks without storing a keystream proportional to hours of airtime.
 Cache contents are cleansed when released.
 
-The hardware-settling prefix starts with independent circular I/Q noise,
-derived from two 32-bit uniform keystream words per half-chip interval using
-a Gaussian transform. Its radius is capped and mean power normalized to stay
-within PCM headroom. Any selected transfer key supplies its private base seed through HMAC-SHA256 with
-the label `DataPump/hardware-noise-seed/v1`, including Data-only encryption.
-Without that seed its base is public. Enabled Scrambler and DSSS layers each
-multiply their own independent prefix signs into that noise; enabling both
-applies both, rather than selecting one seed in preference to the other.
+The hardware-settling prefix starts with public pseudorandom noise bytes. Any
+selected transfer key derives a dedicated preamble Data key through HMAC-SHA256
+with the label `DataPump/hardware-data-seed/v1`. Its Data-purpose AES-CTR stream
+XOR-encrypts those bytes before waveform mapping, including when payload
+spreading is disabled. Every half-chip interval consumes eight bytes: two
+big-endian 32-bit uniform words mapped into circular I/Q noise using a Gaussian
+transform. Its radius is capped and mean power normalized to stay within PCM
+headroom. Enabled Scrambler and DSSS layers then each multiply their own
+independent prefix signs into the noise. All selected layers apply together.
 
 Each prefix stream derives a separate key from its source seed using the
 labels `DataPump/hardware-settling/noise/v1`,
+`DataPump/hardware-settling/data/v1`,
 `DataPump/hardware-settling/scrambler/v1` and
 `DataPump/hardware-settling/dsss/v1`. The derived keys use the existing
-epoch-separated AES-CTR machinery, with fixed 512-byte seek caches. The local
-noise seed and labels are never transmitted. Removing the spreading layers
-still leaves independent noise, not a legal payload codeword. The receiver
-never matches the prefix as a synchronization marker. It consumes no Data, Scrambler or DSSS payload
+epoch-separated AES-CTR machinery, with at most four fixed 512-byte seek caches.
+The public noise generator uses the Scrambler purpose; byte encryption uses
+the Data purpose under its dedicated key. The local Data seed and labels are
+never transmitted. Removing the spreading layers still leaves independent
+noise, not a legal payload codeword. The receiver never matches the prefix as
+a synchronization marker. It consumes no Data, Scrambler or DSSS payload
 positions. The epoch is fixed at transmission start, before that prefix;
 payload positions begin at zero afterward. Clock-start hypotheses add the
 rounded prefix duration when predicting the first payload symbol. No epoch,

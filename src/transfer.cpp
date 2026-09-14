@@ -227,10 +227,10 @@ modem::Config seeded_config(const Options& options, std::uint64_t timestamp) {
     auto result = options.modem;
     result.stream_epoch=timestamp;
     if(options.key && result.pattern_symbols) {
-        constexpr std::string_view domain="DataPump/hardware-noise-seed/v1";
+        constexpr std::string_view domain="DataPump/hardware-data-seed/v1";
         auto seed=options.key->mac(std::span(reinterpret_cast<const std::uint8_t*>(domain.data()),domain.size()));
-        result.hardware_noise_seed.emplace();
-        std::copy(seed.begin(),seed.end(),result.hardware_noise_seed->begin());
+        result.hardware_data_seed.emplace();
+        std::copy(seed.begin(),seed.end(),result.hardware_data_seed->begin());
         OPENSSL_cleanse(seed.data(),seed.size());
     }
     if (options.key && result.scramble) {
