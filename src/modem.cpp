@@ -1,6 +1,7 @@
 #include "datapump/modem.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/crypto.hpp"
 #include <algorithm>
 #include <bit>
@@ -156,9 +157,12 @@ std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     const auto duration=symbol_sample_count(c);
     check(duration<=std::numeric_limits<std::size_t>::max(),"symbol duration exceeds platform sample counter");
     const auto payload=product(count,static_cast<std::size_t>(duration),std::numeric_limits<std::size_t>::max());
+    const auto padding=pattern_pulse_padding_samples(c);
     const auto training=training_sample_count(c);
     check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");
-    return payload+static_cast<std::size_t>(training);
+    const auto content=payload+static_cast<std::size_t>(training);
+    check(padding<=(std::numeric_limits<std::size_t>::max()-content)/2,"pulse tail sample count overflow");
+    return content+2*static_cast<std::size_t>(padding);
 }
 bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Config& c) {
     validate(c);
@@ -318,7 +322,10 @@ double detect_status(std::span<const float> samples, std::span<const std::uint8_
     const auto payload_count = product(bits.size(),static_cast<std::size_t>(duration),c.memory_limit/sizeof(float));
     const auto training=training_sample_count(c);
     check(training<=c.memory_limit/sizeof(float)-payload_count,"status waveform exceeds memory limit");
-    const auto expected_count=payload_count+static_cast<std::size_t>(training);
+    const auto padding=pattern_pulse_padding_samples(c);
+    const auto content_count=payload_count+static_cast<std::size_t>(training);
+    check(padding<=(c.memory_limit/sizeof(float)-content_count)/2,"status pulse tails exceed memory limit");
+    const auto expected_count=content_count+2*static_cast<std::size_t>(padding);
     budget(c.memory_limit,{{samples.size(),sizeof(float)},{expected_count,sizeof(float)},{bits.size(),1},{16384,1}});
     const auto reference = modulate_status(bits,c);
     check(samples.size() == reference.size(),"status detector requires exactly the known symbol duration");

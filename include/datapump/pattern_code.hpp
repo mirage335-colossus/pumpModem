@@ -29,6 +29,11 @@ public:
     // fraction is the position within a chip in [0,1).
     std::complex<double> value(std::uint64_t absolute_chip, unsigned bit,
                                double fraction = 0);
+    // Linear contribution from one symbol, including its filter tails. The
+    // coordinate is a sample offset from that symbol's unpadded start. Other
+    // symbols contribute zero; receivers use this without any guessed bits.
+    std::complex<double> shaped_value(std::uint64_t first_chip, unsigned bit,
+                                      double within_symbol);
     std::uint64_t chip_samples() const;
     std::uint64_t chips_per_symbol() const;
     std::uint64_t symbol_samples() const;
@@ -39,14 +44,17 @@ private:
 };
 
 // Binary pattern PCM: exactly bits.size() payload symbols,
-// optionally preceded by rounded hardware-settling audio. The lead-in carries
+// optionally preceded by rounded hardware-settling audio. Shaped patterns add
+// eight chip times at either burst edge to emit the full finite filter tails.
+// The lead-in carries
 // no payload or acquisition marker. Input bytes are individual 0/1 bits;
 // start_chip addresses the first payload stream fragment. Disable the lead-in
 // explicitly when generating a bare capture or testing preamble loss.
 class PatternTransmitter {
 public:
     static constexpr std::size_t analytic_preview_limit = 2112;
-    // Actual baseband value at the first emitted sample of each payload chip.
+    // Input chip constellation before pulse shaping, reported at each payload
+    // chip's position in the padded output waveform.
     // Settling audio and preview reconstruction never notify the observer.
     using ChipObserver = std::function<void(std::complex<double>)>;
     PatternTransmitter(Bytes bits, Config config, std::uint64_t stream_epoch = 0,

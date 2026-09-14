@@ -1,5 +1,6 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
 #include <algorithm>
 #include <array>
@@ -30,6 +31,10 @@ std::vector<float> waveform(const modem::Config& c,const Bytes& bits,std::size_t
     // Bare payload models capture after the hardware lead-in was lost.
     modem::PatternTransmitter tx(bits,c,c.stream_epoch,0,false);
     std::vector<std::complex<double>> analytic(static_cast<std::size_t>(tx.total_samples()));tx.read_analytic(analytic);
+    // These fixtures describe a capture starting at the payload clock, with
+    // neither hardware settling nor outer filter tails available to acquire.
+    const auto padding=static_cast<std::ptrdiff_t>(modem::pattern_pulse_padding_samples(c));
+    analytic=std::vector<std::complex<double>>(analytic.begin()+padding,analytic.end()-padding);
     std::vector<float> samples(delay+analytic.size()+trailing);
     std::mt19937_64 random(seed);std::normal_distribution<double> noise(0,sigma);
     for(auto& sample:samples)sample=static_cast<float>(noise(random));
@@ -195,6 +200,10 @@ void private_template_energy_normalization() {
     // all its energy; using the number of chips as the norm penalizes this key.
     for(unsigned mode=1;mode<=3;++mode) {
         auto c=config(16,(mode&1U)!=0);c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
+        // This exact-fit regression isolates template-energy normalization.
+        // A shaped symbol also contains unknown neighboring-symbol overlap;
+        // its confidence is checked separately against raw-sample Gram scores.
+        c.pulse_shaping=false;
         c.carrier_hz=1200;
         double mean_energy=1;
         for(unsigned trial=0;trial<1000 && mean_energy>=.75;++trial,++c.stream_epoch) {
@@ -551,7 +560,7 @@ void hardware_settling_is_not_payload() {
         modem::PatternTransmitter source(bits,c,c.stream_epoch);
         std::vector<float> samples(static_cast<std::size_t>(source.total_samples()));source.read(samples);
         c.data_key.reset(); // Acquisition needs no knowledge of the settling Data stream.
-        const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c));
+        const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c)+modem::pattern_pulse_padding_samples(c));
         check(prefix>0,"hardware-settling fixture must contain a physical prefix");
         const std::vector<float> settling(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(prefix));
         check(receive(settling,c,chunks,{},workspace).bursts.empty(),"hardware settling must not become extra decoded payload bits");

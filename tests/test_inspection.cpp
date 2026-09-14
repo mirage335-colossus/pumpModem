@@ -1,5 +1,6 @@
 #include "../src/gui/inspection_model.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <cmath>
 #include <iostream>
@@ -11,6 +12,10 @@ void check(bool value,const char* message){if(!value)throw std::runtime_error(me
 std::string field(const gui::Inspection& value,std::string_view name) {
     for(const auto& item:value.fields)if(item.name==name)return item.value;
     throw std::runtime_error("missing inspection field");
+}
+const gui::StructureSection& section(const gui::Inspection& value,std::string_view name) {
+    for(const auto& item:value.sections)if(item.title==name)return item;
+    throw std::runtime_error("missing inspection section");
 }
 std::string text(const gui::Inspection& value) {
     std::string result=value.title+value.summary+value.preamble_description+value.chip_description;
@@ -64,6 +69,7 @@ void tone_protection() {
         if(step.title=="Private data stream")check(step.state==gui::InspectionState::off,"tone inspector enabled the private data stream");
     check(tone.pattern_space && !tone.pattern_space->representative_keyed,
           "tone inspector displayed private pattern evidence");
+    check(field(tone,"Pulse tails")=="0 s / 0 payload bits","tone inspection must not add shaped pulse airtime");
 }
 void static_pattern_binding() {
     gui::InspectionRequest request;request.binary=Bytes{0,1};
@@ -91,10 +97,20 @@ void binary_pattern_transport() {
     check(text(raw).find("I/Q plots are diagnostic only")!=std::string::npos,
           "pattern inspector must identify its sole acquisition evidence");
     const auto hardware_samples=modem::training_sample_count(request.options.modem);
-    check(hardware_samples>0 && raw.sections.size()==2 && raw.sections.front().title=="Hardware settling" &&
+    const auto pulse_seconds=2.*static_cast<double>(modem::pattern_pulse_padding_samples(request.options.modem))/request.options.modem.sample_rate;
+    check(hardware_samples>0 && raw.sections.size()==3 && raw.sections.front().title=="Hardware settling" &&
           raw.sections.back().symbols==3 && raw.sections.back().duration_seconds==raw.estimate.packet_seconds &&
           raw.estimate.total_seconds>raw.estimate.packet_seconds,
           "hardware prefix must have separate airtime and cannot inflate the three meaningful bits");
+    check(section(raw,"Pulse tails").symbols==0 && section(raw,"Pulse tails").duration_seconds==pulse_seconds &&
+          field(raw,"Pulse tails").find("0 payload bits")!=std::string::npos,
+          "pulse edges must account for both tails without adding meaningful symbols or settling time");
+    request.options.modem.pulse_shaping=false;
+    const auto rectangular=gui::inspect(request);
+    check(rectangular.sections.size()==2 && field(rectangular,"Pulse tails")=="0 s / 0 payload bits" &&
+          std::abs(raw.estimate.total_seconds-rectangular.estimate.total_seconds-pulse_seconds)<1e-9,
+          "disabling shaping must remove only its filter-tail airtime");
+    request.options.modem.pulse_shaping=true;
     request.binary.reset();request.message.data=Bytes{'h','e','l','p'};
     const auto short_text=gui::inspect(request);
     check(!short_text.packet_layout && field(short_text,"Packet header")=="0 bits" &&
@@ -104,9 +120,10 @@ void binary_pattern_transport() {
           "hardware settling symbol durations cannot be reported as meaningful dictionary bits");
     request.options.modem.integration_seconds=3600;
     const auto slow=gui::inspect(request);
-    check(slow.sections.size()==1 && field(slow,"Hardware settling")=="0 s / 0 symbol durations" &&
-          slow.estimate.total_seconds==slow.estimate.packet_seconds,
-          "hour-long pattern inspection must show zero hardware prefix");
+    check(slow.sections.size()==2 && field(slow,"Hardware settling")=="0 s / 0 symbol durations" &&
+          section(slow,"Pulse tails").symbols==0 &&
+          std::abs(slow.estimate.total_seconds-slow.estimate.packet_seconds-pulse_seconds)<1e-9,
+          "hour-long pattern inspection must retain pulse tails separately from its zero hardware prefix");
     request.options.modem.integration_seconds=0;request.options.compression=false;
     request.message.data=Bytes(400,'e');
     const auto marked=gui::inspect(request);

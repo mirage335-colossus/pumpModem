@@ -33,6 +33,8 @@ The modem's nominal chip rate is bandwidth / 2.
 `symbol_seconds` is the bandwidth-derived duration (or explicit integration),
 independent of the hardware clock. `symbol_sample_count` rounds that duration
 up once to an internal PCM sample; exact airtime estimates include this rounding.
+Shaped transmissions also include the two finite filter tails described below;
+these add a fixed burst duration, without changing any payload-symbol duration.
 The nominal gross bit rate is selected bits per symbol divided by nominal symbol
 duration, before packet and training overhead. Audio conversion does not alter
 these modem settings or rates.
@@ -51,7 +53,8 @@ The settling waveform uses independent circular Gaussian-derived I/Q noise,
 refreshed once per chip, at the payload's mean transmit power.
 Its radius is limited and normalized to keep peaks inside PCM headroom.
 Private payload and prefix use the same update cadence and noise mapping.
-Rectangular pulses have sidelobes; bandwidth is nominal, not an enforced spectral mask. It helps external gain control and muting settle before
+Eligible pattern profiles apply the same pulse shaping continuously across the
+prefix and payload. The prefix helps external gain control and muting settle before
 fast payload symbols arrive, and is not made from the legal payload patterns.
 It supplies no training, header or acquisition condition: pattern evidence
 alone accepts the following symbols even when the prefix is lost or distorted.
@@ -64,7 +67,9 @@ without generating or deriving extra keys. Tone mode uses the same noise
 prefix, refreshing phase and amplitude once per chip;
 it reserves no payload constellation points. The transmission epoch is fixed
 before the prefix, and clock-start hypotheses include its elapsed time.
-Airtime estimates include the prefix without adding to meaningful payload bits.
+Airtime estimates include the prefix and filter tails without adding meaningful
+payload bits. For shaped profiles the first payload position is
+`pattern_pulse_padding_samples(config) + training_sample_count(config)`.
 
 ### Private waveform and remaining signal structure
 
@@ -119,8 +124,65 @@ Automatic integration can exceed the largest named factor through
 and a final partial chip is permitted. Pattern generation uses bounded storage;
 receiver timing coverage and numeric limits still bound usable integration.
 
-Pulse shapes are rectangular. Their sidelobes extend outside nominal bandwidth;
-there is no certified occupied-bandwidth mask. Carrier and nominal bandwidth
+### Pulse shaping
+
+`Config::pulse_shaping` defaults to `true`. Pattern symbols lasting at least
+16 complete nominal chip times use a root-raised-cosine (RRC) pulse with 25%
+rolloff and a finite 16-chip span. Manual patterns shorter than this and all
+tone modes retain rectangular pulses. Setting the flag to `false` restores the
+previous waveform for comparison; both endpoints must match the flag and
+profile. No public acquisition marker or waveform-negotiation field is added.
+
+The chip rate and integration duration are unchanged. For a sample-quantized
+chip rate `R`, the ideal support is `1.25 * R`; at nominal bandwidth 1,200 Hz,
+`R = 600` chips/s and the target is about 750 Hz. Nominal bandwidth continues to
+control chip-rate planning and the reported C/N0 conversion, rather than
+claiming a measured occupied width. Continuous filtering joins the independent
+settling chips and every payload symbol. Eight chip times of zero extension at
+each burst edge emit the complete tails: 26.7 ms of fixed additional airtime
+at 600 chips/s. No extra payload symbols, chip addresses or keystream bytes are
+consumed. A partial final chip retains its original address and duration-weighted
+energy. Constellation observers still report the logical input chips before
+shaping; waveform and spectrum views show the actual shaped samples.
+
+Overlapping pulses can exceed the original chip peak limit. A circular radial
+limiter caps the analytic PCM radius at 0.992 after shaping, preserving rotational
+symmetry without a fixed power backoff. In a reproducible private 65,536-chip
+capture at 600 chips/s, limiting reduced power by 0.083 dB relative to its
+unlimited linear waveform, with 0.109% mean-squared waveform error relative to
+signal energy. Hann-windowed spectra measured approximately 742–746 Hz at
+26 dB below their spectral peak; spectral density beyond carrier ±400 Hz remained more
+than 33 dB below that peak. These are software measurements for that capture,
+not universal bounds or RF compliance measurements. The test suite checks
+actual limited PCM sidelobes, mean power, crest headroom and chip addressing.
+
+Receive templates use each candidate symbol's linear shaped contribution,
+evaluated against the original independent sample/bin observations. Actual
+template energies and Gram terms enter the fit; filtering does not manufacture
+additional independent noise observations or a new source of timing confidence.
+Unknown adjacent-symbol tails and the limiter residual remain model mismatch.
+Pattern evidence alone still controls acquisition, iterative timing refinement,
+continuation and burst boundaries; no prefix, decoded content, CRC or MAC
+supplies clock-lock confidence.
+
+The fast receiver's existing sample bins discard a small amount of shaped
+signal energy. In the equal-C/N0 private +26 dB-Hz comparison, its pattern scores
+were about 5% lower on average than with rectangular pulses. A marginal final
+bit fell below the unchanged acceptance threshold and remained unconfirmed;
+the raw-sample correlator recovered it. Thus unchanged payload rate does not
+imply identical noisy decisions or zero confidence cost. The receiver retains
+its conservative acceptance rules. See the [validation record](validation.md)
+for the tested cases and limits.
+
+Regular chip timing can remain observable through periodic second-order
+statistics even though the chips and radial limiter are circularly symmetric.
+The smoother spectrum reduces distant sidelobes; it does not establish
+indistinguishability from bandpass-filtered white noise or a measured adversary
+observation time. Keyless energy and correlation detectors can still respond
+to the signal. Encryption, HKDF purposes, CTR domains, byte mixing and fresh
+absolute chip positions are unchanged by shaping.
+
+There is no certified occupied-bandwidth mask. Carrier and nominal bandwidth
 must fit inside the internal DSP passband. The 24 kHz GUI preset uses a 96 kHz
 internal clock and a fitting carrier. That clock is not a sound-card requirement.
 A carrier need not complete an integer number of cycles in a chip.

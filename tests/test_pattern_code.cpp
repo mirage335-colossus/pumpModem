@@ -1,4 +1,5 @@
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
@@ -118,8 +119,9 @@ void exact_pcm_and_chunks() {
     c.bandwidth_hz = 1100; c.integration_seconds = .071; // Partial final chip.
     const Bytes bits{0,1,0};
     modem::PatternTransmitter whole(bits, c, 91, 3), chunked(bits, c, 91, 3);
-    check(whole.total_samples() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c),
-          "three bits must contain exactly three payload symbols after hardware settling");
+    check(whole.total_samples() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c)+
+          2*modem::pattern_pulse_padding_samples(c),
+          "three bits must retain exactly three payload symbols plus settling and filter tails");
     const auto count = static_cast<std::size_t>(whole.total_samples());
     std::vector<std::complex<double>> a(count), b(count);
     check(whole.read_analytic(a) == count && whole.finished(), "complete analytic capture must end exactly");
@@ -145,6 +147,37 @@ void exact_pcm_and_chunks() {
     std::vector<float> pcm(count); real.read(pcm);
     for (std::size_t i = 0; i < count; ++i)
         check(std::abs(pcm[i] - a[i].real()) < 1e-7, "PCM must be the real projection of the same analytic waveform");
+    modem::PatternTransmitter mixed(bits,c,91,3);
+    std::size_t observed=0;
+    const auto observer=[&](auto) { ++observed; };
+    std::array<float,17> real_chunk{};
+    std::array<std::complex<double>,31> analytic_chunk{};
+    bool use_real=true;
+    while(!mixed.finished()) {
+        const auto before=static_cast<std::size_t>(mixed.samples_emitted());
+        check(mixed.read({}, {}, observer)==0 && mixed.samples_emitted()==before,
+              "empty reads must not advance the pulse train or emit chip observations");
+        if(use_real) {
+            const auto read=mixed.read(real_chunk,{},observer);
+            for(std::size_t i=0;i<read;++i)
+                check(std::abs(real_chunk[i]-a[before+i].real())<1e-7,"mixed real and analytic reads must share one physical sample cursor");
+        } else {
+            const auto read=mixed.read_analytic(analytic_chunk,{},observer);
+            for(std::size_t i=0;i<read;++i)
+                check(std::abs(analytic_chunk[i]-a[before+i])<1e-11,"real reads must not discard analytic filter state");
+        }
+        mixed.preview_last_analytic(analytic_chunk);
+        const auto end=static_cast<std::size_t>(mixed.samples_emitted());
+        for(std::size_t i=0;i<analytic_chunk.size();++i) {
+            const auto distance=analytic_chunk.size()-i;
+            const auto expected=end>=distance?a[end-distance]:std::complex<double>{};
+            check(std::abs(analytic_chunk[i]-expected)<1e-11,
+                  "repeated previews across prefix, symbol and tail boundaries must reconstruct without changing stream state");
+        }
+        use_real=!use_real;
+    }
+    check(observed==bits.size()*modem::pattern_chips_per_symbol(c),
+          "mixed reads and previews must report each logical payload chip exactly once");
     check(std::abs(real.bit_rate() - c.sample_rate / static_cast<double>(modem::symbol_sample_count(c))) < 1e-12,
           "pattern throughput must count one meaningful bit per symbol");
 }
@@ -174,13 +207,13 @@ void streaming_and_modem_integration() {
               "streaming wrapper preview must retain actual pattern samples");
     const Bytes packed{0xa5};
     modem::StreamingTransmitter packed_tx(packed, c);
-    const auto packed_samples = modem::training_sample_count(c)+8 * modem::symbol_sample_count(c);
+    const auto packed_samples = modem::training_sample_count(c)+8 * modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c);
     check(packed_tx.total_samples() == packed_samples && modem::waveform_sample_count(packed.size(), c) == packed_samples,
           "packed bytes must expand to eight meaningful bits after hardware settling");
     check(modem::preamble(c).empty() && modem::memory_supported(packed.size(), 0, c),
           "pattern modem estimation must accept a zero-length preamble");
     const auto status = modem::modulate_status(bits, c);
-    check(status.size() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c) && modem::detect_status(status, bits, c) > .999999,
+    check(status.size() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c) && modem::detect_status(status, bits, c) > .999999,
           "status helper must use the same exact unframed pattern waveform");
     rejects([&] { (void)modem::demodulate(status, c, {}); },
             "legacy known-training demodulator must reject pattern mode explicitly");
@@ -213,14 +246,14 @@ void tones_and_bounded_state() {
     modem::PatternTransmitter long_tx({0,1,0}, c, 73);
     check(long_code.working_bytes() < 8192 && long_tx.working_bytes() < 16384,
           "multi-hour symbols must not allocate waveform or complete keystream history");
-    check(long_tx.total_samples() == 12ULL * 3600 * c.sample_rate,
+    check(long_tx.total_samples() == 12ULL * 3600 * c.sample_rate+2*modem::pattern_pulse_padding_samples(c),
           "multi-hour symbol durations must remain exact with bounded state");
     c.spreading_factor=16384;
     transfer::Options options;options.modem=c;options.dsp_workspace_bytes=384*1024;
     options.key=Crypto(c.spreading_seed);
     const auto estimate=transfer::estimate_binary(Bytes{0,0,1},options);
     check(estimate.memory_supported && !estimate.batch_memory_supported &&
-          estimate.waveform_samples==12ULL*3600*c.sample_rate,
+          estimate.waveform_samples==12ULL*3600*c.sample_rate+2*modem::pattern_pulse_padding_samples(c),
           "three multi-hour pattern bits require bounded transmitter state, not retained chips or PCM");
     modem::StreamingTransmitter wrapped(modem::RawBits{{0,0,1}},c,options.dsp_workspace_bytes/4);
     check(wrapped.working_bytes()<128*1024,"streaming wrapper memory must remain independent of integration duration");
@@ -274,7 +307,7 @@ void hardware_noise_keystreams() {
     original.read_analytic(a);other.read_analytic(b);bare.read_analytic(payload);
     const auto offset=static_cast<std::size_t>(modem::training_sample_count(c));
     std::complex<double> mean{},quadrature{};double power=0;std::size_t observations=0;
-    for(std::size_t i=0;i<offset;i+=modem::pattern_chip_samples(c)) {
+    for(std::size_t i=2*modem::pattern_pulse_padding_samples(c);i<offset;++i) {
         const auto value=a[i]*std::polar(1.,-2*std::numbers::pi*i*c.carrier_hz/c.sample_rate)/
             std::sqrt(2*modem::nominal_signal_power);
         mean+=value;quadrature+=value*value;power+=std::norm(value);++observations;
@@ -282,10 +315,11 @@ void hardware_noise_keystreams() {
     check(std::abs(mean)/observations<.06 && std::abs(quadrature)/observations<.08 &&
           std::abs(power/observations-1)<.1,
           "hardware noise must fill both quadratures with the payload's mean power, not a binary line");
-    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(offset),a.end(),b.begin()+static_cast<std::ptrdiff_t>(offset)),
-          "hardware Data encryption key must not change the following payload");
+    const auto settled=offset+2*modem::pattern_pulse_padding_samples(c);
+    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(settled),a.end(),b.begin()+static_cast<std::ptrdiff_t>(settled)),
+          "hardware Data encryption key must not change payload beyond the filter overlap");
     const auto rotation=std::polar(1.,2*std::numbers::pi*static_cast<double>(offset)*c.carrier_hz/c.sample_rate);
-    for(std::size_t i=0;i<payload.size();++i)
+    for(std::size_t i=2*modem::pattern_pulse_padding_samples(c);i<payload.size();++i)
         check(std::abs(a[offset+i]-payload[i]*rotation)<1e-8,"settling must not consume or reset payload stream positions");
     transfer::Options options;options.modem=config();
     options.key.emplace(Bytes(32,0x19));
@@ -302,7 +336,7 @@ void hardware_data_byte_encryption() {
     // that encryption changes those bytes by exactly the selected key's Data mask.
     // Positions straddle cache boundaries; neither source has spreading enabled.
     constexpr std::uint64_t epoch=1800000000;
-    auto plain=config();
+    auto plain=config();plain.pulse_shaping=false; // Expose unchanged input chip bytes directly.
     transfer::Options options;options.modem=plain;options.key.emplace(plain.spreading_seed);
     auto encrypted=transfer::seeded_config(options,epoch);encrypted.scramble=false;encrypted.dsss=false;
     const auto mask=options.key->stream(StreamPurpose::Data,epoch,0,513*8,StreamDomain::Preamble);
@@ -398,23 +432,23 @@ void short_private_patterns_preserve_noise_and_addressing() {
             complement[symbol]=static_cast<std::uint8_t>(1-bits[symbol]);
         }
         modem::PatternTransmitter tx(bits,c,epoch,0,false),other_bits(complement,c,epoch,0,false);
-        std::vector<std::complex<double>> samples(static_cast<std::size_t>(tx.total_samples())),other(samples.size());
-        tx.read_analytic(samples);other_bits.read_analytic(other);
+        std::vector<std::complex<double>> samples(static_cast<std::size_t>(tx.total_samples())),other(samples.size()),logical,other_logical;
+        tx.read_analytic(samples,{},[&](auto value){logical.push_back(value);});
+        other_bits.read_analytic(other,{},[&](auto value){other_logical.push_back(value);});
         const auto chip_samples=modem::pattern_chip_samples(c);
         const auto count=symbol_count*chips;
         std::vector<std::complex<double>> values(count),position_mean(chips),position_square(chips);
         std::complex<double> mean{},square{},repetition{};
         double energy=0,power_square=0;
         for(std::size_t chip=0;chip<count;++chip) {
-            const auto sample=chip*chip_samples;
-            const auto value=samples[sample]*std::polar(1.,-2*std::numbers::pi*sample*c.carrier_hz/c.sample_rate)/
-                std::sqrt(2*modem::nominal_signal_power);
+            const auto sample=modem::pattern_pulse_padding_samples(c)+chip*chip_samples;
+            const auto value=logical[chip]/std::sqrt(2*modem::nominal_signal_power);
             values[chip]=value;mean+=value;square+=value*value;
             position_mean[chip%chips]+=value;position_square[chip%chips]+=value*value;
             const auto power=std::norm(value);energy+=power;power_square+=power*power;
             check(std::norm(samples[sample])<1 &&
-                  std::abs(std::norm(samples[sample])-std::norm(other[sample]))<1e-12,
-                  "short private patterns must retain PCM headroom and a payload-independent chip envelope");
+                  std::abs(std::norm(logical[chip])-std::norm(other_logical[chip]))<1e-12,
+                  "short private patterns must retain PCM headroom and a payload-independent input chip envelope");
             if(chip>=chips)repetition+=value*std::conj(values[chip-chips]);
         }
         check(std::abs(mean)/count<.06 && std::abs(square)/energy<.06 && std::abs(repetition)/energy<.06,
@@ -439,6 +473,86 @@ void short_private_patterns_preserve_noise_and_addressing() {
               "short patterns must retain private key and epoch dependence after squaring");
     }
 }
+void shaped_bandwidth_power_and_constellation() {
+    auto c=config();c.scramble=true;c.dsss=true;
+    Bytes bits(64);
+    for(std::size_t i=0;i<bits.size();++i)bits[i]=static_cast<std::uint8_t>((i/3+i/7)%2);
+    modem::PatternTransmitter tx(bits,c,1800000000,0,false);
+    modem::PatternCode code(c,1800000000);
+    const auto padding=modem::pattern_pulse_padding_samples(c);
+    check(padding==80 && tx.total_samples()==bits.size()*code.symbol_samples()+2*padding,
+          "600-chip/s shaping must add only the 26.7ms finite burst tails");
+    auto legacy=c;legacy.pulse_shaping=false;
+    check(tx.bit_rate()==modem::PatternTransmitter(bits,legacy,1800000000,0,false).bit_rate(),
+          "pulse shaping must preserve meaningful payload throughput");
+    std::vector<std::complex<double>> samples(static_cast<std::size_t>(tx.total_samples()));
+    std::size_t observed=0;
+    tx.read_analytic(samples,{},[&](auto value) {
+        const auto symbol=observed/code.chips_per_symbol();
+        check(std::abs(value-std::sqrt(2*modem::nominal_signal_power)*code.value(observed,bits[symbol]))<1e-12,
+              "pulse shaping must preserve the keyed logical chip constellation and addresses");
+        ++observed;
+    });
+    check(observed==bits.size()*code.chips_per_symbol(),"filter tails must not create extra observed chips");
+    double energy=0;std::complex<double> mean{},square{};
+    for(std::size_t i=0;i<samples.size();++i) {
+        check(std::abs(samples[i])<=modem::pattern_pcm_radius_limit+1e-10,
+              "shaped PCM must remain bounded without a fixed power backoff");
+        samples[i]*=std::polar(1.,-2*std::numbers::pi*static_cast<double>(i)*c.carrier_hz/c.sample_rate);
+        energy+=std::norm(samples[i]);mean+=samples[i];square+=samples[i]*samples[i];
+    }
+    check(std::abs(energy/(samples.size()-2*padding)/(2*modem::nominal_signal_power)-1)<.06,
+          "shaped waveform must retain mean transmitted power within the sample uncertainty");
+    check(std::abs(mean)/samples.size()<.035 && std::abs(square)/energy<.06,
+          "shaped private noise must not introduce a coherent carrier or squared carrier");
+    // Independent windowed energy checks on the transmitted samples, including
+    // the crest limiter, rather than merely checking ideal filter coefficients.
+    const auto spectral_power=[&](double frequency) {
+        constexpr std::size_t window=2048;
+        double result=0;
+        const auto step=std::polar(1.,-2*std::numbers::pi*frequency/c.sample_rate);
+        for(std::size_t first=0;first+window<=samples.size();first+=window/2) {
+            std::complex<double> sum{},oscillator{1,0};
+            for(std::size_t i=0;i<window;++i) {
+                const auto weight=.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/(window-1));
+                sum+=weight*samples[first+i]*oscillator;oscillator*=step;
+            }
+            result+=std::norm(sum);
+        }
+        return result;
+    };
+    double inband=0;
+    for(double frequency:{-200.,-100.,0.,100.,200.})inband+=spectral_power(frequency)/5;
+    for(double frequency:{-1000.,-700.,-550.,-450.,-400.,400.,450.,550.,700.,1000.})
+        check(spectral_power(frequency)<inband*.0025,
+              "actual shaped private PCM must suppress sidelobes beyond the roughly 750Hz band by 26dB");
+}
+void shaped_coordinate_and_duration_bounds() {
+    auto c=config();modem::PatternCode code(c);
+    for(const auto invalid:{std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity()})
+        rejects([&]{code.shaped_value(0,0,invalid);},"nonfinite shaped timing coordinates must be rejected");
+    rejects([&]{code.shaped_value(0,2,0);},"shaped templates must reject nonbinary bits");
+    rejects([&]{code.shaped_value(std::numeric_limits<std::uint64_t>::max(),0,0);},
+            "filter lookahead must reject wrapping an absolute chip address");
+    const auto pad=static_cast<double>(modem::pattern_pulse_padding_samples(c));
+    check(code.shaped_value(0,0,-pad-1)==std::complex<double>{} &&
+          code.shaped_value(0,0,static_cast<double>(code.symbol_samples())+pad+1)==std::complex<double>{},
+          "an isolated symbol must vanish outside its finite pulse support");
+    rejects([&]{modem::pattern_pulse_sum(0,10,0,[](auto){return std::complex<double>{};});},
+            "pulse summation must reject a zero chip duration before integer division");
+    const auto near_max=std::numeric_limits<std::uint64_t>::max()-2047;
+    (void)modem::pattern_pulse_sum(static_cast<double>(near_max)-4096,near_max,128,[&](auto chip) {
+        check(chip<near_max/128+(near_max%128!=0),"rounded long-sequence coordinates must not access a chip past the sequence");
+        return std::complex<double>{};
+    });
+    c.sample_rate=64;c.bandwidth_hz=1;c.carrier_hz=16;
+    c.integration_seconds=std::nextafter(std::ldexp(1.,58),0.);
+    rejects([&]{modem::PatternTransmitter overflow({0},c,0,0,false);},
+            "finite filter tails must not wrap a previously valid 64-bit payload duration");
+    c.pulse_shaping=false;
+    modem::PatternTransmitter valid({0},c,0,0,false);
+    check(valid.total_samples()==near_max,"the duration overflow fixture must fit before adding filter tails");
+}
 }
 int main() {
     try {
@@ -448,6 +562,8 @@ int main() {
         hardware_data_byte_encryption();
         private_waveform_has_no_fixed_squared_carrier();
         short_private_patterns_preserve_noise_and_addressing();
+        shaped_bandwidth_power_and_constellation();
+        shaped_coordinate_and_duration_bounds();
         std::cout << "Pattern code and binary waveform tests passed\n";
         return 0;
     } catch (const std::exception& error) {

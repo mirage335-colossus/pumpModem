@@ -38,7 +38,7 @@ class CommandTests(PumpCase):
             with wave.open(str(path), "rb") as wav:
                 symbol_samples = round(plan["symbol_seconds"] * wav.getframerate())
                 hardware_symbols = (5 * wav.getframerate() + symbol_samples // 2) // symbol_samples
-                self.assertEqual(wav.getnframes(), (hardware_symbols + 3) * symbol_samples)
+                self.assertEqual(wav.getnframes(), (hardware_symbols + 3) * symbol_samples + 160)
             for comparison, matches in (("001", True), ("110", False)):
                 received = json.loads(self.run_pump("status-rx", "--bits", comparison,
                     "--time", EPOCH, "--search-seconds", "0", "--input", path).stdout)
@@ -276,7 +276,7 @@ class CommandTests(PumpCase):
         self.assertFalse(slow["batch_memory_supported"])
         self.assertTrue(slow["repeatable_allowed"])
         self.assertGreater(slow["symbol_seconds"], 5)
-        self.assertEqual(slow["total_seconds"], slow["packet_seconds"])
+        self.assertAlmostEqual(slow["total_seconds"] - slow["packet_seconds"], 16 / 1200)
         self.assertEqual(slow["constellation_bits"], 1)
 
     def test_content_capacity_excludes_packet_parity(self):
@@ -299,7 +299,7 @@ class CommandTests(PumpCase):
         self.assertGreater(slow["total_seconds"], normal["total_seconds"])
         settling_symbols = math.floor(5 / normal["symbol_seconds"] + .5)
         self.assertAlmostEqual(normal["total_seconds"] - normal["content_seconds"],
-                               settling_symbols * normal["symbol_seconds"])
+                               settling_symbols * normal["symbol_seconds"] + 16 / 600)
         self.assertEqual(normal["constellation_bits"], 1)
         self.assertGreaterEqual(normal["spreading"], 64)
         self.assertFalse(normal["repeatable_allowed"])
@@ -411,7 +411,8 @@ class CommandTests(PumpCase):
             with wave.open(str(status), "rb") as reader:
                 params = reader.getparams()
                 frames = reader.readframes(reader.getnframes())
-                self.assertEqual(params.nframes, (39 + 3) * 1024, "status contains only rounded hardware settling and exact one-bit symbols")
+                self.assertEqual(params.nframes, (39 + 3) * 1024 + 256,
+                                 "status contains exact payload symbols, rounded settling and finite pulse tails")
             result = json.loads(self.run_pump("status-rx", "--bits", "010", "--input", status, *AUDIO).stdout)
             self.assertFalse(result["authenticated"])
             self.assertEqual(result["known_bits"], "010")

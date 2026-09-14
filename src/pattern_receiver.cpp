@@ -1,5 +1,6 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include <algorithm>
 #include <array>
@@ -88,7 +89,7 @@ struct PatternReceiver::Impl {
     std::uint64_t sample=0,bins=0,next_start=0;
     Complex sum{},oscillator{1,0},rotation{},previous_chip{};
     double noise_condition=1;
-    bool real_rank=false,sample_fit=false;
+    bool real_rank=false,sample_fit=false,shaped=false;
     std::size_t partial=0;
     bool finished=false,oscillator_valid=true;
     std::uint64_t trials=0;
@@ -114,6 +115,7 @@ struct PatternReceiver::Impl {
     Impl(Config c,std::size_t bytes,PatternSearch options)
         :config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
+        shaped=pattern_pulse_enabled(c);
         if(!c.pattern_symbols)throw Error("pattern receiver requires binary pattern transport");
         if(!std::isfinite(search.false_alarm_probability) || search.false_alarm_probability<=0 || search.false_alarm_probability>=1 ||
            !std::isfinite(search.retain_score) || search.retain_score<0 ||
@@ -265,7 +267,14 @@ struct PatternReceiver::Impl {
         if(index>(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol())throw Error("pattern stream coordinate overflow");
         const auto chip=index*code.chips_per_symbol()+local;
         const auto fraction=static_cast<double>(chip_position-local);
-        return code.value(chip,bit,fraction)*std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
+        // The raw observations remain disjoint PCM bins. Match the shaped
+        // symbol contribution, without adding a receive filter whose correlated
+        // output would incorrectly count as independent noise observations.
+        // Adjacent unknown symbols are not used as timing or bit evidence.
+        const auto value=shaped?
+            code.shaped_value(index*code.chips_per_symbol(),bit,static_cast<double>(sample_position)):
+            code.value(chip,bit,fraction);
+        return value*std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
     }
     Complex at(std::uint64_t i)const {
         if(i>=bins || bins-i>ring.size())throw Error("pattern observation expired before refinement");

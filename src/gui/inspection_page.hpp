@@ -119,7 +119,7 @@ inline void codeword(Node& parent,const std::string& title,std::size_t data,std:
 }
 inline void pattern_preview(Node& parent,const inspection::PatternSpace& model,Page& page,std::size_t requested_first) {
     heading(parent,model.bounded_pattern_preview?"Pattern / scrambler symbol preview":"Full pattern / scrambler symbol space");
-    paragraph(parent,model.bounded_pattern_preview?"Each row shows an independently distinguishable binary pattern at chip centers. I is the upper half of each cell; Q is the lower half. Long symbols show at most 16,384 chips; distances below cover this illustrated prefix only.":"Each row is one complete legal symbol: its phase/amplitude coefficient times the selected chip sequence. I is the upper half of each cell; Q is the lower half.");
+    paragraph(parent,model.bounded_pattern_preview?"Each row shows the input chips of a binary pattern before pulse shaping. I is the upper half of each cell; Q is the lower half. Long symbols show at most 16,384 chips; distances below cover this illustrated prefix only.":"Each row is one complete legal symbol: its phase/amplitude coefficient times the selected chip sequence. I is the upper half of each cell; Q is the lower half.");
     paragraph(parent,model.representative_keyed?"Keyed pattern structure: public illustrative I/Q noise; the actual amplitude and phase sequence depends on the key and epoch.":model.bounded_pattern_preview?"Configured public pattern; the bounded prefix is inspectable below.":"Configured public I/Q pattern; the full code period is inspectable below.");
     const auto columns=static_cast<std::size_t>(std::clamp(static_cast<int>((parent.width-110)/14),8,64));
     const auto total=model.code.size();const auto last=total?((total-1)/columns)*columns:0;
@@ -144,10 +144,10 @@ inline void pattern_preview(Node& parent,const inspection::PatternSpace& model,P
     grid.children.push_back(std::move(names_column));
     grid.children.push_back(bitmap("pattern/chips",plots::PlotSnapshot::pattern_chips(model,first,shown),cell*static_cast<float>(shown),18*static_cast<float>(model.coefficients.size())));
     parent.children.push_back(std::move(grid));
-    paragraph(parent,"Light: positive. Dark: negative. Middle gray: zero. Distance from middle gray shows I/Q amplitude on one shared scale. Hatched chips are outside this symbol's actual duration. Rows show baseband I/Q before carrier modulation.");
+    paragraph(parent,"Light: positive. Dark: negative. Middle gray: zero. Distance from middle gray shows I/Q amplitude on one shared scale. Hatched chips are outside this symbol's actual duration. Rows show baseband input I/Q before pulse shaping and carrier modulation.");
 }
 inline void pattern_details(Node& parent,const inspection::PatternSpace& model,const Page& page) {
-    paragraph(parent,model.bounded_pattern_preview?"Illustrated coverage: "+std::to_string(model.symbol_samples)+" of "+std::to_string(model.full_symbol_samples)+" samples; "+number(model.symbol_seconds)+" s. Pattern-chip distances use actual sample weights; continuous tone distances use chip-center approximations. This is a design preview, not received confidence.":"Symbol coverage: "+std::to_string(model.symbol_samples)+" samples, "+number(model.symbol_seconds)+" s; "+std::to_string(model.complete_periods)+" complete code periods + "+std::to_string(model.tail_samples)+" samples. Distances include every repeat and partial chip.");
+    paragraph(parent,model.bounded_pattern_preview?"Illustrated coverage: "+std::to_string(model.symbol_samples)+" of "+std::to_string(model.full_symbol_samples)+" samples; "+number(model.symbol_seconds)+" s. Input-chip distances use duration weights; continuous tone distances use chip-center approximations. This design preview does not measure shaped-waveform distance or acquisition confidence.":"Symbol coverage: "+std::to_string(model.symbol_samples)+" samples, "+number(model.symbol_seconds)+" s; "+std::to_string(model.complete_periods)+" complete code periods + "+std::to_string(model.tail_samples)+" samples. Distances include every repeat and partial chip.");
     heading(parent,model.bounded_pattern_preview?"Illustrated pattern distance map":"Complete-symbol distance map");
     const auto symbols=model.coefficients.size(),count=symbols+(model.unused_pattern?1U:0U);
     const float map_cell=std::max(2.0f,std::min(24.0f,std::min(280.0f,parent.width/3)/static_cast<float>(std::max<std::size_t>(1,count))));
@@ -181,7 +181,7 @@ inline void pattern_details(Node& parent,const inspection::PatternSpace& model,c
     add_evidence("Isotropic noise (mean)",std::sqrt(noise_fraction),1-noise_fraction);
     const auto evidence_height=29*static_cast<float>(left.children.size());evidence.children.push_back(std::move(left));
     evidence.children.push_back(bitmap("pattern/evidence",plots::PlotSnapshot::pattern_evidence(model),bar_width,evidence_height));evidence.children.push_back(std::move(right));parent.children.push_back(std::move(evidence));
-    paragraph(parent,"White bar: energy matching the code. Gray: energy outside that code. For noise, rho is RMS over independent whitened chip coordinates; individual noise realizations vary.");
+    paragraph(parent,"White bar: input-chip energy matching the code. Gray: input-chip energy outside that code. Noise bars assume ideal independent chip coordinates; they do not measure received PCM confidence.");
     if(model.unused_pattern) {
         paragraph(parent,"Unused example: "+model.unused_pattern->name+". Full-period signs in the same chip window:");
         const auto first=page.first,shown=std::min(page.page_size,model.code.size()-first);
@@ -190,7 +190,7 @@ inline void pattern_details(Node& parent,const inspection::PatternSpace& model,c
         for(std::size_t c=0;c<shown;++c)signs.children.push_back(text(model.unused_pattern->code[first+c]>0?"+":"-",cell,11,model.chip_weights[first+c]?Tone::text:Tone::muted));
         parent.children.push_back(std::move(signs));
     }
-    paragraph(parent,model.timing_selective?"A wrong chip alignment leaves off-pattern energy. Pattern evidence can distinguish timing even when individual chips remain noisy.":"This code has no one-chip timing discrimination after fitting phase and amplitude. Tone / constant or one-chip patterns retain coherent integration gain, without distinct sign-based timing evidence.");
+    paragraph(parent,model.timing_selective?"The illustrated input-chip vector differs under a one-chip timing shift. Actual timing decisions come solely from received pattern evidence; this preview does not measure timing confidence.":"This input-chip preview has no one-chip timing discrimination after fitting phase and amplitude. Tone / constant or one-chip patterns retain modeled coherent integration gain.");
     paragraph(parent,"Repeated short codes can have other timing aliases. This diagram does not imply a guaranteed lock threshold or additional payload bits. The receiver searches a bounded set of timing hypotheses.");
 }
 inline Page build(const Inspection* model,bool flow,float width,std::size_t first=0,std::string pending="Updating modem estimate...") {

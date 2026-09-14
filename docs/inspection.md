@@ -17,11 +17,13 @@ Legacy APSK alphabets and training have been removed. Active, disabled and unava
 different labels. Configured symbols here are distinct from Console measurements.
 
 The static **pattern/scrambler constellation** shows the binary zero and one
-codeword rows at chip centers. Their internal transitions distinguish them;
+codeword input-chip rows before pulse shaping. Their internal transitions distinguish them;
 they are not merely opposite absolute phases of one codeword. Long symbols show
 a paged prefix of at most 16,384 chips and state its coverage. Pattern distances
-use actual sample-duration weights over that illustrated prefix, rather than
-claiming the distance of an unseen multi-hour symbol. Tone rows use complex
+use input-chip duration weights over that illustrated prefix. They exclude
+filter overlap, burst tails and crest limiting, so they are not distances
+between actual shaped waveforms or measurements of acquisition confidence.
+The preview also does not claim the distance of an unseen multi-hour symbol. Tone rows use complex
 chip-center samples and approximate continuous-tone distances. Timing-shift
 comparisons fit common complex amplitude and phase. Keyed rows use public
 illustration seeds and never expose the actual private epoch stream. There is no separate APSK view. See
@@ -32,11 +34,12 @@ signal time, independent of GUI polling and without VSYNC or display-backend
 timing. Its sample and point capacities grow with the selected signal rate;
 the waveform and spectrum continue to use their latest 2,048 PCM samples.
 
-During audio transmission, **Transmitted constellation** retains actual emitted
-payload chip I/Q values, with a minimum history capacity of 2,048 points and
+During audio transmission, **Transmitted constellation** retains the actual
+logical payload chip I/Q values before pulse shaping, with a minimum history capacity of 2,048 points and
 enough room for every chip overlapping a nominal frame. Polling faster than the chip rate does
 not erase earlier points or substitute measured samples between chips. Settling
-audio uses measured outgoing I/Q until the first payload chip is emitted.
+audio uses measured outgoing I/Q until the first payload chip position is reached.
+Waveform and spectrum views continue to show actual shaped outgoing PCM.
 Simulation and reception continue to show measured receiver input I/Q.
 Public pattern rows repeat each symbol, so short public templates can still
 produce a sparse plot; private chips advance through the keystream. One bit per

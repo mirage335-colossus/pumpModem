@@ -2,6 +2,7 @@
 #include "datapump/compression.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <iostream>
 #include <cmath>
 #include <array>
@@ -28,8 +29,8 @@ void exact_short_text() {
             PacketLayout layout;
             const auto estimate=transfer::estimate(message,value,&layout);
             const auto content_samples=3*modem::symbol_sample_count(value.modem);
-            const auto hardware_samples=modem::training_sample_count(value.modem);
-            check(estimate.waveform_samples==hardware_samples+content_samples,"short text adds only the rounded hardware prefix to its exact three-bit payload");
+            const auto hardware_samples=modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem);
+            check(estimate.waveform_samples==hardware_samples+content_samples,"short text adds hardware settling and pulse tails to its exact three-bit payload");
             check(std::abs(estimate.content_seconds-static_cast<double>(content_samples)/value.modem.sample_rate)<1e-12 &&
                   std::abs(estimate.total_seconds-estimate.content_seconds-static_cast<double>(hardware_samples)/value.modem.sample_rate)<1e-12,
                   "hardware settling airtime cannot be charged as meaningful content");
@@ -54,7 +55,7 @@ void raw_bits() {
         const auto received=transfer::receive(pcm,value);
         check(received.raw_bits==bits,"all eight three-bit messages decode without supplied bit count");
         if(word==1) {
-            const auto payload_start=137+modem::training_sample_count(value.modem);
+            const auto payload_start=137+modem::training_sample_count(value.modem)+modem::pattern_pulse_padding_samples(value.modem);
             const auto without_prefix=transfer::receive(std::span<const float>(pcm).subspan(payload_start),value);
             check(without_prefix.raw_bits==bits,"a receiver that misses all hardware settling still acquires the exact payload");
         }
@@ -91,7 +92,7 @@ void packet_downstream() {
     value.content_limit=message.data.size();
     check(transfer::estimate(message,value).memory_supported,"encoded packet overhead uses its own workspace at the content limit");
     auto source=transfer::message_transmitter(message,value);
-    check(source->total_samples()==modem::training_sample_count(value.modem)+bits.size()*modem::symbol_sample_count(value.modem),"packet bit count remains exact at the content limit with separate hardware settling");
+    check(source->total_samples()==modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem)+bits.size()*modem::symbol_sample_count(value.modem),"packet bit count remains exact at the content limit with separate hardware settling and pulse tails");
     message.repeatable=true;value.repeat_policy.minimum_payload_bytes=0;value.repeat_policy.maximum_seconds=.001;
     bool rejected=false;
     try{(void)transfer::message_transmitter(message,value);}catch(const Error&){rejected=true;}
@@ -108,9 +109,10 @@ void public_late_symbol_interpretation() {
 void long_symbol_estimate() {
     auto value=options();value.modem.integration_seconds=3600;
     const auto estimate=transfer::estimate_binary(Bytes{0,0,1},value);
-    check(modem::training_sample_count(value.modem)==0 && estimate.total_seconds==10800 &&
-          estimate.content_seconds==estimate.total_seconds && estimate.memory_supported,
-          "three hour-long symbols have no hardware prefix or retained waveform requirement");
+    check(modem::training_sample_count(value.modem)==0 && estimate.content_seconds==10800 &&
+          std::abs(estimate.total_seconds-estimate.content_seconds-
+              2.*static_cast<double>(modem::pattern_pulse_padding_samples(value.modem))/value.modem.sample_rate)<1e-9 && estimate.memory_supported,
+          "three hour-long symbols add only bounded pulse tails without a retained waveform");
 }
 void private_workspace_estimate() {
     for(const bool dsss:{false,true})for(const bool settling:{false,true}) {
@@ -174,8 +176,9 @@ void high_snr_short_patterns() {
         const auto estimate=transfer::estimate(message,value);
         check(bits==Bytes({0,0,1}),"the fast profile must preserve the exact dictionary pattern");
         check(estimate.waveform_samples==modem::training_sample_count(value.modem)+
+              2*modem::pattern_pulse_padding_samples(value.modem)+
               bits.size()*modem::symbol_sample_count(value.modem),
-              "fast short text must retain exact bits and independent hardware settling airtime");
+              "fast short text must retain exact bits with settling and pulse tails");
         auto channel=high_snr_channel(value);channel.seed=keyed?13:7;
         const auto received=transfer::simulate(message,value,channel);
         check(received.raw_bits==bits && received.packet.message.data==message.data,

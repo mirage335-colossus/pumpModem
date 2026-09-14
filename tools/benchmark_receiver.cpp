@@ -1,6 +1,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -49,7 +50,8 @@ int main(int argc, char** argv) {
             const auto epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(options.timestamp) + offset);
             modem::PatternSearch search;
             search.start_offset_seconds=static_cast<double>(offset)+
-                static_cast<double>(modem::training_sample_count(options.modem))/options.modem.sample_rate;
+                (static_cast<double>(modem::training_sample_count(options.modem))+
+                 static_cast<double>(modem::pattern_pulse_padding_samples(options.modem)))/options.modem.sample_rate;
             search.start_uncertainty_seconds=static_cast<double>(radius)+1;
             bank.push_back(std::make_unique<modem::StreamingReceiver>(
                 transfer::seeded_config(options,epoch),8*1024*1024,search));

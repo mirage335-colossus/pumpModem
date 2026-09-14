@@ -1,5 +1,6 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -94,9 +95,10 @@ void frame_wide_transmit_constellation() {
         (config.sample_rate%modem::StreamingTransmitter::constellation_frame_rate!=0);
     const auto chip=modem::pattern_chip_samples(config);
     const auto capacity=modem::StreamingTransmitter::constellation_history_capacity(config);
-    const auto endpoint=4*frame+chip/2;
-    const auto total_chips=endpoint/chip+(endpoint%chip!=0);
-    const auto first_frame_chip=(endpoint-frame)/chip;
+    const auto padding=modem::pattern_pulse_padding_samples(config);
+    const auto endpoint=padding+4*frame+chip/2;
+    const auto total_chips=(endpoint-padding)/chip+((endpoint-padding)%chip!=0);
+    const auto first_frame_chip=(endpoint-padding-frame)/chip;
     if(total_chips-first_frame_chip<=modem::StreamingTransmitter::constellation_history_limit)
         throw std::runtime_error("wideband fixture must exceed the old chip history");
     modem::StreamingTransmitter fragmented(modem::RawBits{Bytes{0,1}},config),whole(modem::RawBits{Bytes{0,1}},config);
@@ -159,11 +161,12 @@ int main() {
         modem::Config config;config.memory_limit=1024; // Batch PCM ceiling does not limit explicit streaming DSP.
         const Bytes bits{0,0,1,1,0,1,0,1,1};
         modem::StreamingTransmitter source(modem::RawBits{bits},config);
-        if(source.total_samples()!=modem::training_sample_count(config)+bits.size()*modem::symbol_sample_count(config))
-            throw std::runtime_error("raw bitstream was padded after encryption");
+        if(source.total_samples()!=modem::training_sample_count(config)+2*modem::pattern_pulse_padding_samples(config)+
+            bits.size()*modem::symbol_sample_count(config))
+            throw std::runtime_error("raw waveform length differs from exact bits, settling and pulse tails");
         bool rejected=false;try{source.next_symbol();}catch(const Error&){rejected=true;}
         if(!rejected)throw std::runtime_error("pattern transmitter exposed symbol oracle");
-        std::vector<float> settling(modem::training_sample_count(config));source.read(settling);
+        std::vector<float> settling(modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config));source.read(settling);
         modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
         modem::StreamingReceiver receiver(config,8*1024*1024,search);
         std::array<float,317> samples{};Bytes received;

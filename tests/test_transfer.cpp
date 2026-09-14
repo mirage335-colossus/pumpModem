@@ -1,6 +1,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -101,7 +102,7 @@ void test_exact_raw_bits_and_masking() {
         auto value=options(encrypted);value.modem.dsss=encrypted;
         const auto estimate=transfer::estimate_binary(bits,value);
         const auto payload=bits.size()*modem::symbol_sample_count(value.modem);
-        const auto total=payload+modem::training_sample_count(value.modem);
+        const auto total=payload+modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem);
         check(estimate.waveform_samples==total && estimate.packet_bytes==2,"raw exact-bit estimate added padding");
         check(estimate.packet_seconds==static_cast<double>(payload)/value.modem.sample_rate,"payload estimate includes hardware settling");
         auto masked=bits;transfer::xor_binary_bits(masked,value);auto encrypted_bits=masked;
@@ -127,7 +128,10 @@ void test_exact_raw_bits_and_masking() {
     Bytes bit{0};rejects([&]{transfer::xor_binary_bits(bit,options(true),std::numeric_limits<std::size_t>::max());},"raw bit offset overflow accepted");
     value=options();value.modem.integration_seconds=3600;value.modem.memory_limit=1024;
     const auto slow=transfer::estimate_binary(Bytes{0,0,1},value);
-    check(slow.memory_supported && !slow.batch_memory_supported && slow.total_seconds==10800,"hour-long exact bits are not bounded-memory streamable");
+    check(slow.memory_supported && !slow.batch_memory_supported && slow.content_seconds==10800 &&
+          std::abs(slow.total_seconds-slow.content_seconds-
+              2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate)<1e-9,
+          "hour-long exact bits are not bounded-memory streamable with pulse tails");
 }
 void test_protected_pattern_pipeline() {
     auto value=options(true);value.modem.dsss=true;
@@ -140,7 +144,7 @@ void test_protected_pattern_pipeline() {
     check(clear!=bits,"complete framed wire was not encrypted");
     const auto wave=transfer::transmit(sent,value);
     check(wave==modem::modulate_status(bits,config),"transmission differs from exact encrypted pattern bitstream");
-    check(wave.size()==modem::training_sample_count(config)+bits.size()*modem::symbol_sample_count(config),"framed transmission added post-encryption padding");
+    check(wave.size()==modem::training_sample_count(config)+2*modem::pattern_pulse_padding_samples(config)+bits.size()*modem::symbol_sample_count(config),"framed waveform differs from exact encrypted bits and physical overhead");
     const auto estimate=transfer::estimate(sent,value);
     check(estimate.waveform_samples==wave.size(),"airtime estimate differs from actual encrypted waveform");
     modem::PatternBurst burst;burst.bits=bits;burst.complete=true;burst.score=100;

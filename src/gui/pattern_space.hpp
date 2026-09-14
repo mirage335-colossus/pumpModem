@@ -21,9 +21,10 @@ struct PatternEvidence {
     double squared_distance = 0;
 };
 struct PatternSpace {
-    // A bounded prefix of each independent bit pattern, never received sample
-    // history. Code signs provide row labels; complex codewords carry the
-    // actual phase and amplitude. Coefficients retain the display row count.
+    // A bounded prefix of each independent input-chip pattern before pulse
+    // shaping, never transmitted PCM or received sample history. Code signs
+    // provide row labels; complex codewords carry the logical chip phase and
+    // amplitude. Coefficients retain the display row count.
     std::vector<int> code;
     std::vector<std::complex<double>> coefficients;
     // Pattern transport has independent codeword rows. Only a bounded prefix
@@ -51,9 +52,11 @@ struct PatternSpace {
         return codewords.empty()?coefficients.at(symbol)*static_cast<double>(code.at(chip)):codewords.at(symbol).at(chip);
     }
 
-    // Weighted complex distance over the illustrated prefix. Private patterns
-    // retain their actual varying chip amplitudes; continuous tones use their
-    // chip-center preview. Synthetic display fixtures may use scalar rows.
+    // Weighted complex distance over the illustrated input-chip prefix before
+    // pulse shaping. This excludes filter overlap, tails and crest limiting;
+    // it is not a shaped-waveform distance or acquisition confidence. Private
+    // patterns retain their varying chip amplitudes; continuous tones use
+    // their chip-center preview. Synthetic fixtures may use scalar rows.
     double squared_distance(std::size_t a, std::size_t b) const {
         if (a >= coefficients.size() || b >= coefficients.size()) throw Error("pattern symbol index is out of range");
         double result = 0;
@@ -63,8 +66,8 @@ struct PatternSpace {
         return result;
     }
     // Conditional coherent AWGN distance in quadrature-noise units. This
-    // assumes the matched timing/carrier reference; it is not a BER estimate
-    // or a promise that a finite real-PCM acquisition search has locked.
+    // assumes ideal matched chip coordinates; it does not model the emitted
+    // shaped PCM and is not a BER estimate or an acquisition-lock measurement.
     double noise_squared_distance(std::size_t a, std::size_t b) const {
         const auto distance = squared_distance(a, b);
         if (distance == 0) return 0;

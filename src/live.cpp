@@ -3,6 +3,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "signal_view.hpp"
 #include <algorithm>
 #include <chrono>
@@ -487,7 +488,8 @@ struct Session::Impl {
                 // clock-error window still describes clock uncertainty; the
                 // older transmit epochs below cover the physical prefix.
                 const auto settling=static_cast<unsigned>(std::ceil(
-                    static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate));
+                    (static_cast<double>(modem::training_sample_count(profile))+
+                     static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate));
                 for(unsigned age=value.transfer.search_seconds+1;age<=value.transfer.search_seconds+settling;++age)
                     if(center>=age)epochs.push_back(center-age);
             }
@@ -497,7 +499,8 @@ struct Session::Impl {
                     const auto& c=receiver.options.modem;
                     return receiver.key_tag == tag && (tag.empty() || receiver.epoch == epoch) &&
                         c.spreading_factor==profile.spreading_factor && c.integration_seconds==profile.integration_seconds &&
-                        c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode;
+                        c.scramble==profile.scramble && c.spreading_mode==profile.spreading_mode &&
+                        c.pulse_shaping==profile.pulse_shaping;
                 });
                 if (existing != bank.receivers.end()) continue;
                 const auto capacity = bank_capacity(value);
@@ -514,7 +517,8 @@ struct Session::Impl {
                     modem::PatternSearch search;
                     search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
                     search.start_offset_seconds=static_cast<double>(epoch)-(value.transfer.timestamp?static_cast<double>(value.transfer.timestamp):now)+
-                        static_cast<double>(modem::training_sample_count(config))/config.sample_rate;
+                        (static_cast<double>(modem::training_sample_count(config))+
+                         static_cast<double>(modem::pattern_pulse_padding_samples(config)))/config.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
                     receiver.modem = std::make_unique<modem::StreamingReceiver>(config,
                         std::min(value.dsp_workspace_bytes / 2, capacity - bank.working_bytes - control_margin),search);
@@ -542,7 +546,8 @@ struct Session::Impl {
         if (std::floor(now)==std::floor(bank.created_at)) return;
         const auto oldest=now-value.transfer.search_seconds-1;
         std::erase_if(bank.receivers,[&](const auto& receiver){
-            const auto keep=static_cast<double>(modem::training_sample_count(receiver.options.modem))/receiver.options.modem.sample_rate+
+            const auto keep=(static_cast<double>(modem::training_sample_count(receiver.options.modem))+
+                static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate+
                 2*modem::symbol_seconds(receiver.options.modem);
             const auto candidate=receiver.modem->provisional_pattern();
             if(!candidate.bits.empty() && !candidate.complete)return false;
@@ -678,7 +683,8 @@ struct Session::Impl {
                     bank.limited=true;
                     modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
                     search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch()+
-                        static_cast<double>(modem::training_sample_count(receiver.options.modem))/receiver.options.modem.sample_rate;
+                        (static_cast<double>(modem::training_sample_count(receiver.options.modem))+
+                         static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
                     const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
                     if(other>capacity || overhead>capacity-other)throw;

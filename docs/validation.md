@@ -4,6 +4,73 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Pulse shaping at unchanged payload rate — 14 September 2026
+
+Pattern profiles with at least 16 complete chip times now apply a 25% RRC
+pulse spanning 16 chips. The nominal 1,200 Hz profile retains its 600 chips/s
+and original symbol durations; complete filter tails add 160 samples at 6 kHz
+(26.7 ms) per burst. Shorter manual patterns and tone modes retain their
+previous pulses. Both peers must use matching pulse-shaping settings.
+
+A private 65,536-chip capture measured 742–746 Hz at 26 dB below the spectral
+peak using Hann windows of 8,192–32,768 samples. Radial limiting reduced power
+by 0.083 dB relative to the unlimited linear waveform, with 0.109% relative
+mean-squared error. A capture including protected settling measured 744.9 Hz
+with an 8,192-sample window; prefix-only and payload-only widths were 741.9 Hz
+and 745.6 Hz. These finite software measurements do not certify an RF mask or
+an adversary's detection time. Regular chip timing and burst edges remain
+observable features. See [pulse shaping](modem.md#pulse-shaping).
+
+Frozen pre-change Data ciphertext and fourteen private complex chip values
+still match. Toggling pulse shaping also preserves the complete encrypted wire
+bits for a fixed message ID. AES/HKDF, purpose keys, counter domains, XOR mixing,
+bit alternatives and chip addresses are unchanged. The filter adds no chips or
+public acquisition marker. Both receive paths fit shaped candidate patterns
+against the original sample/bin observations, retaining their confidence
+thresholds and timing-search rules. An independent raw-sample Gram calculation
+checks both bit alternatives, including partial chips and rate error; unknown
+neighbor-symbol tails and limiter distortion remain residual error.
+
+Paired deterministic AWGN tests normalize both waveforms to the same received
+C/N0 and use unchanged acceptance thresholds. They recover all 86 payload bits
+per waveform across +26, +20, +6 and -6 dB-Hz scenarios, including fractional
+sample origins and +/-5,000 ppm clock errors. Aggregate shaped/rectangular
+evidence ratios are respectively 1.003 (exact timing, +26), 1.101 (+26,
++5,000 ppm), 1.122 (+20, -5,000 ppm), 1.238 (+6, 20-second symbols), and 1.088
+(-6, 320-second symbols). Fractional timing and linear channel interpolation
+can favor the smoother waveform. These fixtures guard against a substantial
+confidence regression; they do not establish equal field error rates or
+false-alarm calibration in correlated HF noise.
+
+The fast FFT receiver's disjoint sample bins introduce a small additional
+loss. An eight-seed +26 dB-Hz private comparison found an aggregate shaped/
+rectangular score ratio of 0.949875 over all 48 payload symbols, including
+unconfirmed candidates. In one marginal final symbol, the shaped score was 37.680 against an
+unchanged 37.803 acceptance threshold, versus 40.091 for rectangular pulses;
+the shaped result correctly left that last bit unconfirmed. The raw-sample
+correlator recovered both complete bursts in that case, with aggregate scores
+within 0.3%. Exact bin-averaged templates offered no consistent improvement
+over the existing midpoint templates, so the implementation keeps their
+bounded cost. All emitted bits were correct, with complete bursts in seven of
+eight shaped cases and all eight rectangular cases. A permanent regression
+checks the score ratio without forcing marginal bits past the confidence
+threshold. No threshold was weakened to hide this measured difference.
+
+All **53 tests that do not require a display** passed across the full Release
+run and targeted reruns, including the live suite (122.49 seconds alone), the
+26-test CLI suite, audio-rate conversion, crypto, receiver and GUI-model tests.
+The three native GUI interaction suites could not run because this environment
+has no display or Xvfb. The native GUI built and its display-free self-check
+passed. Inspection accounts for pulse-tail airtime separately and identifies
+its chip-space plots as input-chip design illustrations before shaping.
+
+The four rebuilt ASan/UBSan suites (`pattern_code`, `pattern_receiver`,
+`pattern_correlator`, `pulse_shaping`) passed in 339.25 seconds with both
+sanitizers configured to halt on errors. LeakSanitizer was disabled for this
+sandbox's ptrace restriction; no address or undefined-behavior diagnostics
+were reported. The added fast-receiver confidence regression then passed a
+separate rebuilt `pulse_shaping` ASan/UBSan run with the same settings.
+
 ## Public I/Q patterns and transmit history — 14 September 2026
 
 Unkeyed public patterns now use circular I/Q values with varying amplitude and

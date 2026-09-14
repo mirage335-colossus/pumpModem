@@ -2,6 +2,7 @@
 #include "datapump/audio.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "../src/signal_view.hpp"
 #include <algorithm>
 #include <atomic>
@@ -206,7 +207,8 @@ void test_pattern_audio_tx_constellation() {
                !snapshot.constellation.empty();
     });
     check(!settling.waveform.empty(),"pattern TX must show outgoing audio during hardware settling");
-    const auto prefix_seconds=static_cast<double>(modem::training_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+    const auto prefix_seconds=static_cast<double>(modem::training_sample_count(value.transfer.modem)+
+        modem::pattern_pulse_padding_samples(value.transfer.modem))/value.transfer.modem.sample_rate;
     const auto active=wait_for(session,[&](const auto& snapshot) {
         return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
                snapshot.transmission_seconds>prefix_seconds && !snapshot.constellation.empty();
@@ -236,7 +238,7 @@ void test_pattern_audio_keyed_constellation_history() {
     value.transfer.key.emplace(Bytes(32,0x63));
     const Bytes bits(8192,1);
     auto expected=transfer::binary_transmitter(bits,value.transfer);
-    const auto prefix=modem::training_sample_count(value.transfer.modem);
+    const auto prefix=modem::training_sample_count(value.transfer.modem)+modem::pattern_pulse_padding_samples(value.transfer.modem);
     const auto chip=modem::pattern_chip_samples(value.transfer.modem);
     const auto baseline=live_test_audio::played_samples.load();
     live_test_audio::playback_sample_limit=prefix;
@@ -305,7 +307,8 @@ void test_pattern_audio_long_chip_intervals() {
     value.transfer.modem=tuning::resolve(1,40,tuning::PatternMode::auto_pattern,false).config;
     session.start(value);
     session.transmit_bits(Bytes(32,1));
-    const auto prefix_seconds=static_cast<double>(modem::training_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+    const auto prefix_seconds=static_cast<double>(modem::training_sample_count(value.transfer.modem)+
+        modem::pattern_pulse_padding_samples(value.transfer.modem))/value.transfer.modem.sample_rate;
     const auto first=wait_for(session,[&](const auto& snapshot) {
         return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
                snapshot.transmission_seconds>prefix_seconds && !snapshot.constellation.empty();
@@ -324,8 +327,9 @@ void test_binary_audio_preserves_exact_bit_length() {
     const Bytes bits{0, 0, 1};
     const auto expected = transfer::estimate_binary(bits, value.transfer);
     const auto symbol_samples = modem::symbol_sample_count(value.transfer.modem);
-    check(expected.waveform_samples == modem::training_sample_count(value.transfer.modem) + bits.size()*symbol_samples,
-          "three raw bits occupy exactly three payload patterns after the protected hardware prefix");
+    check(expected.waveform_samples == modem::training_sample_count(value.transfer.modem) +
+          2*modem::pattern_pulse_padding_samples(value.transfer.modem) + bits.size()*symbol_samples,
+          "three raw bits occupy exactly three payload patterns with protected settling and pulse tails");
     session.start(value);
     wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
     live_test_audio::played_samples = 0;
@@ -1111,7 +1115,7 @@ void test_pattern_listener_starts_after_hardware_prefix() {
     auto transmit_options=value.transfer;transmit_options.timestamp=origin;
     const Bytes bits{0,0,1};
     auto source=transfer::binary_transmitter(bits,transmit_options);
-    const auto prefix=modem::training_sample_count(value.transfer.modem);
+    const auto prefix=modem::training_sample_count(value.transfer.modem)+modem::pattern_pulse_padding_samples(value.transfer.modem);
     const auto payload=3*modem::symbol_sample_count(value.transfer.modem);
     std::vector<float> recording(static_cast<std::size_t>(source->total_samples()+payload));
     std::size_t written=0;

@@ -1,6 +1,7 @@
 #include "../src/gui/pattern_space.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
@@ -27,16 +28,24 @@ void exact_transmitter_templates() {
                   "inspection must retain both independent bit patterns");
             check(std::accumulate(model.chip_weights.begin(),model.chip_weights.end(),std::uint64_t{})==model.symbol_samples,
                   "all illustrated samples must have exactly one chip weight");
+            auto rectangular=config;rectangular.pulse_shaping=false;
+            check(inspect_pattern_space(rectangular,40).codewords==model.codewords,
+                  "pulse shaping must not change the logical input-chip design preview");
             for(unsigned bit=0;bit<2;++bit) {
                 modem::PatternTransmitter transmitter(Bytes{static_cast<std::uint8_t>(bit)},config,0,0,false);
                 std::vector<std::complex<double>> analytic(transmitter.total_samples());
-                check(transmitter.read_analytic(analytic)==analytic.size() && transmitter.finished(),
+                std::vector<std::complex<double>> chips;
+                check(transmitter.read_analytic(analytic,{},[&](auto value){chips.push_back(value);})==analytic.size() && transmitter.finished(),
                       "fixture must emit one complete independent pattern");
-                for(std::size_t sample=0;sample<analytic.size();++sample) {
+                check(chips.size()==model.code.size(),"pulse tails must not add cells to the input-chip preview");
+                for(std::size_t chip=0;chip<chips.size();++chip)
+                    check(std::abs(chips[chip]-model.chip_value(bit,chip))<1e-12,
+                          "illustrated I/Q cells must match the transmitter's logical input chips before pulse shaping");
+                if(!modem::pattern_pulse_enabled(config))for(std::size_t sample=0;sample<analytic.size();++sample) {
                     const auto chip=sample/model.chip_samples;
                     const auto oscillator=std::polar(1.,2*std::numbers::pi*config.carrier_hz*static_cast<double>(sample)/config.sample_rate);
                     check(std::abs(analytic[sample]-model.chip_value(bit,chip)*oscillator)<1e-10,
-                          "illustrated variable-amplitude I/Q chips differ from the real analytic transmitter");
+                          "rectangular legacy PCM must still equal its input-chip preview after carrier modulation");
                 }
             }
             double integrated=0;

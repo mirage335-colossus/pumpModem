@@ -2,6 +2,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -131,8 +132,10 @@ void weak_auto_without_training() {
           "one-byte slow status remains eligible independently of PCM duration");
     check(slow.total_seconds > normal.total_seconds * 1000,
           "changing the weak-signal target must change transmitted timing");
-    check(modem::training_sample_count(value.modem)==0 && slow.total_seconds==slow.packet_seconds,
-          "automatic pattern transport must add no training, even when one symbol lasts hours");
+    check(modem::training_sample_count(value.modem)==0 &&
+          std::abs(slow.total_seconds-slow.packet_seconds-
+            2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate)<1e-9,
+          "hour-long symbols add only finite filter tails, with no hardware settling");
     bounded_sampled_prefix(sent,value);
 }
 void obscured_training_pcm_roundtrip() {

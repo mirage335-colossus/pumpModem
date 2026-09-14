@@ -1,4 +1,5 @@
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include "datapump/crypto.hpp"
 
 #include <openssl/crypto.h>
@@ -89,7 +90,14 @@ std::uint64_t pattern_chips_per_symbol(const Config& config) {
 struct PatternCode::Impl {
     Config config;
     std::uint64_t chip = 0, symbol = 0, chips = 0;
+    bool shaped = false;
     StreamCache pattern, dsss;
+    struct CachedChip {
+        std::uint64_t address=0;
+        std::complex<double> value{};
+        bool valid=false;
+    };
+    std::array<CachedChip,32> shaped_chips{};
     Impl(Config value, std::uint64_t epoch): config(value),
         pattern(config.scramble ? std::span<const std::uint8_t>(config.spreading_seed) :
                                  std::span<const std::uint8_t>(public_seed),
@@ -98,9 +106,11 @@ struct PatternCode::Impl {
         chip = pattern_chip_samples(config);
         symbol = symbol_sample_count(config);
         chips = symbol / chip + (symbol % chip != 0);
+        shaped=pattern_pulse_enabled(config);
         require(sizeof(Impl) + sizeof(PatternCode) <= config.memory_limit,
                 "pattern code exceeds memory limit");
     }
+    ~Impl() { OPENSSL_cleanse(shaped_chips.data(),sizeof(shaped_chips)); }
     std::complex<double> value(std::uint64_t absolute_chip, unsigned bit, double fraction) {
         require(bit <= 1, "pattern symbol must be a zero or one bit");
         require(std::isfinite(fraction) && fraction >= 0 && fraction < 1,
@@ -123,6 +133,27 @@ struct PatternCode::Impl {
         if (config.dsss) result *= static_cast<double>(dsss.sign(absolute_chip));
         return result;
     }
+    std::complex<double> shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
+        require(bit<=1,"pattern symbol must be a zero or one bit");
+        require(std::isfinite(within),"pattern sample coordinate must be finite");
+        if(!shaped) {
+            if(within<0 || within>=static_cast<double>(symbol))return {};
+            const auto local=static_cast<std::uint64_t>(within/static_cast<double>(chip));
+            require(local<=std::numeric_limits<std::uint64_t>::max()-first_chip,"pattern chip address would overflow");
+            return value(first_chip+local,bit,std::clamp(within/static_cast<double>(chip)-static_cast<double>(local),0.,std::nextafter(1.,0.)));
+        }
+        return pattern_pulse_sum(within,symbol,chip,[&](std::uint64_t local) {
+            require(local<=std::numeric_limits<std::uint64_t>::max()-first_chip,"pattern chip address would overflow");
+            const auto absolute=first_chip+local;
+            auto& entry=shaped_chips[absolute%shaped_chips.size()];
+            if(!entry.valid || entry.address!=absolute) {
+                entry.value=value(absolute,0,0);entry.address=absolute;entry.valid=true;
+            }
+            auto result=entry.value;
+            if(bit)result*=bit_mask[static_cast<std::size_t>((absolute%chips)%bit_mask.size())];
+            return result;
+        });
+    }
 };
 
 PatternCode::PatternCode(Config config, std::uint64_t epoch): impl_(std::make_unique<Impl>(config, epoch)) {}
@@ -131,6 +162,9 @@ PatternCode::PatternCode(PatternCode&&) noexcept = default;
 PatternCode& PatternCode::operator=(PatternCode&&) noexcept = default;
 std::complex<double> PatternCode::value(std::uint64_t chip, unsigned bit, double fraction) {
     return impl_->value(chip, bit, fraction);
+}
+std::complex<double> PatternCode::shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
+    return impl_->shaped_value(first_chip,bit,within);
 }
 std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
@@ -142,7 +176,13 @@ struct PatternTransmitter::Impl {
     Config config;
     PatternCode code;
     std::unique_ptr<StreamCache> settling, settling_data, settling_pattern, settling_dsss;
-    std::uint64_t start = 0, position = 0, total = 0, training = 0;
+    std::uint64_t start = 0, position = 0, total = 0, training = 0, padding = 0;
+    struct SettlingChip {
+        std::uint64_t address=0;
+        std::complex<double> value{};
+        bool valid=false;
+    };
+    std::array<SettlingChip,32> settling_chips{};
     Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool hardware_preamble):
         bits(std::move(input)), config(value), code(config, epoch), start(start_chip) {
         require(!bits.empty(), "pattern transmission requires at least one bit");
@@ -154,6 +194,9 @@ struct PatternTransmitter::Impl {
         training=hardware_preamble?training_sample_count(config):0;
         require(training<=std::numeric_limits<std::uint64_t>::max()-total,"pattern transmission duration would overflow");
         total+=training;
+        padding=pattern_pulse_padding_samples(config);
+        require(padding<=(std::numeric_limits<std::uint64_t>::max()-total)/2,"pattern transmission duration would overflow");
+        total+=2*padding;
         require(bits.size() <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
                 "pattern transmission chip count would overflow");
         const auto chip_count = static_cast<std::uint64_t>(bits.size()) * code.chips_per_symbol();
@@ -181,6 +224,30 @@ struct PatternTransmitter::Impl {
                 config.dsss_seed,StreamPurpose::Dsss,epoch,domain);
         }
     }
+    ~Impl() { OPENSSL_cleanse(settling_chips.data(),sizeof(settling_chips)); }
+    std::complex<double> shaped_sample(std::uint64_t cursor) {
+        const auto relative=static_cast<long double>(cursor)-padding;
+        std::complex<double> result{};
+        if(training) {
+            result+=pattern_pulse_sum(static_cast<double>(relative),training,code.chip_samples(),[&](std::uint64_t chip) {
+                auto& entry=settling_chips[chip%settling_chips.size()];
+                if(!entry.valid || entry.address!=chip) {
+                    entry.value=settling->noise(chip,settling_data.get(),settling_pattern.get(),settling_dsss.get());
+                    entry.address=chip;entry.valid=true;
+                }
+                return entry.value;
+            });
+        }
+        const auto payload=relative-training;
+        const auto support=static_cast<long double>(padding);
+        const auto duration=static_cast<long double>(code.symbol_samples());
+        const auto begin=std::max(0.L,std::floor((payload-support)/duration));
+        const auto end=std::min(static_cast<long double>(bits.size()),std::floor((payload+support)/duration)+1);
+        for(auto symbol=static_cast<std::uint64_t>(begin);symbol<static_cast<std::uint64_t>(std::max(begin,end));++symbol)
+            result+=code.shaped_value(start+symbol*code.chips_per_symbol(),bits[static_cast<std::size_t>(symbol)],
+                static_cast<double>(payload-symbol*duration));
+        return result;
+    }
     template<class Output, class Convert>
     std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert,
                        std::stop_token stop, const ChipObserver& observer) {
@@ -191,6 +258,22 @@ struct PatternTransmitter::Impl {
         auto oscillator = std::polar(1., static_cast<double>(angle));
         const auto step = std::polar(1., tau * config.carrier_hz / config.sample_rate);
         const auto amplitude = std::sqrt(2 * nominal_signal_power);
+        if(padding) {
+            for(std::size_t i=0;i<count;++i,++cursor) {
+                if((i&4095U)==0)cancelled(stop);
+                output[i]=convert(oscillator*pattern_limit_pcm(amplitude*shaped_sample(cursor)));
+                if(observer && cursor>=padding+training && cursor<total-padding) {
+                    const auto payload=cursor-padding-training;
+                    const auto symbol=payload/code.symbol_samples();
+                    const auto within=payload%code.symbol_samples();
+                    if(within%code.chip_samples()==0)
+                        observer(amplitude*code.value(start+symbol*code.chips_per_symbol()+within/code.chip_samples(),
+                            bits[static_cast<std::size_t>(symbol)]));
+                }
+                oscillator*=step;
+            }
+            return count;
+        }
         for (std::size_t i = 0; i < count;) {
             cancelled(stop);
             if(cursor<training) {

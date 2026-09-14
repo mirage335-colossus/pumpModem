@@ -63,8 +63,8 @@ For absolute chip position `k`, a private template consumes eight bytes at
 Scrambler stream supplies the base. Enabled DSSS bytes at the same absolute
 position XOR into that row. Two big-endian 32-bit words determine a circular
 I/Q sample: uniform words `u,v` in `(0,1)` produce phase `2*pi*v` and radius
-`min(1.75, sqrt(-log(u))) / sqrt(1-exp(-1.75^2))`. This caps peaks within PCM
-headroom and normalizes expected complex power to one. Both amplitude and
+`min(1.75, sqrt(-log(u))) / sqrt(1-exp(-1.75^2))`. This caps input-chip peaks and
+normalizes expected complex power to one. Both amplitude and
 phase now depend on the private stream. This removes the former invariant
 where squaring real PCM canceled all private +/- signs and exposed a fixed
 squared carrier.
@@ -75,6 +75,17 @@ All addresses are checked, including the eight-byte expansion. Every enabled
 private purpose advances through fresh positions across symbols. Fixed
 512-byte seek caches retain no duration-proportional keystream history and
 are cleansed on release.
+
+Pulse shaping occurs after this mapping. Eligible profiles use finite 25% RRC
+pulses, followed by a circular radial PCM limiter for overlapping peaks. Neither
+operation changes plaintext-to-ciphertext encryption, AES/HKDF, purpose keys,
+CTR domains, byte XOR mixing, bit masks or absolute chip positions. The two
+filter tails consume no new chips or stream bytes. Fixed-size mapped-chip caches
+avoid repeating the same seek/map work and are cleansed on release. The receiver
+uses linear shaped candidate templates and treats limiter/neighbor tails as
+model mismatch, while retaining pattern evidence as its sole synchronization
+criterion. See [pulse shaping](modem.md#pulse-shaping) for bandwidth, power loss,
+short-pattern exceptions and peer compatibility.
 
 The two legal bit alternatives multiply that position's circular private row
 by different public internal-transition masks. Only the selected alternative
@@ -103,16 +114,20 @@ and transmission epoch with `StreamDomain::Preamble`, the separate counter
 range whose high eight bytes are ASCII `preamble`. This pad is local state,
 never an on-air field; no preamble-specific key is generated.
 
-The prefix is generated independently of both payload codewords and carries no
+The prefix's input chips are generated independently of both payload codewords and carry no
 acquisition marker. It uses no payload stream positions; payload starts at
-position zero afterward.
+position zero afterward. Continuous pulse shaping overlaps those independent
+prefix and payload contributions near their boundary; this overlap does not
+change either stream's source bytes or addresses.
 The epoch is fixed before the prefix and receiver clock hypotheses account
 for the rounded settling duration. No epoch, prefix length, chip count, nonce
 or sender identity is transmitted as an additional field. There is no legacy
 APSK training prefix or post-encryption symbol padding.
 
 Regular chip timing, finite bandwidth, burst edges and bounded sample amplitudes
-remain physical characteristics of the waveform. Removing the squared-carrier
+remain physical characteristics of the waveform. RRC pulses can expose periodic
+second-order statistics at the chip clock, and concentrating signal energy can
+aid a keyless energy detector. Removing the squared-carrier
 invariant is not proof of indistinguishability from arbitrary background noise
 or a measured probability of interception.
 

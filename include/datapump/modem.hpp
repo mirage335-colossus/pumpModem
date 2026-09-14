@@ -30,6 +30,9 @@ struct Config {
     // Zero retains spreading_factor * quantized chip duration.
     double integration_seconds = 0;
     SpreadingMode spreading_mode = SpreadingMode::pattern;
+    // RRC shaping at the existing chip rate. Very short patterns (<16 chips)
+    // retain rectangular pulses because filter transients dominate them.
+    bool pulse_shaping = true;
     bool scramble = false;
     bool dsss = false;
     std::array<std::uint8_t, 32> spreading_seed{};

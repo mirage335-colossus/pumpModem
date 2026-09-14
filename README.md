@@ -29,6 +29,18 @@ cadence. This does not hide all physical bandwidth, chip-timing or burst-edge
 characteristics. Tone modes force encryption and private spreading off and are
 not LPI modes. The private waveform has changed; peers must use this updated build.
 
+Patterns lasting at least 16 complete chip times now use 25% root-raised-cosine
+pulses at the existing chip and payload bit rates. The 1.2 kHz nominal setting
+still sends 600 chips/s, with an approximately 750 Hz shaped spectrum. A finite
+16-chip filter adds eight chip times at each burst edge (26.7 ms total at
+600 chips/s), and remains continuous across settling and payload symbols.
+This changes the emitted waveform, while plaintext-to-ciphertext encryption,
+keystream mixing, stream addresses and logical chips remain unchanged. Shorter
+manual patterns and tone modes retain their previous pulses. Both peers must
+match `Config::pulse_shaping` (default `true`); no negotiation field is sent.
+[Pulse shaping and its measured limits](docs/modem.md#pulse-shaping) describe
+the small crest-limiter loss and the remaining observable timing structure.
+
 Automatic planning uses two codewords and a modeled 18 dB integrated
 symbol-energy target. The chip floor is 16 at in-band SNR of at least 30 dB,
 32 at 24 dB, and otherwise 64; automatic tones retain 64. Shorter automatic

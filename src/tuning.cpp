@@ -229,6 +229,7 @@ std::vector<modem::Config> receive_profiles(const modem::Config& base,std::span<
                 prior.bandwidth_hz==config.bandwidth_hz && prior.constellation_bits==config.constellation_bits &&
                 prior.pattern_symbols==config.pattern_symbols && prior.spreading_factor==config.spreading_factor &&
                 modem::symbol_sample_count(prior)==modem::symbol_sample_count(config) && prior.spreading_mode==config.spreading_mode &&
+                prior.pulse_shaping==config.pulse_shaping &&
                 prior.scramble==config.scramble && prior.dsss==config.dsss;
         });
         if(!duplicate)profiles.push_back(std::move(config));

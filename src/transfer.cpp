@@ -4,6 +4,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/boundary_sync.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -91,7 +92,8 @@ Estimate estimate_encoded(const Message& message, const Options& options, std::s
     if (frame_size > std::numeric_limits<std::size_t>::max() - training_bytes)
         throw Error("transmission length exceeds platform size limit");
     const auto wire_bytes = frame_size + training_bytes;
-    result.total_seconds = static_cast<double>(modem::training_sample_count(options.modem))/options.modem.sample_rate + result.packet_seconds;
+    result.total_seconds = (static_cast<double>(modem::training_sample_count(options.modem))+
+        2.*static_cast<double>(modem::pattern_pulse_padding_samples(options.modem)))/options.modem.sample_rate + result.packet_seconds;
     try {
         result.waveform_samples = modem::waveform_sample_count(wire_bytes, options.modem);
         result.batch_memory_supported = modem::memory_supported(wire_bytes, training_bytes, options.modem);
@@ -197,7 +199,11 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
     const auto hardware_samples=modem::training_sample_count(value.modem);
     if(hardware_samples>std::numeric_limits<std::uint64_t>::max()-content_samples)
         throw Error("transmission duration exceeds 64-bit sample counter");
-    const auto samples=hardware_samples+content_samples;
+    const auto padding=modem::pattern_pulse_padding_samples(value.modem);
+    const auto unpadded=hardware_samples+content_samples;
+    if(padding>(std::numeric_limits<std::uint64_t>::max()-unpadded)/2)
+        throw Error("pulse tails exceed 64-bit sample counter");
+    const auto samples=unpadded+2*padding;
     Estimate result;
     result.content_bytes=result.packet_bytes=bits.size()/8+(bits.size()%8!=0);
     result.content_seconds=result.packet_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
@@ -373,7 +379,8 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         try {
         auto value=options;value.modem=profile;
         modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(options.timestamp)+
-            static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
+            (static_cast<double>(modem::training_sample_count(profile))+
+             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
@@ -413,7 +420,8 @@ Received simulate(const Message& message, const Options& input_options, const mo
         try {
         auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
         modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
-            static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
+            (static_cast<double>(modem::training_sample_count(profile))+
+             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);

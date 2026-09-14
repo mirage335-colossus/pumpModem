@@ -1,5 +1,6 @@
 #include "datapump/boundary_sync.hpp"
 #include "datapump/transfer.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <iostream>
 #include <limits>
@@ -219,6 +220,7 @@ void packet_fec_and_crypto_integration() {
         check(wire == encrypted_wire, "the existing data stream must encrypt the entire wire including markers");
         const auto estimate = transfer::estimate(message, value);
         const auto expected_samples = modem::training_sample_count(value.modem) +
+            2*modem::pattern_pulse_padding_samples(value.modem) +
             wire.size() * modem::symbol_sample_count(value.modem);
         check(estimate.waveform_samples == expected_samples,
               "long-message airtime estimates must include every transmitted boundary marker");

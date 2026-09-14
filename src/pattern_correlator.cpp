@@ -1,5 +1,6 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -51,7 +52,7 @@ struct PatternCorrelator::Impl {
     PatternCode code;
     std::size_t budget=0,bit_limit=0,accounted_bytes=0;
     std::uint64_t sample=0,trials=0;
-    bool finished=false;
+    bool finished=false,shaped=false;
     struct Hypothesis {
         long double origin=0,rate=1;
         std::uint64_t index=0,observed_start=0;
@@ -73,6 +74,7 @@ struct PatternCorrelator::Impl {
 
     Impl(Config c,PatternSearch options,std::size_t bytes):config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
+        shaped=pattern_pulse_enabled(c);
         require(c.pattern_symbols,"streaming pattern correlator requires binary pattern transport");
         require(search.start_offset_seconds && std::isfinite(*search.start_offset_seconds) &&
                 std::isfinite(search.start_uncertainty_seconds) && search.start_uncertainty_seconds>=0,
@@ -234,6 +236,25 @@ struct PatternCorrelator::Impl {
                 const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
                 if(static_cast<long double>(cursor)>=symbol_end) { complete(h,cursor);continue; }
                 const auto within=std::max(0.L,(static_cast<long double>(cursor)-symbol_start)*h.rate);
+                if(shaped) {
+                    require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+                            "pattern chip coordinate overflow");
+                    const auto first_chip=h.index*code.chips_per_symbol();
+                    const auto left=static_cast<std::size_t>(cursor-sample);
+                    const auto& bank=banks[h.frequency];
+                    const auto projection=bank.prefix[left+1]-bank.prefix[left];
+                    if(!h.fits[0].count)h.observed_start=cursor;
+                    // Match the shaped symbol directly against independent raw
+                    // real samples. Overlapping chip pulses change both fitted
+                    // carrier bases, not N or the two-basis null distribution.
+                    // Unknown adjacent bits are not used to acquire this symbol;
+                    // their small boundary overlap remains in its residual.
+                    for(unsigned bit=0;bit<2;++bit)
+                        h.fits[bit].add(projection,code.shaped_value(first_chip,bit,static_cast<double>(within)),1);
+                    ++cursor;
+                    if(static_cast<long double>(cursor)>=symbol_end)complete(h,cursor);
+                    continue;
+                }
                 const auto local=static_cast<std::uint64_t>(std::floor(within/code.chip_samples()));
                 require(h.index<=(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol(),"pattern chip coordinate overflow");
                 const auto chip=h.index*code.chips_per_symbol()+local;
