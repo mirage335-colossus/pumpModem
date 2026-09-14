@@ -11,6 +11,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
+    if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
     if(control.multiline) {
         control.submit=Command::transmit;control.submit_mode=Field::send_key;
         control.help="Enter transmits by default. Shift+Enter inserts a newline. The send-key choice can require Ctrl+Enter.";
@@ -21,7 +22,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
         control.empty_text="Listening for signals...";
-        control.help="Pattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum.\nFor legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
+        control.help="Whole-byte receptions appear as text; a partial final byte keeps a raw-bit row. Click to copy, or use Paste as message to inspect the bytes in Binary, including escaped byte values.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. For legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr)control.bitmap_caption=BitmapCaption::overlay_error;
@@ -85,6 +86,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::console,10,"Signals",3}, Slot::signals),
         placed({Kind::list,Field::files,Command::none,Bitmap::none,Page::console,10,"Files in memory"}, Slot::files),
         placed({Kind::action,Field::count,Command::copy_signal,Bitmap::none,Page::console,11,"Copy selected"}, Slot::copy_signal),
+        placed({Kind::action,Field::count,Command::paste_signal,Bitmap::none,Page::console,11,"Paste as message"}, Slot::paste_signal),
         placed({Kind::action,Field::count,Command::save_file,Bitmap::none,Page::console,11,"Save selected..."}, Slot::save_file),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waterfall,Page::console,12,"Spectrum / amplitude waterfall"}, Slot::waterfall),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"}, Slot::waveform),

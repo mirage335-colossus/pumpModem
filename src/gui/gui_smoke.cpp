@@ -225,7 +225,7 @@ struct Smoke::Impl {
             require(row!=records.end(),"Signal collection lost its stable reception identity");
             const auto has=[&](const std::string& text){return std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text==text;});};
             require(has(std::to_string(static_cast<long long>(std::llround(signal.frequency_hz)))+" Hz")&&
-                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal.text)),
+                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal_display_text(signal))),
                     "Signal record omitted frequency, status, preamble, data accuracy or complete received text");
             require(row->activatable==(signal.binary?signal.complete:(signal.validated||signal.complete&&signal.pattern_score)&&signal.text_message),
                     "Signal record activation disagreed with verified-text or completed-raw clipboard eligibility");
@@ -424,16 +424,16 @@ struct Smoke::Impl {
             if(snapshot.transmitting||snapshot.simulation_replay||completed_replay!=snapshot.transmission_id)break;
             require(controller.inbox().items().empty()&&verified_ids.size()==2,"Raw binary reception acquired a packet identity");
             { bool recovered=false;for(std::size_t i=0;i<controller.signals().lines().size();++i)
-                recovered=recovered||controller.signals().copy_bits(i)=="01001000011001010110110001110000";
+                recovered=recovered||(controller.signals().copy_text(i)=="Help"&&controller.signals().copy_bytes(i)==Bytes({'H','e','l','p'})&&!controller.signals().copy_bits(i));
               if(!recovered) {
-                  std::string detail="Binary-edited bits did not arrive as the exact copyable raw sequence; error="+snapshot.error+
+                  std::string detail="Binary-edited bytes did not arrive as exact copyable text; error="+snapshot.error+
                       "; transmission="+std::to_string(snapshot.transmission_id)+"; fixture="+path_text(directory);
                   for(std::size_t i=0;i<controller.signals().lines().size();++i) {
                       const auto& line=controller.signals().lines()[i];
                       detail+=" [id="+std::to_string(line.id)+" status="+signal_status_label(line)+" bits="+
                           std::to_string(line.received_bits)+" expected="+std::to_string(line.expected_bits)+
                           " score="+(line.pattern_score?std::to_string(*line.pattern_score):"none")+
-                          " copy="+controller.signals().copy_bits(i).value_or("unavailable")+" text="+line.text+"]";
+                          " copy="+controller.signals().copy_text(i).value_or("unavailable")+" text="+signal_display_text(line)+"]";
                   }
                   throw Error(detail);
               } }

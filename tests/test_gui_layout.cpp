@@ -80,7 +80,8 @@ void supported_sizes() {
               pattern_scores.x + pattern_scores.w == size.w - margin &&
               constellation.w >= 190 && pattern_scores.w >= 190,
               "plot row is misaligned");
-        check(contains(signals, layout[Slot::copy_signal]) &&
+        check(contains(signals, layout[Slot::copy_signal]) && contains(signals, layout[Slot::paste_signal]) &&
+              layout[Slot::copy_signal].x+layout[Slot::copy_signal].w<layout[Slot::paste_signal].x &&
               contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");
         for (const auto slot : {Slot::zoom_in, Slot::zoom_out, Slot::reset_zoom})
             check(contains(waveform, layout[slot]), "waveform action escapes its block");

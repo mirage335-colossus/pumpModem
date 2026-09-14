@@ -108,8 +108,9 @@ int main() {
         binary_line.text="001"; binary_line.complete=true; binary_line.received_bits=3;
         signals.update(binary_line);
         check(gui::signal_status_label(signals.lines()[0])=="binary received");
+        check(!gui::signal_byte_aligned(signals.lines()[0]) && gui::signal_display_text(signals.lines()[0])=="001");
         check(!signals.copy_id(0) && !signals.lines()[0].validated && signals.lines()[0].complete);
-        check(signals.copy_bits(0)=="001");
+        check(signals.copy_bits(0)=="001" && !signals.copy_text(0) && !signals.copy_bytes(0));
         binary_line.text="0"; binary_line.complete=false;
         signals.update(binary_line);
         check(signals.lines()[0].text=="001" && signals.lines()[0].complete);
@@ -138,8 +139,53 @@ int main() {
         binary_line.text=std::string(5000,'0'); binary_line.expected_bits=binary_line.received_bits=5000;
         signals.update(binary_line);
         check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));
-        check(gui::signal_data_label(signals.lines()[2])=="FEC off / prefix");
-        check(!signals.copy_bits(3));
+        check(gui::signal_data_label(signals.lines()[2])=="No checksum / FEC / prefix");
+        check(gui::signal_byte_aligned(signals.lines()[2]) && gui::signal_status_label(signals.lines()[2])=="text received");
+        std::string escaped_prefix;
+        for(std::size_t index=0;index<512;++index)escaped_prefix+="\\x00";
+        check(gui::signal_display_text(signals.lines()[2])==escaped_prefix);
+        check(!signals.copy_text(2) && !signals.copy_bytes(2));
+        check(!signals.copy_bits(3) && !signals.copy_text(3) && !signals.copy_bytes(3));
+
+        gui::Signals byte_signals;
+        gui::SignalLine byte_line;
+        byte_line.id=100; byte_line.binary=true; byte_line.text_message=false;
+        byte_line.text="01001000"; byte_line.received_bits=8; byte_line.expected_bits=32;
+        byte_signals.update(byte_line);
+        check(!gui::signal_byte_aligned(byte_signals.lines()[0]));
+        check(gui::signal_status_label(byte_signals.lines()[0])=="binary pending" &&
+              gui::signal_display_text(byte_signals.lines()[0])=="01001000");
+        check(!byte_signals.copy_bits(0) && !byte_signals.copy_text(0) && !byte_signals.copy_bytes(0));
+        byte_line.complete=true; byte_line.text="01001000011001010110110001110000"; byte_line.received_bits=32;
+        byte_signals.update(byte_line);
+        check(byte_signals.lines().size()==1 && byte_signals.lines()[0].binary && byte_signals.lines()[0].text==byte_line.text);
+        check(gui::signal_byte_aligned(byte_signals.lines()[0]) && gui::signal_status_label(byte_signals.lines()[0])=="text received");
+        check(gui::signal_display_text(byte_signals.lines()[0])=="Help" && byte_signals.copy_text(0)=="Help");
+        check(byte_signals.copy_bytes(0)==Bytes({'H','e','l','p'}) && !byte_signals.copy_bits(0) && !byte_signals.copy_id(0));
+
+        byte_line.id=101; byte_line.text="1100001110101001"; byte_line.received_bits=16; byte_line.expected_bits=0;
+        byte_line.pattern_score=25.;
+        byte_signals.update(byte_line);
+        check(gui::signal_display_text(byte_signals.lines()[1])=="\xc3\xa9" && byte_signals.copy_text(1)=="\xc3\xa9");
+        check(byte_signals.copy_bytes(1)==Bytes({0xc3,0xa9}) && !byte_signals.copy_bits(1));
+
+        byte_line.id=102; byte_line.text="000000001111111101011100"; byte_line.received_bits=byte_line.expected_bits=24;
+        byte_signals.update(byte_line);
+        check(gui::signal_display_text(byte_signals.lines()[2])=="\\x00\\xFF\\\\" && byte_signals.copy_text(2)=="\\x00\\xFF\\\\");
+        check(byte_signals.copy_bytes(2)==Bytes({0,0xff,'\\'}) && !byte_signals.copy_bits(2));
+
+        byte_line.id=103; byte_line.text="01001000"; byte_line.received_bits=8; byte_line.expected_bits=16;
+        byte_signals.update(byte_line);
+        check(!byte_signals.copy_bits(3) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
+        byte_line.expected_bits=8; byte_line.text="0100100";
+        byte_signals.update(byte_line);
+        check(!byte_signals.copy_bits(3) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
+        byte_line.text="0100100x";
+        byte_signals.update(byte_line);
+        check(!byte_signals.copy_bits(3) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
+        byte_line.text.clear(); byte_line.received_bits=byte_line.expected_bits=0;
+        byte_signals.update(byte_line);
+        check(!gui::signal_byte_aligned(byte_signals.lines()[3]) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
         gui::Inbox mixed;
         mixed.put(packet(1,3)); // Text belongs to the signal browser only.
         auto file=packet(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";

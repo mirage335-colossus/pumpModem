@@ -354,6 +354,16 @@ struct Controller::Impl {
         case Command::paste_previous: return previous_message.has_value()&&!attachment&&!file_loading;
         case Command::save_file: return selected_file()!=nullptr;
         case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)||signals.copy_text(*index)); }
+        case Command::paste_signal: {
+            if(closing||attachment||file_loading)return false;
+            const auto index=selected_signal();
+            if(!index)return false;
+            if(signals.copy_bytes(*index))return true;
+            const auto id=signals.copy_id(*index);
+            return id && std::any_of(inbox.items().begin(),inbox.items().end(),[&](const auto& packet) {
+                return id_label(packet.message)==*id && packet.message.data.size()<=BinaryEditor::payload_limit;
+            });
+        }
         case Command::pattern_first: case Command::pattern_previous: return pattern_first>0;
         case Command::pattern_next: case Command::pattern_last: return pattern_first<last_pattern_page();
         default: return true;
@@ -495,6 +505,16 @@ struct Controller::Impl {
         }
         if(!next.received.empty()) refresh_files();
         for(const auto& signal:next.signals) {
+            // A decoded text result already has its own row. Whole-byte
+            // receptions need no second raw row; partial bytes still do.
+            if(signal.binary && signal.complete && signal.received_bits && signal.received_bits%8==0 &&
+               std::any_of(next.received.begin(),next.received.end(),[&](const auto& received) {
+                   return !received.packet_validated && !received.packet.message.data.empty() &&
+                       received.raw_bits.size()==signal.received_bits && signal.text.size()<=received.raw_bits.size() &&
+                       received.diagnostics.pattern_score==signal.pattern_score &&
+                       std::equal(signal.text.begin(),signal.text.end(),received.raw_bits.begin(),
+                           [](char text,std::uint8_t bit) { return text==(bit?'1':'0'); });
+               }))continue;
             const auto packet=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.packet_id; });
             const bool text=packet!=inbox.items().end()&&packet->message.kind==MessageKind::text;
             signals.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score});
@@ -567,6 +587,21 @@ struct Controller::Impl {
                 if(found->message.kind!=MessageKind::text||!valid_clipboard_text(bytes)||bytes.size()>static_cast<std::size_t>(std::numeric_limits<int>::max())) throw Error("This message is a file; use Save selected");
                 request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy verified text",std::string(bytes.begin(),bytes.end()));
             } break;
+        }
+        case Command::paste_signal: {
+            const auto index=*selected_signal();
+            auto bytes=signals.copy_bytes(index);
+            if(!bytes) {
+                const auto id=signals.copy_id(index);
+                const auto found=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& packet) {
+                    return id && id_label(packet.message)==*id;
+                });
+                if(found==inbox.items().end())throw Error("That received message has left the memory cache");
+                bytes=found->message.data;
+            }
+            composer=BinaryEditor(std::move(*bytes));
+            repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
+            seeded_message.clear();sync_composer();++f(UiField::message).text_cursor_end_revision;dirty();break;
         }
         case Command::zoom_in: zoom=std::max(1./16,zoom/2); plot_update.update_plots=true; break;
         case Command::zoom_out: zoom=std::min(256.,zoom*2); plot_update.update_plots=true; break;

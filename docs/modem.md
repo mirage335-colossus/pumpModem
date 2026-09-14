@@ -330,8 +330,11 @@ diagnostics and acquisition scores are evidence of processing, never packet
 authenticity.
 
 Pattern-only signal rows show **Pattern score** in model log-evidence units and
-**No checksum / FEC**. Complete raw bits and dictionary text appear separately
-and can be copied. These results do not enter the packet-validated inbox.
+**No checksum / FEC**. Whole-byte receptions show a single text entry, using
+dictionary text when decoded or an escaped byte view otherwise. A partial final
+byte keeps the exact raw-bit entry alongside any dictionary text. Completed
+entries can be copied; **Paste as message** loads text and escaped bytes exactly
+for inspection in Binary. These results do not enter the packet-validated inbox.
 
 For the explicit legacy receiver, the signal browser's **Preamble** percentage is recognized training duration
 divided by the expected five-second training duration. Training always has 64

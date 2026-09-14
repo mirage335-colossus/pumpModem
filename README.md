@@ -71,7 +71,10 @@ The separate TX target remains a scalar.
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
 sample offset, and presents the result over three seconds. Completed pattern
-text and exact raw bits are shown separately and can be copied. Their rows
+receptions with a whole number of bytes show only text; a partial final byte
+retains a separate exact-bit row. Non-text bytes use `\xNN` escapes. Click a row
+to copy, or choose **Paste as message** to load its exact bytes into Message
+and inspect the first 16 bytes in Binary. Their rows
 show **Pattern score**, with no checksum/FEC claim. Packet-validated results
 retain their separate integrity and data-accuracy information. Physical audio
 endpoints must use compatible carrier and modem settings.

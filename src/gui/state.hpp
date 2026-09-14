@@ -90,12 +90,15 @@ struct SignalLine {
     std::size_t expected_bits = 0;
     std::optional<double> pattern_score;
 };
+bool signal_byte_aligned(const SignalLine& line);
+std::string signal_display_text(const SignalLine& line);
 std::string signal_status_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
 std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.
 // Verified packets have clipboard lookup identities. Complete raw binary
-// observations have a separate bit-string path with no packet/authentication ID.
+// observations use a text/byte view when byte-aligned and an exact bit-string
+// path otherwise. Neither raw view has a packet/authentication ID.
 class Signals {
 public:
     void update(SignalLine line);
@@ -104,6 +107,7 @@ public:
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
     std::optional<std::string> copy_text(std::size_t index) const;
+    std::optional<Bytes> copy_bytes(std::size_t index) const;
 private:
     std::deque<SignalLine> lines_;
 };

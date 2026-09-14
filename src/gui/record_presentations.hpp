@@ -16,7 +16,7 @@ inline std::vector<ui::Record> signal_records(const Signals& signals) {
             {signal_status_label(signal),89,5,100,17,10,tone,false},
             {signal_preamble_label(signal),11,19,178,15,11,tone,false},
             {signal_data_label(signal),11,34,178,15,11,tone,false},
-            {display_label(signal.text),194,14,-10,27,15,tone,false}
+            {display_label(signal_display_text(signal)),194,14,-10,27,15,tone,false}
         };
         rows.push_back(std::move(row));
     }

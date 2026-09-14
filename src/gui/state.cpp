@@ -1,4 +1,5 @@
 #include "state.hpp"
+#include "binary_editor.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
@@ -136,7 +137,32 @@ std::string folder_uri(const std::filesystem::path& directory) {
     return uri;
 }
 
+namespace {
+std::optional<Bytes> signal_byte_prefix(const SignalLine& line) {
+    if (!signal_byte_aligned(line) || line.text.empty() || line.text.size()>line.received_bits ||
+        line.text.find_first_not_of("01")!=std::string::npos) return {};
+    Bytes bytes(line.text.size()/8);
+    for(std::size_t i=0;i<bytes.size()*8;++i)
+        bytes[i/8]|=static_cast<std::uint8_t>((line.text[i]-'0')<<(7-i%8));
+    return bytes;
+}
+bool complete_bits(const SignalLine& line) {
+    return line.binary && line.complete && line.received_bits &&
+        (!line.expected_bits || line.received_bits==line.expected_bits) &&
+        line.text.size()==line.received_bits && line.text.find_first_not_of("01")==std::string::npos;
+}
+}
+bool signal_byte_aligned(const SignalLine& line) {
+    return line.binary && line.complete && line.received_bits && line.received_bits%8==0;
+}
+std::string signal_display_text(const SignalLine& line) {
+    if(const auto bytes=signal_byte_prefix(line)) return BinaryEditor(*bytes).text();
+    if(!line.binary && line.complete && !line.validated && line.text_message && line.pattern_score)
+        return BinaryEditor(Bytes(line.text.begin(),line.text.end())).text();
+    return line.text;
+}
 std::string signal_status_label(const SignalLine& line) {
+    if (signal_byte_aligned(line)) return "text received";
     if (line.binary) return line.complete?"binary received":"binary pending";
     if(line.complete && line.pattern_score && !line.validated)return "text received";
     return line.validated?(line.text_message?"verified":"verified file"):"pending";
@@ -156,6 +182,7 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
+    if (signal_byte_aligned(line)) return line.received_bits>line.text.size()?"No checksum / FEC / prefix":"No checksum / FEC";
     if(line.pattern_score && line.complete && !line.validated && !line.binary)return "No checksum / FEC";
     if (line.binary) return line.received_bits>line.text.size()?"FEC off / prefix":"FEC off";
     if (!line.validated) return "Data pre-FEC pending";
@@ -193,18 +220,21 @@ std::optional<std::string> Signals::copy_id(std::size_t index) const {
 std::optional<std::string> Signals::copy_bits(std::size_t index) const {
     if (index>=lines_.size()) return std::nullopt;
     const auto& line=lines_[index];
-    if (!line.binary || !line.complete || !line.received_bits || (line.expected_bits && line.received_bits!=line.expected_bits) ||
-        line.text.size()!=line.received_bits || line.text.find_first_not_of("01")!=std::string::npos) return std::nullopt;
+    if (signal_byte_aligned(line) || !complete_bits(line)) return std::nullopt;
     return line.text;
 }
 std::optional<std::string> Signals::copy_text(std::size_t index) const {
+    const auto bytes=copy_bytes(index);
+    if(!bytes)return {};
+    return BinaryEditor(*bytes).text();
+}
+std::optional<Bytes> Signals::copy_bytes(std::size_t index) const {
     if(index>=lines_.size())return {};
     const auto& line=lines_[index];
+    if(signal_byte_aligned(line) && complete_bits(line))return signal_byte_prefix(line);
     if(line.binary || !line.complete || line.validated || !line.text_message || !line.pattern_score ||
        !std::isfinite(*line.pattern_score) || line.text.empty())return {};
-    const auto bytes=std::span(reinterpret_cast<const std::uint8_t*>(line.text.data()),line.text.size());
-    if(!valid_clipboard_text(bytes))return {};
-    return line.text;
+    return Bytes(line.text.begin(),line.text.end());
 }
 
 std::string id_label(const Message& message) {

@@ -484,6 +484,8 @@ void short_pattern_reception() {
     }
     check(controller.inbox().items().empty() && !controller.signals().lines()[*text_index].validated &&
           controller.signals().lines()[*text_index].pattern_score.has_value(),"pattern-only text acquired a packet validation claim");
+    check(controller.signals().lines().size()==2 && controller.field(F::signals).records.size()==2,
+          "Non-byte-aligned pattern reception did not retain exactly its text and raw-bit rows");
     for(const auto index:{*text_index,*bit_index}) {
         controller.select(F::signals,std::to_string(controller.signals().lines()[index].id));
         check(controller.enabled(C::copy_signal),"complete pattern reception was blocked from copying");
@@ -493,6 +495,110 @@ void short_pattern_reception() {
         controller.complete_service({requests.front().id,false,{},{}});
     }
     controller.close();
+}
+void receive_pattern_text(Controller& controller,const std::string& expected) {
+    controller.start();controller.activate(ui::Command::transmit);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    bool received=false;
+    while(std::chrono::steady_clock::now()<deadline) {
+        controller.poll();
+        for(std::size_t i=0;i<controller.signals().lines().size();++i)
+            received=received||controller.signals().copy_text(i)==expected;
+        if(received && controller.snapshot().transmission_finished && !controller.snapshot().simulation_replay)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if(!received || !controller.snapshot().transmission_finished || controller.snapshot().simulation_replay) {
+        std::string detail="Pattern reception did not complete as expected copyable text; "+controller.snapshot().error;
+        for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
+        throw Error(detail);
+    }
+}
+void byte_aligned_pattern_reception() {
+    using F=ui::Field;using C=ui::Command;
+    const std::string binary="01001000 01100101\n01101100 01110000";
+    const auto expected_bits=parse_binary_bits(binary);
+    Controller controller({true,true});controller.edit(F::binary,binary);prepare(controller);
+    check(controller.inspection()->binary && expected_bits.size()==32,
+          "Byte-aligned reception fixture must transmit exact raw bytes");
+    receive_pattern_text(controller,"Help");
+    check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1,
+          "Byte-aligned raw reception left a duplicate raw-bit or dictionary row in the signal browser");
+    const auto& line=controller.signals().lines().front();
+    check(line.complete && signal_status_label(line)=="text received" && !line.validated && line.pattern_score.has_value() &&
+          controller.inbox().items().empty() && !controller.signals().copy_bits(0),
+          "Byte-aligned raw text retained binary copying or acquired packet validation");
+    controller.select(F::signals,std::to_string(line.id));
+    check(controller.enabled(C::copy_signal),"Byte-aligned received text was blocked from copying");
+    controller.activate(C::copy_signal);const auto requests=controller.take_services();
+    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value=="Help",
+          "Byte-aligned signal copied a bit string instead of its message text");
+    controller.complete_service({requests.front().id,false,{},{}});
+    controller.edit(F::message,requests.front().value);
+    check(controller.message_bytes()==Bytes({'H','e','l','p'}) &&
+          parse_binary_bits(controller.field(F::binary).text)==expected_bits,
+          "Pasting received text into Message did not restore its exact bytes in the binary editor");
+    controller.close();
+}
+void escaped_signal_message_paste() {
+    using F=ui::Field;using C=ui::Command;
+    const Bytes expected{0,255,'\\','x','4','1'};
+    const BinaryEditor original(expected);
+    check(original.escaped(),"Received arbitrary-byte fixture must require escaped text");
+    Controller controller({true,true});
+    check(!controller.enabled(C::paste_signal),"Paste as message was enabled without a received selection");
+    controller.edit(F::binary,original.binary());prepare(controller);
+    receive_pattern_text(controller,original.text());
+    check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
+          signal_status_label(controller.signals().lines().front())=="text received",
+          "Byte-aligned arbitrary bytes did not produce exactly one escaped text row");
+    controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
+    check(controller.enabled(C::paste_signal),"Received arbitrary bytes could not be pasted as a message");
+    controller.activate(C::copy_signal);const auto requests=controller.take_services();
+    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value==original.text(),
+          "Copying arbitrary received bytes did not use their escaped text representation");
+    controller.complete_service({requests.front().id,false,{},{}});
+    controller.edit(F::message,"A plain message with an unfinished binary prefix");
+    controller.toggle(F::repeatable,true);
+    controller.edit(F::binary,"001");
+    check(controller.field(F::repeatable).checked && !controller.estimate() &&
+          controller.field(F::binary_label).text.find("incomplete")!=std::string::npos,
+          "Paste fixture did not retain a repeatable plain-text draft with an incomplete binary prefix");
+    controller.activate(C::paste_signal);
+    check(controller.message_bytes()==expected && controller.field(F::message).text==original.text() &&
+          controller.field(F::binary).text==original.binary() && !controller.field(F::repeatable).checked &&
+          controller.field(F::message_label).text.find("escaped")!=std::string::npos,
+          "Paste as message reinterpreted arbitrary bytes, retained repeatable text or lost the binary view");
+    prepare(controller);
+    check(controller.enabled(C::transmit),"Paste as message retained the discarded draft's incomplete binary error");
+    controller.close();
+}
+void byte_aligned_dictionary_reception() {
+    using F=ui::Field;using C=ui::Command;
+    check(compression::encode_short_bits(Bytes{'i','n'})==Bytes({1,0,1,0,1,0,1,1}),
+          "Aligned dictionary fixture must encode 'in' as exactly eight bits");
+    check(compression::encode_short_bits(Bytes{0,'e'}).size()==16 && BinaryEditor(Bytes{0,'e'}).text()=="\\x00e",
+          "Escaped dictionary fixture must encode a zero byte and e as exactly sixteen bits");
+    for(const auto& expected:{Bytes{'i','n'},Bytes{0,'e'}}) {
+        const BinaryEditor original(expected);
+        Controller controller({true,true});controller.edit(F::binary,original.binary());
+        controller.edit(F::message,original.text());prepare(controller);
+        check(!controller.inspection()->binary && controller.inspection()->pattern_space && !controller.inspection()->packet_layout,
+              "Aligned dictionary fixture did not select short-text pattern transmission");
+        receive_pattern_text(controller,original.text());
+        check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
+              signal_display_text(controller.signals().lines().front())==original.text() &&
+              controller.field(F::signals).records.front().cells.back().text==original.text() &&
+              controller.signals().copy_text(0)==original.text() && !controller.signals().lines().front().binary &&
+              !controller.signals().copy_bits(0),
+              "Aligned dictionary reception retained a raw-byte row or lost the decoded text's escaped representation");
+        controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
+        check(controller.enabled(C::paste_signal),"Decoded dictionary text could not be pasted as a message");
+        controller.activate(C::paste_signal);
+        check(controller.message_bytes()==expected && controller.field(F::message).text==original.text() &&
+              controller.field(F::binary).text==original.binary(),
+              "Pasting aligned dictionary text inserted compressed transport bits or escaped characters instead of decoded message bytes");
+        controller.close();
+    }
 }
 void receive_target_controls() {
     using F=ui::Field;
@@ -635,7 +741,8 @@ int main(int argc,char** argv) {
         repeatable_pending_drafts();
         binary_editor_controls();
         three_bit_dispatch();
-        receive_target_controls();short_pattern_reception();workspace_controls();
+        receive_target_controls();short_pattern_reception();byte_aligned_pattern_reception();
+        escaped_signal_message_paste();byte_aligned_dictionary_reception();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});

@@ -14,7 +14,7 @@ enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit,
-    cancel, airtime, signal_label, signals, copy_signal, file_label, files,
+    cancel, airtime, signal_label, signals, copy_signal, paste_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
     constellation, pattern_scores_label, pattern_scores, device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
@@ -112,6 +112,7 @@ struct DesktopLayout {
         // signal/plot blocks without changing their exterior geometry.
         const auto signals = out[Slot::signals], waterfall = out[Slot::waterfall], waveform = out[Slot::waveform];
         out[Slot::copy_signal] = {signals.x + 4, signals.y + signals.h - 22, 180, compact_action_height};
+        out[Slot::paste_signal] = {signals.x + 190, signals.y + signals.h - 22, 180, compact_action_height};
         out[Slot::clear_waterfall] = {waterfall.x + 4, waterfall.y + waterfall.h - 22, 128, compact_action_height};
         out[Slot::zoom_in] = {waveform.x + 4, waveform.y + waveform.h - 22, 64, compact_action_height};
         out[Slot::zoom_out] = {waveform.x + 72, waveform.y + waveform.h - 22, 72, compact_action_height};

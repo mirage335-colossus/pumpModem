@@ -40,6 +40,36 @@ void records() {
           signals.copy_text(signals.lines().size()-1)=="e","pattern-supported text must be copyable without claiming packet validation");
     check(rows.back().cells[2].text=="Pattern score 24.5" && rows.back().cells[2].text.find("dB")==std::string::npos,
           "pattern evidence must not be labeled as SNR");
+
+    SignalLine bytes;bytes.id=84;bytes.binary=true;bytes.text_message=false;
+    bytes.text="01001000";bytes.received_bits=8;bytes.expected_bits=32;
+    signals.update(bytes);rows=signal_records(signals);
+    check(!rows.back().activatable&&rows.back().cells[1].text=="binary pending"&&rows.back().cells[4].text=="01001000"&&
+          rows.back().cells[4].tone==ui::TextTone::muted,"An aligned pending prefix was presented as a received message");
+    const auto pending_count=rows.size();
+    bytes.complete=true;bytes.text="01001000011001010110110001110000";bytes.received_bits=32;
+    signals.update(bytes);rows=signal_records(signals);
+    check(rows.size()==pending_count&&rows.back().id=="84"&&rows.back().activatable&&
+          rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="Help"&&rows.back().cells[4].tone==ui::TextTone::normal,
+          "Completed byte-aligned binary must replace its pending row with one selectable text entry");
+    check(!signals.copy_bits(signals.lines().size()-1)&&signals.copy_bytes(signals.lines().size()-1)==Bytes({'H','e','l','p'}),
+          "Received text did not retain exact bytes for pasting into the message editor");
+    bytes.id=85;bytes.text="1100001110101001";bytes.received_bits=16;bytes.expected_bits=0;bytes.pattern_score=24.5;
+    signals.update(bytes);rows=signal_records(signals);
+    check(rows.back().activatable&&rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="\xc3\xa9",
+          "Byte-aligned UTF-8 was left as raw bits");
+    bytes.id=86;bytes.text="000000001111111101011100";bytes.received_bits=bytes.expected_bits=24;
+    signals.update(bytes);rows=signal_records(signals);
+    check(rows.back().activatable&&rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="\\x00\\xFF\\\\",
+          "Nontext bytes and backslashes did not use the message editor's lossless escaped representation");
+    bytes.id=87;bytes.text="01001000";bytes.received_bits=8;bytes.expected_bits=16;
+    signals.update(bytes);
+    check(!signal_records(signals).back().activatable,"Mismatched binary length became selectable as a complete message");
+    bytes.id=88;bytes.text=std::string(5000,'0');bytes.received_bits=bytes.expected_bits=5000;bytes.pattern_score.reset();
+    signals.update(bytes);rows=signal_records(signals);
+    check(!rows.back().activatable&&rows.back().cells[1].text=="text received"&&
+          rows.back().cells[3].text=="No checksum / FEC / prefix"&&rows.back().cells[4].text.starts_with("\\x00\\x00"),
+          "A truncated aligned result must show a text prefix without offering incomplete clipboard data");
     check(control(ui::Field::signals).follow_tail&&control(ui::Field::signals).activate_on_select,"Signal interaction policy is missing from the declaration");
 }
 void presentation() {
