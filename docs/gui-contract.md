@@ -32,12 +32,18 @@ keep the same ceiling. Both native adapters use this shared control. Live DSP
 and transfer estimates receive the same budget, independently of the 256 MiB
 received-message/file cache.
 
-The persistent **TX SNR (dB-Hz)** scalar is independent of the **RX targets
-(dB-Hz)** comma-list. The latter defaults to `40`, trims and deduplicates valid
-entries, and resets the entire list to `40` on invalid input. Its 512-byte edit
-limit and 750 ms normalization delay allow comma/minus drafts while keeping
-native adapters free of parser logic. Receive profiles hold the selected
-bandwidth and pattern/tone mode fixed.
+The persistent **Bandwidth** field defaults to `2.4 kHz`, with `18 kHz` also
+available as a preset. **TX SNR (dB-Hz)** defaults to `80`; its presets include
+`140`, `120`, `100`, `80`, `60`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
+`-30` alongside the existing targets.
+
+The **RX targets (dB-Hz)** comma-list initially matches the TX default, `80`.
+Changing TX SNR to a valid value replaces the RX list with that single matching
+target. The RX list can then be edited independently without changing TX SNR.
+It trims and deduplicates valid entries, and resets the entire list to `40` on
+invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
+comma/minus drafts while keeping native adapters free of parser logic. Receive
+profiles hold the selected bandwidth and pattern/tone mode fixed.
 
 | Vocabulary | Meaning |
 | --- | --- |

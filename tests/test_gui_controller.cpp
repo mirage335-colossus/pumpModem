@@ -792,8 +792,8 @@ void byte_aligned_dictionary_reception() {
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
-    check(controller.field(F::receive_snr).text=="40" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{40} &&
-          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to 40");
+    check(controller.field(F::receive_snr).text=="80" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{80} &&
+          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 80");
     const auto tx=controller.settings().transfer.modem;
     controller.edit(F::receive_snr,"40,");
     controller.poll();
@@ -802,8 +802,28 @@ void receive_target_controls() {
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     check(controller.field(F::receive_snr).text=="40, 6, -6" &&
           controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),"receive target field must canonicalize a valid list");
-    check(controller.field(F::snr).text=="40" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
+    check(controller.field(F::snr).text=="80" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
           controller.settings().transfer.modem.integration_seconds==tx.integration_seconds,"receive search targets must not change the transmitted profile");
+    controller.edit(F::bandwidth,"18 kHz");
+    check(controller.settings().transfer.modem.bandwidth_hz==18000 &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),
+          "bandwidth changes must preserve custom receive targets");
+    controller.edit(F::receive_snr,"20,");
+    controller.edit(F::snr,"-23");
+    check(controller.field(F::receive_snr).text=="-23" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
+          "changing TX SNR must immediately replace pending receive edits with the matching target");
+    std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
+    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
+          "a pending receive edit must not overwrite the target selected by TX SNR");
+    controller.edit(F::snr,"-");
+    check(controller.field(F::receive_snr).text=="-23" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
+          "an incomplete TX SNR edit must preserve the last valid receive target");
+    controller.edit(F::snr,"80");
+    check(controller.field(F::receive_snr).text=="80" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{80},
+          "correcting TX SNR must restore matching receive targets");
     controller.edit(F::receive_snr,"40, wrong");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     check(controller.field(F::receive_snr).text=="40" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{40},

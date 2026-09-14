@@ -139,10 +139,10 @@ struct Controller::Impl {
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value) {
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
-        f(UiField::bandwidth).text="1.2 kHz";
-        for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
-        f(UiField::snr).text="40"; for(const auto* s:{"40","6","-6","-60"}) f(UiField::snr).options.push_back({s,s});
-        f(UiField::receive_snr).text="40";
+        f(UiField::bandwidth).text="2.4 kHz";
+        for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        f(UiField::snr).text="80"; for(const auto* s:{"140","120","100","80","60","40","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
+        f(UiField::receive_snr).text=f(UiField::snr).text;
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
         f(UiField::simulation).selected=std::string(presets[(options.simulation||options.smoke)?std::min<std::size_t>(2,presets.size()-1):0].name);
@@ -192,15 +192,15 @@ struct Controller::Impl {
         if(encrypted() && !was_encrypted && f(UiField::pattern).selected=="auto-pattern") f(UiField::pattern).selected="auto-keystream";
         was_encrypted=encrypted();
     }
-    void configure() {
+    void configure(bool match_receive_target=false) {
         receive_targets_due.reset();
         dirty();
         try {
             live::Settings next;
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
-            const auto targets=tuning::parse_receive_targets(f(UiField::receive_snr).text);
-            f(UiField::receive_snr).text=targets.canonical;
             const auto plan=tuning::resolve(bandwidth(f(UiField::bandwidth).text),number(f(UiField::snr).text,"Target SNR"),mode,encrypted());
+            const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
+            f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_targets_db_hz=targets.values;
@@ -766,7 +766,8 @@ void Controller::edit(UiField field,std::string text) {
         if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
-        else if(field==UiField::device||field==UiField::bandwidth||field==UiField::snr) p.configure();
+        else if(field==UiField::snr) p.configure(true);
+        else if(field==UiField::device||field==UiField::bandwidth) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
     } catch(const std::exception& e) { p.notice(e.what(),10); }

@@ -87,10 +87,13 @@ performance across a large epoch bank are not established.
 
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
-and files have a separate 256 MiB quota. The **RX targets (dB-Hz)** comma-list
-defaults to `40`; search varies this list while holding the selected bandwidth
-and pattern/tone mode fixed. Invalid input resets the entire list to `40`.
-The separate TX target remains a scalar.
+and files have a separate 256 MiB quota. The GUI defaults to **Bandwidth**
+`2.4 kHz` and **TX SNR (dB-Hz)** `80`; the bandwidth presets include `18 kHz`.
+The **RX targets (dB-Hz)** comma-list also starts at `80`. Changing TX SNR to
+a valid value replaces the RX list with that single matching target; the RX
+list can then be edited independently. Search varies this list while holding
+the selected bandwidth and pattern/tone mode fixed. Invalid RX input resets
+the entire list to `40`.
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
 sample offset, and presents the result over three seconds. Decoded pattern

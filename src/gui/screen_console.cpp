@@ -42,8 +42,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_expanded;
         control.help="Click to expand the QR code to fill the window. Click again or press Escape to restore its original size.";
     }
-    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0). This scalar sets the transmitted pattern duration; receive searches use their separate target list.";
-    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas. Search only the selected bandwidth and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";
+    if(slot==Slot::bandwidth)control.help="Nominal modem bandwidth. Defaults to 2.4 kHz; presets include 18 kHz.";
+    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0), default 80 dB-Hz. This scalar sets the transmitted pattern duration. Changing it to a valid value resets RX targets to that single matching target; RX targets can then be edited independently.";
+    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 80. Changing TX SNR to a valid value resets this list to that single matching target. Edit it independently to search other targets with the selected bandwidth and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
     if(slot==Slot::waveform) {

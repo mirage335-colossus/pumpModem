@@ -151,11 +151,16 @@ physical microphone/speaker frequency response still need device-level validatio
 
 ## Automatic signal planning
 
-The CLI and GUI default to bandwidth 1,200 Hz and TX target C/N0 of 40 dB-Hz.
-The selected pattern/tone mode is fixed during receive search; encryption
-normally selects `auto-keystream`, with `auto-pattern` otherwise. The separate
-**RX targets (dB-Hz)** field and CLI `--receive-targets` accept a comma-separated
-list, default `40`. Entries are trimmed and deduplicated. An empty, malformed,
+The CLI defaults to bandwidth 1,200 Hz and TX target C/N0 of 40 dB-Hz. The GUI
+defaults to bandwidth 2,400 Hz and TX target C/N0 of 80 dB-Hz, and offers an
+18 kHz bandwidth preset. The selected pattern/tone mode is fixed during receive
+search; encryption normally selects `auto-keystream`, with `auto-pattern`
+otherwise. The **RX targets (dB-Hz)** field and CLI `--receive-targets` accept
+a comma-separated list. The GUI RX list starts at `80`; changing TX SNR to a
+valid value replaces it with that single matching target. It can then be edited
+independently. The CLI receive list defaults to `40`.
+
+Entries are trimmed and deduplicated. An empty, malformed,
 nonfinite, out-of-range (outside -200..200 dB-Hz), over-16-entry or over-512-byte
 list resets entirely to `40`. The GUI permits partial editing, then normalizes
 after 750 ms of inactivity. RX targets never alter the scalar TX target.
