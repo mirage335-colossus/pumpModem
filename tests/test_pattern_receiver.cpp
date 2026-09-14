@@ -111,6 +111,35 @@ void weak_prefix_cannot_borrow_payload_confidence() {
     check(burst.first_sample>=delay+symbol-10,
           "a strong payload symbol must not retroactively confirm a weak candidate before its start");
 }
+void unconfirmed_tail_cannot_veto_later_start() {
+    auto c=config(64);c.bandwidth_hz=100;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto chip=static_cast<std::size_t>(modem::pattern_chip_samples(c));
+    // Recorded nuisance-chip fixture: one admitted candidate, followed by
+    // weak pending extensions that overlap the next independent signal.
+    constexpr std::array<std::array<std::uint8_t,32>,2> nuisances{{{
+        0x14,0x7c,0xc0,0x88,0x7a,0x7d,0xff,0x21,0x0d,0xc2,0xf8,0x4c,0x16,0x77,0x79,0x39,
+        0xbd,0x1a,0x54,0x43,0xdb,0x57,0x26,0xf5,0x8f,0x8a,0x18,0x72,0x15,0x3c,0x85,0x30},{
+        0x6d,0x86,0xf1,0xdc,0xd2,0xcf,0x04,0xcd,0x16,0x5f,0x27,0x26,0xe3,0x43,0x76,0x58,
+        0xc2,0xbd,0x48,0xf6,0x61,0xe1,0x09,0xf5,0x18,0xde,0xb2,0xf0,0xbc,0xcc,0x40,0x0a}}};
+    for(std::size_t fixture=0;fixture<nuisances.size();++fixture) {
+    const auto& nuisance=nuisances[fixture];
+    const auto before=nuisance.size()*8*chip;
+    const Bytes bits{0,0,1};auto samples=waveform(c,bits,before,2*symbol,0);
+    const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
+    for(std::size_t i=0;i<before;++i) {
+        const auto position=i/chip;
+        const auto sign=((nuisance[position/8]>>(7-position%8))&1U)?-1.:1.;
+        samples[i]=static_cast<float>(amplitude*sign*std::cos(2*std::numbers::pi*c.carrier_hz*static_cast<double>(i)/c.sample_rate));
+    }
+    constexpr std::array<std::size_t,3> chunks{509,37,1021};
+    const auto result=receive(samples,c,chunks);
+    check(result.bursts.size()==(fixture==0?2U:1U),"nuisance fixture must retain only distinct confirmed spans");
+    const auto& strongest=*std::max_element(result.bursts.begin(),result.bursts.end(),[](const auto& a,const auto& b){return a.score<b.score;});
+    check(strongest.bits==bits && strongest.first_sample==before,
+          "an admitted candidate's weak tail must not discard a stronger later signal's first symbol");
+    }
+}
 void noise_hidden_chips() {
     const auto c=config(4096,true);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const auto sigma=std::sqrt(modem::nominal_signal_power*std::pow(10.,16./10.));
@@ -230,20 +259,33 @@ void long_clock_window_fallback() {
 }
 void hardware_settling_is_not_payload() {
     constexpr std::array<std::size_t,3> chunks{509,37,1021};
-    for(bool keyed:{false,true}) {
-        const auto c=config(128,keyed);const Bytes bits{0,0,1};
+    constexpr std::size_t workspace=2*1024*1024;
+    constexpr std::array<const char*,4> modes{"public","scrambler only","DSSS only","scrambler and DSSS"};
+    for(const auto bandwidth:{100.,1200.})for(const auto chips:{64U,128U})
+    for(const auto epoch:{1800000025ULL,1800000174ULL})for(unsigned mode=0;mode<modes.size();++mode)try {
+        auto c=config(chips,(mode&1U)!=0);c.dsss=(mode&2U)!=0;
+        c.bandwidth_hz=bandwidth;c.stream_epoch=epoch;
+        for(std::size_t i=0;i<c.dsss_seed.size();++i)c.dsss_seed[i]=static_cast<std::uint8_t>(5*i+11);
+        const Bytes bits{0,0,1};
         modem::PatternTransmitter source(bits,c,c.stream_epoch);
         std::vector<float> samples(static_cast<std::size_t>(source.total_samples()));source.read(samples);
         const auto prefix=static_cast<std::size_t>(modem::training_sample_count(c));
         check(prefix>0,"hardware-settling fixture must contain a physical prefix");
         const std::vector<float> settling(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(prefix));
-        check(receive(settling,c,chunks).bursts.empty(),"hardware settling must not become extra decoded payload bits");
+        check(receive(settling,c,chunks,{},workspace).bursts.empty(),"hardware settling must not become extra decoded payload bits");
         samples.resize(samples.size()+2*modem::symbol_sample_count(c));
-        const auto result=receive(samples,c,chunks);
+        const auto result=receive(samples,c,chunks,{},workspace);
         const auto& burst=exact(result,bits);
         check(burst.first_sample>=prefix-10 && burst.first_sample<=prefix+10,
               "acquisition must select the payload pattern start, not the hardware lead-in");
-    }
+        check(burst.first_stream_symbol==0,"hardware settling must not advance the payload stream index");
+        const std::vector<float> without_prefix(samples.begin()+static_cast<std::ptrdiff_t>(prefix),samples.end());
+        const auto late_result=receive(without_prefix,c,chunks,{},workspace);
+        const auto& late=exact(late_result,bits);
+        check(late.first_sample<=10 && late.first_stream_symbol==0,
+              "losing the entire hardware prefix must preserve payload acquisition and stream position");
+    } catch(const Error& error){throw Error(std::string(modes[mode])+" / "+std::to_string(chips)+" chips / "+
+        std::to_string(bandwidth)+" Hz / epoch "+std::to_string(epoch)+": "+error.what());}
 }
 }
 int main() {
@@ -254,6 +296,7 @@ int main() {
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
     run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
+    run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);

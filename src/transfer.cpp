@@ -3,6 +3,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/compression.hpp"
+#include <openssl/crypto.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -225,6 +226,13 @@ modem::Config seeded_config(const Options& options, std::uint64_t timestamp) {
     validate(options);
     auto result = options.modem;
     result.stream_epoch=timestamp;
+    if(options.key && result.pattern_symbols) {
+        constexpr std::string_view domain="DataPump/hardware-noise-seed/v1";
+        auto seed=options.key->mac(std::span(reinterpret_cast<const std::uint8_t*>(domain.data()),domain.size()));
+        result.hardware_noise_seed.emplace();
+        std::copy(seed.begin(),seed.end(),result.hardware_noise_seed->begin());
+        OPENSSL_cleanse(seed.data(),seed.size());
+    }
     if (options.key && result.scramble) {
         const auto seed = options.key->stream(StreamPurpose::Scrambler, timestamp, 0, result.spreading_seed.size());
         std::copy(seed.begin(), seed.end(), result.spreading_seed.begin());

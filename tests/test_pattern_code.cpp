@@ -110,8 +110,10 @@ void exact_pcm_and_chunks() {
     }
     for (std::size_t i = 0; i < count; ++i) {
         check(std::abs(a[i] - b[i]) < 1e-11, "chunk boundaries must not alter transmitted phase or chip positions");
-        check(std::abs(std::norm(a[i]) - 2 * modem::nominal_signal_power) < 1e-11,
-              "binary patterns must retain constant transmitted amplitude");
+        if(i>=modem::training_sample_count(c))
+            check(std::abs(std::norm(a[i]) - 2 * modem::nominal_signal_power) < 1e-11,
+                  "payload binary patterns must retain constant transmitted amplitude");
+        else check(std::norm(a[i])<1,"hardware noise must remain inside PCM peak headroom");
     }
     std::array<std::complex<double>, 79> preview{};
     whole.preview_last_analytic(preview);
@@ -217,11 +219,63 @@ void rounded_hardware_duration() {
     check(framed.total_samples()-bare.total_samples()==modem::training_sample_count(c),
           "optional settling must not change the exact payload length");
 }
+void hardware_noise_keystreams() {
+    constexpr std::uint64_t epoch=1800000000;
+    const auto prefix=[](const modem::Config& c,std::uint64_t time,const Bytes& bits=Bytes{0,0,1}) {
+        modem::PatternTransmitter tx(bits,c,time);
+        std::vector<float> samples(static_cast<std::size_t>(modem::training_sample_count(c)));
+        tx.read(samples);return samples;
+    };
+    auto c=config();c.scramble=true;c.dsss=true;
+    c.hardware_noise_seed=std::array<std::uint8_t,32>{};c.hardware_noise_seed->fill(0x37);
+    const auto both=prefix(c,epoch);
+    auto changed=c;changed.spreading_seed[0]^=0x80;
+    check(prefix(changed,epoch)!=both,"Scrambler must affect settling when DSSS is also enabled");
+    changed=c;changed.dsss_seed[0]^=0x80;
+    check(prefix(changed,epoch)!=both,"DSSS must affect settling when Scrambler is also enabled");
+    changed=c;(*changed.hardware_noise_seed)[0]^=0x80;
+    check(prefix(changed,epoch)!=both,"independent hardware-noise key must affect the prefix");
+    check(prefix(c,epoch+1)!=both,"hardware streams must advance with the clock epoch");
+    check(prefix(c,epoch,Bytes{1,1,0,1})==both,"settling cannot encode payload bits or length");
+    for(bool scrambler:{false,true}) {
+        auto disabled=c;disabled.scramble=!scrambler;disabled.dsss=scrambler;
+        auto ignored=disabled;
+        (scrambler?ignored.spreading_seed:ignored.dsss_seed)[0]^=0x80;
+        check(prefix(disabled,epoch)==prefix(ignored,epoch),"a disabled spreading layer must not affect settling");
+    }
+    modem::PatternTransmitter original({0,0,1},c,epoch,19),other({0,0,1},changed,epoch,19),bare({0,0,1},c,epoch,19,false);
+    std::vector<std::complex<double>> a(static_cast<std::size_t>(original.total_samples())),b(a.size()),payload(static_cast<std::size_t>(bare.total_samples()));
+    original.read_analytic(a);other.read_analytic(b);bare.read_analytic(payload);
+    const auto offset=static_cast<std::size_t>(modem::training_sample_count(c));
+    std::complex<double> mean{},quadrature{};double power=0;std::size_t observations=0;
+    for(std::size_t i=0;i<offset;i+=modem::pattern_chip_samples(c)/2) {
+        const auto value=a[i]*std::polar(1.,-2*std::numbers::pi*i*c.carrier_hz/c.sample_rate)/
+            std::sqrt(2*modem::nominal_signal_power);
+        mean+=value;quadrature+=value*value;power+=std::norm(value);++observations;
+    }
+    check(std::abs(mean)/observations<.06 && std::abs(quadrature)/observations<.08 &&
+          std::abs(power/observations-1)<.1,
+          "hardware noise must fill both quadratures with the payload's mean power, not a binary line");
+    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(offset),a.end(),b.begin()+static_cast<std::ptrdiff_t>(offset)),
+          "hardware-noise key must not change the following payload");
+    const auto rotation=std::polar(1.,2*std::numbers::pi*static_cast<double>(offset)*c.carrier_hz/c.sample_rate);
+    for(std::size_t i=0;i<payload.size();++i)
+        check(std::abs(a[offset+i]-payload[i]*rotation)<1e-8,"settling must not consume or reset payload stream positions");
+    transfer::Options options;options.modem=config();
+    options.key.emplace(Bytes(32,0x19));
+    const auto first=transfer::seeded_config(options,epoch);
+    options.key.emplace(Bytes(32,0xa7));
+    const auto second=transfer::seeded_config(options,epoch);
+    check(first.hardware_noise_seed && second.hardware_noise_seed && !first.scramble && !first.dsss,
+          "data-only encryption must supply a private independent hardware-noise seed");
+    check(prefix(first,epoch)!=prefix(second,epoch) && prefix(first,epoch)!=prefix(options.modem,epoch),
+          "data-only encrypted settling must depend on the selected key rather than the public waveform");
+}
 }
 int main() {
     try {
         seek_and_domains(); alphabet_and_repetition(); exact_pcm_and_chunks(); tones_and_bounded_state();
-        streaming_and_modem_integration();rounded_hardware_duration();
+        streaming_and_modem_integration();rounded_hardware_duration();hardware_noise_keystreams();
         std::cout << "Pattern code and binary waveform tests passed\n";
         return 0;
     } catch (const std::exception& error) {

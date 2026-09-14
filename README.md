@@ -33,7 +33,8 @@ For example, `e` is three transmitted payload bits. A hardware-settling prefix
 lasts approximately five seconds, rounded to the nearest whole payload-symbol
 duration; symbols longer than ten seconds need no prefix. The prefix helps
 external gain control and muting settle, but supplies no acquisition evidence
-and adds no payload bits. The Binary editor preserves exact
+and adds no payload bits. Keyed preambles use independent private noise plus
+every enabled Scrambler and DSSS layer, with separate preamble streams. The Binary editor preserves exact
 0/1 drafts, including incomplete bytes and leading zeros, and sends those bits
 directly. Larger messages and attachments retain the compact packet codec,
 compression and optional FEC downstream of pattern acquisition. No dictionary

@@ -287,6 +287,20 @@ struct PatternReceiver::Impl {
             const auto& track=*it;
             const auto margin=2*bin_samples;
             if(same_frequency(track.burst.frequency_hz)&&item.first_sample+margin>=track.burst.first_sample && item.first_sample<=track.next*bin_samples+margin) {
+                if(track.admitted && item.first_sample+margin<track.confirmed_end &&
+                   item.score>track.total_score && item.score>=threshold()) {
+                    // Admission is not a permanent timing lock. A stronger
+                    // overlapping pattern replaces the weaker hypothesis;
+                    // allow normal timing overlap between adjacent symbols.
+                    it=tracks.erase(it);continue;
+                }
+                if(track.admitted && track.confirmed<track.burst.bits.size() &&
+                   item.first_sample>=track.confirmed_end && item.score>=threshold()) {
+                    // Confidence belongs only to the confirmed span. Weak
+                    // pending extensions cannot veto an independently strong
+                    // later start; finish the old span and consider this one.
+                    publish(*it,true);it=tracks.erase(it);continue;
+                }
                 if(track.admitted||track.total_score>=item.score)return;
                 it=tracks.erase(it);
             } else ++it;

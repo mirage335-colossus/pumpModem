@@ -35,8 +35,7 @@ struct StreamCache {
     StreamCache(std::span<const std::uint8_t> seed, StreamPurpose use,
                 std::uint64_t time): key(seed), purpose(use), epoch(time) {}
     ~StreamCache() { OPENSSL_cleanse(bytes.data(), bytes.size()); }
-    int sign(std::uint64_t chip) {
-        const auto offset = chip / 8;
+    std::uint8_t byte(std::uint64_t offset) {
         const auto aligned = offset - offset % capacity;
         if (!valid || aligned != begin) {
             auto generated = key.stream(purpose, epoch, aligned, capacity);
@@ -44,9 +43,36 @@ struct StreamCache {
             OPENSSL_cleanse(generated.data(), generated.size());
             begin = aligned; valid = true;
         }
-        return ((bytes[static_cast<std::size_t>(offset - begin)] >> (chip % 8)) & 1U) ? -1 : 1;
+        return bytes[static_cast<std::size_t>(offset-begin)];
+    }
+    int sign(std::uint64_t chip) {
+        return ((byte(chip/8) >> (chip%8)) & 1U) ? -1 : 1;
+    }
+    std::complex<double> noise(std::uint64_t position) {
+        require(position<=(std::numeric_limits<std::uint64_t>::max()-7)/8,"hardware noise coordinate overflow");
+        const auto uniform=[&](std::uint64_t offset) {
+            std::uint32_t value=0;
+            for(unsigned i=0;i<4;++i)value=(value<<8)|byte(offset+i);
+            return (static_cast<double>(value)+.5)/4294967296.;
+        };
+        // Circular Gaussian noise avoids the one-quadrature pattern structure
+        // of random +/- chips. Limit its crest factor to stay inside PCM
+        // headroom, normalizing E[|noise|^2] back to one.
+        constexpr double maximum_radius=1.75;
+        static const double normalization=std::sqrt(1-std::exp(-maximum_radius*maximum_radius));
+        const auto radius=std::min(maximum_radius,std::sqrt(-std::log(uniform(position*8))));
+        return std::polar(radius/normalization,tau*uniform(position*8+4));
     }
 };
+std::unique_ptr<StreamCache> hardware_stream(std::span<const std::uint8_t> source,
+                                           std::string_view label,StreamPurpose purpose,
+                                           std::uint64_t epoch) {
+    const Crypto domain(source);
+    auto seed=domain.mac(std::span(reinterpret_cast<const std::uint8_t*>(label.data()),label.size()));
+    auto result=std::make_unique<StreamCache>(seed,purpose,epoch);
+    OPENSSL_cleanse(seed.data(),seed.size());
+    return result;
+}
 }
 
 std::uint64_t pattern_chip_samples(const Config& config) {
@@ -121,7 +147,7 @@ struct PatternTransmitter::Impl {
     Bytes bits;
     Config config;
     PatternCode code;
-    std::unique_ptr<StreamCache> settling;
+    std::unique_ptr<StreamCache> settling, settling_pattern, settling_dsss;
     std::uint64_t start = 0, position = 0, total = 0, training = 0;
     Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool hardware_preamble):
         bits(std::move(input)), config(value), code(config, epoch), start(start_chip) {
@@ -139,19 +165,20 @@ struct PatternTransmitter::Impl {
         const auto chip_count = static_cast<std::uint64_t>(bits.size()) * code.chips_per_symbol();
         require(chip_count - 1 <= std::numeric_limits<std::uint64_t>::max() - start,
                 "pattern transmission chip address would overflow");
-        const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+(training?sizeof(StreamCache):0);
+        const auto caches=training?1U+static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss):0U;
+        const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+caches*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
         if(training) {
-            // A separate PRF domain produces noise-like settling chips. It
-            // consumes no payload, Scrambler or DSSS stream positions and is
-            // reproducible for previews without retaining its waveform.
-            const auto& source=config.scramble?config.spreading_seed:config.dsss?config.dsss_seed:public_seed;
-            const Crypto domain(source);
-            constexpr std::string_view label="DataPump/hardware-settling/v1";
-            auto seed=domain.mac(std::span(reinterpret_cast<const std::uint8_t*>(label.data()),label.size()));
-            settling=std::make_unique<StreamCache>(seed,StreamPurpose::Scrambler,epoch);
-            OPENSSL_cleanse(seed.data(),seed.size());
+            // Independent noise remains after removing the configured private
+            // layers. Each layer has a separate hardware domain, so prefix
+            // generation never exposes or consumes a payload stream fragment.
+            settling=hardware_stream(config.hardware_noise_seed?*config.hardware_noise_seed:public_seed,
+                "DataPump/hardware-settling/noise/v1",StreamPurpose::Scrambler,epoch);
+            if(config.scramble)settling_pattern=hardware_stream(config.spreading_seed,
+                "DataPump/hardware-settling/scrambler/v1",StreamPurpose::Scrambler,epoch);
+            if(config.dsss)settling_dsss=hardware_stream(config.dsss_seed,
+                "DataPump/hardware-settling/dsss/v1",StreamPurpose::Dsss,epoch);
         }
     }
     template<class Output, class Convert>
@@ -166,9 +193,13 @@ struct PatternTransmitter::Impl {
         for (std::size_t i = 0; i < count;) {
             cancelled(stop);
             if(cursor<training) {
-                const auto pattern=static_cast<double>(settling->sign(cursor/code.chip_samples()));
+                const auto chip=cursor/code.chip_samples();
+                const auto noise_samples=std::max<std::uint64_t>(1,code.chip_samples()/2);
+                auto pattern=settling->noise(cursor/noise_samples);
+                if(settling_pattern)pattern*=settling_pattern->sign(chip);
+                if(settling_dsss)pattern*=settling_dsss->sign(chip);
                 const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-i,training-cursor,
-                    code.chip_samples()-cursor%code.chip_samples()}));
+                    code.chip_samples()-cursor%code.chip_samples(),noise_samples-cursor%noise_samples}));
                 for(std::size_t j=0;j<run;++j,++i,++cursor) {
                     if((i&4095U)==0)cancelled(stop);
                     output[i]=convert(amplitude*oscillator*pattern);oscillator*=step;
@@ -222,7 +253,7 @@ std::uint64_t PatternTransmitter::samples_emitted() const { return impl_->positi
 double PatternTransmitter::bit_rate() const { return static_cast<double>(impl_->config.sample_rate) / static_cast<double>(impl_->code.symbol_samples()); }
 std::size_t PatternTransmitter::working_bytes() const {
     return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->bits.capacity()+
-        (impl_->settling?sizeof(StreamCache):0);
+        ((impl_->settling?1U:0U)+(impl_->settling_pattern?1U:0U)+(impl_->settling_dsss?1U:0U))*sizeof(StreamCache);
 }
 
 } // namespace datapump::modem

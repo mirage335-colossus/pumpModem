@@ -4,6 +4,34 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Private hardware-noise preamble — September 2026
+
+Hardware settling now uses independent circular Gaussian-derived I/Q noise,
+with normalized mean power and bounded peaks. Any selected key supplies a
+private noise seed, including Data-only configurations. Every enabled Scrambler
+and DSSS layer also applies through a separate hardware derivation domain;
+both layers affect the prefix when both are selected. At most three fixed
+512-byte caches hold these streams, without consuming payload stream positions.
+
+PCM checks vary the key, epoch, noise seed and each spreading seed independently.
+They check both noise quadratures, peak headroom, mean power, chunk invariance,
+payload independence and unchanged payload samples after the prefix. Thirty-two
+receiver cases combine 64/128 chips, 100/1200 Hz, two epochs and all four
+spreading-layer combinations. Prefix-only captures produce no acquired burst;
+full and entirely removed prefixes both recover exact `001` under a 2 MiB
+receiver ceiling.
+
+Two nuisance-waveform regressions also prevent an admitted weak hypothesis or
+its unconfirmed tail from blocking a much stronger later pattern. The captured
+100 Hz CLI failure now recovers all 696 payload bits at sample 30,720 and
+validates `independent clock`, using only pattern evidence to choose timing.
+The final Release run passed all 48 CTest suites in 90.92 seconds. The three
+focused ASan/UBSan suites passed in 21.09 seconds with leak detection
+disabled. These finite software checks do not establish physical low
+probability of intercept. The noise's rectangular half-chip updates have a
+wider first-null spectrum than full-chip payload pulses; no enforced spectral
+mask or physical AGC measurement is claimed.
+
 ## Binary pattern transport — September 2026
 
 The hardware-settling follow-up rounds the five-second target to whole

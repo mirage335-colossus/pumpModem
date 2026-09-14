@@ -33,6 +33,9 @@ struct Config {
     bool dsss = false;
     std::array<std::uint8_t, 32> spreading_seed{};
     std::array<std::uint8_t, 32> dsss_seed{};
+    // Local seed for independent hardware-settling noise, derived whenever a
+    // transfer key is selected, even if payload spreading is disabled.
+    std::optional<std::array<std::uint8_t, 32>> hardware_noise_seed;
     std::size_t memory_limit = default_memory_limit;
 };
 // Duration of captured training independently recognized before the protected

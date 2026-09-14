@@ -20,15 +20,26 @@ get none. Empty payloads emit nothing.
 
 This prefix brings external automatic gain control, audio muting and similar
 hardware toward their transmit operating level before the first payload symbol.
-It uses an independent noise-like sign stream at the normal amplitude and chip
-rate, rather than sending legal payload codewords. It is neither a training
+It uses independent circular Gaussian-derived I/Q noise at the payload's mean
+power, with bounded peaks and updates approximately every half chip, rather
+than sending legal payload codewords. This avoids the duplicated, single-axis
+structure of full-chip random signs. The rectangular updates have a wider
+first-null spectrum than the payload pulses; no strict spectral mask is claimed.
+It is neither a training
 sequence nor a synchronization marker, and the receiver never requires or fits
 it to establish lock. A missing or distorted prefix does not change the payload
 format or the evidence needed to accept a symbol.
 
-The prefix stream has its own derivation domain, with a private seed when
-keyed pattern or DSSS spreading is active and a public seed otherwise. Its samples are
-reproducible for previews without reusing payload stream positions. The epoch
+The prefix begins with independent noise, privately seeded whenever an
+encryption key is selected, including Data-only encryption. Every enabled
+Scrambler and DSSS layer also applies its own independent prefix keystream;
+both layers remain active when both are selected. Separate hardware derivation
+domains keep these fragments independent of the payload streams. With no
+private seed or spreading layer the prefix is public. Its samples are
+reproducible for previews without reusing payload stream positions. At most
+three fixed 512-byte caches hold these streams. This avoids a predictable
+public preamble in keyed transmissions; it does not by itself demonstrate
+physical low probability of intercept. The epoch
 is fixed at transmission start; payload Data and pattern positions still begin
 at zero. System-clock hypotheses account for the prefix's elapsed duration
 when predicting the first payload symbol. Estimates and transmission layouts
