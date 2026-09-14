@@ -22,7 +22,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
         control.empty_text="Listening for signals...";
-        control.help="Whole-byte receptions appear as text; a partial final byte keeps a raw-bit row. Click to copy, or use Paste as message to inspect the bytes in Binary, including escaped byte values.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. For legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
+        control.help="Decoded messages appear as one text row. Other receptions show a byte view for whole bytes or exact bits for a partial final byte. Click to copy, or use Paste as message to inspect the bytes in Binary, including escaped byte values.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. For legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr)control.bitmap_caption=BitmapCaption::overlay_error;

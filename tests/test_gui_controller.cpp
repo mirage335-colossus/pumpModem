@@ -466,34 +466,36 @@ void short_pattern_reception() {
           "short-text fixture must transmit only three dictionary bits");
     controller.start();controller.activate(C::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
-    std::optional<std::size_t> text_index,bit_index;
-    std::string bits;for(auto bit:expected)bits+=bit?'1':'0';
+    std::optional<std::size_t> text_index;
     while(std::chrono::steady_clock::now()<deadline) {
         controller.poll();
         for(std::size_t i=0;i<controller.signals().lines().size();++i) {
             if(controller.signals().copy_text(i)=="e")text_index=i;
-            if(controller.signals().copy_bits(i)==bits)bit_index=i;
         }
-        if(text_index&&bit_index)break;
+        if(text_index && controller.snapshot().transmission_finished && !controller.snapshot().simulation_replay)break;
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if(!text_index || !bit_index) {
-        std::string detail="sampled short-text reception did not expose decoded text and exact raw bits; "+controller.snapshot().error;
+    if(!text_index || !controller.snapshot().transmission_finished || controller.snapshot().simulation_replay) {
+        std::string detail="sampled short-text reception did not complete as decoded text; "+controller.snapshot().error;
         for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
         throw Error(detail);
     }
     check(controller.inbox().items().empty() && !controller.signals().lines()[*text_index].validated &&
           controller.signals().lines()[*text_index].pattern_score.has_value(),"pattern-only text acquired a packet validation claim");
-    check(controller.signals().lines().size()==2 && controller.field(F::signals).records.size()==2,
-          "Non-byte-aligned pattern reception did not retain exactly its text and raw-bit rows");
-    for(const auto index:{*text_index,*bit_index}) {
-        controller.select(F::signals,std::to_string(controller.signals().lines()[index].id));
-        check(controller.enabled(C::copy_signal),"complete pattern reception was blocked from copying");
-        controller.activate(C::copy_signal);const auto requests=controller.take_services();
-        check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard &&
-              requests.front().value==(index==*text_index?"e":bits),"pattern reception clipboard changed the recovered content");
-        controller.complete_service({requests.front().id,false,{},{}});
-    }
+    check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
+          !controller.signals().copy_bits(*text_index),
+          "Decoded short text retained a duplicate row for its three compressed transport bits");
+    controller.select(F::signals,std::to_string(controller.signals().lines()[*text_index].id));
+    check(controller.enabled(C::copy_signal),"complete pattern reception was blocked from copying");
+    controller.activate(C::copy_signal);const auto requests=controller.take_services();
+    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value=="e",
+          "pattern reception clipboard changed the decoded text");
+    controller.complete_service({requests.front().id,false,{},{}});
+    check(controller.enabled(C::paste_signal),"Decoded short text could not be pasted as a message");
+    controller.activate(C::paste_signal);
+    check(controller.message_bytes()==Bytes{'e'} && controller.field(F::message).text=="e" &&
+          controller.field(F::binary).text==BinaryEditor(Bytes{'e'}).binary(),
+          "Pasting decoded short text inserted compressed transport bits instead of its message byte");
     controller.close();
 }
 void receive_pattern_text(Controller& controller,const std::string& expected) {
@@ -512,6 +514,34 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
         throw Error(detail);
     }
+}
+void short_sentence_reception() {
+    using F=ui::Field;using C=ui::Command;
+    const std::string expected="quick brown fox";
+    const Bytes bytes(expected.begin(),expected.end());
+    const BinaryEditor original(bytes);
+    check(bytes.size()==15 && compression::encode_short_bits(bytes).size()%8!=0,
+          "Short sentence fixture must use a partial final byte of compressed transport bits");
+    Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
+    check(controller.inspection()->pattern_space && !controller.inspection()->packet_layout && !controller.inspection()->binary,
+          "Short sentence fixture did not select dictionary text transmission");
+    receive_pattern_text(controller,expected);
+    check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
+          controller.signals().copy_text(0)==expected && !controller.signals().lines().front().binary &&
+          !controller.signals().copy_bits(0),
+          "Simulating 'quick brown fox' retained duplicate bits and text rows");
+    controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
+    check(controller.enabled(C::copy_signal),"Received short sentence was blocked from copying");
+    controller.activate(C::copy_signal);const auto requests=controller.take_services();
+    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value==expected,
+          "Copying the received short sentence changed the decoded message");
+    controller.complete_service({requests.front().id,false,{},{}});
+    check(controller.enabled(C::paste_signal),"Received short sentence could not be pasted as a message");
+    controller.activate(C::paste_signal);
+    check(controller.message_bytes()==bytes && controller.field(F::message).text==expected &&
+          controller.field(F::binary).text==original.binary(),
+          "Pasting the received short sentence did not restore its message bytes in the binary editor");
+    controller.close();
 }
 void byte_aligned_pattern_reception() {
     using F=ui::Field;using C=ui::Command;
@@ -741,7 +771,7 @@ int main(int argc,char** argv) {
         repeatable_pending_drafts();
         binary_editor_controls();
         three_bit_dispatch();
-        receive_target_controls();short_pattern_reception();byte_aligned_pattern_reception();
+        receive_target_controls();short_sentence_reception();short_pattern_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();byte_aligned_dictionary_reception();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

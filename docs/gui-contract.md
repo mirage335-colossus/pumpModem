@@ -117,12 +117,12 @@ and activation policy. Signal records include frequency, status, preamble/data
 quality and message text. Pattern-only rows show model log evidence rather than
 dB or a calibrated confidence percentage. Complete discovered raw bits and
 short dictionary text can be copied without packet validation; provisional
-prefixes and file rows cannot. Whole-byte receptions use one text record,
-preferring decoded dictionary text when available; otherwise raw bytes use the
-editor's lossless escaped-byte representation. Only receptions with a partial
-final byte retain a raw-bit record alongside any decoded text. **Paste as
-message** loads text/byte records into the composer without interpreting their
-display escapes as literal characters. Binary shows the first 16 message bytes.
+prefixes and file rows cannot. Decoded dictionary text uses one text record
+regardless of its compressed bit length. When no text is decoded, whole raw
+bytes use the editor's lossless escaped-byte representation, and a partial
+final byte uses an exact-bit record. **Paste as message** loads text/byte records
+into the composer without interpreting their display escapes as literal
+characters. Binary shows the first 16 message bytes.
 
 ## Behavior every adapter preserves
 

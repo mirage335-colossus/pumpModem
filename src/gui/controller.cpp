@@ -505,9 +505,9 @@ struct Controller::Impl {
         }
         if(!next.received.empty()) refresh_files();
         for(const auto& signal:next.signals) {
-            // A decoded text result already has its own row. Whole-byte
-            // receptions need no second raw row; partial bytes still do.
-            if(signal.binary && signal.complete && signal.received_bits && signal.received_bits%8==0 &&
+            // Decoded text already has its own row. Its compressed transport
+            // bits need no second row, even when they end in a partial byte.
+            if(signal.binary && signal.complete && signal.received_bits &&
                std::any_of(next.received.begin(),next.received.end(),[&](const auto& received) {
                    return !received.packet_validated && !received.packet.message.data.empty() &&
                        received.raw_bits.size()==signal.received_bits && signal.text.size()<=received.raw_bits.size() &&

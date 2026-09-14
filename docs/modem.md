@@ -330,9 +330,10 @@ diagnostics and acquisition scores are evidence of processing, never packet
 authenticity.
 
 Pattern-only signal rows show **Pattern score** in model log-evidence units and
-**No checksum / FEC**. Whole-byte receptions show a single text entry, using
-dictionary text when decoded or an escaped byte view otherwise. A partial final
-byte keeps the exact raw-bit entry alongside any dictionary text. Completed
+**No checksum / FEC**. Decoded dictionary text shows a single text entry,
+including when its compressed bit length is not a multiple of eight. When no
+text is decoded, whole raw bytes use an escaped byte view and a partial final
+byte uses an exact raw-bit entry. Completed
 entries can be copied; **Paste as message** loads text and escaped bytes exactly
 for inspection in Binary. These results do not enter the packet-validated inbox.
 

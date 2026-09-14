@@ -70,9 +70,10 @@ and pattern/tone mode fixed. Invalid input resets the entire list to `40`.
 The separate TX target remains a scalar.
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
-sample offset, and presents the result over three seconds. Completed pattern
-receptions with a whole number of bytes show only text; a partial final byte
-retains a separate exact-bit row. Non-text bytes use `\xNN` escapes. Click a row
+sample offset, and presents the result over three seconds. Decoded pattern
+messages show one text row, even when their compressed bits do not fill whole
+bytes. Other receptions show a byte view for whole bytes or an exact-bit row
+for a partial final byte. Non-text bytes use `\xNN` escapes. Click a row
 to copy, or choose **Paste as message** to load its exact bytes into Message
 and inspect the first 16 bytes in Binary. Their rows
 show **Pattern score**, with no checksum/FEC claim. Packet-validated results
