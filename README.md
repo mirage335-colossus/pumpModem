@@ -17,9 +17,17 @@ coverage and boundaries. No unimplemented control is presented as functioning.
 The default transport now sends one bit per pattern symbol. Pattern-template
 evidence alone admits timing, carrier and keystream candidates, joins symbols,
 and marks signal boundaries. It does not need a preamble, packet header,
-checksum or a clean phase/amplitude constellation to acquire a signal. The
-explicit manual APSK configurations and byte packet APIs remain available for
-compatibility and diagnostic tests.
+checksum or a clean phase/amplitude constellation to acquire a signal. Byte packet APIs remain available for scripting. Legacy APSK transport, its
+fixed training prefix and final-symbol padding have been removed; explicit
+APSK configurations are rejected.
+
+Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
+removing the fixed squared-carrier signature of the previous +/-1 mapping.
+The receiver still acquires from pattern evidence alone, with template-energy
+normalization. The hardware prefix uses the same noise distribution and chip
+cadence. This does not hide all physical bandwidth, chip-timing or burst-edge
+characteristics. Tone modes force encryption and private spreading off and are
+not LPI modes. The private waveform has changed; peers must use this updated build.
 
 Automatic planning uses two sparse codewords, at least 64 chips per symbol,
 and a modeled 18 dB integrated symbol-energy target. This replaces selection by
@@ -34,8 +42,7 @@ lasts approximately five seconds, rounded to the nearest whole payload-symbol
 duration; symbols longer than ten seconds need no prefix. The prefix helps
 external gain control and muting settle, but supplies no acquisition evidence
 and adds no payload bits. Keyed preamble noise bytes pass through Data-stream
-encryption before waveform mapping, followed by every enabled Scrambler and
-DSSS layer. Each layer keeps its existing purpose and epoch key, selecting a
+encryption and every enabled Scrambler/DSSS byte mask before waveform mapping. Each layer keeps its existing purpose and epoch key, selecting a
 separate CTR range with the fixed `preamble` counter pad. Payload stream
 positions still start at zero after the prefix. The Binary editor preserves exact
 0/1 drafts, including incomplete bytes and leading zeros, and sends those bits
@@ -56,8 +63,8 @@ the sole source of timing and keystream alignment. Markers create no new packet
 parser entry points. The word is derived at runtime from a stored label to
 reduce accidental recognition in program/source transfers.
 Raw bits and text below 16 original bytes remain unchanged. Both pattern peers
-need this convention for packets of at least 256 encoded bytes; manual APSK and
-byte packet APIs retain their existing formats. See
+need the same current waveform and recovery convention; byte packet APIs
+retain their existing formats. See
 [byte-boundary recovery](docs/protocol.md#periodic-byte-boundary-recovery).
 
 The desktop has **Console**, **Modem flow**, and **Transmission layout** tabs.
@@ -260,13 +267,12 @@ updating while idle. Transmissions run at CPU speed through noisy PCM, with
 virtual airtime reported separately. The receiver runs independently through
 idle noise and burst starts and derives timing, phase and spreading correlation
 from its samples. Transmit start and completion do not reset its acquisition.
-After computation completes, the entire transmission (including any hardware-settling prefix or legacy training)
+After computation completes, the entire transmission (including any hardware-settling prefix)
 replays chronologically over three seconds. Waveform, waterfall, constellation
-and signal-browser previews follow the same timeline. Each frame shows the
-receiver state at that transmission position, with fresh constellation
-observations. Pending text appears as decoding advances; completed raw bits,
-dictionary text, packet text, file entries and available data accuracy are
-released at the three-second deadline. Neither
+and pattern evidence follow the same timeline. Each frame shows fresh measured
+input I/Q and the retained pattern evidence at that transmission position.
+Completed raw bits, dictionary text, packet text, file entries and available
+data accuracy are released at the three-second deadline. Neither
 copy nor save can expose the prepared result early.
 Starting another transmission or selecting Stop replay interrupts presentation
 and discards its undelivered results. Earlier completed receptions remain in
@@ -290,8 +296,7 @@ Pattern-only results show a model log-evidence score, not an SNR or calibrated
 confidence percentage. Short text and exact raw bits do not require packet
 validation to become copyable. Packet results additionally show **Data …
 pre-FEC**, measured against the verified encoded body; it excludes bootstrap
-and parity bits. The manual legacy receiver also retains its independently
-measured preamble diagnostic. See [modem diagnostics](docs/modem.md).
+and parity bits. Hardware settling supplies no preamble-lock diagnostic. See [modem diagnostics](docs/modem.md).
 The console enforces a six-second delay after actual encrypted transmission;
 simulation and unencrypted transmissions have no cooldown. CLI encrypted audio
 TX also waits six seconds after playback so sequential scripts inherit the delay; independent concurrent
@@ -357,8 +362,8 @@ printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 With automatic pattern settings, `status-rx` discovers the raw bit string from
 pattern evidence and only then compares it with `--bits`. A wrong expected
 string does not steer acquisition. Its JSON reports exact bits, a model score
-and `packet_validated: false`. Explicit manual status configurations retain the
-aligned legacy DBPSK diagnostic.
+and `packet_validated: false`. Manual sample-rate/carrier overrides use the same
+pattern transport.
 
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz.
@@ -425,8 +430,8 @@ acquisition, frequency/sample offsets, WAV parsing, CLI file transfer, and GUI
 cache/cooldown behavior. Seeded tests are reproducible within the same C++
 standard-library implementation.
 
-Automatic signal regressions use changing-sign fixed or seeded pseudorandom
-patterns to verify differential phase and amplitude measurements. They must not
+Automatic acquisition regressions use public sign patterns and privately seeded
+circular I/Q patterns to verify detection from independent PCM samples. They must not
 force tone patterns or require tone simulation to succeed. Tone operation needs
 suitable synchronization and hardware conditions, such as GNSS timing, low
 frequencies or high symbol rates; see the

@@ -32,13 +32,13 @@ void fft(std::vector<Complex>& a, bool inverse, std::stop_token stop) {
     }
     if(inverse)for(auto& value:a)value/=static_cast<double>(n);
 }
-double evidence(Complex dot,double energy,double count,double condition,bool real_rank) {
-    if(count<4 || energy<=1e-30)return 0;
-    const auto fraction=std::clamp(std::norm(dot)/(count*energy*condition),0.,1.-1e-15);
+double evidence(Complex dot,double energy,double template_energy,double count,double condition,bool real_rank) {
+    if(count<4 || energy<=1e-30 || template_energy<=1e-30)return 0;
+    const auto fraction=std::clamp(std::norm(dot)/(template_energy*energy*condition),0.,1.-1e-15);
     // For nonsingular real-PCM quadrature bins, covariance eigenratio kappa
     // bounds this fraction by a whitened rank-two projection. For singular
-    // bins, the real two-column template has lambda_max<=trace=N, so the same
-    // fraction is bounded by a real rank-two projection instead. Both bounds
+    // bins, the real two-column template has lambda_max<=trace=template_energy,
+    // so this fraction is bounded by a real rank-two projection. Both bounds
     // assume independent Gaussian input samples, with unknown common variance.
     return -(real_rank?(count-2)/2:count-1)*std::log1p(-fraction);
 }
@@ -60,6 +60,7 @@ struct PatternReceiver::Impl {
     std::vector<Complex> ring,work,spectrum,product,reference;
     std::vector<double> energy_prefix;
     std::vector<std::array<std::vector<Complex>,2>> templates;
+    std::vector<std::array<double,2>> template_energy;
     std::uint64_t prepared_template_index=0;
     bool templates_valid=false;
     std::uint64_t sample=0,bins=0,next_start=0;
@@ -141,6 +142,7 @@ struct PatternReceiver::Impl {
             static_cast<long double>(2*search.candidate_limit)*sizeof(PatternEvidence)+
             static_cast<long double>(search.track_limit)*(sizeof(Track)+sizeof(PatternBurst)+sizeof(Completed))+
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(templates)::value_type)+
+            static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_energy)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver);
         if(required>bytes && search.start_offset_seconds) {
@@ -158,6 +160,7 @@ struct PatternReceiver::Impl {
         if(!search.bit_limit)throw Error("pattern workspace cannot retain bit candidates");
         ring.resize(4*length+2*hop);work.resize(transform);spectrum.resize(transform);product.resize(transform);reference.resize(transform);
         energy_prefix.resize(transform+1);templates.resize(search.frequency_offsets_hz.size());
+        template_energy.resize(templates.size());
         history.reserve(search.candidate_limit);peaks.reserve(search.candidate_limit);completed.reserve(search.track_limit);
         tracks.reserve(search.track_limit);points.reserve(2048);bursts.reserve(search.track_limit);
         rotation=std::polar(1.,-tau*c.carrier_hz/c.sample_rate);
@@ -169,7 +172,11 @@ struct PatternReceiver::Impl {
         for(std::size_t f=0;f<templates.size();++f)for(unsigned bit=0;bit<2;++bit) {
             auto& row=templates[f][bit];row.resize(transform);
             std::fill(row.begin(),row.end(),Complex{});
-            for(std::size_t i=0;i<length;++i)row[length-1-i]=std::conj(template_value(i,index,bit,f));
+            auto& norm=template_energy[f][bit];norm=0;
+            for(std::size_t i=0;i<length;++i) {
+                const auto value=template_value(i,index,bit,f);
+                row[length-1-i]=std::conj(value);norm+=std::norm(value);
+            }
             fft(row,false,stop);
         }
         prepared_template_index=index;templates_valid=true;
@@ -201,14 +208,18 @@ struct PatternReceiver::Impl {
         history.push_back(item);
     }
     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before=0) {
-        std::array<Complex,2> dot{};double energy=0;
+        std::array<Complex,2> dot{};std::array<double,2> norm{};double energy=0;
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
         for(std::size_t i=skip;i<length;++i) {
             const auto value=at(start+i);energy+=std::norm(value);
-            for(unsigned b=0;b<2;++b)dot[b]+=value*std::conj(template_value(i,index,b,f));
+            for(unsigned b=0;b<2;++b) {
+                const auto pattern=template_value(i,index,b,f);
+                dot[b]+=value*std::conj(pattern);norm[b]+=std::norm(pattern);
+            }
         }
         const auto count=static_cast<double>(length-skip);
-        const auto zero=evidence(dot[0],energy,count,noise_condition,real_rank),one=evidence(dot[1],energy,count,noise_condition,real_rank);
+        const auto zero=evidence(dot[0],energy,norm[0],count,noise_condition,real_rank),
+            one=evidence(dot[1],energy,norm[1],count,noise_condition,real_rank);
         return {start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U};
     }
@@ -335,7 +346,8 @@ struct PatternReceiver::Impl {
                     for(std::size_t i=0;i<transform;++i)product[i]=spectrum[i]*templates[f][b][i];
                     fft(product,true,stop);
                     for(std::size_t j=0;j<count;++j) {
-                        const auto score=evidence(product[length-1+j],energy_prefix[j+length]-energy_prefix[j],static_cast<double>(length),noise_condition,real_rank);
+                        const auto score=evidence(product[length-1+j],energy_prefix[j+length]-energy_prefix[j],
+                            template_energy[f][b],static_cast<double>(length),noise_condition,real_rank);
                         if(b==0)reference[j]={score,0};else reference[j].imag(score);
                     }
                 }
@@ -403,6 +415,7 @@ struct PatternReceiver::Impl {
         total+=energy_prefix.capacity()*sizeof(double)+(history.capacity()+peaks.capacity())*sizeof(PatternEvidence)+
             tracks.capacity()*sizeof(Track)+bursts.capacity()*sizeof(PatternBurst)+completed.capacity()*sizeof(Completed)+
             templates.capacity()*sizeof(decltype(templates)::value_type)+
+            template_energy.capacity()*sizeof(decltype(template_energy)::value_type)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
         for(const auto& track:tracks)total+=track.burst.bits.capacity();

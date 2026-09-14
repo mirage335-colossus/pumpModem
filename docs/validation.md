@@ -4,6 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Protected pattern-only waveform — 14 September 2026
+
+The APSK transmitter/receiver, fixed training bytes, repeating spread template,
+legacy whitening and post-encryption symbol padding have been removed. Every
+selected non-tone key enables private pattern templates and Data encryption.
+Tone clears the key and all private spreading at GUI, CLI, transfer and live
+boundaries, including stale key lists and keyfile reloads.
+
+Private templates now map eight mixed keystream bytes per chip to capped
+circular I/Q noise with varying amplitude and phase. Settling combines Data
+and all enabled private streams before the same mapping and chip cadence, in
+separate preamble counter positions. FFT acquisition uses actual template
+energy; the clock-window correlator retains its existing full Gram fit.
+Pattern evidence remains the only acquisition and time/key alignment source.
+Both peers must use this updated waveform.
+
+The Release build passed all **51 configured CTest tests**, including sampled
+channel/sample-rate, crypto/packet, pattern receiver/correlator, live session,
+and GUI controller/inspection coverage. The independent CLI suite passed all
+**26 tests**. After the final seeded-estimator memory-accounting correction
+and obsolete-header cleanup, the three affected `pattern_transfer`, `tuning`
+and `regressions` suites also passed. The native FLTK GUI and receiver benchmark
+built successfully, and `datapump-gui --self-check` passed without a display.
+Four focused ASan/UBSan suites (`pattern_code`, `pattern_receiver`,
+`pattern_correlator`, `pattern_transfer`) passed in 33.33 seconds with both
+sanitizers configured to halt on errors. LeakSanitizer was disabled because
+this sandbox's ptrace environment prevents its shutdown inspection; no address
+or undefined-behavior findings were reported.
+
+The standalone extended controller smoke previously reached its 100-second
+deadline during a later replay scenario; the default controller suite, including
+production-key tone regressions, passed. This is not a completed interactive
+hardware GUI certification.
+
+Repeating the original `/tmp` waveform comparison with different messages and
+keys (Data, Scrambler and DSSS enabled, prefix omitted, 1,920 samples at 6 kHz)
+now changes every PCM sample. Maximum absolute squared-sample difference is
+approximately **0.95946**, compared with **exactly zero** before the correction.
+Permanent tests cover circular quadratures, variable amplitude, private stream
+addressing/cache boundaries, each independent private layer, protected-prefix
+mixing, exact bit counts and noise-only/wrong-key rejection. This validates
+removal of that particular invariant; bandwidth, chip timing, capped amplitudes
+and burst edges remain, and no measured interception probability is established.
+
+Older entries below record their earlier implementation and test state; their
+legacy waveform behavior and timing benchmarks do not describe this build.
+
 ## Periodic byte-boundary recovery — September 2026
 
 Compact-packet pattern transport now inserts two copies of a runtime-derived

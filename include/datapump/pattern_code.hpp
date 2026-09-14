@@ -12,8 +12,9 @@ std::uint64_t pattern_chip_samples(const Config& config);
 std::uint64_t pattern_chips_per_symbol(const Config& config);
 
 // Seekable, bounded pattern templates. Public patterns restart each symbol;
-// secret Scrambler and DSSS signs use the full absolute chip address, including
-// positions beyond the legacy 16,384-chip period. Epoch/address are local clock
+// secret Scrambler and DSSS bytes use the full absolute chip address. Each
+// private chip consumes eight bytes to map circular noise amplitude and phase.
+// Epoch/address are local clock
 // hypotheses and are never transmitted as metadata.
 class PatternCode {
 public:
@@ -21,9 +22,11 @@ public:
     ~PatternCode();
     PatternCode(PatternCode&&) noexcept;
     PatternCode& operator=(PatternCode&&) noexcept;
+    // Public unkeyed patterns only; private noise and tones require value().
     int sign(std::uint64_t absolute_chip, unsigned bit);
     void fill(std::uint64_t absolute_chip, unsigned bit, std::span<int> output);
-    // Pattern returns its real +/-1 template. Tone uses two frequencies at
+    // Private patterns return bounded circular I/Q noise; public patterns use
+    // real +/-1 templates. Tone uses two frequencies at
     // nominal carrier +/- chip_rate/4; tone bit labels therefore require a
     // known nominal carrier and a frequency search narrower than chip_rate/4.
     // fraction is the position within a chip in [0,1).
@@ -38,7 +41,7 @@ private:
     std::unique_ptr<Impl> impl_;
 };
 
-// Constant-amplitude binary pattern PCM: exactly bits.size() payload symbols,
+// Binary pattern PCM: exactly bits.size() payload symbols,
 // optionally preceded by rounded hardware-settling audio. The lead-in carries
 // no payload or acquisition marker. Input bytes are individual 0/1 bits;
 // start_chip addresses the first payload stream fragment. Disable the lead-in

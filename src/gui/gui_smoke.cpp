@@ -497,6 +497,8 @@ void controller_self_check() {
     std::set<std::tuple<ui::Page,int,int,unsigned>> identities;
     for(const auto& control:ui::console_screen()) {
         const auto kind=control.kind==ui::Kind::action?1:control.kind==ui::Kind::bitmap?2:0;
+        // Literal labels have no model binding; several can share a page.
+        if(kind==0 && control.field==F::count)continue;
         const auto binding=kind==1?static_cast<int>(control.command):kind==2?static_cast<int>(control.bitmap):static_cast<int>(control.field);
         require(identities.emplace(control.page,kind,binding,control.instance).second,"Screen declares a duplicate binding identity");
     }

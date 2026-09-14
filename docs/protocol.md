@@ -8,8 +8,8 @@ screenshots; it does not define the presence of a raw-bit signal. Existing
 keyfiles remain compatible. Receiving a file never executes it.
 
 The automatic waveform is incompatible with the previous automatic APSK
-waveform. Both peers must use the new pattern transport, or explicitly select
-matching legacy APSK settings; the receiver does not negotiate this over air.
+waveform. Both peers must use the current pattern transport. Legacy APSK has been removed;
+the receiver does not negotiate compatibility over air.
 Pattern peers also require the periodic recovery convention for compact packets
 of at least 256 encoded bytes. There is no automatic retry of their earlier,
 unstripped representation after a recovery candidate fails validation.
@@ -63,12 +63,9 @@ as a separate pattern symbol, without symbol padding. The same hardware-settling
 prefix described above can precede it; it is separate from the packet and
 supplies no modem training.
 
-Manual legacy APSK configurations additionally send five seconds of training:
-32 input bytes mapped onto 64 four-bit APSK segments, independent of the payload
-symbol clock. Their bootstrap and body form one continuous APSK bitstream, with
-unused bits possible only in its final symbol. Those legacy waveform details
-do not add bits to the automatic raw pattern path. Manual APSK and byte-oriented
-`pack`/`unpack` packet APIs do not insert or remove byte-boundary recovery markers.
+There is no APSK training path or final-symbol zero padding. Byte-oriented
+`pack`/`unpack` APIs remain separate from modulation and do not insert or remove
+transport byte-boundary recovery markers.
 
 ### Periodic byte-boundary recovery
 
@@ -180,8 +177,7 @@ or accept a valid packet followed by extra candidate bytes.
 Automatic acquisition fits the legal pattern waveforms against noise, with
 unknown common phase and amplitude. It does not use the APSK lattice, packet
 bootstrap, CRC or MAC as a signal-lock gate. Packet sizes and integrity are
-validated only after accepted pattern bits become available. Legacy APSK
-acquisition retains its earlier amplitude/phase and protected-bootstrap search.
+validated only after accepted pattern bits become available.
 Finite frequency/timing coverage, noise and clock drift still limit reception.
 
 The validated packet length terminates packet content. Pattern evidence
@@ -225,18 +221,17 @@ packet metadata empty and the packet repeat flag off. See the
 
 The digest/MAC covers the canonical variable systematic bootstrap followed
 by the logical metadata and encoded payload. It excludes the tag itself,
-training, parity, transport recovery markers and symbol pad bits. A keyed
+hardware settling, parity and transport recovery markers. There are no symbol pad bits. A keyed
 receiver rejects unkeyed packets;
 SHA-256 alone supplies integrity, not authentication. Transfer-layer keyed
 MACs bind the local epoch, which is not transmitted as a packet field.
 
 For automatic pattern transport, private Data-stream encryption wraps all wire
 bits after recovery markers are inserted, independently of private pattern and
-DSSS streams. The manual legacy audio path wraps training and the complete
-protected packet, then applies
-its public whitening mask to the packet, excluding training. Its receiver
-reverses whitening and private masking before FEC and integrity verification.
-Public whitening is reversible scrambling, not encryption.
+DSSS streams. Protected settling uses those same selected keys with separate
+preamble counter positions, mixing the streams before noise amplitude/phase
+mapping. Tone modes force all private protections off. No public whitening
+layer is added after encryption.
 
 ## Automatic compression
 

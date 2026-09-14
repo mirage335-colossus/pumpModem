@@ -51,13 +51,16 @@ struct StreamCache {
     int sign(std::uint64_t chip) {
         return ((byte(chip/8) >> (chip%8)) & 1U) ? -1 : 1;
     }
-    std::complex<double> noise(std::uint64_t position, StreamCache* encryption) {
-        require(position<=(std::numeric_limits<std::uint64_t>::max()-7)/8,"hardware noise coordinate overflow");
+    std::complex<double> noise(std::uint64_t position, StreamCache* first = nullptr,
+                               StreamCache* second = nullptr, StreamCache* third = nullptr) {
+        require(position<=(std::numeric_limits<std::uint64_t>::max()-7)/8,"pattern noise coordinate overflow");
         const auto uniform=[&](std::uint64_t offset) {
             std::uint32_t value=0;
             for(unsigned i=0;i<4;++i) {
                 auto encoded=byte(offset+i);
-                if(encryption)encoded^=encryption->byte(offset+i);
+                if(first)encoded^=first->byte(offset+i);
+                if(second)encoded^=second->byte(offset+i);
+                if(third)encoded^=third->byte(offset+i);
                 value=(value<<8)|encoded;
             }
             return (static_cast<double>(value)+.5)/4294967296.;
@@ -102,18 +105,28 @@ struct PatternCode::Impl {
         require(bit <= 1, "pattern symbol must be a zero or one bit");
         require(config.spreading_mode == SpreadingMode::pattern,
                 "tone templates require complex pattern values");
+        require(!config.scramble && !config.dsss,
+                "private noise templates require complex pattern values");
         const auto local = absolute_chip % chips;
-        int result = pattern.sign(config.scramble ? absolute_chip : local);
+        int result = pattern.sign(local);
         if (bit) result *= bit_mask[static_cast<std::size_t>(local % bit_mask.size())];
-        if (config.dsss) result *= dsss.sign(absolute_chip);
         return result;
     }
     std::complex<double> value(std::uint64_t absolute_chip, unsigned bit, double fraction) {
         require(bit <= 1, "pattern symbol must be a zero or one bit");
         require(std::isfinite(fraction) && fraction >= 0 && fraction < 1,
                 "pattern chip fraction must be within [0,1)");
-        if (config.spreading_mode == SpreadingMode::pattern)
-            return {static_cast<double>(sign(absolute_chip, bit)), 0};
+        if (config.spreading_mode == SpreadingMode::pattern) {
+            if (!config.scramble && !config.dsss)
+                return {static_cast<double>(sign(absolute_chip, bit)), 0};
+            // A secret +/- sign on a real carrier disappears on squaring.
+            // Mix every enabled private stream before mapping both amplitude
+            // and phase, retaining the public internal-transition distinction
+            // between the two candidate patterns used by blind acquisition.
+            auto result = pattern.noise(absolute_chip, config.dsss ? &dsss : nullptr);
+            if (bit) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
+            return result;
+        }
         const auto angle = (bit ? 1. : -1.) * std::numbers::pi / 2 *
                            (static_cast<double>(absolute_chip % 4) + fraction);
         auto result = std::polar(1., angle);
@@ -163,6 +176,9 @@ struct PatternTransmitter::Impl {
         const auto chip_count = static_cast<std::uint64_t>(bits.size()) * code.chips_per_symbol();
         require(chip_count - 1 <= std::numeric_limits<std::uint64_t>::max() - start,
                 "pattern transmission chip address would overflow");
+        if(config.scramble || config.dsss)
+            require(start+chip_count-1 <= (std::numeric_limits<std::uint64_t>::max()-7)/8,
+                    "private pattern byte address would overflow");
         const auto caches=training?1U+static_cast<unsigned>(config.data_key.has_value())+
             static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss):0U;
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+caches*sizeof(StreamCache);
@@ -171,7 +187,7 @@ struct PatternTransmitter::Impl {
         if(training) {
             // Private layers use the same keys, purposes and epoch as the
             // payload; only the fixed CTR pad changes. Encrypt noise bytes
-            // before I/Q mapping, then apply every enabled spreading layer.
+            // together with every enabled spreading stream before I/Q mapping.
             constexpr auto domain=StreamDomain::Preamble;
             settling=std::make_unique<StreamCache>(public_seed,StreamPurpose::Scrambler,epoch,domain);
             if(config.data_key)settling_data=std::make_unique<StreamCache>(
@@ -196,12 +212,9 @@ struct PatternTransmitter::Impl {
             cancelled(stop);
             if(cursor<training) {
                 const auto chip=cursor/code.chip_samples();
-                const auto noise_samples=std::max<std::uint64_t>(1,code.chip_samples()/2);
-                auto pattern=settling->noise(cursor/noise_samples,settling_data.get());
-                if(settling_pattern)pattern*=settling_pattern->sign(chip);
-                if(settling_dsss)pattern*=settling_dsss->sign(chip);
+                auto pattern=settling->noise(chip,settling_data.get(),settling_pattern.get(),settling_dsss.get());
                 const auto run=static_cast<std::size_t>(std::min<std::uint64_t>({count-i,training-cursor,
-                    code.chip_samples()-cursor%code.chip_samples(),noise_samples-cursor%noise_samples}));
+                    code.chip_samples()-cursor%code.chip_samples()}));
                 for(std::size_t j=0;j<run;++j,++i,++cursor) {
                     if((i&4095U)==0)cancelled(stop);
                     output[i]=convert(amplitude*oscillator*pattern);oscillator*=step;

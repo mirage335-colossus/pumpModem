@@ -1,7 +1,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/channel.hpp"
-#include "../src/spreading_code.hpp"
+#include "datapump/pattern_code.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -39,10 +39,12 @@ transfer::Options options(double bandwidth, tuning::PatternMode mode) {
 void changing_pattern(const modem::Config& config) {
     check(config.spreading_mode == modem::SpreadingMode::pattern,
           "automatic regressions require phase-changing patterns");
-    const auto code = modem::detail::spreading_code(config);
-    check(std::find(code.begin(), code.end(), 1) != code.end() &&
-          std::find(code.begin(), code.end(), -1) != code.end(),
-          "sampled fixtures require measurable chip phase shifts");
+    modem::PatternCode code(config,config.stream_epoch);
+    const auto first=code.value(0,0);
+    bool changes=false;
+    for(std::uint64_t chip=1;chip<std::min<std::uint64_t>(code.chips_per_symbol(),64);++chip)
+        changes=changes || std::abs(code.value(chip,0)-first)>1e-6;
+    check(changes,"sampled fixtures require measurable chip waveform changes");
 }
 modem::ChannelConfig ideal_channel() {
     // These regressions isolate AWGN integration and framing. Clock-error
@@ -135,20 +137,16 @@ void weak_auto_without_training() {
 }
 void obscured_training_pcm_roundtrip() {
     auto value = options(2400, tuning::PatternMode::pattern_16);
-    // Preserve the legacy packet receiver's independent missing-training test.
-    value.modem.pattern_symbols=false;value.modem.constellation_bits=4;
     value.modem.spreading_factor = 128;
     changing_pattern(value.modem);
     value.modem.sample_rate = 8000;
     value.fec = FecMode::off; // The mandatory protected bootstrap remains enabled.
     auto sent = payload();
-    sent.kind = MessageKind::text;
-    sent.filename.clear();
     sent.data = {'C', 'Q'};
     auto samples = transfer::transmit(sent, value);
     const auto training = static_cast<std::size_t>(modem::training_sample_count(value.modem));
-    check(training == 5 * value.modem.sample_rate && samples.size() > training,
-          "obscured-training fixture must contain five seconds plus a real packet");
+    check(training % modem::symbol_sample_count(value.modem)==0 && samples.size() > training,
+          "obscured-training fixture must contain rounded settling audio plus a real packet");
     check(modem::symbol_seconds(value.modem) > .1,
           "obscured-training fixture must exercise slow payload integration");
     // Replace all training audio with independent noise. The protected packet

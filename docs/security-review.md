@@ -1,5 +1,9 @@
 # Implementation security review — 2026-09-11
 
+This records an earlier review, including the now-removed APSK path. Current
+waveform and tone policies are described in [security boundaries](security.md#private-waveform-boundary)
+and [cryptographic mapping](crypto.md#binary-pattern-chip-addressing).
+
 This is a focused source and behavior review updated for the version 0.5 implementation,
 not an independent security audit or a claim that the original specification is
 fully implemented. The review covered cryptography, keyfile handling, packet

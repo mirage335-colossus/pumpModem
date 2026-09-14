@@ -16,7 +16,7 @@ std::size_t find(const std::vector<const document::Node*>& nodes,const std::stri
 Inspection fixture() {
     Inspection model;model.title="Configured model";model.summary="Summary";
     model.lanes={{"Transmit",{{"Packet","Packet details",InspectionState::active},{"Encryption","Encryption details",InspectionState::off},{"Coding","Coding details",InspectionState::active},{"Modulation","Modulation details",InspectionState::active},{"Audio","Audio details",InspectionState::unavailable}}}};
-    model.constellations={{"Payload APSK","Ideal payload points",{{1,0},{-1,0}}}};
+    model.constellations={{"Illustrative I/Q","Ideal payload points",{{1,0},{-1,0}}}};
     inspection::PatternSpace pattern;pattern.code.resize(133,1);pattern.chip_weights.resize(133,1);
     pattern.coefficients={{1,0},{-1,0}};pattern.chip_samples=1;pattern.symbol_samples=133;pattern.symbol_seconds=1;
     pattern.unused_pattern=inspection::PatternEvidence{"unused",std::vector<int>(133,-1),-.5,.75,1};
@@ -24,7 +24,7 @@ Inspection fixture() {
     model.sections={{"Physical","Physical detail",24,std::nullopt,std::nullopt,false,false},
                     {"Logical","Logical detail",12,std::nullopt,std::nullopt,true,false},
                     {"Coding note","Coding detail",std::nullopt,std::nullopt,std::nullopt,false,true}};
-    model.fields={{"Carrier","1500 Hz"},{"Modem mode","Differential phase"}};
+    model.fields={{"Carrier","1500 Hz"},{"Modem mode","Pattern waveforms"}};
     model.packet_layout=PacketLayout{};model.packet_layout->header_bytes=16;model.packet_layout->header_parity_bytes=8;
     model.packet_layout->block_count=2;model.packet_layout->block_capacity=192;model.packet_layout->full_block_parity=32;
     model.packet_layout->last_block_data=48;model.packet_layout->last_block_parity=16;
@@ -56,7 +56,7 @@ void transmission_and_pending() {
     check(find(nodes,"Logical")<find(nodes,"Reed-Solomon codewords"),"logical structure must precede coding diagrams");
     check(find(nodes,"Final body block")<find(nodes,"Coding note"),"codeword bars must precede coding notes");
     check(find(nodes,"Preamble and coding structure")<find(nodes,"Current packet and modem parameters"),"parameter table must appear after structural notes");
-    check(nodes.back()->text=="Differential phase","parameter fields must be last");
+    check(nodes.back()->text=="Pattern waveforms","parameter fields must be last");
     const auto data=nodes[find(nodes,"16 data bytes")],parity=nodes[find(nodes,"8 parity bytes")];
     check(data->width==2*parity->width&&data->width+parity->width==900,"codeword blocks must be proportional to byte counts");
     const auto pending=document::build(nullptr,true,900,0,"Estimate pending");

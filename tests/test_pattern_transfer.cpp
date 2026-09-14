@@ -110,6 +110,29 @@ void long_symbol_estimate() {
           estimate.content_seconds==estimate.total_seconds && estimate.memory_supported,
           "three hour-long symbols have no hardware prefix or retained waveform requirement");
 }
+void private_workspace_estimate() {
+    for(const bool dsss:{false,true})for(const bool settling:{false,true}) {
+        auto value=options(true);value.dsp_workspace_bytes=256*1024;value.modem.dsss=dsss;
+        if(!settling)value.modem.integration_seconds=3600;
+        const auto tiny=transfer::binary_transmitter(Bytes{0},value);
+        const auto fixed=tiny->working_bytes()-1;
+        const auto boundary=value.dsp_workspace_bytes/4-fixed;
+        for(const int offset:{-1024,-256,256,1024}) {
+            const auto size=static_cast<std::size_t>(static_cast<std::ptrdiff_t>(boundary)+offset);
+            const Bytes bits(size,0);
+            const auto estimate=transfer::estimate_binary(bits,value);
+            bool admitted=false,exact_duration=true;
+            try {
+                const auto source=transfer::binary_transmitter(bits,value);
+                admitted=source->working_bytes()<=value.dsp_workspace_bytes/4;
+                exact_duration=source->total_samples()==estimate.waveform_samples;
+            } catch(const Error&) {}
+            check(exact_duration,"workspace estimation changed the exact private pattern duration");
+            check(estimate.memory_supported==admitted,
+                  "private workspace estimate omitted enabled preamble keystream caches");
+        }
+    }
+}
 void marked_packet_waveform() {
     Message message;message.kind=MessageKind::file;message.filename="boundary.bin";
     message.data=Bytes(300,'r');
@@ -126,4 +149,4 @@ void marked_packet_waveform() {
     }
 }
 }
-int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();marked_packet_waveform();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

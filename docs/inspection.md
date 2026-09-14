@@ -13,8 +13,7 @@ by pattern evidence. Short raw bits and text have no modem training or packet
 stages. The separate settling waveform helps external hardware prepare for
 payload reception and is never an acquisition condition. Larger text,
 files and screenshots retain their packet codec after pattern acquisition.
-Explicit manual APSK configurations retain separate training/data alphabets and
-their legacy framed receiver. Active, disabled and unavailable stages have
+Legacy APSK alphabets and training have been removed. Active, disabled and unavailable stages have
 different labels. Configured symbols here are distinct from Console measurements.
 
 The static **pattern/scrambler constellation** shows the binary zero and one
@@ -25,8 +24,7 @@ use actual sample-duration weights over that illustrated prefix, rather than
 claiming the distance of an unseen multi-hour symbol. Tone rows use complex
 chip-center samples and approximate continuous-tone distances. Timing-shift
 comparisons fit common complex amplitude and phase. Keyed rows use public
-illustration seeds and never expose the actual private epoch stream. The manual
-APSK view instead shows its complete repeated-template geometry. See
+illustration seeds and never expose the actual private epoch stream. There is no separate APSK view. See
 [geometry and interpretation](pattern-constellation.md).
 
 Automatic reception fits soft pattern evidence against noise while allowing
@@ -38,7 +36,7 @@ weak bits must justify their own extension of a confirmed prefix. Raw reception
 therefore returns an exact detected bit string without a transmitter-supplied
 boundary or length. Completed dictionary text and raw bits can be copied without
 a checksum; the displayed pattern score is model evidence, not measured SNR or
-authentication. Manual APSK retains its protected-header/integrity lock gates.
+authentication. No packet-integrity condition controls pattern acquisition.
 
 Receive searches use the selected bandwidth and pattern mode, plus the separate
 comma-separated target C/N0 list. Invalid list text resets it to `40`. Carrier,
@@ -79,16 +77,12 @@ below 16 original bytes have no RS anywhere; this includes small attachments.
 They still have packet metadata and integrity, unlike short text. No magic,
 packet-version or dictionary-identifier field is transmitted.
 
-The manual APSK packet view additionally separates its logical field blocks
-from the physical sequence. Five-second training occupies 64 four-bit segments
-before the packet. The body contains 23 fixed metadata bytes, a ULEB128 original
-length, metadata strings, payload and a 32-byte digest or keyed MAC. Packet
-integrity covers the canonical header and uncoded metadata/payload. Body RS
-codewords are interleaved by columns, including a shortened final block; parity
-is not a single physical footer. Header and body share a continuous bitstream.
-Only manual APSK may have unused positions in the final packet symbol; binary
-pattern modulation has none. Neither sends a zero-byte tail. The precise packet
-format is documented in [protocol](protocol.md).
+All payload symbols carry one meaningful bit. There are no unused final-symbol
+positions or post-encryption zero padding. The precise packet format is in
+[protocol](protocol.md). Tone selection clears and disables encryption, and its
+inspection reports that it provides no LPI protection. Private pattern examples
+show variable amplitude and phase from public illustration seeds and epoch;
+actual private waveform streams never appear in configuration illustrations.
 
 Within the packet codec, compression is used only when the candidate is smaller.
 Payloads below 256 bytes use the fixed byte-prefix code; longer payloads use raw

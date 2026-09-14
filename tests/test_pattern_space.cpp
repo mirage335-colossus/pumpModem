@@ -1,6 +1,5 @@
 #include "../src/gui/pattern_space.hpp"
 #include "datapump/tuning.hpp"
-#include "../src/constellation.hpp"
 #include "datapump/streaming_modem.hpp"
 #include <cmath>
 #include <iostream>
@@ -16,156 +15,78 @@ void check(bool value, const char* message) { if (!value) throw Error(message); 
 void near(double value, double expected, const char* message, double tolerance = 1e-11) {
     check(std::abs(value - expected) <= tolerance * std::max(1., std::abs(expected)), message);
 }
-modem::RawBits symbol_bits(unsigned value, unsigned width) {
-    modem::RawBits result;
-    for (unsigned i = width; i; --i) result.bits.push_back(static_cast<std::uint8_t>((value >> (i - 1)) & 1U));
-    return result;
-}
 void exact_transmitter_templates() {
-    modem::Config config;
-    config.bandwidth_hz = 1100; // Nonintegral chip clock: last chip is partial.
-    for (const auto factor : {3U, 4U, 6U, 8U, 12U, 16U}) {
-        config.spreading_factor = factor;
-        for (unsigned mode = 0; mode != 3; ++mode) {
-            config.spreading_mode = modem::SpreadingMode::pattern;
-            config.scramble = mode == 1;
-            config.dsss = mode == 2;
-            config.spreading_seed[7] = 71; config.dsss_seed[3] = 19;
-            for (unsigned width = 2; width <= 6; ++width) {
-                config.constellation_bits = width;
-                const auto model = inspect_pattern_space(config, 40);
-                check(model.code.size() == factor && model.coefficients.size() == (1U << width),
-                      "inspection must retain the entire configured code and every symbol");
-                check(std::accumulate(model.chip_weights.begin(), model.chip_weights.end(), std::uint64_t{}) == model.symbol_samples,
-                      "all actual symbol samples must have exactly one chip weight");
-                for (unsigned value = 0; value < model.coefficients.size(); ++value) {
-                    modem::StreamingTransmitter transmitter(symbol_bits(value, width), config);
-                    std::vector<float> pcm(static_cast<std::size_t>(transmitter.total_samples()));
-                    check(transmitter.read(pcm) == pcm.size() && transmitter.finished(), "fixture must emit precisely one complete raw symbol");
-                    std::vector<std::complex<double>> analytic(pcm.size());
-                    transmitter.preview_last_analytic(analytic);
-                    for (std::size_t sample = 0; sample < analytic.size(); ++sample) {
-                        const auto chip = static_cast<std::size_t>((sample / model.chip_samples) % model.code.size());
-                        const auto oscillator = std::polar(1., 2 * std::numbers::pi * config.carrier_hz * static_cast<double>(sample) / config.sample_rate);
-                        const auto expected = model.coefficients[value] * static_cast<double>(model.code[chip]) * oscillator;
-                        check(std::abs(analytic[sample] - expected) < 1e-11,
-                              "every inspected phase/amplitude chip must match the real transmitter's analytic carrier");
-                        near(pcm[sample], expected.real(), "inspected templates must match transmitted real PCM", 4e-8);
-                    }
+    modem::Config config;config.bandwidth_hz=1100;
+    for(const auto factor:{3U,4U,8U,16U,128U}) {
+        config.spreading_factor=factor;
+        for(unsigned mode=0;mode<4;++mode) {
+            config.scramble=(mode&1U)!=0;config.dsss=(mode&2U)!=0;
+            config.spreading_seed[7]=71;config.dsss_seed[3]=19;
+            const auto model=inspect_pattern_space(config,40);
+            check(model.codewords.size()==2 && model.coefficients.size()==2,
+                  "inspection must retain both independent bit patterns");
+            check(std::accumulate(model.chip_weights.begin(),model.chip_weights.end(),std::uint64_t{})==model.symbol_samples,
+                  "all illustrated samples must have exactly one chip weight");
+            for(unsigned bit=0;bit<2;++bit) {
+                modem::PatternTransmitter transmitter(Bytes{static_cast<std::uint8_t>(bit)},config,0,0,false);
+                std::vector<std::complex<double>> analytic(transmitter.total_samples());
+                check(transmitter.read_analytic(analytic)==analytic.size() && transmitter.finished(),
+                      "fixture must emit one complete independent pattern");
+                for(std::size_t sample=0;sample<analytic.size();++sample) {
+                    const auto chip=sample/model.chip_samples;
+                    const auto oscillator=std::polar(1.,2*std::numbers::pi*config.carrier_hz*static_cast<double>(sample)/config.sample_rate);
+                    check(std::abs(analytic[sample]-model.chip_value(bit,chip)*oscillator)<1e-10,
+                          "illustrated variable-amplitude I/Q chips differ from the real analytic transmitter");
                 }
-                for (std::size_t i = 0; i < model.coefficients.size(); ++i)
-                    for (std::size_t j = 0; j < i; ++j) {
-                        double integrated_distance = 0;
-                        for (std::size_t k = 0; k < model.code.size(); ++k) {
-                            const auto a = model.coefficients[i] * static_cast<double>(model.code[k]);
-                            const auto b = model.coefficients[j] * static_cast<double>(model.code[k]);
-                            integrated_distance += std::norm(a - b) * static_cast<double>(model.chip_weights[k]) / config.sample_rate;
-                        }
-                        near(model.squared_distance(i, j), integrated_distance, "whole-pattern distances must equal full weighted complex-vector distances");
-                        near(model.noise_squared_distance(i, j), integrated_distance * 10000 / modem::nominal_signal_power,
-                             "statistical distance must use the whole-symbol AWGN model");
-                    }
-                near(model.minimum_squared_distance, model.squared_distance(model.nearest_symbols.first, model.nearest_symbols.second),
-                     "precomputed nearest pair must retain the complete-pattern metric");
-                near(model.minimum_noise_squared_distance, model.noise_squared_distance(model.nearest_symbols.first, model.nearest_symbols.second),
-                     "display-ready nearest distance must use the same noise model");
             }
+            double integrated=0;
+            for(std::size_t chip=0;chip<model.code.size();++chip)
+                integrated+=std::norm(model.chip_value(0,chip)-model.chip_value(1,chip))*static_cast<double>(model.chip_weights[chip])/config.sample_rate;
+            near(model.squared_distance(0,1),integrated,"pattern distance must retain actual chip amplitudes and partial-sample weights");
+            near(model.noise_squared_distance(0,1),integrated*10000/modem::nominal_signal_power,
+                 "statistical distance must use the illustrated pattern energy");
         }
-    }
-}
-void weighted_evidence(const PatternSpace& model) {
-    auto examine = [&](const auto& evidence) {
-        check(evidence.code.size() == model.code.size(), "comparison must retain every code chip");
-        long double dot = 0, residual = 0;
-        for (std::size_t i = 0; i < model.code.size(); ++i)
-            dot += static_cast<long double>(model.chip_weights[i]) * model.code[i] * evidence.code[i];
-        const auto correlation = static_cast<double>(dot / model.symbol_samples);
-        for (std::size_t i = 0; i < model.code.size(); ++i) {
-            const auto error = evidence.code[i] - correlation * model.code[i];
-            residual += static_cast<long double>(model.chip_weights[i]) * error * error;
-        }
-        near(evidence.correlation, correlation, "matched filter correlation must use exact partial/repeated chip weights");
-        near(evidence.residual_fraction, static_cast<double>(residual / model.symbol_samples),
-             "unused-pattern residual must fit out an arbitrary complex scalar, including global sign");
-        near(evidence.squared_distance, 2 * model.symbol_seconds * (1 - std::abs(correlation)),
-             "comparison distance must use equal unit amplitude and the best common phase");
-    };
-    examine(model.one_chip_shift);
-    if (model.unused_pattern) {
-        examine(*model.unused_pattern);
-        check(model.unused_pattern->residual_fraction > 0,
-              "an unused example must not be the valid code multiplied by any complex scalar");
     }
 }
 void durations_and_modes() {
-    modem::Config config;
-    config.spreading_factor = 3; config.integration_seconds = 77.25 / config.sample_rate;
-    auto model = inspect_pattern_space(config, 0);
-    check(model.symbol_samples == 78 && model.chip_samples == 10 && model.complete_periods == 2 && model.tail_samples == 18,
-          "quantized duration must include whole periods and a partial final chip");
-    check(model.chip_weights == std::vector<std::uint64_t>{30, 28, 20}, "weights must account for the partial final repetition exactly");
-    weighted_evidence(model);
-    near(model.processing_gain_db, 10 * std::log10(7.8), "integration gain includes fractional chips");
-    near(model.symbol_esn0_db - model.chip_esn0_db, model.processing_gain_db, "chip and symbol SNR must share the same C/N0");
-    config.integration_seconds = 4.25 / config.sample_rate;
-    model = inspect_pattern_space(config, 0);
-    check(model.chip_weights == std::vector<std::uint64_t>{5, 0, 0} && !model.unused_pattern,
-          "untransmitted code positions must not invent observable off-code directions");
-    check(!model.code_selective && !model.timing_selective, "a single effective chip cannot provide chip-code timing evidence");
-    weighted_evidence(model);
-
-    for (const auto factor : {1U, 2U, 3U, 4U, 8U, 32U, 128U, 1024U, 4096U, 16384U}) {
-        config.spreading_factor = factor; config.integration_seconds = 0;
-        model = inspect_pattern_space(config, -10);
-        check(model.unused_pattern.has_value() == (factor > 1), "multichip patterns retain off-code comparison directions");
-        near(model.processing_gain_db, 10 * std::log10(factor), "full-pattern coherent integration gain follows its duration");
-        weighted_evidence(model);
+    modem::Config config;config.spreading_factor=3;config.integration_seconds=77.25/config.sample_rate;
+    auto model=inspect_pattern_space(config,0);
+    check(model.symbol_samples==78 && model.chip_samples==10 &&
+          model.chip_weights==std::vector<std::uint64_t>({10,10,10,10,10,10,10,8}),
+          "pattern preview must retain absolute chips including the partial final chip");
+    near(model.processing_gain_db,10*std::log10(7.8),"integration gain includes fractional chips");
+    near(model.symbol_esn0_db-model.chip_esn0_db,model.processing_gain_db,"chip and symbol SNR share the same C/N0");
+    config.integration_seconds=4.25/config.sample_rate;
+    model=inspect_pattern_space(config,0);
+    check(model.chip_weights==std::vector<std::uint64_t>{5} && !model.code_selective && !model.timing_selective,
+          "a single illustrated chip cannot establish chip sequence timing");
+    config.integration_seconds=0;config.spreading_factor=128;config.scramble=true;
+    model=inspect_pattern_space(config,0);
+    modem::PatternCode generator(config);const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
+    std::complex<double> dot{};double energy=0,shifted_energy=0;
+    for(std::size_t chip=0;chip<model.code.size();++chip) {
+        const auto weight=static_cast<double>(model.chip_weights[chip])/model.symbol_samples;
+        const auto value=model.chip_value(0,chip),shifted=amplitude*generator.value(chip+1,0,.5);
+        dot+=weight*value*std::conj(shifted);energy+=weight*std::norm(value);shifted_energy+=weight*std::norm(shifted);
     }
-    config.spreading_mode = modem::SpreadingMode::pattern; config.spreading_factor = 1;
-    model = inspect_pattern_space(config, 0);
-    check(!model.unused_pattern && !model.code_selective && !model.timing_selective,
-          "a one-chip pattern must reveal its degenerate code geometry");
-    config.spreading_factor = 16;
-    model = inspect_pattern_space(config, 0);
-    check(model.code_selective && model.timing_selective && model.unused_pattern,
-          "a full changing-sign pattern must expose off-code and timing residual evidence");
-    weighted_evidence(model);
-    auto alternating = config; alternating.spreading_factor = 2; alternating.scramble = true;
-    bool found_alternating = false;
-    for (unsigned seed = 0; seed < 256 && !found_alternating; ++seed) {
-        alternating.spreading_seed[0] = static_cast<std::uint8_t>(seed);
-        const auto candidate = inspect_pattern_space(alternating, 0);
-        if (!candidate.code_selective) continue;
-        found_alternating = true;
-        near(candidate.one_chip_shift.correlation, -1, "an antipodal code shift is the same legal complex subspace");
-        check(!candidate.timing_selective && candidate.unused_pattern,
-              "global sign ambiguity must remove one-chip timing evidence without removing true off-code examples");
-        weighted_evidence(candidate);
-    }
-    check(found_alternating, "deterministic fixture must find a two-chip alternating keyed pattern");
-    auto other = config; other.sample_rate *= 2;
-    const auto same_time = inspect_pattern_space(other, 0);
-    near(same_time.squared_distance(0, 1), model.squared_distance(0, 1), "physical distance must not depend on hardware/sample clock");
-    near(same_time.noise_squared_distance(0, 1), model.noise_squared_distance(0, 1), "noise distance must not depend on sample clock");
-    other.integration_seconds = model.symbol_seconds * 4;
-    const auto slow = inspect_pattern_space(other, 0);
-    near(slow.noise_squared_distance(0, 1), slow.symbol_seconds / model.symbol_seconds * model.noise_squared_distance(0, 1),
-         "coherent time integration must increase squared noise distance linearly with actual quantized duration");
+    const auto correlation=std::abs(dot)/std::sqrt(energy*shifted_energy);
+    near(model.one_chip_shift.correlation,correlation,"timing correlation must normalize the energy of both variable-amplitude patterns");
+    near(model.one_chip_shift.residual_fraction,1-correlation*correlation,"timing residual must fit arbitrary complex gain");
+    check(model.code_selective && model.timing_selective,"private pattern preview lost timing evidence");
 }
 void bounded_and_public_illustration() {
-    modem::Config config; config.spreading_factor = 16384; config.constellation_bits = 6;
+    modem::Config config; config.spreading_factor = 16384;
     config.integration_seconds = 1e8; config.scramble = true; config.dsss = true;
     config.spreading_seed[1] = 71; config.dsss_seed[11] = 34;
     const auto private_model = inspect_pattern_space(config, -60);
     const auto public_model = inspect_pattern_space(config, -60, true);
     check(!private_model.representative_keyed && public_model.representative_keyed,
           "public illustrations must be explicitly distinguished from the caller's real configured seeds");
-    check(public_model.code != private_model.code && public_model.code.size() == 16384 && public_model.coefficients.size() == 64,
+    check(public_model.code != private_model.code && public_model.code.size() == 16384 && public_model.coefficients.size() == 2,
           "very slow large patterns must retain only one bounded code period and the small symbol alphabet");
-    config.spreading_seed.fill(197); config.dsss_seed.fill(21);
+    config.spreading_seed.fill(197); config.dsss_seed.fill(21);config.stream_epoch=987654321;
     const auto another = inspect_pattern_space(config, -60, true);
-    check(public_model.code == another.code, "representative public code must not depend on private configuration seeds");
-    weighted_evidence(public_model);
+    check(public_model.codewords == another.codewords, "representative public code must not depend on private configuration seeds or epoch");
     config.integration_seconds = 0;
     const auto weak_chip = inspect_pattern_space(config, 10, true);
     check(weak_chip.chip_esn0_db < 0 && weak_chip.symbol_esn0_db > 10,
@@ -201,7 +122,7 @@ void binary_pattern_preview() {
 int main() {
     try {
         exact_transmitter_templates(); durations_and_modes(); bounded_and_public_illustration();binary_pattern_preview();
-        std::cout << "Static full-pattern space tests passed\n";
+        std::cout << "Static pattern space tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n'; return 1;
     }

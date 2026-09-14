@@ -56,7 +56,7 @@ Estimate estimate(const Message& message, const Options& options, PacketLayout* 
 // Input elements are individual 0/1 bits. Byte estimates are ceil(bits/8)
 // storage equivalents; payload time excludes that prefix, total time includes it.
 Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& options);
-// Uses the selected pattern or legacy APSK modem. A selected key masks
+// Uses the one-bit pattern modem. A selected non-tone key masks
 // MSB-first bits with its data stream at options.timestamp; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
@@ -90,24 +90,6 @@ std::size_t packet_workspace_limit(std::size_t content_limit);
 // Callbacks own their key material and remain valid after Options is destroyed.
 PacketOptions packet_options(const Options& options, std::uint64_t timestamp);
 modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
-// Public, reversible audio-frame whitening; this is not encryption. Offsets
-// include the fixed 32-byte training prefix, which is left untouched. Apply
-// after encryption on TX and before decryption on RX, with no added bytes.
-void xor_audio_whitening(std::span<std::uint8_t> bytes, std::uint64_t wire_offset = 0);
-// Combined public whitening/private data-stream mask for bootstrap and the
-// start of whole-frame checks. Cache once per receiver; larger frames unmask
-// their remainder with bounded scratch. This cache adds no frame bytes.
-inline constexpr std::size_t audio_validation_limit = 2048;
-inline constexpr std::size_t audio_validation_workspace = audio_validation_limit + 4096;
-Bytes audio_bootstrap_mask(const Options& options, std::uint64_t timestamp);
-struct AudioValidators {
-    modem::BootstrapValidator bootstrap;
-    modem::PacketValidator packet;
-};
-// Both callbacks own their key/mask and inspect bytes following training.
-// Bootstrap returns the declared whole-frame extent; packet requires full
-// integrity/authentication and checks the admitted original-content limit.
-AudioValidators audio_validators(const Options& options, std::uint64_t timestamp);
 Bytes pack(const Message& message, const Options& options);
 Bytes transmission_wire(const Message& message, const Options& options);
 DecodedPacket unpack(const Bytes& wire, const Options& options);

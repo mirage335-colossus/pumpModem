@@ -26,6 +26,70 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+void tone_mode_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    for(const auto mode:tuning::pattern_modes()) {
+        const std::string name(tuning::pattern_mode_name(mode));
+        if(name!="auto-tone" && !name.starts_with("tone-"))continue;
+        controller.select(F::pattern,name);
+        check(controller.field(F::key).selected=="none" && !controller.field(F::key).enabled &&
+              !controller.settings().transfer.key && controller.settings().receive_keys.empty() &&
+              !controller.settings().transfer.modem.scramble && !controller.settings().transfer.modem.dsss,
+              "Tone selection retained private modulation or permitted key selection");
+        check(controller.field(F::status).text.find("unencrypted")!=std::string::npos,
+              "Tone selection did not explain that encryption is off");
+    }
+    controller.select(F::pattern,"auto-pattern");
+    check(controller.field(F::key).enabled && controller.field(F::key).selected=="none",
+          "Leaving tone mode failed to restore the key selector with encryption off");
+}
+void tone_key_controls() {
+    using F=ui::Field;using C=ui::Command;
+    struct TemporaryKeyring {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-tone-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    create_keyring(fixture.path,{"Tone policy"});
+    Controller controller({true,true});
+    const auto load=[&] {
+        controller.activate(C::open_keyfile);
+        const auto requests=controller.take_services();
+        check(requests.size()==1 && requests.front().kind==ui::ServiceKind::open_file,
+              "Tone policy test did not receive its keyfile chooser");
+        controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+        while((!controller.enabled(C::open_keyfile)||!controller.estimate()) && std::chrono::steady_clock::now()<deadline) {
+            controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        check(controller.enabled(C::open_keyfile)&&controller.estimate().has_value()&&
+              !controller.enabled(C::acknowledge_key_failure),"Tone policy keyfile load did not complete");
+    };
+    load();
+    check(controller.settings().transfer.key && controller.settings().receive_keys.size()==1,
+          "Production keyfile did not activate private transmission and reception");
+    for(const auto mode:tuning::pattern_modes()) {
+        const std::string name(tuning::pattern_mode_name(mode));
+        if(!tuning::tone_mode(mode))continue;
+        controller.select(F::pattern,name);
+        check(controller.field(F::key).selected=="none"&&!controller.field(F::key).enabled&&
+              !controller.settings().transfer.key&&controller.settings().receive_keys.empty()&&
+              !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
+              "Switching from encryption to tone retained private key or modulation state");
+        controller.select(F::key,"key:Tone policy");
+        check(!controller.settings().transfer.key,"Tone permitted a disabled key selection to restore encryption");
+        controller.select(F::pattern,"auto-pattern");
+        check(controller.field(F::key).enabled&&!controller.settings().transfer.key,
+              "Leaving tone silently restored encryption");
+        controller.select(F::key,"key:Tone policy");
+        check(controller.settings().transfer.key.has_value(),"Leaving tone lost the loaded key entry");
+    }
+    controller.select(F::pattern,"auto-tone");load();
+    check(controller.field(F::key).selected=="none"&&!controller.field(F::key).enabled&&
+          !controller.settings().transfer.key&&controller.settings().receive_keys.empty(),
+          "Loading a keyfile while tone re-enabled private transmission or reception");
+}
 void composer_conveniences() {
     using F=ui::Field; using C=ui::Command;
     Controller controller({true,true});
@@ -860,6 +924,8 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        tone_mode_controls();
+        tone_key_controls();
         composer_conveniences();
         repeatable_message_identity();
         previous_message_controls();

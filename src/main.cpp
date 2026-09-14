@@ -398,7 +398,7 @@ void listen(const Args& a,const transfer::Options& options) {
     settings.simulation_seed=a.integer("seed",1);
     settings.simulation_clock_error_ppm=a.number("clock-error-ppm",100);
     settings.simulation_phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
-    if(a.has("keyfile") && !a.has("key-name")) {
+    if(options.modem.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile") && !a.has("key-name")) {
         for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
             std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
     }
@@ -491,7 +491,10 @@ int main(int argc,char** argv) {
         }
         const std::set<std::string> commands={"pack","unpack","tx","rx","simulate","status-tx","status-rx","estimate","listen"};
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
-        auto c=config(a);auto timestamp=epoch(a);auto k=key(a);
+        auto c=config(a);auto timestamp=epoch(a);
+        auto k=c.spreading_mode==modem::SpreadingMode::tone?std::optional<Crypto>{}:key(a);
+        if(c.spreading_mode==modem::SpreadingMode::tone && a.has("keyfile"))
+            std::cerr<<"Tone mode is unencrypted; key selection is disabled.\n";
         auto settings=transfer_options(a,c,k,timestamp);
         transfer::Progress progress;
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
@@ -525,41 +528,29 @@ int main(int argc,char** argv) {
             report(a,transfer::unpack(input_bytes(a),settings),{},timestamp);return 0;
         }
         if(a.command=="status-tx" || a.command=="status-rx") {
-            if(c.pattern_symbols) {
-                const auto plain=status_bits(a,{},timestamp);
-                if(a.command=="status-tx") {
-                    if(!a.has("output") && !a.has("device"))throw Error("status-tx requires --output or --device");
-                    auto source=transfer::binary_transmitter(plain,settings);
-                    if(a.has("output")) {
-                        if(source->total_samples()>c.memory_limit/sizeof(float))throw Error("status WAV exceeds the configured waveform memory limit");
-                        std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
-                        for(std::size_t offset=0;offset<samples.size();)offset+=source->read(std::span(samples).subspan(offset,std::min<std::size_t>(4096,samples.size()-offset)));
-                        output_wave(a,samples,c);
-                    } else {
-                        const auto delay=a.number("tx-delay",6);
-                        if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
-                        audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source->read(chunk);},{},audio_passband_guard(c));
-                        if(k)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
-                    }
-                } else {
-                    auto wav=input_wav(a);settings.modem.sample_rate=wav.sample_rate;modem::validate(settings.modem);
-                    const auto result=transfer::receive(wav.samples,settings,progress);
-                    std::cout<<"{\"authenticated\":false,\"packet_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
-                    for(auto bit:result.raw_bits)std::cout<<(bit?'1':'0');
-                    std::cout<<"\",\"raw_bit_count\":"<<result.raw_bits.size()<<",\"known_bits_match\":"<<(result.raw_bits==plain?"true":"false")<<",\"pattern_score\":";
-                    if(result.diagnostics.pattern_score && std::isfinite(*result.diagnostics.pattern_score))std::cout<<*result.diagnostics.pattern_score;else std::cout<<"null";
-                    std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
-                }
-                return 0;
-            }
-            c=transfer::seeded_config(settings,timestamp);auto bits=status_bits(a,k,timestamp);
+            const auto plain=status_bits(a,{},timestamp);
             if(a.command=="status-tx") {
-                if(!a.has("output") && !a.has("device")) throw Error("status-tx requires --output or --device");
-                output_wave(a,modem::modulate_status(bits,c),c);
+                if(!a.has("output") && !a.has("device"))throw Error("status-tx requires --output or --device");
+                auto source=transfer::binary_transmitter(plain,settings);
+                if(a.has("output")) {
+                    if(source->total_samples()>c.memory_limit/sizeof(float))throw Error("status WAV exceeds the configured waveform memory limit");
+                    std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
+                    for(std::size_t offset=0;offset<samples.size();)offset+=source->read(std::span(samples).subspan(offset,std::min<std::size_t>(4096,samples.size()-offset)));
+                    output_wave(a,samples,c);
+                } else {
+                    const auto delay=a.number("tx-delay",6);
+                    if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
+                    audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source->read(chunk);},{},audio_passband_guard(c));
+                    if(k)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+                }
             } else {
-                auto wav=input_wav(a);c.sample_rate=wav.sample_rate;modem::validate(c);
-                auto correlation=modem::detect_status(wav.samples,bits,c);
-                std::cout<<"{\"authenticated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"correlation\":"<<correlation<<"}\n";
+                auto wav=input_wav(a);settings.modem.sample_rate=wav.sample_rate;modem::validate(settings.modem);
+                const auto result=transfer::receive(wav.samples,settings,progress);
+                std::cout<<"{\"authenticated\":false,\"packet_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
+                for(auto bit:result.raw_bits)std::cout<<(bit?'1':'0');
+                std::cout<<"\",\"raw_bit_count\":"<<result.raw_bits.size()<<",\"known_bits_match\":"<<(result.raw_bits==plain?"true":"false")<<",\"pattern_score\":";
+                if(result.diagnostics.pattern_score && std::isfinite(*result.diagnostics.pattern_score))std::cout<<*result.diagnostics.pattern_score;else std::cout<<"null";
+                std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
             }
             return 0;
         }
@@ -583,8 +574,7 @@ int main(int argc,char** argv) {
                 if(settings.key)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
             } else output_wave(a,transfer::transmit(outgoing,settings),c);
             std::cerr<<"Transmitted ";
-            if(c.pattern_symbols)std::cerr<<estimate.waveform_samples/modem::symbol_sample_count(c)<<" pattern bits, ";
-            else std::cerr<<estimate.packet_bytes<<" frame bytes, ";
+            std::cerr<<estimate.waveform_samples/modem::symbol_sample_count(c)<<" pattern bits, ";
             std::cerr<<estimate.total_seconds
                      <<" seconds; start epoch "<<timestamp<<'\n';return 0;
         }

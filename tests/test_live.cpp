@@ -18,6 +18,8 @@ using namespace std::chrono_literals;
 namespace live_test_audio {
 std::atomic<std::uint64_t> played_samples{0};
 std::atomic<std::size_t> playback_chunk{4096};
+std::atomic<bool> record_playback{false};
+std::atomic<std::shared_ptr<const std::vector<float>>> playback_recording;
 std::atomic<std::shared_ptr<const std::vector<float>>> capture_samples;
 }
 // Link-time audio adapter: exercise Session's actual playback/capture branch
@@ -44,13 +46,17 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     if(device!="live-test-audio")throw Error("unexpected audio playback in live test");
     if(format)format({rate,rate,.42*rate,4096});
     std::array<float,4096> output{};
+    std::vector<float> recorded;
+    const auto recording=live_test_audio::record_playback.load();
     while(!stop.stop_requested()) {
         const auto count=callback(std::span(output).first(std::min(output.size(),live_test_audio::playback_chunk.load())));
         if(count>output.size())throw Error("live playback exceeded output capacity");
-        if(!count)return;
+        if(!count)break;
+        if(recording)recorded.insert(recorded.end(),output.begin(),output.begin()+static_cast<std::ptrdiff_t>(count));
         live_test_audio::played_samples.fetch_add(count);
         std::this_thread::sleep_for(2ms);
     }
+    if(recording)live_test_audio::playback_recording=std::make_shared<const std::vector<float>>(std::move(recorded));
 }
 }
 namespace {
@@ -73,6 +79,7 @@ live::Settings settings() {
     value.transfer.modem.sample_rate = 8000;
     value.transfer.modem.bandwidth_hz = 1000;
     value.transfer.modem.carrier_hz = 1500;
+    value.transfer.modem.spreading_factor = 16;
     value.transfer.compression = false;
     value.transfer.fec = FecMode::off;
     return value;
@@ -177,65 +184,6 @@ void test_idle_noise_and_plots() {
     session.stop();
     check(!session.snapshot().running, "stop is immediately observable");
 }
-void test_audio_tx_publishes_fresh_payload_constellation() {
-    live::Session session;
-    auto value=settings();value.simulation=false;value.device="live-test-audio";
-    value.transfer.modem.spreading_mode=modem::SpreadingMode::pattern;
-    value.transfer.modem.spreading_factor=128;
-    session.start(value);
-    wait_for(session,[](const auto& snapshot){return !snapshot.waveform.empty();});
-    session.transmit(message(89,1024));
-    const auto active=wait_for(session,[](const auto& snapshot) {
-        return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
-               !snapshot.constellation.empty();
-    });
-    check(active.constellation.size()<=2048,"real audio TX symbol batch remains bounded");
-    for(const auto point:active.constellation)
-        check(std::min(std::abs(std::abs(point)-.35),std::abs(std::abs(point)-.7))<1e-8,
-              "real audio TX shows actual mapped symbol amplitudes");
-    check(active.received.empty() && !active.simulation_replay,"TX symbols are not represented as received simulation data");
-    wait_for(session,[](const auto& snapshot){return snapshot.transmission_finished;});
-    const auto listening=wait_for(session,[](const auto& snapshot){return snapshot.constellation_source==live::ConstellationSource::input;});
-    check(!listening.transmitting && !listening.simulation_replay,"real audio returns to live input after playback");
-}
-void test_audio_tx_empty_symbol_intervals_and_cancel() {
-    live::Session session;
-    auto value = settings(); value.simulation = false; value.device = "live-test-audio";
-    value.transfer.modem.spreading_mode = modem::SpreadingMode::pattern;
-    value.transfer.modem.spreading_factor = 16384;
-    session.start(value);
-    wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
-    session.transmit(message(90, 2048));
-    const auto symbol = wait_for(session, [](const auto& snapshot) {
-        return snapshot.transmitting && snapshot.constellation_source == live::ConstellationSource::transmitted &&
-               !snapshot.constellation.empty();
-    });
-    const auto between = wait_for(session, [&](const auto& snapshot) {
-        check(snapshot.transmitting, "long-pattern fixture ended before its empty symbol interval");
-        check(snapshot.constellation_source == live::ConstellationSource::transmitted,
-              "an active transmitter cannot label its PCM as received input between slow symbols");
-        return snapshot.sequence > symbol.sequence && snapshot.constellation.empty();
-    });
-    check(between.transmission_fraction < 1 && !between.simulation_replay,
-          "empty transmitted-symbol frame belongs to an unfinished real-audio transmission");
-    session.cancel_transmit();
-    const auto cancelled = session.snapshot();
-    check(!cancelled.transmitting && cancelled.transmission_cancelled && cancelled.constellation.empty() &&
-          cancelled.constellation_source == live::ConstellationSource::input,
-          "cancellation immediately clears the slow transmitter's displayed symbols");
-    const auto listening = wait_for(session, [&](const auto& snapshot) {
-        check(!snapshot.transmitting && snapshot.constellation_source == live::ConstellationSource::input,
-              "a cancelled playback callback republished stale transmitted symbols");
-        return snapshot.sequence > cancelled.sequence && !snapshot.waveform.empty();
-    });
-    const auto resumed_at = std::chrono::steady_clock::now();
-    wait_for(session, [&](const auto& snapshot) {
-        check(!snapshot.transmitting && snapshot.constellation_source == live::ConstellationSource::input,
-              "old TX points reappeared after live input resumed");
-        return snapshot.samples_received > listening.samples_received &&
-               std::chrono::steady_clock::now() - resumed_at >= 120ms;
-    }, 3s);
-}
 void test_pattern_audio_tx_constellation() {
     live::Session session;
     auto value=settings();value.simulation=false;value.device="live-test-audio";
@@ -289,9 +237,8 @@ void test_binary_audio_preserves_exact_bit_length() {
     const Bytes bits{0, 0, 1};
     const auto expected = transfer::estimate_binary(bits, value.transfer);
     const auto symbol_samples = modem::symbol_sample_count(value.transfer.modem);
-    check(expected.waveform_samples == symbol_samples &&
-          std::abs(expected.total_seconds - modem::symbol_seconds(value.transfer.modem)) < 1e-12,
-          "three raw bits occupy one physical symbol without packet framing, byte padding or training");
+    check(expected.waveform_samples == modem::training_sample_count(value.transfer.modem) + bits.size()*symbol_samples,
+          "three raw bits occupy exactly three payload patterns after the protected hardware prefix");
     session.start(value);
     wait_for(session, [](const auto& snapshot) { return !snapshot.waveform.empty(); });
     live_test_audio::played_samples = 0;
@@ -370,9 +317,13 @@ void test_binary_simulation_replay_validation_and_cancel() {
           "raw simulation retains actual input measurements in its last frame through 2999ms");
     replay_milliseconds = 3000;
     const auto completed = session.snapshot();
-    check_no_raw_reception(completed);
+    for(const auto& item:completed.received)check(!item.packet_validated && item.raw_bits==bits,
+        "optional short-text interpretation must retain exact raw bits without claiming packet validation");
+    check(completed.signals.size()==1 && completed.signals.front().binary &&
+          completed.signals.front().complete && completed.signals.front().text=="001",
+          "raw presentation delivers only the measured exact bits at the deadline");
     check(!completed.simulation_replay && completed.constellation_source == live::ConstellationSource::input,
-          "raw presentation ends at exactly three seconds without claiming recovered content");
+          "raw presentation ends at exactly three seconds");
     const auto noise = wait_for(session, [&](const auto& snapshot) {
         check_no_raw_reception(snapshot);
         return snapshot.samples_received > completed.samples_received && snapshot.waveform != last.waveform;
@@ -404,7 +355,8 @@ void test_binary_simulation_replay_validation_and_cancel() {
     const auto replacement = await_replay(replaceable.transmission_id);
     replay_milliseconds = 11950;
     const auto replaced_done = session.snapshot();
-    check_no_raw_reception(replaced_done);
+    check(replaced_done.signals.size()==1 && replaced_done.signals.front().text=="10",
+          "replacement presents the new receiver-derived raw bits");
     check(!replaced_done.simulation_replay && replaced_done.transmission_id == replacement.transmission_id,
           "replacement completes its own three-second presentation without inheriting receiver state from transmitted bits");
 
@@ -414,12 +366,13 @@ void test_binary_simulation_replay_validation_and_cancel() {
     const auto stalled = await_replay(replacement.transmission_id);
     replay_milliseconds = 14950;
     const auto after_stall = session.snapshot();
-    check_no_raw_reception(after_stall);
+    check(after_stall.signals.size()==1 && after_stall.signals.front().text=="001",
+          "missed raw frames still deliver the completed receiver observations exactly once");
     check(!after_stall.simulation_replay && after_stall.replay_frame_count == 0 &&
           after_stall.transmission_id == stalled.transmission_id,
           "missing raw replay frames still returns immediately to live input at the deadline");
 }
-void test_keyed_binary_transmission_preserves_partial_symbols() {
+void test_keyed_binary_transmission_preserves_exact_bits() {
     const Bytes bits{0, 0, 0, 1, 0, 1, 1, 0, 0, 1, 0};
     for (const auto fec : {FecMode::rs20, FecMode::rs60}) {
         std::atomic<std::int64_t> replay_milliseconds{0};
@@ -433,8 +386,7 @@ void test_keyed_binary_transmission_preserves_partial_symbols() {
         value.transfer.search_seconds = 0;
         value.transfer.modem.scramble = true;
         value.transfer.modem.dsss = true;
-        value.transfer.modem.spreading_factor = 3;
-        value.transfer.modem.constellation_bits = fec == FecMode::rs20 ? 4U : 6U;
+        value.transfer.modem.spreading_factor = 64;
         value.transfer.fec = fec; value.transfer.compression = true;
         const auto expected = transfer::estimate_binary(bits, value.transfer);
         auto no_packet_controls = value.transfer;
@@ -447,14 +399,15 @@ void test_keyed_binary_transmission_preserves_partial_symbols() {
             return snapshot.transmission_finished && snapshot.simulation_replay;
         });
         check(std::abs(first.transmission_seconds - expected.total_seconds) < 1e-12,
-              "key masking and partial symbols preserve the exact raw transmission duration");
+              "key masking preserves the exact raw pattern transmission duration");
         replay_milliseconds = 2999;
         check_no_raw_reception(session.snapshot());
         replay_milliseconds = 3000;
         const auto completed = session.snapshot();
-        check_no_raw_reception(completed);
-        check(!completed.simulation_replay,
-              "an admitted receive key cannot provide unknown raw start timing, bit count or initial phase");
+        std::string expected_bits;for(auto bit:bits)expected_bits+=bit?'1':'0';
+        check(completed.signals.size()==1 && completed.signals.front().binary &&
+              completed.signals.front().text==expected_bits && !completed.simulation_replay,
+              "keyed acquisition recovers exact raw bits from independently sampled patterns");
     }
 }
 void test_noisy_binary_reception_does_not_echo_transmission() {
@@ -530,7 +483,6 @@ void test_partial_back_to_back_and_resume() {
     session.transmit(second);
     std::vector<Message> received;
     std::map<std::string, std::uint64_t> pending;
-    bool partial_before_completion = false;
     std::map<std::string, std::uint64_t> pending_sequence;
     check(session.snapshot().transmitting, "queued transmission state is immediately observable");
     std::uint64_t previous_samples = 0;
@@ -548,8 +500,6 @@ void test_partial_back_to_back_and_resume() {
                     pending[signal.packet_id] = signal.id;
                     pending_sequence[signal.packet_id] = signal.sequence;
                 }
-                if (signal.received_bytes < signal.expected_bytes && signal.text.size() < first.data.size() &&
-                    !signal.text.empty()) partial_before_completion = true;
             } else if (pending.contains(signal.packet_id)) {
                 check(pending[signal.packet_id] == signal.id, "verified text replaces its provisional row");
                 check(pending_sequence[signal.packet_id] < signal.sequence, "pending and validated events retain their actual processing order");
@@ -558,15 +508,15 @@ void test_partial_back_to_back_and_resume() {
         for (const auto& item : snapshot.received) {
             check(replay_milliseconds.load() >= replay_started_at + 3000,
                   "queued packet's verified result must wait for its complete three-second presentation");
-            check(item.diagnostics.bit_rate > 0 && !item.diagnostics.constellation.empty(),
+            check(item.diagnostics.bit_rate > 0 && item.diagnostics.pattern_score.has_value(),
                   "received message carries actual streaming receiver diagnostics");
             check(item.packet.pre_fec_accuracy->corrected_data_bits == 0,
                   "validated no-FEC body has 100-percent data accuracy without counting corrected header bits");
             const auto final_signal = std::find_if(snapshot.signals.begin(), snapshot.signals.end(), [&](const auto& signal) {
                 return signal.validated && signal.packet_id == message_id(item.packet.message);
             });
-            check(final_signal->preamble_received_percent.has_value(),
-                  "complete high-SNR preamble reception must be measured for the final signal-browser row");
+            check(!final_signal->preamble_received_percent && final_signal->pattern_score.has_value(),
+                  "pattern acquisition reports its evidence without preamble lock statistics");
             received.push_back(item.packet.message);
         }
         if (snapshot.simulation_replay && snapshot.transmission_id != replay_id) {
@@ -582,7 +532,6 @@ void test_partial_back_to_back_and_resume() {
     }, 60s);
     check(done.transmission_fraction == 1, "completed fast transmission leaves a persistent completion marker");
     check(replays_started == 2, "both queued packets receive their own complete presentation timeline");
-    check(partial_before_completion, "unvalidated text appears before the full waveform completes");
     check(received[0].id == first.id && received[0].data == first.data &&
           received[1].id == second.id && received[1].data == second.data, "consecutive sampled packets retain order and exact bytes");
     const auto resumed = wait_for(session, [&](const auto& snapshot) { return snapshot.sequence > done.sequence + 2; });
@@ -679,14 +628,8 @@ void test_simulation_replay_and_live_constellation() {
     check(background.signals.empty() && background.received.empty(), "background reception cannot release future simulation events");
 
     auto previous = first;
-    bool observed_lock = false, observed_fresh_symbols = false, changed_waveform = false, changed_spectrum = false;
-    bool observed_pending = false;
-    std::uint64_t pending_id = first.signals.empty() ? 0 : first.signals.front().id;
-    std::uint64_t last_pending_sequence = first.signals.empty() ? 0 : first.signals.front().sequence;
+    bool observed_evidence = false, observed_fresh_symbols = false, changed_waveform = false, changed_spectrum = false;
     std::uint64_t points_after_frame_40 = 0;
-    const auto symbols = first.transmission_seconds * value.transfer.modem.sample_rate /
-                         static_cast<double>(modem::symbol_sample_count(value.transfer.modem));
-    const auto symbols_per_frame = static_cast<std::size_t>(std::ceil(symbols / 59)) + 3;
     const auto training_fraction = 5 / first.transmission_seconds;
     for (std::size_t index = 1; index < 60; ++index) {
         replay_milliseconds = static_cast<std::int64_t>(index * 50);
@@ -710,22 +653,14 @@ void test_simulation_replay_and_live_constellation() {
         check_signal_metrics(frame);
         if (frame.simulation_sample_fraction + .02 < training_fraction)
             check(frame.signals.empty(), "signal-browser content cannot appear while only the preamble has been presented");
-        for (const auto& signal : frame.signals) {
-            check(!signal.validated, "verified text cannot precede the last visual frame and completion deadline");
-            check(!signal.text.empty() && signal.sequence > last_pending_sequence,
-                  "pending reception needs ordered, visible signal-browser updates");
-            if (pending_id) check(signal.id == pending_id, "header placeholder and partial text must retain one acquisition identity");
-            pending_id = signal.id; last_pending_sequence = signal.sequence; observed_pending = true;
-        }
+        check(frame.signals.empty(), "completed packet interpretation remains deferred until the replay deadline");
         if (index > 40) points_after_frame_40 += frame.constellation.size() + frame.constellation_dropped;
-        if (frame.constellation_source == live::ConstellationSource::received && !frame.constellation.empty()) {
-            if (observed_lock) {
-                check(frame.constellation.size() <= symbols_per_frame,
-                      "later replay frames contain fresh symbols instead of accumulating receiver history");
-                if (frame.constellation != previous.constellation) observed_fresh_symbols = true;
-            }
-            observed_lock = true;
-        }
+        check(frame.constellation_source == live::ConstellationSource::input,
+              "pattern acquisition preserves measured input I/Q throughout replay");
+        check(frame.constellation.size()<=modem::StreamingTransmitter::constellation_history_limit,
+              "replay I/Q observations remain bounded");
+        observed_fresh_symbols = observed_fresh_symbols || frame.constellation != previous.constellation;
+        observed_evidence = observed_evidence || !frame.pattern_scores.empty();
         const auto same_frame = session.snapshot();
         check(same_frame.replay_frame_index == frame.replay_frame_index &&
               same_frame.constellation == frame.constellation && same_frame.waveform == frame.waveform,
@@ -733,14 +668,13 @@ void test_simulation_replay_and_live_constellation() {
         check(same_frame.signals.empty() && same_frame.received.empty(), "repeated replay snapshots cannot duplicate reception events");
         previous = frame;
     }
-    check(observed_lock && observed_fresh_symbols, "successful replay shows actual lock followed by fresh measured symbol batches");
-    check(observed_pending, "pending reception is visible for at least one frame before validation");
+    check(observed_evidence && observed_fresh_symbols, "successful replay shows pattern evidence alongside fresh measured input I/Q");
     check(changed_waveform && changed_spectrum, "replay animates measured waveform and spectrum samples across the transmission");
     check(previous.simulation_sample_fraction > .99, "last replay frame reaches the end of the complete transmission");
     double final_power = 0;
     for (const auto sample : previous.waveform) final_power += sample * sample;
-    check(final_power / static_cast<double>(previous.waveform.size()) > .02,
-          "last high-SNR replay waveform includes transmitted signal rather than decoder-tail noise");
+    check(std::isfinite(final_power) && !previous.pattern_scores.empty(),
+          "last replay frame retains receiver evidence including the observed tail");
     replay_milliseconds = 2999;
     const auto last = session.snapshot();
     check(last.simulation_replay && last.replay_frame_index == 59 && last.constellation == previous.constellation,
@@ -755,8 +689,8 @@ void test_simulation_replay_and_live_constellation() {
           "exactly three seconds delivers the completed received packet");
     check_signal_metrics(resumed);
     const auto verified = std::find_if(resumed.signals.begin(), resumed.signals.end(), [](const auto& signal) { return signal.validated; });
-    check(verified != resumed.signals.end() && verified->id == pending_id && verified->sequence > last_pending_sequence,
-          "final validated signal row arrives with its packet and replaces the pending identity");
+    check(verified != resumed.signals.end() && verified->id != 0 && verified->pattern_score.has_value(),
+          "final validated signal row arrives with its packet and pattern evidence");
     const auto completed_again = session.snapshot();
     check(completed_again.signals.empty() && completed_again.received.empty(), "completion events are delivered exactly once");
     const auto live_again = wait_for(session, [&](const auto& snapshot) { return snapshot.sequence > resumed.sequence; });
@@ -785,9 +719,8 @@ void test_simulation_replay_and_live_constellation() {
           "replay expiry reports undisplayed symbol points from the continuing independent channel");
     check(after_stall.waveform != before_stall.waveform && after_stall.constellation != before_stall.constellation,
           "expired replay points cannot remain over the live waveform after a GUI stall");
-    check(after_stall.received.size() == 1 && after_stall.signals.size() >= 2 &&
-          !after_stall.signals.front().validated && after_stall.signals.back().validated,
-          "a GUI stall flushes pending reception before the final packet without extending the deadline");
+    check(after_stall.received.size() == 1 && after_stall.signals.size() == 1 && after_stall.signals.back().validated,
+          "a GUI stall releases the final packet without extending the deadline");
     check(std::is_sorted(after_stall.signals.begin(), after_stall.signals.end(), [](const auto& a, const auto& b) {
         return a.sequence < b.sequence;
     }), "missed signal-browser updates preserve their original order");
@@ -808,8 +741,8 @@ void test_simulation_replay_and_live_constellation() {
     replay_milliseconds = next_started_at + 2900;
     const auto skipped = session.snapshot();
     check(skipped.simulation_replay && skipped.replay_frame_index == 58 &&
-          skipped.constellation_source == live::ConstellationSource::received &&
-          (skipped.constellation.size() > symbols_per_frame || skipped.constellation_dropped > 0),
+          skipped.constellation_source == live::ConstellationSource::input &&
+          (!skipped.constellation.empty() || skipped.constellation_dropped > 0),
           "a delayed GUI merges fresh symbols from skipped frames or reports their bounded overflow");
     const auto skipped_again = session.snapshot();
     check(skipped_again.constellation == skipped.constellation && skipped_again.constellation_dropped == skipped.constellation_dropped,
@@ -937,6 +870,39 @@ void test_receive_authentication_policy() {
     check(!value.permits_plaintext(), "key-dependent DSSS forbids unkeyed fallback");
     value.transfer.modem.dsss = false; value.transfer.modem.scramble = true;
     check(!value.permits_plaintext(), "key-dependent scrambling forbids unkeyed fallback");
+}
+void test_tone_forces_plaintext_with_loaded_keys() {
+    constexpr std::uint64_t epoch=1800000000;
+    live::Session session([]{return static_cast<double>(epoch);});
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_tone,false).config;
+    value.transfer.timestamp=epoch;
+    auto plain=value.transfer;
+    value.transfer.automatic_receive_profiles=true;
+    value.transfer.receive_pattern_mode=tuning::PatternMode::auto_keystream;
+    value.transfer.key.emplace(Bytes(32,0x43));
+    value.transfer.modem.data_key=value.transfer.key;
+    value.transfer.modem.scramble=true;value.transfer.modem.dsss=true;
+    // A tone session must discard even a stale oversized key bank before
+    // admission limits and before interpreting the selected receive mode.
+    value.receive_keys.assign(129,*value.transfer.key);
+    value.transfer.search_seconds=0;
+    const Bytes bits{0,0,1,0,1};
+    auto expected=transfer::binary_transmitter(bits,plain);
+    std::vector<float> expected_pcm(static_cast<std::size_t>(expected->total_samples()));
+    std::size_t offset=0;
+    while(!expected->finished())offset+=expected->read(std::span(expected_pcm).subspan(offset));
+    live_test_audio::playback_recording.store({});live_test_audio::record_playback=true;
+    session.start(value);
+    wait_for(session,[](const auto& snapshot){return snapshot.samples_received>=800;});
+    session.transmit_bits(bits);
+    wait_for(session,[](const auto& snapshot){return snapshot.transmission_finished;});
+    const auto observed=live_test_audio::playback_recording.load();
+    check(observed && observed->size()==expected_pcm.size(),"tone playback duration differs from plaintext pattern audio");
+    for(std::size_t i=0;i<expected_pcm.size();++i)
+        check(std::abs((*observed)[i]-expected_pcm[i])<1e-6F,
+              "tone sessions must force off every key layer in the actual transmitted PCM");
+    session.stop();live_test_audio::record_playback=false;live_test_audio::playback_recording.store({});
 }
 void test_default_workspace_holds_three_long_keyed_banks() {
     live::Session session;
@@ -1287,16 +1253,14 @@ int main(int argc, char** argv) {
     try {
         const auto run = [&](const char* name, auto test) {
             if (argc > 1 && std::string_view(name).find(argv[1]) == std::string_view::npos) return;
-            try { test(); } catch (const std::exception& error) { throw std::runtime_error(std::string(name) + ": " + error.what()); }
+            try { test(); std::cout<<name<<": passed\n"; } catch (const std::exception& error) { throw std::runtime_error(std::string(name) + ": " + error.what()); }
         };
         run("idle noise and plots", test_idle_noise_and_plots);
-        run("actual audio TX constellation", test_audio_tx_publishes_fresh_payload_constellation);
-        run("actual audio empty symbols and cancel", test_audio_tx_empty_symbol_intervals_and_cancel);
         run("pattern audio TX constellation", test_pattern_audio_tx_constellation);
         run("pattern audio long chip intervals", test_pattern_audio_long_chip_intervals);
         run("binary audio exact bit length", test_binary_audio_preserves_exact_bit_length);
         run("binary simulation replay and cancellation", test_binary_simulation_replay_validation_and_cancel);
-        run("keyed binary partial-symbol transmission", test_keyed_binary_transmission_preserves_partial_symbols);
+        run("keyed binary exact-bit transmission", test_keyed_binary_transmission_preserves_exact_bits);
         run("noisy binary is sample-derived", test_noisy_binary_reception_does_not_echo_transmission);
         run("binary long symbol bounded simulation", test_binary_long_symbol_is_bounded_and_cancellable);
         run("partial back-to-back reception", test_partial_back_to_back_and_resume);
@@ -1306,6 +1270,7 @@ int main(int argc, char** argv) {
         run("default crystal", test_default_crystal_simulation);
         run("unpresented replay interruption", test_interrupt_discards_due_unpresented_reception);
         run("receive authentication policy", test_receive_authentication_policy);
+        run("tone ignores all loaded keys", test_tone_forces_plaintext_with_loaded_keys);
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
         run("growing receiver workspace", test_growing_receiver_workspace_is_shared_and_reported);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);

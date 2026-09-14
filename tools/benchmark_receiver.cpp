@@ -8,29 +8,23 @@
 
 // Generated PCM only: this benchmark never opens an audio device. Run without
 // other CPU-heavy work; its result is a measurement, not a portable test limit.
-int main(int argc, char** argv) {
+int main(int argc, char**) {
     using namespace datapump;
     try {
         transfer::Options options;
         options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,true).config;
-        if (argc > 2 || (argc == 2 && (std::string_view(argv[1]).size() != 1 || argv[1][0] < '2' || argv[1][0] > '6')))
-            throw Error("usage: benchmark_receiver [bits-per-symbol: 2..6]");
-        if (argc == 2) options.modem.constellation_bits = static_cast<unsigned>(argv[1][0] - '0');
+        if (argc != 1)throw Error("usage: benchmark_receiver");
         options.key.emplace(Bytes(32, 0x37));
         options.timestamp = 1800000000;
         std::vector<std::unique_ptr<modem::StreamingReceiver>> bank;
         for (int offset = -6; offset <= 6; ++offset) {
             const auto epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(options.timestamp) + offset);
-            auto expected = options.key->xor_data(modem::preamble(options.modem), epoch);
-            const auto mask = transfer::audio_bootstrap_mask(options, epoch);
-            bank.push_back(std::make_unique<modem::StreamingReceiver>(options.modem, std::move(expected),
-                8 * 1024 * 1024, [mask](const Bytes& prefix) {
-                    try {
-                        auto plain = prefix;
-                        for (std::size_t i = 0; i < plain.size(); ++i) plain[i] ^= mask.at(i);
-                        return packet_bootstrap_possible(plain) && packet_frame_size(plain).has_value();
-                    } catch (const Error&) { return false; }
-                }));
+            modem::PatternSearch search;
+            search.start_offset_seconds=static_cast<double>(offset)+
+                static_cast<double>(modem::training_sample_count(options.modem))/options.modem.sample_rate;
+            search.start_uncertainty_seconds=7;
+            bank.push_back(std::make_unique<modem::StreamingReceiver>(
+                transfer::seeded_config(options,epoch),8*1024*1024,search));
         }
         std::vector<float> block(2048);
         std::mt19937_64 random(1);

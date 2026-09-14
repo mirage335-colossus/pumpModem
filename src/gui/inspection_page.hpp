@@ -120,7 +120,7 @@ inline void codeword(Node& parent,const std::string& title,std::size_t data,std:
 inline void pattern_preview(Node& parent,const inspection::PatternSpace& model,Page& page,std::size_t requested_first) {
     heading(parent,model.bounded_pattern_preview?"Pattern / scrambler symbol preview":"Full pattern / scrambler symbol space");
     paragraph(parent,model.bounded_pattern_preview?"Each row shows an independently distinguishable binary pattern at chip centers. I is the upper half of each cell; Q is the lower half. Long symbols show at most 16,384 chips; distances below cover this illustrated prefix only.":"Each row is one complete legal symbol: its phase/amplitude coefficient times the selected chip sequence. I is the upper half of each cell; Q is the lower half.");
-    paragraph(parent,model.representative_keyed?"Keyed pattern structure: public illustrative signs; the actual sequence depends on the key and epoch.":model.bounded_pattern_preview?"Configured public pattern; the bounded prefix is inspectable below.":"Configured public signs; the full code period is inspectable below.");
+    paragraph(parent,model.representative_keyed?"Keyed pattern structure: public illustrative I/Q noise; the actual amplitude and phase sequence depends on the key and epoch.":model.bounded_pattern_preview?"Configured public pattern; the bounded prefix is inspectable below.":"Configured public signs; the full code period is inspectable below.");
     const auto columns=static_cast<std::size_t>(std::clamp(static_cast<int>((parent.width-110)/14),8,64));
     const auto total=model.code.size();const auto last=total?((total-1)/columns)*columns:0;
     const auto first=std::min((requested_first/columns)*columns,last),shown=std::min(columns,total-first);
@@ -144,7 +144,7 @@ inline void pattern_preview(Node& parent,const inspection::PatternSpace& model,P
     grid.children.push_back(std::move(names_column));
     grid.children.push_back(bitmap("pattern/chips",plots::PlotSnapshot::pattern_chips(model,first,shown),cell*static_cast<float>(shown),18*static_cast<float>(model.coefficients.size())));
     parent.children.push_back(std::move(grid));
-    paragraph(parent,"Light: positive. Dark: negative. Middle gray: zero. Distance from middle gray shows I/Q amplitude on one shared scale. Hatched chips are outside this symbol's actual duration. Rows assume a zero preceding carrier phase.");
+    paragraph(parent,"Light: positive. Dark: negative. Middle gray: zero. Distance from middle gray shows I/Q amplitude on one shared scale. Hatched chips are outside this symbol's actual duration. Rows show baseband I/Q before carrier modulation.");
 }
 inline void pattern_details(Node& parent,const inspection::PatternSpace& model,const Page& page) {
     paragraph(parent,model.bounded_pattern_preview?"Illustrated coverage: "+std::to_string(model.symbol_samples)+" of "+std::to_string(model.full_symbol_samples)+" samples; "+number(model.symbol_seconds)+" s. Pattern-chip distances use actual sample weights; continuous tone distances use chip-center approximations. This is a design preview, not received confidence.":"Symbol coverage: "+std::to_string(model.symbol_samples)+" samples, "+number(model.symbol_seconds)+" s; "+std::to_string(model.complete_periods)+" complete code periods + "+std::to_string(model.tail_samples)+" samples. Distances include every repeat and partial chip.");

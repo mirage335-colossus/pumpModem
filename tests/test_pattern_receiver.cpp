@@ -90,6 +90,37 @@ void exact_blind_bits() {
         check(burst.end_sample>=137+3*symbol-10 && burst.end_sample<=137+3*symbol+10,"raw burst gained training or a padding symbol");
     }
 }
+void private_template_energy_normalization() {
+    // Select a valid secret template with substantially less than unit mean
+    // energy. A perfectly matching observation must still explain essentially
+    // all its energy; using the number of chips as the norm penalizes this key.
+    for(unsigned mode=1;mode<=3;++mode) {
+        auto c=config(16,(mode&1U)!=0);c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
+        c.carrier_hz=1200;
+        double mean_energy=1;
+        for(unsigned trial=0;trial<1000 && mean_energy>=.75;++trial,++c.stream_epoch) {
+            modem::PatternCode code(c,c.stream_epoch);mean_energy=0;
+            for(std::uint64_t chip=0;chip<code.chips_per_symbol();++chip)
+                mean_energy+=std::norm(code.value(chip,0));
+            mean_energy/=static_cast<double>(code.chips_per_symbol());
+        }
+        --c.stream_epoch;
+        check(mean_energy<.75,"private template fixture must have a below-average energy norm");
+        modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        constexpr std::array<std::size_t,3> chunks{13,97,7};
+        const auto result=receive(waveform(c,{0,1},0,2*symbol,.31),c,chunks,search);
+        exact(result,{0,1});
+        // At this carrier, each half-chip observation contains a full carrier
+        // cycle, so noiseless PCM projects exactly onto the complex template.
+        const auto bins=2*modem::pattern_chips_per_symbol(c);
+        const auto first=std::find_if(result.candidates.begin(),result.candidates.end(),[](const auto& item) {
+            return item.first_sample==0 && item.stream_symbol==0;
+        });
+        check(first!=result.candidates.end() && first->score>25*static_cast<double>(bins-1),
+              "private waveform evidence must use its measured template energy");
+    }
+}
 void changing_chunks_and_late_start() {
     const auto c=config();const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const auto samples=waveform(c,{0,0,1},37*symbol+143,2*symbol,2.81,.04);
@@ -197,9 +228,12 @@ void bounds_and_cancellation() {
     rejects([&]{const std::array<float,1> invalid{std::numeric_limits<float>::quiet_NaN()};receiver.push(invalid);},"nonfinite PCM accepted");
 }
 void fractional_symbol_timing() {
-    auto c=config();c.bandwidth_hz=1100;c.integration_seconds=.029;const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
-    const Bytes bits{0,0,1,0,1,1,0,0,1,1,0,1};constexpr std::array<std::size_t,3> chunks{11,239,71};
-    exact(receive(waveform(c,bits,139,3*symbol,1.1,.01),c,chunks),bits);
+    for(bool keyed:{false,true}) {
+        auto c=config(128,keyed);c.bandwidth_hz=1100;c.integration_seconds=.029;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        const Bytes bits{0,0,1,0,1,1,0,0,1,1,0,1};constexpr std::array<std::size_t,3> chunks{11,239,71};
+        exact(receive(waveform(c,bits,139,3*symbol,1.1,.01),c,chunks),bits);
+    }
 }
 void keyed_capture_missing_first_symbol() {
     const auto c=config(256,true);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
@@ -305,6 +339,7 @@ int main() {
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+    run("private template energy normalization",private_template_energy_normalization);
     run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);

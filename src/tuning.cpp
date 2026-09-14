@@ -1,5 +1,4 @@
 #include "datapump/tuning.hpp"
-#include "constellation.hpp"
 #include <algorithm>
 #include <array>
 #include <charconv>
@@ -46,6 +45,7 @@ std::string normalized(std::string_view name) {
 }
 std::span<const PatternMode> pattern_modes(){return modes;}
 std::string_view pattern_mode_name(PatternMode mode){return names[index_of(mode)];}
+bool tone_mode(PatternMode mode){return mode==PatternMode::auto_tone || index_of(mode)>=9;}
 PatternMode parse_pattern_mode(std::string_view name) {
     const auto found=std::find(names.begin(),names.end(),name);
     if(found==names.end()) throw Error("unknown pattern mode: "+std::string(name));
@@ -86,18 +86,6 @@ ReceiveTargets parse_receive_targets(std::string_view text) {
     }
     return result;
 }
-double constellation_target_symbol_snr_db(unsigned bits) {
-    if(bits<2 || bits>6)throw Error("constellation must carry 2..6 bits per symbol");
-    const double spacing=modem::detail::radius_step(bits);
-    const double phases=1U<<modem::detail::phase_bits(bits);
-    // Use the worst inner-ring angular separation, including the extra noise
-    // of differential phase detection, and reserve 2.8125 degrees for phase
-    // drift per symbol. A 3.2-sigma half-distance is an engineering design
-    // margin, not a claim of calibrated packet error rate.
-    const double angular=std::sqrt(2.)*spacing*std::sin(std::numbers::pi/phases-std::numbers::pi/64);
-    const double distance=std::min(spacing,angular);
-    return 10*std::log10(2*3.2*3.2*.30625/(distance*distance));
-}
 std::uint32_t recommended_sample_rate(double bandwidth_hz) {
     const auto carrier=recommended_carrier_hz(bandwidth_hz);
     return static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth_hz,4*carrier)));
@@ -120,7 +108,7 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     // very narrow. Audio endpoints negotiate their hardware clock separately.
     base.sample_rate=sample_rate;
     base.carrier_hz=recommended_carrier_hz(bandwidth_hz);
-    const bool tone=mode==PatternMode::auto_tone || index>=9;
+    const bool tone=tone_mode(mode);
     base.spreading_mode=tone?modem::SpreadingMode::tone:modem::SpreadingMode::pattern;
     // The pattern itself must identify a keyed signal. Public templates with
     // only a Data mask give every receive key the same acquisition evidence.
@@ -151,8 +139,9 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
         <<" seconds/symbol; modeled Es/N0 "<<plan.estimated_symbol_snr_db<<" dB, target "<<plan.target_symbol_snr_db<<" dB. "
         <<"Automatic selection reserves at least 64 chips for pattern evidence. ";
     if(!plan.target_supported)explanation<<"The forced length is preserved but does not meet the standalone pattern confidence target. ";
+    if(tone)explanation<<"Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection. ";
     if(mode==PatternMode::auto_keystream && !encryption)explanation<<"Without a key, auto-pattern is used. ";
-    explanation<<"The 18 dB integration target is an initial model, not calibrated detection sensitivity or a false-alarm guarantee. Acquisition uses received pattern evidence, never APSK geometry. Both endpoints derive the profile from matching bandwidth, C/N0 and pattern settings.";
+    explanation<<"The 18 dB integration target is an initial model, not calibrated detection sensitivity or a false-alarm guarantee. Acquisition uses received pattern evidence. Both endpoints derive the profile from matching bandwidth, C/N0 and pattern settings.";
     plan.explanation=explanation.str();
     return plan;
 }
@@ -173,6 +162,10 @@ std::vector<modem::Config> receive_profiles(const modem::Config& base,std::span<
         config.pattern_symbols=plan.pattern_symbols;config.constellation_bits=plan.constellation_bits;
         config.spreading_factor=plan.spreading_factor;config.integration_seconds=plan.integration_seconds;
         config.spreading_mode=plan.spreading_mode;config.scramble=plan.scramble;
+        if(config.spreading_mode==modem::SpreadingMode::tone) {
+            config.dsss=false;config.data_key.reset();
+            config.spreading_seed.fill(0);config.dsss_seed.fill(0);
+        }
         modem::validate(config);
         const auto duplicate=std::any_of(profiles.begin(),profiles.end(),[&](const auto& prior) {
             return prior.sample_rate==config.sample_rate && prior.carrier_hz==config.carrier_hz &&

@@ -161,7 +161,11 @@ struct Controller::Impl {
         need_devices=!options.smoke;
     }
     ~Impl() { session.stop(); worker.request_stop(); if(worker.joinable()) worker.join(); }
-    bool encrypted() const { return f(UiField::key).selected!="none"; }
+    bool tone() const {
+        const auto& mode=f(UiField::pattern).selected;
+        return mode=="auto-tone" || mode.starts_with("tone-");
+    }
+    bool encrypted() const { return !tone() && f(UiField::key).selected!="none"; }
     const KeyEntry* selected_key() const {
         for(const auto& key:keys) if("key:"+key.name==f(UiField::key).selected) return &key;
         return nullptr;
@@ -181,6 +185,7 @@ struct Controller::Impl {
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
     }
     void encryption_changed() {
+        if(tone())f(UiField::key).selected="none";
         auto& options_=f(UiField::pattern).options;
         for(auto& option:options_) if(option.id=="auto-keystream") option.enabled=encrypted();
         if(!encrypted() && f(UiField::pattern).selected=="auto-keystream") f(UiField::pattern).selected="auto-pattern";
@@ -203,7 +208,7 @@ struct Controller::Impl {
             if(options.smoke) next.transfer.search_seconds=0;
             next.transfer.fec=f(UiField::fec).selected=="rs20"?FecMode::rs20:f(UiField::fec).selected=="rs60"?FecMode::rs60:FecMode::off;
             if(encrypted()) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
-            for(const auto& key:keys) next.receive_keys.push_back(key.key);
+            if(!tone())for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             const auto preset=tuning::parse_simulation_preset(f(UiField::simulation).selected); next.simulation=preset.enabled;
             if(preset.enabled) { const auto budget=tuning::link_budget(preset,next.transfer.modem.bandwidth_hz,next.transfer.modem.sample_rate); next.simulation_snr_db=budget.sample_snr_db; channel_snr=budget.snr_db; }
@@ -450,7 +455,7 @@ struct Controller::Impl {
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
         for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
-        if(key_loading) f(UiField::key).enabled=false;
+        if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
         f(UiField::binary).enabled=f(UiField::message).enabled=!attachment&&!closing;
@@ -529,7 +534,8 @@ struct Controller::Impl {
             const auto labels=key_choice_labels(names);
             for(std::size_t i=0;i<keys.size();++i)state.options.push_back({"key:"+keys[i].name,labels[i+1]});
             state.selected=keys.empty()?"none":"key:"+keys.front().name;
-            f(UiField::key_path).text=path_text(key_path.filename()); encryption_changed(); configure(); notice(result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.");
+            f(UiField::key_path).text=path_text(key_path.filename()); encryption_changed(); configure();
+            notice(tone()?"Key entries loaded. Tone modes keep encryption off.":result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.");
         } else if(result.kind==PrepKind::file&&!pending_file) {
             attachment=std::move(result.file); attachment_path=result.path; attachment_image=result.image; f(UiField::message_label).text="Attached: "+display_label(path_text(attachment_path.filename())); dirty();
         } else if(result.kind==PrepKind::devices) {
@@ -774,8 +780,11 @@ void Controller::select(UiField field,std::string id) {
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
         if(!available)throw Error("Select an available item");
         state.selected=std::move(id);
-        if(field==UiField::key) { p.encryption_changed(); p.configure(); }
-        else if(field==UiField::simulation||field==UiField::pattern||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
+        if(field==UiField::key||field==UiField::pattern) {
+            p.encryption_changed(); p.configure();
+            if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
+        }
+        else if(field==UiField::simulation||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
 }

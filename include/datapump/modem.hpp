@@ -16,16 +16,16 @@ inline constexpr double nominal_signal_power = 0.153125;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
     // Pattern transport conveys one bit per independently detectable waveform.
-    // False retains the explicitly configured legacy APSK transport.
-    bool pattern_symbols = false;
+    // Obsolete multi-bit APSK profiles are rejected explicitly.
+    bool pattern_symbols = true;
     std::uint64_t stream_epoch = 0;
     // Internal DSP clock, independent of the hardware audio endpoint clock.
     std::uint32_t sample_rate = 6000;
-    unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
+    unsigned constellation_bits = 1; // Exactly one meaningful bit per waveform.
     double carrier_hz = 1500;
     double bandwidth_hz = 1200;
     double training_seconds = 5; // Hardware target; pattern mode rounds to whole symbols.
-    unsigned spreading_factor = 1;
+    unsigned spreading_factor = 64;
     // Automatic plans can request integration beyond the named chip factors.
     // Zero retains spreading_factor * quantized chip duration.
     double integration_seconds = 0;
@@ -79,7 +79,7 @@ struct ChannelConfig {
     std::optional<std::uint64_t> receiver_timestamp;
 };
 struct Wav { std::uint32_t sample_rate; std::vector<float> samples; };
-// Raises Error for invalid configuration, insufficient memory, or absent preamble.
+// Raises Error for invalid configuration or insufficient memory.
 void validate(const Config& config);
 void validate_channel(const Config& config, const ChannelConfig& channel);
 double bit_rate(const Config& config);
@@ -91,6 +91,7 @@ std::size_t waveform_sample_count(std::size_t wire_bytes, const Config& config);
 // Checks modulation and acquisition working buffers without allocating either.
 bool memory_supported(std::size_t wire_bytes, std::size_t preamble_bytes,
                       const Config& config);
+// Returns no byte prefix; settling audio is generated under the selected masks.
 Bytes preamble(const Config& config);
 // No framing, synchronization bytes, or length fields are added by modulation.
 // Cancellation is checked between bounded DSP chunks. Memory allocation and

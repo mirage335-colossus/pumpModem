@@ -93,7 +93,7 @@ class CommandTests(PumpCase):
         self.assertTrue(default["target_supported"])
         manual=json.loads(self.run_pump("estimate","--text","x","--spreading","1").stdout)
         self.assertEqual(manual["spreading"],1)
-        self.assertEqual(manual["constellation_bits"],4)
+        self.assertEqual(manual["constellation_bits"],1)
         for band, rate, carrier in (("100",6000,1500),("1.2kHz",6000,1500),("30MHz",120000000,22500000)):
             plan=json.loads(self.run_pump("estimate","--text","x","--bw",band,"--target-snr","110").stdout)
             self.assertEqual(plan["sample_rate"],rate)
@@ -108,7 +108,7 @@ class CommandTests(PumpCase):
             result = self.run_pump("rx", "--input", path, "--bw", "100", "--json")
             self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"independent clock")
         result = self.run_pump("simulate", "--text", "bad crystal", "--bw", "2400",
-                               "--spreading", "1", "--snr", "30", "--json",
+                               "--spreading", "64", "--snr", "30", "--json",
                                "--time", EPOCH, "--receiver-time", EPOCH + 2)
         self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"bad crystal")
         self.assertEqual(json.loads(result.stdout)["timestamp"], EPOCH + 2)
@@ -257,11 +257,12 @@ class CommandTests(PumpCase):
                 self.assertEqual(self.run_pump("unpack", data=packet).stdout, b"help")
 
     def test_repeatable_and_memory_limit(self):
-        # Explicit legacy packet mode retains metadata; tiny default text sends only dictionary bits.
-        result = self.run_pump("simulate", "--text", "repeat me", "--repeatable", "--json", *AUDIO)
+        # Packet byte APIs retain metadata; tiny on-air text sends only dictionary bits.
+        packed = self.run_pump("pack", "--text", "e", "--repeatable").stdout
+        result = self.run_pump("unpack", "--json", data=packed)
         self.assertTrue(json.loads(result.stdout)["repeatable"])
         self.run_pump("simulate", "--text", "x", "--memory-mb", "0", ok=False)
-        # Legacy batch PCM memory must not limit an accelerated/streamed transfer.
+        # Batch PCM memory must not limit a streamed transfer.
         self.run_pump("simulate", "--text", "x", "--memory-mb", "1")
         self.run_pump("pack", "--input", "-", "--cache-mb", "1",
                       data=b"x" * (1024 * 1024 + 1), ok=False)
@@ -312,7 +313,7 @@ class CommandTests(PumpCase):
 
     def test_continuous_simulation(self):
         # Tiny packets have no FEC; this lifecycle fixture needs a healthy channel.
-        result = self.run_pump("listen", "--simulation", "3dBm -90dB", "--text", "stream",
+        result = self.run_pump("listen", "--simulation", "3dBm -90dB", "--text", "stream packet content",
                                "--seconds", "10", "--json", "--progress", *AUDIO)
         events = [json.loads(line) for line in result.stdout.splitlines()]
         frames = [event for event in events if event.get("event") == "signal"]
@@ -320,7 +321,7 @@ class CommandTests(PumpCase):
         self.assertGreater(frames[-1]["samples_received"], frames[2]["samples_received"])
         verified = [event for event in events if event.get("validated")]
         self.assertEqual(len(verified), 1)
-        self.assertEqual(base64.b64decode(verified[0]["data_base64"]), b"stream")
+        self.assertEqual(base64.b64decode(verified[0]["data_base64"]), b"stream packet content")
 
     def test_packet_boundaries_and_metadata(self):
         for length in (0, 1, 255, 256, 257):
@@ -329,13 +330,13 @@ class CommandTests(PumpCase):
                 packed = self.run_pump("pack", "--input", "-", data=data).stdout
                 self.assertEqual(self.run_pump("unpack", "--input", "-", data=packed).stdout, data)
         data = b"a" * 100
-        packet = self.run_pump("pack", "--input", "-", "--repeatable", *AUDIO, data=data).stdout
+        packet = self.run_pump("pack", "--input", "-", "--repeatable", "--spreading", "1", *AUDIO, data=data).stdout
         decoded = json.loads(self.run_pump("unpack", "--json", data=packet).stdout)
         self.assertEqual(base64.b64decode(decoded["data_base64"]), data)
         self.assertTrue(decoded["repeatable"])
         self.assertRegex(decoded["id"], r"^[0-9a-f]{32}$")
-        self.run_pump("pack", "--repeatable", "--no-compression", *AUDIO, data=b"a" * 65537, ok=False)
-        compressed = self.run_pump("pack", "--repeatable", *AUDIO, data=b"a" * 65537).stdout
+        self.run_pump("pack", "--repeatable", "--no-compression", "--spreading", "1", *AUDIO, data=b"a" * 65537, ok=False)
+        compressed = self.run_pump("pack", "--repeatable", "--spreading", "1", *AUDIO, data=b"a" * 65537).stdout
         self.assertEqual(self.run_pump("unpack", data=compressed).stdout, b"a" * 65537)
         self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!" )
         self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!?", ok=False)
@@ -403,16 +404,20 @@ class CommandTests(PumpCase):
             with wave.open(str(status), "rb") as reader:
                 params = reader.getparams()
                 frames = reader.readframes(reader.getnframes())
-                self.assertEqual(params.nframes, 3 * 16, "few-bit status has no preamble or byte padding")
+                self.assertEqual(params.nframes, (39 + 3) * 1024, "status contains only rounded hardware settling and exact one-bit symbols")
             result = json.loads(self.run_pump("status-rx", "--bits", "010", "--input", status, *AUDIO).stdout)
             self.assertFalse(result["authenticated"])
             self.assertEqual(result["known_bits"], "010")
-            self.assertGreater(result["correlation"], .99)
+            self.assertTrue(result["known_bits_match"])
+            self.assertEqual(result["raw_bits"], "010")
+            self.assertGreater(result["pattern_score"], 0)
             with wave.open(str(truncated), "wb") as writer:
                 writer.setparams(params)
-                writer.writeframes(frames[:-2])
+                writer.writeframes(frames[:2])
             self.run_pump("status-rx", "--bits", "010", "--input", truncated, *AUDIO, ok=False)
-            self.run_pump("rx", "--input", status, *AUDIO, ok=False)
+            raw = json.loads(self.run_pump("rx", "--input", status, *AUDIO, "--json").stdout)
+            self.assertEqual(raw["raw_bits"], "010")
+            self.assertFalse(raw["validated"])
             for bits in ("", "012", "0" * 4097):
                 self.run_pump("status-tx", "--bits", bits, "--output", root / "invalid.wav", *AUDIO, ok=False)
             self.run_pump("status-tx", "--bits", "010", ok=False)
@@ -464,7 +469,7 @@ class EncryptedCommandTests(PumpCase):
 
     def test_encrypted_noisy_simulation_all_layers(self):
         result = self.run_pump("simulate", "--text", "Secure café 🌍", "--keyfile", self.key,
-                               "--time", EPOCH, "--scramble", "--dsss", "--spreading", "4",
+                               "--time", EPOCH, "--scramble", "--dsss", "--spreading", "64",
                                "--snr", "18", "--delay-samples", "313", "--json", *AUDIO)
         packet = json.loads(result.stdout)
         self.assertTrue(packet["validated"])
@@ -483,7 +488,7 @@ class EncryptedCommandTests(PumpCase):
         result = self.run_pump("simulate", *options, "--json",
                                "--clock-error-ppm", "0", "--phase-noise", "0")
         packet = json.loads(result.stdout)
-        self.assertTrue(packet["authenticated"])
+        self.assertFalse(packet["authenticated"], "short dictionary text has no authentication field")
         self.assertEqual(base64.b64decode(packet["data_base64"]), b"long pattern")
 
     def test_encrypted_wav_positive_negative_epoch_drift(self):
@@ -505,6 +510,23 @@ class EncryptedCommandTests(PumpCase):
                       "--search-seconds", "2", *AUDIO, ok=False)
         self.run_pump("rx", "--input", path, "--keyfile", self.other_key, "--time", EPOCH,
                       "--search-seconds", "0", *AUDIO, ok=False)
+
+    def test_tone_forces_encryption_off(self):
+        for mode in ("auto-tone", "tone-1", "tone-128"):
+            args = ("--pattern", mode, "--time", EPOCH)
+            plain = self.run_pump("pack", "--text", "tone plaintext", *args).stdout
+            keyed = self.run_pump("pack", "--text", "tone plaintext", *args,
+                                  "--keyfile", self.key).stdout
+            for packet in (plain, keyed):
+                decoded = json.loads(self.run_pump("unpack", "--json", data=packet).stdout)
+                self.assertFalse(decoded["authenticated"])
+                self.assertEqual(base64.b64decode(decoded["data_base64"]), b"tone plaintext")
+        plain_path, keyed_path = self.root / "tone-plain.wav", self.root / "tone-keyed.wav"
+        args = ("--pattern", "tone-128", "--time", EPOCH, "--bits", "001")
+        self.run_pump("status-tx", *args, "--output", plain_path)
+        forced = self.run_pump("status-tx", *args, "--keyfile", self.key, "--output", keyed_path)
+        self.assertEqual(plain_path.read_bytes(), keyed_path.read_bytes())
+        self.assertIn(b"Tone", forced.stderr)
 
     def test_mac_rejects_ciphertext_malleability_and_downgrade(self):
         text = b"attacker knows this plaintext"
