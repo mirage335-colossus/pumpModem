@@ -105,8 +105,8 @@ void validate(const Config& c) {
     check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
     check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= 30000000 && c.bandwidth_hz <= c.sample_rate / 2.0,
           "bandwidth must be finite and within 1 Hz..30 MHz and internal Nyquist");
-    check(std::isfinite(c.training_seconds) && c.training_seconds == 5,
-          "normal training duration is fixed at 5 seconds");
+    check(std::isfinite(c.training_seconds) && c.training_seconds == 2,
+          "normal training duration is fixed at 2 seconds");
     check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");
     check(c.spreading_factor >= 1 && c.spreading_factor <= 16384, "spreading factor must be 1..16384");
     check(c.spreading_mode == SpreadingMode::pattern || c.spreading_mode == SpreadingMode::tone,"unknown spreading mode");
@@ -146,7 +146,7 @@ std::uint64_t symbol_sample_count(const Config& c) {
     return static_cast<std::uint64_t>(samples);
 }
 std::uint64_t training_sample_count(const Config& c) {
-    const auto target=static_cast<std::uint64_t>(c.sample_rate)*5;
+    const auto target=static_cast<std::uint64_t>(c.sample_rate)*2;
     const auto symbol=symbol_sample_count(c);
     const auto count=target/symbol+(target%symbol>=symbol/2+symbol%2);
     check(count<=std::numeric_limits<std::uint64_t>::max()/symbol,"hardware preamble duration overflow");

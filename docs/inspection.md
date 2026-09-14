@@ -71,8 +71,8 @@ Hardware audio additionally converts between hardware and internal sample clocks
 bit count, symbol count and duration. Blocks are schematic rather than scaled
 to airtime. Automatic pattern transmission uses exactly one payload symbol per
 bit, with zero modem training and symbol padding. A separate hardware-settling
-block rounds five seconds to the nearest whole payload-symbol duration, with
-ties upward; it is absent for symbols longer than ten seconds. Its duration
+block rounds two seconds to the nearest whole payload-symbol duration, with
+ties upward; it is absent for symbols longer than four seconds. Its duration
 contributes to total airtime without adding meaningful bits. The diagrams show
 counts and placeholders,
 never input contents, metadata values, key bytes or private spreading sequences.

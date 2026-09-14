@@ -24,7 +24,7 @@ struct Config {
     unsigned constellation_bits = 1; // Exactly one meaningful bit per waveform.
     double carrier_hz = 1500;
     double bandwidth_hz = 1200;
-    double training_seconds = 5; // Hardware target; pattern mode rounds to whole symbols.
+    double training_seconds = 2; // Hardware target; pattern mode rounds to whole symbols.
     unsigned spreading_factor = 64;
     // Automatic plans can request integration beyond the named chip factors.
     // Zero retains spreading_factor * quantized chip duration.

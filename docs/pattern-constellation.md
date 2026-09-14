@@ -10,10 +10,11 @@ prefix can precede those symbols; reception does not depend on receiving it.
 
 ## Hardware-settling prefix
 
-A nonempty transmission starts with approximately five seconds of settling,
+A nonempty transmission starts with approximately two seconds of settling,
 rounded to the nearest whole sample-quantized payload-symbol duration, with
 half-symbol ties upward. If a symbol lasts `T` seconds, the prefix lasts
-`floor(5/T + 0.5)*T`. It is absent when `T > 10`. Empty payloads emit nothing.
+`floor(2/T + 0.5)*T`. It is absent when `T > 4`. At `T = 4`, the tie rounds up
+to one four-second interval. Empty payloads emit nothing.
 
 The prefix helps external gain control and muting settle. Its samples use the
 same bounded circular Gaussian-derived I/Q mapping, expected mean power and

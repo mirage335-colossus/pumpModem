@@ -45,10 +45,10 @@ these modem settings or rates.
 ### Automatic-pattern hardware settling
 
 A nonempty automatic-pattern transmission starts with a hardware-settling
-waveform lasting approximately five seconds, rounded to the nearest whole
+waveform lasting approximately two seconds, rounded to the nearest whole
 sample-quantized payload-symbol duration, with half-symbol ties rounded up.
-For symbol duration `T`, the prefix contains `floor(5 / T + 0.5)` intervals of
-length `T`; it is absent when `T` exceeds ten seconds. The first payload symbol
+For symbol duration `T`, the prefix contains `floor(2 / T + 0.5)` intervals of
+length `T`; it is absent when `T` exceeds four seconds. The first payload symbol
 then follows at its normal duration, starting at payload stream position zero.
 An empty payload emits no prefix.
 

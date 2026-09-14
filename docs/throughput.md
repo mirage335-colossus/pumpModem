@@ -16,7 +16,7 @@ Private profiles whose carrier permits compact orthogonal receive bins reserve
 at least 32 chips; boundary-bit probes did not support 16 chips on that path.
 Other profiles outside the bounded 256-sample exact-fit range retain 64 chips.
 At 12 kHz the following rates exclude packet coding,
-byte-boundary recovery words and the approximately five-second hardware prefix:
+byte-boundary recovery words and the approximately two-second hardware prefix:
 
 | Target C/N0 | In-band SNR | Chips/bit | Gross bit/s |
 | ---: | ---: | ---: | ---: |

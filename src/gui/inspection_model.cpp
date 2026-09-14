@@ -51,8 +51,8 @@ Inspection inspect(const InspectionRequest& request) {
     const auto recovery=transmitted-meaningful;
     result.title=result.binary?"Raw bit pattern transmission":short_text?"Short text pattern transmission":"Message / file pattern transmission";
     result.summary=count(transmitted)+" transmitted bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
-    result.preamble_description="Hardware settling sends independent noise-like chips for five seconds rounded to the nearest whole payload-symbol duration: "+
-        count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than ten seconds need no prefix. The receiver does not require or lock to this prefix; payload pattern evidence determines signal start, end, timing and keystream synchronization.";
+    result.preamble_description="Hardware settling sends independent noise-like chips for two seconds rounded to the nearest whole payload-symbol duration: "+
+        count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than four seconds need no prefix. The receiver does not require or lock to this prefix; payload pattern evidence determines signal start, end, timing and keystream synchronization.";
     if(keyed)result.preamble_description+=" The independent Data stream protects the prefix before the enabled Scrambler and DSSS layers; prefix addresses never overlap payload addresses.";
     result.chip_description=tone?
         "Public tone patterns are for unencrypted communication and local experiments. Tone modes disable Data encryption, Scrambler and DSSS and do not provide Low-Probability-of-Intercept protection.":

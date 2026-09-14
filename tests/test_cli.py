@@ -37,7 +37,7 @@ class CommandTests(PumpCase):
             plan = json.loads(self.run_pump("estimate", "--text", "e").stdout)
             with wave.open(str(path), "rb") as wav:
                 symbol_samples = round(plan["symbol_seconds"] * wav.getframerate())
-                hardware_symbols = (5 * wav.getframerate() + symbol_samples // 2) // symbol_samples
+                hardware_symbols = (2 * wav.getframerate() + symbol_samples // 2) // symbol_samples
                 self.assertEqual(wav.getnframes(), (hardware_symbols + 3) * symbol_samples + 160)
             for comparison, matches in (("001", True), ("110", False)):
                 received = json.loads(self.run_pump("status-rx", "--bits", comparison,
@@ -297,7 +297,7 @@ class CommandTests(PumpCase):
         slow = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "6").stdout)
         self.assertGreater(slow["spreading"], normal["spreading"])
         self.assertGreater(slow["total_seconds"], normal["total_seconds"])
-        settling_symbols = math.floor(5 / normal["symbol_seconds"] + .5)
+        settling_symbols = math.floor(2 / normal["symbol_seconds"] + .5)
         self.assertAlmostEqual(normal["total_seconds"] - normal["content_seconds"],
                                settling_symbols * normal["symbol_seconds"] + 16 / 600)
         self.assertEqual(normal["constellation_bits"], 1)
@@ -411,7 +411,7 @@ class CommandTests(PumpCase):
             with wave.open(str(status), "rb") as reader:
                 params = reader.getparams()
                 frames = reader.readframes(reader.getnframes())
-                self.assertEqual(params.nframes, (39 + 3) * 1024 + 256,
+                self.assertEqual(params.nframes, (16 + 3) * 1024 + 256,
                                  "status contains exact payload symbols, rounded settling and finite pulse tails")
             result = json.loads(self.run_pump("status-rx", "--bits", "010", "--input", status, *AUDIO).stdout)
             self.assertFalse(result["authenticated"])

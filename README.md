@@ -57,8 +57,8 @@ a demonstration of extreme weak-signal performance.
 Text shorter than 16 original bytes uses the built-in bit-prefix dictionary and
 sends exactly the resulting bits, without byte padding, packet fields or FEC.
 For example, `e` is three transmitted payload bits. A hardware-settling prefix
-lasts approximately five seconds, rounded to the nearest whole payload-symbol
-duration; symbols longer than ten seconds need no prefix. The prefix helps
+lasts approximately two seconds, rounded to the nearest whole payload-symbol
+duration; symbols longer than four seconds need no prefix. The prefix helps
 external gain control and muting settle, but supplies no acquisition evidence
 and adds no payload bits. Keyed preamble noise bytes pass through Data-stream
 encryption and every enabled Scrambler/DSSS byte mask before waveform mapping. Each layer keeps its existing purpose and epoch key, selecting a
@@ -176,7 +176,7 @@ WinMM audio API. WAV and simulation
 operation work without audio hardware or the ALSA library. No radio is keyed or
 transmitted by the automated tests. Physical audio transfer and Windows hardware
 operation still require device testing. Use a capture long enough to contain the
-complete five-second training sequence and packet.
+complete rounded two-second hardware-settling prefix and payload.
 
 ## Desktop console
 

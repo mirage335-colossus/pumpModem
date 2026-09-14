@@ -89,7 +89,7 @@ void frame_wide_transmit_constellation() {
     config.sample_rate=1200003;config.bandwidth_hz=300000;config.carrier_hz=450000;
     config.integration_seconds=11;config.scramble=true;config.spreading_seed[0]=37;
     // The rounded hardware prefix is empty for this long-symbol fixture, so
-    // it can exercise wideband history without rendering five seconds of PCM.
+    // it can exercise wideband history without rendering two seconds of PCM.
     if(modem::training_sample_count(config))throw std::runtime_error("frame history fixture unexpectedly has a preamble");
     const auto frame=config.sample_rate/modem::StreamingTransmitter::constellation_frame_rate+
         (config.sample_rate%modem::StreamingTransmitter::constellation_frame_rate!=0);

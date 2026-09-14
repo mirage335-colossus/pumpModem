@@ -268,10 +268,10 @@ void tones_and_bounded_state() {
 }
 void rounded_hardware_duration() {
     auto c=config();
-    for(const auto [seconds,expected]:std::array<std::pair<double,unsigned>,7>{{{.1,50},{1,5},{6,1},{10,1},{10.01,0},{20,0},{3600,0}}}) {
+    for(const auto [seconds,expected]:std::array<std::pair<double,unsigned>,8>{{{.1,20},{1,2},{2,1},{3,1},{4,1},{4.01,0},{20,0},{3600,0}}}) {
         c.integration_seconds=seconds;
         check(modem::training_sample_count(c)==expected*modem::symbol_sample_count(c),
-              "hardware settling must round five seconds to the nearest whole payload symbol");
+              "hardware settling must round two seconds to the nearest whole payload symbol");
     }
     c.integration_seconds=.1;
     modem::PatternTransmitter framed({0,0,1},c,73),bare({0,0,1},c,73,0,false);

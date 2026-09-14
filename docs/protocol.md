@@ -21,9 +21,9 @@ and lengths not divisible by eight. Three input bits produce exactly three
 payload pattern symbols. There is no packet header, checksum, MAC, FEC,
 byte-padding bit, or transmitted length field on this path.
 
-A separate hardware-settling prefix precedes a nonempty transmission when five
+A separate hardware-settling prefix precedes a nonempty transmission when two
 seconds rounds to at least one whole payload-symbol duration. Rounding is to
-nearest, with ties upward: symbols longer than ten seconds add no prefix. This
+nearest, with ties upward: symbols longer than four seconds add no prefix. This
 independent noise-like waveform helps external gain control and muting settle;
 it carries no payload or training information and is not required for reception.
 Payload stream positions start at zero after the prefix. See
