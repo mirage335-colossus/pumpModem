@@ -763,7 +763,9 @@ private:
     }
     void show_page() {
         shown_page=application.page();for(auto& [id,page]:pages)visible(page.group,id==shown_page);
-        for(auto& [id,button]:tabs)button->value(id==shown_page);
+        // value() resets FLTK's press baseline and can swallow the release.
+        // Keep a held tab's native state until the click or drag completes.
+        for(auto& [id,button]:tabs)if(Fl::pushed()!=button)button->value(id==shown_page);
         window->redraw();
     }
     void apply() {

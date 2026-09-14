@@ -319,6 +319,57 @@ void prompts() {
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
+void tab_clicks() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Tab fixture has no native window");
+    const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto pointer=[&](int event,int px,int py) {
+        Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;
+        Fl::e_state=event==FL_RELEASE?0:FL_BUTTON1;Fl::handle(event,window);
+    };
+    const auto selected=[&](ui::Page page) {
+        require(app.application.page()==page,"Native tab click did not select its page");
+        for(const auto& definition:ui::pages()) {
+            auto* button=find_button(*window,definition.title);require(button,"Shared tab is missing");
+            require((button->value()!=0)==(definition.id==page),"Native tab selection disagrees with the displayed page");
+        }
+    };
+    for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);
+        for(const auto& initial:ui::pages())for(const auto& target:ui::pages()) {
+            app.application.select_page(initial.id);refresh();selected(initial.id);
+            auto* button=find_button(*window,target.title);
+            const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
+            const auto revision=app.application.revision();
+            pointer(FL_PUSH,px,py);
+            require(Fl::pushed()==button,"Tab click missed its native target");
+            // A stationary press spanning presentation ticks must still commit
+            // on release, including when clicking the already selected tab.
+            refresh();
+            require(app.application.page()==initial.id&&app.application.revision()==revision,
+                "Native tab changed pages before mouse release");
+            pointer(FL_RELEASE,px,py);selected(target.id);refresh();selected(target.id);
+        }
+    }
+    for(const auto& target:ui::pages()) {
+        auto* button=find_button(*window,target.title);
+        const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
+        for(bool return_inside:{false,true}) {
+            const auto before=app.application.page();
+            pointer(FL_PUSH,px,py);refresh();
+            pointer(FL_DRAG,px,button->y()+button->h()+10);refresh();
+            if(return_inside) {pointer(FL_DRAG,px,py);refresh();}
+            pointer(FL_RELEASE,px,return_inside?py:button->y()+button->h()+10);
+            selected(return_inside?target.id:before);refresh();selected(return_inside?target.id:before);
+        }
+    }
+    Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void repeatable_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=Fl::first_window();require(window,"Repeatable fixture has no native window");
@@ -677,6 +728,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();repeatable_clicks();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, repeatable clicks, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
