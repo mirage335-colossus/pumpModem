@@ -101,7 +101,7 @@ and data streams share the candidate epoch and searched stream position.
 | `auto-keystream` | Automatic binary pattern integration with fresh keyed chips; falls back to public `auto-pattern` without a key. |
 | `auto-pattern` | Automatic integration of two rare codewords: public without a key, fresh keyed fragments with encryption. |
 | `auto-tone` | Automatic integration of two continuous tones. |
-| `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | Preserve the named short pattern duration, mixing with fresh keyed fragments when encrypted; do not meet the automatic rarity floor. |
+| `pattern-3`, `pattern-4`, `pattern-6`, `pattern-8`, `pattern-12`, `pattern-16` | Preserve the named duration and fresh keyed fragments. Only `pattern-16` can meet the automatic floor, with sufficient in-band SNR. |
 | `tone-1`, `tone-2`, `tone-3`, `tone-4`, `tone-8`, `tone-32`, `tone-128`, `tone-1024`, `tone-4096`, `tone-16384` | Preserve the named tone duration in chips. |
 
 Tone codewords use opposite quarter-turn progression per chip, producing
@@ -173,12 +173,28 @@ or `--receive-targets`. Simulator `--snr` describes sample-power noise and does
 not choose the transmitted profile.
 
 `tuning::resolve` uses binary pattern symbols (`constellation_bits = 1`). It
-starts with a modeled integrated-energy target of 18 dB and an automatic rarity
-floor of 64 chips, then selects the smallest supported integration meeting
-both. Automatic factors are 64 through 16,384, doubling at each step; longer
-integration uses an explicit duration. Forced modes preserve the requested
-length and report an unsupported target when the rarity floor or energy model
-is unmet. APSK geometry does not choose default pattern length or bit rate.
+retains the modeled integrated-energy target of 18 dB and selects the smallest
+supported integration meeting both that target and an SNR-dependent chip floor:
+
+| Modeled SNR in the selected bandwidth | Minimum pattern chips | Gross rate at 12 kHz |
+| --- | ---: | ---: |
+| At least 30 dB | 16 | 375 bit/s |
+| At least 24 dB, below 30 dB | 32 | 187.5 bit/s |
+| Below 24 dB | 64 | At most 93.75 bit/s |
+
+These gates require high SNR relative to bandwidth, not simply a high C/N0
+number. A shortened profile must contain only whole sample-quantized chips;
+otherwise selection tries the next length up to the previous 64-chip floor.
+This prevents a new periodic short-chip hold at fractional bandwidths or custom
+clocks. The receive-profile bank checks its preserved actual clock as well.
+Private profiles with compact orthogonal receive bins reserve at least 32 chips
+to preserve boundary-bit recovery; the recommended 12 kHz profile uses the exact
+sample fit and remains eligible for 16 chips. Other profiles outside the bounded
+256-sample exact-fit range retain 64 chips.
+Automatic tone modes retain the 64-chip floor. Automatic factors are
+16 through 16,384, doubling at each step; longer integration uses an explicit
+duration. Forced modes preserve the requested length and report an unsupported
+target when the applicable chip floor or energy model is unmet.
 
 ```text
 required_symbol_seconds = 10^((18 - C/N0_dBHz) / 10)
@@ -187,11 +203,24 @@ bit_rate                = 1 / symbol_seconds
 ```
 
 C/N0 uses noise power in a 1 Hz reference bandwidth. For bandwidth B,
-`SNR_B = C/N0 - 10 log10(B)`. The 18 dB target and 64-chip floor are initial
+`SNR_B = C/N0 - 10 log10(B)`. The 18 dB target and adaptive chip floors are
 engineering model choices, not an empirically calibrated false-alarm or missed-
 detection specification. Search multiplicity, correlated bins, channel model
 and adaptive timing selection must be included in future calibration. Long
 integration alone does not establish tolerance of clock drift or interference.
+
+At 12 kHz and 80 dB-Hz, the selected 16-chip pattern improves gross throughput
+fourfold over the previous fixed floor. Symbol and chain admission thresholds,
+keystream generation and the transmitted chip distribution are unchanged.
+Short private symbols with nonorthogonal carrier bins now use the same exact
+real-PCM fit as short public symbols, retaining the cap of four real evidence
+dimensions per chip. Orthogonal private bins retain their compact search. This
+avoids losing short-pattern evidence by integrating across chip boundaries.
+Patterns below 16 chips remain manual: some pass clean PCM yet lose an endpoint
+under the sampled clock/phase channel. See [throughput limits and validation](throughput.md).
+This is still one bit per codeword; multi-kilobit bulk transfer needs additional
+validated waveform work. Peers using automatic tuning must use matching plans;
+an older fixed-64-chip automatic profile is not the new high-SNR profile.
 
 ## Incremental pattern receiver and live audio
 

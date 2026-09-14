@@ -286,6 +286,13 @@ class CommandTests(PumpCase):
         self.assertEqual(self.run_pump("unpack", "--cache-mb", "1", data=packet).stdout, payload)
 
     def test_automatic_tuning_and_estimate(self):
+        for target, chips, rate in ((80, 16, 375), (65, 32, 187.5), (40, 64, 93.75)):
+            fast = json.loads(self.run_pump("estimate", "--text", "e", "--bw", "12000",
+                                           "--target-snr", str(target)).stdout)
+            self.assertEqual(fast["spreading"], chips)
+            self.assertEqual(fast["bit_rate"], rate)
+            self.assertTrue(fast["target_supported"])
+            self.assertAlmostEqual(fast["content_seconds"], 3 / rate)
         normal = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "40").stdout)
         slow = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "6").stdout)
         self.assertGreater(slow["spreading"], normal["spreading"])

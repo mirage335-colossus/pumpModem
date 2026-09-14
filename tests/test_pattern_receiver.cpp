@@ -133,6 +133,62 @@ void short_pattern_wrong_key_and_noise() {
     check(receive(background,c,chunks).bursts.empty(),
           "exact public short-template projection must not inflate independent real Gaussian noise into a burst");
 }
+void high_bandwidth_short_patterns() {
+    constexpr std::array<std::size_t,3> chunks{13,97,7};
+    const Bytes bits{0,1,0,0,1};
+    for(unsigned chips:{3U,4U,6U,8U,12U,16U})for(unsigned mode=0;mode<4;++mode) {
+        auto c=config(chips,(mode&1U)!=0);c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
+        c.sample_rate=48000;c.bandwidth_hz=12000;c.carrier_hz=9000;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        // All eight start residues within a chip, with independent carrier
+        // phases. The private masks change at every absolute chip address.
+        for(std::size_t delay=135;delay<143;++delay)for(double phase:{.27,1.73,3.11}) {
+            try {
+                const auto result=receive(waveform(c,bits,delay,3*symbol,phase,.001),c,chunks);
+                const auto& burst=exact(result,bits);
+                check(burst.first_sample+2>=delay && burst.first_sample<=delay+2 &&
+                      burst.end_sample==delay+bits.size()*symbol,
+                      "short private patterns must preserve start and final-bit timing");
+            } catch(const Error& error) {
+                throw Error(std::to_string(chips)+" chips / mode "+std::to_string(mode)+
+                            " / delay "+std::to_string(delay)+" / phase "+std::to_string(phase)+": "+error.what());
+            }
+        }
+    }
+}
+void short_private_noise_evidence() {
+    constexpr std::array<std::size_t,3> chunks{137,997,53};
+    for(unsigned mode=1;mode<4;++mode) {
+        auto c=config(16,(mode&1U)!=0);c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
+        c.sample_rate=48000;c.bandwidth_hz=12000;c.carrier_hz=9000;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        Bytes bits(2048);std::mt19937_64 random(13);
+        for(auto& bit:bits)bit=static_cast<std::uint8_t>(random()&1U);
+        const auto samples=waveform(c,bits,137,3*symbol,.73,.001);
+        auto wrong=c;
+        if(mode&1U)wrong.spreading_seed[7]^=0x80;else wrong.dsss_seed[7]^=0x80;
+        check(receive(samples,wrong,chunks).bursts.empty(),
+              "sample-resolution private patterns must not inflate a wrong key into evidence");
+        wrong=c;++wrong.stream_epoch;
+        check(receive(samples,wrong,chunks).bursts.empty(),
+              "sample-resolution private patterns must reject a wrong stream epoch");
+        std::normal_distribution<double> noise(0,std::sqrt(modem::nominal_signal_power));
+        std::vector<float> background(4096*symbol);
+        for(auto& sample:background)sample=static_cast<float>(noise(random));
+        check(receive(background,c,chunks).bursts.empty(),
+              "sample-resolution private patterns must reject real Gaussian background");
+        // A later clean span cannot retroactively confirm an obscured first
+        // bit, and its score cannot justify extra bits from a noisy tail.
+        auto bounded=waveform(c,{1,0,0,1},137,32*symbol,.73);
+        std::mt19937_64 obscured(197);std::normal_distribution<double> strong_noise(0,2.);
+        for(std::size_t i=0;i<137+symbol;++i)bounded[i]+=static_cast<float>(strong_noise(obscured));
+        for(std::size_t i=137+4*symbol;i<bounded.size();++i)bounded[i]=static_cast<float>(noise(obscured));
+        const auto recovered=receive(bounded,c,chunks);
+        const auto& burst=exact(recovered,{0,0,1});
+        check(burst.first_sample+2>=137+symbol && burst.end_sample<=137+4*symbol+2,
+              "short private confidence must belong only to the measured payload span");
+    }
+}
 void private_template_energy_normalization() {
     // Select a valid secret template with substantially less than unit mean
     // energy. A perfectly matching observation must still explain essentially
@@ -299,6 +355,65 @@ void independent_sampled_channel() {
         catch(const Error& error){throw Error(std::string(keyed?"keyed ":"public ")+std::to_string(length)+": "+error.what());}
     }
 }
+void high_snr_sampled_channel() {
+    // At 12 kHz bandwidth these sample SNRs correspond to 30 and 24 dB
+    // in-band SNR. Seed 13 previously exposed lost first/final bits at eight
+    // chips, even with a substantially stronger channel. Exercise the
+    // conservative shorter profiles against those independent clock/phase
+    // and fractional startup effects, including the whole settling prefix.
+    for(unsigned chips:{16U,32U})for(unsigned mode=0;mode<4;++mode) {
+        auto c=config(chips,(mode&1U)!=0);c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
+        c.sample_rate=48000;c.bandwidth_hz=12000;c.carrier_hz=9000;
+        Bytes bits(1536);std::mt19937 random(731);
+        for(auto& bit:bits)bit=static_cast<std::uint8_t>(random()&1U);
+        modem::StreamingTransmitter transmitter(modem::RawBits{bits},c);
+        modem::ChannelConfig impairment;impairment.snr_db=chips==16?27:21;
+        impairment.clock_error_ppm=100;impairment.phase_noise_degrees_per_sqrt_second=.5;impairment.seed=13;
+        modem::SampledSimulationChannel channel(c,impairment);
+        std::array<float,509> block{};std::vector<float> samples;
+        while(const auto count=channel.read(transmitter,block))
+            samples.insert(samples.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
+        const auto offset=samples.size();
+        samples.resize(offset+3*modem::symbol_sample_count(c));channel.read_noise(std::span(samples).subspan(offset));
+        constexpr std::array<std::size_t,4> chunks{137,503,17,1021};
+        try {exact(receive(samples,c,chunks),bits);}
+        catch(const Error& error){throw Error(std::to_string(chips)+" chips / mode "+std::to_string(mode)+": "+error.what());}
+    }
+}
+void orthogonal_private_pattern_bins() {
+    constexpr std::array<std::size_t,3> chunks{13,97,7};
+    const Bytes short_bits{0,1,0,0,1};
+    for(unsigned rate:{6000U,8000U})for(unsigned mode=1;mode<4;++mode) {
+        auto c=config(32,(mode&1U)!=0);c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
+        c.sample_rate=rate;c.bandwidth_hz=1000;c.carrier_hz=rate==6000?1500:2000;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        const auto chip=static_cast<std::size_t>(modem::pattern_chip_samples(c));
+        // Orthogonal private bins retain their compact established fit.
+        // Automatic profiles use at least 32 chips here: 16-chip patterns can
+        // lose a boundary bit at some chip residues even in a clean channel.
+        for(std::size_t delay=135;delay<135+chip;++delay)for(double phase:{.27,1.73,3.11}) {
+            const auto result=receive(waveform(c,short_bits,delay,3*symbol,phase,.001),c,chunks);
+            const auto& burst=exact(result,short_bits);
+            check(burst.first_sample+chip/2>=delay && burst.first_sample<=delay+chip/2 &&
+                  burst.end_sample+chip/2>=delay+short_bits.size()*symbol &&
+                  burst.end_sample<=delay+short_bits.size()*symbol+chip/2,
+                  "orthogonal private bins lost short-message endpoint timing");
+        }
+        Bytes bits(1536);std::mt19937 random(731);
+        for(auto& bit:bits)bit=static_cast<std::uint8_t>(random()&1U);
+        modem::StreamingTransmitter transmitter(modem::RawBits{bits},c);
+        modem::ChannelConfig impairment;impairment.snr_db=24-10*std::log10(rate/2000.);
+        impairment.clock_error_ppm=100;impairment.phase_noise_degrees_per_sqrt_second=.5;impairment.seed=13;
+        modem::SampledSimulationChannel channel(c,impairment);
+        std::array<float,509> block{};std::vector<float> samples;
+        while(const auto count=channel.read(transmitter,block))
+            samples.insert(samples.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
+        const auto offset=samples.size();samples.resize(offset+3*symbol);
+        channel.read_noise(std::span(samples).subspan(offset));
+        try {exact(receive(samples,c,chunks),bits);}
+        catch(const Error& error){throw Error(std::to_string(rate)+" Hz / mode "+std::to_string(mode)+": "+error.what());}
+    }
+}
 void shared_projection_and_workspace_update() {
     const auto c=config(64);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const auto samples=waveform(c,{0,0,1},137,3*symbol,.83,.04);
@@ -321,7 +436,9 @@ void shared_projection_and_workspace_update() {
     rejects([&]{limited.push(samples);limited.finish();},"bit-cap exhaustion silently truncated a valid signal");
 }
 void short_pattern_shared_projection_phase() {
-    auto c=config(16);c.carrier_hz=1200;
+    for(unsigned mode=0;mode<4;++mode) {
+    auto c=config(16);c.carrier_hz=1500;
+    c.scramble=(mode&1U)!=0;c.dsss=(mode&2U)!=0;c.dsss_seed[11]=139;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const Bytes bits{0,1,0,0,1};
     const auto samples=waveform(c,bits,137,3*symbol,.31,.001);
@@ -336,6 +453,74 @@ void short_pattern_shared_projection_phase() {
     check(original.front().first_sample==shared.front().first_sample &&
           original.front().end_sample==shared.front().end_sample && original.front().score==shared.front().score,
           "sharing a carrier projection must not change exact short-template acquisition evidence");
+    }
+}
+void short_template_cache_workspace() {
+    auto c=config(16,true);c.sample_rate=48000;c.bandwidth_hz=12000;c.carrier_hz=9000;
+    c.dsss=true;c.dsss_seed[11]=139;
+    modem::PatternSearch search;search.candidate_limit=32;search.track_limit=2;search.bit_limit=128;
+    constexpr std::size_t small=192*1024,large=2*1024*1024;
+    modem::PatternReceiver cached(c,large,search),uncached(c,small,search),shrinking(c,large,search);
+    check(cached.working_bytes()>uncached.working_bytes()+100*1024,
+          "short-template cache fixture must exercise cached and uncached execution");
+    Bytes bits(96);std::mt19937_64 random(13);for(auto& bit:bits)bit=static_cast<std::uint8_t>(random()&1U);
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto samples=waveform(c,bits,137,3*symbol,.73,.001);
+    bool reduced=false;
+    for(std::size_t offset=0;offset<samples.size();) {
+        const auto count=std::min<std::size_t>(137,samples.size()-offset);
+        const auto block=std::span(samples).subspan(offset,count);
+        cached.push(block);uncached.push(block);shrinking.push(block);offset+=count;
+        if(!reduced && offset>samples.size()/3) {
+            shrinking.set_workspace_bytes(small);reduced=true;
+        }
+        check(cached.working_bytes()<=large && uncached.working_bytes()<=small &&
+              shrinking.working_bytes()<=(reduced?small:large),
+              "optional template caches must remain inside their workspace limit");
+    }
+    cached.finish();uncached.finish();shrinking.finish();
+    const auto expected=cached.take_bursts();
+    check(expected.size()==1 && expected.front().bits==bits,"cached short templates lost payload bits");
+    for(auto* receiver:{&uncached,&shrinking}) {
+        const auto actual=receiver->take_bursts();
+        check(actual.size()==1 && actual.front().bits==expected.front().bits &&
+              actual.front().first_sample==expected.front().first_sample &&
+              actual.front().end_sample==expected.front().end_sample &&
+              actual.front().frequency_hz==expected.front().frequency_hz &&
+              actual.front().score==expected.front().score,
+              "cache availability or eviction changed exact pattern decisions or confidence");
+        const auto a=cached.candidates(),b=receiver->candidates();
+        check(a.size()==b.size(),"cache availability changed retained search coverage");
+        for(std::size_t i=0;i<a.size();++i)
+            check(a[i].first_sample==b[i].first_sample && a[i].stream_symbol==b[i].stream_symbol &&
+                  a[i].frequency_hz==b[i].frequency_hz && a[i].score==b[i].score &&
+                  a[i].alternative_score==b[i].alternative_score && a[i].bit==b[i].bit,
+                  "cache availability changed a timing/key/frequency/label hypothesis");
+    }
+    // Keep the cache while reducing spare RAM, then grow a payload
+    // to the complete configured bit limit. Bit allocations must evict the
+    // cache and recreate ordinary template rows without shrinking that limit.
+    search.bit_limit=4096;
+    modem::PatternReceiver pressure(c,large,search);
+    const auto cached_bytes=pressure.working_bytes();constexpr std::size_t pressure_budget=320*1024;
+    pressure.set_workspace_bytes(pressure_budget);
+    check(pressure.working_bytes()==cached_bytes,"a fitting optional cache should survive workspace reduction");
+    modem::PatternReceiver reference(c,pressure_budget,search);
+    Bytes full(search.bit_limit);for(auto& bit:full)bit=static_cast<std::uint8_t>(random()&1U);
+    const auto longer=waveform(c,full,137,3*symbol,.73,.001);
+    for(std::size_t offset=0;offset<longer.size();) {
+        const auto count=std::min<std::size_t>(997,longer.size()-offset);
+        const auto block=std::span(longer).subspan(offset,count);
+        pressure.push(block);reference.push(block);offset+=count;
+        check(pressure.working_bytes()<=pressure_budget,"payload growth exceeded workspace before cache eviction");
+    }
+    pressure.finish();reference.finish();
+    const auto grown=pressure.take_bursts(),ordinary=reference.take_bursts();
+    check(grown.size()==1 && ordinary.size()==1 && grown.front().bits==full && ordinary.front().bits==full &&
+          grown.front().first_sample==ordinary.front().first_sample && grown.front().end_sample==ordinary.front().end_sample &&
+          grown.front().score==ordinary.front().score,
+          "payload pressure changed confidence or reduced the configured bit capacity");
+    check(pressure.working_bytes()+100*1024<cached_bytes,"payload pressure must release optional template storage");
 }
 void long_clock_window_fallback() {
     auto c=config(64,true);c.integration_seconds=3600;
@@ -399,6 +584,8 @@ int main() {
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
     run("short pattern sample timing",short_pattern_sample_timing);
     run("short pattern wrong keys and noise",short_pattern_wrong_key_and_noise);
+    run("high-bandwidth short public and private patterns",high_bandwidth_short_patterns);
+    run("short private noise evidence",short_private_noise_evidence);
     run("private template energy normalization",private_template_energy_normalization);
     run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
@@ -406,8 +593,11 @@ int main() {
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);
     run("independent sampled crystal and phase",independent_sampled_channel);
+    run("high-SNR sampled private and public patterns",high_snr_sampled_channel);
+    run("orthogonal private pattern bins",orthogonal_private_pattern_bins);
     run("shared projection and workspace updates",shared_projection_and_workspace_update);
     run("short pattern shared projection phase",short_pattern_shared_projection_phase);
+    run("short template cache workspace and exact equivalence",short_template_cache_workspace);
     run("bounded long clock-window fallback",long_clock_window_fallback);
     run("hardware settling remains outside payload",hardware_settling_is_not_payload);
     return failures?1:0;

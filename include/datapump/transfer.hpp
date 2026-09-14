@@ -86,6 +86,10 @@ using Progress = std::function<void(std::uint64_t)>;
 // Separate codec scratch from the amount of application content admitted.
 // Covers the largest supported RS overhead, temporary copies and metadata.
 std::size_t packet_workspace_limit(std::size_t content_limit);
+// Capacity for unpacked 0/1 elements, including periodic recovery words.
+// Checked separately from packed codec bytes; actual TX/RX allocations must
+// still fit their independently configured DSP workspace.
+std::size_t pattern_bit_limit(std::size_t content_limit);
 
 // Callbacks own their key material and remain valid after Options is destroyed.
 PacketOptions packet_options(const Options& options, std::uint64_t timestamp);

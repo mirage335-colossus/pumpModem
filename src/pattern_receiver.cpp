@@ -71,6 +71,18 @@ struct PatternReceiver::Impl {
     std::vector<std::array<std::vector<Complex>,2>> templates;
     std::vector<std::array<double,2>> template_energy;
     std::vector<std::array<Complex,2>> template_square;
+    struct CachedTemplates {
+        std::vector<std::array<std::vector<Complex>,2>> rows;
+        std::vector<std::array<double,2>> energy;
+        std::vector<std::array<Complex,2>> square;
+        bool valid=false;
+    };
+    std::vector<CachedTemplates> cached_templates;
+    std::size_t cache_reservation=0;
+    std::vector<std::array<Complex,2>> tracking_reference;
+    std::uint64_t tracking_reference_index=0;
+    std::size_t tracking_reference_frequency=0;
+    bool tracking_reference_valid=false;
     std::uint64_t prepared_template_index=0;
     bool templates_valid=false;
     std::uint64_t sample=0,bins=0,next_start=0;
@@ -123,13 +135,20 @@ struct PatternReceiver::Impl {
         // of adjacent symbols twice, especially with partial final chips.
         bin_samples=static_cast<std::size_t>(std::gcd(std::gcd(code.chip_samples(),symbols),
             std::max<std::uint64_t>(1,code.chip_samples()/2)));
-        // Short symbols have too little evidence to tolerate bins that mix
-        // adjacent chips. Keep their exact sample timing within a bounded FFT.
-        if(symbols<=256 && !c.scramble && !c.dsss)bin_samples=1;
-        sample_fit=bin_samples==1 && !c.scramble && !c.dsss;
         const auto omega=tau*c.carrier_hz/c.sample_rate;
         const auto sine=std::sin(omega);
-        const auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin_samples)*omega)/sine):static_cast<double>(bin_samples);
+        const auto bin_image=[&](std::size_t count) {
+            return std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(count)*omega)/sine):static_cast<double>(count);
+        };
+        // Preserve compact private bins when their two carrier quadratures
+        // are orthogonal: that fit already retains all projected energy.
+        // Short nonorthogonal/singular private bins need exact sample fits
+        // to avoid a high-SNR confidence ceiling. Public short patterns keep
+        // their existing sample-resolution timing behavior.
+        if(symbols<=256 && ((!c.scramble && !c.dsss) || bin_image(bin_samples)>1e-10*static_cast<double>(bin_samples)))
+            bin_samples=1;
+        sample_fit=bin_samples==1 && (symbols<=256 || (!c.scramble && !c.dsss));
+        const auto image=bin_image(bin_samples);
         const auto small=static_cast<double>(bin_samples)-image;
         real_rank=small<=1e-10*static_cast<double>(bin_samples);
         if(!real_rank)noise_condition=(static_cast<double>(bin_samples)+image)/small;
@@ -180,16 +199,38 @@ struct PatternReceiver::Impl {
         history.reserve(search.candidate_limit);peaks.reserve(search.candidate_limit);completed.reserve(search.track_limit);
         tracks.reserve(search.track_limit);points.reserve(2048);bursts.reserve(search.track_limit);
         rotation=std::polar(1.,-tau*c.carrier_hz/c.sample_rate);
+        // Short private acquisition revisits the same bounded initial stream
+        // bank every hop. Cache its exact transforms only in spare workspace;
+        // payload capacity and search coverage retain their original limits.
+        const auto frequencies=search.frequency_offsets_hz.size();
+        const long double cache_bytes=static_cast<long double>(search.initial_stream_symbols)*
+            (sizeof(CachedTemplates)+static_cast<long double>(frequencies)*
+             (sizeof(decltype(templates)::value_type)+sizeof(decltype(template_energy)::value_type)+
+              sizeof(decltype(template_square)::value_type)+2*static_cast<long double>(transform)*sizeof(Complex)))+
+            static_cast<long double>(length)*sizeof(decltype(tracking_reference)::value_type);
+        if(symbols<=256 && search.initial_stream_symbols>1 && cache_bytes<=bytes-fixed_reservation) {
+            cache_reservation=static_cast<std::size_t>(std::ceil(cache_bytes));
+            cached_templates.resize(search.initial_stream_symbols);
+            for(auto& bank:cached_templates) {
+                bank.rows.resize(frequencies);bank.energy.resize(frequencies);bank.square.resize(frequencies);
+                for(auto& row:bank.rows)for(auto& values:row)values.resize(transform);
+            }
+            tracking_reference.resize(length);
+        }
         prepare_templates(0,{});
     }
     void prepare_templates(std::uint64_t index,std::stop_token stop) {
-        if(templates_valid&&prepared_template_index==index)return;
+        const auto cached=!cached_templates.empty();
+        if(cached?cached_templates[index].valid:(templates_valid&&prepared_template_index==index))return;
         templates_valid=false;
+        auto& rows=cached?cached_templates[index].rows:templates;
+        auto& energies=cached?cached_templates[index].energy:template_energy;
+        auto& squares=cached?cached_templates[index].square:template_square;
         for(std::size_t f=0;f<templates.size();++f)for(unsigned bit=0;bit<2;++bit) {
-            auto& row=templates[f][bit];row.resize(transform);
+            auto& row=rows[f][bit];row.resize(transform);
             std::fill(row.begin(),row.end(),Complex{});
-            auto& norm=template_energy[f][bit];norm=0;
-            auto& square=template_square[f][bit];square={};
+            auto& norm=energies[f][bit];norm=0;
+            auto& square=squares[f][bit];square={};
             for(std::size_t i=0;i<length;++i) {
                 const auto value=template_value(i,index,bit,f);
                 row[length-1-i]=std::conj(value);norm+=std::norm(value);
@@ -198,6 +239,24 @@ struct PatternReceiver::Impl {
             fft(row,false,stop);
         }
         prepared_template_index=index;templates_valid=true;
+        if(cached)cached_templates[index].valid=true;
+    }
+    void drop_template_cache() {
+        std::vector<CachedTemplates>().swap(cached_templates);
+        std::vector<std::array<Complex,2>>().swap(tracking_reference);
+        templates_valid=false;tracking_reference_valid=false;cache_reservation=0;
+    }
+    bool cache_fits(std::size_t bytes,std::size_t extra)const {
+        // Retain the original fixed reservation, including scratch/copy
+        // headroom, when deciding whether optional caches can coexist with
+        // payload growth. The original uncached bit-capacity proof still holds.
+        long double required=static_cast<long double>(fixed_reservation)+cache_reservation+extra+latest.bits.capacity();
+        for(const auto& track:tracks)required+=track.burst.bits.capacity();
+        for(const auto& burst:bursts)required+=burst.bits.capacity();
+        return required<=bytes;
+    }
+    void room_for_bits(std::size_t extra) {
+        if(!cached_templates.empty() && !cache_fits(budget,extra))drop_template_cache();
     }
     Complex template_value(std::size_t bin,std::uint64_t index,unsigned bit,std::size_t f) {
         const auto sample_position=static_cast<long double>(bin)*bin_samples+static_cast<long double>(bin_samples-1)/2;
@@ -241,13 +300,24 @@ struct PatternReceiver::Impl {
     }
     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before=0) {
         std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
+        // Timing refinements of one stream symbol fit the same templates.
+        // Reuse their exact values; only the received window and carrier Gram
+        // phase change. This cache is evicted with the optional FFT banks.
+        if(!tracking_reference.empty() && (!tracking_reference_valid || tracking_reference_index!=index ||
+                                          tracking_reference_frequency!=f)) {
+            tracking_reference_valid=false;
+            for(std::size_t i=0;i<length;++i)for(unsigned b=0;b<2;++b)
+                tracking_reference[i][b]=template_value(i,index,b,f);
+            tracking_reference_index=index;tracking_reference_frequency=f;tracking_reference_valid=true;
+        }
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
         for(std::size_t i=skip;i<length;++i) {
             const auto value=at(start+i);energy+=std::norm(value);
+            const auto carrier=sample_fit?carrier_square(start+i):Complex{};
             for(unsigned b=0;b<2;++b) {
-                const auto pattern=template_value(i,index,b,f);
+                const auto pattern=tracking_reference.empty()?template_value(i,index,b,f):tracking_reference[i][b];
                 dot[b]+=value*std::conj(pattern);norm[b]+=std::norm(pattern);
-                if(sample_fit)square[b]+=pattern*pattern*carrier_square(start+i);
+                if(sample_fit)square[b]+=pattern*pattern*carrier;
             }
         }
         const auto count=evidence_count(length-skip);
@@ -261,6 +331,7 @@ struct PatternReceiver::Impl {
         track.burst.complete=complete;track.burst.score=track.confirmed_score;
         if(complete) {
             track.burst.bits.resize(track.confirmed);track.burst.end_sample=track.confirmed_end;
+            room_for_bits(track.burst.bits.capacity()>budget/3?budget:3*track.burst.bits.capacity());
             latest=track.burst;
             if(bursts.size()==search.track_limit)bursts.erase(bursts.begin());
             bursts.push_back(track.burst);
@@ -270,8 +341,10 @@ struct PatternReceiver::Impl {
     }
     void append_bit(Bytes& bits,std::uint8_t bit) {
         if(bits.size()==search.bit_limit)throw Error("pattern burst exceeds bounded bit capacity");
-        if(bits.size()==bits.capacity())bits.reserve(std::max<std::size_t>(1,
-            bits.size()>search.bit_limit/2?search.bit_limit:2*bits.size()));
+        if(bits.size()==bits.capacity()) {
+            const auto capacity=std::max<std::size_t>(1,bits.size()>search.bit_limit/2?search.bit_limit:2*bits.size());
+            room_for_bits(capacity);bits.reserve(capacity);
+        }
         bits.push_back(bit);
     }
     void continue_tracks(std::stop_token stop,bool final=false) {
@@ -371,17 +444,25 @@ struct PatternReceiver::Impl {
                 work[i]=at(next_start+i);energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);
             }
             spectrum=work;fft(spectrum,false,stop);
+            // The input transform no longer needs work. Reuse it for the
+            // identical carrier Gram phase shared by every bit/frequency/
+            // stream hypothesis at a start, without new allocations or a
+            // phase recurrence that would change the numerical calculation.
+            if(sample_fit)for(std::size_t j=0;j<count;++j)work[j]=carrier_square(next_start+j);
             peaks.clear();
             for(std::size_t stream_index=0;stream_index<search.initial_stream_symbols;++stream_index) {
             prepare_templates(stream_index,stop);
+            const auto& rows=cached_templates.empty()?templates:cached_templates[stream_index].rows;
+            const auto& energies=cached_templates.empty()?template_energy:cached_templates[stream_index].energy;
+            const auto& squares=cached_templates.empty()?template_square:cached_templates[stream_index].square;
             for(std::size_t f=0;f<templates.size();++f) {
                 for(unsigned b=0;b<2;++b) {
-                    for(std::size_t i=0;i<transform;++i)product[i]=spectrum[i]*templates[f][b][i];
+                    for(std::size_t i=0;i<transform;++i)product[i]=spectrum[i]*rows[f][b][i];
                     fft(product,true,stop);
                     for(std::size_t j=0;j<count;++j) {
                         const auto score=evidence(product[length-1+j],energy_prefix[j+length]-energy_prefix[j],
-                            template_energy[f][b],evidence_count(length),noise_condition,real_rank,
-                            sample_fit,sample_fit?template_square[f][b]*carrier_square(next_start+j):Complex{});
+                            energies[f][b],evidence_count(length),noise_condition,real_rank,
+                            sample_fit,sample_fit?squares[f][b]*work[j]:Complex{});
                         if(b==0)reference[j]={score,0};else reference[j].imag(score);
                     }
                 }
@@ -453,6 +534,14 @@ struct PatternReceiver::Impl {
             template_square.capacity()*sizeof(decltype(template_square)::value_type)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
+        total+=cached_templates.capacity()*sizeof(CachedTemplates);
+        total+=tracking_reference.capacity()*sizeof(decltype(tracking_reference)::value_type);
+        for(const auto& bank:cached_templates) {
+            total+=bank.rows.capacity()*sizeof(decltype(templates)::value_type)+
+                bank.energy.capacity()*sizeof(decltype(template_energy)::value_type)+
+                bank.square.capacity()*sizeof(decltype(template_square)::value_type);
+            for(const auto& row:bank.rows)for(const auto& values:row)total+=values.capacity()*sizeof(Complex);
+        }
         for(const auto& track:tracks)total+=track.burst.bits.capacity();
         for(const auto& burst:bursts)total+=burst.bits.capacity();
         return total+latest.bits.capacity();
@@ -467,6 +556,7 @@ struct PatternReceiver::Impl {
             if(wrapper>=bytes)throw Error("pattern workspace cannot retain correlator control state");
             fallback->set_workspace_bytes(bytes-wrapper);budget=bytes;return;
         }
+        if(!cached_templates.empty() && !cache_fits(bytes,0))drop_template_cache();
         if(bytes<fixed_reservation||working_bytes()>bytes)throw Error("pattern workspace cannot retain current correlation state");
         const auto limit=std::min(configured_bit_limit,(bytes-fixed_reservation)/(2*search.track_limit+2));
         if(!limit)throw Error("pattern workspace cannot retain bit candidates");

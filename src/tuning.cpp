@@ -6,6 +6,8 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <numbers>
+#include <numeric>
 #include <sstream>
 
 namespace datapump::tuning {
@@ -19,8 +21,48 @@ constexpr std::array<std::string_view,19> names{
     "auto-keystream","auto-pattern","auto-tone","pattern-3","pattern-4","pattern-6","pattern-8","pattern-12","pattern-16",
     "tone-1","tone-2","tone-3","tone-4","tone-8","tone-32","tone-128","tone-1024","tone-4096","tone-16384"};
 constexpr std::array<unsigned,19> lengths{0,0,0,3,4,6,8,12,16,1,2,3,4,8,32,128,1024,4096,16384};
-constexpr std::array<unsigned,9> automatic_lengths{64,128,256,512,1024,2048,4096,8192,16384};
+constexpr std::array<unsigned,11> automatic_lengths{16,32,64,128,256,512,1024,2048,4096,8192,16384};
 constexpr double pattern_target_symbol_snr_db=18;
+unsigned minimum_pattern_chips(const modem::Config& config,double target_snr_db_hz,bool tone) {
+    // A high C/N0 is only a fast-link target relative to the selected band.
+    // Preserve the previous weak-signal and tone plans. Shorter patterns need
+    // substantial in-band headroom as well as integrated energy: clean PCM
+    // alone overstates their tolerance of fractional timing and clock error.
+    // These conservative engineering floors do not replace RX evidence tests.
+    const auto band_snr=target_snr_db_hz-10*std::log10(config.bandwidth_hz);
+    unsigned minimum=!tone && band_snr>=30?16:!tone && band_snr>=24?32:64;
+    // A partial final chip would introduce a new periodic short-hold cadence
+    // when the symbol is shortened. Keep the previous integration floor if
+    // neither short profile consists entirely of whole sample-quantized chips.
+    const auto chip=static_cast<std::uint64_t>(std::ceil(2.*config.sample_rate/config.bandwidth_hz));
+    auto candidate=config;candidate.integration_seconds=0;
+    while(minimum<64) {
+        candidate.spreading_factor=minimum;
+        const auto samples=modem::symbol_sample_count(candidate);
+        if(samples%chip==0) {
+            // Keep the compact private receive path when its carrier bases
+            // are orthogonal. Endpoint/channel probes require 32 chips on
+            // that path, even when total signal energy is ample.
+            bool compact_private=false;
+            if(config.scramble || config.dsss) {
+                const auto bin=std::gcd(std::gcd(chip,samples),std::max<std::uint64_t>(1,chip/2));
+                const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
+                const auto sine=std::sin(omega);
+                const auto image=std::abs(sine)>1e-12?
+                    std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
+                compact_private=image<=1e-10*static_cast<double>(bin);
+            }
+            // Only the bounded exact-sample path and the orthogonal private
+            // path have short-pattern channel coverage. Preserve the old
+            // floor for other long-sample geometries.
+            if(samples>256 && !compact_private)return 64;
+            if(minimum==16 && compact_private) {minimum=32;continue;}
+            break;
+        }
+        minimum*=2;
+    }
+    return minimum;
+}
 constexpr std::array presets{
     SimulationPreset{"no",false,0,0},SimulationPreset{"3dBm -6dB",true,3,-6},
     SimulationPreset{"3dBm -60dB",true,3,-60},SimulationPreset{"3dBm -90dB",true,3,-90},
@@ -114,13 +156,15 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     // only a Data mask give every receive key the same acquisition evidence.
     base.scramble=!tone && encryption;
     const double chip_seconds=2/bandwidth_hz;
+    const auto minimum_chips=minimum_pattern_chips(base,target_snr_db_hz,tone);
     plan.target_symbol_snr_db=pattern_target_symbol_snr_db;
     const double exponent=(plan.target_symbol_snr_db-target_snr_db_hz)/10-std::log10(chip_seconds);
     plan.required_spreading=exponent>std::log10(std::numeric_limits<double>::max())?
         std::numeric_limits<double>::infinity():std::max(1.,std::pow(10.,exponent));
     if(lengths[index])base.spreading_factor=lengths[index];
     else {
-        const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),plan.required_spreading);
+        const auto found=std::lower_bound(automatic_lengths.begin(),automatic_lengths.end(),
+            std::max(plan.required_spreading,static_cast<double>(minimum_chips)));
         base.spreading_factor=found==automatic_lengths.end()?automatic_lengths.back():*found;
         if(found==automatic_lengths.end()) {
             base.integration_seconds=std::pow(10.,(plan.target_symbol_snr_db-target_snr_db_hz)/10);
@@ -131,13 +175,18 @@ Plan resolve(double bandwidth_hz,double target_snr_db_hz,PatternMode mode,bool e
     const double seconds=modem::symbol_seconds(base);
     plan.estimated_processing_gain_db=10*std::log10(seconds/chip_seconds);
     plan.estimated_symbol_snr_db=target_snr_db_hz+10*std::log10(seconds);
-    plan.target_supported=base.spreading_factor>=automatic_lengths.front() &&
+    plan.target_supported=base.spreading_factor>=minimum_chips &&
         plan.estimated_symbol_snr_db+1e-10>=plan.target_symbol_snr_db;
     std::ostringstream explanation;
-    explanation<<std::fixed<<std::setprecision(1)<<"Two sparse pattern symbols (1 raw bit/symbol), "
-        <<base.spreading_factor<<" nominal chips and "<<seconds
-        <<" seconds/symbol; modeled Es/N0 "<<plan.estimated_symbol_snr_db<<" dB, target "<<plan.target_symbol_snr_db<<" dB. "
-        <<"Automatic selection reserves at least 64 chips for pattern evidence. ";
+    explanation<<"Two pattern codewords (1 raw bit/symbol), "
+        <<base.spreading_factor<<" nominal chips and "<<std::setprecision(6)<<seconds
+        <<" seconds/symbol; modeled Es/N0 "<<std::fixed<<std::setprecision(1)
+        <<plan.estimated_symbol_snr_db<<" dB, target "<<plan.target_symbol_snr_db<<" dB. "
+        <<"Automatic selection reserves at least "<<minimum_chips<<" chips at this bandwidth and C/N0. "
+        <<"Pattern floors are 16 chips at 30 dB in-band SNR, 32 at 24 dB, otherwise 64; tones retain 64. "
+        <<"Short automatic profiles also require whole chips to preserve the update cadence. ";
+    explanation<<"Private profiles with compact orthogonal receive bins reserve at least 32 chips. ";
+    explanation<<"Other profiles beyond the 256-sample exact-fit range retain 64 chips. ";
     if(!plan.target_supported)explanation<<"The forced length is preserved but does not meet the standalone pattern confidence target. ";
     if(tone)explanation<<"Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection. ";
     if(mode==PatternMode::auto_keystream && !encryption)explanation<<"Without a key, auto-pattern is used. ";
@@ -162,6 +211,14 @@ std::vector<modem::Config> receive_profiles(const modem::Config& base,std::span<
         config.pattern_symbols=plan.pattern_symbols;config.constellation_bits=plan.constellation_bits;
         config.spreading_factor=plan.spreading_factor;config.integration_seconds=plan.integration_seconds;
         config.spreading_mode=plan.spreading_mode;config.scramble=plan.scramble;
+        // Recheck the shortened profile after restoring the caller's actual
+        // clock. An aligned recommended clock does not imply an aligned custom
+        // clock. Explicit named/manual patterns retain their requested length.
+        if(!lengths[index_of(mode)] && config.spreading_factor<64) {
+            modem::validate(config);
+            config.spreading_factor=std::max(config.spreading_factor,
+                minimum_pattern_chips(config,target,tone_mode(mode)));
+        }
         if(config.spreading_mode==modem::SpreadingMode::tone) {
             config.dsss=false;config.data_key.reset();
             config.spreading_seed.fill(0);config.dsss_seed.fill(0);

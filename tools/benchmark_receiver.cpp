@@ -1,28 +1,56 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
+#include <charconv>
 #include <chrono>
+#include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <limits>
+#include <random>
+#include <string>
 #include <string_view>
 #include <thread>
 
+namespace {
+template<class Number> Number argument(std::string_view text,const char* name) {
+    if(text.starts_with('+')) {
+        text.remove_prefix(1);
+        if(text.starts_with('-'))throw datapump::Error(std::string("invalid ")+name);
+    }
+    if(text.empty())throw datapump::Error(std::string("invalid ")+name);
+    Number value{};
+    const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value);
+    if(parsed.ec!=std::errc{} || parsed.ptr!=text.data()+text.size())
+        throw datapump::Error(std::string("invalid ")+name);
+    return value;
+}
+}
+
 // Generated PCM only: this benchmark never opens an audio device. Run without
 // other CPU-heavy work; its result is a measurement, not a portable test limit.
-int main(int argc, char**) {
+int main(int argc, char** argv) {
     using namespace datapump;
     try {
+        if(argc>4)throw Error("usage: benchmark_receiver [bandwidth_hz [target_cn0_db_hz [epoch_radius]]]");
+        const auto bandwidth=argc>1?argument<double>(argv[1],"bandwidth_hz"):1200.;
+        const auto target=argc>2?argument<double>(argv[2],"target_cn0_db_hz"):40.;
+        const auto radius=argc>3?argument<unsigned>(argv[3],"epoch_radius"):6U;
+        if(!std::isfinite(target) || target < -200 || target > 200)
+            throw Error("target_cn0_db_hz must be finite and within -200..200");
+        if(radius>32)throw Error("epoch_radius must be within 0..32");
         transfer::Options options;
-        options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,true).config;
-        if (argc != 1)throw Error("usage: benchmark_receiver");
+        options.modem=tuning::resolve(bandwidth,target,tuning::PatternMode::auto_pattern,true).config;
+        options.search_seconds=radius;
         options.key.emplace(Bytes(32, 0x37));
         options.timestamp = 1800000000;
         std::vector<std::unique_ptr<modem::StreamingReceiver>> bank;
-        for (int offset = -6; offset <= 6; ++offset) {
+        for (int offset = -static_cast<int>(radius); offset <= static_cast<int>(radius); ++offset) {
             const auto epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(options.timestamp) + offset);
             modem::PatternSearch search;
             search.start_offset_seconds=static_cast<double>(offset)+
                 static_cast<double>(modem::training_sample_count(options.modem))/options.modem.sample_rate;
-            search.start_uncertainty_seconds=7;
+            search.start_uncertainty_seconds=static_cast<double>(radius)+1;
             bank.push_back(std::make_unique<modem::StreamingReceiver>(
                 transfer::seeded_config(options,epoch),8*1024*1024,search));
         }
@@ -45,7 +73,11 @@ int main(int argc, char**) {
         catch (const Error&) { if (!stop.stop_requested()) throw; }
         const auto wall = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
         const double media = static_cast<double>(samples) / options.modem.sample_rate;
-        std::cout << options.modem.constellation_bits << " bits/symbol, 13 keyed epochs, " << options.modem.sample_rate << " Hz generated PCM: " << media << " media seconds / "
+        std::cout << std::setprecision(std::numeric_limits<double>::max_digits10)
+                  << options.modem.bandwidth_hz << " Hz bandwidth, " << target << " dB-Hz C/N0 target, "
+                  << options.modem.spreading_factor << " chips, " << options.modem.constellation_bits << " bits/symbol, "
+                  << bank.size() << " keyed epochs (radius " << radius << "), " << options.modem.sample_rate << " Hz generated PCM: "
+                  << std::setprecision(6) << media << " media seconds / "
                   << wall << " wall seconds = " << media / wall << "x real time\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

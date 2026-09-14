@@ -380,6 +380,65 @@ void private_waveform_has_no_fixed_squared_carrier() {
     check(reference!=scrambler_changed.value(64,0) && reference!=dsss_changed.value(64,0),
           "both enabled private streams must independently affect amplitude and phase");
 }
+void short_private_patterns_preserve_noise_and_addressing() {
+    constexpr std::uint64_t epoch=1800000000;
+    constexpr std::size_t symbol_count=1024;
+    for(unsigned layers=1;layers<=3;++layers)for(unsigned chips:{3U,4U,6U,8U,12U,16U,32U}) {
+        auto c=config();c.scramble=(layers&1U)!=0;c.dsss=(layers&2U)!=0;
+        c.sample_rate=48000;c.bandwidth_hz=12000;c.carrier_hz=9000;c.spreading_factor=chips;
+        auto longer=c;longer.spreading_factor=128;
+        modem::PatternCode short_code(c,epoch),long_code(longer,epoch);
+        for(const auto position:{0ULL,1ULL,63ULL,64ULL,127ULL,128ULL,16383ULL,16384ULL,1ULL<<40})
+            check(short_code.value(position,0)==long_code.value(position,0),
+                  "shortening private patterns must preserve absolute keystream chip addressing and mapping");
+
+        Bytes bits(symbol_count),complement(symbol_count);
+        for(std::size_t symbol=0;symbol<symbol_count;++symbol) {
+            bits[symbol]=static_cast<std::uint8_t>((symbol/3+symbol/7)%2);
+            complement[symbol]=static_cast<std::uint8_t>(1-bits[symbol]);
+        }
+        modem::PatternTransmitter tx(bits,c,epoch,0,false),other_bits(complement,c,epoch,0,false);
+        std::vector<std::complex<double>> samples(static_cast<std::size_t>(tx.total_samples())),other(samples.size());
+        tx.read_analytic(samples);other_bits.read_analytic(other);
+        const auto chip_samples=modem::pattern_chip_samples(c);
+        const auto count=symbol_count*chips;
+        std::vector<std::complex<double>> values(count),position_mean(chips),position_square(chips);
+        std::complex<double> mean{},square{},repetition{};
+        double energy=0,power_square=0;
+        for(std::size_t chip=0;chip<count;++chip) {
+            const auto sample=chip*chip_samples;
+            const auto value=samples[sample]*std::polar(1.,-2*std::numbers::pi*sample*c.carrier_hz/c.sample_rate)/
+                std::sqrt(2*modem::nominal_signal_power);
+            values[chip]=value;mean+=value;square+=value*value;
+            position_mean[chip%chips]+=value;position_square[chip%chips]+=value*value;
+            const auto power=std::norm(value);energy+=power;power_square+=power*power;
+            check(std::norm(samples[sample])<1 &&
+                  std::abs(std::norm(samples[sample])-std::norm(other[sample]))<1e-12,
+                  "short private patterns must retain PCM headroom and a payload-independent chip envelope");
+            if(chip>=chips)repetition+=value*std::conj(values[chip-chips]);
+        }
+        check(std::abs(mean)/count<.06 && std::abs(square)/energy<.06 && std::abs(repetition)/energy<.06,
+              "short private transmissions must not restore a fixed carrier, squared carrier or repeated symbol row");
+        check(std::abs(energy/count-1)<.08 && power_square/count-std::pow(energy/count,2)>.4,
+              "short private transmissions must preserve variable amplitude and normalized mean power");
+        for(unsigned position=0;position<chips;++position)
+            check(std::abs(position_mean[position])/symbol_count<.15 &&
+                  std::abs(position_square[position])/symbol_count<.15,
+                  "short private symbol boundaries must not create phase or squared-phase repetition");
+
+        auto changed=c;
+        if(c.scramble)changed.spreading_seed[0]^=0x80;else changed.dsss_seed[0]^=0x80;
+        modem::PatternCode other_key(changed,epoch),other_epoch(c,epoch+1);
+        double key_squared_difference=0,epoch_squared_difference=0;
+        for(std::size_t chip=0;chip<128;++chip) {
+            const auto value=short_code.value(chip,0);
+            key_squared_difference+=std::norm(value*value-std::pow(other_key.value(chip,0),2));
+            epoch_squared_difference+=std::norm(value*value-std::pow(other_epoch.value(chip,0),2));
+        }
+        check(key_squared_difference/128>.5 && epoch_squared_difference/128>.5,
+              "short patterns must retain private key and epoch dependence after squaring");
+    }
+}
 }
 int main() {
     try {
@@ -388,6 +447,7 @@ int main() {
         streaming_and_modem_integration();rounded_hardware_duration();hardware_noise_keystreams();
         hardware_data_byte_encryption();
         private_waveform_has_no_fixed_squared_carrier();
+        short_private_patterns_preserve_noise_and_addressing();
         std::cout << "Pattern code and binary waveform tests passed\n";
         return 0;
     } catch (const std::exception& error) {

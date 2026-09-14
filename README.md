@@ -29,9 +29,16 @@ cadence. This does not hide all physical bandwidth, chip-timing or burst-edge
 characteristics. Tone modes force encryption and private spreading off and are
 not LPI modes. The private waveform has changed; peers must use this updated build.
 
-Automatic planning uses two sparse codewords, at least 64 chips per symbol,
-and a modeled 18 dB integrated symbol-energy target. This replaces selection by
-APSK geometry. The model score is evidence for comparing pattern hypotheses;
+Automatic planning uses two codewords and a modeled 18 dB integrated
+symbol-energy target. The chip floor is 16 at in-band SNR of at least 30 dB,
+32 at 24 dB, and otherwise 64; automatic tones retain 64. Shorter automatic
+profiles require whole chips at the actual sample clock, preserving the chip
+update cadence. Compact orthogonal private bins reserve at least 32 chips;
+other profiles outside the 256-sample exact-fit range retain 64. At 12 kHz and
+80 dB-Hz this yields 375 gross bit/s, four times the previous fixed floor.
+Both endpoints must use matching plans. [Throughput limits](docs/throughput.md)
+explain the remaining bulk-transfer constraint and validation.
+The model score is evidence for comparing pattern hypotheses;
 it is not a calibrated false-alarm probability, measured SNR, authentication or
 a demonstration of extreme weak-signal performance.
 
@@ -370,9 +377,10 @@ pattern transport.
 
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz.
-Auto planning uses one bit per pattern symbol, a 64-chip minimum and an initial
-18 dB integrated-energy model. Forced short patterns preserve their duration
-and report unsupported automatic confidence assumptions. Integration may extend
+Auto planning uses one bit per pattern symbol, a 16/32/64-chip floor based on
+in-band SNR and an initial 18 dB integrated-energy model. Forced short patterns
+preserve their duration and report unsupported automatic confidence assumptions
+when they miss the applicable floor. Integration may extend
 past 16,384 chips, subject to numeric, workspace and acquisition limits. This
 is not measured receiver sensitivity or a capacity optimum.
 

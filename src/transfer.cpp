@@ -43,6 +43,19 @@ void validate(const Options& options) {
     if (options.dsp_workspace_bytes < 256*1024) throw Error("streaming DSP workspace must be at least 256 KiB");
 }
 std::size_t packet_budget(const Options& options) { return packet_workspace_limit(options.content_limit); }
+struct PatternBudget { std::size_t payload_bits,wire_bits; };
+PatternBudget pattern_budget(std::size_t content_limit) {
+    // The codec budget counts packed bytes and scratch. Pattern storage uses
+    // one byte per bit, then adds recovery words before the Data mask. Keep
+    // these capacities separate; neither changes the admitted content or DSP
+    // workspace limits, which still constrain actual allocations independently.
+    const auto bytes=packet_workspace_limit(content_limit);
+    if(bytes>Bytes{}.max_size()/8)throw Error("pattern packet bit capacity exceeds address space");
+    const auto bits=bytes*8;
+    const auto wire=boundary_sync::encoded_size(bits);
+    if(wire>Bytes{}.max_size())throw Error("pattern wire bit capacity exceeds address space");
+    return {bits,wire};
+}
 void validate_message(const Message& message, const Options& options) {
     validate(options);
     if (message.data.size() > options.content_limit)
@@ -113,6 +126,9 @@ std::size_t packet_workspace_limit(std::size_t content_limit) {
     if(!content_limit || content_limit>(std::numeric_limits<std::size_t>::max()-65568)/8)
         throw Error("invalid content limit");
     return content_limit*8+65536;
+}
+std::size_t pattern_bit_limit(std::size_t content_limit) {
+    return pattern_budget(content_limit).wire_bits;
 }
 
 PacketOptions packet_options(const Options& input_options, std::uint64_t timestamp) {
@@ -219,10 +235,11 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
 Bytes message_bits(const Message& message,const Options& input_options) {
     const auto options=effective_options(input_options);
     validate_message(message,options);
+    const auto budget=pattern_budget(options.content_limit);
     if(message.kind==MessageKind::text && message.data.size()<16)
-        return compression::encode_short_bits(message.data,packet_budget(options));
+        return compression::encode_short_bits(message.data,budget.payload_bits);
     const auto packet=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
-    if(packet.size()>packet_budget(options)/8)throw Error("pattern packet bit storage exceeds content workspace");
+    if(packet.size()>budget.payload_bits/8)throw Error("pattern packet bit storage exceeds content workspace");
     Bytes bits;bits.reserve(packet.size()*8);
     for(auto byte:packet)for(unsigned i=0;i<8;++i)bits.push_back(static_cast<std::uint8_t>((byte>>(7-i))&1));
     return bits;
@@ -231,7 +248,7 @@ Bytes message_wire_bits(const Message& message,const Options& input_options) {
     const auto options=effective_options(input_options);
     auto bits=message_bits(message,options);
     if(message.kind!=MessageKind::text || message.data.size()>=16)
-        bits=boundary_sync::insert(bits,packet_budget(options));
+        bits=boundary_sync::insert(bits,pattern_bit_limit(options.content_limit));
     auto context=options;context.content_limit=std::max(context.content_limit,bits.size());
     xor_binary_bits(bits,context);
     return bits;
@@ -262,7 +279,7 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& input_option
     // for embedded packets. Decryption and its constellation-supplied stream
     // position are unchanged; only the decrypted byte grouping is recovered.
     std::optional<Bytes> candidate;
-    try { candidate=boundary_sync::recover(result.raw_bits,packet_budget(options)); }
+    try { candidate=boundary_sync::recover(result.raw_bits,pattern_bit_limit(options.content_limit)); }
     catch(const Error&) {} // Invalid recovery leaves only raw evidence.
     // Content grammar is interpreted only after pattern acquisition. A bad
     // packet never changes the winning signal timing or discards its raw bits.
@@ -357,7 +374,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         auto value=options;value.modem=profile;
         modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(options.timestamp)+
             static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
-        search.bit_limit=packet_budget(value);
+        search.bit_limit=pattern_bit_limit(value.content_limit);
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         for(std::size_t offset=0;offset<samples.size();) {
@@ -397,7 +414,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
         auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
         modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
             static_cast<double>(modem::training_sample_count(profile))/profile.sample_rate;
-        search.bit_limit=packet_budget(value);
+        search.bit_limit=pattern_bit_limit(value.content_limit);
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         modem::SampledSimulationChannel impairments(config,channel);std::array<float,2048> samples{};

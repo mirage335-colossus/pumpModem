@@ -1,9 +1,11 @@
 #include "datapump/transfer.hpp"
 #include "datapump/compression.hpp"
+#include "datapump/channel.hpp"
 #include "datapump/tuning.hpp"
 #include <iostream>
 #include <cmath>
 #include <array>
+#include <limits>
 
 using namespace datapump;
 namespace {
@@ -148,5 +150,122 @@ void marked_packet_waveform() {
               "the unchanged constellation decoder must deliver a marker-bearing encrypted or clear packet");
     }
 }
+transfer::Options high_snr_options(bool keyed) {
+    auto value=options(keyed);
+    value.modem=tuning::resolve(12000,80,tuning::PatternMode::auto_pattern,keyed).config;
+    value.automatic_receive_profiles=true;
+    value.receive_targets_db_hz={80};
+    return value;
 }
-int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+modem::ChannelConfig high_snr_channel(const transfer::Options& value) {
+    modem::ChannelConfig channel;
+    // Channel noise occupies Fs/2; the planner's target is C/N0 in one hertz.
+    channel.snr_db=80-10*std::log10(static_cast<double>(value.modem.sample_rate)/2);
+    channel.delay_samples=137;
+    channel.receiver_timestamp=value.timestamp+1;
+    return channel;
+}
+void high_snr_short_patterns() {
+    Message message;message.data={'e'};
+    for(const bool keyed:{false,true}) {
+        auto value=high_snr_options(keyed);
+        value.modem.dsss=keyed;
+        const auto bits=transfer::message_bits(message,value);
+        const auto estimate=transfer::estimate(message,value);
+        check(bits==Bytes({0,0,1}),"the fast profile must preserve the exact dictionary pattern");
+        check(estimate.waveform_samples==modem::training_sample_count(value.modem)+
+              bits.size()*modem::symbol_sample_count(value.modem),
+              "fast short text must retain exact bits and independent hardware settling airtime");
+        auto channel=high_snr_channel(value);channel.seed=keyed?13:7;
+        const auto received=transfer::simulate(message,value,channel);
+        check(received.raw_bits==bits && received.packet.message.data==message.data,
+              "fast public and private dictionary patterns must survive unsynchronized impaired PCM");
+        check(!received.packet_validated && !received.packet.authenticated,
+              "fast pattern confidence must not invent packet integrity or authentication");
+    }
+
+    auto value=high_snr_options(true);value.modem.dsss=true;
+    const Bytes bits{0,1,0,0};
+    auto transmitter=transfer::binary_transmitter(bits,value);
+    modem::SampledSimulationChannel channel(transfer::seeded_config(value,value.timestamp),high_snr_channel(value));
+    std::array<float,347> chunk{};std::vector<float> pcm;
+    while(const auto count=channel.read(*transmitter,chunk))
+        pcm.insert(pcm.end(),chunk.begin(),chunk.begin()+static_cast<std::ptrdiff_t>(count));
+    std::vector<float> tail(2*modem::symbol_sample_count(value.modem));channel.read_noise(tail);
+    pcm.insert(pcm.end(),tail.begin(),tail.end());
+    ++value.timestamp;
+    const auto received=transfer::receive(pcm,value);
+    check(received.raw_bits==bits,"fast encrypted raw reception must preserve leading zeros and the exact endpoint");
+    check(!received.packet_validated && !received.packet.authenticated,
+          "short encrypted raw bits have no packet authentication tag");
+}
+void high_snr_marked_file() {
+    Message message;message.kind=MessageKind::file;message.filename="fast-boundary.bin";
+    for(unsigned i=0;i<300;++i)message.data.push_back(static_cast<std::uint8_t>((i*131+17)&255));
+    for(const bool dsss:{false,true}) {
+        auto value=high_snr_options(true);value.modem.dsss=dsss;value.compression=false;
+        check(value.modem.scramble,"the fast encrypted plan must retain its keyed acquisition waveform");
+        check(transfer::message_wire_bits(message,value).size()>transfer::message_bits(message,value).size(),
+              "fast file reception must cross a masked periodic byte-boundary recovery word");
+        auto channel=high_snr_channel(value);channel.seed=dsss?13:7;
+        const auto received=transfer::simulate(message,value,channel);
+        check(received.packet_validated && received.packet.authenticated &&
+              received.packet.message.filename==message.filename && received.packet.message.data==message.data,
+              "fast keyed file reception must preserve boundary recovery, encryption and authentication with clock drift");
+    }
+}
+void high_snr_large_file_estimate() {
+    auto value=high_snr_options(true);value.modem.dsss=true;
+    value.compression=false;value.fec=FecMode::off;value.dsp_workspace_bytes=64*1024*1024;
+    Message message;message.kind=MessageKind::file;message.filename="megabyte.bin";
+    message.data=Bytes(value.content_limit,0xa5);
+    for(const auto fec:{FecMode::off,FecMode::rs60}) {
+        value.fec=fec;
+        const auto fast=transfer::estimate(message,value);
+        auto conservative=value;conservative.modem.spreading_factor=64;
+        const auto slow=transfer::estimate(message,conservative);
+        check(fast.memory_supported && !fast.batch_memory_supported,
+              "megabyte files must remain streamable without retaining hours of fast-profile PCM");
+        check(fast.packet_bytes==slow.packet_bytes && fast.content_bytes==message.data.size(),
+              "faster automatic patterns must preserve the encrypted packet's content and overhead");
+        check(fast.content_seconds*4<=slow.content_seconds+1e-9,
+              "the high-C/N0 automatic profile must materially improve long-file airtime");
+        check(std::abs(fast.total_seconds-static_cast<double>(fast.waveform_samples)/value.modem.sample_rate)<1e-9,
+              "large-file estimates must use the fast profile's actual quantized PCM duration");
+        // Check full-size bit storage and downstream grammar independently of
+        // the shorter impaired-PCM file reception test above.
+        modem::PatternBurst burst;burst.bits=transfer::message_wire_bits(message,value);
+        burst.complete=true;burst.score=100;
+        check(burst.bits.size()>transfer::packet_workspace_limit(value.content_limit),
+              "the fixture must exceed the old packed-byte limit after bit and marker expansion");
+        const auto received=transfer::interpret_pattern(std::move(burst),value,value.timestamp);
+        check(received.packet_validated && received.packet.authenticated && received.packet.message.data==message.data,
+              "full advertised file capacity must retain masked boundary recovery and authentication with every FEC expansion");
+    }
+}
+void pattern_storage_limits() {
+    auto value=high_snr_options(true);value.content_limit=1;value.compression=false;
+    Message message;message.kind=MessageKind::file;message.filename="tiny.bin";
+    for(const std::size_t size:{0U,1U}) {
+        message.data=Bytes(size,0x5a);
+        modem::PatternBurst burst;burst.bits=transfer::message_wire_bits(message,value);burst.complete=true;
+        const auto received=transfer::interpret_pattern(std::move(burst),value,value.timestamp);
+        check(received.packet_validated && received.packet.authenticated && received.packet.message.data==message.data,
+              "independent pattern bit storage must preserve tiny content limits and packet overhead");
+    }
+    message.data.push_back(0);
+    bool rejected=false;
+    try{(void)transfer::message_wire_bits(message,value);}catch(const Error&){rejected=true;}
+    check(rejected,"expanded pattern storage must not increase the admitted content limit");
+    message.data.resize(1);
+    // Exercise byte-to-bit overflow and the separate recovery-word expansion
+    // before an allocation, using a one-byte message under an absurd quota.
+    for(const auto limit:{(std::numeric_limits<std::size_t>::max()-65568)/8,
+                          (Bytes{}.max_size()/8-65536)/8}) {
+        value.content_limit=limit;rejected=false;
+        try{(void)transfer::message_wire_bits(message,value);}catch(const Error&){rejected=true;}
+        check(rejected,"pattern bit and recovery-word capacity arithmetic must reject address-space overflow");
+    }
+}
+}
+int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

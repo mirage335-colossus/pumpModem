@@ -109,15 +109,19 @@ optional FEC operate after that detection decision. A fade can still split a
 burst; silence-based delimiting does not establish that a transmitter intended
 to stop.
 
-Public symbols of at most 256 samples use individual PCM samples in the FFT search,
+Public symbols and private symbols with nonorthogonal carrier bins, of at most
+256 samples, use individual PCM samples in the FFT search,
 so coarse chip-bin boundaries cannot erase a short final bit. This path fits
 the exact two-real-basis carrier Gram matrix. Its real-sample score
 `-(N-2)/2 * log(1-rho²)` caps `N` at four real dimensions per chip to retain
 the previous half-chip evidence scale; finer sampling does not create extra
 independent chip evidence. Longer public symbols retain chip-bin integration;
 when their sample/chip alignment requires one-sample bins, they also use this
-fit. Private receiver timing and scoring are unchanged. The pattern candidates
-and iterative search are unchanged. The reported start can retain a nearby
+fit. Longer private symbols retain their previous scoring and timing path.
+Orthogonal private bins retain their compact search; automatic profiles reserve
+at least 32 chips on that path to preserve boundary-bit recovery.
+The two pattern candidates, search penalties and chain thresholds are unchanged.
+The reported start can retain a nearby
 earlier candidate admitted before the next FFT block arrives.
 
 The current default frequency bank has five offsets spaced by `1/(4T)`, where
@@ -202,6 +206,13 @@ transmitted chip labels. The Console's live measured chip constellation is
 separate from this static alphabet view.
 
 ## Compatibility
+
+High-SNR automatic plans now select 16 or 32 chips where the in-band SNR,
+whole-chip alignment and receiver confidence gates permit, with 64 chips or
+longer retained otherwise. Both peers must
+derive matching plans. The private chip mapping, purpose keys and epoch/chip
+address convention are unchanged by this tuning update; shortening a symbol
+does not reuse its absolute private chip positions. See [throughput](throughput.md).
 
 The previous APSK transmitter, fixed training, repeating sign-template path,
 and aligned symbol receiver have been removed. The private circular waveform

@@ -512,7 +512,7 @@ struct Session::Impl {
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
                     modem::PatternSearch search;
-                    search.bit_limit=packet_budget(value.content_limit);
+                    search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
                     search.start_offset_seconds=static_cast<double>(epoch)-(value.transfer.timestamp?static_cast<double>(value.transfer.timestamp):now)+
                         static_cast<double>(modem::training_sample_count(config))/config.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
@@ -676,7 +676,7 @@ struct Session::Impl {
                         if(current.running && generation==version)current.error=error.what();
                     }
                     bank.limited=true;
-                    modem::PatternSearch search;search.bit_limit=packet_budget(value.content_limit);
+                    modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
                     search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch()+
                         static_cast<double>(modem::training_sample_count(receiver.options.modem))/receiver.options.modem.sample_rate;
                     search.start_uncertainty_seconds=value.transfer.search_seconds+1.;

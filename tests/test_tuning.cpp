@@ -84,8 +84,13 @@ void bandwidth_derived_clocks() {
         near(plan.config.carrier_hz,carrier,"low-bandwidth audio must use a usable carrier");
         check(plan.config.carrier_hz-bandwidth/2>=300,"automatic audio band extends below the usable audio range");
         check(plan.config.carrier_hz+bandwidth/2<.42*plan.config.sample_rate,"internal spectrum must fit the conversion passband");
-        check(plan.config.spreading_factor>=64,"strong links retain enough chips for standalone pattern evidence");
-        near(modem::bit_rate(plan.config),bandwidth/128,"strong channel rate preserves the 64-chip confidence floor");
+        check(plan.config.spreading_factor>=16 && plan.config.spreading_factor<=64,
+              "strong links retain a conservative pattern floor");
+        check(plan.config.spreading_factor==64 ||
+              modem::symbol_sample_count(plan.config)%modem::pattern_chip_samples(plan.config)==0,
+              "automatic shortening introduced a periodic partial-chip hold");
+        near(modem::bit_rate(plan.config),bandwidth/(2*plan.config.spreading_factor),
+             "strong channel rate uses the selected whole-chip pattern floor");
         const auto budget=tuning::link_budget(tuning::simulation_presets()[1],bandwidth,plan.config.sample_rate);
         check(std::isfinite(budget.sample_snr_db),"low and SDR-rate clocks need valid link budgets");
     }
@@ -108,8 +113,47 @@ void audio_passband_pattern_roundtrips() {
 }
 void automatic_pattern_rates() {
     const auto fast=tuning::resolve(2400,100,tuning::PatternMode::auto_pattern,false);
-    check(fast.config.pattern_symbols && fast.config.constellation_bits==1 && fast.config.spreading_factor==64,"strong links preserve sparse pattern evidence");
-    near(modem::bit_rate(fast.config),18.75,"high-C/N0 rate includes the minimum pattern length");
+    check(fast.config.pattern_symbols && fast.config.constellation_bits==1 && fast.config.spreading_factor==16,"strong links preserve complete pattern evidence");
+    near(modem::bit_rate(fast.config),75,"high-C/N0 rate includes the conservative minimum pattern length");
+    for(const bool keyed:{false,true}) {
+        const auto strong=tuning::resolve(12000,80,tuning::PatternMode::auto_pattern,keyed);
+        check(strong.target_supported && strong.config.scramble==keyed,"fast planning must retain private acquisition when keyed");
+        near(modem::bit_rate(strong.config),375,"12 kHz strong link removes the fixed 64-chip bottleneck");
+        const auto threshold=10*std::log10(12000.);
+        for(const auto [snr,expected]:std::array<std::pair<double,unsigned>,5>{
+                {{threshold+23.999,64},{threshold+24,32},{threshold+29.999,32},
+                 {threshold+30,16},{200,16}}}) {
+            const auto plan=tuning::resolve(12000,snr,tuning::PatternMode::auto_pattern,keyed);
+            check(plan.config.spreading_factor==expected && plan.target_supported,
+                  "short-pattern selection must use in-band headroom and retain its floor at extreme SNR");
+        }
+        // Equal C/N0 at a much wider bandwidth is not the same strong channel.
+        check(tuning::resolve(30000000,80,tuning::PatternMode::auto_pattern,keyed).config.spreading_factor==64,
+              "C/N0 alone cannot justify shorter patterns at every bandwidth");
+    }
+    check(tuning::resolve(12000,200,tuning::PatternMode::auto_tone,false).config.spreading_factor==64,
+          "high-SNR pattern changes must preserve automatic tone planning");
+    check(tuning::resolve(1000,80,tuning::PatternMode::auto_pattern,true).config.spreading_factor==32,
+          "compact orthogonal private searches need the validated 32-chip floor");
+    check(tuning::resolve(1000,80,tuning::PatternMode::auto_pattern,false).config.spreading_factor==16,
+          "public exact sample fits retain the validated 16-chip floor");
+    for(const bool keyed:{false,true})
+        check(tuning::resolve(400,80,tuning::PatternMode::auto_pattern,keyed).config.spreading_factor==64,
+              "unvalidated long-sample compact profiles must retain the previous floor");
+    check(tuning::resolve(600,80,tuning::PatternMode::auto_pattern,false).config.spreading_factor==64 &&
+          tuning::resolve(600,80,tuning::PatternMode::auto_pattern,true).config.spreading_factor==32,
+          "long-sample shortening is limited to the orthogonal private path");
+    check(tuning::resolve(750,80,tuning::PatternMode::auto_pattern,false).config.spreading_factor==16,
+          "the exact sample-fit upper boundary remains eligible for shortening");
+    check(tuning::resolve(12000,80,tuning::PatternMode::pattern_16,true).target_supported,
+          "forced 16-chip patterns can meet the same high-SNR planning floor");
+    check(!tuning::resolve(12000,60,tuning::PatternMode::pattern_16,true).target_supported,
+          "forced short patterns still report insufficient in-band headroom");
+    for(const auto bandwidth:{100.25,1499.25})for(const bool keyed:{false,true}) {
+        const auto partial=tuning::resolve(bandwidth,100,tuning::PatternMode::auto_pattern,keyed);
+        check(partial.config.spreading_factor==64,
+              "a high target must not introduce short-hold timing structure at fractional bandwidths");
+    }
     const auto weak=tuning::resolve(2400,-20,tuning::PatternMode::auto_pattern,false);
     const auto weaker=tuning::resolve(2400,-30,tuning::PatternMode::auto_pattern,false);
     check(weak.config.constellation_bits==1,"weak links integrate evidence for each raw bit");
@@ -168,7 +212,9 @@ void receive_target_lists() {
     check(tuning::parse_receive_targets(many).reset,"repeated entries cannot bypass the target count bound");
     const std::array<double,4> targets{40,100,6,-6};
     const auto profiles=tuning::receive_profiles(1200,targets,tuning::PatternMode::auto_pattern,false);
-    check(profiles.size()==3,"targets with identical actual waveform profiles must share a receiver");
+    check(profiles.size()==4,"distinct high-SNR integrations must remain distinct receiver profiles");
+    check(tuning::receive_profiles(1200,std::array<double,3>{80,100,150},tuning::PatternMode::auto_pattern,false).size()==1,
+          "strong targets with identical waveforms must still share one receiver");
     for(const auto& profile:profiles)
         check(profile.bandwidth_hz==1200 && profile.spreading_mode==modem::SpreadingMode::pattern && !profile.scramble,
               "receive targets must not search other bandwidths or pattern modes");
@@ -181,12 +227,30 @@ void receive_target_lists() {
     customized.memory_limit=2*1024*1024;customized.dsss=true;customized.stream_epoch=12345;
     customized.spreading_seed.fill(7);customized.dsss_seed.fill(11);
     const auto preserved=tuning::receive_profiles(customized,targets,tuning::PatternMode::auto_keystream,true);
-    check(preserved.size()==3,"custom-clock duplicate waveform profiles were not merged");
+    check(preserved.size()==3,"custom-clock profiles must merge when alignment restores the prior floor");
     for(const auto& profile:preserved)
         check(profile.sample_rate==8000 && profile.carrier_hz==1750 && profile.dsss && profile.scramble &&
               profile.memory_limit==customized.memory_limit && profile.stream_epoch==customized.stream_epoch &&
               profile.spreading_seed==customized.spreading_seed && profile.dsss_seed==customized.dsss_seed,
               "receive search discarded the caller's clock, carrier, spreading stream or resource configuration");
+    auto fractional_clock=tuning::resolve(12000,80,tuning::PatternMode::auto_pattern,true).config;
+    fractional_clock.sample_rate=44100;
+    const std::array<double,1> high_target{80};
+    auto orthogonal_clock=fractional_clock;orthogonal_clock.sample_rate=48000;orthogonal_clock.carrier_hz=12000;
+    check(tuning::receive_profiles(orthogonal_clock,high_target,tuning::PatternMode::auto_pattern,true).front().spreading_factor==32,
+          "private confidence floor must use the caller's actual carrier geometry");
+    auto dsss_only=tuning::resolve(1000,80,tuning::PatternMode::auto_pattern,false).config;dsss_only.dsss=true;
+    const auto dsss_profiles=tuning::receive_profiles(dsss_only,high_target,tuning::PatternMode::auto_pattern,false);
+    check(dsss_profiles.front().spreading_factor==32 && dsss_profiles.front().dsss && !dsss_profiles.front().scramble,
+          "DSSS-only private patterns need the same compact-path confidence floor");
+    const auto aligned=tuning::receive_profiles(fractional_clock,high_target,tuning::PatternMode::auto_pattern,true);
+    check(aligned.size()==1 && aligned.front().spreading_factor==64 && aligned.front().sample_rate==44100,
+          "automatic receive planning must check chip alignment against the preserved actual clock");
+    check(tuning::receive_profiles(fractional_clock,high_target,tuning::PatternMode::pattern_16,true).front().spreading_factor==16,
+          "alignment protection must not alter an explicitly forced manual pattern");
+    fractional_clock.sample_rate=0;
+    rejects([&]{tuning::receive_profiles(fractional_clock,high_target,tuning::PatternMode::auto_pattern,true);},
+            "custom-clock alignment must reject invalid clocks before chip modulo arithmetic");
     customized.data_key.emplace(Bytes(32,0x31));
     for(const auto mode:{tuning::PatternMode::auto_tone,tuning::PatternMode::tone_128}) {
         const auto tones=tuning::receive_profiles(customized,targets,mode,true);
