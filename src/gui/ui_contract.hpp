@@ -18,7 +18,7 @@ enum class Command {
     none, transmit, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
-    pattern_first, pattern_previous, pattern_next, pattern_last
+    pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_fullscreen
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,

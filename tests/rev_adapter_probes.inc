@@ -721,6 +721,78 @@
         }
         delete outside;delete viewport;delete backdrop;native_frame();
     }
+    void verify_fullscreen_bitmap() {
+        const auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){
+            return binding.bitmap&&binding.control.click==ui::Command::toggle_qr_fullscreen;
+        });
+        if(found==bindings.end())throw std::runtime_error("Rev fullscreen probe has no declared toggle bitmap");
+        const auto initial_page=application.page();select_page(found->control.page);apply();native_frame();
+        auto* original=found->bitmap;const auto original_rect=original->rect;
+        int original_x=0,original_y=0;window->getClientPos(original_x,original_y);
+        const int original_width=window->size.w,original_height=window->size.h;
+        const auto group_size=group->size();
+        const auto display=FullscreenBitmapWindow::display_for(*this);
+        const auto click=[](Rev::Window& target,float x,float y) {
+            int left=0,top=0;target.window->getClientPos(left,top);
+            const auto px=left+static_cast<int>(std::round(x*target.details.scale));
+            const auto py=top+static_cast<int>(std::round(y*target.details.scale));
+            target.onMouseButton(Rev::NativeWindow::Left,Rev::NativeWindow::Press,px,py);
+            target.onMouseButton(Rev::NativeWindow::Left,Rev::NativeWindow::Release,px,py);
+        };
+        const auto render_fullscreen=[&] {
+            if(!fullscreen)throw std::runtime_error("Rev declared bitmap click did not open fullscreen");
+            const auto draws=fullscreen->bitmap->draws;
+            const auto deadline=Clock::now()+std::chrono::seconds(2);
+            fullscreen->refresh(fullscreen->event);
+            while(fullscreen->bitmap->draws==draws) {
+                Rev::NativeWindow::pumpEvents();
+                if(Clock::now()>=deadline)throw std::runtime_error("Rev fullscreen bitmap did not paint");
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            }
+        };
+        const auto verify_restore=[&] {
+            apply();native_frame();int x=0,y=0;window->getClientPos(x,y);
+            if(fullscreen||application.fullscreen_control()||group->size()!=group_size||found->bitmap!=original||
+               window->size.w!=original_width||window->size.h!=original_height||x!=original_x||y!=original_y||
+               original->rect.x!=original_rect.x||original->rect.y!=original_rect.y||
+               original->rect.w!=original_rect.w||original->rect.h!=original_rect.h)
+                throw std::runtime_error("Rev fullscreen dismissal did not restore the original native window and bitmap");
+        };
+        click(*this,original_rect.x+original_rect.w/2,original_rect.y+original_rect.h/2);apply();render_fullscreen();
+#ifndef _WIN32
+        {
+            ::Window root=0,parent=0,*children=nullptr;unsigned count=0;
+            const bool queried=XQueryTree(Rev::NativeWindow::xDisplay,fullscreen->window->xWindow,&root,&parent,&children,&count)!=0;
+            if(children)XFree(children);
+            if(!queried||parent!=root)throw std::runtime_error("Rev fullscreen native surface is not an independent X11 top-level window");
+        }
+#endif
+        int x=0,y=0;fullscreen->window->getClientPos(x,y);
+        if(group->size()!=group_size+1||x!=display.x||y!=display.y||
+           fullscreen->window->size.w!=display.w||fullscreen->window->size.h!=display.h||
+           fullscreen->bitmap->width!=static_cast<unsigned>(display.w)||
+           fullscreen->bitmap->height!=static_cast<unsigned>(display.h))
+            throw std::runtime_error("Rev fullscreen bitmap does not occupy its entire physical monitor");
+        const auto pixels=[&] {
+            BitmapImage image(100,100);
+            fullscreen->bitmap->snapshot.paint(full_bitmap_request(100,100,false,true),
+                [&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);},launch.color);
+            return image.pixels();
+        };
+        const auto brightness=application.field(ui::Field::qr_brightness).selected;
+        application.select(ui::Field::qr_brightness,"normal");
+        std::this_thread::sleep_for(std::chrono::milliseconds(45));application.tick();apply();render_fullscreen();
+        const auto normal=pixels();
+        application.select(ui::Field::qr_brightness,"dark");
+        std::this_thread::sleep_for(std::chrono::milliseconds(45));application.tick();apply();render_fullscreen();
+        if(normal==pixels()||fullscreen->caption->content.get()!=application.bitmap(found->control,100).caption)
+            throw std::runtime_error("Rev fullscreen bitmap did not retain live brightness and caption presentation");
+        application.select(ui::Field::qr_brightness,brightness);
+        click(*fullscreen,fullscreen->details.size.width/2,fullscreen->details.size.height/2);verify_restore();
+        click(*this,original_rect.x+original_rect.w/2,original_rect.y+original_rect.h/2);apply();render_fullscreen();
+        fullscreen->onKeyboard(static_cast<int>(Rev::NativeWindow::Key::Escape),Rev::NativeWindow::Press);verify_restore();
+        select_page(initial_page);apply();native_frame();
+    }
     void verify_native_resize() {
         const auto initial_page=application.page();
         const auto resize=[&](int width,int height) {
@@ -746,7 +818,7 @@
         for(const auto& page:ui::pages()) {
             select_page(page.id);resize(ui::min_width,ui::min_height);resize(ui::default_width,ui::default_height);
         }
-        select_page(initial_page);apply();native_frame();verify_layout();
+        select_page(initial_page);apply();native_frame();verify_layout();verify_fullscreen_bitmap();
     }
     void verify_prompt_focus() {
         auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding){return binding.button&&!binding.button->disabled;});

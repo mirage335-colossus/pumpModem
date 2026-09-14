@@ -25,7 +25,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Decoded messages appear as one text row. Other receptions show a byte view for whole bytes or exact bits for a partial final byte. Click to copy, or use Paste as message to inspect the bytes in Binary, including escaped byte values.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. For legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
-    if(slot==Slot::qr)control.bitmap_caption=BitmapCaption::overlay_error;
+    if(slot==Slot::qr) {
+        control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_fullscreen;
+        control.help="Click to show the QR code full screen. Click again or press Escape to restore its original size.";
+    }
     if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0). This scalar sets the transmitted pattern duration; receive searches use their separate target list.";
     if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas. Search only the selected bandwidth and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";

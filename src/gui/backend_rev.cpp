@@ -26,6 +26,12 @@
 #include <string>
 #include <thread>
 #include <vector>
+#if defined(DATAPUMP_REV_ADAPTER_TEST) && !defined(_WIN32)
+#include <X11/Xlib.h>
+#undef None
+#undef True
+#undef False
+#endif
 
 import Rev.Window;
 import Rev.NativeWindow;
@@ -308,6 +314,84 @@ struct BitmapView : theme::RevBox {
     void draw(re::Event& e) override {re::Box::draw(e);video->draw();}
 };
 
+// Keep the desktop's native geometry and retained controls intact while a
+// declared bitmap occupies its monitor in a separate, undecorated top-level.
+struct FullscreenBitmapWindow : Rev::Window {
+    Application& application;
+    const ui::Control& control;
+    BitmapView* bitmap=nullptr;
+    re::Text* caption=nullptr;
+    BindingState presentation;
+    ui::ControlInteractions interactions;
+    std::function<void(ui::Command)> observe;
+    static Rev::NativeWindow::Display display_for(Rev::Window& owner) {
+        const auto displays=Rev::NativeWindow::getDisplays();
+        if(displays.empty())throw std::runtime_error("Cannot find a monitor for fullscreen display");
+        int x=0,y=0;owner.window->getClientPos(x,y);
+        x+=owner.window->size.w/2;y+=owner.window->size.h/2;
+        for(const auto& display:displays)
+            if(x>=display.x&&x<display.x+display.w&&y>=display.y&&y<display.y+display.h)return display;
+        return displays.front();
+    }
+    FullscreenBitmapWindow(std::vector<void*>& windows,Application& app,const ui::Control& declaration,
+            const Rev::NativeWindow::Display& display,std::function<void(ui::Command)> observer)
+        :Rev::Window(windows,{.name=ui::window_title(),.size={display.w,display.h,{0,0},{0,0}},
+            .decorated=false,.borderless=true,.fullscreen=true}),
+         application(app),control(declaration),observe(std::move(observer)) {
+        style->background.color=theme::rev_color(theme::WidgetRole::canvas);
+        bitmap=new BitmapView(this,application.launch.color,[this]{return details.scale;});
+        caption=new theme::RevText(this,"",{&smallText});
+        caption->style->overflow=Overflow::Hide;
+        // Moving between DPI scales can resize a Win32 window synchronously.
+        // Apply the monitor's physical extent after that move has completed.
+        setPos(display.x,display.y);window->setSize(display.w,display.h);
+        onResize(display.w,display.h);show();refresh(event);
+    }
+    void onResize(int width,int height) override {
+        Rev::Window::onResize(width,height);if(bitmap)apply();
+    }
+    void onClose(bool& reject) override {reject=true;application.dismiss_fullscreen();}
+    void keyDown(re::Event& e) override {
+        if(e.keyboard.escape) {application.dismiss_fullscreen();e.propagate=false;return;}
+        Rev::Window::keyDown(e);
+    }
+    bool allows_input() const {
+        const auto state=application.control(control);
+        return application.fullscreen_control()==&control&&state.visible&&state.enabled;
+    }
+    void dispatch(ui::Command command) {
+        application.gesture(control,command);if(observe)observe(command);
+    }
+    void mouseDown(re::Event& e) override {
+        if(e.mouse.lb&&allows_input()&&interactions.pointer(control,e.mouse.pos.x,e.mouse.pos.y)
+            .dispatch([this](ui::Command command){dispatch(command);})) {e.propagate=false;return;}
+        Rev::Window::mouseDown(e);
+    }
+    void mouseWheel(re::Event& e) override {
+        if(allows_input()&&ui::ControlInteractions::wheel(control,e.mouse.wheel.y/120.0)
+            .dispatch([this](ui::Command command){dispatch(command);})) {e.propagate=false;return;}
+        Rev::Window::mouseWheel(e);
+    }
+    void apply() {
+        const auto geometry=ui::fullscreen_control_layout(control,details.size.width,details.size.height);
+        if(presentation.needs_layout(geometry,control.font_size)) {
+            place(bitmap,geometry.widget);place(caption,geometry.caption);
+            style->border={.color=theme::rev_color(theme::WidgetRole::border),.width=geometry.border?1_px:0_px};
+            caption->style->zIndex=geometry.caption_overlay?1:0;
+            presentation.applied_layout(geometry,control.font_size);shared->layoutDirty=true;
+        }
+        const auto width=static_cast<unsigned>(std::max(0.0f,
+            std::round((geometry.widget.x+geometry.widget.w)*details.scale)-std::round(geometry.widget.x*details.scale)));
+        const auto value=application.bitmap(control,width);
+        if(presentation.update_bitmap(control.bitmap,value.revision))bitmap->set(value.source);
+        caption->content=value.caption;
+        caption->style->visibility=value.caption.empty()||!ui::drawable(geometry.caption)?Visibility::Hidden:Visibility::Visible;
+        caption->style->text.color=theme::rev_color(theme::text_rgb(value.caption_tone,
+            application.launch.color,application.control(control).enabled));
+        refresh(event);
+    }
+};
+
 struct ChoiceView : re::Dropdown {
     ChoiceView(re::Element* parent,Params params,StyleList styles={})
         :re::Dropdown(parent,std::move(params),std::move(styles)) {
@@ -542,6 +626,7 @@ public:
     std::vector<Binding> bindings;
     std::span<const ui::Control> declarations;
     std::function<void(ui::Command)> command_observer;
+    std::unique_ptr<FullscreenBitmapWindow> fullscreen;
     std::vector<void*>* group;
     ui::ServiceQueue services;
     re::Box* dialog=nullptr;
@@ -653,6 +738,9 @@ public:
         refresh(event);
     }
     void keyDown(re::Event& e) override {
+        if(fullscreen&&e.keyboard.escape) {
+            application.dismiss_fullscreen();e.propagate=false;return;
+        }
         if(dialog && e.keyboard.escape) {
             if(const auto* request=services.current())dialog_result=ui::ServiceResult{request->id,true,{},{}};
             e.propagate=false;return;
@@ -896,6 +984,16 @@ public:
         for(const auto& [page,view]:documents)view->apply(application.document(page,ui::document_content_width(viewport.w)));
     }
     void apply() {
+        const auto* expanded=application.fullscreen_control();
+        if(fullscreen&&expanded!=&fullscreen->control) {
+            fullscreen.reset();if(!application.closing())show();
+        }
+        if(expanded&&!fullscreen) {
+            hide_help(true);
+            fullscreen=std::make_unique<FullscreenBitmapWindow>(*group,application,*expanded,
+                FullscreenBitmapWindow::display_for(*this),[this](ui::Command command){if(command_observer)command_observer(command);});
+        }
+        if(fullscreen)fullscreen->apply();
         bool relayout=false;
         for(auto& b:bindings) {
             const auto view=binding_presentation(application,b.control,b.menu_items,details.size.width,details.size.height,declarations);

@@ -20,7 +20,8 @@ struct Application::Impl {
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
     std::unique_ptr<Smoke> smoke;
     bool started_session=false,passed=false;
-    std::uint64_t poll_count=0;
+    std::uint64_t poll_count=0,presentation_revision=0;
+    const ui::Control* fullscreen=nullptr;
     ui::Page page=ui::Page::console;
     struct Document {
         std::shared_ptr<const Inspection> model;
@@ -52,13 +53,13 @@ bool Application::tick() {
         if(impl_->smoke) {
             impl_->smoke->step(impl_->controller, &impl_->bitmaps);
             if(!impl_->passed&&impl_->smoke->done()) {
-                impl_->passed=true;impl_->completed=now;impl_->page=launch.page;
+                impl_->passed=true;impl_->completed=now;select_page(launch.page);
                 std::cout<<"Shared GUI smoke passed: keys, text, files, binary editing, cancellation, retained saves, live plots and page switching.\n";
             }
             if(!impl_->passed) {
                 const auto& definitions=ui::pages();
-                impl_->page=definitions[static_cast<std::size_t>(std::chrono::duration<double>(now-impl_->started).count())%definitions.size()].id;
-            } else if(std::chrono::duration<double>(now-impl_->completed).count()>=launch.hold)impl_->controller.close();
+                select_page(definitions[static_cast<std::size_t>(std::chrono::duration<double>(now-impl_->started).count())%definitions.size()].id);
+            } else if(std::chrono::duration<double>(now-impl_->completed).count()>=launch.hold)close();
         }
     }
     if(now<impl_->next_presentation)return false;
@@ -67,7 +68,7 @@ bool Application::tick() {
 }
 bool Application::finished() const { return impl_->controller.ready_to_close(); }
 int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
-void Application::close() { impl_->controller.close(); }
+void Application::close() { dismiss_fullscreen();impl_->controller.close(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
     if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.edit(field,std::move(text));
@@ -95,7 +96,16 @@ void Application::toggle(ui::Field field,bool value) {
 void Application::toggle(const ui::Control& declaration,bool value) {
     if(declaration.kind==ui::Kind::toggle&&accepts_input(declaration))toggle(declaration.field,value);
 }
-void Application::activate(ui::Command command) { if(!closing())impl_->controller.activate(command); }
+void Application::activate(ui::Command command) {
+    if(closing())return;
+    if(command==ui::Command::toggle_qr_fullscreen) {
+        if(!enabled(command))return;
+        if(impl_->fullscreen) {dismiss_fullscreen();return;}
+        const auto& controls=ui::console_screen();
+        const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
+        if(found!=controls.end()) {impl_->fullscreen=&*found;++impl_->presentation_revision;}
+    } else impl_->controller.activate(command);
+}
 void Application::activate(const ui::Control& declaration) {
     if(accepts_input(declaration))activate(declaration.command);
 }
@@ -103,6 +113,13 @@ void Application::gesture(const ui::Control& declaration,ui::Command command) {
     if(command==ui::Command::none)return;
     if(command!=declaration.click&&command!=declaration.double_click&&command!=declaration.wheel_up&&command!=declaration.wheel_down)return;
     if(accepts_input(declaration)&&enabled(command))activate(command);
+}
+const ui::Control* Application::fullscreen_control() const {
+    const auto* declaration=impl_->fullscreen;
+    return declaration&&accepts_input(*declaration)?declaration:nullptr;
+}
+void Application::dismiss_fullscreen() {
+    if(impl_->fullscreen) {impl_->fullscreen=nullptr;++impl_->presentation_revision;}
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
     if(closing()||(!declaration.persistent&&declaration.page!=page()))return false;
@@ -135,15 +152,21 @@ void Application::select_menu(std::span<const ui::Control* const> items,const st
     for(std::size_t i=0;i<items.size();++i)if(id==std::to_string(i)) {activate(*items[i]);return;}
 }
 const ui::FieldState& Application::field(ui::Field field) const { return impl_->controller.field(field); }
-bool Application::enabled(ui::Command command) const { return impl_->controller.enabled(command); }
+bool Application::enabled(ui::Command command) const {
+    if(command==ui::Command::toggle_qr_fullscreen)return !closing()&&page()==ui::Page::console;
+    return impl_->controller.enabled(command);
+}
 std::string Application::command_label(ui::Command command) const { return impl_->controller.command_label(command); }
 void Application::complete_service(ui::ServiceResult result) { impl_->controller.complete_service(std::move(result)); }
 std::vector<ui::ServiceRequest> Application::take_services() { return impl_->controller.take_services(); }
 void Application::report_error(std::string message) { impl_->controller.report_error(std::move(message)); }
-std::uint64_t Application::revision() const { return impl_->controller.revision(); }
+std::uint64_t Application::revision() const { return impl_->controller.revision()+impl_->presentation_revision; }
 std::uint64_t Application::poll_count() const { return impl_->poll_count; }
 void Application::select_page(ui::Page page) {
-    if(std::any_of(ui::pages().begin(),ui::pages().end(),[&](const auto& value){return value.id==page;}))impl_->page=page;
+    if(std::any_of(ui::pages().begin(),ui::pages().end(),[&](const auto& value){return value.id==page;})) {
+        if(impl_->page!=page)dismiss_fullscreen();
+        impl_->page=page;
+    }
 }
 ui::Page Application::page() const { return impl_->page; }
 bool Application::smoke_passed() const { return impl_->passed; }

@@ -17,6 +17,30 @@ struct ControlLayout {
     bool has_label=false,has_suggestions=false,has_caption=false,border=false,caption_overlay=false,popup_upward=false;
     bool operator==(const ControlLayout&) const = default;
 };
+inline void layout_bitmap_content(const Control& c,ControlLayout& out) {
+    if(c.kind==Kind::bitmap) {
+        out.has_caption=true;
+        if(c.bitmap_caption==BitmapCaption::overlay_error) {
+            out.caption_overlay=true;
+            out.caption={out.widget.x+std::min(8,out.widget.w),out.widget.y+std::min(8,out.widget.h),
+                std::max(0,out.widget.w-16),std::max(0,out.widget.h-16)};
+        }
+        else {
+            out.border=true;
+            const int inset_x=std::min(4,out.widget.w),inset_y=std::min(4,out.widget.h);
+            const int caption_height=std::min(22,out.widget.h);
+            out.caption={out.widget.x+inset_x,out.widget.y+out.widget.h-caption_height,std::max(0,out.widget.w-8),caption_height};
+            out.widget={out.widget.x+inset_x,out.widget.y+inset_y,std::max(0,out.widget.w-8),std::max(0,out.widget.h-30)};
+        }
+    }
+}
+// Full-screen bitmaps use the same caption policy without desktop controls.
+inline ControlLayout fullscreen_control_layout(const Control& c,int width,int height) {
+    ControlLayout out;
+    out.frame=out.widget={0,0,std::max(0,width),std::max(0,height)};
+    layout_bitmap_content(c,out);
+    return out;
+}
 // All rectangles are absolute logical client coordinates. No adapter knows the
 // meaning of a slot or independently reserves space for application controls.
 inline ControlLayout control_layout(const Control& c,const FieldState& state,int width,int height,
@@ -71,21 +95,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
         out.suggestions={out.widget.x+out.widget.w-suggestions_width,out.widget.y,suggestions_width,out.widget.h};
         out.widget.w-=suggestions_width;
     }
-    if(c.kind==Kind::bitmap) {
-        out.has_caption=true;
-        if(c.bitmap_caption==BitmapCaption::overlay_error) {
-            out.caption_overlay=true;
-            out.caption={out.widget.x+std::min(8,out.widget.w),out.widget.y+std::min(8,out.widget.h),
-                std::max(0,out.widget.w-16),std::max(0,out.widget.h-16)};
-        }
-        else {
-            out.border=true;
-            const int inset_x=std::min(4,out.widget.w),inset_y=std::min(4,out.widget.h);
-            const int caption_height=std::min(22,out.widget.h);
-            out.caption={out.widget.x+inset_x,out.widget.y+out.widget.h-caption_height,std::max(0,out.widget.w-8),caption_height};
-            out.widget={out.widget.x+inset_x,out.widget.y+inset_y,std::max(0,out.widget.w-8),std::max(0,out.widget.h-30)};
-        }
-    }
+    layout_bitmap_content(c,out);
     return out;
 }
 inline Rect record_cell_rect(const RecordCell& cell,int row_width) {
