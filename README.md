@@ -193,8 +193,8 @@ the bright white QR background with dark red; Off makes the preview black. Only
 the QR preview changes, and the selection is kept while you edit the message.
 Monochrome displays offer Dim gray and Dark gray instead, with Dark gray selected
 on startup. Choose Normal to restore the full-contrast QR code for scanning.
-Click the QR code to show it full screen. Click again or press Escape to return
-to its original size. The full-screen view keeps the selected brightness.
+Click the QR code to expand it to fill the app window. Click again or press
+Escape to return to its original size. The expanded view keeps the selected brightness.
 
 Both editors are available together, with no Message/Binary source selector.
 For example, entering `01000001` in Binary produces `A` in Message. Binary is

@@ -26,12 +26,6 @@
 #include <string>
 #include <thread>
 #include <vector>
-#if defined(DATAPUMP_REV_ADAPTER_TEST) && !defined(_WIN32)
-#include <X11/Xlib.h>
-#undef None
-#undef True
-#undef False
-#endif
 
 import Rev.Window;
 import Rev.NativeWindow;
@@ -314,9 +308,10 @@ struct BitmapView : theme::RevBox {
     void draw(re::Event& e) override {re::Box::draw(e);video->draw();}
 };
 
-// Keep the desktop's native geometry and retained controls intact while a
-// declared bitmap occupies its monitor in a separate, undecorated top-level.
-struct FullscreenBitmapWindow : Rev::Window {
+// A retained overlay fills the existing client area while preserving the
+// desktop controls and the native window's frame, position and size.
+struct ExpandedBitmapView : theme::RevBox {
+    Rev::Window& owner;
     Application& application;
     const ui::Control& control;
     BitmapView* bitmap=nullptr;
@@ -324,40 +319,19 @@ struct FullscreenBitmapWindow : Rev::Window {
     BindingState presentation;
     ui::ControlInteractions interactions;
     std::function<void(ui::Command)> observe;
-    static Rev::NativeWindow::Display display_for(Rev::Window& owner) {
-        const auto displays=Rev::NativeWindow::getDisplays();
-        if(displays.empty())throw std::runtime_error("Cannot find a monitor for fullscreen display");
-        int x=0,y=0;owner.window->getClientPos(x,y);
-        x+=owner.window->size.w/2;y+=owner.window->size.h/2;
-        for(const auto& display:displays)
-            if(x>=display.x&&x<display.x+display.w&&y>=display.y&&y<display.y+display.h)return display;
-        return displays.front();
-    }
-    FullscreenBitmapWindow(std::vector<void*>& windows,Application& app,const ui::Control& declaration,
-            const Rev::NativeWindow::Display& display,std::function<void(ui::Command)> observer)
-        :Rev::Window(windows,{.name=ui::window_title(),.size={display.w,display.h,{0,0},{0,0}},
-            .decorated=false,.borderless=true,.fullscreen=true}),
-         application(app),control(declaration),observe(std::move(observer)) {
+    ExpandedBitmapView(Rev::Window& host,Application& app,const ui::Control& declaration,
+            std::function<void(ui::Command)> observer)
+        :theme::RevBox(&host),owner(host),application(app),control(declaration),observe(std::move(observer)) {
         style->background.color=theme::rev_color(theme::WidgetRole::canvas);
-        bitmap=new BitmapView(this,application.launch.color,[this]{return details.scale;});
+        style->zIndex=90;interceptHits=true;
+        bitmap=new BitmapView(this,application.launch.color,[this]{return owner.details.scale;});
         caption=new theme::RevText(this,"",{&smallText});
         caption->style->overflow=Overflow::Hide;
-        // Moving between DPI scales can resize a Win32 window synchronously.
-        // Apply the monitor's physical extent after that move has completed.
-        setPos(display.x,display.y);window->setSize(display.w,display.h);
-        onResize(display.w,display.h);show();refresh(event);
-    }
-    void onResize(int width,int height) override {
-        Rev::Window::onResize(width,height);if(bitmap)apply();
-    }
-    void onClose(bool& reject) override {reject=true;application.dismiss_fullscreen();}
-    void keyDown(re::Event& e) override {
-        if(e.keyboard.escape) {application.dismiss_fullscreen();e.propagate=false;return;}
-        Rev::Window::keyDown(e);
+        apply();
     }
     bool allows_input() const {
         const auto state=application.control(control);
-        return application.fullscreen_control()==&control&&state.visible&&state.enabled;
+        return application.expanded_control()==&control&&state.visible&&state.enabled;
     }
     void dispatch(ui::Command command) {
         application.gesture(control,command);if(observe)observe(command);
@@ -365,17 +339,18 @@ struct FullscreenBitmapWindow : Rev::Window {
     void mouseDown(re::Event& e) override {
         if(e.mouse.lb&&allows_input()&&interactions.pointer(control,e.mouse.pos.x,e.mouse.pos.y)
             .dispatch([this](ui::Command command){dispatch(command);})) {e.propagate=false;return;}
-        Rev::Window::mouseDown(e);
+        theme::RevBox::mouseDown(e);
     }
     void mouseWheel(re::Event& e) override {
         if(allows_input()&&ui::ControlInteractions::wheel(control,e.mouse.wheel.y/120.0)
             .dispatch([this](ui::Command command){dispatch(command);})) {e.propagate=false;return;}
-        Rev::Window::mouseWheel(e);
+        theme::RevBox::mouseWheel(e);
     }
     void apply() {
-        const auto geometry=ui::fullscreen_control_layout(control,details.size.width,details.size.height);
+        const auto& details=owner.details;
+        const auto geometry=ui::expanded_control_layout(control,details.size.width,details.size.height);
         if(presentation.needs_layout(geometry,control.font_size)) {
-            place(bitmap,geometry.widget);place(caption,geometry.caption);
+            place(this,geometry.frame);place(bitmap,geometry.widget);place(caption,geometry.caption);
             style->border={.color=theme::rev_color(theme::WidgetRole::border),.width=geometry.border?1_px:0_px};
             caption->style->zIndex=geometry.caption_overlay?1:0;
             presentation.applied_layout(geometry,control.font_size);shared->layoutDirty=true;
@@ -388,7 +363,7 @@ struct FullscreenBitmapWindow : Rev::Window {
         caption->style->visibility=value.caption.empty()||!ui::drawable(geometry.caption)?Visibility::Hidden:Visibility::Visible;
         caption->style->text.color=theme::rev_color(theme::text_rgb(value.caption_tone,
             application.launch.color,application.control(control).enabled));
-        refresh(event);
+        refresh(owner.event);
     }
 };
 
@@ -626,7 +601,8 @@ public:
     std::vector<Binding> bindings;
     std::span<const ui::Control> declarations;
     std::function<void(ui::Command)> command_observer;
-    std::unique_ptr<FullscreenBitmapWindow> fullscreen;
+    std::unique_ptr<ExpandedBitmapView> expanded;
+    re::Element* expanded_previous_focus=nullptr;
     std::vector<void*>* group;
     ui::ServiceQueue services;
     re::Box* dialog=nullptr;
@@ -686,6 +662,11 @@ public:
     void draw(re::Event& e) override {
         update_help();
         Rev::Window::draw(e);
+        // The restored surface must resolve its visible style before the
+        // ordinary focus checks can accept one of its retained descendants.
+        if(!expanded&&expanded_previous_focus) {
+            auto* previous=expanded_previous_focus;expanded_previous_focus=nullptr;focus_control(previous);
+        }
         // Run once after a shared presentation reaches its normal native frame.
         // Resizes can queue this frame for the next event batch; forcing a
         // second draw in the polling loop would delay simulation measurements.
@@ -737,12 +718,19 @@ public:
         }
         refresh(event);
     }
+    void mouseDown(re::Event& e) override {
+        // Native pointer dispatch may clear the editor's focus before it
+        // reaches the bitmap gesture. Retain it before that dispatch begins.
+        auto* previous=focused_control();Rev::Window::mouseDown(e);
+        if(application.expanded_control()&&!expanded&&!expanded_previous_focus)expanded_previous_focus=previous;
+    }
     void keyDown(re::Event& e) override {
-        if(fullscreen&&e.keyboard.escape) {
-            application.dismiss_fullscreen();e.propagate=false;return;
-        }
         if(dialog && e.keyboard.escape) {
             if(const auto* request=services.current())dialog_result=ui::ServiceResult{request->id,true,{},{}};
+            e.propagate=false;return;
+        }
+        if(expanded&&!dialog) {
+            if(e.keyboard.escape)application.dismiss_expanded();
             e.propagate=false;return;
         }
         if(e.keyboard.tab) {
@@ -977,6 +965,7 @@ public:
             if(binding.caption) {place(binding.caption,local(geometry.caption));binding.caption->style->overflow=Overflow::Hide;binding.caption->style->zIndex=geometry.caption_overlay?1:0;}
             binding.element->style->border={.color=theme::rev_color(theme::WidgetRole::border),.radius=0_px,.width=geometry.border?1_px:0_px};
         }
+        if(expanded)expanded->apply();
         update_documents();shared->layoutDirty=true;refresh(event);
     }
     void update_documents() {
@@ -984,16 +973,20 @@ public:
         for(const auto& [page,view]:documents)view->apply(application.document(page,ui::document_content_width(viewport.w)));
     }
     void apply() {
-        const auto* expanded=application.fullscreen_control();
-        if(fullscreen&&expanded!=&fullscreen->control) {
-            fullscreen.reset();if(!application.closing())show();
+        const auto* expansion=application.expanded_control();
+        if(expanded&&expansion!=&expanded->control) {
+            expanded.reset();surface->style->visibility=Visibility::Visible;surface->dirty.style=true;
+            focus_control(nullptr);
         }
-        if(expanded&&!fullscreen) {
+        if(expansion&&!expanded) {
             hide_help(true);
-            fullscreen=std::make_unique<FullscreenBitmapWindow>(*group,application,*expanded,
-                FullscreenBitmapWindow::display_for(*this),[this](ui::Command command){if(command_observer)command_observer(command);});
+            if(!expanded_previous_focus)expanded_previous_focus=focused_control();
+            focus_control(nullptr);
+            surface->style->visibility=Visibility::Hidden;surface->dirty.style=true;
+            expanded=std::make_unique<ExpandedBitmapView>(*this,application,*expansion,
+                [this](ui::Command command){if(command_observer)command_observer(command);});
         }
-        if(fullscreen)fullscreen->apply();
+        if(expanded)expanded->apply();
         bool relayout=false;
         for(auto& b:bindings) {
             const auto view=binding_presentation(application,b.control,b.menu_items,details.size.width,details.size.height,declarations);

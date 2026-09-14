@@ -342,8 +342,15 @@ class NativeWindow : public Fl_Double_Window {
 public:
     NativeWindow():Fl_Double_Window(ui::default_width,ui::default_height,ui::window_title()) {}
     std::function<void()> resized;
+    Fl_Widget* overlay=nullptr;
     void resize(int x,int y,int width,int height) override {
         Fl_Double_Window::resize(x,y,width,height);if(resized)resized();
+    }
+private:
+    void draw() override {
+        // Native controls can damage only their own rectangle between ticks.
+        // Paint the covering view for those regions too, keeping it opaque.
+        if(overlay&&overlay->visible())draw_child(*overlay);else Fl_Double_Window::draw();
     }
 };
 
@@ -362,35 +369,32 @@ private:
         fl_pop_clip();
     }
 };
-// A separate native window leaves the original desktop's geometry, focus and
-// scroll positions intact while a declared bitmap occupies its monitor.
-class NativeFullscreenBitmap : public Fl_Double_Window {
+// The overlay fills the existing client area while retaining the controls,
+// scroll positions and native window geometry beneath it.
+class NativeExpandedBitmap : public Fl_Group {
 public:
-    NativeFullscreenBitmap(Fl_Window& owner,const ui::Control& control,
+    NativeExpandedBitmap(Fl_Window& owner,const ui::Control& control,
             std::function<BitmapPresentation(unsigned)> presentation,
             std::function<void(ui::Command)> dispatch,std::function<void()> dismiss)
-        :Fl_Double_Window(owner.x(),owner.y(),owner.w(),owner.h(),ui::window_title()),
+        :Fl_Group(0,0,owner.w(),owner.h()),
          control_(control),presentation_(std::move(presentation)),dismiss_(std::move(dismiss)) {
         begin();group_=new NativeControlGroup(control_);group_->dispatch=std::move(dispatch);group_->begin();
         bitmap_=new NativeBitmap;caption_=new NativeLiteralText;
         caption_->labelsize(ui::bitmap_caption_font_size);caption_->labeltype(literal_label_type());
         caption_->align(FL_ALIGN_LEFT|FL_ALIGN_INSIDE|FL_ALIGN_CLIP);
-        group_->end();end();resizable(group_);theme::apply_widgets(*this);
-        callback([](Fl_Widget*,void* context){static_cast<NativeFullscreenBitmap*>(context)->dismiss_();},this);
-        const int screen=owner.screen_num();screen_num(screen);fullscreen_screens(screen,screen,screen,screen);
-        fullscreen();layout();
+        group_->end();end();box(FL_FLAT_BOX);theme::apply_widgets(*this);layout();
     }
     const ui::Control* control() const {return &control_;}
     void refresh() {
         const auto presentation=presentation_(static_cast<unsigned>(std::max(1,
-            widgets::bitmap_sample_extent(bitmap_->x(),bitmap_->w(),Fl::screen_scale(screen_num())))));
+            widgets::bitmap_sample_extent(bitmap_->x(),bitmap_->w(),Fl::screen_scale(window()->screen_num())))));
         if(state_.update_bitmap(control_.bitmap,presentation.revision))bitmap_->set(presentation.source);
         if(!caption_->label()||presentation.caption!=caption_->label())caption_->copy_label(presentation.caption.c_str());
         caption_->labelcolor(text_color(presentation.caption_tone));
         if(!presentation.caption.empty()&&caption_->w()>0&&caption_->h()>0)caption_->show();else caption_->hide();
     }
     void resize(int x,int y,int width,int height) override {
-        Fl_Double_Window::resize(x,y,width,height);if(group_)layout();
+        Fl_Group::resize(x,y,width,height);if(group_)layout();
     }
     int handle(int event) override {
         if(event==FL_FOCUS)return 1;
@@ -398,7 +402,8 @@ public:
             if(Fl::event_key()==FL_Escape)dismiss_();
             return 1;
         }
-        return Fl_Double_Window::handle(event);
+        if(Fl_Group::handle(event))return 1;
+        return event==FL_PUSH||event==FL_RELEASE||event==FL_MOUSEWHEEL||event==FL_DRAG||event==FL_MOVE||event==FL_ENTER;
     }
 private:
     const ui::Control& control_;
@@ -409,7 +414,7 @@ private:
     NativeLiteralText* caption_=nullptr;
     BindingState state_;
     void layout() {
-        const auto geometry=ui::fullscreen_control_layout(control_,w(),h());
+        const auto geometry=ui::expanded_control_layout(control_,w(),h());
         const auto place=[](Fl_Widget& widget,ui::Rect rect){widget.resize(rect.x,rect.y,rect.w,rect.h);};
         place(*group_,geometry.frame);place(*bitmap_,geometry.widget);place(*caption_,geometry.caption);
         group_->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);refresh();redraw();
@@ -657,13 +662,12 @@ public:
         layout();show_page();application.start();apply();window->show();
         Fl::add_timeout(.004,timer_callback,this);
     }
-    ~NativeApp() {Fl::remove_timeout(timer_callback,this);services.cancel();application.close();fullscreen.reset();window.reset();}
+    ~NativeApp() {Fl::remove_timeout(timer_callback,this);services.cancel();application.close();window->overlay=nullptr;expanded.reset();window.reset();}
     Application application;
     int run() {
         while(!application.finished()) {
             Fl::wait(.004);
         }
-        if(fullscreen)fullscreen->hide();
         window->hide();if(failure_)std::rethrow_exception(failure_);return application.result();
     }
 private:
@@ -676,8 +680,8 @@ private:
         std::shared_ptr<const ui::DocumentNode> source;
     };
     std::unique_ptr<NativeWindow> window;
-    std::unique_ptr<NativeFullscreenBitmap> fullscreen;
-    std::unique_ptr<Fl_Widget_Tracker> fullscreen_focus;
+    std::unique_ptr<NativeExpandedBitmap> expanded;
+    std::unique_ptr<Fl_Widget_Tracker> expanded_focus;
     std::map<ui::Page,Page> pages;
     std::vector<std::pair<ui::Page,Fl_Button*>> tabs;
     std::vector<std::unique_ptr<Binding>> bindings;
@@ -798,6 +802,7 @@ private:
             place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption&&ui::drawable(geometry.caption));
             b.group->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);
         }
+        if(expanded)expanded->resize(0,0,window->w(),window->h());
         update_documents();window->redraw();
     }
     void update_documents() {
@@ -857,28 +862,29 @@ private:
             if(b.menu)label(b.menu,view.control.label);
         }
         if(relayout)layout();else update_documents();
-        update_bitmaps();show_page();update_fullscreen();Fl_Group::current(previous_group);
+        update_bitmaps();show_page();update_expanded();Fl_Group::current(previous_group);
     }
-    void update_fullscreen() {
-        const auto* control=application.fullscreen_control();
-        if(fullscreen&&fullscreen->control()!=control) {
-            fullscreen.reset();
-            if(fullscreen_focus&&fullscreen_focus->exists()) {
-                auto* widget=fullscreen_focus->widget();if(widget&&widget->visible_r()&&widget->active_r())widget->take_focus();
+    void update_expanded() {
+        const auto* control=application.expanded_control();
+        if(expanded&&expanded->control()!=control) {
+            window->overlay=nullptr;expanded.reset();
+            if(expanded_focus&&expanded_focus->exists()) {
+                auto* widget=expanded_focus->widget();if(widget&&widget->visible_r()&&widget->active_r())widget->take_focus();
             }
-            fullscreen_focus.reset();
+            expanded_focus.reset();
+            window->redraw();
         }
         if(!control)return;
-        if(!fullscreen) {
-            if(Fl::focus())fullscreen_focus=std::make_unique<Fl_Widget_Tracker>(Fl::focus());
-            auto* previous_group=Fl_Group::current();Fl_Group::current(nullptr);
-            fullscreen=std::make_unique<NativeFullscreenBitmap>(*window,*control,
+        if(!expanded) {
+            if(Fl::focus())expanded_focus=std::make_unique<Fl_Widget_Tracker>(Fl::focus());
+            auto* previous_group=Fl_Group::current();window->begin();
+            expanded=std::make_unique<NativeExpandedBitmap>(*window,*control,
                 [this,control](unsigned width){return application.bitmap(*control,width);},
                 [this,control](ui::Command command){application.gesture(*control,command);},
-                [this]{application.dismiss_fullscreen();});
-            Fl_Group::current(previous_group);fullscreen->show();fullscreen->take_focus();
+                [this]{application.dismiss_expanded();});
+            window->overlay=expanded.get();Fl_Group::current(previous_group);expanded->take_focus();window->redraw();
         }
-        fullscreen->refresh();
+        expanded->refresh();
     }
     void update_bitmaps() {
         for(auto& item:bindings) {

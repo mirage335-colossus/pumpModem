@@ -54,10 +54,10 @@ public:
     void activate(ui::Command command);
     void activate(const ui::Control& control);
     void gesture(const ui::Control& control,ui::Command command);
-    // A native full-screen presentation of this declaration's live bitmap.
+    // Present this declaration's live bitmap across the app window's client area.
     // The declaration remains owned by the shared application.
-    const ui::Control* fullscreen_control() const;
-    void dismiss_fullscreen();
+    const ui::Control* expanded_control() const;
+    void dismiss_expanded();
     ControlPresentation control(const ui::Control& control) const;
     MenuPresentation menu(std::span<const ui::Control* const> items) const;
     void select_menu(std::span<const ui::Control* const> items,const std::string& id);

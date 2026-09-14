@@ -26,8 +26,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr) {
-        control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_fullscreen;
-        control.help="Click to show the QR code full screen. Click again or press Escape to restore its original size.";
+        control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_expanded;
+        control.help="Click to expand the QR code to fill the window. Click again or press Escape to restore its original size.";
     }
     if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0). This scalar sets the transmitted pattern duration; receive searches use their separate target list.";
     if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas. Search only the selected bandwidth and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";

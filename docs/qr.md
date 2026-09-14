@@ -27,9 +27,10 @@ remains in effect when the message changes. Choose Normal for the original
 black-on-white rendering when scanning. This presentation setting does not change
 the module matrix or the black-and-white SVG/PBM exports.
 
-Click the QR preview to fill the screen with a larger, sharply rendered code.
-Click it again or press Escape to restore the original preview and window layout.
-The full-screen view keeps the selected brightness and follows message changes.
+Click the QR preview to fill the app window with a larger, sharply rendered code.
+The window keeps its size and title bar, and the code follows window resizing.
+Click it again or press Escape to restore the original preview and controls.
+The expanded view keeps the selected brightness and follows message changes.
 
 The optical representation is plaintext: it does not automatically add modem
 encryption, authentication, or content trust. It transports the exact supplied

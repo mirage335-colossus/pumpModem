@@ -120,29 +120,29 @@ void control_bindings() {
     action.field=ui::Field::message;app.activate(action);
     check(app.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Eligible bound action did not dispatch its command");
 }
-void fullscreen_preview() {
+void expanded_preview() {
     Application app({.simulation=true});
     const auto& declarations=ui::console_screen();
     const auto& qr=*std::find_if(declarations.begin(),declarations.end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
-    check(qr.click==ui::Command::toggle_qr_fullscreen&&!app.fullscreen_control(),"QR must start at its original size with a click toggle");
+    check(qr.click==ui::Command::toggle_qr_expanded&&!app.expanded_control(),"QR must start at its original size with a click toggle");
     ui::ControlInteractions clicks;
     const auto press=[&] {clicks.pointer(qr,40,40).dispatch([&](auto command){app.gesture(qr,command);});};
     const auto brightness=app.field(ui::Field::qr_brightness).selected;
     const auto revision=app.revision();press();
-    check(app.fullscreen_control()==&qr&&app.revision()>revision,"QR click did not publish a retained full-screen declaration");
+    check(app.expanded_control()==&qr&&app.revision()>revision,"QR click did not publish a retained expanded declaration");
     press(); // A rapid second click must still toggle when no double-click is declared.
-    check(!app.fullscreen_control()&&app.field(ui::Field::qr_brightness).selected==brightness,
+    check(!app.expanded_control()&&app.field(ui::Field::qr_brightness).selected==brightness,
           "Second QR click did not restore the preview with its brightness unchanged");
-    press();const auto expanded_revision=app.revision();app.dismiss_fullscreen();
-    check(!app.fullscreen_control()&&app.revision()>expanded_revision&&!app.closing(),"Dismissing full screen closed the application or retained its bitmap");
-    const auto dismissed_revision=app.revision();app.dismiss_fullscreen();
-    check(app.revision()==dismissed_revision,"Repeated full-screen dismissal invalidated an unchanged presentation");
+    press();const auto expanded_revision=app.revision();app.dismiss_expanded();
+    check(!app.expanded_control()&&app.revision()>expanded_revision&&!app.closing(),"Dismissing expanded view closed the application or retained its bitmap");
+    const auto dismissed_revision=app.revision();app.dismiss_expanded();
+    check(app.revision()==dismissed_revision,"Repeated expanded dismissal invalidated an unchanged presentation");
     press();app.select_page(ui::Page::flow);press();
-    check(!app.fullscreen_control()&&!app.enabled(qr.click),"Page change or stale QR click left a full-screen preview active");
+    check(!app.expanded_control()&&!app.enabled(qr.click),"Page change or stale QR click left an expanded preview active");
     app.select_page(ui::Page::console);
-    check(!app.fullscreen_control(),"Returning to the console reopened a dismissed full-screen preview");
+    check(!app.expanded_control(),"Returning to the console reopened a dismissed expanded preview");
     press();app.close();press();
-    check(!app.fullscreen_control()&&!app.enabled(qr.click),"Closing the application retained or reopened full screen");
+    check(!app.expanded_control()&&!app.enabled(qr.click),"Closing the application retained or reopened expanded view");
 }
 void menu_bindings() {
     Application app({.simulation=true});
@@ -371,6 +371,6 @@ void declarations() {
 }
 }
 int main() {
-    try {records();presentation();control_bindings();fullscreen_preview();menu_bindings();declared_edits();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -21,7 +21,7 @@ struct Application::Impl {
     std::unique_ptr<Smoke> smoke;
     bool started_session=false,passed=false;
     std::uint64_t poll_count=0,presentation_revision=0;
-    const ui::Control* fullscreen=nullptr;
+    const ui::Control* expanded=nullptr;
     ui::Page page=ui::Page::console;
     struct Document {
         std::shared_ptr<const Inspection> model;
@@ -68,7 +68,7 @@ bool Application::tick() {
 }
 bool Application::finished() const { return impl_->controller.ready_to_close(); }
 int Application::result() const { return launch.smoke&&!impl_->passed?1:0; }
-void Application::close() { dismiss_fullscreen();impl_->controller.close(); }
+void Application::close() { dismiss_expanded();impl_->controller.close(); }
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
     if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.edit(field,std::move(text));
@@ -98,12 +98,12 @@ void Application::toggle(const ui::Control& declaration,bool value) {
 }
 void Application::activate(ui::Command command) {
     if(closing())return;
-    if(command==ui::Command::toggle_qr_fullscreen) {
+    if(command==ui::Command::toggle_qr_expanded) {
         if(!enabled(command))return;
-        if(impl_->fullscreen) {dismiss_fullscreen();return;}
+        if(impl_->expanded) {dismiss_expanded();return;}
         const auto& controls=ui::console_screen();
         const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& c){return c.bitmap==ui::Bitmap::qr;});
-        if(found!=controls.end()) {impl_->fullscreen=&*found;++impl_->presentation_revision;}
+        if(found!=controls.end()) {impl_->expanded=&*found;++impl_->presentation_revision;}
     } else impl_->controller.activate(command);
 }
 void Application::activate(const ui::Control& declaration) {
@@ -114,12 +114,12 @@ void Application::gesture(const ui::Control& declaration,ui::Command command) {
     if(command!=declaration.click&&command!=declaration.double_click&&command!=declaration.wheel_up&&command!=declaration.wheel_down)return;
     if(accepts_input(declaration)&&enabled(command))activate(command);
 }
-const ui::Control* Application::fullscreen_control() const {
-    const auto* declaration=impl_->fullscreen;
+const ui::Control* Application::expanded_control() const {
+    const auto* declaration=impl_->expanded;
     return declaration&&accepts_input(*declaration)?declaration:nullptr;
 }
-void Application::dismiss_fullscreen() {
-    if(impl_->fullscreen) {impl_->fullscreen=nullptr;++impl_->presentation_revision;}
+void Application::dismiss_expanded() {
+    if(impl_->expanded) {impl_->expanded=nullptr;++impl_->presentation_revision;}
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
     if(closing()||(!declaration.persistent&&declaration.page!=page()))return false;
@@ -153,7 +153,7 @@ void Application::select_menu(std::span<const ui::Control* const> items,const st
 }
 const ui::FieldState& Application::field(ui::Field field) const { return impl_->controller.field(field); }
 bool Application::enabled(ui::Command command) const {
-    if(command==ui::Command::toggle_qr_fullscreen)return !closing()&&page()==ui::Page::console;
+    if(command==ui::Command::toggle_qr_expanded)return !closing()&&page()==ui::Page::console;
     return impl_->controller.enabled(command);
 }
 std::string Application::command_label(ui::Command command) const { return impl_->controller.command_label(command); }
@@ -164,7 +164,7 @@ std::uint64_t Application::revision() const { return impl_->controller.revision(
 std::uint64_t Application::poll_count() const { return impl_->poll_count; }
 void Application::select_page(ui::Page page) {
     if(std::any_of(ui::pages().begin(),ui::pages().end(),[&](const auto& value){return value.id==page;})) {
-        if(impl_->page!=page)dismiss_fullscreen();
+        if(impl_->page!=page)dismiss_expanded();
         impl_->page=page;
     }
 }

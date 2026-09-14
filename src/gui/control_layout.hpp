@@ -34,8 +34,8 @@ inline void layout_bitmap_content(const Control& c,ControlLayout& out) {
         }
     }
 }
-// Full-screen bitmaps use the same caption policy without desktop controls.
-inline ControlLayout fullscreen_control_layout(const Control& c,int width,int height) {
+// Expanded bitmaps fill the app client area with the same caption policy.
+inline ControlLayout expanded_control_layout(const Control& c,int width,int height) {
     ControlLayout out;
     out.frame=out.widget={0,0,std::max(0,width),std::max(0,height)};
     layout_bitmap_content(c,out);

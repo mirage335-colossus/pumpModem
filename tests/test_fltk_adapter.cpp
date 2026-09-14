@@ -435,29 +435,41 @@ void repeatable_clicks() {
     Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
-void fullscreen_bitmap_clicks() {
+void expanded_bitmap_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
-    auto* window=Fl::first_window();require(window,"Fullscreen fixture has no native window");
+    auto* window=Fl::first_window();require(window,"Expanded fixture has no native window");
     const auto controls=ui::console_screen();
     const auto declared=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.bitmap==ui::Bitmap::qr;});
-    require(declared!=controls.end(),"Fullscreen fixture has no declared bitmap");
+    require(declared!=controls.end(),"Expanded fixture has no declared bitmap");
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
         while(Clock::now()<until)Fl::wait(.005);
     };
-    const auto click=[](Fl_Window* target,int px,int py) {
+    const auto click=[&](int px,int py) {
         Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;Fl::e_state=FL_BUTTON1;
-        Fl::handle(FL_PUSH,target);Fl::e_state=0;Fl::handle(FL_RELEASE,target);
+        Fl::handle(FL_PUSH,window);Fl::e_state=0;Fl::handle(FL_RELEASE,window);
     };
-    const auto expanded=[]() -> NativeFullscreenBitmap* {
-        for(auto* candidate=Fl::first_window();candidate;candidate=Fl::next_window(candidate))
-            if(auto* fullscreen=dynamic_cast<NativeFullscreenBitmap*>(candidate))return fullscreen;
+    const auto window_count=[] {
+        unsigned count=0;for(auto* candidate=Fl::first_window();candidate;candidate=Fl::next_window(candidate))++count;
+        return count;
+    };
+    const auto expanded=[&]() -> NativeExpandedBitmap* {
+        for(int i=0;i<window->children();++i)
+            if(auto* overlay=dynamic_cast<NativeExpandedBitmap*>(window->child(i)))return overlay;
         return nullptr;
     };
-    const auto bitmap=[](NativeFullscreenBitmap& fullscreen) -> NativeBitmap* {
-        auto* group=dynamic_cast<Fl_Group*>(fullscreen.child(0));
+    const auto bitmap=[](NativeExpandedBitmap& overlay) -> NativeBitmap* {
+        auto* group=dynamic_cast<Fl_Group*>(overlay.child(0));
         if(group)for(int i=0;i<group->children();++i)if(auto* view=dynamic_cast<NativeBitmap*>(group->child(i)))return view;
+        return nullptr;
+    };
+    std::function<NativeBitmap*(Fl_Group&,ui::Rect)> preview=[&](Fl_Group& group,ui::Rect expected) -> NativeBitmap* {
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* view=dynamic_cast<NativeBitmap*>(child);view&&ui::Rect{view->x(),view->y(),view->w(),view->h()}==expected)return view;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=preview(*nested,expected))return found;
+        }
         return nullptr;
     };
     const auto fingerprint=[](NativeBitmap& view) {
@@ -467,45 +479,65 @@ void fullscreen_bitmap_clicks() {
         for(std::size_t i=0;i<count;++i)hash=(hash^pixels->array[i])*1099511628211ULL;
         return hash;
     };
-    app.application.edit(ui::Field::message,"Native full-screen bitmap");
+    app.application.edit(ui::Field::message,"Native expanded bitmap");
     app.application.select(ui::Field::qr_brightness,"normal");refresh();
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->resize(43,61,size.first,size.second);refresh();
-        auto* previous_focus=find_button(*window,"Transmit");require(previous_focus,"Fullscreen fixture has no focus target");previous_focus->take_focus();
+        auto* previous_focus=find_button(*window,"Transmit");require(previous_focus,"Expanded fixture has no focus target");previous_focus->take_focus();
         const ui::Rect original{window->x(),window->y(),window->w(),window->h()};
+        const auto original_windows=window_count();const auto original_border=window->border();const std::string original_title=window->label();
         const auto geometry=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h());
-        click(window,geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
-        auto* fullscreen=expanded();require(fullscreen&&fullscreen->fullscreen_active(),"Clicking the bitmap did not open a native fullscreen window");
-        require(Fl::focus()==fullscreen,"Expanded bitmap did not retain keyboard focus for Escape");
-        auto* view=bitmap(*fullscreen);require(view&&view->x()==0&&view->y()==0&&view->w()==fullscreen->w()&&view->h()==fullscreen->h(),
-            "Expanded bitmap did not occupy the full native client area");
-        int sx=0,sy=0,sw=0,sh=0;Fl::screen_xywh(sx,sy,sw,sh,window->screen_num());
-        require(fullscreen->x()==sx&&fullscreen->y()==sy&&fullscreen->w()==sw&&fullscreen->h()==sh,
-            "Expanded bitmap did not occupy its original monitor");
-        require(ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
-            "Opening the fullscreen bitmap changed the original window geometry");
+        auto* original_preview=preview(*window,geometry.widget);require(original_preview,"Expanded fixture has no original native preview");
+        click(geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
+        auto* overlay=expanded();require(overlay&&overlay->parent()==window,"Clicking the bitmap did not create an overlay inside the existing window");
+        require(Fl::focus()==overlay,"Expanded bitmap did not retain keyboard focus for Escape");
+        auto* view=bitmap(*overlay);require(view&&view->x()==0&&view->y()==0&&view->w()==window->w()&&view->h()==window->h()&&
+            overlay->x()==0&&overlay->y()==0&&overlay->w()==window->w()&&overlay->h()==window->h(),
+            "Expanded bitmap did not occupy the existing app client area");
+        require(window_count()==original_windows&&window->border()==original_border&&original_title==window->label()&&
+            ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
+            "Expanding the bitmap changed the native window count, frame or geometry");
+        const auto covered_pixels=[&] {
+            window->make_current();const int width=previous_focus->w(),height=previous_focus->h();
+            std::unique_ptr<unsigned char[]> pixels(fl_read_image(nullptr,previous_focus->x(),previous_focus->y(),width,height));
+            require(pixels!=nullptr,"Expanded bitmap damage probe could not capture the native window");
+            return std::vector<unsigned char>(pixels.get(),pixels.get()+static_cast<std::size_t>(width)*height*3);
+        };
+        Fl::flush();const auto covered=covered_pixels();previous_focus->redraw();
+        require(window->damage()==FL_DAMAGE_CHILD,"Expanded bitmap damage probe did not isolate a covered child redraw");
+        Fl::flush();require(covered_pixels()==covered,"A covered control repainted above the expanded bitmap between presentation ticks");
         const auto initial=fingerprint(*view);
-        app.application.edit(ui::Field::message,"Updated native full-screen bitmap");refresh();
+        app.application.edit(ui::Field::message,"Updated native expanded bitmap");refresh();
         const auto updated=fingerprint(*view);require(updated!=initial,"Expanded bitmap retained the old source after a message edit");
         app.application.select(ui::Field::qr_brightness,"dark");refresh();
         require(fingerprint(*view)!=updated,"Expanded bitmap ignored a brightness update");
-        click(fullscreen,fullscreen->w()/2,fullscreen->h()/2);refresh();
-        require(!expanded()&&!app.application.fullscreen_control()&&window->shown(),"Second bitmap click did not restore the desktop");
+        window->size(original.w+77,original.h+59);refresh();
+        require(overlay->w()==window->w()&&overlay->h()==window->h()&&view->w()==window->w()&&view->h()==window->h()&&
+            window_count()==original_windows,"Expanded bitmap did not follow an app window resize");
+        click(window->w()/2,window->h()/2);refresh();
+        require(!expanded()&&!app.application.expanded_control()&&window->shown()&&window_count()==original_windows,
+            "Second bitmap click did not restore the existing app view");
         require(Fl::focus()==previous_focus,"Second bitmap click did not restore the original keyboard focus");
-        require(ui::Rect{window->x(),window->y(),window->w(),window->h()}==original&&
-            ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h()).widget==geometry.widget,
-            "Second bitmap click did not restore the original window and bitmap geometry");
-        app.application.edit(ui::Field::message,"Native full-screen bitmap");
+        const auto restored=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h()).widget;
+        require(window->x()==original.x&&window->y()==original.y&&window->w()==original.w+77&&window->h()==original.h+59&&
+            ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==restored,
+            "Second bitmap click did not restore the native preview layout at the current app size");
+        window->size(original.w,original.h);refresh();
+        require(ui::Rect{original_preview->x(),original_preview->y(),original_preview->w(),original_preview->h()}==geometry.widget,
+            "Restoring the app size did not recover the original preview geometry");
+        app.application.edit(ui::Field::message,"Native expanded bitmap");
         app.application.select(ui::Field::qr_brightness,"normal");refresh();
-        click(window,geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
-        fullscreen=expanded();require(fullscreen,"Restored bitmap could not be expanded again");
+        click(geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
+        overlay=expanded();require(overlay,"Restored bitmap could not be expanded again");
         app.application.edit(ui::Field::message,std::string(4096,'x'));refresh();
-        const auto error=app.application.bitmap(*declared);auto* caption=find_label(*fullscreen,error.caption);
+        const auto error=app.application.bitmap(*declared);auto* caption=find_label(*overlay,error.caption);
         require(!error.caption.empty()&&caption&&caption->visible_r()&&caption->labelcolor()==text_color(error.caption_tone),
             "Expanded bitmap lost its error caption or caption tone");
-        Fl::e_keysym=FL_Escape;Fl::e_state=0;Fl::handle(FL_KEYDOWN,fullscreen);refresh();
-        require(!expanded()&&!app.application.fullscreen_control()&&!app.application.closing(),"Escape did not dismiss only the fullscreen bitmap");
-        app.application.edit(ui::Field::message,"Native full-screen bitmap");refresh();
+        Fl::e_keysym=FL_Escape;Fl::e_state=0;Fl::handle(FL_KEYDOWN,window);refresh();
+        require(!expanded()&&!app.application.expanded_control()&&!app.application.closing()&&window_count()==original_windows&&
+            ui::Rect{window->x(),window->y(),window->w(),window->h()}==original,
+            "Escape did not dismiss only the expanded bitmap within the original app window");
+        app.application.edit(ui::Field::message,"Native expanded bitmap");refresh();
     }
     Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
     app.application.close();while(!app.application.finished())Fl::wait(.005);
@@ -803,6 +835,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();fullscreen_bitmap_clicks();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, fullscreen bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

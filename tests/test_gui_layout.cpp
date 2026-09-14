@@ -187,13 +187,14 @@ void declaration_identity() {
     check(control_layout(copy,{},default_width,default_height,scoped).frame.x==24,
         "Copied binding borrowed another page's row allocation");
 }
-void fullscreen_bitmaps() {
+void expanded_bitmaps() {
     Control bitmap{Kind::bitmap};bitmap.bitmap_caption=BitmapCaption::overlay_error;
-    for(const auto bounds:{Rect{0,0,1920,1080},Rect{0,0,1080,1920},Rect{0,0,3840,2160},Rect{0,0,0,0}}) {
-        const auto layout=fullscreen_control_layout(bitmap,bounds.w,bounds.h);
-        check(layout.frame==bounds&&layout.widget==bounds,"Full-screen bitmap did not fill the available viewport");
+    for(const auto bounds:{Rect{0,0,default_width,default_height},Rect{0,0,min_width,min_height},
+                          Rect{0,0,1920,1080},Rect{0,0,1080,1920},Rect{0,0,0,0}}) {
+        const auto layout=expanded_control_layout(bitmap,bounds.w,bounds.h);
+        check(layout.frame==bounds&&layout.widget==bounds,"Expanded bitmap did not fill the available viewport");
         check(layout.caption_overlay&&contains(bounds,layout.caption)&&!layout.has_label,
-              "Full-screen error caption escaped the viewport or reserved an ordinary desktop label");
+              "Expanded error caption escaped the viewport or reserved an ordinary desktop label");
     }
 }
 }
@@ -205,7 +206,7 @@ int main() {
         adapter_helpers();
         relative_controls();
         declaration_identity();
-        fullscreen_bitmaps();
+        expanded_bitmaps();
         std::cout << "shared desktop layout passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';
