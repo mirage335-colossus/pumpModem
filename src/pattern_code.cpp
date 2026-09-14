@@ -101,29 +101,19 @@ struct PatternCode::Impl {
         require(sizeof(Impl) + sizeof(PatternCode) <= config.memory_limit,
                 "pattern code exceeds memory limit");
     }
-    int sign(std::uint64_t absolute_chip, unsigned bit) {
-        require(bit <= 1, "pattern symbol must be a zero or one bit");
-        require(config.spreading_mode == SpreadingMode::pattern,
-                "tone templates require complex pattern values");
-        require(!config.scramble && !config.dsss,
-                "private noise templates require complex pattern values");
-        const auto local = absolute_chip % chips;
-        int result = pattern.sign(local);
-        if (bit) result *= bit_mask[static_cast<std::size_t>(local % bit_mask.size())];
-        return result;
-    }
     std::complex<double> value(std::uint64_t absolute_chip, unsigned bit, double fraction) {
         require(bit <= 1, "pattern symbol must be a zero or one bit");
         require(std::isfinite(fraction) && fraction >= 0 && fraction < 1,
                 "pattern chip fraction must be within [0,1)");
         if (config.spreading_mode == SpreadingMode::pattern) {
-            if (!config.scramble && !config.dsss)
-                return {static_cast<double>(sign(absolute_chip, bit)), 0};
             // A secret +/- sign on a real carrier disappears on squaring.
             // Mix every enabled private stream before mapping both amplitude
             // and phase, retaining the public internal-transition distinction
             // between the two candidate patterns used by blind acquisition.
-            auto result = pattern.noise(absolute_chip, config.dsss ? &dsss : nullptr);
+            // Public rows use the same I/Q map and repeat at symbol boundaries
+            // so acquisition needs no transmission-index hypothesis.
+            const auto position = config.scramble || config.dsss ? absolute_chip : absolute_chip % chips;
+            auto result = pattern.noise(position, config.dsss ? &dsss : nullptr);
             if (bit) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
             return result;
         }
@@ -139,13 +129,6 @@ PatternCode::PatternCode(Config config, std::uint64_t epoch): impl_(std::make_un
 PatternCode::~PatternCode() = default;
 PatternCode::PatternCode(PatternCode&&) noexcept = default;
 PatternCode& PatternCode::operator=(PatternCode&&) noexcept = default;
-int PatternCode::sign(std::uint64_t chip, unsigned bit) { return impl_->sign(chip, bit); }
-void PatternCode::fill(std::uint64_t chip, unsigned bit, std::span<int> output) {
-    require(bit <= 1, "pattern symbol must be a zero or one bit");
-    require(output.empty() || output.size() - 1 <= std::numeric_limits<std::uint64_t>::max() - chip,
-            "pattern chip address would overflow");
-    for (std::size_t i = 0; i < output.size(); ++i) output[i] = impl_->sign(chip + i, bit);
-}
 std::complex<double> PatternCode::value(std::uint64_t chip, unsigned bit, double fraction) {
     return impl_->value(chip, bit, fraction);
 }

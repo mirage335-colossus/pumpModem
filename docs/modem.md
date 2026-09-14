@@ -86,7 +86,10 @@ no claim of absolute indistinguishability from noise is made.
 ### Pattern codewords and named choices
 
 `PatternCode` supplies two distinguishable codewords for each one-bit symbol.
-The public pattern resets at a symbol boundary. In keyed pattern mode, the
+Both public and private patterns use circular I/Q chips with varying amplitude
+and phase. The public pattern resets at a symbol boundary. Its short templates
+can produce sparse constellation plots because repetition adds no new chip
+values. In keyed pattern mode, the
 Scrambler stream uses absolute chip positions, so successive symbols use fresh
 fragments rather than repeating a small chip block. The second codeword mixes
 the first with a nonconstant balanced mask, preserving distinguishability under

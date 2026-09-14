@@ -9,10 +9,12 @@
 using namespace datapump;
 using Complex=std::complex<double>;
 void pattern_transmit_constellation() {
-    for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})for(const bool raw:{false,true}) {
+    for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
+    for(unsigned layers=0;layers<(mode==modem::SpreadingMode::pattern?4U:1U);++layers)
+    for(const bool raw:{false,true}) {
         modem::Config config;
-        config.spreading_mode=mode;config.dsss=mode==modem::SpreadingMode::pattern;config.dsss_seed[0]=73;
-        config.scramble=mode==modem::SpreadingMode::pattern;
+        config.spreading_mode=mode;config.dsss=(layers&2U)!=0;config.dsss_seed[0]=73;
+        config.scramble=(layers&1U)!=0;
         config.stream_epoch=1800000031;config.integration_seconds=.0054;
         const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
         if(symbol%chip==0)throw std::runtime_error("pattern constellation fixture needs partial final chips");

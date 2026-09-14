@@ -4,6 +4,38 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Public I/Q patterns and transmit history — 14 September 2026
+
+Unkeyed public patterns now use circular I/Q values with varying amplitude and
+phase, replacing the real-sign waveform. Their two complete bit templates still
+repeat each symbol, so short public patterns retain a finite, potentially sparse
+cloud. Private stream addressing and tone waveforms are unchanged.
+
+The audio transmit plot now shows the transmitter's last 2,048 actual payload
+chip values across GUI polls. It no longer replaces them with only the fresh
+batch or measured samples between chip boundaries. The live regression verifies
+exact emitted values, stability inside a chip, growth across updates, bounded
+retention, and omission counts when the GUI stalls. Settling and independent
+receiver-input simulation retain their measured views.
+
+Short public symbols use sample-resolution FFT timing with an exact real
+carrier-basis Gram fit. Evidence stays capped at the previous half-chip scale;
+private timing and scoring are unchanged. Ninety cases cover 3/4/6/8/12/16-chip
+public patterns, five sample offsets and three phases, preserving every bit and
+the exact final endpoint. Initial admission may precede the true start by up to
+two samples. Tests also cover shared projections with an arbitrary phase,
+300-symbol wrong-key/noise captures, and weak pending tails before a later burst.
+Disabling the pending-tail protection breaks both replacement interference
+fixtures, confirming that they still exercise that protection.
+
+All **51 configured CTest suites** passed across the final run and an isolated
+live-suite rerun. The concurrent run passed 50 suites but exceeded the large live
+transfer's wall-clock timeout while other build/verification work ran; the full
+live suite then passed alone in **111.13 seconds**. All **26 CLI tests** passed.
+The receiver and streaming-modem ASan/UBSan suites passed in **41.87 seconds**
+with halt-on-error enabled and LeakSanitizer disabled for this sandbox's ptrace
+restriction. The rebuilt native FLTK GUI passed its display-free self-check.
+
 ## Protected pattern-only waveform — 14 September 2026
 
 The APSK transmitter/receiver, fixed training bytes, repeating spread template,

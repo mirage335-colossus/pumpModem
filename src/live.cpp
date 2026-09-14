@@ -382,6 +382,8 @@ struct Session::Impl {
         if (!force && Clock::now() - last_plot < std::chrono::milliseconds(50)) return;
         auto measured = window.frame(config);
         auto transmitted = transmitter ? transmitter->take_payload_constellation() : modem::ConstellationBatch{};
+        auto transmitted_history = transmitter ? transmitter->payload_constellation() :
+            std::vector<std::complex<double>>{};
         std::lock_guard lock(mutex);
         if (!current.running || generation != version) return;
         if (transmitter && tx_serial != serial) return;
@@ -392,10 +394,11 @@ struct Session::Impl {
         current.constellation_source = ConstellationSource::input;
         current.constellation_dropped = 0;
         if (transmitter) {
-            // Between pattern chip boundaries (and during settling), display
-            // measured outgoing I/Q so long chips do not blink on and off.
-            if (!transmitted.points.empty())
-                current.constellation.clear();
+            // Keep actual emitted chips across display intervals. Narrow bands
+            // can produce only one new chip in several GUI updates. Until the
+            // payload begins, the measured settling waveform remains visible.
+            if (!transmitted_history.empty())
+                current.constellation = std::move(transmitted_history);
             current.pattern_scores.clear();
             current.constellation_source = ConstellationSource::transmitted;
             queue_points(std::move(transmitted), ConstellationSource::transmitted);
@@ -1029,9 +1032,11 @@ Snapshot Session::snapshot() {
     auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
     impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
     if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {
-        impl_->current.constellation = std::move(impl_->pending_points.points);
+        // Publication owns the bounded display history. The fresh-point batch
+        // only accounts for observations omitted before the UI consumed them.
         impl_->current.constellation_dropped = impl_->pending_points.dropped;
-        impl_->current.constellation_source = impl_->pending_source;
+        if (impl_->current.constellation_source != impl_->pending_source)
+            count_dropped(impl_->current.constellation_dropped, impl_->pending_points.points.size());
         impl_->pending_points = {}; ++impl_->current.sequence;
     }
     auto result = impl_->current; result.signals = std::move(signals); result.received = std::move(received);

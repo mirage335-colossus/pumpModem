@@ -90,6 +90,49 @@ void exact_blind_bits() {
         check(burst.end_sample>=137+3*symbol-10 && burst.end_sample<=137+3*symbol+10,"raw burst gained training or a padding symbol");
     }
 }
+void short_pattern_sample_timing() {
+    constexpr std::array<std::size_t,3> chunks{13,97,7};
+    const Bytes bits{0,1,0,0,1};
+    for(unsigned chips:{3U,4U,6U,8U,12U,16U}) {
+        auto c=config(chips);c.carrier_hz=1200;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        for(std::size_t delay=135;delay<=139;++delay)for(double phase:{.27,1.73,3.11}) {
+            try {
+                const auto result=receive(waveform(c,bits,delay,3*symbol,phase,.001),c,chunks);
+                const auto& burst=exact(result,bits);
+                // A hop can admit a nearby start before the exact peak is
+                // available. Continuation must still recover the exact end.
+                check(burst.first_sample+2>=delay && burst.first_sample<=delay+2 &&
+                      burst.end_sample==delay+bits.size()*symbol,
+                      "short circular patterns must retain all bits, a start within two samples, and the exact endpoint");
+            } catch(const Error& error) {
+                throw Error(std::to_string(chips)+" chips / delay "+std::to_string(delay)+
+                            " / phase "+std::to_string(phase)+": "+error.what());
+            }
+        }
+    }
+}
+void short_pattern_wrong_key_and_noise() {
+    auto c=config(16,true);c.carrier_hz=1200;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    constexpr std::array<std::size_t,3> chunks{13,97,7};
+    const Bytes bits{0,1,0,0,1};
+    exact(receive(waveform(c,bits,137,3*symbol,.73,.001),c,chunks),bits);
+    auto wrong=c;wrong.spreading_seed[7]^=0x80;
+    Bytes long_bits(300);std::mt19937_64 random(713);
+    for(auto& bit:long_bits)bit=static_cast<std::uint8_t>(random()&1U);
+    const auto samples=waveform(c,long_bits,137,3*symbol,.73,.001);
+    check(receive(samples,wrong,chunks).bursts.empty(),
+          "short-pattern acquisition must not admit a different key");
+    std::normal_distribution<double> noise(0,std::sqrt(modem::nominal_signal_power));
+    std::vector<float> background(300*symbol);
+    for(auto& sample:background)sample=static_cast<float>(noise(random));
+    check(receive(background,c,chunks).bursts.empty(),
+          "private short-template projection must not admit independent real Gaussian noise");
+    c.scramble=false;
+    check(receive(background,c,chunks).bursts.empty(),
+          "exact public short-template projection must not inflate independent real Gaussian noise into a burst");
+}
 void private_template_energy_normalization() {
     // Select a valid secret template with substantially less than unit mean
     // energy. A perfectly matching observation must still explain essentially
@@ -111,13 +154,13 @@ void private_template_energy_normalization() {
         constexpr std::array<std::size_t,3> chunks{13,97,7};
         const auto result=receive(waveform(c,{0,1},0,2*symbol,.31),c,chunks,search);
         exact(result,{0,1});
-        // At this carrier, each half-chip observation contains a full carrier
-        // cycle, so noiseless PCM projects exactly onto the complex template.
-        const auto bins=2*modem::pattern_chips_per_symbol(c);
+        // At this carrier, each private half-chip observation contains a full
+        // carrier cycle, so noiseless PCM must explain essentially all energy.
+        const auto degrees=static_cast<double>(2*modem::pattern_chips_per_symbol(c)-1);
         const auto first=std::find_if(result.candidates.begin(),result.candidates.end(),[](const auto& item) {
             return item.first_sample==0 && item.stream_symbol==0;
         });
-        check(first!=result.candidates.end() && first->score>25*static_cast<double>(bins-1),
+        check(first!=result.candidates.end() && first->score>25*degrees,
               "private waveform evidence must use its measured template energy");
     }
 }
@@ -146,29 +189,27 @@ void unconfirmed_tail_cannot_veto_later_start() {
     auto c=config(64);c.bandwidth_hz=100;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     const auto chip=static_cast<std::size_t>(modem::pattern_chip_samples(c));
-    // Recorded nuisance-chip fixture: one admitted candidate, followed by
-    // weak pending extensions that overlap the next independent signal.
-    constexpr std::array<std::array<std::uint8_t,32>,2> nuisances{{{
-        0x14,0x7c,0xc0,0x88,0x7a,0x7d,0xff,0x21,0x0d,0xc2,0xf8,0x4c,0x16,0x77,0x79,0x39,
-        0xbd,0x1a,0x54,0x43,0xdb,0x57,0x26,0xf5,0x8f,0x8a,0x18,0x72,0x15,0x3c,0x85,0x30},{
-        0x6d,0x86,0xf1,0xdc,0xd2,0xcf,0x04,0xcd,0x16,0x5f,0x27,0x26,0xe3,0x43,0x76,0x58,
-        0xc2,0xbd,0x48,0xf6,0x61,0xe1,0x09,0xf5,0x18,0xde,0xb2,0xf0,0xbc,0xcc,0x40,0x0a}}};
-    for(std::size_t fixture=0;fixture<nuisances.size();++fixture) {
-    const auto& nuisance=nuisances[fixture];
-    const auto before=nuisance.size()*8*chip;
-    const Bytes bits{0,0,1};auto samples=waveform(c,bits,before,2*symbol,0);
-    const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
-    for(std::size_t i=0;i<before;++i) {
-        const auto position=i/chip;
-        const auto sign=((nuisance[position/8]>>(7-position%8))&1U)?-1.:1.;
-        samples[i]=static_cast<float>(amplitude*sign*std::cos(2*std::numbers::pi*c.carrier_hz*static_cast<double>(i)/c.sample_rate));
-    }
-    constexpr std::array<std::size_t,3> chunks{509,37,1021};
-    const auto result=receive(samples,c,chunks);
-    check(result.bursts.size()==(fixture==0?2U:1U),"nuisance fixture must retain only distinct confirmed spans");
-    const auto& strongest=*std::max_element(result.bursts.begin(),result.bursts.end(),[](const auto& a,const auto& b){return a.score<b.score;});
-    check(strongest.bits==bits && strongest.first_sample==before,
-          "an admitted candidate's weak tail must not discard a stronger later signal's first symbol");
+    // Two admitted symbols followed by a weak partial extension overlap an
+    // independently timed strong burst. Noise is added to the actual circular
+    // template: old random real-sign fixtures no longer resemble this waveform.
+    // Disabling the pending-tail admission guard loses the entire later burst
+    // in the first fixture and its first bit in the second.
+    struct Fixture { std::uint64_t seed; double sigma; unsigned shift_chips; };
+    for(const auto fixture:{Fixture{1,.9,24},Fixture{15,1.3,16}}) {
+        const auto before=2*symbol+fixture.shift_chips*chip;
+        const Bytes bits{0,0,1};auto samples=waveform(c,bits,before,2*symbol,0);
+        const auto earlier=waveform(c,{1,0,1},0,0,0);
+        std::mt19937_64 random(fixture.seed);std::normal_distribution<double> noise(0,fixture.sigma);
+        for(std::size_t i=0;i<before;++i)
+            samples[i]=earlier[i]+(i>=symbol?static_cast<float>(noise(random)):0);
+        constexpr std::array<std::size_t,3> chunks{509,37,1021};
+        const auto result=receive(samples,c,chunks);
+        check(result.bursts.size()==2,"weak-tail fixture must retain exactly two confirmed spans");
+        const auto& first=result.bursts.front();const auto& later=result.bursts.back();
+        check(first.bits==Bytes({1,0}) && first.first_sample==0 && first.end_sample==2*symbol,
+              "weak pending evidence must not extend the earlier confirmed span");
+        check(later.bits==bits && later.first_sample==before && later.end_sample==before+3*symbol,
+              "an admitted candidate's weak tail must not discard a stronger later signal's first symbol");
     }
 }
 void noise_hidden_chips() {
@@ -279,6 +320,23 @@ void shared_projection_and_workspace_update() {
     search.bit_limit=2;modem::PatternReceiver limited(c,256*1024,search);
     rejects([&]{limited.push(samples);limited.finish();},"bit-cap exhaustion silently truncated a valid signal");
 }
+void short_pattern_shared_projection_phase() {
+    auto c=config(16);c.carrier_hz=1200;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const Bytes bits{0,1,0,0,1};
+    const auto samples=waveform(c,bits,137,3*symbol,.31,.001);
+    std::vector<std::complex<double>> common(samples.size());
+    for(std::size_t i=0;i<samples.size();++i)common[i]=static_cast<double>(samples[i])*std::polar(1.,
+        -2*std::numbers::pi*c.carrier_hz*static_cast<double>(i)/c.sample_rate+.73);
+    modem::PatternReceiver direct(c),projected(c);
+    direct.push(samples);projected.push(samples,common);direct.finish();projected.finish();
+    const auto original=direct.take_bursts(),shared=projected.take_bursts();
+    check(original.size()==1 && shared.size()==1 && original.front().bits==bits && shared.front().bits==bits,
+          "short-pattern Gram fitting must preserve the shared projection's arbitrary constant phase");
+    check(original.front().first_sample==shared.front().first_sample &&
+          original.front().end_sample==shared.front().end_sample && original.front().score==shared.front().score,
+          "sharing a carrier projection must not change exact short-template acquisition evidence");
+}
 void long_clock_window_fallback() {
     auto c=config(64,true);c.integration_seconds=3600;
     modem::PatternSearch search;search.start_offset_seconds=0;search.start_uncertainty_seconds=0;
@@ -339,6 +397,8 @@ int main() {
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+    run("short pattern sample timing",short_pattern_sample_timing);
+    run("short pattern wrong keys and noise",short_pattern_wrong_key_and_noise);
     run("private template energy normalization",private_template_energy_normalization);
     run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
@@ -347,6 +407,7 @@ int main() {
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);
     run("independent sampled crystal and phase",independent_sampled_channel);
     run("shared projection and workspace updates",shared_projection_and_workspace_update);
+    run("short pattern shared projection phase",short_pattern_shared_projection_phase);
     run("bounded long clock-window fallback",long_clock_window_fallback);
     run("hardware settling remains outside payload",hardware_settling_is_not_payload);
     return failures?1:0;

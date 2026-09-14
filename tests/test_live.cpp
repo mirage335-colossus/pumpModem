@@ -1,6 +1,7 @@
 #include "datapump/live.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_code.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -18,6 +19,7 @@ using namespace std::chrono_literals;
 namespace live_test_audio {
 std::atomic<std::uint64_t> played_samples{0};
 std::atomic<std::size_t> playback_chunk{4096};
+std::atomic<std::uint64_t> playback_sample_limit{std::numeric_limits<std::uint64_t>::max()};
 std::atomic<bool> record_playback{false};
 std::atomic<std::shared_ptr<const std::vector<float>>> playback_recording;
 std::atomic<std::shared_ptr<const std::vector<float>>> capture_samples;
@@ -48,11 +50,17 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     std::array<float,4096> output{};
     std::vector<float> recorded;
     const auto recording=live_test_audio::record_playback.load();
+    std::uint64_t emitted=0;
     while(!stop.stop_requested()) {
-        const auto count=callback(std::span(output).first(std::min(output.size(),live_test_audio::playback_chunk.load())));
+        const auto limit=live_test_audio::playback_sample_limit.load();
+        if(emitted>=limit) { std::this_thread::sleep_for(2ms); continue; }
+        const auto capacity=static_cast<std::size_t>(std::min<std::uint64_t>(
+            std::min(output.size(),live_test_audio::playback_chunk.load()),limit-emitted));
+        const auto count=callback(std::span(output).first(capacity));
         if(count>output.size())throw Error("live playback exceeded output capacity");
         if(!count)break;
         if(recording)recorded.insert(recorded.end(),output.begin(),output.begin()+static_cast<std::ptrdiff_t>(count));
+        emitted+=count;
         live_test_audio::played_samples.fetch_add(count);
         std::this_thread::sleep_for(2ms);
     }
@@ -204,12 +212,90 @@ void test_pattern_audio_tx_constellation() {
     });
     check(active.constellation.size()<=modem::StreamingTransmitter::constellation_history_limit,
           "pattern audio TX constellation exceeded its bounded history");
+    modem::PatternCode code(value.transfer.modem);
+    std::vector<std::complex<double>> expected;
+    for(unsigned bit=0;bit<2;++bit)for(std::uint64_t chip=0;chip<code.chips_per_symbol();++chip)
+        expected.push_back(std::sqrt(2*modem::nominal_signal_power)*code.value(chip,bit));
     for(const auto point:active.constellation)
-        check(std::abs(std::abs(point)-std::sqrt(2*modem::nominal_signal_power))<1e-8,
-              "pattern audio TX must show actual emitted chip amplitudes");
+        check(std::any_of(expected.begin(),expected.end(),[&](auto value){return std::abs(point-value)<1e-10;}),
+              "pattern audio TX must show actual emitted chip amplitude and phase");
     check(active.pattern_scores.empty(),"half-duplex audio TX must not invent receiver pattern scores");
     session.cancel_transmit();
     check(session.snapshot().constellation.empty(),"cancelled pattern TX retained transmitted chip points");
+}
+void test_pattern_audio_keyed_constellation_history() {
+    struct PlaybackReset {
+        ~PlaybackReset() { live_test_audio::playback_sample_limit=std::numeric_limits<std::uint64_t>::max(); }
+    } reset;
+    constexpr std::uint64_t epoch=1800000000;
+    live::Session session([]{return static_cast<double>(epoch);});
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.modem=tuning::resolve(40,40,tuning::PatternMode::auto_pattern,true).config;
+    value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
+    value.transfer.key.emplace(Bytes(32,0x63));
+    const Bytes bits(8192,1);
+    auto expected=transfer::binary_transmitter(bits,value.transfer);
+    const auto prefix=modem::training_sample_count(value.transfer.modem);
+    const auto chip=modem::pattern_chip_samples(value.transfer.modem);
+    const auto baseline=live_test_audio::played_samples.load();
+    live_test_audio::playback_sample_limit=prefix;
+    session.start(value);session.transmit_bits(bits);
+    wait_for(session,[&](const auto&){return live_test_audio::played_samples.load()-baseline==prefix;});
+    std::array<float,4096> output{};
+    const auto advance=[&](std::uint64_t target) {
+        // Let the next callback publish, then stop on an exact PCM boundary.
+        std::this_thread::sleep_for(60ms);
+        live_test_audio::playback_sample_limit=target;
+        auto snapshot=wait_for(session,[&](const auto&){return live_test_audio::played_samples.load()-baseline==target;});
+        while(expected->samples_emitted()<target) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),target-expected->samples_emitted()));
+            expected->read(std::span(output).first(count));
+        }
+        return snapshot;
+    };
+    const auto verify=[&](const live::Snapshot& snapshot) {
+        check(snapshot.constellation_source==live::ConstellationSource::transmitted,
+              "keyed audio TX history lost its transmitted source");
+        check(snapshot.constellation==expected->payload_constellation(),
+              "keyed audio TX history differs from the actual emitted chip sequence");
+    };
+    const auto first=advance(prefix+1);verify(first);
+    check(first.constellation.size()==1,"first payload chip should produce exactly one real point");
+    const auto between=advance(prefix+chip/2);verify(between);
+    check(between.constellation==first.constellation,
+          "a GUI update between chip boundaries replaced actual TX history with measured samples");
+    for(std::uint64_t i=1;i<=4;++i) {
+        const auto snapshot=advance(prefix+i*chip+1);verify(snapshot);
+        check(snapshot.constellation.size()==i+1,"narrow-band TX discarded chips from earlier GUI intervals");
+        check(!snapshot.constellation_dropped,"displayed chip history was falsely counted as omitted");
+    }
+    const auto history=session.snapshot();
+    check(std::any_of(history.constellation.begin()+2,history.constellation.end(),[&](auto point) {
+        return point!=history.constellation[0] && point!=history.constellation[1];
+    }),"keyed TX history collapsed its independent I/Q samples to two points");
+    expected->take_payload_constellation();
+    const auto limit=modem::StreamingTransmitter::constellation_history_limit;
+    const auto overflow_target=prefix+(limit+9)*chip;
+    const auto play_without_polling=[&](std::uint64_t target) {
+        std::this_thread::sleep_for(60ms);
+        live_test_audio::playback_sample_limit=target;
+        const auto deadline=std::chrono::steady_clock::now()+10s;
+        while(live_test_audio::played_samples.load()-baseline!=target) {
+            check(std::chrono::steady_clock::now()<deadline,"bounded TX history playback stalled");
+            std::this_thread::sleep_for(2ms);
+        }
+        while(expected->samples_emitted()<target) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),target-expected->samples_emitted()));
+            expected->read(std::span(output).first(count));
+        }
+    };
+    play_without_polling(overflow_target);
+    play_without_polling(overflow_target+1);
+    const auto bounded=session.snapshot();verify(bounded);
+    const auto omitted=expected->take_payload_constellation().dropped;
+    check(bounded.constellation.size()==limit && omitted>0 && bounded.constellation_dropped==omitted,
+          "slow GUI polling must retain newest bounded TX history and count only unseen displaced chips");
+    session.cancel_transmit();session.stop();
 }
 void test_pattern_audio_long_chip_intervals() {
     live_test_audio::playback_chunk=64;
@@ -1257,6 +1343,7 @@ int main(int argc, char** argv) {
         };
         run("idle noise and plots", test_idle_noise_and_plots);
         run("pattern audio TX constellation", test_pattern_audio_tx_constellation);
+        run("pattern audio keyed constellation history", test_pattern_audio_keyed_constellation_history);
         run("pattern audio long chip intervals", test_pattern_audio_long_chip_intervals);
         run("binary audio exact bit length", test_binary_audio_preserves_exact_bit_length);
         run("binary simulation replay and cancellation", test_binary_simulation_replay_validation_and_cancel);

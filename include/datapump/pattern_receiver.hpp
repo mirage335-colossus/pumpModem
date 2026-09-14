@@ -46,6 +46,8 @@ public:
     // Shared per-sample carrier projection for a bank with one carrier/clock.
     // projected[i] is raw[i] * exp(-j*carrier_phase[i]); an arbitrary fixed
     // projection phase is fitted by the pattern score. Both spans must match.
+    // Sample-resolution Gram fits reconstruct the carrier from raw samples
+    // to keep their real basis matrix independent of that arbitrary rotation.
     void push(std::span<const float>,std::span<const std::complex<double>> projected,std::stop_token = {});
     void finish(std::stop_token = {});
     std::vector<PatternBurst> take_bursts();

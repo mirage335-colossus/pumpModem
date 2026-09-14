@@ -430,7 +430,7 @@ acquisition, frequency/sample offsets, WAV parsing, CLI file transfer, and GUI
 cache/cooldown behavior. Seeded tests are reproducible within the same C++
 standard-library implementation.
 
-Automatic acquisition regressions use public sign patterns and privately seeded
+Automatic acquisition regressions use public circular I/Q patterns and privately seeded
 circular I/Q patterns to verify detection from independent PCM samples. They must not
 force tone patterns or require tone simulation to succeed. Tone operation needs
 suitable synchronization and hardware conditions, such as GNSS timing, low

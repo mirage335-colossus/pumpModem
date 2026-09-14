@@ -58,19 +58,19 @@ void seek_and_domains() {
     check(changed, "changing the clock epoch must select another private pattern");
     rejects([&] { code.value(std::numeric_limits<std::uint64_t>::max()/8+1,0); },
             "private noise access must reject byte address wraparound");
-    rejects([&] { code.sign(0,0); },"private samples cannot be reduced to a real sign");
 }
 void alphabet_and_repetition() {
     auto c = config(); modem::PatternCode public_code(c);
     const auto length = public_code.chips_per_symbol();
-    int dot = 0;
+    std::complex<double> normalized_overlap{};
     for (std::uint64_t i = 0; i < length; ++i) {
-        const auto zero = public_code.sign(i, 0), one = public_code.sign(i, 1);
-        dot += zero * one;
-        check(zero == public_code.sign(length + i, 0),
+        const auto zero = public_code.value(i, 0), one = public_code.value(i, 1);
+        normalized_overlap += std::conj(zero) * one / std::norm(zero);
+        check(zero == public_code.value(length + i, 0) && one == public_code.value(length + i, 1),
               "public symbols must be identifiable without their transmission index");
     }
-    check(dot == 0, "complete binary mask periods must have zero complex-line overlap");
+    check(std::abs(normalized_overlap) < 1e-12,
+          "complete binary mask periods must preserve balanced internal transitions");
     c.scramble = true; modem::PatternCode private_code(c, 73);
     bool adjacent_changed = false, legacy_period_changed = false;
     for (std::uint64_t i = 0; i < length; ++i) {
@@ -94,6 +94,23 @@ void alphabet_and_repetition() {
     c.spreading_factor = 1; modem::PatternCode degenerate(c);
     check(degenerate.value(0, 0) == degenerate.value(0, 1),
           "one-chip binary template must expose its unavoidable unknown-phase ambiguity");
+}
+void public_waveform_uses_amplitude_and_phase() {
+    auto c=config();c.spreading_factor=4096;
+    modem::PatternCode code(c,73),other_epoch(c,74);
+    const auto count=code.chips_per_symbol();
+    std::complex<double> mean{},square{};double energy=0,energy_square=0;
+    for(std::uint64_t chip=0;chip<count;++chip) {
+        const auto value=code.value(chip,0);
+        check(value==other_epoch.value(chip,0) && value==code.value(chip+count,0),
+              "public circular templates must be independent of epoch and repeat each symbol");
+        mean+=value;square+=value*value;
+        const auto power=std::norm(value);energy+=power;energy_square+=power*power;
+    }
+    check(std::abs(mean)/count<.06 && std::abs(square)/energy<.06,
+          "public pattern chips must occupy both quadratures, not a two-point binary line");
+    check(std::abs(energy/count-1)<.08 && energy_square/count-std::pow(energy/count,2)>.4,
+          "public pattern chips must vary amplitude as well as phase");
 }
 void exact_pcm_and_chunks() {
     auto c = config(); c.scramble = true; c.dsss = true;
@@ -175,7 +192,6 @@ void tones_and_bounded_state() {
     check(std::abs(quarter - std::complex<double>{0,1}) < 1e-12 &&
           std::abs(tone.value(1, 0) - std::conj(quarter)) < 1e-12,
           "tone templates must use opposite quarter-turn chip increments");
-    rejects([&] { (void)tone.sign(0, 0); }, "real sign API must not silently approximate a complex tone");
     modem::PatternTransmitter tx({1}, c,0,0,false);
     std::array<std::complex<double>, 19> samples{}; tx.read_analytic(samples);
     const auto angular = 2 * std::numbers::pi * c.carrier_hz / c.sample_rate +
@@ -367,7 +383,8 @@ void private_waveform_has_no_fixed_squared_carrier() {
 }
 int main() {
     try {
-        seek_and_domains(); alphabet_and_repetition(); exact_pcm_and_chunks(); tones_and_bounded_state();
+        seek_and_domains(); alphabet_and_repetition(); public_waveform_uses_amplitude_and_phase();
+        exact_pcm_and_chunks(); tones_and_bounded_state();
         streaming_and_modem_integration();rounded_hardware_duration();hardware_noise_keystreams();
         hardware_data_byte_encryption();
         private_waveform_has_no_fixed_squared_carrier();

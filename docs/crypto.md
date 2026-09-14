@@ -85,9 +85,13 @@ clock-window correlator retains the full two-quadrature Gram matrix. Signal
 start, continuation, end and time/key alignment still come from pattern
 evidence alone, never a preamble, packet header, FEC or MAC.
 
-Unkeyed public patterns retain real +/-1 rows that restart each symbol. These
-are intentionally recognizable. Low-level `sign`/`fill` access is restricted
-to public patterns; private templates require complex `value` samples.
+Unkeyed public patterns use the same circular I/Q mapping with the public
+Scrambler seed, epoch zero and symbol-local chip positions. Amplitude and phase
+both vary, but their rows restart each symbol and are intentionally recognizable.
+Two bit alternatives mean two complete pattern templates, not a two-point
+constellation. Short public templates legitimately yield sparse plots because
+later symbols reuse the same finite chip values. All templates use complex
+`value` samples; the former real `sign`/`fill` API has been removed.
 
 ### Protected hardware settling
 

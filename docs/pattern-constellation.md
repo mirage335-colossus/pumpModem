@@ -36,8 +36,12 @@ partial. Symbol `j` uses absolute chip positions starting at `j*C`, where
 `C = ceil(symbol_samples/chip_samples)`. Partial chips consume a full position.
 Epoch and chip index are local hypotheses and are never transmitted fields.
 
-Public unkeyed patterns retain a deterministic real +/-1 row that restarts
-each symbol. Selected keys always enable private Scrambler waveforms on the
+Public unkeyed patterns use a deterministic circular I/Q noise row that restarts
+each symbol. Its amplitude and phase both vary; a binary pattern alphabet
+means two complete codewords, not two permitted chip values. A short public
+codeword still has few distinct points: repeated transmissions reuse its chips,
+so the scatter plot contains at most twice its chip count across both bit values.
+Selected keys always enable private Scrambler waveforms on the
 transfer path. A private row consumes eight bytes per absolute chip, mixing
 Scrambler and enabled DSSS bytes before mapping to circular noise. Both its
 amplitude and phase depend on the private streams. The radius is capped to
@@ -53,7 +57,8 @@ across symbols prevent the paired waveform cancellation that reuse would allow.
 
 The previous real +/-1 mapping left a fixed carrier after squaring PCM. That
 signature was a mapping defect, not a necessary property of pattern search.
-Private circular noise removes it and avoids a fixed payload envelope. The
+Circular I/Q noise removes it and avoids a fixed payload envelope. Public rows
+remain recognizable through repetition and provide no encryption or LPI. The
 new prefix and private payload also share noise statistics and chip cadence.
 Finite bandwidth, rectangular chip holds, capped amplitudes and burst edges
 remain observable physical properties; there is no claim of absolute
@@ -68,9 +73,9 @@ GUI, CLI and transfer APIs. Public tone experiments make no LPI claim.
 
 `PatternReceiver` scores sampled waveforms against both legal patterns. A fit
 allows unknown common complex phase and amplitude; no hard chip decision or
-clean APSK cloud is required before pattern scoring. The live chip constellation
-therefore remains a diagnostic view of measured differential observations.
-Its radial/phase residual does not control pattern acquisition.
+clean APSK cloud is required before pattern scoring. The live constellation
+shows measured receiver input I/Q or a bounded history of actual transmitted
+chip I/Q, with the source labeled. Its geometry does not control pattern acquisition.
 
 For independent circular Gaussian complex observations, let `rho²` be the
 normalized energy in the fitted pattern direction (using the actual sum of
@@ -103,6 +108,17 @@ alone starts and ends burst acquisition. Packet parsing, integrity checks and
 optional FEC operate after that detection decision. A fade can still split a
 burst; silence-based delimiting does not establish that a transmitter intended
 to stop.
+
+Public symbols of at most 256 samples use individual PCM samples in the FFT search,
+so coarse chip-bin boundaries cannot erase a short final bit. This path fits
+the exact two-real-basis carrier Gram matrix. Its real-sample score
+`-(N-2)/2 * log(1-rho²)` caps `N` at four real dimensions per chip to retain
+the previous half-chip evidence scale; finer sampling does not create extra
+independent chip evidence. Longer public symbols retain chip-bin integration;
+when their sample/chip alignment requires one-sample bins, they also use this
+fit. Private receiver timing and scoring are unchanged. The pattern candidates
+and iterative search are unchanged. The reported start can retain a nearby
+earlier candidate admitted before the next FFT block arrives.
 
 The current default frequency bank has five offsets spaced by `1/(4T)`, where
 `T` is a symbol's duration. This is finite frequency coverage, not an unlimited
@@ -189,5 +205,6 @@ separate from this static alphabet view.
 
 The previous APSK transmitter, fixed training, repeating sign-template path,
 and aligned symbol receiver have been removed. The private circular waveform
-also changes the previous keyed pattern format. Peers must use the same current
+also changes the previous keyed pattern format; public circular chips replace
+the previous unkeyed real-sign format. Peers must use the same current
 waveform; the receiver performs no compatibility negotiation or fallback.

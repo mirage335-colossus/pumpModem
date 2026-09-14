@@ -32,13 +32,22 @@ void fft(std::vector<Complex>& a, bool inverse, std::stop_token stop) {
     }
     if(inverse)for(auto& value:a)value/=static_cast<double>(n);
 }
-double evidence(Complex dot,double energy,double template_energy,double count,double condition,bool real_rank) {
+double evidence(Complex dot,double energy,double template_energy,double count,double condition,bool real_rank,
+                bool exact_real,Complex template_square={}) {
     if(count<4 || energy<=1e-30 || template_energy<=1e-30)return 0;
-    const auto fraction=std::clamp(std::norm(dot)/(template_energy*energy*condition),0.,1.-1e-15);
-    // For nonsingular real-PCM quadrature bins, covariance eigenratio kappa
-    // bounds this fraction by a whitened rank-two projection. For singular
-    // bins, the real two-column template has lambda_max<=trace=template_energy,
-    // so this fraction is bounded by a real rank-two projection. Both bounds
+    auto fitted=std::norm(dot)/(template_energy*condition);
+    if(exact_real) {
+        // Individual real samples fit two real carrier bases. Their exact
+        // Gram matrix is encoded by sum(|template|^2) and sum(template^2).
+        // The trace-only bound loses half the energy even for an exact fit.
+        const auto determinant=template_energy*template_energy-std::norm(template_square);
+        if(determinant>1e-12*template_energy*template_energy)
+            fitted=2*(template_energy*std::norm(dot)-(template_square*dot*dot).real())/determinant;
+    }
+    const auto fraction=std::clamp(fitted/energy,0.,1.-1e-15);
+    // Nonsingular quadrature bins use a covariance-eigenratio bound. Individual
+    // real samples use the exact rank-two fit above; an ill-conditioned Gram
+    // matrix retains the conservative lambda_max<=trace bound. These scores
     // assume independent Gaussian input samples, with unknown common variance.
     return -(real_rank?(count-2)/2:count-1)*std::log1p(-fraction);
 }
@@ -61,12 +70,13 @@ struct PatternReceiver::Impl {
     std::vector<double> energy_prefix;
     std::vector<std::array<std::vector<Complex>,2>> templates;
     std::vector<std::array<double,2>> template_energy;
+    std::vector<std::array<Complex,2>> template_square;
     std::uint64_t prepared_template_index=0;
     bool templates_valid=false;
     std::uint64_t sample=0,bins=0,next_start=0;
     Complex sum{},oscillator{1,0},rotation{},previous_chip{};
     double noise_condition=1;
-    bool real_rank=false;
+    bool real_rank=false,sample_fit=false;
     std::size_t partial=0;
     bool finished=false,oscillator_valid=true;
     std::uint64_t trials=0;
@@ -113,6 +123,10 @@ struct PatternReceiver::Impl {
         // of adjacent symbols twice, especially with partial final chips.
         bin_samples=static_cast<std::size_t>(std::gcd(std::gcd(code.chip_samples(),symbols),
             std::max<std::uint64_t>(1,code.chip_samples()/2)));
+        // Short symbols have too little evidence to tolerate bins that mix
+        // adjacent chips. Keep their exact sample timing within a bounded FFT.
+        if(symbols<=256 && !c.scramble && !c.dsss)bin_samples=1;
+        sample_fit=bin_samples==1 && !c.scramble && !c.dsss;
         const auto omega=tau*c.carrier_hz/c.sample_rate;
         const auto sine=std::sin(omega);
         const auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin_samples)*omega)/sine):static_cast<double>(bin_samples);
@@ -143,6 +157,7 @@ struct PatternReceiver::Impl {
             static_cast<long double>(search.track_limit)*(sizeof(Track)+sizeof(PatternBurst)+sizeof(Completed))+
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(templates)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_energy)::value_type)+
+            static_cast<long double>(search.frequency_offsets_hz.size())*sizeof(decltype(template_square)::value_type)+
             static_cast<long double>(search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double)+
             4096*sizeof(Complex)+code.working_bytes()+sizeof(PatternReceiver);
         if(required>bytes && search.start_offset_seconds) {
@@ -161,6 +176,7 @@ struct PatternReceiver::Impl {
         ring.resize(4*length+2*hop);work.resize(transform);spectrum.resize(transform);product.resize(transform);reference.resize(transform);
         energy_prefix.resize(transform+1);templates.resize(search.frequency_offsets_hz.size());
         template_energy.resize(templates.size());
+        template_square.resize(templates.size());
         history.reserve(search.candidate_limit);peaks.reserve(search.candidate_limit);completed.reserve(search.track_limit);
         tracks.reserve(search.track_limit);points.reserve(2048);bursts.reserve(search.track_limit);
         rotation=std::polar(1.,-tau*c.carrier_hz/c.sample_rate);
@@ -173,9 +189,11 @@ struct PatternReceiver::Impl {
             auto& row=templates[f][bit];row.resize(transform);
             std::fill(row.begin(),row.end(),Complex{});
             auto& norm=template_energy[f][bit];norm=0;
+            auto& square=template_square[f][bit];square={};
             for(std::size_t i=0;i<length;++i) {
                 const auto value=template_value(i,index,bit,f);
                 row[length-1-i]=std::conj(value);norm+=std::norm(value);
+                if(sample_fit)square+=value*value*carrier_square(i);
             }
             fft(row,false,stop);
         }
@@ -194,6 +212,20 @@ struct PatternReceiver::Impl {
         if(i>=bins || bins-i>ring.size())throw Error("pattern observation expired before refinement");
         return ring[static_cast<std::size_t>(i%ring.size())];
     }
+    Complex carrier_square(std::uint64_t bin)const {
+        const auto phase=std::remainder(2*static_cast<long double>(tau)*config.carrier_hz*
+            (static_cast<long double>(bin)*bin_samples+(bin_samples-1)/2.L)/config.sample_rate,
+            static_cast<long double>(tau));
+        return std::polar(1.,static_cast<double>(phase));
+    }
+    double evidence_count(std::size_t observed)const {
+        const auto count=static_cast<double>(observed);
+        // Finer timing must not turn a held wrong-key chip into many fresh
+        // random observations. Preserve the former half-chip evidence scale
+        // (two complex bins, or four real dimensions, per chip) while fitting
+        // the waveform against every available sample.
+        return sample_fit?std::min(count,4*count/static_cast<double>(code.chip_samples())):count;
+    }
     double threshold()const {
         // Alpha-spending-style threshold under the reference noise model.
         // Actual PCM quadrature covariance and adaptive paths need calibration;
@@ -208,18 +240,19 @@ struct PatternReceiver::Impl {
         history.push_back(item);
     }
     PatternEvidence measure(std::uint64_t start,std::uint64_t index,std::size_t f,std::uint64_t observed_before=0) {
-        std::array<Complex,2> dot{};std::array<double,2> norm{};double energy=0;
+        std::array<Complex,2> dot{},square{};std::array<double,2> norm{};double energy=0;
         const auto skip=static_cast<std::size_t>(observed_before>start?std::min<std::uint64_t>(length,observed_before-start):0);
         for(std::size_t i=skip;i<length;++i) {
             const auto value=at(start+i);energy+=std::norm(value);
             for(unsigned b=0;b<2;++b) {
                 const auto pattern=template_value(i,index,b,f);
                 dot[b]+=value*std::conj(pattern);norm[b]+=std::norm(pattern);
+                if(sample_fit)square[b]+=pattern*pattern*carrier_square(start+i);
             }
         }
-        const auto count=static_cast<double>(length-skip);
-        const auto zero=evidence(dot[0],energy,norm[0],count,noise_condition,real_rank),
-            one=evidence(dot[1],energy,norm[1],count,noise_condition,real_rank);
+        const auto count=evidence_count(length-skip);
+        const auto zero=evidence(dot[0],energy,norm[0],count,noise_condition,real_rank,sample_fit,square[0]),
+            one=evidence(dot[1],energy,norm[1],count,noise_condition,real_rank,sample_fit,square[1]);
         return {start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U};
     }
@@ -347,7 +380,8 @@ struct PatternReceiver::Impl {
                     fft(product,true,stop);
                     for(std::size_t j=0;j<count;++j) {
                         const auto score=evidence(product[length-1+j],energy_prefix[j+length]-energy_prefix[j],
-                            template_energy[f][b],static_cast<double>(length),noise_condition,real_rank);
+                            template_energy[f][b],evidence_count(length),noise_condition,real_rank,
+                            sample_fit,sample_fit?template_square[f][b]*carrier_square(next_start+j):Complex{});
                         if(b==0)reference[j]={score,0};else reference[j].imag(score);
                     }
                 }
@@ -416,6 +450,7 @@ struct PatternReceiver::Impl {
             tracks.capacity()*sizeof(Track)+bursts.capacity()*sizeof(PatternBurst)+completed.capacity()*sizeof(Completed)+
             templates.capacity()*sizeof(decltype(templates)::value_type)+
             template_energy.capacity()*sizeof(decltype(template_energy)::value_type)+
+            template_square.capacity()*sizeof(decltype(template_square)::value_type)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
         for(const auto& row:templates)for(const auto& v:row)total+=v.capacity()*sizeof(Complex);
         for(const auto& track:tracks)total+=track.burst.bits.capacity();
@@ -468,6 +503,15 @@ void PatternReceiver::push(std::span<const float> input,std::span<const std::com
     auto& s=*impl_;cancelled(stop);if(s.finished)throw Error("pattern capture already finished");
     if(input.size()!=projected.size())throw Error("shared pattern projection length mismatch");
     if(s.fallback){s.fallback->push(input,stop);return;}
+    if(s.sample_fit) {
+        // The real Gram fit needs a known carrier phase convention. Shared
+        // projections may have an arbitrary fixed rotation, so reconstruct
+        // these short/sample-resolution observations from their raw samples.
+        for(const auto value:projected)
+            if(!std::isfinite(value.real())||!std::isfinite(value.imag()))
+                throw Error("pattern input contains a nonfinite sample");
+        push(input,stop);return;
+    }
     s.oscillator_valid=false;
     for(std::size_t i=0;i<input.size();++i) {
         if((s.sample&4095U)==0)cancelled(stop);

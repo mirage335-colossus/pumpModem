@@ -27,6 +27,15 @@ comparisons fit common complex amplitude and phase. Keyed rows use public
 illustration seeds and never expose the actual private epoch stream. There is no separate APSK view. See
 [geometry and interpretation](pattern-constellation.md).
 
+During audio transmission, **Transmitted constellation** retains up to 2,048
+actual emitted payload chip I/Q values. Polling faster than the chip rate does
+not erase earlier points or substitute measured samples between chips. Settling
+audio uses measured outgoing I/Q until the first payload chip is emitted.
+Simulation and reception continue to show measured receiver input I/Q.
+Public pattern rows repeat each symbol, so short public templates can still
+produce a sparse plot; private chips advance through the keystream. One bit per
+complete pattern does not limit its chips to two amplitude/phase values.
+
 Automatic reception fits soft pattern evidence against noise while allowing
 unknown common phase and amplitude. That evidence controls signal start, end,
 timing and keystream hypotheses. APSK cloud residuals, preamble detection and
