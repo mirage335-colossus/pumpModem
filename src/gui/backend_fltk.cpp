@@ -788,7 +788,12 @@ private:
             }
             if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
             if(b.choice)b.choice->apply_display(state.display_text);
-            if(b.toggle) {b.toggle->value(state.checked);label(b.toggle,view.control.label);}
+            if(b.toggle) {
+                // value() also resets FLTK's press baseline. Preserve its
+                // pending toggle until release, including drag cancellation.
+                if(Fl::pushed()!=b.toggle)b.toggle->value(state.checked);
+                label(b.toggle,view.control.label);
+            }
             if(b.records){b.records->configure(c);b.records->apply(state);}
             if(b.button) {enabled(b.button,view.enabled);label(b.button,view.control.label);}
             if(b.menu)label(b.menu,view.control.label);

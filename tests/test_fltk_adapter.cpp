@@ -319,6 +319,71 @@ void prompts() {
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
+void repeatable_clicks() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Repeatable fixture has no native window");
+    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Repeatable"));
+    require(toggle,"Repeatable fixture has no native checkbox");
+    const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto pointer=[&](int event,int px,int py) {
+        Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;
+        Fl::e_state=event==FL_RELEASE?0:FL_BUTTON1;Fl::handle(event,window);
+    };
+    app.application.edit(ui::Field::message,"Click test body");refresh();
+    const auto geometry=ui::checkbox_layout(toggle->w(),toggle->h());
+    for(const auto& target:{geometry.box,geometry.label})for(bool initial:{false,true}) {
+        app.application.toggle(ui::Field::repeatable,initial);refresh();
+        const auto before=app.application.field(ui::Field::message).text;
+        const int px=toggle->x()+target.x+target.w/2,py=toggle->y()+target.y+target.h/2;
+        pointer(FL_PUSH,px,py);
+        require(Fl::pushed()==toggle,"Repeatable click missed its native target");
+        refresh();
+        require(app.application.field(ui::Field::repeatable).checked==initial&&
+            app.application.field(ui::Field::message).text==before,"Repeatable committed before mouse release");
+        pointer(FL_RELEASE,px,py);
+        require(app.application.field(ui::Field::repeatable).checked!=initial,
+            "Presentation during a held click swallowed the Repeatable toggle");
+        const auto after=app.application.field(ui::Field::message).text;
+        require(initial?after=="Click test body":after.starts_with("REPEATABLE-")&&after.substr(19)==" Click test body",
+            "Native Repeatable click lost the message body or duplicated its marker");
+        refresh();
+        require((toggle->value()!=0)==!initial&&app.application.field(ui::Field::message).text==after,
+            "Presentation after release reverted or repeated the Repeatable toggle");
+
+        // Dragging outside cancels; returning inside before release commits.
+        for(bool return_inside:{false,true}) {
+            const auto checked=app.application.field(ui::Field::repeatable).checked;
+            const auto revision=app.application.revision();
+            pointer(FL_PUSH,px,py);refresh();
+            pointer(FL_DRAG,toggle->x()+toggle->w()+10,py);refresh();
+            if(return_inside) {pointer(FL_DRAG,px,py);refresh();}
+            pointer(FL_RELEASE,return_inside?px:toggle->x()+toggle->w()+10,py);
+            require(app.application.field(ui::Field::repeatable).checked==(checked!=return_inside)&&
+                app.application.revision()==revision+(return_inside?1:0),
+                "Presentation changed native Repeatable drag cancellation or release semantics");
+            refresh();
+        }
+    }
+    for(bool initial:{false,true}) {
+        app.application.toggle(ui::Field::repeatable,initial);refresh();toggle->take_focus();
+        Fl::e_keysym=' ';Fl::e_state=0;toggle->handle(FL_KEYDOWN);refresh();
+        require(app.application.field(ui::Field::repeatable).checked!=initial&&(toggle->value()!=0)==!initial,
+            "Repeatable keyboard toggle did not survive presentation");
+    }
+    pointer(FL_PUSH,toggle->x()+geometry.box.x+1,toggle->y()+geometry.box.y+1);
+    app.application.edit(ui::Field::message,std::string(237,'x'));refresh();
+    require(!toggle->active_r()&&!toggle->value()&&!app.application.field(ui::Field::repeatable).checked,
+        "Disabling Repeatable during a press retained a stale native value");
+    pointer(FL_RELEASE,toggle->x()+geometry.box.x+1,toggle->y()+geometry.box.y+1);refresh();
+    require(!app.application.field(ui::Field::repeatable).checked&&app.application.field(ui::Field::message).text==std::string(237,'x'),
+        "Releasing a disabled Repeatable control changed the draft");
+    Fl::e_keysym=key;Fl::e_x=x;Fl::e_y=y;Fl::e_state=state;
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void extension_controls() {
     auto declarations=datapump::gui::test::extension_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -612,6 +677,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();repeatable_clicks();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, repeatable clicks, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
