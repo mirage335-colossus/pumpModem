@@ -955,6 +955,29 @@ void test_encrypted_epoch_bank_refreshes_while_idle() {
           received.received.front().timestamp == origin + 10,
           "an idle encrypted listener independently refreshes epochs after its initial search window expires");
 }
+void test_pattern_epoch_boundary() {
+    constexpr double origin=1800000000;
+    std::atomic<double> local_epoch{origin+.9};
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([&]{return local_epoch.load();},[&]{
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();value.transfer.key.emplace(Bytes(32,0x68));
+    value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_keystream,true).config;
+    value.transfer.search_seconds=0;value.dsp_workspace_bytes=8*1024*1024;
+    session.start(value);
+    wait_for(session,[](const auto& snapshot){return snapshot.samples_received>=800;});
+    // This crosses an epoch after only 110 ms: waiting a whole elapsed second
+    // or refreshing after the first PCM block can lose the entire short burst.
+    local_epoch=origin+1.01;
+    session.transmit_bits(Bytes{0,0,1});
+    wait_for(session,[&](const auto& snapshot){
+        if(snapshot.simulation_replay)replay_milliseconds=4000;
+        return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[](const auto& signal){
+            return signal.binary && signal.complete && signal.text=="001" && signal.pattern_score.has_value();
+        });
+    },10s);
+}
 void test_cancel_reconfigure_and_bounds() {
     std::atomic<std::int64_t> replay_milliseconds{0};
     live::Session session({}, [&] {
@@ -1130,6 +1153,7 @@ int main(int argc, char** argv) {
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
         run("growing receiver workspace", test_growing_receiver_workspace_is_shared_and_reported);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
+        run("pattern epoch boundary", test_pattern_epoch_boundary);
         run("cancel, reconfigure and bounds", test_cancel_reconfigure_and_bounds);
         run("unrecoverable noise", test_unrecoverable_noise_does_not_validate);
         run("weak and wide modes", test_weak_and_wide_modes_keep_the_channel_running);

@@ -25,8 +25,8 @@ struct Settings {
     std::uint64_t simulation_seed = 1;
     double simulation_speed = 1;
     std::vector<Crypto> receive_keys;
-    // Selecting a transmit key also requires authenticated reception. An
-    // unkeyed channel may search loaded keys in addition to plain packets.
+    // Selecting a transmit key restricts reception to matching keyed streams.
+    // Pattern-only raw results carry no separate authentication tag.
     bool permits_plaintext() const noexcept {
         return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
     }
@@ -53,6 +53,7 @@ struct SignalUpdate {
     bool complete = false;
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
+    std::optional<double> pattern_score = std::nullopt;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {

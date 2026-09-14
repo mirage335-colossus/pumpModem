@@ -14,64 +14,59 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-Release 0.7.0 gives ordinary messages under 16 bytes a four-byte bootstrap and
-automatically disables all Reed–Solomon coding for them. Other short messages
-typically use six to nine bootstrap bytes with coding enabled. There is no
-magic marker or separate header symbol padding. Frames remain provisional until complete integrity verification and a final
-comparison of the recorded pattern-symbol fits. An early valid match does not
-commit receiver lock: the highest full-message constellation SNR in the admitted
-search wins after the final symbol. Both peers need the new format; legacy decoding is removed.
-Short content uses one fixed byte-prefix code that
-favors lowercase text; longer messages/files use raw LZMA2 with preset 9 extreme
-settings. Compression is automatic when smaller, and no dictionary or dictionary
+The default transport now sends one bit per pattern symbol. Pattern-template
+evidence alone admits timing, carrier and keystream candidates, joins symbols,
+and marks signal boundaries. It does not need a preamble, packet header,
+checksum or a clean phase/amplitude constellation to acquire a signal. The
+explicit manual APSK configurations and byte packet APIs remain available for
+compatibility and diagnostic tests.
+
+Automatic planning uses two sparse codewords, at least 64 chips per symbol,
+and a modeled 18 dB integrated symbol-energy target. This replaces selection by
+APSK geometry. The model score is evidence for comparing pattern hypotheses;
+it is not a calibrated false-alarm probability, measured SNR, authentication or
+a demonstration of extreme weak-signal performance.
+
+Text shorter than 16 original bytes uses the built-in bit-prefix dictionary and
+sends exactly the resulting bits, without byte padding, packet fields or FEC.
+For example, `e` is three transmitted bits. The Binary editor preserves exact
+0/1 drafts, including incomplete bytes and leading zeros, and sends those bits
+directly. Larger messages and attachments retain the compact packet codec,
+compression and optional FEC downstream of pattern acquisition. No dictionary
 identifier is transmitted. The compression library is built statically from
-vendored source; the complete portable application can be copied between
-compatible computers without downloading packages.
+vendored source; no runtime download is required.
 
-The desktop has three tabs: **Console**, **Modem flow**, and **Transmission
-layout**. Modem flow includes a static pattern/scrambler constellation: every
-configured symbol is shown across the full sign period, with pages for long
-patterns, full-template distances and modeled integration gain. An unused sign
-vector and a shifted template illustrate evidence that a phase/amplitude-only
-projection leaves out. Keyed modes use clearly labelled public illustrative
-signs rather than private streams. See
-[pattern constellation geometry](docs/pattern-constellation.md). Version 0.7.2
-retains the 0.7 packet format and existing keyfiles, with no new runtime dependency.
+The desktop has **Console**, **Modem flow**, and **Transmission layout** tabs.
+The inspection views show the two pattern codewords, their modeled distances,
+and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
+keyed previews use clearly labeled public example streams. These design plots
+are separate from measured receive evidence. See
+[pattern constellation geometry](docs/pattern-constellation.md) and
+[the inspection views](docs/inspection.md).
 
-Modem flow follows the selected transmit and receive processing,
-including phase/amplitude alphabets, spreading, integration, coding and gain
-estimation. Transmission layout illustrates the proposed on-air sequence,
-preamble, protected bootstrap, body fields and Reed–Solomon blocks, with a
-placeholder for the payload. Both views update from the current message, source,
-key and modem settings in the background. Counts come from the actual encoder;
-message contents and key material are not displayed. Reception and simulation
-continue while switching tabs. See [the inspection views](docs/inspection.md).
+The receiver keeps a short baseband history and bounded timestamped candidate
+records instead of retaining a whole transmission waveform. Its frequency,
+timing and keystream searches are finite. The default carrier bank spans
+±1/(2T), where T is symbol duration; arbitrary drift and whole-band scanning
+are not implemented. When a full symbol window exceeds the FFT workspace, a bounded correlator
+searches an explicit system-clock start window instead. Tests cover a four-hour
+symbol prefix with bounded storage and actual short-signal PCM recovery through
+this fallback. Coverage is finite: broad unknown-start acquisition and real-time
+performance across a large epoch bank are not established.
 
-The receiver integrates the configured sign pattern before making APSK symbol
-decisions; it does not require individual chips to be decoded above the noise.
-Its timing search is finite and it has no continuous clock or frequency tracking
-loop. The DSP history budget defaults to 50% of available RAM; a dropdown selects
-25%, 50%, or 75%. The separate 256 MiB received-message/file quota does not cap
-signal history. Simulation feeds the same PCM acquisition path from independent sample
-and carrier phases; its finite search can fail to acquire a signal.
+The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
+available RAM. It does not request that amount of history. Received messages
+and files have a separate 256 MiB quota. The **RX targets (dB-Hz)** comma-list
+defaults to `40`; search varies this list while holding the selected bandwidth
+and pattern/tone mode fixed. Invalid input resets the entire list to `40`.
+The separate TX target remains a scalar.
 
-The message and binary editors show the same payload. Binary displays the first
-16 bytes as eight-bit groups, most significant bit first; editing either field
-updates the other. Ctrl+C and Ctrl+V copy and paste normally. Binary replacements
-preserve any content after the first 16 bytes. Incomplete bytes remain editable
-and pause transmission until completed. Zero bytes and bytes that cannot display
-as text appear as `\xNN` escapes in the message field; its label identifies this
-mode, where `\\` represents a literal backslash. Transmit sends the resulting
-message with the usual packet framing, encryption and error correction.
-
-The GUI presents the entire simulated transmission over three seconds,
-including fixed training, live plots and pending signal-browser text. Verified
-messages, file entries and data accuracy become available at the end of that
-presentation. It retains per-signal preamble reception and fresh constellation
-observations in the decoder's differential phase and amplitude coordinates.
-Existing keyfiles remain usable, and narrow audio modes retain the 1500 Hz carrier. Both audio
-endpoints must use matching carrier and modem settings; narrow automatic
-defaults differ from 0.5.0.
+Simulation feeds the actual PCM receiver with independent carrier phase and
+sample offset, and presents the result over three seconds. Completed pattern
+text and exact raw bits are shown separately and can be copied. Their rows
+show **Pattern score**, with no checksum/FEC claim. Packet-validated results
+retain their separate integrity and data-accuracy information. Physical audio
+endpoints must use compatible carrier and modem settings.
 
 ## Build and run
 
@@ -98,7 +93,7 @@ ctest --test-dir build --output-on-failure
 ```
 
 The last command refuses to overwrite an existing file. `rx --json` returns
-verified content as base64 plus metadata and DSP diagnostics; without `--save`
+content as base64, exact recovered bits, validation flags and DSP diagnostics; without `--save`
 or `--json`, binary file content remains unsaved. Text defaults to stdout, so
 normal pipelines work. Treat unencrypted SHA-256 integrity checks as corruption
 detection, not sender authentication.
@@ -206,8 +201,9 @@ When a text transmission starts, Message clears to the current convenience text
 and **Previous message - click to paste** becomes available to restore the exact
 previous message for editing or retransmission, preserving its repeatable
 identifier. Editing the recalled message generates a fresh identifier.
-The new draft remains available while transmission runs. The CLI and packet API
-retain their existing explicit metadata options and wire format.
+The new draft remains available while transmission runs. Packet APIs retain
+explicit metadata options; default text under 16 bytes sends only dictionary
+bits and therefore has no separate metadata fields.
 
 Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
@@ -216,12 +212,13 @@ updating while idle. Transmissions run at CPU speed through noisy PCM, with
 virtual airtime reported separately. The receiver runs independently through
 idle noise and burst starts and derives timing, phase and spreading correlation
 from its samples. Transmit start and completion do not reset its acquisition.
-After computation completes, the entire transmission, including fixed training,
+After computation completes, the entire transmission (including training only in legacy mode)
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and signal-browser previews follow the same timeline. Each frame shows the
 receiver state at that transmission position, with fresh constellation
-observations. Pending text appears as decoding advances; verified text, file
-entries and data accuracy are released at the three-second deadline. Neither
+observations. Pending text appears as decoding advances; completed raw bits,
+dictionary text, packet text, file entries and available data accuracy are
+released at the three-second deadline. Neither
 copy nor save can expose the prepared result early.
 Starting another transmission or selecting Stop replay interrupts presentation
 and discards its undelivered results. Earlier completed receptions remain in
@@ -235,23 +232,16 @@ symbol timing and chip correlation. Startup includes an arbitrary sample offset
 and carrier phase. It does not provide an oscillator tracking loop; unsuccessful
 acquisition remains an unsuccessful simulation.
 Real audio reception pauses during transmission and resumes afterward.
-Bandwidth and target C/N0 determine constellation size and automatic integration length; forced pattern
+Bandwidth and the TX target C/N0 determine binary-pattern integration length; forced pattern
 and tone modes are also available. Auto keystream is enabled with encryption.
-The editor shows estimated airtime. Streaming transmission and reception use
-bounded DSP storage independent of airtime. Compression is always chosen automatically.
-Provisional ticker text is distinguished from validated cache entries.
-Each signal shows **Preamble** reception and **Data … pre-FEC**. Data accuracy is
-the percentage of encoded body bits received correctly before Reed–Solomon
-correction, measured against the fully verified result. This includes body
-metadata, compressed or raw content, and the integrity tag; it excludes bootstrap
-header and parity bits. It is not a percentage of decompressed file bytes.
-Unverified packets show `pending`; unavailable measurements show `--`. Simulation
-keeps data accuracy pending until verified reception is presented at the end of
-replay, even though computation finished earlier.
-Preamble reception counts independently recognized training duration against the
-fixed five seconds, using its 64-segment schedule rather than the slower or faster
-payload symbol clock. See [modem diagnostics](docs/modem.md) for the measurement
-thresholds and bounded-history limits.
+The editor shows estimated airtime. Streaming transmission uses bounded chunks; reception bounds waveform history
+and retained candidate/bit records within its workspace. Compression is always chosen automatically.
+Pattern-only results show a model log-evidence score, not an SNR or calibrated
+confidence percentage. Short text and exact raw bits do not require packet
+validation to become copyable. Packet results additionally show **Data …
+pre-FEC**, measured against the verified encoded body; it excludes bootstrap
+and parity bits. The manual legacy receiver also retains its independently
+measured preamble diagnostic. See [modem diagnostics](docs/modem.md).
 The console enforces a six-second delay after actual encrypted transmission;
 simulation and unencrypted transmissions have no cooldown. CLI encrypted audio
 TX also waits six seconds after playback so sequential scripts inherit the delay; independent concurrent
@@ -276,8 +266,8 @@ Optional external pads remain a CLI feature using `--pad path` at creation and l
 Keyfiles contain only this application's symmetric key sets. Never put
 signing keys or other applications' secrets in this format.
 
-AES-256-CTR encrypts the entire known training sequence, framed content,
-HMAC-SHA256 tag, and Reed–Solomon bytes. Independent HKDF-derived keys separate
+AES-256-CTR masks the transmitted data bits; larger packet messages retain their
+HMAC-SHA256 and Reed–Solomon processing. Short pattern-only messages have no MAC. Independent HKDF-derived keys separate
 the data, MAC, DSSS, scrambler, and reserved FHSS streams. All streams use the
 same candidate whole-second transmission anchor. Physical timing is refined to
 the sample; this is not a nanosecond-resolution absolute-time receiver. Receive
@@ -285,8 +275,9 @@ time defaults to the start of capture; for saved WAVs use the original TX epoch
 or a nearby epoch with the search window. Search is nearest-first and bounded by
 ±32,768 seconds when encrypted.
 
-CTR position reuse reveals the XOR of the affected plaintext positions; the
-independent MAC still protects authenticity. A clock search window is not replay
+CTR position reuse reveals the XOR of the affected plaintext positions. A packet
+MAC protects larger authenticated messages; raw bits and short dictionary text
+have no cryptographic authentication. A clock search window is not replay
 prevention. Large keyfiles do not guarantee SSD erasure. The format does not
 protect a secret from someone who obtains its entire keyfile and required pad.
 See [cryptography](docs/crypto.md) and [security boundaries](docs/security.md).
@@ -304,24 +295,27 @@ printf 'hello' | ./build/pump pack --input - | ./build/pump unpack --input -
 ./build/pump qr --text 'clipboard text' --output clipboard.svg
 ./build/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
 
-# Exactly three DBPSK symbols; no preamble, byte padding, authentication, or FEC.
-./build/pump status-tx --bits 010 --spreading 128 --output status.wav
-./build/pump status-rx --bits 010 --spreading 128 --input status.wav
+# Exactly three pattern symbols; no preamble, padding, authentication, or FEC.
+./build/pump status-tx --bits 010 --output status.wav
+./build/pump status-rx --bits 010 --input status.wav
+
+# Search these receive targets only, with the selected bandwidth and pattern.
+./build/pump listen --receive-targets "40, 6, -6" --bw 1200 --pattern auto-pattern --json
 ```
 
-`status-rx` reports correlation with an already aligned known signal. It does not
-assert validated identity or implement continuous very-slow beacon monitoring.
-The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz,
-forced lengths of 1..16,384 chips per symbol, optional independent encrypted spreading, and 20%/
-60% RS parity or FEC Off. The compact header follows the effective body coding
-policy, with all RS automatically disabled below 16 original bytes. Raw binary
-is available for exact few-bit data without packet fields or integrity tags.
-`--target-snr` is the desired C/N0 in dBHz. The planner maximizes modeled throughput
-across 4/8/16/32/64-point phase-and-amplitude constellations with geometry-based
-noise and drift margins. It caps phase density at eight positions and payload
-density at six bits per symbol, preserving at least two symbols for one byte.
-Automatic integration can extend beyond 16,384 chips; this is not measured
-receiver sensitivity or a capacity optimum.
+With automatic pattern settings, `status-rx` discovers the raw bit string from
+pattern evidence and only then compares it with `--bits`. A wrong expected
+string does not steer acquisition. Its JSON reports exact bits, a model score
+and `packet_validated: false`. Explicit manual status configurations retain the
+aligned legacy DBPSK diagnostic.
+
+The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
+forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz.
+Auto planning uses one bit per pattern symbol, a 64-chip minimum and an initial
+18 dB integrated-energy model. Forced short patterns preserve their duration
+and report unsupported automatic confidence assumptions. Integration may extend
+past 16,384 chips, subject to numeric, workspace and acquisition limits. This
+is not measured receiver sensitivity or a capacity optimum.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
@@ -355,7 +349,9 @@ The received text/file cache defaults to 256 MiB (`--cache-mb`); streaming DSP h
 a separate 64 MiB workspace (`--dsp-mb`, shared by the key/epoch receiver bank).
 Neither is a process RSS cap: encoded
 packets, codec workspaces and caller-owned buffers can coexist. Live audio and
-sampled simulation never allocate PCM proportional to transmission duration.
+sampled simulation retain a short receive window rather than the entire PCM
+transmission. Pattern-search workspace can grow with the longest symbol; an
+unsupported configuration is rejected before allocation.
 Simulation CPU work does grow with the number of samples, so long integrations
 and high sample rates can take substantial time and remain cancellable.
 Explicit batch WAV operations still use `--memory-mb` and can reject recordings

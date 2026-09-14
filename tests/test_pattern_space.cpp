@@ -1,4 +1,5 @@
 #include "../src/gui/pattern_space.hpp"
+#include "datapump/tuning.hpp"
 #include "../src/constellation.hpp"
 #include "datapump/streaming_modem.hpp"
 #include <cmath>
@@ -178,10 +179,28 @@ void bounded_and_public_illustration() {
     try { (void)inspect_pattern_space(config, std::numeric_limits<double>::quiet_NaN()); } catch (const Error&) { rejected = true; }
     check(rejected, "nonfinite C/N0 must be rejected before display");
 }
+void binary_pattern_preview() {
+    for(const auto mode:{tuning::PatternMode::auto_pattern,tuning::PatternMode::auto_keystream,tuning::PatternMode::auto_tone}) {
+        auto config=tuning::resolve(1200,40,mode,true).config;
+        const auto model=inspect_pattern_space(config,40,true);
+        check(model.bounded_pattern_preview && model.coefficients.size()==2 && model.codewords.size()==2,
+              "binary pattern inspection must preserve two independent codeword rows");
+        check(model.squared_distance(0,1)>0 && model.squared_distance(0,0)==0,
+              "binary pattern rows must have measured nonzero distance despite equal scalar coefficients");
+        modem::PatternCode expected(config,config.stream_epoch);
+        if(!config.scramble)for(std::size_t i=0;i<model.code.size();++i)
+            check(std::abs(model.chip_value(1,i)-std::sqrt(2*modem::nominal_signal_power)*expected.value(i,1,.5))<1e-10,
+                  "pattern preview must render the actual selected codeword");
+        config.integration_seconds=3600;
+        const auto long_model=inspect_pattern_space(config,0,true);
+        check(long_model.truncated && long_model.code.size()==16384 && long_model.symbol_samples<long_model.full_symbol_samples,
+              "hour-long pattern inspection must retain only a bounded explicitly labeled prefix");
+    }
+}
 }
 int main() {
     try {
-        exact_transmitter_templates(); durations_and_modes(); bounded_and_public_illustration();
+        exact_transmitter_templates(); durations_and_modes(); bounded_and_public_illustration();binary_pattern_preview();
         std::cout << "Static full-pattern space tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n'; return 1;

@@ -4,6 +4,17 @@
 #include <span>
 
 namespace datapump::compression {
+// Exact-bit form of the fixed short code below. Each element is one 0/1 bit;
+// no original-length field, framing or padding is added. The encoder limit is
+// the number of bit elements (and storage bytes); the decoder limit is bytes.
+Bytes encode_short_bits(std::span<const std::uint8_t> input,
+                        std::size_t output_limit = default_memory_limit);
+// Decode complete prefix-code tokens through the exact supplied endpoint.
+// Empty input is valid. Non-bit elements, noncanonical escapes and an endpoint
+// inside a token throw Error; no missing bits are inferred or supplied.
+Bytes decode_short_bits(std::span<const std::uint8_t> bits,
+                        std::size_t output_limit = default_memory_limit);
+
 // One fixed code over bytes. There are no phrases, codebook headers or codec
 // identifiers. Space/e/t/a/o use 3 bits, i/n use 4, fourteen other lowercase
 // bytes use 6; every remaining byte uses a 5-bit escape plus its 8 literal bits.

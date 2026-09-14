@@ -118,9 +118,9 @@ inline void codeword(Node& parent,const std::string& title,std::size_t data,std:
     parent.children.push_back(std::move(line));
 }
 inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& page,std::size_t requested_first) {
-    heading(parent,"Full pattern / scrambler symbol space");
-    paragraph(parent,"Each row is one complete legal symbol: its phase/amplitude coefficient times the selected chip sequence. I is the upper half of each cell; Q is the lower half.");
-    paragraph(parent,model.representative_keyed?"Keyed pattern structure: public illustrative signs; the actual sequence depends on the key and epoch.":"Configured public signs; the full code period is inspectable below.");
+    heading(parent,model.bounded_pattern_preview?"Pattern / scrambler symbol preview":"Full pattern / scrambler symbol space");
+    paragraph(parent,model.bounded_pattern_preview?"Each row shows an independently distinguishable binary pattern at chip centers. I is the upper half of each cell; Q is the lower half. Long symbols show at most 16,384 chips; distances below cover this illustrated prefix only.":"Each row is one complete legal symbol: its phase/amplitude coefficient times the selected chip sequence. I is the upper half of each cell; Q is the lower half.");
+    paragraph(parent,model.representative_keyed?"Keyed pattern structure: public illustrative signs; the actual sequence depends on the key and epoch.":model.bounded_pattern_preview?"Configured public pattern; the bounded prefix is inspectable below.":"Configured public signs; the full code period is inspectable below.");
     const auto columns=static_cast<std::size_t>(std::clamp(static_cast<int>((parent.width-110)/14),8,64));
     const auto total=model.code.size();const auto last=total?((total-1)/columns)*columns:0;
     const auto first=std::min((requested_first/columns)*columns,last),shown=std::min(columns,total-first);
@@ -145,8 +145,8 @@ inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& pag
     grid.children.push_back(bitmap("pattern/chips",plots::PlotSnapshot::pattern_chips(model,first,shown),cell*static_cast<float>(shown),18*static_cast<float>(model.coefficients.size())));
     parent.children.push_back(std::move(grid));
     paragraph(parent,"Light: positive. Dark: negative. Middle gray: zero. Distance from middle gray shows I/Q amplitude on one shared scale. Hatched chips are outside this symbol's actual duration. Rows assume a zero preceding carrier phase.");
-    paragraph(parent,"Symbol coverage: "+std::to_string(model.symbol_samples)+" samples, "+number(model.symbol_seconds)+" s; "+std::to_string(model.complete_periods)+" complete code periods + "+std::to_string(model.tail_samples)+" samples. Distances include every repeat and partial chip.");
-    heading(parent,"Complete-symbol distance map");
+    paragraph(parent,model.bounded_pattern_preview?"Illustrated coverage: "+std::to_string(model.symbol_samples)+" of "+std::to_string(model.full_symbol_samples)+" samples; "+number(model.symbol_seconds)+" s. Pattern-chip distances use actual sample weights; continuous tone distances use chip-center approximations. This is a design preview, not received confidence.":"Symbol coverage: "+std::to_string(model.symbol_samples)+" samples, "+number(model.symbol_seconds)+" s; "+std::to_string(model.complete_periods)+" complete code periods + "+std::to_string(model.tail_samples)+" samples. Distances include every repeat and partial chip.");
+    heading(parent,model.bounded_pattern_preview?"Illustrated pattern distance map":"Complete-symbol distance map");
     const auto symbols=model.coefficients.size(),count=symbols+(model.unused_pattern?1U:0U);
     const float map_cell=std::max(2.0f,std::min(24.0f,std::min(280.0f,parent.width/3)/static_cast<float>(std::max<std::size_t>(1,count))));
     const float map_size=map_cell*static_cast<float>(count);
@@ -157,12 +157,12 @@ inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& pag
     for(std::size_t i=0;i<count;++i) {auto label=text(i%std::max<std::size_t>(1,symbols/8)==0||i==symbols?(i==symbols?"U":std::to_string(i)):"",30,10);label.height=map_cell;labels.children.push_back(std::move(label));}
     plot_row.children.push_back(std::move(labels));plot_row.children.push_back(bitmap("pattern/distances",plots::PlotSnapshot::pattern_distances(model),map_size,map_size));matrix.children.push_back(std::move(plot_row));map.children.push_back(std::move(matrix));
     double maximum=0;
-    for(std::size_t a=0;a<symbols;++a)for(std::size_t b=0;b<a;++b)maximum=std::max(maximum,std::abs(model.coefficients[a]-model.coefficients[b]));
+    for(std::size_t a=0;a<symbols;++a)for(std::size_t b=0;b<a;++b)maximum=std::max(maximum,std::sqrt(model.squared_distance(a,b)/model.symbol_seconds));
     if(model.unused_pattern && !model.coefficients.empty())for(const auto coefficient:model.coefficients)maximum=std::max(maximum,std::sqrt(std::max(0.,std::norm(coefficient)+std::norm(model.coefficients.front())-2*(coefficient*std::conj(model.coefficients.front())).real()*model.unused_pattern->correlation)));
-    auto detail=text("Every cell compares two complete chip vectors. Dark = close; light = far. Diagonal = zero.\n\nRow/column numbers are the binary symbol values as integers. U is the unused sequence below, at symbol 0's amplitude and phase.\n\nOne shared scale: 0 to "+number(maximum*std::sqrt(model.symbol_seconds))+" amplitude sqrt(s).\n\nNoise is a distribution across the full space, not an additional fixed symbol.",parent.width-map_size-54,12,Tone::text);
+    auto detail=text(std::string(model.bounded_pattern_preview?"Every cell compares two illustrated chip vectors. ":"Every cell compares two complete chip vectors. ")+"Dark = close; light = far. Diagonal = zero.\n\nRow/column numbers are the binary symbol values as integers. U is the unused sequence below, at symbol 0's amplitude and phase.\n\nOne shared scale: 0 to "+number(maximum*std::sqrt(model.symbol_seconds))+" amplitude sqrt(s).\n\nNoise is a distribution across the full space, not an additional fixed symbol.",parent.width-map_size-54,12,Tone::text);
     map.children.push_back(std::move(detail));parent.children.push_back(std::move(map));
-    paragraph(parent,"Nearest complete symbols: "+number(std::sqrt(model.minimum_squared_distance))+" amplitude sqrt(s); "+number(std::sqrt(model.minimum_noise_squared_distance))+" sigma at the configured target noise level.",12,Tone::text,true);
-    paragraph(parent,"Before matching: "+number(model.chip_esn0_db)+" dB Es/N0 per nominal chip. After full-symbol matching: "+number(model.symbol_esn0_db)+" dB. Integration gain: "+number(model.processing_gain_db)+" dB.",12,Tone::text,true);
+    paragraph(parent,std::string(model.bounded_pattern_preview?"Nearest illustrated patterns: ":"Nearest complete symbols: ")+number(std::sqrt(model.minimum_squared_distance))+" amplitude sqrt(s); "+number(std::sqrt(model.minimum_noise_squared_distance))+" sigma at the configured target noise level.",12,Tone::text,true);
+    paragraph(parent,"Before matching: "+number(model.chip_esn0_db)+" dB Es/N0 per nominal chip. "+std::string(model.bounded_pattern_preview?"After illustrated-prefix matching: ":"After full-symbol matching: ")+number(model.symbol_esn0_db)+" dB. Integration gain: "+number(model.processing_gain_db)+" dB.",12,Tone::text,true);
     heading(parent,"Off-pattern directions remain unused");
     paragraph(parent,"The bars fit the best complex amplitude and phase to the entire candidate. A different scalar phase alone is not a different spreading pattern.");
     const float label_width=std::min(250.0f,parent.width/3),value_width=std::min(175.0f,parent.width/3),bar_width=parent.width-label_width-value_width;
@@ -186,7 +186,7 @@ inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& pag
         for(std::size_t c=0;c<shown;++c)signs.children.push_back(text(model.unused_pattern->code[first+c]>0?"+":"-",cell,11,model.chip_weights[first+c]?Tone::text:Tone::muted));
         parent.children.push_back(std::move(signs));
     }
-    paragraph(parent,model.timing_selective?"A wrong chip alignment leaves off-pattern energy. The receiver despreads and integrates candidate timings before testing APSK symbols; individual chips need not be decodable.":"This code has no one-chip timing discrimination after fitting phase and amplitude. Tone / constant or one-chip patterns retain coherent integration gain, without distinct sign-based timing evidence.");
+    paragraph(parent,model.timing_selective?"A wrong chip alignment leaves off-pattern energy. Pattern evidence can distinguish timing even when individual chips remain noisy.":"This code has no one-chip timing discrimination after fitting phase and amplitude. Tone / constant or one-chip patterns retain coherent integration gain, without distinct sign-based timing evidence.");
     paragraph(parent,"Repeated short codes can have other timing aliases. This diagram does not imply a guaranteed lock threshold or additional payload bits. The receiver searches a bounded set of timing hypotheses.");
 }
 inline Page build(const Inspection* model,bool flow,float width,std::size_t first=0,std::string pending="Updating modem estimate...") {

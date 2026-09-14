@@ -32,6 +32,14 @@ void records() {
     signals.update(bits);check(!signal_records(signals).back().activatable,"Incomplete raw bits became copyable");
     bits.complete=true;signals.update(bits);rows=signal_records(signals);
     check(rows.back().activatable&&rows.back().cells.back().text=="001","Completed raw bits lost leading zeros or activation");
+    bits.expected_bits=0;bits.pattern_score=24.5;signals.update(bits);
+    check(signals.copy_bits(signals.lines().size()-1)=="001","pattern-discovered length must not require a transmitted expected count to copy");
+    SignalLine recovered;recovered.id=83;recovered.text="e";recovered.complete=true;recovered.pattern_score=24.5;
+    signals.update(recovered);rows=signal_records(signals);
+    check(rows.back().activatable && signal_status_label(recovered)=="text received" && !signals.copy_id(signals.lines().size()-1) &&
+          signals.copy_text(signals.lines().size()-1)=="e","pattern-supported text must be copyable without claiming packet validation");
+    check(rows.back().cells[2].text=="Pattern score 24.5" && rows.back().cells[2].text.find("dB")==std::string::npos,
+          "pattern evidence must not be labeled as SNR");
     check(control(ui::Field::signals).follow_tail&&control(ui::Field::signals).activate_on_select,"Signal interaction policy is missing from the declaration");
 }
 void presentation() {

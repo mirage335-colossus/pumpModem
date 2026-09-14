@@ -1,18 +1,57 @@
-# Data Pump compact packet format
+# Data Pump pattern transport and compact packet format
 
-Release 0.7.0 uses this format exclusively. The old packet formats and their
-compression selectors are removed. Both audio peers must use the compact
-format and matching modem settings. Existing keyfiles and the separate raw-bit
-transmission path are unchanged. Receiving a file never executes it.
+Automatic modem profiles use one meaningful bit per binary pattern symbol.
+Pattern evidence establishes signal presence, timing and burst boundaries
+before application decoding. Both audio peers need matching modem settings.
+The compact packet codec remains available for larger text, files and
+screenshots; it does not define the presence of a raw-bit signal. Existing
+keyfiles remain compatible. Receiving a file never executes it.
 
-## On-air sequence
+The automatic waveform is incompatible with the previous automatic APSK
+waveform. Both peers must use the new pattern transport, or explicitly select
+matching legacy APSK settings; the receiver does not negotiate this over air.
 
-The modem sends its fixed five-second training, then a **variable compact
-bootstrap**, then the optionally Reed–Solomon-coded and interleaved body.
-Training contains 32 input bytes mapped onto 64 four-bit APSK segments; it is
-independent of the payload symbol clock. Bootstrap and body form one continuous
-APSK bitstream. There is no internal symbol padding or transmitted zero-byte
-tail. Only the last symbol can contain unused pad bits, excluded from content.
+## Raw bits and short text
+
+Raw binary input is transmitted exactly as entered, including leading zeros
+and lengths not divisible by eight. Three input bits produce exactly three
+pattern symbols. There is no preamble, packet header, checksum, MAC, FEC,
+byte-padding bit, or transmitted length field on this path.
+
+Normal text below 16 original UTF-8 bytes uses the fixed short-byte dictionary
+described below, emitted as exact prefix-code bits. It carries no compression
+flag, original-size field or padding. The receiver decodes complete dictionary
+tokens through the detected burst endpoint and only presents this automatic
+short-text interpretation when the result is below 16 bytes. Truncated or
+uninterpretable input remains available as raw bits. For example, the byte
+`e` is its three-bit dictionary code, rather than a framed one-byte message.
+
+Text of at least 16 source bytes, files and screenshots use the existing compact
+packet codec below. Files and screenshots retain that representation even
+when their payload is below 16 bytes; the application does not invent an
+untransmitted file type or filename from raw bits. Direct packet APIs can also
+encode short text, but those framed bytes are separate from the normal
+short-text transfer path.
+
+The receiver preserves detected raw bits independently of packet validity. A
+byte-aligned burst may subsequently validate as a compact packet; otherwise
+the short dictionary may provide a text interpretation. Neither interpretation
+changes which waveform timing or pattern candidates were selected. Keyed raw
+bits use the independent Data stream before transmission; no authentication
+tag is silently added to them.
+
+## Framed packet sequence
+
+The packet contains a **variable compact bootstrap**, then the optionally
+Reed–Solomon-coded and interleaved body. Automatic binary pattern modulation
+sends each packed packet bit as a separate pattern symbol, without physical
+training or symbol padding.
+
+Manual legacy APSK configurations additionally send five seconds of training:
+32 input bytes mapped onto 64 four-bit APSK segments, independent of the payload
+symbol clock. Their bootstrap and body form one continuous APSK bitstream, with
+unused bits possible only in its final symbol. Those legacy waveform details
+do not add bits to the automatic raw pattern path.
 
 The systematic bootstrap occupies four to eight bytes:
 
@@ -41,7 +80,8 @@ parity bytes. A five-byte header uses zero, two or four. This is the same nomina
 coding policy; rounding small blocks to even parity makes their actual overhead
 ratio higher. Header and body always use the same modulation and symbol rate.
 
-Ordinary text under 16 bytes has a **four-byte total bootstrap**. Text under
+Within this packet codec, ordinary text under 16 bytes has a **four-byte total
+bootstrap**; normal short-text transfer bypasses it. Packet text under
 256 bytes usually has four or five systematic bytes and at most four parity
 bytes. Long metadata strings can increase the length field by one byte. The
 maximum bootstrap is 14 bytes, a receive-probe bound, not transmitted padding.
@@ -56,19 +96,18 @@ returns its actual protected length. Incomplete prefixes return no size.
 `decode_packet` reports the exact consumed length and ignores a demodulator
 tail after that frame.
 
-Blind acquisition fits the measured pattern constellation's amplitude lattice
-and differential phase residuals. It tries the first symbol's possible phase
-labels, so loss of the physical training does not require header RS to repair
-an unknown phase reference. Frames up to 2048 encoded bytes remain provisional
-until their complete digest or MAC verifies, while other timing hypotheses keep
-searching. This covers all packets with less than 256 original bytes, including
-maximum metadata. A plausible short header alone cannot commit the receiver to
-a corrupted length. Finite timing, noise and drift limits still apply.
+Automatic acquisition fits the legal pattern waveforms against noise, with
+unknown common phase and amplitude. It does not use the APSK lattice, packet
+bootstrap, CRC or MAC as a signal-lock gate. Packet sizes and integrity are
+validated only after accepted pattern bits become available. Legacy APSK
+acquisition retains its earlier amplitude/phase and protected-bootstrap search.
+Finite frequency/timing coverage, noise and clock drift still limit reception.
 
-The validated length terminates content. Signal fade is not an unambiguous
-message delimiter: a channel fade can also occur within a transmission. No
-end marker or zero-byte guard is sent; finite-capture integration is flushed
-locally and does not increase transmitted airtime.
+The validated packet length terminates packet content. Pattern evidence
+separately terminates a detected burst. A fade can split a burst because signal
+loss alone cannot establish whether a transmitter intended to stop. No end
+marker or zero-byte guard is sent; finishing a finite capture is local and does
+not increase transmitted airtime.
 
 ## Logical body before coding
 
@@ -108,14 +147,17 @@ training, parity and symbol pad bits. A keyed receiver rejects unkeyed packets;
 SHA-256 alone supplies integrity, not authentication. Transfer-layer keyed
 MACs bind the local epoch, which is not transmitted as a packet field.
 
-Private stream encryption wraps training and the complete protected packet.
-The existing public whitening mask is then applied to the packet, excluding
-training. The receiver reverses whitening and private masking before FEC and
-integrity verification. Whitening is reversible scrambling, not encryption.
+For automatic pattern transport, private Data-stream encryption wraps the exact
+payload bits, independently of private pattern and DSSS streams. The manual
+legacy audio path wraps training and the complete protected packet, then applies
+its public whitening mask to the packet, excluding training. Its receiver
+reverses whitening and private masking before FEC and integrity verification.
+Public whitening is reversible scrambling, not encryption.
 
 ## Automatic compression
 
-Compression is attempted automatically unless explicitly disabled by the CLI.
+For framed packets, compression is attempted automatically unless explicitly
+disabled by the CLI.
 It is selected only when it saves at least one whole payload byte. The single
 compressed flag and the original length completely determine decoding:
 
@@ -139,9 +181,11 @@ short codes, as in the frequency-weighted idea behind Morse code:
 | Every other byte | `11111` followed by its eight literal bits | 13 |
 
 This codes bytes, including arbitrary binary and UTF-8. There are no phrase
-tokens. Escaping a directly coded byte is noncanonical. The original byte count
-terminates decoding; only zero to seven zero pad bits may follow. Extra bytes,
-nonzero padding, truncated tokens and expansion beyond the count are rejected.
+tokens. Escaping a directly coded byte is noncanonical. The exact-bit short-text
+path terminates at the detected bit endpoint and permits no padding. In the
+framed packet representation, the original byte count terminates decoding and
+only zero to seven zero pad bits may follow. Extra bytes, nonzero padding,
+truncated tokens and expansion beyond the count are rejected.
 
 ### Long data and files
 

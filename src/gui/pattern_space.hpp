@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include "datapump/pattern_code.hpp"
 #include "../constellation.hpp"
 #include "../spreading_code.hpp"
 #include <algorithm>
@@ -28,6 +29,12 @@ struct PatternSpace {
     // coefficient[value] * code[chip] is the full analytic baseband symbol.
     std::vector<int> code;
     std::vector<std::complex<double>> coefficients;
+    // Pattern transport has independent codeword rows. Only a bounded prefix
+    // is illustrated; an hours-long keyed symbol must not allocate its chips.
+    std::vector<std::vector<std::complex<double>>> codewords;
+    bool bounded_pattern_preview = false, truncated = false;
+    std::uint64_t full_symbol_samples = 0;
+    double independent_squared_distance = 0;
     std::vector<std::uint64_t> chip_weights;
     std::uint64_t chip_samples = 0, symbol_samples = 0, period_samples = 0;
     std::uint64_t complete_periods = 0, tail_samples = 0;
@@ -43,6 +50,9 @@ struct PatternSpace {
     std::optional<PatternEvidence> unused_pattern;
     PatternEvidence one_chip_shift;
     double cn0_db_hz = 0;
+    std::complex<double> chip_value(std::size_t symbol,std::size_t chip) const {
+        return codewords.empty()?coefficients.at(symbol)*static_cast<double>(code.at(chip)):codewords.at(symbol).at(chip);
+    }
 
     // Integral |a*c(t)-b*c(t)|^2 dt. All +/- signs have unit magnitude, so
     // this is exact for the complete analytic symbol, including repetitions
@@ -50,7 +60,9 @@ struct PatternSpace {
     // high-dimensional sample space, nor a claim of an independent code bank.
     double squared_distance(std::size_t a, std::size_t b) const {
         if (a >= coefficients.size() || b >= coefficients.size()) throw Error("pattern symbol index is out of range");
-        const auto result = symbol_seconds * std::norm(coefficients[a] - coefficients[b]);
+        double result = 0;
+        if(codewords.empty())result=symbol_seconds*std::norm(coefficients[a]-coefficients[b]);
+        else result=a==b?0:independent_squared_distance;
         if (!std::isfinite(result)) throw Error("pattern distance exceeds numeric range");
         return result;
     }
@@ -83,6 +95,51 @@ inline PatternSpace inspect_pattern_space(const modem::Config& config, double cn
             illustrated.spreading_seed[i] = static_cast<std::uint8_t>(0x39U + 17U * i);
             illustrated.dsss_seed[i] = static_cast<std::uint8_t>(0xa7U + 29U * i);
         }
+    }
+    if(config.pattern_symbols) {
+        result.bounded_pattern_preview=true;
+        modem::PatternCode generator(illustrated,illustrated.stream_epoch);
+        result.chip_samples=generator.chip_samples();
+        result.full_symbol_samples=generator.symbol_samples();
+        const auto shown=static_cast<std::size_t>(std::min<std::uint64_t>(generator.chips_per_symbol(),16384));
+        result.symbol_samples=std::min(result.full_symbol_samples,result.chip_samples*shown);
+        result.truncated=result.symbol_samples<result.full_symbol_samples;
+        result.period_samples=result.symbol_samples;result.tail_samples=result.symbol_samples;
+        result.chip_seconds=static_cast<double>(result.chip_samples)/config.sample_rate;
+        result.symbol_seconds=static_cast<double>(result.symbol_samples)/config.sample_rate;
+        result.cn0_db_hz=cn0_db_hz;
+        result.chip_esn0_db=cn0_db_hz+10*std::log10(result.chip_seconds);
+        result.symbol_esn0_db=cn0_db_hz+10*std::log10(result.symbol_seconds);
+        result.processing_gain_db=10*std::log10(result.symbol_seconds/result.chip_seconds);
+        const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
+        result.coefficients={{amplitude,0},{amplitude,0}};
+        result.code.resize(shown);result.chip_weights.resize(shown);
+        result.codewords.assign(2,std::vector<std::complex<double>>(shown));
+        for(std::size_t chip=0;chip<shown;++chip) {
+            result.chip_weights[chip]=std::min(result.chip_samples,result.symbol_samples-chip*result.chip_samples);
+            const auto fraction=.5*static_cast<double>(result.chip_weights[chip])/static_cast<double>(result.chip_samples);
+            for(unsigned bit=0;bit<2;++bit)result.codewords[bit][chip]=amplitude*generator.value(chip,bit,fraction);
+            result.code[chip]=result.codewords[0][chip].real()<0?-1:1;
+            result.independent_squared_distance+=static_cast<double>(result.chip_weights[chip])/config.sample_rate*
+                std::norm(result.codewords[0][chip]-result.codewords[1][chip]);
+        }
+        result.effective_chips=shown;
+        result.code_selective=config.spreading_mode==modem::SpreadingMode::pattern;
+        std::complex<double> shifted_dot{};
+        for(std::size_t chip=0;chip<shown;++chip) {
+            const auto next=amplitude*generator.value(chip+1,0,.5);
+            shifted_dot+=(static_cast<double>(result.chip_weights[chip])/static_cast<double>(result.symbol_samples))*
+                result.codewords[0][chip]*std::conj(next)/(amplitude*amplitude);
+        }
+        result.one_chip_shift.name="One-chip offset of illustrated pattern";
+        result.one_chip_shift.correlation=std::clamp(std::abs(shifted_dot),0.,1.);
+        result.one_chip_shift.residual_fraction=std::max(0.,1-std::norm(shifted_dot));
+        result.one_chip_shift.squared_distance=2*result.symbol_seconds*(1-result.one_chip_shift.correlation);
+        result.timing_selective=result.one_chip_shift.residual_fraction>0;
+        result.nearest_symbols={0,1};
+        result.minimum_squared_distance=result.squared_distance(0,1);
+        result.minimum_noise_squared_distance=result.noise_squared_distance(0,1);
+        return result;
     }
     result.code = modem::detail::spreading_code(illustrated);
     result.chip_samples = modem::detail::spreading_chip_samples(config);

@@ -14,6 +14,10 @@ namespace datapump::modem {
 inline constexpr double nominal_signal_power = 0.153125;
 enum class SpreadingMode : std::uint8_t { pattern, tone };
 struct Config {
+    // Pattern transport conveys one bit per independently detectable waveform.
+    // False retains the explicitly configured legacy APSK transport.
+    bool pattern_symbols = false;
+    std::uint64_t stream_epoch = 0;
     // Internal DSP clock, independent of the hardware audio endpoint clock.
     std::uint32_t sample_rate = 6000;
     unsigned constellation_bits = 4; // 2..6 bits: 2/4/8 phases, 2/4/8 rings.
@@ -49,6 +53,9 @@ struct Diagnostics {
     std::vector<std::complex<double>> constellation;
     std::vector<float> waveform;
     std::optional<PreambleReception> preamble_reception = std::nullopt;
+    // Model-based pattern evidence in natural-log units; not measured SNR or
+    // a calibrated probability of signal presence.
+    std::optional<double> pattern_score;
 };
 struct DecodeResult { Bytes bytes; Diagnostics diagnostics; };
 struct ChannelConfig {

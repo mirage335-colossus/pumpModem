@@ -32,6 +32,13 @@ keep the same ceiling. Both native adapters use this shared control. Live DSP
 and transfer estimates receive the same budget, independently of the 256 MiB
 received-message/file cache.
 
+The persistent **TX SNR (dB-Hz)** scalar is independent of the **RX targets
+(dB-Hz)** comma-list. The latter defaults to `40`, trims and deduplicates valid
+entries, and resets the entire list to `40` on invalid input. Its 512-byte edit
+limit and 750 ms normalization delay allow comma/minus drafts while keeping
+native adapters free of parser logic. Receive profiles hold the selected
+bandwidth and pattern/tone mode fixed.
+
 | Vocabulary | Meaning |
 | --- | --- |
 | `Kind::label` | Literal or bound readonly native text. |
@@ -107,7 +114,10 @@ cells. Cells carry literal text, relative logical rectangles, font size, semanti
 tone and emphasis. Negative cell width means remaining row width minus that
 amount. The list declaration supplies row height, empty/help text, tail-following
 and activation policy. Signal records include frequency, status, preamble/data
-quality and message text; files and unverified prefixes are not copyable as text.
+quality and message text. Pattern-only rows show model log evidence rather than
+dB or a calibrated confidence percentage. Complete discovered raw bits and
+short dictionary text can be copied without packet validation; provisional
+prefixes and file rows cannot. Pattern text and raw bits are separate records.
 
 ## Behavior every adapter preserves
 

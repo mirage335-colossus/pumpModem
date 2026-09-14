@@ -44,7 +44,7 @@ double constellation_scale(const Constellation& data) {
 double pattern_distance(const inspection::PatternSpace& model, std::size_t a, std::size_t b) {
     if (a == b) return 0;
     const auto count = model.coefficients.size();
-    if (a < count && b < count) return std::abs(model.coefficients[a] - model.coefficients[b]);
+    if (a < count && b < count) return std::sqrt(model.squared_distance(a,b)/model.symbol_seconds);
     const auto coefficient = model.coefficients[a < count ? a : b], reference = model.coefficients.front();
     return std::sqrt(std::max(0., std::norm(coefficient) + std::norm(reference) -
         2 * (coefficient * std::conj(reference)).real() * model.unused_pattern->correlation));
@@ -250,7 +250,7 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                     const auto chip = first + col;
                     if (chip >= model.chip_weights.size() || !model.chip_weights[chip])
                         return gray((x + y) % 4 == 0 ? (request.monochrome ? 255 : theme::grid) : theme::surface);
-                    const auto sample = model.coefficients[component / 2] * static_cast<double>(model.code[chip]);
+                    const auto sample = model.chip_value(component / 2,chip);
                     const auto value = component % 2 ? sample.imag() : sample.real();
                     const auto fraction = scale > 0 ? std::clamp(value / scale, -1., 1.) : 0;
                     if (request.monochrome) {
@@ -322,7 +322,9 @@ std::string PlotSnapshot::caption(unsigned width) const {
                 const auto count = std::min(data.count, data.model.code.size() - first);
                 out << "Chips " << (count ? first + 1 : 0) << "-" << first + count << " / " << data.model.code.size()
                     << "; I above Q; light positive, dark negative, middle gray zero; hatching unused";
-            } else if (data.kind == Pattern::distances) return "Complete-symbol distance: dark close, light far; diagonal zero; common scale";
+            } else if (data.kind == Pattern::distances) return data.model.bounded_pattern_preview?
+                "Illustrated pattern distance: dark close, light far; preview only; diagonal zero":
+                "Complete-symbol distance: dark close, light far; diagonal zero; common scale";
             else return "Energy matching code (white) / outside code (gray): legal, shifted, unused (if present), isotropic noise mean";
         } else if constexpr (std::is_same_v<Type, Codeword>) out << data.data << " data / " << data.parity << " parity bytes";
         return out.str();

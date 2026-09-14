@@ -97,7 +97,7 @@ void long_patterns_use_bounded_workspace() {
     }
 }
 void wideband_fractional_carrier_pcm_roundtrip() {
-    auto value = options(24000, tuning::PatternMode::pattern_3);
+    auto value = options(24000, tuning::PatternMode::auto_pattern);
     changing_pattern(value.modem);
     check(value.modem.sample_rate == 96000, "24kHz GUI preset must use a compatible PCM sample rate");
     value.modem.carrier_hz = 12731.375;
@@ -112,7 +112,7 @@ void wideband_fractional_carrier_pcm_roundtrip() {
     samples = modem::simulate(samples, value.modem, channel);
     same_packet(transfer::receive(samples, value), sent);
 }
-void weak_auto_and_fixed_training() {
+void weak_auto_without_training() {
     const auto ordinary = tuning::resolve(2400, 40, tuning::PatternMode::auto_pattern, false);
     const auto weak = tuning::resolve(2400, -20, tuning::PatternMode::auto_pattern, false);
     check(weak.target_supported && modem::symbol_seconds(weak.config) > 16384 * 2. / weak.config.bandwidth_hz,
@@ -129,14 +129,14 @@ void weak_auto_and_fixed_training() {
           "one-byte slow status remains eligible independently of PCM duration");
     check(slow.total_seconds > normal.total_seconds * 1000,
           "changing the weak-signal target must change transmitted timing");
-    check(modem::symbol_seconds(value.modem) > value.modem.training_seconds,
-          "training fixture must be shorter than one differential APSK payload symbol");
-    check(std::abs((slow.total_seconds - slow.packet_seconds) - 5) <= 1.0 / value.modem.sample_rate,
-          "the five-second preamble must not round up to a long payload symbol");
+    check(modem::training_sample_count(value.modem)==0 && slow.total_seconds==slow.packet_seconds,
+          "automatic pattern transport must add no training, even when one symbol lasts hours");
     bounded_sampled_prefix(sent,value);
 }
 void obscured_training_pcm_roundtrip() {
     auto value = options(2400, tuning::PatternMode::pattern_16);
+    // Preserve the legacy packet receiver's independent missing-training test.
+    value.modem.pattern_symbols=false;value.modem.constellation_bits=4;
     value.modem.spreading_factor = 128;
     changing_pattern(value.modem);
     value.modem.sample_rate = 8000;
@@ -167,12 +167,12 @@ void weak_channels_use_the_planned_integration() {
     auto sent = payload();
     sent.kind = MessageKind::text;
     sent.filename.clear();
-    const std::string text = "CQ weak channel: verified bytes";
+    const std::string text = "e";
     sent.data.assign(text.begin(), text.end());
     // Extremely weak plans are checked above without pretending their very
     // long integrations are instantaneous. Exercise actual acquisition at
     // practical sampled durations here.
-    constexpr double target = 24;
+    constexpr double target = 18;
     auto value = options(2400, tuning::PatternMode::auto_pattern);
     value.key = Crypto(Bytes(32, 0x59));
     value.modem = tuning::resolve(2400, target, tuning::PatternMode::auto_keystream, true).config;
@@ -183,19 +183,26 @@ void weak_channels_use_the_planned_integration() {
     auto channel = ideal_channel();
     // Packet acquisition needs margin beyond the symbol-energy planning
     // estimate; the shorter integration must still fail in this channel.
-    channel.snr_db = target + 6 - 10 * std::log10(static_cast<double>(value.modem.sample_rate) / 2);
+    channel.snr_db = target + 3 - 10 * std::log10(static_cast<double>(value.modem.sample_rate) / 2);
     auto short_integration = value;
     short_integration.modem = tuning::resolve(2400, 40, tuning::PatternMode::auto_keystream, true).config;
     changing_pattern(transfer::seeded_config(short_integration, short_integration.timestamp));
     check(modem::symbol_seconds(value.modem) > modem::symbol_seconds(short_integration.modem),
           "weak-channel plans must exercise longer integration");
     bool short_rejected = false;
-    try { (void)transfer::simulate(sent, short_integration, channel); }
+    try { const auto received=transfer::simulate(sent, short_integration, channel);
+        short_rejected=received.raw_bits!=transfer::message_bits(sent,short_integration); }
     catch (const Error&) { short_rejected = true; }
     check(short_rejected, "the weak-channel fixture must require longer symbol integration");
     for (const std::uint64_t seed : {1ULL, 17ULL}) {
         channel.seed = seed;
-        try { same_packet(transfer::simulate(sent, value, channel), sent); }
+        try {
+            const auto received=transfer::simulate(sent,value,channel);
+            check(received.raw_bits==transfer::message_bits(sent,value) && received.packet.message.data==sent.data,
+                  "long integration must recover the exact three bits in the weak sampled channel");
+            check(!received.packet_validated && received.diagnostics.pattern_score.has_value(),
+                  "three-bit weak reception must rely on pattern evidence without packet validation");
+        }
         catch (const Error& error) {
             throw std::runtime_error("planned pattern integration at " + std::to_string(target) +
                 " dB-Hz, seed " + std::to_string(seed) + ": " + error.what());
@@ -208,7 +215,7 @@ int main() {
     for (const auto& [name, test] : std::array{
              std::pair{"long-pattern workspace", &long_patterns_use_bounded_workspace},
              std::pair{"wideband fractional-carrier PCM", &wideband_fractional_carrier_pcm_roundtrip},
-             std::pair{"weak auto and fixed training", &weak_auto_and_fixed_training},
+             std::pair{"weak auto without training", &weak_auto_without_training},
              std::pair{"obscured training PCM", &obscured_training_pcm_roundtrip},
              std::pair{"planned weak-channel integration", &weak_channels_use_the_planned_integration}}) {
         try {

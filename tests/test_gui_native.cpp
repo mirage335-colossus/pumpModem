@@ -132,6 +132,9 @@ int main() {
         signals.update(binary_line); check(!signals.copy_bits(2));
         binary_line.expected_bits=0; binary_line.received_bits=0;
         signals.update(binary_line); check(!signals.copy_bits(2));
+        binary_line.received_bits=3;binary_line.pattern_score=25.;
+        signals.update(binary_line);check(signals.copy_bits(2)=="001");
+        binary_line.pattern_score.reset();
         binary_line.text=std::string(5000,'0'); binary_line.expected_bits=binary_line.received_bits=5000;
         signals.update(binary_line);
         check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));

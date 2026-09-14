@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include "datapump/pattern_receiver.hpp"
 #include <functional>
 #include <memory>
 #include <optional>
@@ -22,8 +23,7 @@ struct ConstellationBatch {
 // Validation is deterministic for a given prefix within one receiver instance;
 // repeated identical prefixes may reuse the previous extent/rejection verdict.
 using BootstrapValidator = std::function<std::optional<std::size_t>(const Bytes&)>;
-// Exact complete packet bytes, without the synthetic training prefix. Every
-// frame remains provisional until its digest/MAC passes this callback.
+// Legacy APSK packet validation; pattern receivers never consult this callback.
 using PacketValidator = std::function<bool(const Bytes&)>;
 
 // Unframed binary input: one meaningful 0/1 bit per element, including leading
@@ -48,6 +48,8 @@ public:
     bool finished() const;
     std::uint64_t total_samples() const;
     std::uint64_t samples_emitted() const;
+    // Retained transmitter state, independent of streamed waveform duration.
+    std::size_t working_bytes() const;
     // Actual payload symbols whose transmission has begun, oldest first.
     // Fixed training and spreading-chip signs are excluded. Each symbol is
     // retained once, regardless of PCM block size or integration duration.
@@ -68,24 +70,32 @@ class StreamingReceiver {
 public:
     StreamingReceiver(Config config, Bytes expected_preamble,
                       std::size_t workspace_bytes = 8 * 1024 * 1024,
-                      BootstrapValidator validator = {}, PacketValidator packet_validator = {});
+                      BootstrapValidator validator = {}, PacketValidator packet_validator = {},
+                      PatternSearch pattern_search = {});
     ~StreamingReceiver();
     StreamingReceiver(StreamingReceiver&&) noexcept;
     StreamingReceiver& operator=(StreamingReceiver&&) noexcept;
     // Choose PCM or integrated observations for a capture; reset before
     // changing input kinds. Empty spans do not select an input kind.
     Bytes push(std::span<const float> samples, std::stop_token stop = {});
+    Bytes push(std::span<const float> samples, std::span<const std::complex<double>> projected,
+               std::stop_token stop = {});
     Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
-    // End a finite capture by completing only final integrals with at least
-    // 50% observed coverage; integrity validation resolves its decisions.
-    // Does not insert silence or extra data symbols.
+    // Finish a finite capture without inserting silence or extra symbols.
+    // Pattern mode returns only complete, sufficiently supported symbols.
+    // Legacy APSK can finish a half-observed integral for packet validation.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
-    // A plausible header is collecting or complete fits are still competing.
+    // Pattern candidates are accumulating, or a legacy packet is provisional.
     bool acquiring() const;
     // Bounded, unverified encoded bytes from the best provisional fit. These
     // are for a clearly tentative preview, never packet/file delivery.
     Bytes provisional_frame() const;
+    // Exact pattern-supported bits, independent of packet interpretation.
+    PatternBurst provisional_pattern() const;
+    std::vector<PatternBurst> take_pattern_bursts();
+    std::vector<PatternEvidence> pattern_candidates() const;
+    bool clock_windowed() const;
     Diagnostics diagnostics() const;
     // Available for the best provisional fit while acquiring(), then for the
     // validated receive timing after synchronization. The first

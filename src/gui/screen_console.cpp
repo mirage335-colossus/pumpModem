@@ -21,11 +21,13 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
         control.empty_text="Listening for signals...";
-        control.help="Preamble: recognized duration / expected five seconds (64 training segments); -- means unavailable.\nData: encoded body bits correct before error correction, measured after full verification.\nClick verified text or completed raw bits to copy. Files use the file list. Pending prefixes cannot be copied.";
+        control.help="Pattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum.\nFor legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr)control.bitmap_caption=BitmapCaption::overlay_error;
-    if(slot==Slot::dsp_workspace)control.help="Signal waveform history and DSP processing use this fraction of available RAM, measured at startup and when this choice changes. The default is 50%. Received messages and files have a separate 256 MiB limit.";
+    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0). This scalar sets the transmitted pattern duration; receive searches use their separate target list.";
+    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas. Search only the selected bandwidth and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";
+    if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
     if(slot==Slot::waveform) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
@@ -61,8 +63,9 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
         placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Bandwidth"}, Slot::bandwidth),
-        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"Target 1Hz tone SNR (dB)"}, Slot::snr),
-        placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Scrambler pattern / tone"}, Slot::pattern),
+        placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"TX SNR (dB-Hz)"}, Slot::snr),
+        placed({Kind::text,Field::receive_snr,Command::none,Bitmap::none,Page::console,4,"RX targets (dB-Hz)",1,false,512}, Slot::receive_snr),
+        placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Pattern / tone"}, Slot::pattern),
         placed({Kind::choice,Field::fec,Command::none,Bitmap::none,Page::console,5,"Error correction"}, Slot::fec),
         placed({Kind::choice,Field::dsp_workspace,Command::none,Bitmap::none,Page::console,5,"DSP workspace"}, Slot::dsp_workspace),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),

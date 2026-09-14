@@ -29,6 +29,33 @@ class PumpCase(unittest.TestCase):
 
 
 class CommandTests(PumpCase):
+    def test_three_pattern_bits_without_framing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "three-bits.wav"
+            self.run_pump("status-tx", "--bits", "001", "--time", EPOCH, "--output", path)
+            plan = json.loads(self.run_pump("estimate", "--text", "e").stdout)
+            with wave.open(str(path), "rb") as wav:
+                self.assertEqual(wav.getnframes(), round(3 * plan["symbol_seconds"] * wav.getframerate()))
+            for comparison, matches in (("001", True), ("110", False)):
+                received = json.loads(self.run_pump("status-rx", "--bits", comparison,
+                    "--time", EPOCH, "--search-seconds", "0", "--input", path).stdout)
+                self.assertEqual(received["raw_bits"], "001")
+                self.assertEqual(received["raw_bit_count"], 3)
+                self.assertEqual(received["known_bits_match"], matches)
+                self.assertFalse(received["packet_validated"])
+                self.assertFalse(received["authenticated"])
+                self.assertGreater(received["pattern_score"], 0)
+                self.assertEqual(received["pattern_score_units"], "model log evidence")
+
+    def test_receive_target_list_is_separate_from_transmit(self):
+        baseline = json.loads(self.run_pump("estimate", "--text", "e").stdout)
+        for targets in ("40, +6, -6, 40", "40,,6", "nan", "201", ""):
+            result = self.run_pump("estimate", "--text", "e", "--receive-targets", targets)
+            self.assertEqual(json.loads(result.stdout), baseline)
+            if targets != "40, +6, -6, 40":
+                self.assertIn(b"reset to 40 dB-Hz", result.stderr)
+        self.run_pump("estimate", "--text", "e", "--spreading", "64", "--receive-targets", "40", ok=False)
+
     def test_help_and_invalid_options(self):
         self.assertIn(b"simulate", self.run_pump("--help").stdout)
         self.assertEqual(self.run_pump("--version").stdout, b"Data Pump 0.7.2\n")
@@ -227,7 +254,8 @@ class CommandTests(PumpCase):
                 self.assertEqual(self.run_pump("unpack", data=packet).stdout, b"help")
 
     def test_repeatable_and_memory_limit(self):
-        result = self.run_pump("simulate", "--text", "repeat me", "--repeatable", "--json")
+        # Explicit legacy packet mode retains metadata; tiny default text sends only dictionary bits.
+        result = self.run_pump("simulate", "--text", "repeat me", "--repeatable", "--json", *AUDIO)
         self.assertTrue(json.loads(result.stdout)["repeatable"])
         self.run_pump("simulate", "--text", "x", "--memory-mb", "0", ok=False)
         # Legacy batch PCM memory must not limit an accelerated/streamed transfer.
@@ -244,7 +272,8 @@ class CommandTests(PumpCase):
         self.assertFalse(slow["batch_memory_supported"])
         self.assertTrue(slow["repeatable_allowed"])
         self.assertGreater(slow["symbol_seconds"], 5)
-        self.assertAlmostEqual(slow["total_seconds"] - slow["packet_seconds"], 5, delta=0.01)
+        self.assertEqual(slow["total_seconds"], slow["packet_seconds"])
+        self.assertEqual(slow["constellation_bits"], 1)
 
     def test_content_capacity_excludes_packet_parity(self):
         payload = bytes(range(256)) * 4096
@@ -257,8 +286,10 @@ class CommandTests(PumpCase):
         slow = json.loads(self.run_pump("estimate", "--text", "hello", "--target-snr", "6").stdout)
         self.assertGreater(slow["spreading"], normal["spreading"])
         self.assertGreater(slow["total_seconds"], normal["total_seconds"])
-        self.assertGreater(normal["total_seconds"], normal["content_seconds"])
-        self.assertTrue(normal["repeatable_allowed"])
+        self.assertEqual(normal["total_seconds"], normal["content_seconds"])
+        self.assertEqual(normal["constellation_bits"], 1)
+        self.assertGreaterEqual(normal["spreading"], 64)
+        self.assertFalse(normal["repeatable_allowed"])
         compressed = json.loads(self.run_pump("estimate", "--text", "e" * 80).stdout)
         raw = json.loads(self.run_pump("estimate", "--text", "e" * 80, "--no-compression").stdout)
         self.assertLess(compressed["packet_bytes"], raw["packet_bytes"])
@@ -267,7 +298,10 @@ class CommandTests(PumpCase):
         self.run_pump("estimate", "--text", "x", "--target-snr", "37.5", "--bw", "3000", "--sample-rate", "8000", ok=False)
         unsupported = self.run_pump("estimate", "--text", "!", "--target-snr", "-270", ok=False)
         self.assertIn(b"duration", unsupported.stderr)
-        result = self.run_pump("simulate", "--text", "pattern test", "--pattern", "pattern-3",
+        forced = json.loads(self.run_pump("estimate", "--text", "e", "--pattern", "pattern-3").stdout)
+        self.assertEqual(forced["spreading"], 3)
+        self.assertFalse(forced["target_supported"])
+        result = self.run_pump("simulate", "--text", "pattern test", "--pattern", "auto-pattern",
                                "--simulation", "3dBm -120dB", "--json", "--bw", "1000")
         self.assertEqual(base64.b64decode(json.loads(result.stdout)["data_base64"]), b"pattern test")
 
@@ -290,13 +324,13 @@ class CommandTests(PumpCase):
                 packed = self.run_pump("pack", "--input", "-", data=data).stdout
                 self.assertEqual(self.run_pump("unpack", "--input", "-", data=packed).stdout, data)
         data = b"a" * 100
-        packet = self.run_pump("pack", "--input", "-", "--repeatable", data=data).stdout
+        packet = self.run_pump("pack", "--input", "-", "--repeatable", *AUDIO, data=data).stdout
         decoded = json.loads(self.run_pump("unpack", "--json", data=packet).stdout)
         self.assertEqual(base64.b64decode(decoded["data_base64"]), data)
         self.assertTrue(decoded["repeatable"])
         self.assertRegex(decoded["id"], r"^[0-9a-f]{32}$")
-        self.run_pump("pack", "--repeatable", "--no-compression", data=b"a" * 65537, ok=False)
-        compressed = self.run_pump("pack", "--repeatable", data=b"a" * 65537).stdout
+        self.run_pump("pack", "--repeatable", "--no-compression", *AUDIO, data=b"a" * 65537, ok=False)
+        compressed = self.run_pump("pack", "--repeatable", *AUDIO, data=b"a" * 65537).stdout
         self.assertEqual(self.run_pump("unpack", data=compressed).stdout, b"a" * 65537)
         self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!" )
         self.run_pump("pack", "--repeatable", "--spreading", "16384", data=b"!?", ok=False)

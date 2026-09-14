@@ -4,6 +4,7 @@
 #include "datapump/packet.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "datapump/tuning.hpp"
 #include <functional>
 #include <optional>
 #include <span>
@@ -26,6 +27,11 @@ struct Options {
     std::optional<Crypto> key;
     std::uint64_t timestamp = 0;
     unsigned search_seconds = 6;
+    // Manual callers retain their explicit modem profile. Automatic GUI/CLI
+    // receive searches resolve only these targets at the selected band/mode.
+    bool automatic_receive_profiles = false;
+    std::vector<double> receive_targets_db_hz{tuning::default_receive_target_db_hz};
+    tuning::PatternMode receive_pattern_mode = tuning::PatternMode::auto_pattern;
     RepeatPolicy repeat_policy;
 };
 struct Estimate {
@@ -53,6 +59,10 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& opti
 // MSB-first bits with its data stream at options.timestamp; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
+// Pattern transport: short text uses the fixed dictionary's exact bits;
+// larger messages/files use packet bytes as a downstream content grammar.
+Bytes message_bits(const Message&, const Options&);
+std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message&, const Options&);
 // Symmetric raw data-stream masking, including fragments starting mid-byte.
 // Without a key the bits are unchanged. Does not authenticate decoded guesses.
 void xor_binary_bits(std::span<std::uint8_t> bits, const Options& options,
@@ -61,7 +71,11 @@ struct Received {
     DecodedPacket packet;
     modem::Diagnostics diagnostics;
     std::uint64_t timestamp = 0;
+    Bytes raw_bits{};
+    bool packet_validated = true;
 };
+Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t timestamp,
+                           modem::Diagnostics = {});
 using Progress = std::function<void(std::uint64_t)>;
 
 // Separate codec scratch from the amount of application content admitted.

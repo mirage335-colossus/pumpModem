@@ -4,6 +4,57 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Binary pattern transport — September 2026
+
+The current working-tree automatic transport uses pattern evidence for
+acquisition and exact burst endpoints. It preserves explicit legacy APSK
+fixtures separately. The final Release build passed **48/48 CTest suites**
+in 78.05 seconds, including the CLI, shared GUI controller, live session,
+resampling, packet, crypto and new pattern suites.
+
+All **six focused ASan/UBSan suites** also passed (11.30 seconds): short
+compression, pattern generation, both correlation paths, transfer integration,
+and the exact-bit editor. Leak detection was disabled for this execution
+environment; this is not a leak-sanitizer result.
+
+New actual-PCM checks cover all eight possible three-bit messages without a
+supplied bit count; dictionary text `e` occupying exactly three bits; unknown
+start and carrier phase; wrong keys and noise-only captures; cropped keyed
+streams; weak chips at -16 dB; and 1,536 received bits with 100 ppm clock error
+and phase noise. Independent sound-card conversions preserve public and keyed
+`001` and a downstream packet. A two-seed weak-channel regression recovers
+three bits with the longer selected integration and rejects the shorter
+integration in that same sampled channel. Packet integrity cannot discard
+otherwise acquired raw bits or select their timing.
+
+A deterministic live regression advances the receiver's injected clock from
+`E + 0.90` to `E + 1.01` with a zero-second epoch-search radius and transmits
+exactly `001`. It verifies that new epochs are admitted before the next PCM
+block, without waiting a full elapsed second. This fixes an intermittent
+keyed-burst failure exposed by the shared GUI smoke workflow. Previous epochs
+remain available through their bounded symbol-completion interval.
+
+The final toolkit-independent controller plus strict GUI smoke workflow also
+passed, including key generation/loading, sampled encrypted text and files,
+exact encrypted 32-bit raw recovery, replay replacement/cancellation, and
+return to live plots. The smoke sequence now observes resumed live plots before
+reconfiguring the key, which otherwise clears the completed replay's ID.
+
+Long-symbol checks generate bounded prefixes and verify constant state during
+a four-hour symbol, exact three-bit/12-hour transmitter estimates, cancellation,
+and rejection of unaffordable clock windows. They do **not** run a complete
+12-hour radio experiment. See the measured per-window memory and CPU costs in
+[pattern constellation](pattern-constellation.md#streaming-long-symbol-correlation).
+The scalar fallback is not real-time-capable for every admitted window on this
+host. Carrier/rate coverage is finite, and physical oscillator coherence and
+false-alarm behavior in colored interference remain uncalibrated.
+
+The native FLTK application could not be rebuilt in this environment because
+X11 development headers/libraries are missing (`Window` is undefined in the
+FLTK platform headers). The toolkit-independent GUI application and controller
+build and run. Earlier native GUI results below are historical and are not a
+claim that this new waveform was verified through native windows here.
+
 ## Automatic regression signal policy
 
 Automatic regression checks must not force `tone-N`, `auto-tone`, or

@@ -1,6 +1,7 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
+#include "datapump/compression.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -95,6 +96,7 @@ void composer_conveniences() {
     controller.toggle(F::repeatable,false);
     controller.edit(F::message,"");
     controller.edit(F::binary,"00000000 11111111");
+    controller.edit(F::message,controller.field(F::message).text);
     controller.toggle(F::repeatable,true);
     const auto binary_repeatable=controller.message_bytes();
     repeatable_marker(controller.field(F::message).text);
@@ -334,6 +336,7 @@ void repeatable_pending_drafts() {
 
     controller.edit(F::message,"");
     controller.edit(F::binary,"00000000 11111111");
+    controller.edit(F::message,controller.field(F::message).text);
     controller.toggle(F::repeatable,true);
     auto escaped_marker=repeatable_marker(controller.field(F::message).text);
     for(const auto suffix:{"\\x0\\xFF","\\x\\xFF"}) {
@@ -376,33 +379,38 @@ void binary_editor_controls() {
     controller.edit(F::binary,"001");
     check(controller.field(F::binary).text=="001"&&controller.field(F::message).text=="A"&&
           !controller.estimate()&&!controller.enabled(C::transmit),
-          "Partial byte was hidden, changed the payload or left transmission enabled");
-    for(int poll=0;poll<40;++poll) {
-        controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
-    }
-    check(!controller.estimate(),"A delayed estimate made an incomplete binary draft transmittable");
+          "New raw draft changed its text view or retained a stale estimate");
+    prepare(controller);
+    check(controller.inspection()->binary&&controller.enabled(C::transmit)&&
+          !controller.field(F::repeatable).enabled&&!controller.field(F::fec).enabled,
+          "Three raw bits were not prepared or retained framing controls");
     controller.edit(F::message,"A");
     check(controller.field(F::binary).text=="01000001",
-          "Reapplying the displayed message did not repair an invalid binary draft");
+          "Reapplying the displayed message did not leave raw-bit mode");
     controller.edit(F::binary,"00000000 11111111");
     check(controller.message_bytes()==Bytes({0,255})&&controller.field(F::message).text=="\\x00\\xFF"&&
           controller.field(F::message_label).text.find("escaped")!=std::string::npos,
           "Arbitrary binary bytes were lost or displayed as ordinary text");
     prepare(controller);
-    check(!controller.inspection()->binary&&controller.inspection()->packet_layout->original_bytes==2,
-          "Binary editing changed the dispatch mode or encoded the escape characters");
-    controller.start();controller.activate(C::transmit);
+    check(controller.inspection()->binary&&!controller.inspection()->packet_layout,
+          "Short binary editing still selected packet framing");
+    const auto expected_seconds=controller.estimate()->total_seconds;
+    controller.start();controller.activate(C::transmit);controller.poll();
     const auto receive_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
-    while(controller.inbox().items().empty()&&std::chrono::steady_clock::now()<receive_deadline) {
+    while(!controller.snapshot().transmission_finished&&std::chrono::steady_clock::now()<receive_deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    check(!controller.inbox().items().empty()&&controller.inbox().items().front().message.data==Bytes({0,255}),
-          "Binary-edited zero and non-UTF-8 bytes did not arrive as the exact verified payload");
+    if(!controller.snapshot().transmission_finished ||
+       std::abs(controller.snapshot().transmission_seconds-expected_seconds)>1./controller.settings().transfer.modem.sample_rate)
+        throw Error("Raw binary airtime mismatch: expected "+std::to_string(expected_seconds)+", got "+
+            std::to_string(controller.snapshot().transmission_seconds)+"; "+controller.snapshot().error);
     check(controller.message_bytes().empty()&&controller.enabled(C::paste_previous),
           "Transmitting arbitrary bytes did not clear the composer and retain previous-message paste");
     controller.activate(C::paste_previous);
     check(controller.message_bytes()==Bytes({0,255})&&controller.field(F::message).text=="\\x00\\xFF",
           "Previous-message paste did not restore exact arbitrary bytes and their escaped editor mode");
+    prepare(controller);
+    check(controller.inspection()->binary,"Previous-message paste lost raw-bit dispatch mode");
     controller.edit(F::message,"\\x0\\xFF");
     check(controller.field(F::message).text=="\\x0\\xFF"&&!controller.estimate()&&
           controller.message_bytes()==Bytes({0,255}),"Incomplete escape lost its draft or changed committed bytes");
@@ -416,10 +424,101 @@ void binary_editor_controls() {
     check(controller.message_bytes().empty()&&controller.field(F::message).text.empty()&&
           controller.field(F::message_label).text=="Message","Clearing binary did not clear the short payload");
 }
+void three_bit_dispatch() {
+    using F=ui::Field; using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::binary,"001");
+    prepare(controller);
+    const auto& inspection=*controller.inspection();
+    check(inspection.binary&&!inspection.packet_layout&&controller.field(F::binary).text=="001"&&
+          controller.message_bytes().empty(),"Empty composer padded its three-bit raw draft");
+    const auto expected=transfer::estimate_binary(Bytes{0,0,1},controller.settings().transfer);
+    check(controller.estimate()->total_seconds==expected.total_seconds,
+          "Three-bit GUI estimate encoded text or rounded the bit count");
+    controller.start();controller.activate(C::transmit);
+    check(controller.enabled(C::paste_previous)&&controller.field(F::binary).text.empty(),
+          "Accepted raw draft did not clear and retain its exact previous value");
+    controller.poll();
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    while(!controller.snapshot().transmission_finished&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(controller.snapshot().transmission_finished&&
+          std::abs(controller.snapshot().transmission_seconds-expected.total_seconds)<=1./controller.settings().transfer.modem.sample_rate,
+          "Three-bit draft did not dispatch as the exact unframed signal");
+    controller.activate(C::paste_previous);
+    check(controller.field(F::binary).text=="001"&&controller.message_bytes().empty(),
+          "Restoring three-bit draft changed its leading zeros or synthesized a byte");
+    prepare(controller);
+    check(controller.inspection()->binary&&controller.estimate()->total_seconds==expected.total_seconds,
+          "Restored three-bit draft changed transport or airtime");
+}
 BitmapImage render(const plots::PlotSnapshot& source) {
     BitmapImage image(120, 120);
     source.paint(full_bitmap_request(120, 120, false, true), [&](unsigned x, unsigned y, PixelBlock block) { image.blit(x, y, block); });
     return image;
+}
+void short_pattern_reception() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});controller.edit(F::message,"e");prepare(controller);
+    const auto expected=compression::encode_short_bits(Bytes{'e'});
+    check(expected.size()==3 && controller.inspection()->pattern_space && !controller.inspection()->packet_layout,
+          "short-text fixture must transmit only three dictionary bits");
+    controller.start();controller.activate(C::transmit);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    std::optional<std::size_t> text_index,bit_index;
+    std::string bits;for(auto bit:expected)bits+=bit?'1':'0';
+    while(std::chrono::steady_clock::now()<deadline) {
+        controller.poll();
+        for(std::size_t i=0;i<controller.signals().lines().size();++i) {
+            if(controller.signals().copy_text(i)=="e")text_index=i;
+            if(controller.signals().copy_bits(i)==bits)bit_index=i;
+        }
+        if(text_index&&bit_index)break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if(!text_index || !bit_index) {
+        std::string detail="sampled short-text reception did not expose decoded text and exact raw bits; "+controller.snapshot().error;
+        for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
+        throw Error(detail);
+    }
+    check(controller.inbox().items().empty() && !controller.signals().lines()[*text_index].validated &&
+          controller.signals().lines()[*text_index].pattern_score.has_value(),"pattern-only text acquired a packet validation claim");
+    for(const auto index:{*text_index,*bit_index}) {
+        controller.select(F::signals,std::to_string(controller.signals().lines()[index].id));
+        check(controller.enabled(C::copy_signal),"complete pattern reception was blocked from copying");
+        controller.activate(C::copy_signal);const auto requests=controller.take_services();
+        check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard &&
+              requests.front().value==(index==*text_index?"e":bits),"pattern reception clipboard changed the recovered content");
+        controller.complete_service({requests.front().id,false,{},{}});
+    }
+    controller.close();
+}
+void receive_target_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    check(controller.field(F::receive_snr).text=="40" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{40} &&
+          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to 40");
+    const auto tx=controller.settings().transfer.modem;
+    controller.edit(F::receive_snr,"40,");
+    controller.poll();
+    check(controller.field(F::receive_snr).text=="40,","a partial comma-list edit must remain editable before normalization");
+    controller.edit(F::receive_snr," 40, +6, -6, 40 ");
+    std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
+    check(controller.field(F::receive_snr).text=="40, 6, -6" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),"receive target field must canonicalize a valid list");
+    check(controller.field(F::snr).text=="40" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
+          controller.settings().transfer.modem.integration_seconds==tx.integration_seconds,"receive search targets must not change the transmitted profile");
+    controller.edit(F::receive_snr,"40, wrong");
+    std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
+    check(controller.field(F::receive_snr).text=="40" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{40},
+          "invalid receive target text must reset the complete field to its default");
+    controller.edit(F::receive_snr,std::string(513,'1'));
+    check(controller.field(F::receive_snr).text=="40","overlong receive target input must reset to the default too");
+    const auto& controls=ui::console_screen();
+    const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.field==F::receive_snr;});
+    check(found!=controls.end() && found->persistent && found->kind==ui::Kind::text,
+          "receive targets must be an editable persistent text field");
 }
 void workspace_controls() {
     Controller controller({true, true});
@@ -507,7 +606,8 @@ int main(int argc,char** argv) {
         previous_message_controls();
         repeatable_pending_drafts();
         binary_editor_controls();
-        workspace_controls();
+        three_bit_dispatch();
+        receive_target_controls();short_pattern_reception();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});

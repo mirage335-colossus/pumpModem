@@ -115,11 +115,14 @@ struct Controller::Impl {
 
     ui::FieldState& f(UiField id) { return fields.at(static_cast<std::size_t>(id)); }
     const ui::FieldState& f(UiField id) const { return fields.at(static_cast<std::size_t>(id)); }
+    std::optional<Clock::time_point> receive_targets_due;
+    std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value) {
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
         f(UiField::bandwidth).text="1.2 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         f(UiField::snr).text="40"; for(const auto* s:{"40","6","-6","-60"}) f(UiField::snr).options.push_back({s,s});
+        f(UiField::receive_snr).text="40";
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
         f(UiField::simulation).selected=std::string(presets[(options.simulation||options.smoke)?std::min<std::size_t>(2,presets.size()-1):0].name);
@@ -164,11 +167,18 @@ struct Controller::Impl {
         was_encrypted=encrypted();
     }
     void configure() {
+        receive_targets_due.reset();
         dirty();
         try {
             live::Settings next;
-            const auto plan=tuning::resolve(bandwidth(f(UiField::bandwidth).text),number(f(UiField::snr).text,"Target SNR"),tuning::parse_pattern_mode(f(UiField::pattern).selected),encrypted());
+            const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
+            const auto targets=tuning::parse_receive_targets(f(UiField::receive_snr).text);
+            f(UiField::receive_snr).text=targets.canonical;
+            const auto plan=tuning::resolve(bandwidth(f(UiField::bandwidth).text),number(f(UiField::snr).text,"Target SNR"),mode,encrypted());
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
+            next.transfer.automatic_receive_profiles=true;
+            next.transfer.receive_targets_db_hz=targets.values;
+            next.transfer.receive_pattern_mode=mode;
             if(options.smoke) next.transfer.search_seconds=0;
             next.transfer.fec=f(UiField::fec).selected=="rs20"?FecMode::rs20:f(UiField::fec).selected=="rs60"?FecMode::rs60:FecMode::off;
             if(encrypted()) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
@@ -190,17 +200,22 @@ struct Controller::Impl {
         } catch(...) { settings_valid=false; f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
     }
     void message_label() {
-        if(!attachment) f(UiField::message_label).text=composer.escaped()?"Message / escaped bytes (\\xNN)":"Message";
+        if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
+            (composer.escaped()?"Message / escaped byte view (raw bits selected)":"Message / text view (raw bits selected)"):
+            composer.escaped()?"Message / escaped bytes (\\xNN)":"Message";
+    }
+    void binary_label() {
+        f(UiField::binary_label).text=composer.raw_bits()?"Raw bits / "+std::to_string(composer.raw_bits()->size())+" bits":"Binary / first 16 bytes";
     }
     void sync_composer() {
         f(UiField::message).text=composer.text();
         f(UiField::binary).text=composer.binary();
-        draft_error.clear(); f(UiField::binary_label).text="Binary / first 16 bytes";
+        draft_error.clear(); binary_label();
         message_label();
     }
     bool has_repeatable_prefix() const {
         const auto& bytes=composer.bytes();
-        return !repeatable_prefix.empty()&&bytes.size()>=repeatable_prefix.size()&&
+        return !composer.raw_bits()&&!repeatable_prefix.empty()&&bytes.size()>=repeatable_prefix.size()&&
             std::equal(repeatable_prefix.begin(),repeatable_prefix.end(),bytes.begin());
     }
     std::string new_repeatable_prefix() {
@@ -294,8 +309,10 @@ struct Controller::Impl {
     void binary_changed() {
         try {
             composer.edit_binary(f(UiField::binary).text);
-            if(composer.bytes().empty()) { seed_composer(); return; }
-            if(has_repeatable_prefix()) {
+            if(!composer.raw_bits()&&composer.bytes().empty()) { seed_composer(); return; }
+            if(composer.raw_bits()) {
+                repeatable_prefix.clear(); pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
+            } else if(has_repeatable_prefix()) {
                 if(!pending_repeatable_removal)renew_repeatable_prefix();
             } else if(!repeatable_prefix.empty()) {
                 repeatable_prefix.clear(); f(UiField::repeatable).checked=false;
@@ -307,7 +324,7 @@ struct Controller::Impl {
             };
             // A shorter replacement can bring the retained suffix into view.
             if(compact(normalized)!=compact(f(UiField::binary).text))f(UiField::binary).text=normalized;
-            draft_error.clear(); f(UiField::binary_label).text="Binary / first 16 bytes";
+            draft_error.clear(); binary_label();
             message_label();
             if(pending_repeatable_removal)set_repeatable(false);
         } catch(const std::exception& e) {
@@ -336,7 +353,7 @@ struct Controller::Impl {
         case Command::use_text: return attachment||file_loading;
         case Command::paste_previous: return previous_message.has_value()&&!attachment&&!file_loading;
         case Command::save_file: return selected_file()!=nullptr;
-        case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)); }
+        case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)||signals.copy_text(*index)); }
         case Command::pattern_first: case Command::pattern_previous: return pattern_first>0;
         case Command::pattern_next: case Command::pattern_last: return pattern_first<last_pattern_page();
         default: return true;
@@ -346,16 +363,17 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::binary).enabled=f(UiField::message).enabled=!attachment&&!closing;
         const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
-        f(UiField::repeatable).enabled=!attachment&&!file_loading&&draft_error.empty()&&
+        f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
         const auto size=attachment?attachment->size():composer.bytes().size();
-        f(UiField::fec).enabled=f(UiField::fec).enabled&&(file_loading||size>=16);
-        f(UiField::fec).display_text=!file_loading&&size<16?"Off (under 16 B)":"";
+        const bool raw=!attachment&&composer.raw_bits().has_value();
+        f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw&&(file_loading||size>=16);
+        f(UiField::fec).display_text=raw?"Off (raw bits)":!file_loading&&size<16?"Off (under 16 B)":"";
     }
     void refresh_files() {
         auto& state=f(UiField::files);
@@ -399,6 +417,7 @@ struct Controller::Impl {
         } else if(settings_valid&&!estimate&&estimated_revision!=revision&&Clock::now()-estimate_requested>=std::chrono::milliseconds(120)) {
             result.kind=PrepKind::estimate; result.revision=revision; InspectionRequest request;
             request.message=message(); request.options=settings.transfer;
+            if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=number(f(UiField::snr).text,"Target SNR"); request.simulation=settings.simulation; request.device=settings.device;
             start_worker([request=std::move(request)](Prepared& value,std::stop_token) { value.inspection=std::make_shared<const Inspection>(inspect(request)); },std::move(result));
         }
@@ -465,14 +484,22 @@ struct Controller::Impl {
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
         plot_update.clear_waterfall=plot_update.clear_waterfall||changed.clear_waterfall;
-        for(auto& received:next.received) inbox.put(std::move(received.packet));
+        for(auto& received:next.received) {
+            if(received.packet_validated)inbox.put(std::move(received.packet));
+            else if(!received.packet.message.data.empty()) {
+                SignalLine line;line.id=next_pattern_text_id--;line.frequency_hz=settings.transfer.modem.carrier_hz;
+                line.text=std::string(received.packet.message.data.begin(),received.packet.message.data.end());
+                line.complete=true;line.pattern_score=received.diagnostics.pattern_score;
+                signals.update(std::move(line));
+            }
+        }
         if(!next.received.empty()) refresh_files();
         for(const auto& signal:next.signals) {
             const auto packet=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.packet_id; });
             const bool text=packet!=inbox.items().end()&&packet->message.kind==MessageKind::text;
-            signals.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits});
+            signals.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score});
         }
-        if(!next.signals.empty()) refresh_signals();
+        if(!next.signals.empty() || !next.received.empty()) refresh_signals();
         if(transmit_requested&&!next.transmitting&&next.transmission_finished) { transmit_requested=false; gate.finished(); }
         const auto mode=next.simulation?"Simulation / continuous receive":"Listening / "+settings.device;
         const auto tx_mode=std::string(next.simulation?"Calculating simulation ":"Transmitting ")+std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(next.transmission_seconds)+" media";
@@ -507,7 +534,10 @@ struct Controller::Impl {
             std::optional<BinaryEditor> sent;
             if(!attachment)sent=composer;
             gate.started(settings.simulation,encrypted()); transmit_requested=true;
-            try { session.transmit(message()); } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
+            try {
+                if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits());
+                else session.transmit(message());
+            } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
             if(sent) { previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
@@ -528,7 +558,8 @@ struct Controller::Impl {
         case Command::acknowledge_key_failure: key_failed=false; f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename()); notice("Current key selection retained."); break;
         case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save verified received content",file->message.filename.empty()?"received.bin":file->message.filename,std::make_shared<const Bytes>(file->message.data)); break; }
         case Command::copy_signal: {
-            const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits (unverified)",*raw);
+            const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits",*raw);
+            else if(const auto text=signals.copy_text(index))request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received text",*text);
             else if(const auto id=signals.copy_id(index)) {
                 const auto found=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& p) { return id_label(p.message)==*id; });
                 if(found==inbox.items().end()) throw Error("That received message has left the memory cache");
@@ -574,6 +605,8 @@ void Controller::poll() {
     auto& p=*impl_; std::optional<Impl::Prepared> prepared;
     { std::lock_guard lock(p.mutex); prepared.swap(p.prepared); }
     try {
+        if(!p.closing && !p.transmit_requested && !p.snapshot.transmitting &&
+           p.receive_targets_due && Clock::now()>=*p.receive_targets_due)p.configure();
         if(prepared) {
             if(p.closing) { if(p.worker.joinable()) p.worker.join(); p.preparing=false; }
             else p.accept(std::move(*prepared));
@@ -587,16 +620,20 @@ void Controller::close() { auto& p=*impl_; p.closing=true; p.session.stop(); p.w
 bool Controller::closing() const { return impl_->closing; }
 bool Controller::ready_to_close() const { return impl_->closing&&!impl_->preparing; }
 void Controller::edit(UiField field,std::string text) {
-    auto& p=*impl_; if(!p.f(field).enabled||(p.f(field).text==text&&!(field==UiField::message&&!p.draft_error.empty()))) return;
+    auto& p=*impl_; if(!p.f(field).enabled||(p.f(field).text==text&&!(field==UiField::message&&(!p.draft_error.empty()||p.composer.raw_bits())))) return;
     try {
         const auto& screen=ui::console_screen();
         const auto declaration=std::find_if(screen.begin(),screen.end(),[&](const auto& c) { return c.field==field&&c.kind==ui::Kind::text; });
         if(declaration==screen.end()) throw Error("This field is not editable text");
-        if(const auto error=ui::edit_error(*declaration,text);!error.empty())throw Error(error);
+        if(const auto error=ui::edit_error(*declaration,text);!error.empty()) {
+            if(field!=UiField::receive_snr)throw Error(error);
+            p.f(field).text="40";p.configure();p.controls();return;
+        }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
-        const bool untouched=p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
+        const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
         if(field==UiField::binary) p.binary_changed();
+        else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
         else if(field==UiField::device||field==UiField::bandwidth||field==UiField::snr) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();

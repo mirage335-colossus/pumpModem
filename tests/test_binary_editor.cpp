@@ -14,11 +14,12 @@ void rejects_unchanged(BinaryEditor& editor, Operation operation, const char* me
     const auto original_text = editor.text();
     const auto original_binary = editor.binary();
     const auto original_escaped = editor.escaped();
+    const auto original_raw = editor.raw_bits();
     bool rejected = false;
     try { operation(); } catch (const Error&) { rejected = true; }
     check(rejected, message);
     check(editor.bytes() == original_bytes && editor.text() == original_text &&
-          editor.binary() == original_binary && editor.escaped() == original_escaped,
+          editor.binary() == original_binary && editor.escaped() == original_escaped && editor.raw_bits() == original_raw,
           "Rejected edit changed the committed message");
 }
 
@@ -43,7 +44,7 @@ void preserved_suffix() {
     BinaryEditor editor(bytes("0123456789abcdefSUFFIX"));
     check(editor.binary().size() == 143, "Binary field did not stop at 16 bytes");
     editor.edit_binary("01011000");
-    check(editor.text() == "XSUFFIX", "Shorter binary replacement damaged bytes beyond the old prefix");
+    check(editor.text() == "XSUFFIX" && !editor.raw_bits(), "Shorter binary replacement damaged bytes beyond the old prefix");
     editor.edit_text("0123456789abcdefSUFFIX");
     editor.edit_binary("");
     check(editor.text() == "SUFFIX", "Clearing binary prefix removed the message suffix");
@@ -103,6 +104,31 @@ void payload_limit() {
     editor = BinaryEditor(bytes("valid"));
     rejects_unchanged(editor, [&] { editor.edit_text(std::string(BinaryEditor::payload_limit + 1, 'a')); }, "Ordinary text exceeded the byte limit");
 }
+void exact_raw_drafts() {
+    BinaryEditor editor(bytes("A"));
+    editor.edit_binary("0 0\n1");
+    check(editor.raw_bits() == std::optional<Bytes>(Bytes{0,0,1}) && editor.binary() == "001",
+          "Three-bit draft lost leading zeros or gained padding");
+    check(editor.bytes() == bytes("A") && editor.text() == "A",
+          "Partial byte replaced the separate text interpretation with padded data");
+    rejects_unchanged(editor, [&] { editor.edit_binary("0012"); }, "Invalid raw bit accepted");
+    editor.edit_binary("00000001");
+    check(editor.raw_bits() == std::optional<Bytes>(Bytes{0,0,0,0,0,0,0,1}) &&
+          editor.bytes() == Bytes{1} && editor.text() == "\\x01",
+          "Byte-aligned raw draft changed mode or failed to update the byte view");
+    editor.edit_text(editor.text());
+    check(!editor.raw_bits() && editor.bytes() == Bytes{1}, "Text edit did not select byte/text transmission");
+    for(std::size_t length=1;length<=128;++length) {
+        editor.edit_binary(std::string(length,'0'));
+        check(editor.raw_bits() && *editor.raw_bits() == Bytes(length,0), "Exact raw draft length was rounded");
+        const auto binary=editor.binary();
+        check(static_cast<std::size_t>(std::count(binary.begin(),binary.end(),'0')) == length,
+              "Raw binary display lost meaningful zero bits");
+    }
+    rejects_unchanged(editor, [&] { editor.edit_binary(std::string(129,'0')); }, "Raw draft exceeded its bit limit");
+    editor.edit_binary("");
+    check(!editor.raw_bits() && editor.bytes().empty() && editor.binary().empty(), "Clearing raw input retained its bits or text");
+}
 }
 
 int main() {
@@ -112,6 +138,7 @@ int main() {
         escaped_roundtrip();
         invalid_drafts();
         payload_limit();
+        exact_raw_drafts();
         std::cout << "Binary editor synchronization and lossless byte editing passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

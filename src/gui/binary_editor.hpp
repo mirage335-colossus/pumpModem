@@ -3,14 +3,17 @@
 #include "datapump/types.hpp"
 #include "utf8_policy.hpp"
 #include <algorithm>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 
 namespace datapump::gui {
-// The message owns the bytes; the binary field edits its first 16 bytes. A
-// replacement can change the prefix length, but never removes the old suffix.
+// Short binary edits select an exact raw-bit draft, including partial bytes.
+// A complete-byte raw draft updates the separate text/byte view; partial bytes
+// retain that view until another complete-byte or text edit. For longer text,
+// binary edits replace its first 16 bytes without removing the old suffix.
 // Native text fields cannot hold arbitrary bytes, so an explicit escaped mode
 // preserves zero bytes, control characters and malformed UTF-8 losslessly.
 class BinaryEditor {
@@ -24,9 +27,18 @@ public:
     const Bytes& bytes() const noexcept { return bytes_; }
     const std::string& text() const noexcept { return text_; }
     bool escaped() const noexcept { return escaped_; }
+    const std::optional<Bytes>& raw_bits() const noexcept { return raw_bits_; }
 
     std::string binary() const {
         std::string result;
+        if (raw_bits_) {
+            result.reserve(raw_bits_->size() + raw_bits_->size() / 8);
+            for (std::size_t index = 0; index < raw_bits_->size(); ++index) {
+                if (index && index % 8 == 0) result += index % 16 ? ' ' : '\n';
+                result += (*raw_bits_)[index] ? '1' : '0';
+            }
+            return result;
+        }
         const auto count = std::min(prefix_limit, bytes_.size());
         result.reserve(count * 9);
         for (std::size_t index = 0; index < count; ++index) {
@@ -71,6 +83,8 @@ public:
     void edit_binary(std::string_view text) {
         Bytes prefix;
         prefix.reserve(prefix_limit);
+        Bytes exact_bits;
+        exact_bits.reserve(prefix_limit * 8);
         std::uint8_t value = 0;
         std::size_t bits = 0;
         for (const char character : text) {
@@ -79,11 +93,18 @@ public:
                 throw Error("Binary input accepts only 0, 1 and whitespace");
             if (bits == prefix_limit * 8)
                 throw Error("Binary input is limited to the first 16 bytes (128 bits)");
+            exact_bits.push_back(static_cast<std::uint8_t>(character - '0'));
             value = static_cast<std::uint8_t>((value << 1) | (character - '0'));
             if (++bits % 8 == 0) {
                 prefix.push_back(value);
                 value = 0;
             }
+        }
+        if (bytes_.size() <= prefix_limit || raw_bits_) {
+            if (exact_bits.empty()) { commit({}); return; }
+            if (bits % 8 == 0) commit(std::move(prefix));
+            raw_bits_ = std::move(exact_bits);
+            return;
         }
         if (bits % 8) throw Error("Complete each binary byte with 8 bits");
         const auto suffix = std::min(prefix_limit, bytes_.size());
@@ -144,10 +165,12 @@ private:
         bytes_.swap(bytes);
         text_.swap(rendered);
         escaped_ = escaped;
+        raw_bits_.reset();
     }
 
     Bytes bytes_;
     std::string text_;
     bool escaped_ = false;
+    std::optional<Bytes> raw_bits_;
 };
 }

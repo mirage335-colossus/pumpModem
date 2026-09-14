@@ -2,6 +2,7 @@
 #include "datapump/crypto.hpp"
 #include "datapump/packet.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_code.hpp"
 #include "constellation.hpp"
 #include "spreading_code.hpp"
 #include <algorithm>
@@ -203,6 +204,7 @@ class TrainingEvidence {
     }
 public:
     TrainingEvidence(const Config& config,std::span<const std::uint8_t> expected):training_(training_sample_count(config)),bin_((training_+511)/512) {
+        if(config.pattern_symbols)return;
         if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
         Complex previous{1,0};
         for(std::size_t i=0;i<expected_.size();++i){expected_[i]=detail::mapped(detail::read_bits(expected,i*4,4),4,previous);previous=expected_[i];}
@@ -485,6 +487,7 @@ std::size_t BinaryReceiver::working_bytes()const{return sizeof(BinaryReceiver)+s
 struct StreamingTransmitter::Impl {
     Bytes wire;
     Config config;
+    std::unique_ptr<PatternTransmitter> pattern;
     std::vector<int> code;
     std::uint64_t position=0,total=0,training=0,symbol=0,chip=0,segment_start=0,segment_end=0;
     std::size_t symbol_index=0,payload_symbols=0,raw_bit_count=0;
@@ -501,6 +504,20 @@ struct StreamingTransmitter::Impl {
     Impl(Bytes bytes,Config value,std::size_t workspace):wire(std::move(bytes)),config(value) {
         static_assert(sizeof(Impl)<=65536,"transmitter state exceeds its fixed workspace reservation");
         validate(config);
+        if(config.pattern_symbols) {
+            if(wire.size()>std::numeric_limits<std::size_t>::max()/8 ||
+               sizeof(Impl)>workspace || wire.capacity()>workspace-sizeof(Impl) ||
+               wire.size()>(workspace-sizeof(Impl)-wire.capacity())/8)
+                throw Error("pattern transmitter workspace is too small");
+            Bytes bits;bits.reserve(wire.size()*8);
+            for(const auto byte:wire)for(unsigned bit=0;bit<8;++bit)
+                bits.push_back(static_cast<std::uint8_t>((byte>>(7-bit))&1U));
+            Bytes{}.swap(wire);
+            pattern=std::make_unique<PatternTransmitter>(std::move(bits),config,config.stream_epoch);
+            if(pattern->working_bytes()>workspace-sizeof(Impl))throw Error("pattern transmitter workspace is too small");
+            total=pattern->total_samples();symbol=symbol_sample_count(config);
+            return;
+        }
         if(wire.size()<32)throw Error("APSK wire requires the 32-byte training prefix");
         if(workspace<65536+config.spreading_factor*sizeof(int))throw Error("streaming transmitter workspace is too small");
         code=detail::spreading_code(config);training=training_sample_count(config);symbol=symbol_sample_count(config);chip=detail::spreading_chip_samples(config);
@@ -512,6 +529,13 @@ struct StreamingTransmitter::Impl {
     Impl(RawBits input,Config value,std::size_t workspace):config(value),raw_bit_count(input.bits.size()),raw(true) {
         validate(config);
         if(input.bits.empty())throw Error("raw binary transmission requires at least one bit");
+        if(config.pattern_symbols) {
+            if(sizeof(Impl)>workspace || input.bits.size()>workspace-sizeof(Impl))throw Error("pattern transmitter workspace is too small");
+            pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch);
+            if(pattern->working_bytes()>workspace-sizeof(Impl))throw Error("pattern transmitter workspace is too small");
+            total=pattern->total_samples();symbol=symbol_sample_count(config);
+            return;
+        }
         if(workspace<65536+config.spreading_factor*sizeof(int))throw Error("streaming transmitter workspace is too small");
         wire.resize(raw_bit_count/8+(raw_bit_count%8!=0));
         for(std::size_t i=0;i<raw_bit_count;++i) {
@@ -568,9 +592,14 @@ StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t wor
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;
-bool StreamingTransmitter::finished()const{return impl_->position==impl_->total;}
+bool StreamingTransmitter::finished()const{return impl_->pattern?impl_->pattern->finished():impl_->position==impl_->total;}
 std::uint64_t StreamingTransmitter::total_samples()const{return impl_->total;}
-std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->position;}
+std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->pattern?impl_->pattern->samples_emitted():impl_->position;}
+std::size_t StreamingTransmitter::working_bytes()const {
+    const auto& s=*impl_;
+    return sizeof(StreamingTransmitter)+sizeof(Impl)+s.wire.capacity()+s.code.capacity()*sizeof(int)+
+        (s.pattern?s.pattern->working_bytes():0);
+}
 std::vector<Complex> StreamingTransmitter::payload_constellation()const {
     const auto& s=*impl_;
     std::vector<Complex> result;result.reserve(s.constellation_count);
@@ -586,6 +615,7 @@ ConstellationBatch StreamingTransmitter::take_payload_constellation() {
 }
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
+    if(s.pattern) {const auto count=s.pattern->read(output,stop);s.position=s.pattern->samples_emitted();return count;}
     const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.total-s.position));
     const auto start_angle=std::remainder(static_cast<long double>(s.position)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
     Complex oscillator=std::polar(1.,static_cast<double>(start_angle));const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
@@ -599,6 +629,7 @@ std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token s
 }
 std::size_t StreamingTransmitter::read_analytic(std::span<Complex> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
+    if(s.pattern) {const auto count=s.pattern->read_analytic(output,stop);s.position=s.pattern->samples_emitted();return count;}
     const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.total-s.position));
     const auto start_angle=std::remainder(static_cast<long double>(s.position)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
     Complex oscillator=std::polar(1.,static_cast<double>(start_angle));const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
@@ -611,7 +642,10 @@ std::size_t StreamingTransmitter::read_analytic(std::span<Complex> output,std::s
     return count;
 }
 std::optional<SymbolObservation> StreamingTransmitter::next_symbol(std::stop_token stop) {
-    auto& s=*impl_;cancelled(stop);if(s.pcm)throw Error("cannot mix integrated and PCM reads on one transmitter");s.analytical=true;
+    auto& s=*impl_;cancelled(stop);
+    if(s.pattern)throw Error("pattern reception requires physical PCM or analytic samples, not despread symbol observations");
+    if(s.pcm)throw Error("cannot mix integrated and PCM reads on one transmitter");
+    s.analytical=true;
     if(finished())return std::nullopt;
     // Training has64 fixed waveform segments, regardless of the payload clock.
     // Integrate each segment directly so a future SDR clock does not require
@@ -637,6 +671,7 @@ void StreamingTransmitter::preview_last(std::span<float> output)const {
 void StreamingTransmitter::preview_last_analytic(std::span<Complex> output)const {
     const auto& s=*impl_;
     if(output.size()>analytic_preview_limit)throw Error("analytic streaming preview exceeds its bounded history");
+    if(s.pattern) {s.pattern->preview_last_analytic(output);return;}
     const auto count=std::min<std::uint64_t>(output.size(),s.position);
     const auto leading=output.size()-static_cast<std::size_t>(count);
     std::fill(output.begin(),output.end(),Complex{});
@@ -659,6 +694,8 @@ void StreamingTransmitter::preview_last_analytic(std::span<Complex> output)const
 }
 
 struct StreamingReceiver::Impl {
+    std::unique_ptr<PatternReceiver> pattern;
+    PatternSearch pattern_search;
     static constexpr std::size_t preview_limit=2048;
     struct Trial {
         bool active=false,accepted=false;
@@ -714,7 +751,11 @@ struct StreamingReceiver::Impl {
     Complex oscillator{1,0};
     enum class Input { none,pcm,integrated };
     Input input=Input::none;
-    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check,PacketValidator complete):config(c),expected(std::move(pre)),validator(std::move(check)),packet_validator(std::move(complete)),workspace(budget),training_evidence(c,expected) {
+    Impl(Config c,Bytes pre,std::size_t budget,BootstrapValidator check,PacketValidator complete,PatternSearch search={}):pattern_search(std::move(search)),config(c),expected(std::move(pre)),validator(std::move(check)),packet_validator(std::move(complete)),workspace(budget),training_evidence(c,expected) {
+        if(c.pattern_symbols) {
+            if(budget<=sizeof(Impl))throw Error("pattern receiver workspace is too small");
+            pattern=std::make_unique<PatternReceiver>(c,budget-sizeof(Impl),pattern_search);return;
+        }
         validate(c);if(expected.size()!=32)throw Error("APSK expects a 32-byte training prefix");
         bootstrap_symbols=(packet_prefix_size*8+c.constellation_bits-1)/c.constellation_bits;
         if(!validator)validator=packet_bootstrap;
@@ -811,6 +852,7 @@ struct StreamingReceiver::Impl {
         }
     }
     std::size_t working_bytes()const {
+        if(pattern)return sizeof(Impl)+pattern->working_bytes();
         std::size_t bytes=sizeof(Impl)+candidates.capacity()*sizeof(Candidate)+code.capacity()*sizeof(int)+
             diagnostic.constellation.capacity()*sizeof(Complex)+expected.capacity()+replay_bytes.capacity()+trials.capacity()*sizeof(Trial);
         for(const auto& candidate:candidates)bytes+=candidate.points.capacity()*sizeof(Complex)+candidate.ordered_radii.capacity()*sizeof(double);
@@ -1071,19 +1113,22 @@ struct StreamingReceiver::Impl {
         return output;
     }
 };
-StreamingReceiver::StreamingReceiver(Config c,Bytes pre,std::size_t workspace,BootstrapValidator validator,PacketValidator packet_validator):impl_(std::make_unique<Impl>(c,std::move(pre),workspace,std::move(validator),std::move(packet_validator))){}
+StreamingReceiver::StreamingReceiver(Config c,Bytes pre,std::size_t workspace,BootstrapValidator validator,PacketValidator packet_validator,PatternSearch search):impl_(std::make_unique<Impl>(c,std::move(pre),workspace,std::move(validator),std::move(packet_validator),std::move(search))){}
 StreamingReceiver::~StreamingReceiver()=default;
 StreamingReceiver::StreamingReceiver(StreamingReceiver&&) noexcept=default;
 StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=default;
-bool StreamingReceiver::synchronized()const{return impl_->synced;}
-bool StreamingReceiver::acquiring()const{return impl_->selection_deadline || std::any_of(impl_->trials.begin(),impl_->trials.end(),[](const auto& trial){return trial.active;});}
+bool StreamingReceiver::synchronized()const{return impl_->pattern?impl_->pattern->synchronized():impl_->synced;}
+bool StreamingReceiver::clock_windowed()const{return impl_->pattern&&impl_->pattern->clock_windowed();}
+bool StreamingReceiver::acquiring()const{return impl_->pattern?impl_->pattern->acquiring():impl_->selection_deadline || std::any_of(impl_->trials.begin(),impl_->trials.end(),[](const auto& trial){return trial.active;});}
 Bytes StreamingReceiver::provisional_frame()const {
     const auto& s=*impl_;
+    if(s.pattern)return {};
     if(!s.displayed_trial || !s.trials[*s.displayed_trial].active)return {};
     const auto& bytes=s.trials[*s.displayed_trial].bytes;
     return Bytes(bytes.begin(),bytes.begin()+static_cast<std::ptrdiff_t>(std::min(bytes.size(),Impl::preview_limit)));
 }
 Diagnostics StreamingReceiver::diagnostics()const{
+    if(impl_->pattern)return impl_->pattern->diagnostics();
     auto result=impl_->diagnostic;
     if(impl_->constellation_cursor)
         std::rotate(result.constellation.begin(),result.constellation.begin()+static_cast<std::ptrdiff_t>(impl_->constellation_cursor),result.constellation.end());
@@ -1091,6 +1136,7 @@ Diagnostics StreamingReceiver::diagnostics()const{
 }
 ConstellationBatch StreamingReceiver::take_payload_constellation() {
     auto& s=*impl_;
+    if(s.pattern)return {s.pattern->take_chip_constellation(),0};
     ConstellationBatch result;result.points.reserve(s.pending_constellation.count);result.dropped=s.pending_constellation.dropped;
     for(std::size_t i=0;i<s.pending_constellation.count;++i)result.points.push_back(s.fresh_points[(s.fresh_begin+i)%s.fresh_points.size()]);
     s.pending_constellation.count=0;s.pending_constellation.dropped=0;s.fresh_begin=0;return result;
@@ -1098,15 +1144,18 @@ ConstellationBatch StreamingReceiver::take_payload_constellation() {
 std::size_t StreamingReceiver::working_bytes()const{return impl_->working_bytes();}
 void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
+    if(impl_->pattern)impl_->pattern->set_workspace_bytes(bytes-sizeof(Impl));
     impl_->workspace=bytes;
 }
 bool StreamingReceiver::frame_supported(std::size_t extent)const {
     const auto& s=*impl_;
+    if(s.pattern)return extent<=(s.workspace-working_bytes())/8;
     return s.can_record(s.trials.front(),extent);
 }
-void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.expected,s.workspace,s.validator,s.packet_validator);impl_=std::move(fresh);}
+void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.expected,s.workspace,s.validator,s.packet_validator,s.pattern_search);impl_=std::move(fresh);}
 Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation> observations,std::stop_token stop) {
     auto& s=*impl_;
+    if(s.pattern)throw Error("pattern acquisition requires measured PCM, not despread symbol observations");
     if(s.finished)throw Error("capture already finished; reset before appending input");
     if(observations.empty())return {};
     cancelled(stop);
@@ -1116,6 +1165,7 @@ Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation> observa
 }
 Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token stop) {
     auto& s=*impl_;Bytes output;
+    if(s.pattern){s.pattern->push(samples,stop);return {};}
     if(s.finished)throw Error("capture already finished; reset before appending input");
     if(samples.empty())return {};
     cancelled(stop);
@@ -1145,7 +1195,15 @@ Bytes StreamingReceiver::push(std::span<const float> samples,std::stop_token sto
     }
     return output;
 }
+Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Complex> projected,std::stop_token stop) {
+    if(impl_->pattern){impl_->pattern->push(samples,projected,stop);return {};}
+    return push(samples,stop);
+}
+PatternBurst StreamingReceiver::provisional_pattern()const{return impl_->pattern?impl_->pattern->provisional():PatternBurst{};}
+std::vector<PatternBurst> StreamingReceiver::take_pattern_bursts(){return impl_->pattern?impl_->pattern->take_bursts():std::vector<PatternBurst>{};}
+std::vector<PatternEvidence> StreamingReceiver::pattern_candidates()const{return impl_->pattern?impl_->pattern->candidates():std::vector<PatternEvidence>{};}
 Bytes StreamingReceiver::finish(std::stop_token stop) {
+    if(impl_->pattern){impl_->pattern->finish(stop);return {};}
     auto& s=*impl_;cancelled(stop);if(s.finished)return {};
     Bytes output;
     const auto first=s.synced?s.selected:0,last=s.synced?s.selected+1:s.candidates.size();

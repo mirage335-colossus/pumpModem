@@ -88,6 +88,7 @@ struct SignalLine {
     bool complete = false;
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
+    std::optional<double> pattern_score;
 };
 std::string signal_status_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
@@ -102,6 +103,7 @@ public:
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
+    std::optional<std::string> copy_text(std::size_t index) const;
 private:
     std::deque<SignalLine> lines_;
 };

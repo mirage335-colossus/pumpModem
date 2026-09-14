@@ -37,6 +37,50 @@ Changing the whole-second anchor derives a fresh epoch key; counter positions
 therefore do not collide merely because adjacent transmissions cross a second.
 Within one anchor and purpose, random access and sequential generation agree.
 
+### Binary pattern chip addressing
+
+The binary `PatternCode` waveform addresses Scrambler and DSSS independently.
+Transfer first derives each 32-byte waveform seed from that purpose's original
+key stream at the selected epoch and byte offset zero. `PatternCode` constructs
+its own `Crypto` instance from the supplied seed and then selects the same
+purpose and epoch for chip generation. This second derivation layer is part of
+the waveform convention; direct `PatternCode` callers supply those seeds
+themselves. Raw payload masking continues to use the original Data-purpose key.
+For absolute chip position `k`, it reads byte `floor(k/8)` and bit `k % 8`
+(least-significant bit first) from that purpose's epoch stream. This bit order
+is a waveform convention; packed application bytes still carry payload bits
+most-significant bit first.
+
+Let `C` be `ceil(symbol_samples / chip_samples)`. Symbol `j` starts at chip
+`start_chip + j*C`; chip `i` within it uses the absolute address
+`start_chip + j*C + i`. A partial final chip consumes its entire bit position.
+Consequently adjacent symbols never restart a private prefix, and a long
+symbol never repeats the legacy 16,384-chip period. Every multiply/add used to
+form a transmitted stream range is checked before waveform generation.
+
+The two legal bit patterns share that time's private row and mix it with
+different public internal-transition masks. Only one alternative is
+transmitted at that time. DSSS, when enabled, applies signs from its separate
+purpose and seed. Small fixed caches support both sequential output and
+receiver seeks without storing a keystream proportional to hours of airtime.
+Cache contents are cleansed when released.
+
+The epoch and chip coordinates are local transmitter state and receiver clock
+hypotheses. They add no sender identifier, nonce, slot, symbol index or chip
+counter to the transmitted raw bits. A Unix-time anchor approximates absolute
+time; the implementation does not claim a native TAI clock. Acquisition must
+find the corresponding pattern evidence within its implemented clock search.
+The bounded long-symbol correlator can derive the surviving stream-symbol
+index from a negative clock-relative start offset. The raw Data-stream decoder
+uses that same bit index when unmasking a cropped reception; it must not restart
+the data stream at zero merely because the captured fragment begins there.
+
+Public unkeyed patterns restart their deterministic row for every symbol, so
+they do not require a secret symbol index. That public mode does not provide
+the nonrepeating private waveform of the keyed mode. Manual legacy APSK keeps
+its earlier repeated sign-template behavior and should not be described as
+the new nonrepeating pattern waveform.
+
 `xor_data` XORs that stream with arbitrary bytes. `mac` computes the complete
 32-byte HMAC-SHA256 over exactly the supplied bytes with the separate MAC key.
 Frame callers must include all metadata that requires integrity in an
@@ -50,6 +94,18 @@ positions. It does not directly reveal other CTR positions or the independent
 MAC key. HMAC still rejects altered authenticated content. This is not a claim
 that CTR reuse preserves confidentiality. Use transmission spacing and coordinate
 large transfers sharing a key.
+
+The live session waits for a fresh whole-second epoch before preparing another
+automatically timed keyed pattern transmission on that device. An explicitly
+supplied timestamp remains a caller-controlled override. This local guard does
+not coordinate independent devices sharing a key or replace operational
+transmission spacing.
+
+Raw-bit bursts and dictionary-coded short text carry no MAC or checksum. Their
+pattern confidence can reject noise and mismatched time/key hypotheses, but
+does not supply cryptographic message authentication or replay protection.
+The packet path retains its existing keyed MAC when enabled. No extra
+authentication field is silently appended to a three-bit raw transmission.
 
 ## Named key sets: keyfile version 2
 

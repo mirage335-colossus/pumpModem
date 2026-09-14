@@ -133,5 +133,22 @@ void static_pattern_binding() {
     check(keyed.pattern_space->representative_keyed && keyed.pattern_space->code==other_key.pattern_space->code,
           "static keyed illustration must be labelled and independent of private epoch material");
 }
+void binary_pattern_transport() {
+    gui::InspectionRequest request;request.binary=Bytes{0,0,1};
+    request.target_snr=40;request.options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
+    const auto raw=gui::inspect(request);
+    check(raw.binary && field(raw,"Meaningful bits")=="3" && field(raw,"Packet header")=="0 bits" &&
+          field(raw,"Symbol padding")=="0 bits" && field(raw,"FEC")=="Off",
+          "three-bit pattern inspection must preserve exact length and zero framing");
+    check(raw.pattern_space && raw.pattern_space->bounded_pattern_preview && raw.pattern_space->codewords.size()==2,
+          "binary pattern inspector must bind independent codeword rows");
+    check(text(raw).find("APSK geometry is diagnostic only")!=std::string::npos,
+          "pattern inspector must identify its sole acquisition evidence");
+    request.binary.reset();request.message.data=Bytes{'h','e','l','p'};
+    const auto short_text=gui::inspect(request);
+    check(!short_text.packet_layout && field(short_text,"Packet header")=="0 bits" &&
+          field(short_text,"Checksum / integrity tag")=="0 bits" && field(short_text,"Compression")=="Built-in short-text dictionary",
+          "short text inspection must describe raw dictionary bits without packet overhead");
 }
-int main(){try{packet_layout();tiny_packet_layout();raw_layout();static_pattern_binding();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+}
+int main(){try{packet_layout();tiny_packet_layout();raw_layout();static_pattern_binding();binary_pattern_transport();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
