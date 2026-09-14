@@ -183,7 +183,8 @@ struct PatternTransmitter::Impl {
         }
     }
     template<class Output, class Convert>
-    std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert, std::stop_token stop) {
+    std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert,
+                       std::stop_token stop, const ChipObserver& observer) {
         cancelled(stop);
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), total - cursor));
         const auto angle = std::remainder(static_cast<long double>(cursor) * tau * config.carrier_hz / config.sample_rate,
@@ -222,6 +223,8 @@ struct PatternTransmitter::Impl {
             for (std::size_t j = 0; j < run; ++j, ++i, ++cursor) {
                 if ((i & 4095U) == 0) cancelled(stop);
                 output[i] = convert(amplitude * oscillator * pattern);
+                if (j == 0 && within % code.chip_samples() == 0 && observer)
+                    observer(amplitude * pattern);
                 oscillator *= step; pattern *= pattern_step;
             }
         }
@@ -234,11 +237,12 @@ PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t 
 PatternTransmitter::~PatternTransmitter() = default;
 PatternTransmitter::PatternTransmitter(PatternTransmitter&&) noexcept = default;
 PatternTransmitter& PatternTransmitter::operator=(PatternTransmitter&&) noexcept = default;
-std::size_t PatternTransmitter::read(std::span<float> output, std::stop_token stop) {
-    return impl_->render(impl_->position, output, [](auto value) { return static_cast<float>(value.real()); }, stop);
+std::size_t PatternTransmitter::read(std::span<float> output, std::stop_token stop, const ChipObserver& observer) {
+    return impl_->render(impl_->position, output, [](auto value) { return static_cast<float>(value.real()); }, stop, observer);
 }
-std::size_t PatternTransmitter::read_analytic(std::span<std::complex<double>> output, std::stop_token stop) {
-    return impl_->render(impl_->position, output, [](auto value) { return value; }, stop);
+std::size_t PatternTransmitter::read_analytic(std::span<std::complex<double>> output, std::stop_token stop,
+                                          const ChipObserver& observer) {
+    return impl_->render(impl_->position, output, [](auto value) { return value; }, stop, observer);
 }
 void PatternTransmitter::preview_last_analytic(std::span<std::complex<double>> output) const {
     require(output.size() <= analytic_preview_limit, "pattern preview exceeds its bounded sample limit");
@@ -246,7 +250,7 @@ void PatternTransmitter::preview_last_analytic(std::span<std::complex<double>> o
     const auto leading = output.size() - count;
     std::fill_n(output.begin(), leading, std::complex<double>{});
     auto cursor = impl_->position - count;
-    impl_->render(cursor, output.subspan(leading), [](auto value) { return value; }, {});
+    impl_->render(cursor, output.subspan(leading), [](auto value) { return value; }, {}, {});
 }
 bool PatternTransmitter::finished() const { return impl_->position == impl_->total; }
 std::uint64_t PatternTransmitter::total_samples() const { return impl_->total; }

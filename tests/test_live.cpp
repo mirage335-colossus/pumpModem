@@ -17,6 +17,7 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace live_test_audio {
 std::atomic<std::uint64_t> played_samples{0};
+std::atomic<std::size_t> playback_chunk{4096};
 std::atomic<std::shared_ptr<const std::vector<float>>> capture_samples;
 }
 // Link-time audio adapter: exercise Session's actual playback/capture branch
@@ -44,7 +45,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
     if(format)format({rate,rate,.42*rate,4096});
     std::array<float,4096> output{};
     while(!stop.stop_requested()) {
-        const auto count=callback(output);
+        const auto count=callback(std::span(output).first(std::min(output.size(),live_test_audio::playback_chunk.load())));
         if(count>output.size())throw Error("live playback exceeded output capacity");
         if(!count)return;
         live_test_audio::played_samples.fetch_add(count);
@@ -234,6 +235,52 @@ void test_audio_tx_empty_symbol_intervals_and_cancel() {
         return snapshot.samples_received > listening.samples_received &&
                std::chrono::steady_clock::now() - resumed_at >= 120ms;
     }, 3s);
+}
+void test_pattern_audio_tx_constellation() {
+    live::Session session;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
+    session.start(value);
+    wait_for(session,[](const auto& snapshot){return !snapshot.waveform.empty();});
+    Bytes bits(8192);for(std::size_t i=0;i<bits.size();++i)bits[i]=i%2;
+    session.transmit_bits(bits);
+    const auto settling=wait_for(session,[](const auto& snapshot) {
+        return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
+               !snapshot.constellation.empty();
+    });
+    check(!settling.waveform.empty(),"pattern TX must show outgoing audio during hardware settling");
+    const auto prefix_seconds=static_cast<double>(modem::training_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+    const auto active=wait_for(session,[&](const auto& snapshot) {
+        return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
+               snapshot.transmission_seconds>prefix_seconds && !snapshot.constellation.empty();
+    });
+    check(active.constellation.size()<=modem::StreamingTransmitter::constellation_history_limit,
+          "pattern audio TX constellation exceeded its bounded history");
+    for(const auto point:active.constellation)
+        check(std::abs(std::abs(point)-std::sqrt(2*modem::nominal_signal_power))<1e-8,
+              "pattern audio TX must show actual emitted chip amplitudes");
+    check(active.pattern_scores.empty(),"half-duplex audio TX must not invent receiver pattern scores");
+    session.cancel_transmit();
+    check(session.snapshot().constellation.empty(),"cancelled pattern TX retained transmitted chip points");
+}
+void test_pattern_audio_long_chip_intervals() {
+    live_test_audio::playback_chunk=64;
+    live::Session session;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.modem=tuning::resolve(1,40,tuning::PatternMode::auto_pattern,false).config;
+    session.start(value);
+    session.transmit_bits(Bytes(32,1));
+    const auto prefix_seconds=static_cast<double>(modem::training_sample_count(value.transfer.modem))/value.transfer.modem.sample_rate;
+    const auto first=wait_for(session,[&](const auto& snapshot) {
+        return snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
+               snapshot.transmission_seconds>prefix_seconds && !snapshot.constellation.empty();
+    });
+    wait_for(session,[&](const auto& snapshot) {
+        check(snapshot.transmitting && snapshot.constellation_source==live::ConstellationSource::transmitted &&
+              !snapshot.constellation.empty(),"pattern TX went blank between long chip boundaries");
+        return snapshot.sequence>first.sequence+3;
+    });
+    session.cancel_transmit();session.stop();live_test_audio::playback_chunk=4096;
 }
 void test_binary_audio_preserves_exact_bit_length() {
     live::Session session;
@@ -984,6 +1031,8 @@ void test_pattern_epoch_boundary() {
     for(std::size_t frame=0;frame<replay.replay_frame_count;++frame) {
         replay_milliseconds=static_cast<std::int64_t>((frame*3000+replay.replay_frame_count-1)/replay.replay_frame_count);
         const auto shown=session.snapshot();
+        check(shown.constellation_source==live::ConstellationSource::input,
+              "pattern replay must keep I/Q in input coordinates while evidence changes");
         check(shown.pattern_scores.size()<=live::Snapshot::pattern_score_limit,"pattern plot exceeded its bounded candidate history");
         for(const auto point:shown.pattern_scores) {
             check(std::isfinite(point.real())&&std::isfinite(point.imag())&&point.real()>=0&&point.imag()>=0,
@@ -1020,6 +1069,8 @@ void test_pattern_listener_starts_after_hardware_prefix() {
     live::Session session([=]{return listen_epoch;});
     session.start(value);
     const auto received=wait_for(session,[](const auto& snapshot){
+        check(snapshot.constellation_source==live::ConstellationSource::input,
+              "live pattern acquisition must not replace the input I/Q producer");
         return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[](const auto& signal){
             return signal.binary && signal.complete && signal.text=="001" && signal.pattern_score.has_value();
         });
@@ -1027,6 +1078,27 @@ void test_pattern_listener_starts_after_hardware_prefix() {
     check(received.dsp_buffered_bytes<=value.dsp_workspace_bytes,
           "older hardware-prefix epochs must remain within the DSP memory ceiling");
     session.stop();live_test_audio::capture_samples.store({});
+}
+void test_single_pattern_replay_evidence() {
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([]{return 1800000000.;},[&] {
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();
+    value.transfer.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
+    value.transfer.search_seconds=0;
+    session.start(value);
+    wait_for(session,[](const auto& snapshot){return !snapshot.waveform.empty();});
+    session.transmit_bits(Bytes{1});
+    wait_for(session,[](const auto& snapshot){return snapshot.simulation_replay;},10s);
+    replay_milliseconds=2999;
+    const auto last=session.snapshot();
+    check(last.simulation_replay&&last.simulation_sample_fraction==1&& !last.pattern_scores.empty(),
+          "short pattern replay lost evidence produced by trailing receiver windows");
+    check(last.constellation_source==live::ConstellationSource::input,
+          "short pattern replay replaced measured I/Q with an acquisition-dependent source");
+    check(session.snapshot().pattern_scores==last.pattern_scores,
+          "last pattern replay frame changed without advancing presentation time");
 }
 void test_plaintext_pattern_with_loaded_receive_keys() {
     std::atomic<double> epoch{1800000000.};
@@ -1220,6 +1292,8 @@ int main(int argc, char** argv) {
         run("idle noise and plots", test_idle_noise_and_plots);
         run("actual audio TX constellation", test_audio_tx_publishes_fresh_payload_constellation);
         run("actual audio empty symbols and cancel", test_audio_tx_empty_symbol_intervals_and_cancel);
+        run("pattern audio TX constellation", test_pattern_audio_tx_constellation);
+        run("pattern audio long chip intervals", test_pattern_audio_long_chip_intervals);
         run("binary audio exact bit length", test_binary_audio_preserves_exact_bit_length);
         run("binary simulation replay and cancellation", test_binary_simulation_replay_validation_and_cancel);
         run("keyed binary partial-symbol transmission", test_keyed_binary_transmission_preserves_partial_symbols);
@@ -1237,6 +1311,7 @@ int main(int argc, char** argv) {
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
         run("pattern epoch boundary", test_pattern_epoch_boundary);
         run("pattern listener after hardware prefix", test_pattern_listener_starts_after_hardware_prefix);
+        run("single pattern replay evidence", test_single_pattern_replay_evidence);
         run("plaintext pattern and loaded receive keys", test_plaintext_pattern_with_loaded_receive_keys);
         run("cancel, reconfigure and bounds", test_cancel_reconfigure_and_bounds);
         run("unrecoverable noise", test_unrecoverable_noise_does_not_validate);

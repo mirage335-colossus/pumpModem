@@ -574,8 +574,10 @@ void bitmap_source_checks() {
     const auto first = sources.update(controller);
     check(contains(first, ui::Bitmap::qr), "Bitmap source initialization omitted the default dark QR preview");
     check(contains(first, ui::Bitmap::pattern_scores) &&
-          sources.caption(ui::Bitmap::pattern_scores).find("waiting") != std::string::npos,
-          "Console pattern plot was not initialized while waiting for live evidence");
+          sources.caption(ui::Bitmap::pattern_scores).find("complete pattern windows") != std::string::npos &&
+          sources.caption(ui::Bitmap::pattern_scores, 240).find("waiting") != std::string::npos &&
+          std::string_view(patterns->help).find("Hardware audio input is paused during transmission") != std::string_view::npos,
+          "Console pattern plot did not explain complete-window evidence and paused reception during hardware TX");
     const auto original = sources.get(ui::Bitmap::qr);
     const auto empty = render(original);
     check(empty.pixels()[0] == 32 && empty.pixels()[1] == 0 && empty.pixels()[2] == 0,

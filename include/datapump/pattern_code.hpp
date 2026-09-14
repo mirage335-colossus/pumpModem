@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/modem.hpp"
+#include <functional>
 #include <memory>
 
 namespace datapump::modem {
@@ -45,14 +46,18 @@ private:
 class PatternTransmitter {
 public:
     static constexpr std::size_t analytic_preview_limit = 2112;
+    // Actual baseband value at the first emitted sample of each payload chip.
+    // Settling audio and preview reconstruction never notify the observer.
+    using ChipObserver = std::function<void(std::complex<double>)>;
     PatternTransmitter(Bytes bits, Config config, std::uint64_t stream_epoch = 0,
                        std::uint64_t start_chip = 0, bool hardware_preamble = true);
     ~PatternTransmitter();
     PatternTransmitter(PatternTransmitter&&) noexcept;
     PatternTransmitter& operator=(PatternTransmitter&&) noexcept;
-    std::size_t read(std::span<float> output, std::stop_token stop = {});
+    std::size_t read(std::span<float> output, std::stop_token stop = {},
+                     const ChipObserver& observer = {});
     std::size_t read_analytic(std::span<std::complex<double>> output,
-                              std::stop_token stop = {});
+                              std::stop_token stop = {}, const ChipObserver& observer = {});
     // Bounded reconstruction from stream coordinates; no waveform history is
     // retained and preview does not advance the transmitter.
     void preview_last_analytic(std::span<std::complex<double>> output) const;

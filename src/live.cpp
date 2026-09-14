@@ -380,19 +380,26 @@ struct Session::Impl {
     }
     void publish(const detail::SignalWindow& window, const modem::Config& config, std::uint64_t version,
                  Clock::time_point& last_plot, bool force = false,
-                 modem::StreamingTransmitter* transmitter = nullptr, std::uint64_t serial = 0) {
+                 modem::StreamingTransmitter* transmitter = nullptr, std::uint64_t serial = 0,
+                 const std::vector<std::complex<double>>* pattern_scores = nullptr) {
         if (!force && Clock::now() - last_plot < std::chrono::milliseconds(50)) return;
         auto measured = window.frame(config);
         auto transmitted = transmitter ? transmitter->take_payload_constellation() : modem::ConstellationBatch{};
         std::lock_guard lock(mutex);
         if (!current.running || generation != version) return;
         if (transmitter && tx_serial != serial) return;
+        if (pattern_scores && tx_serial != serial) return;
         current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
+        if (pattern_scores) current.pattern_scores = *pattern_scores;
         current.constellation = std::move(measured.constellation);
         current.constellation_source = ConstellationSource::input;
         current.constellation_dropped = 0;
         if (transmitter) {
-            current.constellation.clear();
+            // Between pattern chip boundaries (and during settling), display
+            // measured outgoing I/Q so long chips do not blink on and off.
+            if (!config.pattern_symbols || !transmitted.points.empty())
+                current.constellation.clear();
+            current.pattern_scores.clear();
             current.constellation_source = ConstellationSource::transmitted;
             queue_points(std::move(transmitted), ConstellationSource::transmitted);
         }
@@ -791,7 +798,10 @@ struct Session::Impl {
                     }
                 }
                 const bool synchronized = receiver.modem->synchronized();
-                if (synchronized || receiver.modem->acquiring()) {
+                // Pattern acquisition has its own evidence plot. Keep its
+                // I/Q display in measured input coordinates before and after
+                // acquisition instead of alternating producers at UI polls.
+                if (!receiver.options.modem.pattern_symbols && (synchronized || receiver.modem->acquiring())) {
                     auto observed = receiver.modem->take_payload_constellation();
                     bool better = !locked || (synchronized && !synchronized_points);
                     // The common single-candidate path needs no diagnostics
@@ -889,7 +899,7 @@ struct Session::Impl {
                 append_points(simulation_wave->interval_points, std::move(points));
                 simulation_wave->pattern_scores = std::move(pattern_scores);
                 simulation_wave->interval_locked = simulation_wave->interval_locked || locked;
-            } else {
+            } else if (value.simulation || !tx_busy) {
                 queue_points(std::move(points), ConstellationSource::received);
                 if (current.pattern_scores != pattern_scores) {
                     current.pattern_scores = std::move(pattern_scores); ++current.sequence;
@@ -1018,10 +1028,16 @@ struct Session::Impl {
                         account(count, version); progress(*wave, value);
                         plot_window.push(input_samples);
                         feed_samples(*simulation_bank,input_samples,value,version,wave->stop,wave.get());
+                        publish(plot_window, value.transfer.modem, version, last_plot, false,
+                                nullptr, wave->serial, &wave->pattern_scores);
                         if (!wave->tail_started && wave->replay.size() < wave->replay_count &&
+                            (!value.transfer.modem.pattern_symbols || wave->replay.size()+1 < wave->replay_count) &&
                             wave->transmitted_samples >= replay_target(*wave))
                             collect_replay(*wave, value.transfer.modem, plot_window);
                         if (wave->tail_started && !wave->tail_remaining) {
+                            // Short pattern bursts can be scored only after
+                            // trailing samples complete a receiver window.
+                            // Reserve their final replay frame for that evidence.
                             if (wave->replay.size() < wave->replay_count)
                                 collect_replay(*wave, value.transfer.modem, plot_window);
                             complete_tx(*wave); wave.reset();

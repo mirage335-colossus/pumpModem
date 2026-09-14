@@ -13,8 +13,9 @@ struct SymbolObservation {
     std::uint64_t sample_count = 0;
 };
 // Newly observed payload symbols in the decoder's differential-phase and
-// gain-normalized amplitude coordinates. Points are measured, never snapped
-// to decisions. A slow consumer receives the newest bounded set and a count
+// gain-normalized amplitude coordinates for APSK, or physical baseband chip
+// I/Q for pattern transport. Points are never snapped to decisions. A slow
+// consumer receives the newest bounded set and a count
 // of points displaced before it could consume them.
 struct ConstellationBatch {
     std::vector<std::complex<double>> points;
@@ -50,9 +51,10 @@ public:
     std::uint64_t samples_emitted() const;
     // Retained transmitter state, independent of streamed waveform duration.
     std::size_t working_bytes() const;
-    // Actual payload symbols whose transmission has begun, oldest first.
-    // Fixed training and spreading-chip signs are excluded. Each symbol is
-    // retained once, regardless of PCM block size or integration duration.
+    // Actual payload points whose transmission has begun, oldest first.
+    // APSK retains symbols before spreading; pattern mode retains physical
+    // baseband chips, including spreading signs. Settling/training is excluded.
+    // Each point is retained once, regardless of PCM block size or duration.
     std::vector<std::complex<double>> payload_constellation() const;
     ConstellationBatch take_payload_constellation();
     // Reconstruct the actual recent PCM, including spreading and carrier phase.

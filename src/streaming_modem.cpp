@@ -32,12 +32,12 @@ struct PendingConstellation {
         else if(dropped<std::numeric_limits<std::uint64_t>::max())++dropped;
     }
     template<typename At>
-    ConstellationBatch take(std::size_t history_size,At at) {
+    ConstellationBatch take(std::size_t history_size,At at,bool differential=true) {
         ConstellationBatch result;result.points.reserve(count);result.dropped=dropped;
         const auto begin=history_size-count;
         auto prior=begin?at(begin-1):previous;
         for(std::size_t i=begin;i<history_size;++i) {
-            const auto point=at(i);result.points.push_back(decision_coordinates(point,prior));prior=point;
+            const auto point=at(i);result.points.push_back(differential?decision_coordinates(point,prior):point);prior=point;
         }
         count=0;dropped=0;return result;
     }
@@ -549,6 +549,15 @@ struct StreamingTransmitter::Impl {
         // Start the first raw symbol when the first sample is requested, so
         // diagnostics never claim an untransmitted initial point.
     }
+    void retain_constellation(Complex value,Complex previous={1,0}) {
+        if(!constellation_count)pending_constellation.previous=previous;
+        if(constellation_count==constellation.size()) {
+            pending_constellation.previous=constellation[constellation_begin];
+            constellation_begin=(constellation_begin+1)%constellation.size();--constellation_count;
+        }
+        constellation[(constellation_begin+constellation_count++)%constellation.size()]=value;
+        pending_constellation.append(constellation.size());
+    }
     void advance() {
         const auto index=symbol_index++;
         const auto training_symbols=raw?0U:64U;
@@ -565,15 +574,7 @@ struct StreamingTransmitter::Impl {
         }
         const auto previous=phase;
         point=detail::mapped(value,bits,phase);phase=point/std::abs(point);
-        if(index>=training_symbols) {
-            if(!constellation_count)pending_constellation.previous=previous;
-            if(constellation_count==constellation.size()) {
-                pending_constellation.previous=constellation[constellation_begin];
-                constellation_begin=(constellation_begin+1)%constellation.size();--constellation_count;
-            }
-            constellation[(constellation_begin+constellation_count++)%constellation.size()]=point;
-            pending_constellation.append(constellation.size());
-        }
+        if(index>=training_symbols)retain_constellation(point,previous);
         segment_start=segment_end;
         segment_end=index<training_symbols?training*static_cast<std::uint64_t>(index+1)/64:segment_end+symbol;
         if(history_count==history.size()){history_begin=(history_begin+1)%history.size();--history_count;}
@@ -611,11 +612,14 @@ ConstellationBatch StreamingTransmitter::take_payload_constellation() {
     auto& s=*impl_;
     return s.pending_constellation.take(s.constellation_count,[&](std::size_t i){
         return s.constellation[(s.constellation_begin+i)%s.constellation.size()];
-    });
+    },!s.pattern);
 }
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
-    if(s.pattern) {const auto count=s.pattern->read(output,stop);s.position=s.pattern->samples_emitted();return count;}
+    if(s.pattern) {
+        const auto count=s.pattern->read(output,stop,[&](Complex point){s.retain_constellation(point);});
+        s.position=s.pattern->samples_emitted();return count;
+    }
     const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.total-s.position));
     const auto start_angle=std::remainder(static_cast<long double>(s.position)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
     Complex oscillator=std::polar(1.,static_cast<double>(start_angle));const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);
@@ -629,7 +633,10 @@ std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token s
 }
 std::size_t StreamingTransmitter::read_analytic(std::span<Complex> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.analytical)throw Error("cannot mix PCM and integrated reads on one transmitter");s.pcm=true;
-    if(s.pattern) {const auto count=s.pattern->read_analytic(output,stop);s.position=s.pattern->samples_emitted();return count;}
+    if(s.pattern) {
+        const auto count=s.pattern->read_analytic(output,stop,[&](Complex point){s.retain_constellation(point);});
+        s.position=s.pattern->samples_emitted();return count;
+    }
     const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),s.total-s.position));
     const auto start_angle=std::remainder(static_cast<long double>(s.position)*tau*s.config.carrier_hz/s.config.sample_rate,static_cast<long double>(tau));
     Complex oscillator=std::polar(1.,static_cast<double>(start_angle));const auto step=std::polar(1.,tau*s.config.carrier_hz/s.config.sample_rate);

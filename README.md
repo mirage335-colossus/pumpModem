@@ -157,6 +157,10 @@ attachment, Level L QR previews, continuous audio reception, a scrolling
 frequency-labeled signal ticker with reception percentages, a waterfall and live waveform,
 and adjacent I/Q and pattern-evidence plots. The pattern plot compares the receiver's
 retained pattern 0 and pattern 1 scores against noise and follows simulation replay.
+In pattern modes, receive I/Q stays in input coordinates as acquisition changes.
+Hardware transmission shows emitted chip points and measured outgoing I/Q during
+settling and between chip boundaries; the evidence panel says **RX paused during TX** because audio
+input pauses during playback. Pattern scores wait for complete receiver windows.
 It includes named shared-key selection and
 a bounded receive cache. WAV tools remain available through the CLI. It does not
 open received files or execute received content. Screenshots can be attached as

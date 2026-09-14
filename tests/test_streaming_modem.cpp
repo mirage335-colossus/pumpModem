@@ -2,11 +2,13 @@
 #include "datapump/packet.hpp"
 #include "datapump/crypto.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/pattern_code.hpp"
 #include "../src/constellation.hpp"
 #include "../src/spreading_code.hpp"
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <chrono>
 #include <thread>
@@ -253,6 +255,78 @@ void consumable_transmit_constellation() {
     const auto empty=overflow.take_payload_constellation();
     if(!empty.points.empty() || empty.dropped)throw std::runtime_error("TX consumption did not reset pending counters");
     if(overflow.payload_constellation().size()!=limit)throw std::runtime_error("TX drain discarded legacy diagnostic history");
+}
+void pattern_transmit_constellation() {
+    for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})for(const bool raw:{false,true}) {
+        auto config=pattern_config();config.pattern_symbols=true;config.constellation_bits=1;
+        config.spreading_mode=mode;config.dsss=true;config.dsss_seed[0]=73;
+        config.scramble=mode==modem::SpreadingMode::pattern;
+        config.stream_epoch=1800000031;config.integration_seconds=.0054;
+        const auto chip=modem::pattern_chip_samples(config),symbol=modem::symbol_sample_count(config);
+        if(symbol%chip==0)throw std::runtime_error("pattern constellation fixture needs partial final chips");
+        Bytes wire(65),bits;
+        for(std::size_t i=0;i<wire.size();++i) {
+            wire[i]=static_cast<std::uint8_t>(i*79+37);
+            for(unsigned bit=0;bit<8;++bit)bits.push_back(static_cast<std::uint8_t>((wire[i]>>(7-bit))&1U));
+        }
+        auto create=[&] {
+            return raw?modem::StreamingTransmitter(modem::RawBits{bits},config):modem::StreamingTransmitter(wire,config);
+        };
+        auto source=create(),pcm=create(),overflow=create();
+        if(!source.payload_constellation().empty() || !source.take_payload_constellation().points.empty())
+            throw std::runtime_error("unstarted pattern TX invented constellation points");
+        const auto training=modem::training_sample_count(config);
+        std::vector<Complex> settling(training);std::vector<float> settling_pcm(training);
+        source.read_analytic(settling);pcm.read(settling_pcm);
+        if(!source.payload_constellation().empty() || !pcm.take_payload_constellation().points.empty())
+            throw std::runtime_error("hardware settling audio polluted payload chip constellation");
+        auto matches=[](const auto& first,const auto& second) {
+            if(first.size()!=second.size())return false;
+            for(std::size_t i=0;i<first.size();++i)if(std::abs(first[i]-second[i])>1e-10)return false;
+            return true;
+        };
+        std::vector<Complex> expected;
+        std::array<Complex,317> block{};std::array<float,317> pcm_block{};
+        constexpr std::array<std::size_t,5> requests{1,3,317,10,71};std::size_t iteration=0;
+        while(!source.finished()) {
+            const auto start=source.samples_emitted();const auto requested=requests[iteration++%requests.size()];
+            const auto count=source.read_analytic(std::span(block).first(requested));
+            if(pcm.read(std::span(pcm_block).first(requested))!=count)throw std::runtime_error("pattern PCM sample count differs");
+            std::vector<Complex> expected_batch;
+            for(std::size_t i=0;i<count;++i) {
+                if(std::abs(pcm_block[i]-static_cast<float>(block[i].real()))>1e-6F)
+                    throw std::runtime_error("pattern constellation observation altered transmitted PCM");
+                const auto position=start+i;
+                if((position-training)%symbol%chip==0) {
+                    // Recover baseband directly from the emitted analytic
+                    // waveform, independently of the chip observer's values.
+                    const auto angle=2*std::numbers::pi*static_cast<double>(position)*config.carrier_hz/config.sample_rate;
+                    expected_batch.push_back(block[i]*std::polar(1.,-angle));
+                }
+            }
+            const auto batch=source.take_payload_constellation(),pcm_batch=pcm.take_payload_constellation();
+            if(batch.dropped || pcm_batch.dropped || !matches(batch.points,expected_batch) || !matches(pcm_batch.points,expected_batch))
+                throw std::runtime_error("pattern TX constellation missed, duplicated or rotated actual emitted chip I/Q");
+            expected.insert(expected.end(),expected_batch.begin(),expected_batch.end());
+            std::array<Complex,17> preview{};source.preview_last_analytic(preview);
+            if(!source.take_payload_constellation().points.empty() || !pcm.take_payload_constellation().points.empty())
+                throw std::runtime_error("pattern constellation drain or waveform preview replayed chips");
+        }
+        const auto limit=modem::StreamingTransmitter::constellation_history_limit;
+        if(expected.size()!=bits.size()*modem::pattern_chips_per_symbol(config) || expected.size()<=limit)
+            throw std::runtime_error("pattern constellation did not retain each partial final chip");
+        while(!overflow.finished())overflow.read(pcm_block);
+        const auto batch=overflow.take_payload_constellation();
+        const std::vector<Complex> newest(expected.end()-limit,expected.end());
+        if(batch.dropped!=expected.size()-limit || !matches(batch.points,newest) ||
+           !matches(source.payload_constellation(),newest) || !matches(overflow.payload_constellation(),newest))
+            throw std::runtime_error("pattern constellation lost chronological history or exact overflow count");
+        source.read_analytic(block);overflow.read(pcm_block);
+        const auto empty=overflow.take_payload_constellation();
+        if(!empty.points.empty() || empty.dropped || !source.take_payload_constellation().points.empty())
+            throw std::runtime_error("finished pattern transmitter replayed constellation points");
+        if(source.working_bytes()>128*1024)throw std::runtime_error("pattern constellation exceeded fixed DSP workspace");
+    }
 }
 void consumable_receive_constellation() {
     auto config=pattern_config();
@@ -1052,6 +1126,11 @@ void recent_pcm_preview() {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--constellation-only") {
+            consumable_transmit_constellation();pattern_transmit_constellation();
+            consumable_receive_constellation();transmitted_constellation_history();live_constellation_window();
+            std::cout<<"streaming constellation tests passed\n";return 0;
+        }
         if(argc>1 && std::string_view(argv[1])=="--pattern-only") {
             long_keyed_pcm();std::cout<<"below-chip-noise PCM pattern acquisition tests passed\n";return 0;
         }
@@ -1083,6 +1162,7 @@ int main(int argc,char** argv) {
         two_ring_gain_aliases();
         short_noisy_bootstraps();
         consumable_transmit_constellation();
+        pattern_transmit_constellation();
         consumable_receive_constellation();
         receiver_input_modes();
         exact_pcm_boundaries();
