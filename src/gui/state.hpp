@@ -89,6 +89,9 @@ struct SignalLine {
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
     std::optional<double> pattern_score;
+    // Exact retained transport bits for decoded pattern text, independently
+    // of its message bytes. Empty means the original bits are unavailable.
+    std::string raw_bits;
 };
 bool signal_byte_aligned(const SignalLine& line);
 std::string signal_display_text(const SignalLine& line);
@@ -106,6 +109,7 @@ public:
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
+    std::optional<std::string> copy_raw_bits(std::size_t index) const;
     std::optional<std::string> copy_text(std::size_t index) const;
     std::optional<Bytes> copy_bytes(std::size_t index) const;
 private:

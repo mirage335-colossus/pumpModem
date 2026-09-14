@@ -58,6 +58,24 @@ void raw_bits() {
         }
     }
 }
+void short_raw_interpretation() {
+    const auto value=options();
+    for(unsigned length=1;length<=4;++length)for(unsigned word=0;word<(1U<<length);++word) {
+        modem::PatternBurst burst;burst.complete=true;burst.score=25.;
+        for(unsigned bit=length;bit;--bit)burst.bits.push_back(static_cast<std::uint8_t>((word>>(bit-1))&1U));
+        const auto received=transfer::interpret_pattern(burst,value,value.timestamp);
+        check(received.raw_bits==burst.bits,"one- to four-bit patterns must retain exact leading zeros and endpoints");
+        check(!received.packet_validated && !received.packet.authenticated,
+              "raw short patterns cannot claim packet validation or authentication");
+        Bytes decoded;
+        if(length==3 && word<5)decoded={static_cast<std::uint8_t>(" etao"[word])};
+        else if(length==4 && (word==10 || word==11))decoded={static_cast<std::uint8_t>(word==10?'i':'n')};
+        check(received.packet.message.data==decoded,
+              "only complete three- or four-bit dictionary tokens should decode into short text");
+        if(length==3 && word==2)check(received.packet.message.data==Bytes{'t'} && received.raw_bits==Bytes({0,1,0}),
+                                     "010 must retain its raw pattern while decoding as lowercase t");
+    }
+}
 void packet_downstream() {
     auto value=options();value.fec=FecMode::off;Message message;message.data=Bytes(16,'e');
     const auto bits=transfer::message_bits(message,value);
@@ -93,4 +111,4 @@ void long_symbol_estimate() {
           "three hour-long symbols have no hardware prefix or retained waveform requirement");
 }
 }
-int main(){try{exact_short_text();raw_bits();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

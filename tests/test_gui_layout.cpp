@@ -85,6 +85,22 @@ void supported_sizes() {
               contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");
         for (const auto slot : {Slot::zoom_in, Slot::zoom_out, Slot::reset_zoom})
             check(contains(waveform, layout[slot]), "waveform action escapes its block");
+        const auto page=layout[Slot::page];
+        for(const auto slot:{Slot::compression_explanation,Slot::short_bits_label,Slot::short_bits,Slot::short_bits_detail,
+                Slot::compression_codes,Slot::short_use_text,Slot::short_send_key,Slot::short_transmit,
+                Slot::short_cancel,Slot::short_airtime,Slot::compression_signals,Slot::copy_raw_signal,
+                Slot::paste_raw_signal,Slot::received_raw_bits})
+            check(!persistent_slot(slot)&&contains(page,layout[slot]),"Compression page control escaped its viewport");
+        const auto short_bits=layout[Slot::short_bits],codes=layout[Slot::compression_codes];
+        check(short_bits.x+short_bits.w<codes.x&&codes.w>=489&&codes.h>=160&&
+              layout[Slot::short_bits_detail].x+layout[Slot::short_bits_detail].w<codes.x,
+              "Exact-bit editor overlaps the lowercase compression reference");
+        const auto raw_signals=layout[Slot::compression_signals],raw_copy=layout[Slot::copy_raw_signal];
+        const auto raw_paste=layout[Slot::paste_raw_signal],raw_detail=layout[Slot::received_raw_bits];
+        check(raw_signals.h>=134&&raw_signals.y+raw_signals.h<raw_copy.y&&
+              raw_copy.y==raw_paste.y&&raw_copy.x+raw_copy.w<raw_paste.x&&
+              raw_copy.y+raw_copy.h<raw_detail.y&&raw_detail.h>=48,
+              "Exact received bits or their actions overlap the signal history");
         auto previous = layout[Slot::device];
         for (const auto slot : {Slot::bandwidth, Slot::snr, Slot::receive_snr, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
             const auto current = layout[slot];

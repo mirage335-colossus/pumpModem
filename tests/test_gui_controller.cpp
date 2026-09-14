@@ -543,6 +543,101 @@ void short_sentence_reception() {
           "Pasting the received short sentence did not restore its message bytes in the binary editor");
     controller.close();
 }
+void short_raw_editor() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    check(!controller.enabled(C::transmit_short_bits)&&!controller.enabled(C::copy_raw_signal)&&
+          !controller.enabled(C::paste_raw_signal),"Empty raw tab enabled a transmission or receive action");
+    controller.edit(F::callsign,"N0CALL");controller.toggle(F::repeatable,true);
+    controller.edit(F::short_bits,"0 1 0");prepare(controller);
+    check(controller.field(F::binary).text=="010"&&controller.field(F::message).text=="t"&&
+          !controller.field(F::repeatable).checked&&controller.inspection()->binary&&
+          controller.enabled(C::transmit_short_bits),"Short raw entry did not replace a long greeting with exact bits");
+    check(controller.estimate()->total_seconds==transfer::estimate_binary(Bytes{0,1,0},controller.settings().transfer).total_seconds&&
+          controller.field(F::short_bits_detail).text.find("01110100")!=std::string::npos,
+          "Raw tab did not distinguish three transmitted bits from the decoded t byte");
+    const auto& reference=controller.field(F::compression_codes).text;
+    for(const auto entry:{"space 000","e 001","t 010","a 011","o 100","i 1010","n 1011","z 1111101111010"})
+        check(reference.find(entry)!=std::string::npos,"Compression reference omitted a fixed lowercase code");
+    for(const auto invalid:{"01010","01x",""}) {
+        controller.edit(F::short_bits,invalid);controller.poll();
+        check(controller.field(F::short_bits).text==invalid&&!controller.estimate()&&
+              !controller.enabled(C::transmit_short_bits)&&!controller.enabled(C::transmit),
+              "Invalid short raw input silently transmitted the previous draft");
+    }
+    for(const auto raw:{"0","00","0010","1111","1011"}) {
+        controller.edit(F::short_bits,raw);prepare(controller);
+        check(controller.field(F::binary).text==raw&&controller.enabled(C::transmit_short_bits)&&
+              controller.inspection()->binary&&controller.estimate()->total_seconds==
+                  transfer::estimate_binary(parse_binary_bits(raw),controller.settings().transfer).total_seconds,
+              "One- to four-bit raw input was padded, compressed, or rejected as an incomplete dictionary token");
+    }
+    controller.edit(F::message,"t");prepare(controller);
+    check(controller.field(F::short_bits).text=="010"&&!controller.inspection()->binary&&
+          controller.field(F::binary).text=="01110100"&&controller.enabled(C::transmit_short_bits),
+          "Message text did not expose its lowercase code separately from byte bits");
+    controller.edit(F::short_bits,"010");prepare(controller);
+    check(controller.inspection()->binary&&controller.field(F::binary).text=="010",
+          "Reapplying the displayed code did not select exact raw transmission");
+    controller.edit(F::binary,"01x");
+    check(!controller.enabled(C::transmit_short_bits),"Invalid Console Binary edit left raw transmission enabled");
+    controller.edit(F::short_bits,"010");prepare(controller);
+    check(controller.enabled(C::transmit_short_bits)&&controller.field(F::binary).text=="010",
+          "Reapplying raw bits did not discard an invalid Console Binary draft");
+    controller.edit(F::message,"A longer console message");prepare(controller);
+    check(controller.field(F::short_bits).text.empty()&&!controller.enabled(C::transmit_short_bits)&&
+          controller.enabled(C::transmit),"Raw tab could transmit an unrelated long Console draft");
+    controller.edit(F::short_bits,"010");controller.activate(C::attach_file);
+    const auto services=controller.take_services();
+    controller.complete_service({services.front().id,false,std::filesystem::absolute(__FILE__).string(),{}});
+    prepare(controller);
+    check(!controller.field(F::short_bits).enabled&&!controller.enabled(C::transmit_short_bits),
+          "Raw tab could edit or transmit an attachment");
+    controller.activate(C::use_text);prepare(controller);
+    check(controller.field(F::short_bits).text=="010"&&controller.enabled(C::transmit_short_bits),
+          "Returning from an attachment lost the short raw draft");
+    controller.close();
+}
+void short_raw_reception() {
+    using F=ui::Field;using C=ui::Command;
+    for(const auto raw:{"010","1","0010"}) {
+        Controller controller({true,true});controller.edit(F::short_bits,raw);prepare(controller);
+        controller.start();controller.activate(C::transmit_short_bits);
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+        std::optional<std::size_t> received;
+        while(std::chrono::steady_clock::now()<deadline) {
+            controller.poll();
+            for(std::size_t i=0;i<controller.signals().lines().size();++i)
+                if(controller.signals().copy_raw_bits(i)==raw)received=i;
+            if(controller.snapshot().simulation_replay)
+                check(!received,"Exact received bits became copyable before simulation replay completed");
+            if(received&&controller.snapshot().transmission_finished&&!controller.snapshot().simulation_replay)break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        check(received.has_value(),"Simulated short raw pattern did not retain its exact received bits");
+        controller.select(F::signals,std::to_string(controller.signals().lines()[*received].id));
+        check(controller.enabled(C::copy_raw_signal)&&controller.enabled(C::paste_raw_signal)&&
+              controller.field(F::received_raw_bits).text.find(raw)!=std::string::npos,
+              "Completed raw reception did not enable inspection, copy and reuse");
+        controller.activate(C::copy_raw_signal);const auto requests=controller.take_services();
+        check(requests.size()==1&&requests.front().value==raw,"Copy raw bits copied decoded text or padded byte bits");
+        controller.complete_service({requests.front().id,false,{},{}});
+        if(std::string_view(raw)=="010") {
+            check(controller.signals().copy_text(*received)=="t","010 reception lost its decoded text view");
+            controller.activate(C::paste_signal);
+            check(controller.field(F::message).text=="t"&&controller.field(F::binary).text=="01110100"&&
+                  controller.field(F::short_bits).text=="010","Paste as message lost the distinction between text bytes and compression bits");
+        }
+        controller.activate(C::paste_raw_signal);prepare(controller);
+        check(controller.field(F::short_bits).text==raw&&controller.field(F::binary).text==raw&&
+              controller.inspection()->binary&&controller.enabled(C::transmit_short_bits),
+              "Reusing received raw bits changed their exact length or value");
+        controller.activate(C::clear_received);
+        check(!controller.enabled(C::copy_raw_signal)&&!controller.enabled(C::paste_raw_signal),
+              "Clearing receptions left stale raw bits available");
+        controller.close();
+    }
+}
 void byte_aligned_pattern_reception() {
     using F=ui::Field;using C=ui::Command;
     const std::string binary="01001000 01100101\n01101100 01110000";
@@ -771,6 +866,7 @@ int main(int argc,char** argv) {
         repeatable_pending_drafts();
         binary_editor_controls();
         three_bit_dispatch();
+        short_raw_editor();short_raw_reception();
         receive_target_controls();short_sentence_reception();short_pattern_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();byte_aligned_dictionary_reception();workspace_controls();
         bitmap_source_checks();

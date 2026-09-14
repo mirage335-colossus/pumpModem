@@ -17,7 +17,11 @@ enum class Slot {
     cancel, airtime, signal_label, signals, copy_signal, paste_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
-    constellation, pattern_scores_label, pattern_scores, device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    constellation, pattern_scores_label, pattern_scores,
+    compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
+    short_use_text, short_send_key, short_transmit, short_cancel, short_airtime,
+    compression_signals, copy_raw_signal, paste_raw_signal, received_raw_bits,
+    device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -117,6 +121,30 @@ struct DesktopLayout {
         out[Slot::zoom_in] = {waveform.x + 4, waveform.y + waveform.h - 22, 64, compact_action_height};
         out[Slot::zoom_out] = {waveform.x + 72, waveform.y + waveform.h - 22, 72, compact_action_height};
         out[Slot::reset_zoom] = {waveform.x + 148, waveform.y + waveform.h - 22, 88, compact_action_height};
+
+        // The short-pattern page uses the same native control declarations as
+        // the console. Reserve a compact reference beside the exact-bit editor
+        // and let its reception history grow with the page viewport.
+        const int compression_width = width - 2 * margin;
+        const int compression_column = (compression_width - 20) / 2;
+        out[Slot::compression_explanation] = {margin, 130, compression_width, 54};
+        out[Slot::short_bits_label] = {margin, 190, compression_column, 22};
+        out[Slot::short_bits] = {margin, 216, 230, 40};
+        out[Slot::short_bits_detail] = {margin, 270, compression_column, 72};
+        out[Slot::compression_codes] = {margin + compression_column + 20, 184,
+            compression_width - compression_column - 20, 166};
+        constexpr int short_actions_y = 362;
+        out[Slot::short_use_text] = {margin, short_actions_y, 90, action_height};
+        out[Slot::short_send_key] = {116, short_actions_y, 150, action_height};
+        out[Slot::short_transmit] = {276, short_actions_y, 125, action_height};
+        out[Slot::short_cancel] = {411, short_actions_y, 115, action_height};
+        out[Slot::short_airtime] = {536, short_actions_y, width - margin - 536, action_height};
+        const int raw_detail_y = out[Slot::page].y + out[Slot::page].h - 62;
+        const int raw_actions_y = raw_detail_y - 38;
+        out[Slot::compression_signals] = {margin, 426, compression_width, raw_actions_y - 436};
+        out[Slot::copy_raw_signal] = {margin, raw_actions_y, 150, action_height};
+        out[Slot::paste_raw_signal] = {margin + 160, raw_actions_y, 180, action_height};
+        out[Slot::received_raw_bits] = {margin, raw_detail_y, compression_width, 52};
 
         const int controls_y = height - 92, available = width - 2 * margin - 60;
         const int device_width = available * 10 / 100, bandwidth_width = available * 9 / 100;

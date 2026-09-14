@@ -372,8 +372,56 @@ void declarations() {
     const auto a=ui::control_layout(extension[0],{},1180,866,extension),b=ui::control_layout(extension[1],{},1180,866,extension);
     check(a.frame.x+a.frame.w<b.frame.x&&a.frame.y==b.frame.y,"Generic extension declarations overlap or ignore order");
 }
+void compression_declarations() {
+    const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[](const auto& p){return p.id==ui::Page::compression;});
+    check(page!=ui::pages().end()&&!page->document&&std::string_view(page->title)=="Compression / raw bits",
+          "Compression view must be a declared native-control page");
+    Application app({.simulation=true});
+    check(!app.document(ui::Page::compression,900),"Compression controls acquired a duplicate document");
+    std::set<ui::Field> fields;std::set<ui::Command> commands;std::vector<const ui::Control*> controls;
+    bool explains_code=false;
+    for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression) {
+        controls.push_back(&c);fields.insert(c.field);commands.insert(c.command);
+        check(!c.persistent&&c.slot!=ui::Slot::none,"Compression binding lost shared page geometry");
+        if(c.field==ui::Field::short_bits)
+            check(c.kind==ui::Kind::text&&!c.multiline&&c.submit==ui::Command::transmit_short_bits&&
+                  c.submit_mode==ui::Field::send_key,"Short-bit editor lost its guarded send-key binding");
+        if(c.field==ui::Field::signals)
+            check(c.kind==ui::Kind::list&&c.follow_tail&&!c.activate_on_select&&c.activate_record==ui::Command::copy_raw_signal,
+                  "Compression reception selection must preserve exact-bit copy interaction");
+        if(c.kind==ui::Kind::label&&c.field==ui::Field::count) {
+            const std::string_view label=c.label;
+            explains_code|=label.find("010")!=label.npos&&label.find("01110100")!=label.npos&&
+                label.find("incomplete compression codes")!=label.npos;
+        }
+    }
+    check(explains_code,"Compression page does not explain received t versus its byte representation");
+    for(const auto field:{ui::Field::short_bits,ui::Field::short_bits_detail,ui::Field::compression_codes,
+                         ui::Field::received_raw_bits,ui::Field::signals,ui::Field::send_key,ui::Field::airtime})
+        check(fields.contains(field),"Compression page lost a shared field binding");
+    for(const auto command:{ui::Command::transmit_short_bits,ui::Command::cancel,ui::Command::use_text,
+                           ui::Command::copy_raw_signal,ui::Command::paste_raw_signal})
+        check(commands.contains(command),"Compression page lost a required action");
+    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+        std::vector<ui::Rect> occupied;
+        for(const auto* c:controls) {
+            const auto geometry=ui::control_layout(*c,{},size.w,size.h);
+            auto frame=geometry.frame;
+            if(geometry.has_label&&c->kind!=ui::Kind::label) {
+                frame.h+=frame.y-geometry.label.y;frame.y=geometry.label.y;
+            }
+            for(const auto other:occupied)
+                check(frame.x+frame.w<=other.x||other.x+other.w<=frame.x||
+                      frame.y+frame.h<=other.y||other.y+other.h<=frame.y,
+                      "Compression page controls or their native labels overlap");
+            occupied.push_back(frame);
+        }
+    }
+    check(std::string_view(control(ui::Field::binary).help).find("Incomplete bytes pause")==std::string_view::npos,
+          "Binary help still rejects supported short raw patterns");
+}
 }
 int main() {
-    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

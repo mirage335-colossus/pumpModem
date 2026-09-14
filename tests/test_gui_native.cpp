@@ -10,8 +10,57 @@ DecodedPacket packet(std::uint8_t id, std::size_t size) {
     result.message.data.resize(size,id);
     return result;
 }
+void retained_raw_bits() {
+    gui::Signals signals;
+    gui::SignalLine decoded;
+    decoded.text="t";decoded.raw_bits="010";decoded.received_bits=3;
+    decoded.complete=true;decoded.pattern_score=25.;
+    signals.update(decoded);
+    check(signals.copy_raw_bits(0)=="010" && signals.copy_text(0)=="t" &&
+          signals.copy_bytes(0)==Bytes{'t'} && !signals.copy_bits(0) && !signals.copy_id(0));
+    check(signals.lines()[0].raw_bits=="010" && !signals.copy_raw_bits(1));
+
+    const auto unavailable=[&](gui::SignalLine line) {
+        signals.clear();signals.update(std::move(line));check(!signals.copy_raw_bits(0));
+    };
+    auto pending=decoded;pending.complete=false;unavailable(pending);
+    auto partial=decoded;partial.raw_bits="01";unavailable(partial);
+    check(signals.lines()[0].raw_bits.empty());
+    partial=decoded;partial.expected_bits=4;unavailable(partial);
+    for (const auto& invalid : {std::string{},std::string("01x"),std::string("0 1"),std::string("01\0",3)}) {
+        auto malformed=decoded;malformed.raw_bits=invalid;unavailable(malformed);
+        check(signals.lines()[0].raw_bits.empty());
+    }
+    for (const auto score : {std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        auto invalid_score=decoded;invalid_score.pattern_score=score;unavailable(invalid_score);
+    }
+    auto missing_score=decoded;missing_score.pattern_score.reset();unavailable(missing_score);
+    auto verified=decoded;verified.validated=true;unavailable(verified);
+    auto file=decoded;file.text_message=false;unavailable(file);
+    auto empty=decoded;empty.text.clear();unavailable(empty);
+
+    auto bounded=decoded;bounded.raw_bits=std::string(4096,'0');bounded.received_bits=4096;
+    signals.clear();signals.update(bounded);
+    check(signals.copy_raw_bits(0)==bounded.raw_bits);
+    bounded.raw_bits.push_back('0');++bounded.received_bits;unavailable(bounded);
+    check(signals.lines()[0].raw_bits.empty());
+
+    gui::SignalLine binary;
+    binary.binary=true;binary.text="01110100";binary.received_bits=8;binary.complete=true;
+    signals.clear();signals.update(binary);
+    check(signals.copy_raw_bits(0)=="01110100" && signals.copy_text(0)=="t" && !signals.copy_bits(0));
+    binary.text="010";binary.received_bits=3;signals.update(binary);
+    check(signals.copy_raw_bits(0)=="010" && signals.copy_bits(0)=="010" && !signals.copy_text(0));
+    binary.complete=false;unavailable(binary);
+    binary.complete=true;binary.expected_bits=4;unavailable(binary);
+    binary.expected_bits=0;binary.text="01";unavailable(binary);
+    binary.text="01x";unavailable(binary);
+    binary.text=std::string(4097,'0');binary.received_bits=4097;unavailable(binary);
+    check(signals.lines()[0].text.size()==4096);
+}
 int main() {
     try {
+        retained_raw_bits();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
         check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));

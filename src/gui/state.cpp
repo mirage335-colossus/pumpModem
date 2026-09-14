@@ -203,6 +203,9 @@ void Signals::update(SignalLine line) {
         line.validated=false; line.packet_id.clear(); line.text_message=false;
         line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();
     }
+    if (line.raw_bits.size()>4096 || line.raw_bits.find_first_not_of("01")!=std::string::npos ||
+        (line.received_bits && line.raw_bits.size()!=line.received_bits) ||
+        (line.expected_bits && line.raw_bits.size()!=line.expected_bits)) line.raw_bits.clear();
     if (line.text.size()>4096) line.text.resize(4096);
     const auto found=std::find_if(lines_.begin(),lines_.end(),[&](const auto& item) { return item.id==line.id; });
     if (found!=lines_.end()) {
@@ -222,6 +225,14 @@ std::optional<std::string> Signals::copy_bits(std::size_t index) const {
     const auto& line=lines_[index];
     if (signal_byte_aligned(line) || !complete_bits(line)) return std::nullopt;
     return line.text;
+}
+std::optional<std::string> Signals::copy_raw_bits(std::size_t index) const {
+    if (index>=lines_.size()) return {};
+    const auto& line=lines_[index];
+    if (complete_bits(line)) return line.text;
+    if (line.binary || !line.complete || line.validated || !line.text_message || line.text.empty() ||
+        !line.pattern_score || !std::isfinite(*line.pattern_score) || line.raw_bits.empty()) return {};
+    return line.raw_bits;
 }
 std::optional<std::string> Signals::copy_text(std::size_t index) const {
     const auto bytes=copy_bytes(index);

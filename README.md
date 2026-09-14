@@ -202,6 +202,18 @@ limited to 128 meaningful bits, with optional whitespace between groups. While
 an attachment is selected, both message draft views are inactive; Use text
 restores the synchronized draft.
 
+The **Compression / raw bits** tab shows the fixed lowercase codebook separately
+from the message's byte representation. For example, the three payload bits
+`010` decode as `t`, whose ASCII byte is `01110100`. Enter any **1 to 4 bits** in
+this tab to transmit that exact pattern, preserving leading zeros and incomplete
+dictionary codes. The complete short codes are space=`000`, e=`001`, t=`010`,
+a=`011`, o=`100`, i=`1010`, and n=`1011`; other patterns remain valid raw input.
+Select a completed reception to see its original bits, choose **Copy raw bits**
+to copy them, or **Use received bits** to load a 1 to 4 bit pattern for sending
+again. **Paste as message** on Console continues to load decoded text and show
+its byte representation in Binary. Console Binary supports longer raw drafts,
+up to 128 bits.
+
 **Callsign** and **Grid** are convenience fields for the editable greeting in
 Message. Clearing Message inserts `CQ CQ CQ`, followed by ` DE ` and Callsign
 when present, ` GRID ` and Grid when present, then `. Please reply. ` including

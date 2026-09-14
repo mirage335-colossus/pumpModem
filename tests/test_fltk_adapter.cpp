@@ -909,6 +909,35 @@ public:
     }
     void draw() override {}
 };
+void compression_page_labels() {
+    Launch launch;launch.simulation=true;launch.page=ui::Page::compression;
+    NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Compression fixture has no native window");
+    window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
+    for(const auto* draft:{"","010","0010","01010"}) {
+        if(*draft)app.application.edit(ui::Field::short_bits,draft);
+        const auto until=Clock::now()+std::chrono::milliseconds(80);while(Clock::now()<until)Fl::wait(.005);
+        for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression&&c.kind==ui::Kind::label) {
+            const auto value=app.application.control(c).label;
+            const auto expected=app.application.control_layout(c,window->w(),window->h()).label;
+            // The same status can appear in both tabs; measure this declared
+            // native label, including its page-specific geometry.
+            const std::function<Fl_Widget*(Fl_Group&)> locate=[&](Fl_Group& group)->Fl_Widget* {
+                for(int i=0;i<group.children();++i) {
+                    auto* child=group.child(i);
+                    if(child->label()&&value==child->label()&&ui::Rect{child->x(),child->y(),child->w(),child->h()}==expected)return child;
+                    if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* found=locate(*nested))return found;
+                }
+                return nullptr;
+            };
+            auto* label=locate(*window);require(label,"Compression text was not presented as a native label");
+            fl_font(label->labelfont(),label->labelsize());int width=0,height=0;fl_measure(value.c_str(),width,height,0);
+            if(width>label->w()||height>label->h())
+                throw std::runtime_error("Compression label clips at the minimum window size: "+value);
+        }
+    }
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void clipboard_shortcuts() {
     Fl_Double_Window host(600,220,"Native editor clipboard shortcuts");
     auto* source=new NativeEditor;source->resize(10,10,580,90);
@@ -1006,6 +1035,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -17,12 +17,25 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Enter transmits by default. Shift+Enter inserts a newline. The send-key choice can require Ctrl+Enter.";
     }
     if(slot==Slot::message)control.help="Edits also update the first 16 bytes in Binary. In escaped-byte mode, use \\xNN for byte values and \\\\ for a literal backslash. Enter transmits; Shift+Enter inserts a newline.";
-    if(slot==Slot::binary)control.help="Edit the first 16 message bytes, most significant bit first. Use eight 0/1 bits per byte; whitespace is optional. Ctrl+C copies and Ctrl+V pastes. Incomplete bytes pause transmission. Enter transmits; Shift+Enter inserts a newline.";
+    if(slot==Slot::binary)control.help="Edit the first 16 message bytes, most significant bit first. Whitespace is optional. Inputs up to 128 bits can transmit exact bits, including incomplete bytes. Short lowercase codes can decode as text; use Compression / raw bits to inspect their exact received bits. Ctrl+C copies and Ctrl+V pastes. Enter transmits; Shift+Enter inserts a newline.";
+    if(slot==Slot::short_bits) {
+        control.font_size=22;control.submit=Command::transmit_short_bits;control.submit_mode=Field::send_key;
+        control.help="Enter 1 to 4 exact 0/1 bits; leading zeros are preserved and whitespace is optional. Editing selects raw transmission. Enter transmits using the selected send-key rule.";
+    }
+    if(slot==Slot::compression_codes)control.font_size=12;
+    if(slot==Slot::short_bits_detail)control.help="This interpretation comes from the same compression codec used by the receiver. A complete lowercase code can appear as text; its original received bits remain available below.";
+    if(slot==Slot::copy_raw_signal)control.help="Copy the selected completed reception's exact transport bits, including leading zeros and compression bits.";
+    if(slot==Slot::paste_raw_signal)control.help="Load the selected reception's exact 1 to 4 bits into the raw editor for retransmission.";
     if(slot==Slot::signals) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
         control.empty_text="Listening for signals...";
         control.help="Decoded messages appear as one text row. Other receptions show a byte view for whole bytes or exact bits for a partial final byte. Click to copy, or use Paste as message to inspect the bytes in Binary, including escaped byte values.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. For legacy packets, preamble shows recognized training and Data shows pre-FEC accuracy after packet verification. Files use the file list.";
+    }
+    if(slot==Slot::compression_signals) {
+        control.list_row_height=54;control.follow_tail=true;control.activate_record=Command::copy_raw_signal;
+        control.empty_text="Listening for signals...";
+        control.help="Select a completed reception to inspect its exact transport bits below. Double-click or use Copy raw bits to copy them. Use received bits loads a 1 to 4 bit reception for retransmission, even when it decoded as text.";
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr) {
@@ -46,6 +59,7 @@ const char* window_title() {return "Data Pump";}
 const std::vector<PageDefinition>& pages() {
     static const std::vector<PageDefinition> definitions{
         {Page::console,"console","Console",false,86},
+        {Page::compression,"compression","Compression / raw bits",false,200},
         {Page::flow,"flow","Modem flow",true,114},
         {Page::transmission,"transmission","Transmission layout",true,204}
     };
@@ -101,6 +115,23 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"}, Slot::reset_zoom),
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,
+            "Lowercase compression: 010 decodes to t. Pasting t as a message shows its byte, 01110100.\n"
+            "Send 1-4 exact bits below. Other patterns, including incomplete compression codes,\n"
+            "are sent and received as raw bits."}, Slot::compression_explanation),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,1,"Exact raw bits (1-4)"}, Slot::short_bits_label),
+        placed({Kind::text,Field::short_bits,Command::none,Bitmap::none,Page::compression,1,"",1,false,128}, Slot::short_bits),
+        placed({Kind::label,Field::short_bits_detail,Command::none,Bitmap::none,Page::compression,2,""}, Slot::short_bits_detail),
+        placed({Kind::label,Field::compression_codes,Command::none,Bitmap::none,Page::compression,2,""}, Slot::compression_codes),
+        placed({Kind::action,Field::count,Command::use_text,Bitmap::none,Page::compression,3,"Use text"}, Slot::short_use_text),
+        placed({Kind::choice,Field::send_key,Command::none,Bitmap::none,Page::compression,3,""}, Slot::short_send_key),
+        placed({Kind::action,Field::count,Command::transmit_short_bits,Bitmap::none,Page::compression,3,"Transmit"}, Slot::short_transmit),
+        placed({Kind::action,Field::count,Command::cancel,Bitmap::none,Page::compression,3,"Cancel TX"}, Slot::short_cancel),
+        placed({Kind::label,Field::airtime,Command::none,Bitmap::none,Page::compression,3,""}, Slot::short_airtime),
+        placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::compression,4,"Received signals - select to inspect exact bits"}, Slot::compression_signals),
+        placed({Kind::action,Field::count,Command::copy_raw_signal,Bitmap::none,Page::compression,5,"Copy raw bits"}, Slot::copy_raw_signal),
+        placed({Kind::action,Field::count,Command::paste_raw_signal,Bitmap::none,Page::compression,5,"Use received bits"}, Slot::paste_raw_signal),
+        placed({Kind::label,Field::received_raw_bits,Command::none,Bitmap::none,Page::compression,6,""}, Slot::received_raw_bits),
     };
     return controls;
 }

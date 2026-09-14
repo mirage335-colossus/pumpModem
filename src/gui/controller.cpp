@@ -3,6 +3,7 @@
 #include "text_policy.hpp"
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/tuning.hpp"
 #include <array>
@@ -21,6 +22,25 @@ namespace datapump::gui {
 namespace {
 using UiField=ui::Field; using ui::Command;
 using Clock=std::chrono::steady_clock;
+std::string bit_text(std::span<const std::uint8_t> bits) {
+    std::string result;result.reserve(bits.size());
+    for(const auto bit:bits)result+=bit?'1':'0';
+    return result;
+}
+std::string compression_reference() {
+    std::string result;
+    for(const auto group:{" etao","in","shrd","lucm","fwyp","bg","jk","qv","xz"}) {
+        if(!result.empty())result+='\n';
+        const auto first=static_cast<std::uint8_t>(group[0]);
+        result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
+        for(const char* byte=group;*byte;++byte) {
+            if(byte!=group)result+="   ";
+            result+=*byte==' '?"space":std::string(1,*byte);
+            result+=' ';result+=bit_text(compression::encode_short_bits(Bytes{static_cast<std::uint8_t>(*byte)}));
+        }
+    }
+    return result;
+}
 std::string path_text(const std::filesystem::path& path) { const auto s=path.u8string(); return {s.begin(),s.end()}; }
 std::filesystem::path path_from_text(std::string_view s) { return std::filesystem::path(std::u8string(s.begin(),s.end())); }
 double number(const std::string& text,const char* name) {
@@ -135,6 +155,7 @@ struct Controller::Impl {
         f(UiField::dsp_workspace).options={{"ram-25","25% available RAM"},{"ram-50","50% available RAM"},{"ram-75","75% available RAM"}};
         f(UiField::dsp_workspace).selected="ram-50";
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
+        f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
         encryption_changed(); configure(); dirty(); controls();
         need_devices=!options.smoke;
@@ -212,6 +233,54 @@ struct Controller::Impl {
         f(UiField::binary).text=composer.binary();
         draft_error.clear(); binary_label();
         message_label();
+        sync_short_bits();
+    }
+    void sync_short_bits() {
+        auto& text=f(UiField::short_bits).text;text.clear();
+        if(composer.raw_bits()) {
+            if(composer.raw_bits()->size()<=4)text=bit_text(*composer.raw_bits());
+        } else if(composer.bytes().size()==1) {
+            try { text=bit_text(compression::encode_short_bits(composer.bytes(),4)); }
+            catch(const Error&) {} // This byte has a longer dictionary code.
+        }
+    }
+    void short_bits_changed() {
+        const auto input=f(UiField::short_bits).text;
+        try {
+            const auto bits=parse_binary_bits(input);
+            if(bits.size()>4)throw Error("Enter 1-4 bits; use Console for longer input.");
+            Bytes decoded;
+            try { decoded=compression::decode_short_bits(bits); }
+            catch(const Error&) {} // Incomplete dictionary tokens are valid raw drafts.
+            BinaryEditor next(std::move(decoded));next.edit_binary(input);
+            composer=std::move(next);
+            repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
+            seeded_message.clear();sync_composer();f(UiField::short_bits).text=input;
+        } catch(const std::exception& e) {
+            draft_error=e.what();
+        }
+        dirty();
+    }
+    void short_bits_status() {
+        auto& detail=f(UiField::short_bits_detail).text;
+        if(attachment||file_loading)detail="Attachment selected. Choose Use text\nto enter a short raw pattern.";
+        else if(!draft_error.empty())detail=draft_error;
+        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to 4 bits to replace the current draft.\nLeading zeros and incomplete dictionary codes are preserved.";
+        else {
+            const auto bits=parse_binary_bits(f(UiField::short_bits).text);
+            detail="Current draft: "+std::to_string(bits.size())+" payload bits, "+bit_text(bits)+".\n";
+            try {
+                const auto decoded=compression::decode_short_bits(bits);
+                detail+="Lowercase code: "+(decoded==Bytes{' '}?std::string("space"):"'"+std::string(decoded.begin(),decoded.end())+"'");
+                detail+=". Message byte: "+BinaryEditor(decoded).binary()+".";
+            } catch(const Error&) { detail+="No complete lowercase code; sent exactly as entered."; }
+        }
+        auto& received=f(UiField::received_raw_bits).text;
+        const auto index=selected_signal();
+        const auto bits=index?signals.copy_raw_bits(*index):std::nullopt;
+        if(!bits)received="Select a completed pattern reception to inspect its exact payload bits.";
+        else received="Received raw bits ("+std::to_string(bits->size())+"): "+bits->substr(0,64)+
+            (bits->size()>64?"...\nFirst 64 shown; Copy raw bits copies all.":"");
     }
     bool has_repeatable_prefix() const {
         const auto& bytes=composer.bytes();
@@ -325,7 +394,7 @@ struct Controller::Impl {
             // A shorter replacement can bring the retained suffix into view.
             if(compact(normalized)!=compact(f(UiField::binary).text))f(UiField::binary).text=normalized;
             draft_error.clear(); binary_label();
-            message_label();
+            message_label();sync_short_bits();
             if(pending_repeatable_removal)set_repeatable(false);
         } catch(const std::exception& e) {
             draft_error=e.what(); f(UiField::binary_label).text="Binary / incomplete or invalid";
@@ -344,6 +413,8 @@ struct Controller::Impl {
         if(closing) return false;
         const bool busy=transmit_requested || snapshot.transmitting;
         switch(command) {
+        case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
+            !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
@@ -354,6 +425,11 @@ struct Controller::Impl {
         case Command::paste_previous: return previous_message.has_value()&&!attachment&&!file_loading;
         case Command::save_file: return selected_file()!=nullptr;
         case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)||signals.copy_text(*index)); }
+        case Command::copy_raw_signal: { const auto index=selected_signal();return index&&signals.copy_raw_bits(*index).has_value(); }
+        case Command::paste_raw_signal: {
+            const auto index=selected_signal();const auto bits=index?signals.copy_raw_bits(*index):std::nullopt;
+            return !attachment&&!file_loading&&bits&&bits->size()<=4;
+        }
         case Command::paste_signal: {
             if(closing||attachment||file_loading)return false;
             const auto index=selected_signal();
@@ -376,6 +452,7 @@ struct Controller::Impl {
         for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
+        f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
         f(UiField::binary).enabled=f(UiField::message).enabled=!attachment&&!closing;
         const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
@@ -384,6 +461,7 @@ struct Controller::Impl {
         const bool raw=!attachment&&composer.raw_bits().has_value();
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw&&(file_loading||size>=16);
         f(UiField::fec).display_text=raw?"Off (raw bits)":!file_loading&&size<16?"Off (under 16 B)":"";
+        short_bits_status();
     }
     void refresh_files() {
         auto& state=f(UiField::files);
@@ -500,6 +578,8 @@ struct Controller::Impl {
                 SignalLine line;line.id=next_pattern_text_id--;line.frequency_hz=settings.transfer.modem.carrier_hz;
                 line.text=std::string(received.packet.message.data.begin(),received.packet.message.data.end());
                 line.complete=true;line.pattern_score=received.diagnostics.pattern_score;
+                line.received_bits=received.raw_bits.size();
+                if(received.raw_bits.size()<=4096)line.raw_bits=bit_text(received.raw_bits);
                 signals.update(std::move(line));
             }
         }
@@ -548,6 +628,7 @@ struct Controller::Impl {
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
+        case Command::transmit_short_bits:
         case Command::transmit: {
             // Keep the accepted bytes available for retry, including arbitrary
             // binary edits. Clearing here frees the next draft while TX runs.
@@ -588,6 +669,13 @@ struct Controller::Impl {
                 request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy verified text",std::string(bytes.begin(),bytes.end()));
             } break;
         }
+        case Command::copy_raw_signal: {
+            const auto bits=signals.copy_raw_bits(*selected_signal());
+            request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received raw payload bits",*bits);break;
+        }
+        case Command::paste_raw_signal:
+            f(UiField::short_bits).text=*signals.copy_raw_bits(*selected_signal());short_bits_changed();
+            ++f(UiField::short_bits).text_cursor_end_revision;break;
         case Command::paste_signal: {
             const auto index=*selected_signal();
             auto bytes=signals.copy_bytes(index);
@@ -655,7 +743,9 @@ void Controller::close() { auto& p=*impl_; p.closing=true; p.session.stop(); p.w
 bool Controller::closing() const { return impl_->closing; }
 bool Controller::ready_to_close() const { return impl_->closing&&!impl_->preparing; }
 void Controller::edit(UiField field,std::string text) {
-    auto& p=*impl_; if(!p.f(field).enabled||(p.f(field).text==text&&!(field==UiField::message&&(!p.draft_error.empty()||p.composer.raw_bits())))) return;
+    auto& p=*impl_; if(!p.f(field).enabled||(p.f(field).text==text&&
+        !(field==UiField::message&&(!p.draft_error.empty()||p.composer.raw_bits()))&&
+        !(field==UiField::short_bits&&(!p.composer.raw_bits()||!p.draft_error.empty())))) return;
     try {
         const auto& screen=ui::console_screen();
         const auto declaration=std::find_if(screen.begin(),screen.end(),[&](const auto& c) { return c.field==field&&c.kind==ui::Kind::text; });
@@ -667,7 +757,8 @@ void Controller::edit(UiField field,std::string text) {
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
-        if(field==UiField::binary) p.binary_changed();
+        if(field==UiField::short_bits)p.short_bits_changed();
+        else if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
         else if(field==UiField::device||field==UiField::bandwidth||field==UiField::snr) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
