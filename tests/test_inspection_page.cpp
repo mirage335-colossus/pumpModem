@@ -32,7 +32,7 @@ Inspection fixture() {
 }
 void semantic_order_and_geometry() {
     const auto model=fixture();const auto flow=document::build(&model,true,900,70);
-    check(flow.page_size==56&&flow.first==56,"responsive chip paging must be aligned and bounded");
+    check(flow.page_size==33&&flow.first==66,"responsive chip paging must be aligned and bounded");
     std::vector<const document::Node*> nodes;flatten(flow.root,nodes);
     check(find(nodes,"Transmit")<find(nodes,"Chosen phase / amplitude alphabets"),"lanes must precede alphabets");
     check(find(nodes,"constellation/0")<find(nodes,"Full pattern / scrambler symbol space"),"alphabets must precede pattern inspection");
@@ -46,7 +46,7 @@ void semantic_order_and_geometry() {
     const auto narrow=document::build(&model,true,300);nodes.clear();flatten(narrow.root,nodes);
     check(nodes[find(nodes,"Transmit")+1]->children.size()==1,"narrow flow must stack cards");
     check(narrow.page_size==13,"narrow chip paging must follow available width");
-    const auto end=document::build(&model,true,900,99999);check(end.first==112,"last chip window must clamp to the final partial page");
+    const auto end=document::build(&model,true,900,99999);check(end.first==132,"last chip window must clamp to the final partial page");
     nodes.clear();flatten(end.root,nodes);check(!nodes[find(nodes,"Next")]->enabled&&!nodes[find(nodes,"Last")]->enabled,"end-page actions must be disabled");
 }
 void transmission_and_pending() {

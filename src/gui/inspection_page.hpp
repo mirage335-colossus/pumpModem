@@ -117,7 +117,7 @@ inline void codeword(Node& parent,const std::string& title,std::size_t data,std:
     if(parity) {auto n=text(std::to_string(parity)+" parity bytes",parent.width-split,12,Tone::text,true);n.height=40;n.padding=8;n.fill=Fill::parity;n.border=true;line.children.push_back(std::move(n));}
     parent.children.push_back(std::move(line));
 }
-inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& page,std::size_t requested_first) {
+inline void pattern_preview(Node& parent,const inspection::PatternSpace& model,Page& page,std::size_t requested_first) {
     heading(parent,model.bounded_pattern_preview?"Pattern / scrambler symbol preview":"Full pattern / scrambler symbol space");
     paragraph(parent,model.bounded_pattern_preview?"Each row shows an independently distinguishable binary pattern at chip centers. I is the upper half of each cell; Q is the lower half. Long symbols show at most 16,384 chips; distances below cover this illustrated prefix only.":"Each row is one complete legal symbol: its phase/amplitude coefficient times the selected chip sequence. I is the upper half of each cell; Q is the lower half.");
     paragraph(parent,model.representative_keyed?"Keyed pattern structure: public illustrative signs; the actual sequence depends on the key and epoch.":model.bounded_pattern_preview?"Configured public pattern; the bounded prefix is inspectable below.":"Configured public signs; the full code period is inspectable below.");
@@ -145,6 +145,8 @@ inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& pag
     grid.children.push_back(bitmap("pattern/chips",plots::PlotSnapshot::pattern_chips(model,first,shown),cell*static_cast<float>(shown),18*static_cast<float>(model.coefficients.size())));
     parent.children.push_back(std::move(grid));
     paragraph(parent,"Light: positive. Dark: negative. Middle gray: zero. Distance from middle gray shows I/Q amplitude on one shared scale. Hatched chips are outside this symbol's actual duration. Rows assume a zero preceding carrier phase.");
+}
+inline void pattern_details(Node& parent,const inspection::PatternSpace& model,const Page& page) {
     paragraph(parent,model.bounded_pattern_preview?"Illustrated coverage: "+std::to_string(model.symbol_samples)+" of "+std::to_string(model.full_symbol_samples)+" samples; "+number(model.symbol_seconds)+" s. Pattern-chip distances use actual sample weights; continuous tone distances use chip-center approximations. This is a design preview, not received confidence.":"Symbol coverage: "+std::to_string(model.symbol_samples)+" samples, "+number(model.symbol_seconds)+" s; "+std::to_string(model.complete_periods)+" complete code periods + "+std::to_string(model.tail_samples)+" samples. Distances include every repeat and partial chip.");
     heading(parent,model.bounded_pattern_preview?"Illustrated pattern distance map":"Complete-symbol distance map");
     const auto symbols=model.coefficients.size(),count=symbols+(model.unused_pattern?1U:0U);
@@ -182,6 +184,8 @@ inline void pattern(Node& parent,const inspection::PatternSpace& model,Page& pag
     paragraph(parent,"White bar: energy matching the code. Gray: energy outside that code. For noise, rho is RMS over independent whitened chip coordinates; individual noise realizations vary.");
     if(model.unused_pattern) {
         paragraph(parent,"Unused example: "+model.unused_pattern->name+". Full-period signs in the same chip window:");
+        const auto first=page.first,shown=std::min(page.page_size,model.code.size()-first);
+        const float cell=std::min(32.0f,(parent.width-86)/static_cast<float>(std::max<std::size_t>(1,shown)));
         auto signs=row(parent.width);signs.bottom=8;signs.children.push_back(text("",86,11));
         for(std::size_t c=0;c<shown;++c)signs.children.push_back(text(model.unused_pattern->code[first+c]>0?"+":"-",cell,11,model.chip_weights[first+c]?Tone::text:Tone::muted));
         parent.children.push_back(std::move(signs));
@@ -196,8 +200,19 @@ inline Page build(const Inspection* model,bool flow,float width,std::size_t firs
     paragraph(root,model->title,14,Tone::accent,true,6);paragraph(root,model->summary);
     if(flow) {
         for(const auto& lane:model->lanes)steps(root,lane);
-        constellations(root,*model);
-        if(model->pattern_space)pattern(root,*model->pattern_space,page,first);
+        if(!model->constellations.empty()&&model->pattern_space&&root.width>=800) {
+            auto previews=row(root.width);
+            auto alphabets=column(std::min(360.0f,root.width/3));alphabets.right=16;
+            auto patterns=column(root.width-alphabets.width-alphabets.right);
+            constellations(alphabets,*model);
+            pattern_preview(patterns,*model->pattern_space,page,first);
+            previews.children.push_back(std::move(alphabets));previews.children.push_back(std::move(patterns));
+            root.children.push_back(std::move(previews));
+        } else {
+            constellations(root,*model);
+            if(model->pattern_space)pattern_preview(root,*model->pattern_space,page,first);
+        }
+        if(model->pattern_space)pattern_details(root,*model->pattern_space,page);
         note(root,"Preamble symbols",model->preamble_description);note(root,"Pattern and integration",model->chip_description);
     } else {
         std::vector<const StructureSection*> physical,logical,coding;
