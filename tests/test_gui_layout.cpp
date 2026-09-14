@@ -27,7 +27,9 @@ void established_default() {
     check(layout[Slot::signals] == Rect{16, 412, 882, 156}, "received signals size changed");
     check(layout[Slot::files] == Rect{912, 412, 252, 120}, "received files size changed");
     check(layout[Slot::waterfall] == Rect{16, 598, 390, 130}, "waterfall size changed");
-    check(layout[Slot::device] == Rect{16, 774, 108, 27}, "persistent modem controls moved");
+    check(layout[Slot::device] == Rect{16, 774, 112, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{138, 774, 93, 27} &&
+          layout[Slot::carrier] == Rect{241, 774, 101, 27}, "Rate and Carrier editors lost their reserved widths");
     check(layout[Slot::status] == Rect{16, 835, 1148, 24}, "persistent status moved");
 }
 void document_widths() {
@@ -102,13 +104,24 @@ void supported_sizes() {
               raw_copy.y+raw_copy.h<raw_detail.y&&raw_detail.h>=48,
               "Exact received bits or their actions overlap the signal history");
         auto previous = layout[Slot::device];
-        for (const auto slot : {Slot::bandwidth, Slot::snr, Slot::receive_snr, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
+        const auto control_gap = layout[Slot::bandwidth].x - previous.x - previous.w;
+        check(control_gap >= 2 && control_gap <= 10 &&
+              (size.w != min_width || control_gap == 2) &&
+              (size.w < default_width || control_gap == 10),
+              "Modem row did not adapt its gaps to the available width");
+        for (const auto slot : {Slot::bandwidth, Slot::carrier, Slot::snr, Slot::receive_snr, Slot::pattern, Slot::fec, Slot::dsp_workspace}) {
             const auto current = layout[slot];
-            check(current.x == previous.x + previous.w + 10 && current.y == previous.y &&
+            check(current.x == previous.x + previous.w + control_gap && current.y == previous.y &&
                   current.h == previous.h, "modem control row is misaligned");
             previous = current;
         }
         check(previous.x + previous.w == size.w - margin, "modem controls do not fill the row");
+        check(layout[Slot::bandwidth].w>=82 && layout[Slot::carrier].w>=90 &&
+              persistent_slot(Slot::carrier), "Rate or Carrier is unusable at the minimum window size");
+        check(layout[Slot::device].w>=112 && layout[Slot::snr].w>=130 &&
+              layout[Slot::receive_snr].w>=166 && layout[Slot::pattern].w>=130 &&
+              layout[Slot::fec].w>=148 && layout[Slot::dsp_workspace].w>=121,
+              "A modem control is too narrow for its full native label");
     }
 }
 void adapter_helpers() {

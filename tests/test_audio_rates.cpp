@@ -66,10 +66,13 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
     check(options.modem.sample_rate == internal_rate && modem::bit_rate(options.modem) == planned_rate,
           "hardware rates must not alter bandwidth, symbol timing or selected throughput");
 }
-void pattern_roundtrip(bool keyed) {
+void pattern_roundtrip(bool keyed,double bandwidth=1200) {
     transfer::Options options;
     options.timestamp=1800000000;options.search_seconds=0;options.fec=FecMode::off;
-    options.modem=tuning::resolve(1200,40,keyed?tuning::PatternMode::auto_keystream:tuning::PatternMode::auto_pattern,keyed).config;
+    options.modem=tuning::resolve(bandwidth,40,keyed?tuning::PatternMode::auto_keystream:tuning::PatternMode::auto_pattern,
+        keyed,bandwidth==3600?std::optional<double>{1500}:std::nullopt).config;
+    if(bandwidth==3600)check(options.modem.carrier_hz==1500,
+          "the 3.6 kHz radio plan must retain its 1500 Hz carrier across audio cards");
     if(keyed) { std::array<std::uint8_t,32> seed{};seed[0]=0x5c;options.key=Crypto(seed); }
     const auto symbol=modem::symbol_sample_count(options.modem);
     const auto internal=options.modem.sample_rate;
@@ -106,6 +109,8 @@ int main() {
         roundtrip(24000, 88200, 96000);
         pattern_roundtrip(false);
         pattern_roundtrip(true);
+        pattern_roundtrip(false,3600);
+        pattern_roundtrip(true,3600);
         std::cout << "Packets survive independent hardware sample rates\n";
         return 0;
     } catch (const std::exception& error) {

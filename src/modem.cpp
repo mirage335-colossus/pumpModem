@@ -105,15 +105,23 @@ void validate(const Config& c) {
     check(c.sample_rate >= 64 && c.sample_rate <= 120000000, "internal sample rate must be 64..120000000 Hz");
     check(std::isfinite(c.bandwidth_hz) && c.bandwidth_hz >= 1 && c.bandwidth_hz <= 30000000 && c.bandwidth_hz <= c.sample_rate / 2.0,
           "bandwidth must be finite and within 1 Hz..30 MHz and internal Nyquist");
-    check(std::isfinite(c.carrier_hz) && c.carrier_hz >= c.bandwidth_hz / 2 &&
-          c.carrier_hz + c.bandwidth_hz / 2 <= c.sample_rate / 2.0,
-          "carrier and bandwidth must fit inside internal DSP passband");
     check(std::isfinite(c.training_seconds) && c.training_seconds == 5,
           "normal training duration is fixed at 5 seconds");
     check(std::isfinite(c.integration_seconds) && c.integration_seconds>=0,"invalid integration duration");
-    (void)symbol_sample_count(c);
     check(c.spreading_factor >= 1 && c.spreading_factor <= 16384, "spreading factor must be 1..16384");
     check(c.spreading_mode == SpreadingMode::pattern || c.spreading_mode == SpreadingMode::tone,"unknown spreading mode");
+    const auto samples=symbol_sample_count(c);
+    const auto chip=chip_samples(c);
+    // Do not call pattern_pulse_enabled here: its chip helper validates this
+    // same configuration. Use the identical complete-chip eligibility rule.
+    const bool shaped=c.pulse_shaping && c.spreading_mode==SpreadingMode::pattern &&
+        samples/chip>=2*pattern_pulse_half_span;
+    // This is the intended RRC support including rolloff, not a certified
+    // emission mask. Finite pulse truncation and limiting still leave tails.
+    const auto half_band=shaped ? (1+pattern_pulse_rolloff)*c.sample_rate/(2.*static_cast<double>(chip)) : c.bandwidth_hz/2;
+    check(std::isfinite(c.carrier_hz) && c.carrier_hz>=half_band &&
+          c.carrier_hz+half_band<=c.sample_rate/2.,
+          "carrier and waveform must fit above DC and below internal Nyquist; raise the carrier for short unshaped patterns or tone modes");
     check(c.spreading_mode != SpreadingMode::tone || (!c.scramble && !c.dsss && !c.data_key),
           "tone mode is unencrypted and cannot enable Data, Scrambler or DSSS keystreams");
     check(c.memory_limit >= 1024, "modem memory limit must be at least 1024 bytes");

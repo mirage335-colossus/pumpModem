@@ -56,10 +56,10 @@ Inspection inspect(const InspectionRequest& request) {
     if(keyed)result.preamble_description+=" The independent Data stream protects the prefix before the enabled Scrambler and DSSS layers; prefix addresses never overlap payload addresses.";
     result.chip_description=tone?
         "Public tone patterns are for unencrypted communication and local experiments. Tone modes disable Data encryption, Scrambler and DSSS and do not provide Low-Probability-of-Intercept protection.":
-        "Each meaningful bit selects one of two distinguishable internal patterns. The nominal chip duration follows the selected bandwidth. Private patterns use variable-amplitude circular I/Q noise; Scrambler and DSSS use separate purposes and advancing stream addresses.";
+        "Each meaningful bit selects one of two distinguishable internal patterns. The nominal chip duration follows the selected rate. Private patterns use variable-amplitude circular I/Q noise; Scrambler and DSSS use separate purposes and advancing stream addresses.";
     if(pulse_samples)result.chip_description+=" Smooth pulse shaping keeps the chip rate unchanged and adds short tails at the burst edges. Pattern evidence remains the sole source of timing confidence.";
     result.fields={{"Source",result.binary?"Raw bits":short_text?"Short text":"Message / file"},
-        {"Bandwidth",number(config.bandwidth_hz)+" Hz"},{"TX target C/N0",number(request.target_snr)+" dB-Hz"},
+        {"Rate",number(config.bandwidth_hz)+" Hz"},{"TX target C/N0",number(request.target_snr)+" dB-Hz"},
         {"Internal sample rate",count(config.sample_rate)+" samples/s"},{"Carrier",number(config.carrier_hz)+" Hz"},
         {"Pattern symbols","2 distinguishable patterns / 1 meaningful bit each"},
         {"Pattern selection",request.requested_pattern.empty()?"Configured modem":request.requested_pattern},
@@ -94,7 +94,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Private data stream",keyed?"Mask the entire bitstream, including alignment words, with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
         {"Pattern selection",result.chip_description},
         {request.simulation?"Sampled channel":"Audio output",request.simulation?"Transmit sampled PCM through independent clock, frequency, phase-noise and additive-noise simulation.":"Generate PCM at the internal clock and resample to the selected audio output."}}});
-    result.lanes.push_back({"Receive • pattern evidence",{{"Bounded hypotheses","Search only the configured receive targets, selected bandwidth and pattern mode, with local clock/key hypotheses."},
+    result.lanes.push_back({"Receive • pattern evidence",{{"Bounded hypotheses","Search only the configured receive targets, selected rate, carrier and pattern mode, with local clock/key hypotheses."},
         {"Pattern versus noise","Accumulate soft pattern evidence. Refine timing and frequency using that score; I/Q plots show diagnostic measurements."},
         {"Candidate history","Keep compact scored symbol candidates and useful chain state within the DSP workspace limit; release old waveform history."},
         {"Meaningful bits","Emit pattern-supported bits with exact length; signal end is inferred from subsequent absence of adequate pattern evidence."},

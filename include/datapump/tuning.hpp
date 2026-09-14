@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -43,10 +44,13 @@ inline constexpr double maximum_bandwidth_hz = 30000000;
 // retain the 0.75 * bandwidth carrier. The logical clock covers both the band
 // and carrier with four samples per hertz, keeping the nominal upper edge in
 // the resampler's flat passband. Hardware clocks are negotiated independently.
-std::uint32_t recommended_sample_rate(double bandwidth_hz);
+// An explicit carrier changes the internal clock as needed; omitted carriers
+// preserve the existing automatic recommendation.
+std::uint32_t recommended_sample_rate(double bandwidth_hz,
+    std::optional<double> carrier_hz = std::nullopt);
 double recommended_carrier_hz(double bandwidth_hz);
 Plan resolve(double bandwidth_hz, double target_snr_db_hz, PatternMode mode,
-             bool encryption);
+             bool encryption, std::optional<double> carrier_hz = std::nullopt);
 // Selected bandwidth and pattern mode stay fixed. Targets resolving to the
 // same waveform profile share one receiver hypothesis.
 std::vector<modem::Config> receive_profiles(double bandwidth_hz,

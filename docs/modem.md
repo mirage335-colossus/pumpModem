@@ -21,9 +21,12 @@ frequency, clock and memory limits below remain material.
 
 ## Timing, training, and spreading
 
-The default internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
-1,200 Hz nominal bandwidth. For nominal bandwidth `B` from 1 Hz through 30 MHz,
-the planner selects `Fs = max(6000, ceil(4B))` and carrier `max(1500, 0.75B)`.
+The default CLI/internal configuration is mono 6,000 Hz PCM, a 1500 Hz carrier and
+1,200 Hz nominal rate parameter (`Config::bandwidth_hz`). For this parameter `B`
+from 1 Hz through 30 MHz, the legacy carrier recommendation is
+`max(1500, 0.75B)`. With a selected carrier `fc`, automatic planning chooses
+`Fs = ceil(max(64, 4B, 4fc))`. The GUI defaults to `B=3600`, `fc=1500`, and
+14,400 internal samples/s, and exposes both Rate and Carrier controls.
 Narrow audio remains around a usable carrier rather than falling below 300 Hz.
 The 6 kHz floor is needed for this real-PCM carrier representation; it does not
 raise the nominal chip or symbol rate. The 30 MHz plan still uses 120 million
@@ -182,8 +185,12 @@ observation time. Keyless energy and correlation detectors can still respond
 to the signal. Encryption, HKDF purposes, CTR domains, byte mixing and fresh
 absolute chip positions are unchanged by shaping.
 
-There is no certified occupied-bandwidth mask. Carrier and nominal bandwidth
-must fit inside the internal DSP passband. The 24 kHz GUI preset uses a 96 kHz
+There is no certified occupied-bandwidth mask. Eligible shaped patterns must
+fit their ideal RRC support above DC and below the internal Nyquist frequency;
+short rectangular patterns and tone modes retain the conservative nominal
+`carrier ± B/2` guard. Selecting such an unshaped mode may require raising a
+low carrier. Finite filter tails and limiter regrowth remain subject to the
+spectral qualifications above. The 24 kHz GUI preset uses a 96 kHz
 internal clock and a fitting carrier. That clock is not a sound-card requirement.
 A carrier need not complete an integer number of cycles in a chip.
 
@@ -213,9 +220,13 @@ physical microphone/speaker frequency response still need device-level validatio
 
 ## Automatic signal planning
 
-The CLI defaults to bandwidth 1,200 Hz and TX target C/N0 of 40 dB-Hz. The GUI
-defaults to bandwidth 2,400 Hz and TX target C/N0 of 80 dB-Hz, and offers an
-18 kHz bandwidth preset. The selected pattern/tone mode is fixed during receive
+The CLI defaults to nominal rate 1,200 Hz and TX target C/N0 of 40 dB-Hz. The GUI
+defaults to Rate 3,600 Hz, Carrier 1,500 Hz and TX target C/N0 of 80 dB-Hz, and
+offers an 18 kHz rate preset. Its default shaped spectrum ideally spans
+375–2,625 Hz, including rolloff, for ordinary audio transfer between computers.
+This changes carrier placement and chip timing, not the keystream purposes,
+encryption, pulse shape or pattern-evidence synchronization rules. The selected
+rate, carrier and pattern/tone mode are fixed during receive
 search; encryption normally selects `auto-keystream`, with `auto-pattern`
 otherwise. The **RX targets (dB-Hz)** field and CLI `--receive-targets` accept
 a comma-separated list. The GUI RX list starts at `80`; changing TX SNR to a
@@ -227,7 +238,8 @@ nonfinite, out-of-range (outside -200..200 dB-Hz), over-16-entry or over-512-byt
 list resets entirely to `40`. The GUI permits partial editing, then normalizes
 after 750 ms of inactivity. RX targets never alter the scalar TX target.
 
-The receiver resolves only this list, using the selected bandwidth and mode;
+The receiver resolves only this list, using the selected rate, carrier, clock
+and mode before selecting the pattern length and checking its confidence floor;
 identical sample-quantized waveform profiles are searched once. Manual CLI
 `--spreading`, `--scramble`, `--dsss`, `--sample-rate` or `--carrier` selects
 explicit pattern configuration and cannot be combined with automatic planning

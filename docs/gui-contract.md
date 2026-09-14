@@ -32,8 +32,14 @@ keep the same ceiling. Both native adapters use this shared control. Live DSP
 and transfer estimates receive the same budget, independently of the 256 MiB
 received-message/file cache.
 
-The persistent **Bandwidth** field defaults to `2.4 kHz`, with `18 kHz` also
-available as a preset. **TX SNR (dB-Hz)** defaults to `80`; its presets include
+The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
+available as a preset. The adjacent editable **Carrier** dropdown defaults to
+`1.5 kHz`. Changing Rate resets Carrier to `1.5 kHz` for `3.6 kHz`, otherwise
+to the existing `max(1500, 0.75 × rate)` Hz recommendation. A carrier override
+persists until the next rate change. Both fields configure transmit planning,
+receive profiles, live audio, simulation and inspection together. Rate remains
+the nominal timing parameter; it does not claim a measured spectral width.
+**TX SNR (dB-Hz)** defaults to `80`; its presets include
 `140`, `120`, `100`, `80`, `60`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
 `-30` alongside the existing targets.
 
@@ -43,7 +49,7 @@ target. The RX list can then be edited independently without changing TX SNR.
 It trims and deduplicates valid entries, and resets the entire list to `40` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
-profiles hold the selected bandwidth and pattern/tone mode fixed.
+profiles hold the selected rate, carrier and pattern/tone mode fixed.
 
 | Vocabulary | Meaning |
 | --- | --- |

@@ -38,6 +38,22 @@ int main(){try {
     invalid=config;invalid.bandwidth_hz=std::numeric_limits<double>::quiet_NaN();rejects([&]{m::validate(invalid);},"NaN config accepted");
     invalid=config;invalid.training_seconds=6;rejects([&]{m::validate(invalid);},"nonstandard training accepted");
     invalid=config;invalid.spreading_factor=16385;rejects([&]{m::validate(invalid);},"oversized spreading accepted");
+    auto centered=config;centered.bandwidth_hz=3600;centered.sample_rate=14400;centered.carrier_hz=1500;
+    m::validate(centered);
+    require(m::pattern_pulse_enabled(centered),"centered audio must use the same shaping eligibility as the transmitter");
+    for(const auto carrier:{1125.,6075.}) {centered.carrier_hz=carrier;m::validate(centered);}
+    for(const auto carrier:{1124.99,6075.01,-1.,std::numeric_limits<double>::quiet_NaN()}) {
+        centered.carrier_hz=carrier;rejects([&]{m::validate(centered);},"RRC support crossed DC or Nyquist");
+    }
+    centered.carrier_hz=1500;centered.pulse_shaping=false;
+    rejects([&]{m::validate(centered);},"rectangular waveform used a shaped passband allowance");
+    centered.pulse_shaping=true;centered.spreading_factor=15;
+    rejects([&]{m::validate(centered);},"fewer than sixteen complete chips used a shaped passband allowance");
+    centered.spreading_factor=16;centered.sample_rate=15000;
+    rejects([&]{m::validate(centered);},"partial final chip bypassed the shaping duration requirement");
+    centered.sample_rate=14400;centered.integration_seconds=16./1800.;m::validate(centered);
+    centered.integration_seconds=15./1800.;
+    rejects([&]{m::validate(centered);},"short explicit integration used a shaped passband allowance");
     invalid=config;invalid.memory_limit=1024;rejects([&]{m::modulate(Bytes(32),invalid);},"waveform allocation budget ignored");
     std::stringstream wav(std::ios::in|std::ios::out|std::ios::binary);m::write_wav(wav,wave,config.sample_rate);const auto restored=m::read_wav(wav);
     require(restored.sample_rate==config.sample_rate && restored.samples.size()==wave.size(),"WAV metadata mismatch");

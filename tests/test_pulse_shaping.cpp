@@ -149,6 +149,29 @@ void same_cn0_confidence() {
         check(ratio>=.85,"RRC shaping must preserve aggregate keyed pattern confidence at equal received C/N0");
     }
 }
+void centered_carrier_same_cn0() {
+    const Bytes bits{0,1,1,0,1,0};
+    for(const bool keyed:{false,true}) {
+        double centered_score=0,reference_score=0;
+        for(const double clock_ppm:{-100.,100.})for(unsigned seed=0;seed<4;++seed) {
+            modem::Config c;c.sample_rate=14400;c.bandwidth_hz=3600;c.carrier_hz=1500;
+            c.spreading_factor=128;c.scramble=keyed;c.dsss=keyed;c.stream_epoch=1789312671+seed;
+            for(std::size_t i=0;i<c.spreading_seed.size();++i) {
+                c.spreading_seed[i]=static_cast<std::uint8_t>(3*i+7+11*seed);
+                c.dsss_seed[i]=static_cast<std::uint8_t>(5*i+11+7*seed);
+            }
+            const ChannelCase channel{36,0,clock_ppm,257.375+.25*seed};
+            centered_score+=recover_score(bits,c,channel,seed);
+            // Only translate the waveform. Keep chip timing, integration,
+            // payload, power and N0 equal to the former 0.75 * B carrier.
+            c.carrier_hz=2700;
+            reference_score+=recover_score(bits,c,channel,seed);
+        }
+        const auto ratio=centered_score/reference_score;
+        std::cout<<(keyed?"Private":"Public")<<" 3.6 kHz: 1500/2700 Hz carrier evidence "<<ratio<<'\n';
+        check(ratio>=.9,"centering the shaped radio waveform must preserve aggregate confidence at equal C/N0");
+    }
+}
 struct FastComparison {
     double score=0,last_score=0;
     bool exact=false;
@@ -223,7 +246,7 @@ void fast_same_cn0_confidence() {
 }
 int main() {
     try {
-        unchanged_crypto_and_chip_vectors();same_cn0_confidence();fast_same_cn0_confidence();
+        unchanged_crypto_and_chip_vectors();same_cn0_confidence();centered_carrier_same_cn0();fast_same_cn0_confidence();
         std::cout<<"Pulse-shaping encryption and equal-C/N0 confidence tests passed\n";
         return 0;
     } catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }

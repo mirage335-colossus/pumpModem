@@ -21,7 +21,7 @@ enum class Slot {
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, received_raw_bits,
-    device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    device, bandwidth, carrier, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -29,7 +29,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::header: case Slot::mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
-    case Slot::device: case Slot::bandwidth: case Slot::snr: case Slot::receive_snr: case Slot::pattern:
+    case Slot::device: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
@@ -146,17 +146,23 @@ struct DesktopLayout {
         out[Slot::paste_raw_signal] = {margin + 160, raw_actions_y, 180, action_height};
         out[Slot::received_raw_bits] = {margin, raw_detail_y, compression_width, 52};
 
-        const int controls_y = height - 92, available = width - 2 * margin - 60;
-        const int device_width = available * 10 / 100, bandwidth_width = available * 9 / 100;
-        const int snr_width = 130, receive_snr_width = std::max(150, available * 16 / 100);
-        const int pattern_width = available * 18 / 100, fec_width = available * 16 / 100;
+        // Keep all eight settings on one persistent row. Reserve the full
+        // 13-pixel label widths; narrow windows reduce gaps before editors.
+        const int controls_y = height - 92, extra = std::max(0, width - min_width);
+        const int control_gap = std::min(10, 2 + extra / 7);
+        const int field_growth = extra - 7 * (control_gap - 2);
+        const int device_width = 112, bandwidth_width = 82 + field_growth * 12 / 100;
+        const int carrier_width = 90 + field_growth * 12 / 100;
+        const int snr_width = 130, receive_snr_width = 166 + field_growth * 15 / 100;
+        const int pattern_width = 130 + field_growth * 25 / 100, fec_width = 148 + field_growth * 20 / 100;
         int x = margin;
-        out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + 10;
-        out[Slot::bandwidth] = {x, controls_y, bandwidth_width, field_height}; x += bandwidth_width + 10;
-        out[Slot::snr] = {x, controls_y, snr_width, field_height}; x += snr_width + 10;
-        out[Slot::receive_snr] = {x, controls_y, receive_snr_width, field_height}; x += receive_snr_width + 10;
-        out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + 10;
-        out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + 10;
+        out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + control_gap;
+        out[Slot::bandwidth] = {x, controls_y, bandwidth_width, field_height}; x += bandwidth_width + control_gap;
+        out[Slot::carrier] = {x, controls_y, carrier_width, field_height}; x += carrier_width + control_gap;
+        out[Slot::snr] = {x, controls_y, snr_width, field_height}; x += snr_width + control_gap;
+        out[Slot::receive_snr] = {x, controls_y, receive_snr_width, field_height}; x += receive_snr_width + control_gap;
+        out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + control_gap;
+        out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
         out[Slot::diagnostics] = {margin, height - 56, width - 2 * margin, 22};
         out[Slot::status] = {margin, height - 31, width - 2 * margin, 24};

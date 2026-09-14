@@ -49,12 +49,20 @@ double number(const std::string& text,const char* name) {
     if(used!=text.size() || !std::isfinite(value)) throw Error(std::string(name)+" must be a finite number");
     return value;
 }
-double bandwidth(std::string value) {
+double frequency(std::string value,const char* name) {
     value.erase(std::remove(value.begin(),value.end(),' '),value.end()); double scale=1;
     if(value.ends_with("MHz")) { scale=1000000; value.resize(value.size()-3); }
     else if(value.ends_with("kHz")) { scale=1000; value.resize(value.size()-3); }
     else if(value.ends_with("Hz")) value.resize(value.size()-2);
-    return number(value,"Bandwidth")*scale;
+    return number(value,name)*scale;
+}
+std::string frequency_text(double hz) {
+    const double scale=hz>=1000000?1000000:hz>=1000?1000:1;
+    std::ostringstream text;text<<std::setprecision(12)<<hz/scale;
+    return text.str()+(scale==1000000?" MHz":scale==1000?" kHz":" Hz");
+}
+double recommended_gui_carrier(double rate) {
+    return rate==3600?1500:tuning::recommended_carrier_hz(rate);
 }
 std::string seconds_text(double seconds) {
     std::ostringstream text;
@@ -139,8 +147,9 @@ struct Controller::Impl {
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value) {
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
-        f(UiField::bandwidth).text="2.4 kHz";
-        for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        f(UiField::bandwidth).text="3.6 kHz";
+        for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        reset_carrier(3600);
         f(UiField::snr).text="80"; for(const auto* s:{"140","120","100","80","60","40","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
         f(UiField::receive_snr).text=f(UiField::snr).text;
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
@@ -192,13 +201,22 @@ struct Controller::Impl {
         if(encrypted() && !was_encrypted && f(UiField::pattern).selected=="auto-pattern") f(UiField::pattern).selected="auto-keystream";
         was_encrypted=encrypted();
     }
-    void configure(bool match_receive_target=false) {
+    void reset_carrier(double rate) {
+        auto& carrier=f(UiField::carrier);
+        carrier.text=frequency_text(recommended_gui_carrier(rate));
+        carrier.options={{carrier.text,carrier.text}};
+        for(const auto* preset:{"1 kHz","1.5 kHz","1.8 kHz","2 kHz","2.5 kHz","2.7 kHz","3 kHz","6 kHz","9 kHz","13.5 kHz","18 kHz"})
+            if(carrier.text!=preset)carrier.options.push_back({preset,preset});
+    }
+    void configure(bool match_receive_target=false,bool match_carrier=false) {
         receive_targets_due.reset();
         dirty();
         try {
             live::Settings next;
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
-            const auto plan=tuning::resolve(bandwidth(f(UiField::bandwidth).text),number(f(UiField::snr).text,"Target SNR"),mode,encrypted());
+            const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
+            if(match_carrier)reset_carrier(rate);
+            const auto plan=tuning::resolve(rate,number(f(UiField::snr).text,"Target SNR"),mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
             const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
             f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
@@ -454,7 +472,7 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -617,7 +635,7 @@ struct Controller::Impl {
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
         else if(next.hardware_sample_rate) diagnostics<<" | Hardware "<<next.hardware_sample_rate/1000.0<<" kHz";
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz<<" Hz";
-        if(!next.simulation&&next.audio_passband_hz>0&&settings.transfer.modem.carrier_hz+settings.transfer.modem.bandwidth_hz/2>next.audio_passband_hz) diagnostics<<" | Audio passband exceeded; reduce bandwidth or choose a wider device";
+        if(!next.simulation&&next.audio_passband_hz>0&&settings.transfer.modem.carrier_hz+settings.transfer.modem.bandwidth_hz/2>next.audio_passband_hz) diagnostics<<" | Nominal envelope exceeds audio passband; reduce Rate or Carrier, or choose a wider device";
         if(!target_supported) diagnostics<<" | "<<tuning_explanation;
         f(UiField::diagnostics).text=diagnostics.str(); snapshot=std::move(next);
     }
@@ -767,7 +785,8 @@ void Controller::edit(UiField field,std::string text) {
         else if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
         else if(field==UiField::snr) p.configure(true);
-        else if(field==UiField::device||field==UiField::bandwidth) p.configure();
+        else if(field==UiField::bandwidth) p.configure(false,true);
+        else if(field==UiField::device||field==UiField::carrier) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
     } catch(const std::exception& e) { p.notice(e.what(),10); }

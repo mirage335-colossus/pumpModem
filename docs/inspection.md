@@ -56,7 +56,7 @@ boundary or length. Completed dictionary text and raw bits can be copied without
 a checksum; the displayed pattern score is model evidence, not measured SNR or
 authentication. No packet-integrity condition controls pattern acquisition.
 
-Receive searches use the selected bandwidth and pattern mode, plus the separate
+Receive searches use the selected rate, carrier and pattern mode, plus the separate
 comma-separated target C/N0 list. Invalid list text resets it to `40`. Carrier,
 clock and key coverage is finite. The long-symbol fallback requires an explicit
 clock-start window and budgets every frequency/rate/timing combination; memory

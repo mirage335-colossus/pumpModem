@@ -217,6 +217,39 @@ void high_snr_marked_file() {
               "fast keyed file reception must preserve boundary recovery, encryption and authentication with clock drift");
     }
 }
+void centered_radio_packet() {
+    Message message;message.kind=MessageKind::file;message.filename="radio.bin";
+    message.id.fill(0x5c);
+    for(unsigned i=0;i<16;++i)message.data.push_back(static_cast<std::uint8_t>(i*37));
+    for(const double cn0:{40.,80.})for(const bool keyed:{false,true}) {
+        auto value=options(keyed);value.compression=false;value.fec=FecMode::off;
+        value.modem=tuning::resolve(3600,cn0,tuning::PatternMode::auto_pattern,keyed,1500).config;
+        value.modem.dsss=keyed;
+        check(value.modem.carrier_hz<value.modem.bandwidth_hz/2 && value.modem.pulse_shaping,
+              "the radio fixture must exercise the shaped band below the old nominal carrier limit");
+        if(cn0==80)check(value.modem.spreading_factor==16,
+              "the strong radio fixture must exercise the GUI default's short automatic pattern");
+        modem::ChannelConfig channel;
+        // Keep each planner target in physical units regardless of
+        // the internal sample clock. The sampled channel supplies an unknown
+        // fractional start and carrier phase; acquisition also searches time.
+        channel.snr_db=cn0-10*std::log10(static_cast<double>(value.modem.sample_rate)/2);
+        channel.clock_error_ppm=keyed?-100:100;channel.delay_samples=137;
+        channel.phase_noise_degrees_per_sqrt_second=.5;channel.seed=keyed?13:7;
+        channel.receiver_timestamp=value.timestamp+1;
+        auto expected=transfer::message_wire_bits(message,value);
+        transfer::xor_binary_bits(expected,value); // Receive exposes decrypted bits, including recovery markers.
+        const auto received=transfer::simulate(message,value,channel);
+        if(received.raw_bits!=expected)
+            throw Error(std::string(keyed?"private":"public")+" centered radio packet bits differ at "+
+                std::to_string(cn0)+" dB-Hz: recovered "+
+                std::to_string(received.raw_bits.size())+" bits, expected "+std::to_string(expected.size()));
+        check(received.packet_validated &&
+              received.packet.authenticated==keyed && received.packet.message.data==message.data &&
+              received.packet.message.filename==message.filename,
+              "3.6 kHz at 1500 Hz must acquire and validate public and private packets from impaired PCM at target C/N0");
+    }
+}
 void high_snr_large_file_estimate() {
     auto value=high_snr_options(true);value.modem.dsss=true;
     value.compression=false;value.fec=FecMode::off;value.dsp_workspace_bytes=64*1024*1024;
@@ -271,4 +304,4 @@ void pattern_storage_limits() {
     }
 }
 }
-int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

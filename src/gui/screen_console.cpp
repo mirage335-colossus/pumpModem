@@ -42,9 +42,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_expanded;
         control.help="Click to expand the QR code to fill the window. Click again or press Escape to restore its original size.";
     }
-    if(slot==Slot::bandwidth)control.help="Nominal modem bandwidth. Defaults to 2.4 kHz; presets include 18 kHz.";
+    if(slot==Slot::bandwidth)control.help="Nominal modem rate in Hz; occupied bandwidth depends on the waveform. Defaults to 3.6 kHz with a 1.5 kHz carrier. Changing Rate resets Carrier to the recommended frequency; edit Carrier afterward to choose another frequency.";
+    if(slot==Slot::carrier)control.help="Audio carrier frequency. Choose a preset or enter Hz, kHz or MHz. Defaults to 1.5 kHz at the 3.6 kHz rate. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
     if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0), default 80 dB-Hz. This scalar sets the transmitted pattern duration. Changing it to a valid value resets RX targets to that single matching target; RX targets can then be edited independently.";
-    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 80. Changing TX SNR to a valid value resets this list to that single matching target. Edit it independently to search other targets with the selected bandwidth and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";
+    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 80. Changing TX SNR to a valid value resets this list to that single matching target. Edit it independently to search other targets with the selected rate, carrier and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 40. Duplicate profiles share one search.";
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
     if(slot==Slot::waveform) {
@@ -82,7 +83,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::key,Command::none,Bitmap::none,Page::console,3,"Encryption key entry"}, Slot::key),
         placed({Kind::label,Field::key_path,Command::none,Bitmap::none,Page::console,3,""}, Slot::key_path),
         placed({Kind::text,Field::device,Command::none,Bitmap::none,Page::console,4,"Audio device"}, Slot::device),
-        placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Bandwidth"}, Slot::bandwidth),
+        placed({Kind::text,Field::bandwidth,Command::none,Bitmap::none,Page::console,4,"Rate"}, Slot::bandwidth),
+        placed({Kind::text,Field::carrier,Command::none,Bitmap::none,Page::console,4,"Carrier"}, Slot::carrier),
         placed({Kind::text,Field::snr,Command::none,Bitmap::none,Page::console,4,"TX SNR (dB-Hz)"}, Slot::snr),
         placed({Kind::text,Field::receive_snr,Command::none,Bitmap::none,Page::console,4,"RX targets (dB-Hz)",1,false,512}, Slot::receive_snr),
         placed({Kind::choice,Field::pattern,Command::none,Bitmap::none,Page::console,5,"Pattern / tone"}, Slot::pattern),

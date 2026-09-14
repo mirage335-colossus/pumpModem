@@ -212,6 +212,33 @@ void declared_edits() {
     app.close();app.report_error("Inactive edit unchanged");editor.field=ui::Field::message;app.edit(editor,"other");
     check(app.field(editor.field).text=="valid"&&app.field(ui::Field::status).text=="Inactive edit unchanged","Disabled declaration attempted an edit");
 }
+void rate_carrier_declarations() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
+    check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
+          rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
+          carrier.open_upward && !app.field(carrier.field).options.empty(),
+          "Rate and Carrier must be shared persistent editable dropdowns");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);app.preset(rate,"2.4 kHz");
+        check(app.field(F::carrier).text=="1.8 kHz","Rate preset did not reset Carrier on every page");
+        app.preset(carrier,"2 kHz");
+        check(app.field(F::carrier).text=="2 kHz","Carrier preset did not use the shared edit path");
+        app.edit(carrier,"2150 Hz");
+        check(app.field(F::carrier).text=="2150 Hz","Carrier dropdown did not accept a custom frequency");
+        app.preset(rate,"3.6 kHz");
+        check(app.field(F::carrier).text=="1.5 kHz","HF rate preset did not restore its recommended carrier");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto rate_geometry=ui::control_layout(rate,app.field(rate.field),size.w,size.h);
+            const auto carrier_geometry=ui::control_layout(carrier,app.field(carrier.field),size.w,size.h);
+            check(rate_geometry.has_suggestions && carrier_geometry.has_suggestions &&
+                  rate_geometry.widget.w>=59 && carrier_geometry.widget.w>=67 &&
+                  rate_geometry.frame.x+rate_geometry.frame.w<carrier_geometry.frame.x,
+                  "Rate and Carrier native editors or suggestion buttons overlap");
+        }
+    }
+}
 void declared_submission() {
     Application app({.simulation=true});
     ui::Control editor{ui::Kind::text};editor.submit=ui::Command::clear_received;
@@ -422,6 +449,6 @@ void compression_declarations() {
 }
 }
 int main() {
-    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

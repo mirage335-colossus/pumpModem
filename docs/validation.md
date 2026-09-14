@@ -1329,3 +1329,33 @@ fixtures now use controlled local clocks: they test timestamp selection and an
 explicit idle epoch advance without making sanitizer CPU throughput determine
 key admission. Separate tests still require mismatched/out-of-window epochs to
 fail. Production clock admission and retention are unchanged by these test fixes.
+
+### GUI rate and carrier defaults (2026-09-14)
+
+The GUI now defaults to Rate 3,600 Hz and Carrier 1,500 Hz. Carrier selection
+participates in both transmit and receive planning before the existing pattern
+confidence floor is evaluated. Rate changes restore that rate's recommended
+carrier; other edits preserve an explicit choice. CLI defaults, cipher streams,
+chip mapping, pulse shaping and acquisition thresholds remain unchanged.
+
+The Release build passed all 53 non-interactive suites, including crypto/key
+vectors, pattern acquisition, live transfer, CLI and GUI controller coverage.
+New packet fixtures recover exact public and authenticated private payloads at
+40 and 80 dB-Hz with unknown carrier phase/fractional start, an independently
+offset receive epoch, ±100 ppm clock error and phase diffusion. The 80 dB-Hz
+cases exercise the actual default 16-chip profile. New public/private PCM
+round trips also pass through independent 44.1/48 kHz audio-card clocks.
+
+Both FLTK and Rev passed the full simulated GUI workflow and native adapter
+checks. FLTK document checks and Rev platform/clipboard plus 1x/2x coordinate
+checks passed. The final Rate/Carrier row was visually inspected at 1180×866
+and 1030×786 in both backends, with the shared layout/application checks rerun
+after reserving full label widths. FLTK's 2x bitmap probe required an Xft-enabled
+test build; the initial build without Xft could not apply the requested scale.
+
+At equal received C/N0, translating the same 3,600 Hz rate waveform from a
+2,700 Hz carrier to 1,500 Hz produced aggregate pattern-evidence ratios of
+0.9911 public and 1.0206 private across the tested starts and ±100 ppm clocks.
+These software-channel checks preserve the existing planner's confidence
+expectations; they do not measure a physical radio/speaker passband or establish
+field sensitivity, BER or probability of intercept.

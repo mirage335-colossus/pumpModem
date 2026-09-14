@@ -106,12 +106,17 @@ performance across a large epoch bank are not established.
 
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
-and files have a separate 256 MiB quota. The GUI defaults to **Bandwidth**
-`2.4 kHz` and **TX SNR (dB-Hz)** `80`; the bandwidth presets include `18 kHz`.
+and files have a separate 256 MiB quota. The GUI defaults to **Rate**
+`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `80`.
+Rate is the nominal chip-rate planning parameter, not a measured occupied
+bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
+375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
+Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
+`max(1500, 0.75 × rate)` Hz. Carrier can then be selected or entered separately.
 The **RX targets (dB-Hz)** comma-list also starts at `80`. Changing TX SNR to
 a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding
-the selected bandwidth and pattern/tone mode fixed. Invalid RX input resets
+the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `40`.
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
@@ -398,10 +403,13 @@ is not measured receiver sensitivity or a capacity optimum.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter
-to/from the modem's internal clock. For bandwidth `B`, the internal sample rate
-is `max(6000, ceil(4B))` samples/second and the carrier is `max(1500, 0.75B)` Hz.
-The 6 kHz floor represents the real 1500 Hz audio carrier at narrow bandwidths;
-symbol timing and integration remain based on bandwidth. Large downsampling
+to/from the modem's internal clock. With rate parameter `B` and selected carrier
+`fc`, automatic planning uses `Fs = ceil(max(64, 4B, 4fc))` samples/second. The CLI
+retains its default `B=1200` and carrier rule `max(1500, 0.75B)` Hz; the GUI
+uses the carrier control described above. The usual 6 kHz floor represents the
+1500 Hz carrier at narrow rates; symbol timing and integration remain based on
+`B`. Both transmit and receive planning use the selected carrier before choosing
+pattern lengths. Large downsampling
 ratios use bounded filter stages. Different 44.1/48/96 kHz cards can share the
 same modem settings. Conversion cannot restore frequencies outside the physical
 card's passband. Live GUI audio rejects a selected band that exceeds the converter's

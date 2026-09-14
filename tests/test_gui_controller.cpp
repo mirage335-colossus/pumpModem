@@ -26,9 +26,54 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+void rate_carrier_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.5 kHz" &&
+          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500,
+          "GUI defaults must use the 3.6 kHz rate and 1.5 kHz audio carrier");
+    controller.edit(F::carrier,"1650 Hz");
+    check(controller.settings().transfer.modem.carrier_hz==1650,
+          "A custom audio carrier did not reach the modem configuration");
+    controller.edit(F::snr,"60");controller.select(F::fec,"off");
+    controller.select(F::simulation,"3dBm -90dB");controller.edit(F::device,"test-device");
+    check(controller.field(F::carrier).text=="1650 Hz" && controller.settings().transfer.modem.carrier_hz==1650,
+          "An unrelated setting replaced the manual carrier");
+    const auto profiles=tuning::receive_profiles(controller.settings().transfer.modem,
+        std::vector<double>{60,40},tuning::PatternMode::auto_pattern,false);
+    check(!profiles.empty() && std::all_of(profiles.begin(),profiles.end(),[](const auto& profile){return profile.carrier_hz==1650;}),
+          "Automatic receive hypotheses discarded the selected carrier");
+    controller.edit(F::bandwidth,"2.4 kHz");
+    check(controller.field(F::carrier).text=="1.8 kHz" && controller.settings().transfer.modem.carrier_hz==1800,
+          "Changing Rate did not restore that rate's recommended carrier");
+    controller.edit(F::bandwidth,"30 MHz");
+    check(controller.field(F::carrier).text=="22.5 MHz" && controller.settings().transfer.modem.carrier_hz==22500000 &&
+          controller.field(F::carrier).options.front().id=="22.5 MHz",
+          "The widest rate has no selectable recommended carrier");
+    controller.edit(F::bandwidth,"3.6 kHz");
+    check(controller.field(F::carrier).text=="1.5 kHz" && controller.settings().transfer.modem.carrier_hz==1500,
+          "Returning to the HF rate did not restore the 1.5 kHz carrier");
+    const auto valid=controller.settings().transfer.modem;
+    controller.edit(F::bandwidth,"unfinished");
+    check(controller.field(F::carrier).text=="1.5 kHz" && controller.settings().transfer.modem.bandwidth_hz==valid.bandwidth_hz &&
+          !controller.enabled(C::transmit),"Invalid Rate text changed the carrier or permitted transmission");
+    controller.edit(F::bandwidth,"3.6 kHz");controller.edit(F::carrier,"900 Hz");
+    check(controller.field(F::carrier).text=="900 Hz" && controller.settings().transfer.modem.carrier_hz==1500 &&
+          !controller.enabled(C::transmit) && controller.field(F::status).text.find("carrier")!=std::string::npos,
+          "An incompatible carrier was silently replaced or applied");
+    controller.edit(F::carrier,"1.5 kHz");controller.select(F::pattern,"auto-tone");
+    check(controller.field(F::carrier).text=="1.5 kHz" && !controller.enabled(C::transmit) &&
+          controller.field(F::status).text.find("raise the carrier")!=std::string::npos,
+          "An incompatible tone profile silently changed the carrier or hid the corrective action");
+    controller.edit(F::carrier,"2.7 kHz");
+    check(controller.settings().transfer.modem.carrier_hz==2700 &&
+          controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
+          "Raising the carrier did not recover the selected tone profile");
+}
 void tone_mode_controls() {
     using F=ui::Field;
     Controller controller({true,true});
+    controller.edit(F::carrier,"2.7 kHz");
     for(const auto mode:tuning::pattern_modes()) {
         const std::string name(tuning::pattern_mode_name(mode));
         if(name!="auto-tone" && !name.starts_with("tone-"))continue;
@@ -53,6 +98,7 @@ void tone_key_controls() {
     } fixture;
     create_keyring(fixture.path,{"Tone policy"});
     Controller controller({true,true});
+    controller.edit(F::carrier,"2.7 kHz");
     const auto load=[&] {
         controller.activate(C::open_keyfile);
         const auto requests=controller.take_services();
@@ -491,6 +537,7 @@ void binary_editor_controls() {
 void three_bit_dispatch() {
     using F=ui::Field; using C=ui::Command;
     Controller controller({true,true});
+    controller.edit(F::carrier,"1.65 kHz");
     controller.edit(F::binary,"001");
     prepare(controller);
     const auto& inspection=*controller.inspection();
@@ -510,6 +557,8 @@ void three_bit_dispatch() {
     check(controller.snapshot().transmission_finished&&
           std::abs(controller.snapshot().transmission_seconds-expected.total_seconds)<=1./controller.settings().transfer.modem.sample_rate,
           "Three-bit draft did not dispatch as the exact unframed signal");
+    check(controller.settings().transfer.modem.carrier_hz==1650 && controller.field(F::carrier).text=="1.65 kHz",
+          "Live transmission replaced the manually selected carrier");
     controller.activate(C::paste_previous);
     check(controller.field(F::binary).text=="001"&&controller.message_bytes().empty(),
           "Restoring three-bit draft changed its leading zeros or synthesized a byte");
@@ -926,6 +975,7 @@ void bitmap_source_checks() {
           std::string(sources.title(ui::Bitmap::constellation)) == "Receiver input I/Q" &&
           std::string(sources.title(ui::Bitmap::pattern_scores)) == "Pattern evidence",
           "Shared bitmap titles did not identify the actual measurement source");
+    controller.edit(ui::Field::carrier,"2.7 kHz");
     controller.select(ui::Field::pattern, "auto-tone");
     sources.update(controller);
     check(controller.settings().transfer.modem.pattern_symbols &&
@@ -944,6 +994,7 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        rate_carrier_controls();
         tone_mode_controls();
         tone_key_controls();
         composer_conveniences();

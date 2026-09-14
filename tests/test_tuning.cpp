@@ -98,6 +98,48 @@ void bandwidth_derived_clocks() {
     near(defaults.carrier_hz,tuning::recommended_carrier_hz(defaults.bandwidth_hz),"raw default carrier differs from the automatic carrier");
     check(defaults.sample_rate==tuning::recommended_sample_rate(defaults.bandwidth_hz),"raw default clock differs from the automatic clock");
 }
+void explicit_carrier_planning() {
+    near(tuning::recommended_carrier_hz(3600),2700,"GUI audio defaults must not change the legacy carrier recommendation");
+    for(const bool keyed:{false,true}) {
+        const auto plan=tuning::resolve(3600,80,tuning::PatternMode::auto_pattern,keyed,1500);
+        check(plan.config.carrier_hz==1500 && plan.config.sample_rate==14400 &&
+              plan.config.spreading_factor==16 && plan.target_supported && plan.config.scramble==keyed,
+              "centered audio planning must preserve the chosen carrier and confidence geometry");
+        near(modem::bit_rate(plan.config),112.5,"centered audio changed the nominal symbol rate");
+        const auto profiles=tuning::receive_profiles(plan.config,std::array<double,2>{80,100},
+            tuning::PatternMode::auto_pattern,keyed);
+        check(profiles.size()==1 && profiles.front().carrier_hz==1500 &&
+              profiles.front().sample_rate==14400 && profiles.front().spreading_factor==16,
+              "receive targets must replan the selected centered audio profile");
+    }
+    const auto high=tuning::resolve(3600,80,tuning::PatternMode::auto_pattern,false,20000);
+    check(high.config.carrier_hz==20000 && high.config.sample_rate==80000,
+          "an explicit high carrier must increase the internal real-PCM clock");
+    const auto wide=tuning::resolve(30000000,80,tuning::PatternMode::auto_pattern,false,25000000);
+    check(wide.config.carrier_hz==25000000 && wide.config.sample_rate==120000000,
+          "explicit carriers must retain the general-purpose high-bandwidth range");
+    // The legacy 600-Hz private recommendation uses orthogonal 5-sample bins
+    // and allows 32 chips. This caller's actual short-sample clock allows 16.
+    auto actual=tuning::resolve(600,80,tuning::PatternMode::auto_pattern,true,400).config;
+    check(actual.sample_rate==2400 && actual.spreading_factor==16,"custom clock must determine the transmitter floor");
+    check(tuning::receive_profiles(actual,std::array<double,1>{80},tuning::PatternMode::auto_pattern,true)
+          .front().spreading_factor==16,"a default carrier floor must not leak into a custom receive profile");
+    auto orthogonal=tuning::resolve(3200,80,tuning::PatternMode::auto_pattern,true,1600);
+    check(orthogonal.config.spreading_factor==32 && orthogonal.target_supported,
+          "explicit orthogonal private carriers must retain the validated 32-chip floor");
+    // Valid explicitly sampled receiver configurations need not obey the
+    // recommended clock's four-samples-per-carrier heuristic.
+    auto high_receiver=wide.config;high_receiver.carrier_hz=40000000;
+    check(tuning::receive_profiles(high_receiver,std::array<double,1>{80},tuning::PatternMode::auto_pattern,false)
+          .front().carrier_hz==40000000,"receive planning rejected a valid custom carrier clock");
+    for(const auto carrier:{0.,-1.,std::numeric_limits<double>::quiet_NaN(),std::numeric_limits<double>::infinity(),30000001.})
+        rejects([&]{tuning::resolve(3600,80,tuning::PatternMode::auto_pattern,false,carrier);},
+                "invalid explicit carrier accepted");
+    rejects([]{tuning::resolve(3600,80,tuning::PatternMode::pattern_8,false,1500);},
+            "a short rectangular pattern inherited the shaped audio extent");
+    rejects([]{tuning::resolve(3600,80,tuning::PatternMode::auto_tone,false,1500);},
+            "an unshaped tone profile inherited the shaped audio extent");
+}
 void audio_passband_pattern_roundtrips() {
     // Exercise real PCM with non-integer carrier cycles per chip using the
     // same one-bit patterns and integration floor as automatic plans.
@@ -282,6 +324,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_patterns();snr_planning();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }
