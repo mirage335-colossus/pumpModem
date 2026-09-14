@@ -29,6 +29,10 @@ public:
                 snapshot.constellation_source != live::ConstellationSource::input));
             constellation_dropped_ = snapshot.constellation_dropped;
         }
+        const bool pattern_enabled = controller.settings().transfer.modem.pattern_symbols;
+        if (update.update_plots || pattern_enabled_ != pattern_enabled || !frames_.contains(ui::Bitmap::pattern_scores))
+            put(ui::Bitmap::pattern_scores, plots::PlotSnapshot::pattern_scores(snapshot.pattern_scores, pattern_enabled));
+        pattern_enabled_ = pattern_enabled;
         if (update.clear_waterfall || update.append_waterfall)
             put(ui::Bitmap::waterfall, plots::PlotSnapshot::waterfall(history_));
         const auto& bytes = controller.message_bytes();
@@ -83,6 +87,7 @@ public:
         case ui::Bitmap::constellation:
             return constellation_source_ == live::ConstellationSource::received ? "Received constellation" :
                 constellation_source_ == live::ConstellationSource::transmitted ? "Transmitted constellation" : "Receiver input I/Q";
+        case ui::Bitmap::pattern_scores: return "Pattern evidence";
         default: return ""; // Other sources retain their ordinary declaration label.
         }
     }
@@ -98,6 +103,7 @@ private:
     std::uint64_t constellation_dropped_ = 0;
     double zoom_ = 0;
     bool replaying_ = false;
+    bool pattern_enabled_ = false;
     live::ConstellationSource constellation_source_ = live::ConstellationSource::input;
 };
 }

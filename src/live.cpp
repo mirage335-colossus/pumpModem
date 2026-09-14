@@ -27,17 +27,19 @@ constexpr std::size_t replay_frames = 60;
 constexpr std::size_t replay_wave_samples = 256;
 constexpr std::size_t replay_bins = 257;
 constexpr std::size_t constellation_limit = 2048;
+constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
 constexpr auto replay_duration = std::chrono::seconds(3);
 constexpr std::size_t replay_text_limit = 4096;
 struct ReplayFrame {
     std::vector<float> waveform, spectrum;
-    std::vector<std::complex<float>> constellation;
+    std::vector<std::complex<float>> constellation, pattern_scores;
     ConstellationSource source = ConstellationSource::input;
     double fraction = 0;
     std::uint64_t dropped = 0;
 };
 constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
     (replay_wave_samples + replay_bins) * sizeof(float) +
+    pattern_score_limit * sizeof(std::complex<float>) +
     sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64;
 // One verified packet is moved into the receive-content cache at the deadline.
 // Its payload uses the content quota; its diagnostics and caption use DSP space.
@@ -65,6 +67,7 @@ std::string display_text(const Message& message) {
 }
 constexpr std::size_t minimum_workspace = 512 * 1024;
 std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double) + 3 * sizeof(std::complex<double>)) +
+                                       pattern_score_limit * (4 * sizeof(std::complex<double>) + sizeof(modem::PatternEvidence)) +
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
                                        plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
                                        replay_workspace(value); }
@@ -149,6 +152,7 @@ struct Session::Impl {
         std::optional<transfer::Received> received;
         std::size_t replay_count = 0, point_limit = 0;
         modem::ConstellationBatch interval_points;
+        std::vector<std::complex<double>> pattern_scores;
         bool interval_locked = false;
         std::stop_token stop;
     };
@@ -245,6 +249,7 @@ struct Session::Impl {
         current.simulation_replay = false;
         current.replay_frame_index = current.replay_frame_count = 0;
         current.simulation_sample_fraction = 0;
+        current.pattern_scores.clear();
     }
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
@@ -322,6 +327,9 @@ struct Session::Impl {
             append_points(visible, std::move(points));
         }
         result.constellation = std::move(visible.points); result.constellation_dropped = visible.dropped;
+        // Each frame already contains a bounded history; replacing it keeps
+        // repeated polls stable and never leaks later evidence into replay.
+        result.pattern_scores.assign(frame.pattern_scores.begin(), frame.pattern_scores.end());
     }
     void halt() {
         std::lock_guard lock(mutex);
@@ -414,6 +422,8 @@ struct Session::Impl {
         append_points(bounded, std::move(wave.interval_points), wave.point_limit);
         frame.constellation.reserve(bounded.points.size());
         for (const auto point : bounded.points) frame.constellation.emplace_back(static_cast<float>(point.real()), static_cast<float>(point.imag()));
+        frame.pattern_scores.reserve(wave.pattern_scores.size());
+        for (const auto point : wave.pattern_scores) frame.pattern_scores.emplace_back(static_cast<float>(point.real()), static_cast<float>(point.imag()));
         frame.dropped = bounded.dropped;
         frame.fraction = static_cast<double>(static_cast<long double>(wave.transmitted_samples) /
                                             wave.transmitter->total_samples());
@@ -744,6 +754,8 @@ struct Session::Impl {
         bool locked = false, synchronized_points = false;
         Receiver* plotted_receiver = nullptr;
         modem::ConstellationBatch points;
+        std::vector<std::complex<double>> pattern_scores;
+        double best_pattern_score = -1;
         const auto first = bank.active.value_or(0);
         const auto last = bank.active ? first + 1 : bank.receivers.size();
         for (std::size_t index = first; index < last; ++index) {
@@ -766,6 +778,18 @@ struct Session::Impl {
                 receiver.modem->set_workspace_bytes(capacity - other - overhead);
                 auto wire = feed(*receiver.modem);
                 update_workspace();
+                if (receiver.options.modem.pattern_symbols) {
+                    const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
+                    const auto best = std::max_element(candidates.begin(), candidates.end(),
+                        [](const auto& a, const auto& b) { return a.score < b.score; });
+                    if (best != candidates.end() && best->score > best_pattern_score) {
+                        best_pattern_score = best->score;
+                        pattern_scores.clear(); pattern_scores.reserve(candidates.size());
+                        for (const auto& candidate : candidates)
+                            pattern_scores.emplace_back(candidate.bit ? candidate.alternative_score : candidate.score,
+                                                        candidate.bit ? candidate.score : candidate.alternative_score);
+                    }
+                }
                 const bool synchronized = receiver.modem->synchronized();
                 if (synchronized || receiver.modem->acquiring()) {
                     auto observed = receiver.modem->take_payload_constellation();
@@ -863,8 +887,14 @@ struct Session::Impl {
         if (current.running && generation == version) {
             if (simulation_wave) {
                 append_points(simulation_wave->interval_points, std::move(points));
+                simulation_wave->pattern_scores = std::move(pattern_scores);
                 simulation_wave->interval_locked = simulation_wave->interval_locked || locked;
-            } else queue_points(std::move(points), ConstellationSource::received);
+            } else {
+                queue_points(std::move(points), ConstellationSource::received);
+                if (current.pattern_scores != pattern_scores) {
+                    current.pattern_scores = std::move(pattern_scores); ++current.sequence;
+                }
+            }
             receiver_bytes = bank.working_bytes;
             if(bank.limited)current.status="Pattern search is limited by the configured DSP workspace";
             current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);

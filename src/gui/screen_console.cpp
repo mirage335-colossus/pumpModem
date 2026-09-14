@@ -33,6 +33,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
         control.double_click=Command::reset_zoom;control.help="Wheel zooms the time span. Double-click resets zoom.";
     }
+    if(slot==Slot::pattern_scores)control.help="Live P0 evidence on the horizontal axis and P1 evidence on the vertical axis. Scores use natural-log units; they are not measured SNR or calibrated probabilities.";
     if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
     return control;
 }
@@ -88,6 +89,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waterfall,Page::console,12,"Spectrum / amplitude waterfall"}, Slot::waterfall),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"}, Slot::waveform),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::constellation,Page::console,12,"Constellation"}, Slot::constellation),
+        placed({Kind::bitmap,Field::count,Command::none,Bitmap::pattern_scores,Page::console,12,"Pattern evidence"}, Slot::pattern_scores),
         placed({Kind::action,Field::count,Command::clear_waterfall,Bitmap::none,Page::console,13,"Clear waterfall"}, Slot::clear_waterfall),
         placed({Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"}, Slot::zoom_in),
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),

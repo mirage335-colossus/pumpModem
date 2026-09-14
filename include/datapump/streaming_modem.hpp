@@ -95,6 +95,7 @@ public:
     PatternBurst provisional_pattern() const;
     std::vector<PatternBurst> take_pattern_bursts();
     std::vector<PatternEvidence> pattern_candidates() const;
+    std::vector<PatternEvidence> pattern_candidates(std::size_t limit) const;
     bool clock_windowed() const;
     Diagnostics diagnostics() const;
     // Available for the best provisional fit while acquiring(), then for the

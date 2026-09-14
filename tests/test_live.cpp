@@ -979,8 +979,22 @@ void test_pattern_epoch_boundary() {
     // or refreshing after the first PCM block can lose the entire short burst.
     local_epoch=origin+1.01;
     session.transmit_bits(Bytes{0,0,1});
+    const auto replay=wait_for(session,[](const auto& snapshot){return snapshot.simulation_replay;},10s);
+    bool saw_zero=false,saw_one=false;
+    for(std::size_t frame=0;frame<replay.replay_frame_count;++frame) {
+        replay_milliseconds=static_cast<std::int64_t>((frame*3000+replay.replay_frame_count-1)/replay.replay_frame_count);
+        const auto shown=session.snapshot();
+        check(shown.pattern_scores.size()<=live::Snapshot::pattern_score_limit,"pattern plot exceeded its bounded candidate history");
+        for(const auto point:shown.pattern_scores) {
+            check(std::isfinite(point.real())&&std::isfinite(point.imag())&&point.real()>=0&&point.imag()>=0,
+                  "pattern plot must carry finite measured evidence for both alternatives");
+            saw_zero=saw_zero||point.real()>point.imag();saw_one=saw_one||point.imag()>point.real();
+        }
+        check(session.snapshot().pattern_scores==shown.pattern_scores,"unchanged replay frame changed pattern evidence");
+    }
+    check(saw_zero&&saw_one,"pattern replay must show distinct receiver evidence for both transmitted bit patterns");
+    replay_milliseconds=4000;
     wait_for(session,[&](const auto& snapshot){
-        if(snapshot.simulation_replay)replay_milliseconds=4000;
         return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[](const auto& signal){
             return signal.binary && signal.complete && signal.text=="001" && signal.pattern_score.has_value();
         });

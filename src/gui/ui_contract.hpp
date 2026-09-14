@@ -21,7 +21,7 @@ enum class Command {
     pattern_first, pattern_previous, pattern_next, pattern_last
 };
 enum class Bitmap {
-    none, qr, waveform, waterfall, constellation, pattern, pattern_distances,
+    none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet
 };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };

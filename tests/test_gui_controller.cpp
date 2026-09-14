@@ -561,8 +561,21 @@ void bitmap_source_checks() {
     Controller controller({true, true});
     BitmapSources sources;
     const auto contains = [](const auto& ids, ui::Bitmap id) { return std::find(ids.begin(), ids.end(), id) != ids.end(); };
+    const auto& controls = ui::console_screen();
+    const auto constellation = std::find_if(controls.begin(), controls.end(),
+        [](const auto& control) { return control.bitmap == ui::Bitmap::constellation; });
+    const auto patterns = std::find_if(controls.begin(), controls.end(),
+        [](const auto& control) { return control.bitmap == ui::Bitmap::pattern_scores; });
+    check(constellation != controls.end() && patterns != controls.end() &&
+          constellation->page == ui::Page::console && patterns->page == ui::Page::console &&
+          constellation->row == patterns->row && constellation->slot == ui::Slot::constellation &&
+          patterns->slot == ui::Slot::pattern_scores && patterns->kind == ui::Kind::bitmap,
+          "Console did not declare separate live I/Q and pattern evidence plots on the same row");
     const auto first = sources.update(controller);
     check(contains(first, ui::Bitmap::qr), "Bitmap source initialization omitted the default dark QR preview");
+    check(contains(first, ui::Bitmap::pattern_scores) &&
+          sources.caption(ui::Bitmap::pattern_scores).find("waiting") != std::string::npos,
+          "Console pattern plot was not initialized while waiting for live evidence");
     const auto original = sources.get(ui::Bitmap::qr);
     const auto empty = render(original);
     check(empty.pixels()[0] == 32 && empty.pixels()[1] == 0 && empty.pixels()[2] == 0,
@@ -593,8 +606,21 @@ void bitmap_source_checks() {
     sources.update(controller);
     check(sources.error(ui::Bitmap::qr).empty(), "Valid QR retained an error over its quiet zone");
     check(std::string(sources.title(ui::Bitmap::waveform)) == "Live waveform" &&
-          std::string(sources.title(ui::Bitmap::constellation)) == "Receiver input I/Q",
+          std::string(sources.title(ui::Bitmap::constellation)) == "Receiver input I/Q" &&
+          std::string(sources.title(ui::Bitmap::pattern_scores)) == "Pattern evidence",
           "Shared bitmap titles did not identify the actual measurement source");
+    controller.select(ui::Field::pattern, "auto-tone");
+    sources.update(controller);
+    check(controller.settings().transfer.modem.pattern_symbols &&
+          controller.settings().transfer.modem.spreading_mode == modem::SpreadingMode::tone &&
+          sources.caption(ui::Bitmap::pattern_scores).find("waiting") != std::string::npos,
+          "Tone spreading incorrectly disabled the live pattern evidence plot");
+    controller.select(ui::Field::pattern, "auto-pattern");
+    sources.update(controller);
+    check(controller.settings().transfer.modem.pattern_symbols &&
+          controller.settings().transfer.modem.spreading_mode == modem::SpreadingMode::pattern &&
+          sources.caption(ui::Bitmap::pattern_scores).find("waiting") != std::string::npos,
+          "Pattern spreading did not preserve the live evidence plot");
 }
 }
 

@@ -155,7 +155,9 @@ and operating-system requirements.
 The console provides adjacent message and binary editors, explicit clipboard copy, file
 attachment, Level L QR previews, continuous audio reception, a scrolling
 frequency-labeled signal ticker with reception percentages, a waterfall and live waveform,
-spectrum and constellation displays. It includes named shared-key selection and
+and adjacent I/Q and pattern-evidence plots. The pattern plot compares the receiver's
+retained pattern 0 and pattern 1 scores against noise and follows simulation replay.
+It includes named shared-key selection and
 a bounded receive cache. WAV tools remain available through the CLI. It does not
 open received files or execute received content. Screenshots can be attached as
 ordinary image files; direct operating-system screenshot capture is not implemented.

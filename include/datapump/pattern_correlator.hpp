@@ -16,6 +16,7 @@ public:
     std::vector<PatternBurst> take_bursts();
     PatternBurst provisional() const;
     std::vector<PatternEvidence> candidates() const;
+    std::vector<PatternEvidence> candidates(std::size_t limit) const;
     std::vector<std::complex<double>> take_chip_constellation();
     bool acquiring() const;
     bool synchronized() const;

@@ -9,6 +9,7 @@ namespace datapump::gui::plots {
 namespace {
 struct Waveform { std::vector<float> samples; modem::Config config; double zoom; };
 struct Constellation { std::vector<std::complex<double>> points; bool symbols; };
+struct PatternScores { std::vector<std::complex<double>> scores; bool enabled; };
 struct Waterfall { SpectrumHistory history; bool overview; };
 struct Qr { std::optional<QrCode> code; QrBrightness brightness; };
 struct Pattern { inspection::PatternSpace model; std::size_t first, count; enum Kind { chips, distances, evidence } kind; };
@@ -41,6 +42,15 @@ double constellation_scale(const Constellation& data) {
     if (data.symbols && scale < std::numeric_limits<double>::max() / 2) scale = std::max(1., std::ceil(scale * 2) / 2);
     return scale;
 }
+bool valid_pattern_score(std::complex<double> score) {
+    return std::isfinite(score.real()) && std::isfinite(score.imag()) && score.real() >= 0 && score.imag() >= 0;
+}
+double pattern_score_scale(const PatternScores& data) {
+    double scale = 0;
+    for (const auto score : data.scores) if (valid_pattern_score(score))
+        scale = std::max({scale, score.real(), score.imag()});
+    return scale > 0 ? scale : 1;
+}
 double pattern_distance(const inspection::PatternSpace& model, std::size_t a, std::size_t b) {
     if (a == b) return 0;
     const auto count = model.coefficients.size();
@@ -51,7 +61,7 @@ double pattern_distance(const inspection::PatternSpace& model, std::size_t a, st
 }
 }
 struct PlotSnapshot::Data {
-    std::variant<std::monostate, Waveform, Constellation, Waterfall, Qr, Pattern, Codeword> value;
+    std::variant<std::monostate, Waveform, Constellation, PatternScores, Waterfall, Qr, Pattern, Codeword> value;
     template<class Value> explicit Data(Value value_) : value(std::move(value_)) {}
 };
 PlotSnapshot::PlotSnapshot() : data_(std::make_shared<Data>(std::monostate{})) {}
@@ -67,6 +77,9 @@ PlotSnapshot PlotSnapshot::waveform(std::vector<float> samples, modem::Config co
 }
 PlotSnapshot PlotSnapshot::constellation(std::vector<std::complex<double>> points, bool symbols) {
     return PlotSnapshot(std::make_shared<Data>(Constellation{std::move(points), symbols}));
+}
+PlotSnapshot PlotSnapshot::pattern_scores(std::vector<std::complex<double>> scores, bool enabled) {
+    return PlotSnapshot(std::make_shared<Data>(PatternScores{std::move(scores), enabled}));
 }
 PlotSnapshot PlotSnapshot::waterfall(SpectrumHistory history, bool overview) {
     return PlotSnapshot(std::make_shared<Data>(Waterfall{std::move(history), overview}));
@@ -202,6 +215,40 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
                 if (std::abs(radius - .5) <= tolerance || std::abs(radius - 1) <= tolerance) return reference(x, y);
                 return gray(0);
             });
+        } else if constexpr (std::is_same_v<Type, PatternScores>) {
+            const auto scale = pattern_score_scale(data);
+            const auto sx = std::min((width - 1) * .8, (height - 1) * .8 / request.sample_aspect_ratio);
+            const auto sy = std::min((height - 1) * .8, (width - 1) * .8 * request.sample_aspect_ratio);
+            const auto left = ((width - 1) - sx) / 2, bottom = ((height - 1) + sy) / 2;
+            const auto axis_x = static_cast<int>(std::lround(left)), axis_y = static_cast<int>(std::lround(bottom));
+            // The two evidence axes share one scale and represent positive
+            // scores, not the signed complex amplitude of the I/Q plot.
+            std::vector<std::pair<int, int>> points;
+            if (data.enabled) for (const auto score : data.scores) {
+                if (!valid_pattern_score(score)) continue;
+                const auto x = static_cast<int>(std::lround(left + score.real() / scale * sx));
+                const auto y = static_cast<int>(std::lround(bottom - score.imag() / scale * sy));
+                for (int dy : {-1, 0}) for (int dx : {-1, 0}) points.emplace_back(y + dy, x + dx);
+            }
+            std::sort(points.begin(), points.end());
+            auto next_point = points.end();
+            auto current_row = std::numeric_limits<unsigned>::max();
+            rows(request, sink, color, [&](unsigned x, unsigned y) {
+                if (current_row != y) {
+                    current_row = y;
+                    next_point = std::lower_bound(points.begin(), points.end(), std::pair{static_cast<int>(y), static_cast<int>(x)});
+                }
+                const auto position = std::pair{static_cast<int>(y), static_cast<int>(x)};
+                if (next_point != points.end() && *next_point == position) {
+                    do { ++next_point; } while (next_point != points.end() && *next_point == position);
+                    return color ? theme::data_tint : gray(255);
+                }
+                if (x < left - .5 || x > left + sx + .5 || y < bottom - sy - .5 || y > bottom + .5) return gray(0);
+                if (static_cast<int>(x) == axis_x || static_cast<int>(y) == axis_y) return reference(x, y);
+                if (sx > 0 && sy > 0 && std::abs((x - left) * sy - (bottom - y) * sx) <= .6 * std::hypot(sx, sy))
+                    return gray(request.monochrome ? ((sx >= sy ? x : y) % 3 == 0 ? 255 : 0) : theme::grid);
+                return gray(0);
+            });
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             const auto& history = data.history.rows();
             rows(request, sink, color, [&](unsigned x, unsigned y) {
@@ -311,6 +358,21 @@ std::string PlotSnapshot::caption(unsigned width) const {
             const auto scale = constellation_scale(data);
             out << std::setprecision(2) << scale / 2 << " / " << scale << " amplitude";
             if (width >= 320) out << " / " << data.points.size() << (data.symbols ? " symbols" : " input points");
+        } else if constexpr (std::is_same_v<Type, PatternScores>) {
+            if (!data.enabled) return width < 320 ? "Phase/amplitude mode" : "Pattern scores unavailable in phase/amplitude mode";
+            const auto count = std::count_if(data.scores.begin(), data.scores.end(), valid_pattern_score);
+            if (width < 320) {
+                if (!count) return "waiting for patterns";
+                out << "P0 x/P1 y; ln vs noise 0.." << std::setprecision(2) << pattern_score_scale(data);
+                return out.str();
+            }
+            out << "Horizontal P0 / vertical P1: ";
+            if (!count) out << "waiting for pattern candidates (ln evidence vs noise)";
+            else {
+                out << std::setprecision(3) << "0.." << pattern_score_scale(data) << " ln evidence vs noise";
+                out << " / " << count << " retained candidates";
+                out << "; diagonal = equal scores";
+            }
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             out << "0.." << data.history.max_hz() << " Hz / " << data.history.lower_db() << ".." << data.history.upper_db() << " dBFS peak";
         } else if constexpr (std::is_same_v<Type, Qr>) {

@@ -1202,6 +1202,7 @@ Bytes StreamingReceiver::push(std::span<const float> samples,std::span<const Com
 PatternBurst StreamingReceiver::provisional_pattern()const{return impl_->pattern?impl_->pattern->provisional():PatternBurst{};}
 std::vector<PatternBurst> StreamingReceiver::take_pattern_bursts(){return impl_->pattern?impl_->pattern->take_bursts():std::vector<PatternBurst>{};}
 std::vector<PatternEvidence> StreamingReceiver::pattern_candidates()const{return impl_->pattern?impl_->pattern->candidates():std::vector<PatternEvidence>{};}
+std::vector<PatternEvidence> StreamingReceiver::pattern_candidates(std::size_t limit)const{return impl_->pattern?impl_->pattern->candidates(limit):std::vector<PatternEvidence>{};}
 Bytes StreamingReceiver::finish(std::stop_token stop) {
     if(impl_->pattern){impl_->pattern->finish(stop);return {};}
     auto& s=*impl_;cancelled(stop);if(s.finished)return {};

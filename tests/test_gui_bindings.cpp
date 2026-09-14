@@ -54,7 +54,8 @@ void retained_layout_and_bitmap() {
     check(retained.needs_layout(geometry,13),"A changed popup direction retained stale native layout");
     const auto maximum=std::numeric_limits<std::uint64_t>::max();
     check(retained.update_bitmap(ui::Bitmap::waveform,maximum)&&!retained.update_bitmap(ui::Bitmap::waveform,maximum)&&
-          retained.update_bitmap(ui::Bitmap::waveform,0)&&retained.update_bitmap(ui::Bitmap::constellation,0),
+          retained.update_bitmap(ui::Bitmap::waveform,0)&&retained.update_bitmap(ui::Bitmap::constellation,0)&&
+          retained.update_bitmap(ui::Bitmap::pattern_scores,0),
         "Initial or wrapped bitmap revisions were confused with an uninitialized native cache");
 }
 }

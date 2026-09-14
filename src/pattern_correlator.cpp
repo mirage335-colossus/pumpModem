@@ -294,6 +294,10 @@ PatternBurst PatternCorrelator::provisional()const {
     auto result=best->burst;result.bits.resize(best->committed);result.end_sample=best->committed_end;return result;
 }
 std::vector<PatternEvidence> PatternCorrelator::candidates()const{return impl_->history;}
+std::vector<PatternEvidence> PatternCorrelator::candidates(std::size_t limit)const{
+    const auto& history=impl_->history;
+    return {history.end()-static_cast<std::ptrdiff_t>(std::min(limit,history.size())),history.end()};
+}
 std::vector<Complex> PatternCorrelator::take_chip_constellation() {
     auto& s=*impl_;std::vector<Complex> result;result.reserve(s.point_count);
     for(std::size_t i=0;i<s.point_count;++i)result.push_back(s.points[(s.point_begin+i)%s.points.size()]);

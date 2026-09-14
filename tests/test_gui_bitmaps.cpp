@@ -133,6 +133,8 @@ void tiled_replay() {
     const std::vector<PlotSnapshot> sources{
         PlotSnapshot{}, PlotSnapshot::waveform(wave, config), PlotSnapshot::waveform(wave, config, 256),
         PlotSnapshot::constellation({{.25, .2}, {.75, 0}, {-.1, -.8}}, true),
+        PlotSnapshot::pattern_scores({{2, 8}, {4, 4}, {9, 1}, {0, 0}, {4, 4}}),
+        PlotSnapshot::pattern_scores({}), PlotSnapshot::pattern_scores({{8, 2}}, false),
         PlotSnapshot::waterfall(history), PlotSnapshot::waterfall(history, true),
         PlotSnapshot::qr(encode_qr("tile transfer")), PlotSnapshot::qr(encode_qr("tile transfer"), plots::QrBrightness::normal),
         PlotSnapshot::pattern_chips(pattern), PlotSnapshot::pattern_distances(pattern), PlotSnapshot::pattern_evidence(pattern),
@@ -216,10 +218,59 @@ void qr_and_patterns() {
     check(red(distances, 0, 0) == 0 && red(distances, 10, 10) == 0 && red(distances, 10, 0) == 255,
           "distance matrix does not preserve diagonal and shared full-vector distance");
 }
+void pattern_scores() {
+    const std::vector<std::complex<double>> scores{{10, 0}, {0, 5}, {4, 4}, {0, 0}};
+    const auto source = PlotSnapshot::pattern_scores(scores);
+    const auto request = full_bitmap_request(101, 101);
+    const auto scalar = render(source, request);
+    check(red(scalar, 90, 90) == 255 && red(scalar, 10, 50) == 255 && red(scalar, 42, 58) == 255 && red(scalar, 10, 90) == 255,
+          "pattern scores must use P0 horizontal/P1 vertical with one nonnegative evidence scale");
+    check(red(scalar, 40, 60) == theme::grid && red(scalar, 40, 40) == 0,
+          "pattern scores must show an equal-score diagonal rather than an I/Q crosshair");
+    auto aspect = request; aspect.sample_aspect_ratio = 2;
+    const auto geometry = render(source, aspect);
+    check(red(geometry, 70, 90) == 255 && red(geometry, 30, 50) == 255,
+          "non-square samples distorted the relative scale of pattern scores");
+    const auto color_request = full_bitmap_request(101, 101, false, true);
+    const auto color = render(source, color_request);
+    const auto offset = (90U * 101 + 90) * 3;
+    check(color.pixels()[offset] == theme::data_tint.red && color.pixels()[offset+1] == theme::data_tint.green &&
+          color.pixels()[offset+2] == theme::data_tint.blue,
+          "pattern scores must use the shared data tint");
+    check(render(source, color_request, false).pixels() == scalar.pixels(), "pattern scores ignored disabled color preference");
+    const auto mono = render(source, full_bitmap_request(101, 101, true));
+    check(red(mono, 90, 90) == 255 && red(mono, 39, 61) == 255 && red(mono, 40, 60) == 0,
+          "monochrome pattern scores must preserve measured points and dotted references");
+    auto invalid = scores;
+    invalid.insert(invalid.end(), {{std::numeric_limits<double>::infinity(), 2},
+        {2, std::numeric_limits<double>::quiet_NaN()}, {-1, 100}, {100, -1}});
+    check(render(PlotSnapshot::pattern_scores(invalid), request).pixels() == scalar.pixels(),
+          "nonfinite or negative pattern scores changed the valid evidence plot");
+    const auto maximum = std::numeric_limits<double>::max();
+    const auto extreme = render(PlotSnapshot::pattern_scores({{maximum, maximum}, {maximum/2, 0}}), request);
+    check(red(extreme, 90, 10) == 255 && red(extreme, 50, 90) == 255,
+          "large finite evidence must not overflow or be discarded as a complex magnitude");
+    for (const auto ratio : {std::numeric_limits<double>::denorm_min(), std::numeric_limits<double>::max()}) {
+        auto narrow = full_bitmap_request(1, 1); narrow.sample_aspect_ratio = ratio;
+        render(source, narrow);
+        narrow = request; narrow.sample_aspect_ratio = ratio;
+        render(source, narrow);
+    }
+    const auto disabled = PlotSnapshot::pattern_scores(scores, false);
+    check(render(disabled, request).pixels() == render(PlotSnapshot::pattern_scores({}, false), request).pixels(),
+          "phase/amplitude mode must not display retained pattern scores");
+    check(source.caption().find("Horizontal P0 / vertical P1: 0..10 ln evidence vs noise") != std::string::npos &&
+          source.caption().find("4 retained candidates") != std::string::npos,
+          "pattern score caption lost axis orientation, evidence units, scale, or candidate count");
+    check(PlotSnapshot::pattern_scores({}).caption().find("waiting for pattern candidates") != std::string::npos &&
+          disabled.caption().find("unavailable in phase/amplitude mode") != std::string::npos,
+          "pattern scores must distinguish waiting for candidates from phase/amplitude mode");
+    check(source.caption(192) == "P0 x/P1 y; ln vs noise 0..10", "compact pattern caption lost axis labels or evidence scale");
+}
 }
 int main() {
     try {
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); qr_and_patterns();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); qr_and_patterns(); pattern_scores();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

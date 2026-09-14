@@ -17,7 +17,7 @@ enum class Slot {
     cancel, airtime, signal_label, signals, copy_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
-    constellation, device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    constellation, pattern_scores_label, pattern_scores, device, bandwidth, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -90,14 +90,22 @@ struct DesktopLayout {
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
         const int plots_y = signal_y + signal_height + 30, plot_height = height - plots_y - 138;
-        const int waterfall_width = (width - 2 * margin) * 44 / 100;
-        const int other_width = (width - 2 * margin - waterfall_width - 24) / 2;
+        const int plots_width = width - 2 * margin;
+        const int waterfall_width = plots_width * 34 / 100;
+        const int waveform_width = std::max(236, plots_width * 24 / 100);
+        const int constellation_width = (plots_width - waterfall_width - waveform_width - 36) / 2;
+        const int waveform_x = margin + waterfall_width + 12;
+        const int constellation_x = waveform_x + waveform_width + 12;
+        const int pattern_scores_x = constellation_x + constellation_width + 12;
+        const int pattern_scores_width = width - margin - pattern_scores_x;
         out[Slot::waterfall_label] = {margin, plots_y - 23, waterfall_width, 21};
         out[Slot::waterfall] = {margin, plots_y, waterfall_width, plot_height};
-        out[Slot::waveform_label] = {margin + waterfall_width + 12, plots_y - 23, other_width, 21};
-        out[Slot::waveform] = {margin + waterfall_width + 12, plots_y, other_width, plot_height};
-        out[Slot::constellation_label] = {margin + waterfall_width + other_width + 24, plots_y - 23, other_width, 21};
-        out[Slot::constellation] = {margin + waterfall_width + other_width + 24, plots_y, other_width, plot_height};
+        out[Slot::waveform_label] = {waveform_x, plots_y - 23, waveform_width, 21};
+        out[Slot::waveform] = {waveform_x, plots_y, waveform_width, plot_height};
+        out[Slot::constellation_label] = {constellation_x, plots_y - 23, constellation_width, 21};
+        out[Slot::constellation] = {constellation_x, plots_y, constellation_width, plot_height};
+        out[Slot::pattern_scores_label] = {pattern_scores_x, plots_y - 23, pattern_scores_width, 21};
+        out[Slot::pattern_scores] = {pattern_scores_x, plots_y, pattern_scores_width, plot_height};
 
         // Both adapters use these declared copy/plot actions alongside their
         // shared click/wheel gestures. Small footers fit inside the established

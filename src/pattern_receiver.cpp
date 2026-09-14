@@ -477,6 +477,11 @@ std::vector<PatternBurst> PatternReceiver::take_bursts(){
 }
 PatternBurst PatternReceiver::provisional()const{return impl_->fallback?impl_->fallback->provisional():impl_->provisional();}
 std::vector<PatternEvidence> PatternReceiver::candidates()const{return impl_->fallback?impl_->fallback->candidates():impl_->history;}
+std::vector<PatternEvidence> PatternReceiver::candidates(std::size_t limit)const{
+    if(impl_->fallback)return impl_->fallback->candidates(limit);
+    const auto& history=impl_->history;
+    return {history.end()-static_cast<std::ptrdiff_t>(std::min(limit,history.size())),history.end()};
+}
 std::vector<Complex> PatternReceiver::take_chip_constellation(){if(impl_->fallback)return impl_->fallback->take_chip_constellation();auto result=impl_->chip_points();impl_->points.clear();impl_->point_cursor=0;return result;}
 bool PatternReceiver::acquiring()const{return impl_->fallback?impl_->fallback->acquiring():!impl_->tracks.empty();}
 bool PatternReceiver::synchronized()const{return impl_->fallback?impl_->fallback->synchronized():std::any_of(impl_->tracks.begin(),impl_->tracks.end(),[](const auto& track){return track.admitted;});}

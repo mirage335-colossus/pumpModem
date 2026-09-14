@@ -57,10 +57,14 @@ struct SignalUpdate {
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {
+    static constexpr std::size_t pattern_score_limit = 128;
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
     std::vector<std::complex<double>> constellation;
+    // Retained receiver hypotheses, not probabilities: real = pattern 0
+    // evidence, imaginary = pattern 1 evidence, both against noise.
+    std::vector<std::complex<double>> pattern_scores;
     ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;

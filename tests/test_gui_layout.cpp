@@ -26,7 +26,7 @@ void established_default() {
     check(layout[Slot::qr] == Rect{968, 152, 196, 196}, "QR preview moved");
     check(layout[Slot::signals] == Rect{16, 412, 882, 156}, "received signals size changed");
     check(layout[Slot::files] == Rect{912, 412, 252, 120}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 598, 505, 130}, "waterfall size changed");
+    check(layout[Slot::waterfall] == Rect{16, 598, 390, 130}, "waterfall size changed");
     check(layout[Slot::device] == Rect{16, 774, 108, 27}, "persistent modem controls moved");
     check(layout[Slot::status] == Rect{16, 835, 1148, 24}, "persistent status moved");
 }
@@ -71,11 +71,14 @@ void supported_sizes() {
               files.x == save.x && files.w == save.w && save.y == files.y + files.h + 7 &&
               save.y + save.h == signals.y + signals.h, "signals and files row is misaligned");
         const auto waterfall = layout[Slot::waterfall], waveform = layout[Slot::waveform];
-        const auto constellation = layout[Slot::constellation];
-        check(waterfall.y == waveform.y && waveform.y == constellation.y &&
-              waterfall.h == waveform.h && waveform.h == constellation.h &&
+        const auto constellation = layout[Slot::constellation], pattern_scores = layout[Slot::pattern_scores];
+        check(waterfall.y == waveform.y && waveform.y == constellation.y && constellation.y == pattern_scores.y &&
+              waterfall.h == waveform.h && waveform.h == constellation.h && constellation.h == pattern_scores.h &&
               waveform.x == waterfall.x + waterfall.w + 12 &&
-              constellation.x == waveform.x + waveform.w + 12,
+              constellation.x == waveform.x + waveform.w + 12 &&
+              pattern_scores.x == constellation.x + constellation.w + 12 &&
+              pattern_scores.x + pattern_scores.w == size.w - margin &&
+              constellation.w >= 190 && pattern_scores.w >= 190,
               "plot row is misaligned");
         check(contains(signals, layout[Slot::copy_signal]) &&
               contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");
