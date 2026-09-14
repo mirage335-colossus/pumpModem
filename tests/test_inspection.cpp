@@ -161,6 +161,16 @@ void binary_pattern_transport() {
     check(slow.sections.size()==1 && field(slow,"Hardware settling")=="0 s / 0 symbol durations" &&
           slow.estimate.total_seconds==slow.estimate.packet_seconds,
           "hour-long pattern inspection must show zero hardware prefix");
+    request.options.modem.integration_seconds=0;request.options.compression=false;
+    request.message.data=Bytes(400,'e');
+    const auto marked=gui::inspect(request);
+    check(marked.packet_layout &&
+          field(marked,"Meaningful bits")==std::to_string(marked.packet_layout->wire_bytes*8) &&
+          field(marked,"Transmitted bits")==std::to_string(marked.estimate.packet_bytes*8),
+          "pattern inspection must distinguish logical content bits from encrypted recovery overhead");
+    double duration=0;for(const auto& section:marked.sections)duration+=section.duration_seconds.value_or(0);
+    check(std::abs(duration-marked.estimate.total_seconds)<1e-9,
+          "separate recovery and content sections must account for complete transmission airtime");
 }
 }
 int main(){try{packet_layout();tiny_packet_layout();raw_layout();static_pattern_binding();binary_pattern_transport();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -44,6 +44,22 @@ compression and optional FEC downstream of pattern acquisition. No dictionary
 identifier is transmitted. The compression library is built statically from
 vendored source; no runtime download is required.
 
+Compact packets on the pattern transport add a repeated 96-bit recovery word
+after each complete 256 encoded bytes, with or without encryption and FEC.
+The 24-byte insertion costs 9.375% per full block and adds nothing below 256
+encoded bytes. Markers are inserted before encryption, so keyed transmissions
+encrypt every marker bit with the rest of the stream. After existing decryption,
+a narrow fixed-cadence search can
+restore byte alignment after a net shift of up to seven plaintext bits, leaving
+the damaged region to FEC and whole-packet integrity. Pattern decoding remains
+the sole source of timing and keystream alignment. Markers create no new packet
+parser entry points. The word is derived at runtime from a stored label to
+reduce accidental recognition in program/source transfers.
+Raw bits and text below 16 original bytes remain unchanged. Both pattern peers
+need this convention for packets of at least 256 encoded bytes; manual APSK and
+byte packet APIs retain their existing formats. See
+[byte-boundary recovery](docs/protocol.md#periodic-byte-boundary-recovery).
+
 The desktop has **Console**, **Modem flow**, and **Transmission layout** tabs.
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
@@ -300,7 +316,8 @@ Optional external pads remain a CLI feature using `--pad path` at creation and l
 Keyfiles contain only this application's symmetric key sets. Never put
 signing keys or other applications' secrets in this format.
 
-AES-256-CTR masks the transmitted data bits; larger packet messages retain their
+AES-256-CTR masks every wire bit after transport recovery markers are inserted,
+including the markers themselves; larger packet messages retain their
 HMAC-SHA256 and Reed–Solomon processing. Short pattern-only messages have no MAC. Independent HKDF-derived keys separate
 the data, MAC, DSSS, scrambler, and reserved FHSS streams. All streams use the
 same candidate whole-second transmission anchor. Physical timing is refined to

@@ -64,10 +64,12 @@ Inspection inspect(const InspectionRequest& request) {
         const auto hardware_samples=result.estimate.packet_seconds>0?modem::training_sample_count(config):0;
         const auto hardware_symbols=hardware_samples/symbol_samples;
         const auto hardware_seconds=static_cast<double>(hardware_samples)/config.sample_rate;
-        const auto meaningful=result.binary?request.binary->size():
-            (result.estimate.waveform_samples>=hardware_samples?(result.estimate.waveform_samples-hardware_samples)/symbol_samples:0);
+        const auto transmitted=result.binary?request.binary->size():short_text?
+            transfer::message_bits(request.message,options).size():result.estimate.packet_bytes*8;
+        const auto meaningful=short_text || result.binary?transmitted:layout.wire_bytes*8;
+        const auto recovery=transmitted-meaningful;
         result.title=result.binary?"Raw bit pattern transmission":short_text?"Short text pattern transmission":"Message / file pattern transmission";
-        result.summary=count(meaningful)+" meaningful bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
+        result.summary=count(transmitted)+" transmitted bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
         result.preamble_description="Hardware settling sends independent noise-like chips for five seconds rounded to the nearest whole payload-symbol duration: "+
             count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than ten seconds need no prefix. The receiver does not require or lock to this prefix; payload pattern evidence determines signal start, end, timing and keystream synchronization.";
         result.chip_description="Each meaningful bit selects one of two distinguishable internal patterns. The nominal chip duration follows the selected bandwidth. Keyed pattern and DSSS streams use separate purposes and advancing stream addresses.";
@@ -82,26 +84,31 @@ Inspection inspect(const InspectionRequest& request) {
             {"Acquisition evidence","Received pattern evidence versus noise; APSK geometry is diagnostic only"}};
         const std::string encoding=result.binary?"Raw bits are used exactly as supplied, preserving leading zeros.":
             short_text?"The built-in short-text dictionary produces a self-delimiting bit string. No byte padding, packet header, checksum, integrity tag or FEC is added.":
-            "The existing byte-oriented packet codec supplies the content bitstream. Packet parsing and optional error correction follow pattern acquisition.";
+            "The byte-oriented packet codec supplies the content bitstream. Two copies of a 96-bit alignment word follow every 256 encoded bytes, then optional encryption masks every bit including the alignment words. Packet parsing and optional error correction follow pattern acquisition, decryption and byte-boundary recovery.";
         if(hardware_samples)result.sections.push_back({"Hardware settling", "Independent noise-like chips let audio gain control and gating settle. They convey no data bits and use no payload keystream positions.",{},hardware_symbols,hardware_seconds});
-        result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,result.estimate.packet_seconds});
+        result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,static_cast<double>(meaningful)*symbol_seconds});
+        if(recovery)result.sections.push_back({"Byte-boundary recovery", "Alignment words are interspersed at fixed byte intervals and encrypted with the content when a key is selected.",{},recovery,static_cast<double>(recovery)*symbol_seconds});
         if(short_text || result.binary)result.fields.insert(result.fields.end(),{{"Packet header","0 bits"},{"Checksum / integrity tag","0 bits"},{"FEC","Off"},
             {"Compression",short_text?"Built-in short-text dictionary":"Off (raw bits)"}});
         else {
             result.packet_layout=layout;
             result.fields.insert(result.fields.end(),{{"Encoded packet",count(layout.wire_bytes)+" bytes"},{"Compression",compression_description(layout,options)},
-                {"Body FEC",fec_name(layout.fec)}});
+                {"Body FEC",fec_name(layout.fec)},
+                {"Byte-boundary recovery",count(recovery)+" bits; 192 bits per complete 256 encoded bytes"},
+                {"Transmitted bits",count(transmitted)}});
         }
         result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
         result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
             {"Content bits",encoding},
-            {"Private data stream",keyed?"Mask the meaningful bitstream with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
+            {"Byte-boundary recovery",short_text || result.binary?"No recovery bits added.":"Insert the repeated alignment word after each complete 256 encoded bytes, before the private data mask.",short_text || result.binary?InspectionState::off:InspectionState::active},
+            {"Private data stream",keyed?"Mask the entire bitstream, including alignment words, with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
             {"Pattern selection","Map each bit to a distinguishable internal pattern. A keyed symbol advances to a fresh scrambler fragment; configured DSSS uses its independent stream."},
             {request.simulation?"Sampled channel":"Audio output",request.simulation?"Transmit sampled PCM through independent clock, frequency, phase-noise and additive-noise simulation.":"Generate PCM at the internal clock and resample to the selected audio output."}}});
         result.lanes.push_back({"Receive • pattern evidence",{{"Bounded hypotheses","Search only the configured receive targets, selected bandwidth and pattern mode, with local clock/key hypotheses."},
             {"Pattern versus noise","Accumulate soft pattern evidence. Refine timing and frequency using that score; a noisy APSK plot does not veto a pattern match."},
             {"Candidate history","Keep compact scored symbol candidates and useful chain state within the DSP workspace limit; release old waveform history."},
             {"Meaningful bits","Emit pattern-supported bits with exact length; signal end is inferred from subsequent absence of adequate pattern evidence."},
+            {"Byte-boundary recovery",short_text || result.binary?"Raw bits and short dictionary text retain their exact bit lengths.":"After the existing decryption step, recognize alignment words near fixed periodic boundaries and restore byte grouping before FEC. Constellation timing and keystream alignment remain unchanged; alignment words never start a new message parser.",short_text || result.binary?InspectionState::off:InspectionState::active},
             {"Content interpretation",short_text?"Decode the predefined dictionary from the recovered bit string.":result.binary?"Present the recovered raw bits.":"Decode the optional packet and error correction after symbol acquisition."}}});
         return result;
     }

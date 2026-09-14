@@ -63,6 +63,10 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
 // Pattern transport: short text uses the fixed dictionary's exact bits;
 // larger messages/files use packet bytes as a downstream content grammar.
 Bytes message_bits(const Message&, const Options&);
+// Intentional pattern transmission: insert periodic byte-boundary recovery
+// bits for compact messages/files, then Data-mask the entire bitstream.
+// Raw binary and short dictionary text carry no recovery markers.
+Bytes message_wire_bits(const Message&, const Options&);
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message&, const Options&);
 // Symmetric raw data-stream masking, including fragments starting mid-byte.
 // Without a key the bits are unchanged. Does not authenticate decoded guesses.
@@ -72,7 +76,7 @@ struct Received {
     DecodedPacket packet;
     modem::Diagnostics diagnostics;
     std::uint64_t timestamp = 0;
-    Bytes raw_bits{};
+    Bytes raw_bits{}; // Exact observed bits under the raw Data-mask convention.
     bool packet_validated = true;
 };
 Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t timestamp,

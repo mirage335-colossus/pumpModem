@@ -3,6 +3,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/compression.hpp"
+#include "datapump/boundary_sync.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -244,7 +245,7 @@ Estimate estimate(const Message& message, const Options& options) {
 Estimate estimate(const Message& message,const Options& options,PacketLayout* layout) {
     validate_message(message, options);
     if(options.modem.pattern_symbols) {
-        const auto bits=message_bits(message,options);
+        const auto bits=message_wire_bits(message,options);
         if(layout) {
             *layout={};layout->original_bytes=message.data.size();
             if(message.kind!=MessageKind::text || message.data.size()>=16)
@@ -323,16 +324,24 @@ Bytes message_bits(const Message& message,const Options& options) {
     for(auto byte:packet)for(unsigned i=0;i<8;++i)bits.push_back(static_cast<std::uint8_t>((byte>>(7-i))&1));
     return bits;
 }
+Bytes message_wire_bits(const Message& message,const Options& options) {
+    auto bits=message_bits(message,options);
+    if(message.kind!=MessageKind::text || message.data.size()>=16)
+        bits=boundary_sync::insert(bits,packet_budget(options));
+    auto context=options;context.content_limit=std::max(context.content_limit,bits.size());
+    xor_binary_bits(bits,context);
+    return bits;
+}
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& options) {
     if(options.modem.pattern_symbols) {
-        auto bits=message_bits(message,options);
+        auto bits=message_wire_bits(message,options);
         if(message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
            static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
             throw Error("repeatable content exceeds airtime limit");
-        // Encoded packet bits have their own checked workspace limit. They
-        // are not an untrusted raw UI draft's one-byte-per-bit quota.
-        auto value=options;value.content_limit=std::max(value.content_limit,bits.size());
-        return binary_transmitter(bits,value);
+        // The entire stream, including alignment markers, is already masked.
+        // Passing through binary_transmitter would apply that mask twice.
+        return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
+            seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4);
     }
     return std::make_unique<modem::StreamingTransmitter>(transmission_wire(message,options),seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4);
 }
@@ -340,17 +349,23 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& options,std:
     auto context=options;context.timestamp=timestamp;
     context.content_limit=std::max(context.content_limit,burst.bits.size());
     if(burst.first_stream_symbol>std::numeric_limits<std::size_t>::max())throw Error("received pattern stream index exceeds bit address space");
-    xor_binary_bits(burst.bits,context,static_cast<std::size_t>(burst.first_stream_symbol));
     Received result;result.timestamp=timestamp;result.diagnostics=std::move(diagnostics);
     result.diagnostics.pattern_score=burst.score;
     result.diagnostics.sample_offset=static_cast<std::size_t>(burst.first_sample);
     result.raw_bits=std::move(burst.bits);result.packet_validated=false;
+    xor_binary_bits(result.raw_bits,context,static_cast<std::size_t>(burst.first_stream_symbol));
     if(options.key && burst.first_stream_symbol)return result;
+    // Recovery has one fixed cadence anchored to this burst, never a search
+    // for embedded packets. Decryption and its constellation-supplied stream
+    // position are unchanged; only the decrypted byte grouping is recovered.
+    std::optional<Bytes> candidate;
+    try { candidate=boundary_sync::recover(result.raw_bits,packet_budget(options)); }
+    catch(const Error&) {} // Invalid recovery leaves only raw evidence.
     // Content grammar is interpreted only after pattern acquisition. A bad
     // packet never changes the winning signal timing or discards its raw bits.
-    if(result.raw_bits.size()%8==0) {
-        Bytes bytes(result.raw_bits.size()/8);
-        for(std::size_t i=0;i<result.raw_bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(result.raw_bits[i]<<(7-i%8));
+    if(candidate && candidate->size()%8==0) {
+        Bytes bytes(candidate->size()/8);
+        for(std::size_t i=0;i<candidate->size();++i)bytes[i/8]|=static_cast<std::uint8_t>((*candidate)[i]<<(7-i%8));
         try {
             auto packet=decode_packet(bytes,packet_options(options,timestamp),packet_budget(options));
             if(packet.consumed_bytes==bytes.size() && packet.message.data.size()<=options.content_limit) {
@@ -358,6 +373,7 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& options,std:
             }
         } catch(const Error&) {}
     }
+    if(result.raw_bits.size()>15*13)return result;
     try {
         auto decoded=compression::decode_short_bits(result.raw_bits,std::min<std::size_t>(15,options.content_limit));
         result.packet.message.data=std::move(decoded);
@@ -405,9 +421,10 @@ Bytes transmission_wire(const Message& message,const Options& options) {
     if(options.modem.pattern_symbols) {
         if(message.kind==MessageKind::text && message.data.size()<16)
             throw Error("short pattern text has an exact bit length; use message_transmitter");
-        validate_message(message,options);
-        auto bytes=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
-        return options.key?options.key->xor_data(bytes,options.timestamp):std::move(bytes);
+        const auto bits=message_wire_bits(message,options);
+        Bytes bytes(bits.size()/8);
+        for(std::size_t i=0;i<bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(bits[i]<<(7-i%8));
+        return bytes;
     }
     validate_message(message, options);
     const auto config = seeded_config(options, options.timestamp);

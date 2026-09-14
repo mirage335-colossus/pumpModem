@@ -146,6 +146,31 @@ does not supply cryptographic message authentication or replay protection.
 The packet path retains its existing keyed MAC when enabled. No extra
 authentication field is silently appended to a three-bit raw transmission.
 
+Compact packets on the binary pattern transport insert a 24-byte recovery
+marker after every complete 256 encoded bytes, before optional Data-stream XOR.
+The repeated 96-bit word is derived at runtime as described in
+[protocol.md](protocol.md#periodic-byte-boundary-recovery); it is not stored as
+literal bytes in source or the executable. The Data stream encrypts the entire
+wire bit sequence, including every marker; marker positions consume ordinary
+Data-stream positions. Transmitted symbols also use the configured private
+pattern and DSSS streams at their wire positions. After acquisition, the existing
+whole-stream Data decryption is unchanged. The recovery helper then matches
+plaintext markers in bounded windows, normalizes the preceding plaintext data
+interval and strips markers before deinterleaving, FEC and whole-packet
+integrity. It changes byte grouping only. Pattern constellation decoding remains
+the sole authority for timing and keystream alignment: recovery neither trials
+cryptographic offsets nor resets counters or reseeds streams. It cannot restore
+lost Data-stream/Scrambler/DSSS alignment or an unknown absolute stream position.
+
+The marker definition is public transport redundancy, not a new cryptographic
+primitive, authentication field or packet boundary. The existing HMAC coverage, purpose
+keys, epoch derivation and CTR convention remain unchanged; the payload stream
+now includes marker positions. FEC-off and unencrypted compact packets use the
+same recovery cadence; raw bits, short
+dictionary text, manual legacy APSK and byte packet APIs do not. The
+`raw_bits` diagnostic retains the existing decrypted bits, including markers,
+and is distinct from the marker-recovered packet candidate.
+
 ## Named key sets: keyfile version 2
 
 New CLI keyfiles use `DPMKEY02`. The GUI and CLI load all named sets from one

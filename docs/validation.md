@@ -4,6 +4,44 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Periodic byte-boundary recovery — September 2026
+
+Compact-packet pattern transport now inserts two copies of a runtime-derived
+96-bit word after every complete 256 encoded bytes, then encrypts the complete
+wire sequence, including markers, when a key is selected. Recovery runs after
+pattern acquisition and the unchanged whole-stream Data decryption. It matches
+plaintext markers, normalizes plaintext intervals and removes markers before
+deinterleaving, FEC and whole-packet integrity. Each marker search is restricted
+to seven bits either side of its expected slot, and normalization retains a
+damaged interval's prefix while trimming or zero-filling its tail. A recovered candidate permits one packet
+at the existing burst origin, with exact extent and no inner-packet search or
+retry of unstripped bytes. Exact raw bits and short dictionary transmissions,
+manual APSK and byte packet APIs retain their existing formats.
+
+Relevant checks are boundary sizes including an exact final 256-byte block;
+FEC-off and keyed/unkeyed round trips; inserted, deleted and changed plaintext
+bits; damaged markers followed by intact markers; and rejection of nested or
+trailing packet candidates. Source/executable scanning checks that even one
+96-bit marker word is absent at every bit offset. Such a scan cannot guarantee its absence
+from arbitrary transferred data or runtime memory dumps.
+
+The six focused Release suites passed: `boundary_sync`, `crypto`,
+`pattern_transfer`, `transfer`, `live`, and `gui_inspection`. `boundary_sync`,
+`crypto`, and `pattern_transfer` also passed with ASan/UBSan; LeakSanitizer was
+disabled for that run. The pattern suite includes clear and encrypted PCM
+round trips crossing a marker through the unchanged constellation decoder.
+The optimized Release `pump` executable and 180 source/document files passed
+the runtime-derived marker scan at all eight bit phases. `git diff --check`
+also passed. These results describe the focused suites, not a full-suite run.
+
+These are transport-bit and software integration checks. They do not establish
+recovery from whole missing blocks, an unknown absolute stream offset, lost
+Data-stream/Scrambler/DSSS alignment or a slip in a tail with no later intact
+marker. Pattern constellation decoding remains the sole authority for timing
+and keystream alignment; recovery never trials offsets, resets counters or
+reseeds streams. An intact marker never substitutes for packet SHA-256/HMAC
+validation.
+
 ## Shared preamble keys and CTR pad — September 2026
 
 The preamble now uses the same Data key and the same enabled Scrambler/DSSS

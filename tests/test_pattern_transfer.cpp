@@ -110,5 +110,20 @@ void long_symbol_estimate() {
           estimate.content_seconds==estimate.total_seconds && estimate.memory_supported,
           "three hour-long symbols have no hardware prefix or retained waveform requirement");
 }
+void marked_packet_waveform() {
+    Message message;message.kind=MessageKind::file;message.filename="boundary.bin";
+    message.data=Bytes(300,'r');
+    for(bool keyed:{false,true}) {
+        auto value=options(keyed);value.compression=false;value.search_seconds=0;
+        check(transfer::message_wire_bits(message,value).size()>transfer::message_bits(message,value).size(),
+              "waveform fixture must cross at least one periodic recovery word");
+        modem::ChannelConfig channel;channel.snr_db=30;channel.clock_error_ppm=0;
+        channel.phase_noise_degrees_per_sqrt_second=0;
+        const auto received=transfer::simulate(message,value,channel);
+        check(received.packet_validated && received.packet.authenticated==keyed &&
+              received.packet.message.data==message.data,
+              "the unchanged constellation decoder must deliver a marker-bearing encrypted or clear packet");
+    }
 }
-int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();marked_packet_waveform();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
