@@ -68,8 +68,13 @@ the same keys and epoch as their payload streams. The high eight CTR counter
 bytes contain the fixed ASCII pad `preamble`, separating prefix positions
 without generating or deriving extra keys. Tone mode uses the same noise
 prefix, refreshing phase and amplitude once per chip;
-it reserves no payload constellation points. The transmission epoch is fixed
-before the prefix, and clock-start hypotheses include its elapsed time.
+it reserves no payload constellation points. Automatically timed hardware
+output schedules the first payload symbol on a whole system-clock second;
+playback starts earlier by the prefix and leading filter tail. The symbol's
+timestamp denotes that payload boundary. Explicit-timestamp captures and
+simulation retain deterministic timing, including their prefix offset.
+The output device is opened before choosing the scheduled start. Unmeasured
+device and output-buffer latency can still shift the physical audio boundary.
 Airtime estimates include the prefix and filter tails without adding meaningful
 payload bits. For shaped profiles the first payload position is
 `pattern_pulse_padding_samples(config) + training_sample_count(config)`.
@@ -97,12 +102,18 @@ no claim of absolute indistinguishability from noise is made.
 Both public and private patterns use circular I/Q chips with varying amplitude
 and phase. The public pattern resets at a symbol boundary. Its short templates
 can produce sparse constellation plots because repetition adds no new chip
-values. In keyed pattern mode, the
-Scrambler stream uses absolute chip positions, so successive symbols use fresh
-fragments rather than repeating a small chip block. The second codeword mixes
+values. In keyed pattern mode, each symbol selects the whole second at its
+scheduled start and holds that epoch for its entire pattern. Symbols beginning
+in one second consume successive counter positions; a symbol beginning in a
+later second selects that newer epoch. Long symbols skip intervening seconds,
+and crossing a second inside a pattern never changes that pattern's reference.
+Stable purpose roots let the receiver regenerate later symbols without the
+original message epoch. The second codeword mixes
 the first with a nonconstant balanced mask, preserving distinguishability under
 unknown carrier phase. A separate DSSS purpose remains independent. Pattern
-and data streams share the candidate epoch and searched stream position.
+and Data streams share the symbol-start epoch and subsecond position. Streams
+are generated on demand with fixed-size caches. See
+[the exact integer schedule](crypto.md#binary-pattern-chip-addressing).
 
 | Mode | Behavior |
 | --- | --- |
@@ -315,13 +326,27 @@ in natural-log units derived from a white Gaussian model. It is not APSK
 point error, measured dB, a calibrated confidence percentage or authentication.
 Timing, carrier and keystream candidates are compared only using this pattern
 evidence. High individual evidence can admit a single symbol; weaker retained
-symbols can contribute to a chain. A low-evidence gap ends the recovered burst.
+symbols can contribute to a chain. A failed symbol ends the contiguous recovered
+span without inserting a guessed bit. Established timing continues across
+missing symbols until at least two successive symbols have failed and their
+combined duration exceeds six seconds. Thus two missing hours-long symbols
+end a message; short symbols retain synchronization through a gap of up to
+six seconds. A sufficiently confident surviving symbol can start a new span
+without earlier symbols having decoded. Later seconds remain independently
+searchable after an old message ends.
+Retained weak symbols can be admitted by their combined evidence. If that
+combined evidence remains insufficient when a confident symbol arrives, the
+receiver preserves the confirmed prefix and starts a new span at that symbol.
 No supplied bit count, packet length, known text or checksum admits a burst.
 Packet decoding and optional integrity checks occur after the burst is chosen.
 
 The default frequency bank contains five offsets at 0, ±1/(4T), ±1/(2T),
 where T is symbol duration. The API permits an explicit bounded offset bank.
-Keyed search tries a finite set of epochs and initial stream positions; it
+Keyed search tries a finite set of epochs and initial stream positions. Where
+symbol duration does not divide one second, its subsecond phase hypotheses
+follow the finite `gcd(symbol_samples, sample_rate)` lattice. Phases yielding
+the same symbol stream address share a template; confident symbols narrow the
+remaining interval. Weak noise does not select a different phase. The search
 transmits no epoch, symbol index or chip-block index. Timing resolution and
 coverage depend on the allocated transform. This is not a whole-band search,
 an arbitrary Doppler tracker or a guarantee of long-duration clock recovery.
@@ -333,21 +358,60 @@ fits over the entire requested timing/frequency/rate window. Half-chip timing
 coverage is checked before allocation; unaffordable coverage is explicitly
 rejected. No full-symbol waveform or keystream array is required by this fallback.
 
+Live keyed profiles whose symbols last at least 60 seconds select
+`compact_clock_search` directly, even when a large FFT would fit. This retains
+the configured timing, carrier-frequency, clock-rate and subsecond-phase
+coverage. It uses 32-sample projection blocks and retains at most 32 diagnostic
+candidate records and 64 constellation points. Those limits trim diagnostic
+history; they do not remove running correlation hypotheses or lower confidence
+thresholds. Live admission also reserves 8 KiB per compact receiver for bounded
+control and diagnostic growth, in addition to its measured allocation.
+Public profiles retain continuous FFT discovery when it fits, since they share
+one repeating code rather than needing a separate receiver for every epoch.
+
 Tests cover a four-hour symbol prefix with bounded storage, noise rejection,
 and actual short-signal PCM recovery through the fallback. These checks establish
 bounded state and exercised decoding, not a completed four-hour weak-signal
 reception experiment. The default six-second epoch search supplies ±7 seconds
-of start uncertainty; at 1.2 kHz this costs roughly 26 MB per epoch before
-retained bits. CPU cost also grows with timing and epoch hypotheses and is not
+of start uncertainty. This is uncertainty in alignment: each admitted fit can
+accumulate over the entire hours-long symbol. Completed low-confidence results
+are discarded; running fits contain only compact sums. Their count, including
+distinct phase-address groups, determines search storage. CPU cost also grows
+with timing and epoch hypotheses and is not
 established as real time for a large bank. Multi-hour operation requires a finite
 clock window, adequate DSP budget and sufficient oscillator stability.
 
-An idle public fallback is rearmed after two symbol durations, so it does not
-remain confined to its original phase window forever. Active admitted bursts
-retain their state; ordinary FFT discovery is not periodically reset. This
-rearming does not provide complete continuous coverage of arbitrary start times
-between windows. The configured budget remains an upper limit, not a target
-to fill.
+An unconfirmed live epoch retires after one symbol duration plus prefix and
+clock-window allowance. A confirmed receiver retires after the permitted
+failed-symbol gap and timing allowance; old noise epochs are not retained
+indefinitely. Idle public fallback windows are also rearmed, while ordinary
+FFT discovery remains continuous. This rearming does not provide complete
+coverage of arbitrary start times between windows.
+
+Compact storage is a per-receiver bound. The aggregate bank can retain many
+possible start seconds while a long symbol is still being observed, and it
+also scales with selected keys and profiles. Admission still reports incomplete
+coverage when the configured budget is exhausted. A four-hour duration alone
+neither requires a four-hour waveform buffer nor guarantees that every bank
+configuration fits or runs in real time.
+
+On the tested 64-bit build, a compact private profile at 6,000 samples/s,
+1,500 Hz carrier and 1 Hz nominal bandwidth uses two-second chips. Its
+±7-second start window has 15 half-chip origins, five default frequency
+offsets and one zero-ppm clock rate: 75 timing/frequency hypotheses per epoch.
+
+| Symbol duration | Measured streaming receiver | Live admission per epoch, including control reserve |
+| --- | ---: | ---: |
+| 4 hours, one subsecond phase | 44,480 bytes | 53,360 bytes |
+| 4 hours + 0.3 seconds, phase search enabled | 52,880 bytes | 61,760 bytes |
+
+About 14,430 simultaneous unconfirmed start epochs would therefore account for
+approximately 734 MiB or 850 MiB respectively per key/profile, before global
+audio, plots and other DSP reservations. These are bank-size estimates from
+measured per-receiver allocations, not measurements of a four-hour hardware
+run. Wider bands, additional rates or keys, fractional symbol phases and
+available RAM change admission; oscillator coherence and CPU throughput still
+require validation on the intended hardware.
 
 The GUI DSP workspace dropdown offers 25%, 50% (default), or 75% of available
 RAM, resolved at startup or when selected. Received messages/files retain a

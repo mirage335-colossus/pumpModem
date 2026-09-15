@@ -3,6 +3,8 @@
 #include "datapump/channel.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_code.hpp"
+#include <algorithm>
 #include <iostream>
 #include <cmath>
 #include <array>
@@ -105,6 +107,89 @@ void public_late_symbol_interpretation() {
     const auto received=transfer::interpret_pattern(burst,value,value.timestamp);
     check(received.packet.message.data==text.data,"public patterns do not require an absolute secret stream index to interpret short text");
     check(received.diagnostics.pattern_score==burst.score,"a completed burst retains its own evidence score after receiver tracks drain");
+}
+void data_symbol_schedule_seeks() {
+    auto value=options(true);
+    // 6,000 one-chip symbols per second exercise both sides of the 512-byte
+    // Data cache boundary before the next epoch, plus multiple epoch resets.
+    value.modem.sample_rate=48000;value.modem.bandwidth_hz=12000;
+    value.modem.carrier_hz=12000;value.modem.spreading_factor=1;
+    value.modem.integration_seconds=0;
+    check(modem::symbol_sample_count(value.modem)==8,
+          "Data seek fixture must use 6,000 symbols per second");
+    Bytes plain(13031);
+    for(std::size_t i=0;i<plain.size();++i)plain[i]=static_cast<std::uint8_t>((i/3+i/17)%2);
+    auto encrypted=plain;transfer::xor_binary_bits(encrypted,value);
+    for(std::size_t second=0;second<3;++second) {
+        const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp+second,0,750);
+        const auto first=second*6000,last=std::min(first+6000,plain.size());
+        for(auto i=first;i<last;++i) {
+            const auto local=i-first;
+            const auto expected=plain[i]^((mask[local/8]>>(7-local%8))&1U);
+            check(encrypted[i]==expected,
+                  "Data masking must select the scheduled second and its MSB-first local bit");
+        }
+    }
+    auto chunked=plain;
+    const std::array<std::size_t,5> sizes{1,7,509,4093,601};
+    for(std::size_t first=0,chunk=0;first<chunked.size();++chunk) {
+        const auto count=std::min(sizes[chunk%sizes.size()],chunked.size()-first);
+        transfer::xor_binary_bits(std::span(chunked).subspan(first,count),value,first);
+        first+=count;
+    }
+    check(chunked==encrypted,"Data mask chunk boundaries must not change cache or epoch addressing");
+    for(const std::size_t first:{7U,4095U,4096U,5999U,6000U,6001U,11999U,12000U}) {
+        const auto count=std::min<std::size_t>(43,encrypted.size()-first);
+        Bytes fragment(encrypted.begin()+static_cast<std::ptrdiff_t>(first),
+                       encrypted.begin()+static_cast<std::ptrdiff_t>(first+count));
+        transfer::xor_binary_bits(fragment,value,first);
+        check(std::equal(fragment.begin(),fragment.end(),plain.begin()+static_cast<std::ptrdiff_t>(first)),
+              "non-byte-aligned fragments must decrypt across cache and whole-second boundaries");
+    }
+}
+void data_symbol_schedule_rebase() {
+    for(const double seconds:{.3,4*3600+.5}) {
+        auto value=options(true);value.modem.integration_seconds=seconds;value.modem.dsss=true;
+        const auto samples=modem::symbol_sample_count(value.modem);
+        const auto rate=static_cast<std::uint64_t>(value.modem.sample_rate);
+        const Bytes plain{0,1,0,0,1,1,0,1,0,1,1,1,0};
+        auto encrypted=plain;transfer::xor_binary_bits(encrypted,value);
+        for(std::size_t i=0;i<plain.size();++i) {
+            const auto start=static_cast<std::uint64_t>(i)*samples;
+            const auto epoch=value.timestamp+start/rate,ordinal=(start%rate)/samples;
+            const auto mask=value.key->stream(StreamPurpose::Data,epoch,ordinal/8,1);
+            check(encrypted[i]==(plain[i]^((mask.front()>>(7-ordinal%8))&1U)),
+                  "short and hours-long Data symbols must use their own start-second masks");
+        }
+        // A .3-second schedule first enters second 1 at phase .2; a
+        // 4-hour+.5-second schedule enters its second symbol at phase .5.
+        const std::size_t skipped=seconds<1?4:1;
+        const auto start=static_cast<std::uint64_t>(skipped)*samples;
+        auto later=value;later.timestamp+=start/rate;later.modem.stream_phase_samples=start%rate;
+        check(later.modem.stream_phase_samples!=0,
+              "rebasing fixture must require a fractional start phase");
+        Bytes remaining(encrypted.begin()+static_cast<std::ptrdiff_t>(skipped),encrypted.end());
+        transfer::xor_binary_bits(remaining,later);
+        check(std::equal(remaining.begin(),remaining.end(),plain.begin()+static_cast<std::ptrdiff_t>(skipped)),
+              "independent later-epoch Data decryption must not require the first message epoch");
+        modem::PatternBurst burst;burst.bits.assign(encrypted.begin()+static_cast<std::ptrdiff_t>(skipped),encrypted.end());
+        burst.stream_phase_samples=later.modem.stream_phase_samples;burst.score=100;burst.complete=true;
+        auto context=value; // The evidence, rather than caller settings, supplies the recovered phase.
+        const auto decoded=transfer::interpret_pattern(burst,context,later.timestamp);
+        check(decoded.raw_bits==remaining,
+              "interpret_pattern must use the phase recovered with the surviving symbol");
+        const auto initial_config=transfer::seeded_config(value,value.timestamp);
+        const auto later_config=transfer::seeded_config(later,later.timestamp);
+        check(initial_config.spreading_seed==later_config.spreading_seed &&
+              initial_config.dsss_seed==later_config.dsss_seed,
+              "waveform purpose roots must be independent of the original message epoch");
+        modem::PatternCode initial(initial_config,value.timestamp),rebased(later_config,later.timestamp);
+        const auto chips=initial.chips_per_symbol();
+        for(std::uint64_t symbol=0;symbol<3;++symbol)
+            for(const auto local:std::array<std::uint64_t,3>{0,1,chips-1})
+                check(initial.value((skipped+symbol)*chips+local,0)==rebased.value(symbol*chips+local,0),
+                      "rebased pattern and Data streams must describe the same surviving symbols");
+    }
 }
 void long_symbol_estimate() {
     auto value=options();value.modem.integration_seconds=3600;
@@ -304,4 +389,4 @@ void pattern_storage_limits() {
     }
 }
 }
-int main(){try{exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

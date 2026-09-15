@@ -104,6 +104,16 @@ symbol prefix with bounded storage and actual short-signal PCM recovery through
 this fallback. Coverage is finite: broad unknown-start acquisition and real-time
 performance across a large epoch bank are not established.
 
+Private patterns select the whole second at each symbol's scheduled start and
+hold it for the complete pattern, including hours-long symbols. Symbols
+beginning in the same second consume successive stream positions; the first
+symbol beginning in a later second uses the newer timestamp. Data encryption
+follows the same schedule. Fixed-size seek caches generate all streams on demand.
+An already-running receiver can recognize a sufficiently confident symbol
+despite obscuring noise in earlier symbols. Failed symbols produce no guessed
+bits; established timing survives until at least two consecutive symbols fail
+and that gap exceeds six seconds. Later seconds can be acquired independently.
+
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
@@ -351,12 +361,19 @@ signing keys or other applications' secrets in this format.
 AES-256-CTR masks every wire bit after transport recovery markers are inserted,
 including the markers themselves; larger packet messages retain their
 HMAC-SHA256 and Reed–Solomon processing. Short pattern-only messages have no MAC. Independent HKDF-derived keys separate
-the data, MAC, DSSS, scrambler, and reserved FHSS streams. All streams use the
-same candidate whole-second transmission anchor. Physical timing is refined to
-the sample; this is not a nanosecond-resolution absolute-time receiver. Receive
-time defaults to the start of capture; for saved WAVs use the original TX epoch
-or a nearby epoch with the search window. Search is nearest-first and bounded by
+the data, MAC, DSSS, scrambler, and reserved FHSS streams. On-air Data, DSSS and
+Scrambler positions use the same candidate symbol-start second and subsecond
+schedule. Automatically timed hardware output aligns the first payload symbol
+to a whole second, starting its settling audio beforehand. Explicit timestamps
+and simulation remain deterministic. Physical timing is refined to the sample;
+this is not a nanosecond-resolution absolute-time receiver. Receive time defaults
+to the start of capture; for saved WAVs supply a timestamp near the relevant
+symbol epoch and the corresponding search window. Search is nearest-first and bounded by
 ±32,768 seconds when encrypted.
+
+Both peers must use the symbol-start stream schedule. Its private waveforms and
+on-air Data masks are incompatible with the earlier transmission-wide epoch
+mapping; keyfile formats and the standalone byte-packet crypto API are unchanged.
 
 CTR position reuse reveals the XOR of the affected plaintext positions. A packet
 MAC protects larger authenticated messages; raw bits and short dictionary text

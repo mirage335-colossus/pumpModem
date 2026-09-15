@@ -18,7 +18,10 @@ struct Config {
     // Pattern transport conveys one bit per independently detectable waveform.
     // Obsolete multi-bit APSK profiles are rejected explicitly.
     bool pattern_symbols = true;
+    // Whole second and sample phase of symbol zero. Each later pattern uses
+    // its own start second; an epoch never changes inside a pattern symbol.
     std::uint64_t stream_epoch = 0;
+    std::uint64_t stream_phase_samples = 0;
     // Internal DSP clock, independent of the hardware audio endpoint clock.
     std::uint32_t sample_rate = 6000;
     unsigned constellation_bits = 1; // Exactly one meaningful bit per waveform.

@@ -2,12 +2,14 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/channel.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
 #include <limits>
 #include <numbers>
+#include <numeric>
 #include <random>
 #include <string>
 
@@ -174,7 +176,9 @@ void short_private_noise_evidence() {
         if(mode&1U)wrong.spreading_seed[7]^=0x80;else wrong.dsss_seed[7]^=0x80;
         check(receive(samples,wrong,chunks).bursts.empty(),
               "sample-resolution private patterns must not inflate a wrong key into evidence");
-        wrong=c;++wrong.stream_epoch;
+        // A later second inside this capture is intentionally acquirable.
+        // Choose an epoch beyond every symbol in the generated waveform.
+        wrong=c;wrong.stream_epoch+=1+samples.size()/c.sample_rate;
         check(receive(samples,wrong,chunks).bursts.empty(),
               "sample-resolution private patterns must reject a wrong stream epoch");
         std::normal_distribution<double> noise(0,std::sqrt(modem::nominal_signal_power));
@@ -249,6 +253,43 @@ void weak_prefix_cannot_borrow_payload_confidence() {
     const auto& burst=exact(result,{0,0,1});
     check(burst.first_sample>=delay+symbol-10,
           "a strong payload symbol must not retroactively confirm a weak candidate before its start");
+}
+void pending_tail_requires_joint_confidence() {
+    auto c=config(64,true);c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
+    constexpr std::array<std::size_t,3> changing{137,503,17};
+    for(const bool joint_confident:{false,true}) {
+        auto samples=waveform(c,{0,1,0},0,3*symbol,.73);
+        std::mt19937_64 random(197);std::normal_distribution<double> noise(0,2.);
+        for(std::size_t i=symbol;i<2*symbol;++i)samples[i]+=static_cast<float>(noise(random));
+        if(!joint_confident) {
+            std::mt19937_64 last_random(821);std::normal_distribution<double> last_noise(0,1.);
+            for(std::size_t i=2*symbol;i<3*symbol;++i)samples[i]+=static_cast<float>(last_noise(last_random));
+        }
+        const std::array<std::size_t,1> whole{samples.size()};
+        for(const auto chunks:{std::span<const std::size_t>(changing),std::span<const std::size_t>(whole)}) {
+            const auto result=receive(samples,c,chunks,search);
+            // Middle evidence is about 9.3. A last-symbol score around 34 meets
+            // standalone confidence but leaves the joint tail bound around 30.5,
+            // below acceptance. A clean last symbol also establishes joint
+            // confidence, which must preserve the existing combined-chain behavior.
+            check(std::any_of(result.candidates.begin(),result.candidates.end(),[&](const auto& e) {
+                return e.stream_symbol==1 && e.score>=search.retain_score && e.score<10 &&
+                    e.score-e.alternative_score>=1;
+            }),"weak-tail fixture must retain an individually unconfirmed middle-symbol candidate");
+            if(joint_confident) {
+                check(exact(result,{0,1,0}).first_stream_symbol==0,
+                      "valid combined confidence must preserve the pending tail and entire admitted span");
+                continue;
+            }
+            check(result.bursts.size()==2 && result.bursts[0].bits==Bytes{0} && result.bursts[1].bits==Bytes{0},
+                  "standalone confidence must not confirm a pending tail whose joint bound fails");
+            check(result.bursts[0].first_stream_symbol==0 && result.bursts[0].end_sample==symbol &&
+                  result.bursts[1].first_stream_symbol==2 && result.bursts[1].first_sample==2*symbol,
+                  "independent confidence must preserve both surviving symbols and their original stream positions");
+        }
+    }
 }
 void unconfirmed_tail_cannot_veto_later_start() {
     auto c=config(64);c.bandwidth_hz=100;
@@ -346,6 +387,59 @@ void keyed_capture_missing_first_symbol() {
     auto samples=waveform(c,{1,0,0,1},0,3*symbol,.37,.03);samples.erase(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(symbol));
     constexpr std::array<std::size_t,3> chunks{127,19,503};const auto result=receive(samples,c,chunks);
     check(exact(result,{0,0,1}).first_stream_symbol==1,"late keyed burst lost its data-keystream position");
+}
+void keyed_track_survives_missing_symbols() {
+    auto c=config(256,true);c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const Bytes before{0,1,1,0},after{1,0,0,1};
+    Bytes bits=before;bits.insert(bits.end(),{0,0,0});bits.insert(bits.end(),after.begin(),after.end());
+    auto samples=waveform(c,bits,137,3*symbol,.37,.02);
+    std::fill(samples.begin()+static_cast<std::ptrdiff_t>(137+4*symbol),
+              samples.begin()+static_cast<std::ptrdiff_t>(137+7*symbol),0.F);
+    constexpr std::array<std::size_t,3> chunks{127,19,503};
+    const auto recovered=receive(samples,c,chunks);
+    check(recovered.bursts.size()==2 && recovered.bursts[0].bits==before && recovered.bursts[1].bits==after,
+          "an established private track must recover independently after three missing short symbols");
+    check(recovered.bursts[0].first_stream_symbol==0 && recovered.bursts[1].first_stream_symbol==7,
+          "missing symbols must advance the private stream without inserting guessed payload bits");
+    modem::PatternSearch short_gap;short_gap.max_gap_seconds=0;
+    const auto expired=receive(samples,c,chunks,short_gap);
+    check(expired.bursts.size()==1 && expired.bursts.front().bits==before,
+          "after two failed symbols exhaust the configured gap, old private tracking must expire");
+}
+void independently_started_epoch_recovers_phase() {
+    for(unsigned profile=0;profile<3;++profile) {
+        auto transmitter=config(128,true);transmitter.pulse_shaping=false;
+        if(profile==1)transmitter.integration_seconds=.7;
+        if(profile==2) {
+            transmitter=config(16,true);transmitter.pulse_shaping=false;
+            transmitter.sample_rate=8000;transmitter.bandwidth_hz=1000;
+        }
+        const auto symbol=modem::symbol_sample_count(transmitter);
+        const auto step=std::gcd(symbol,static_cast<std::uint64_t>(transmitter.sample_rate));
+        transmitter.stream_phase_samples=(std::min(symbol,static_cast<std::uint64_t>(transmitter.sample_rate))-1)/step*step;
+        Bytes bits{0,1,1,0,0,1,0,1,0,1,1,0,1,0,0,1};
+        if(profile==2) {
+            // Initial cached templates are phase-independent, but later
+            // symbols cross the second at different nonzero sample phases.
+            const auto block=bits;for(unsigned i=0;i<3;++i)bits.insert(bits.end(),block.begin(),block.end());
+        }
+        const auto samples=waveform(transmitter,bits,137,3*symbol,.37,.01);
+        auto receiver=transmitter;receiver.stream_phase_samples=0;
+        modem::PatternSearch search;search.search_stream_phases=true;search.frequency_offsets_hz={0};
+        constexpr std::array<std::size_t,3> chunks{127,19,503};
+        const auto result=receive(samples,receiver,chunks,search);
+        const auto& burst=exact(result,bits);
+        check(burst.first_stream_symbol==0,"an independently admitted second must start at its own first symbol");
+        for(std::size_t index=0;index<bits.size();++index) {
+            const auto expected=modem::symbol_stream_address(transmitter.stream_epoch,transmitter.stream_phase_samples,
+                index,symbol,transmitter.sample_rate);
+            const auto actual=modem::symbol_stream_address(receiver.stream_epoch,burst.stream_phase_samples,
+                index,symbol,receiver.sample_rate);
+            check(actual.epoch==expected.epoch && actual.ordinal==expected.ordinal,
+                  "recovered phase must retain every decoded symbol's exact timestamp and within-second counter");
+        }
+    }
 }
 void independent_sampled_channel() {
     for(bool keyed:{false,true})for(std::size_t length:{std::size_t{3},std::size_t{1536}}) {
@@ -597,10 +691,13 @@ int main() {
     run("short private noise evidence",short_private_noise_evidence);
     run("private template energy normalization",private_template_energy_normalization);
     run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
+    run("pending tail joint confidence",pending_tail_requires_joint_confidence);
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);
+    run("private tracking across missing symbols",keyed_track_survives_missing_symbols);
+    run("independent epoch phase acquisition",independently_started_epoch_recovers_phase);
     run("independent sampled crystal and phase",independent_sampled_channel);
     run("high-SNR sampled private and public patterns",high_snr_sampled_channel);
     run("orthogonal private pattern bins",orthogonal_private_pattern_bins);

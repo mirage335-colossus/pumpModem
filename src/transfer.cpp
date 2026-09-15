@@ -1,4 +1,5 @@
 #include "datapump/transfer.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
@@ -34,6 +35,9 @@ void check_cancelled(std::stop_token stop) {
 }
 void validate(const Options& options) {
     modem::validate(options.modem);
+    if(options.capture_epoch && (!std::isfinite(*options.capture_epoch) || *options.capture_epoch<0 ||
+       static_cast<long double>(*options.capture_epoch)>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())))
+        throw Error("capture epoch must be finite, nonnegative and within the epoch range");
     if ((options.modem.scramble || options.modem.dsss) && !options.key)
         throw Error("encrypted spreading requires a symmetric key");
     if (options.fec != FecMode::off && options.fec != FecMode::rs20 && options.fec != FecMode::rs60)
@@ -155,12 +159,15 @@ modem::Config seeded_config(const Options& input_options, std::uint64_t timestam
     auto result = options.modem;
     result.stream_epoch=timestamp;
     result.data_key=options.key;
+    // Stable, purpose-separated roots. PatternCode selects the epoch at each
+    // symbol start; a later independently acquired epoch must not depend on
+    // the first timestamp of the original message.
     if (options.key && result.scramble) {
-        const auto seed = options.key->stream(StreamPurpose::Scrambler, timestamp, 0, result.spreading_seed.size());
+        const auto seed = options.key->stream(StreamPurpose::Scrambler, 0, 0, result.spreading_seed.size());
         std::copy(seed.begin(), seed.end(), result.spreading_seed.begin());
     }
     if (options.key && result.dsss) {
-        const auto seed = options.key->stream(StreamPurpose::Dsss, timestamp, 0, result.dsss_seed.size());
+        const auto seed = options.key->stream(StreamPurpose::Dsss, 0, 0, result.dsss_seed.size());
         std::copy(seed.begin(), seed.end(), result.dsss_seed.begin());
     }
     return result;
@@ -273,6 +280,7 @@ std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& 
 Received interpret_pattern(modem::PatternBurst burst,const Options& input_options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {
     const auto options=effective_options(input_options);
     auto context=options;context.timestamp=timestamp;
+    context.modem.stream_phase_samples=burst.stream_phase_samples;
     context.content_limit=std::max(context.content_limit,burst.bits.size());
     if(burst.first_stream_symbol>std::numeric_limits<std::size_t>::max())throw Error("received pattern stream index exceeds bit address space");
     Received result;result.timestamp=timestamp;result.diagnostics=std::move(diagnostics);
@@ -314,16 +322,25 @@ void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,s
     if(bits.size()>std::numeric_limits<std::size_t>::max()-bit_offset)
         throw Error("raw binary data-stream offset overflow");
     if(value.key) {
-        // A received fragment can start at any bit, not only a byte boundary.
-        // Keep crypto scratch bounded while preserving the exact TX stream.
+        // Data and pattern positions use the same symbol-start clock. A new
+        // second restarts its local bit positions even after missed symbols.
+        // Keep a bounded cache; never allocate a duration-sized keystream.
+        constexpr std::size_t cache_size=512;
+        Bytes mask;
+        std::uint64_t cached_epoch=0,cached_begin=0;
+        bool cached=false;
+        const auto samples=modem::symbol_sample_count(value.modem);
         std::size_t offset=0;
         while(offset<bits.size()) {
-            const auto position=bit_offset+offset,skip=position%8;
-            const auto count=std::min<std::size_t>(16384*8-skip,bits.size()-offset);
-            const auto mask=value.key->stream(StreamPurpose::Data,value.timestamp,position/8,(skip+count)/8+((skip+count)%8!=0));
-            for(std::size_t i=0;i<count;++i)
-                bits[offset+i]^=static_cast<std::uint8_t>((mask[(skip+i)/8]>>(7-(skip+i)%8))&1);
-            offset+=count;
+            const auto address=modem::symbol_stream_address(value.timestamp,value.modem.stream_phase_samples,
+                bit_offset+offset,samples,value.modem.sample_rate);
+            const auto byte=address.ordinal/8,begin=byte-byte%cache_size;
+            if(!cached || address.epoch!=cached_epoch || begin!=cached_begin) {
+                mask=value.key->stream(StreamPurpose::Data,address.epoch,begin,cache_size);
+                cached_epoch=address.epoch;cached_begin=begin;cached=true;
+            }
+            bits[offset]^=static_cast<std::uint8_t>((mask[static_cast<std::size_t>(byte-begin)]>>(7-address.ordinal%8))&1);
+            ++offset;
         }
     }
 }
@@ -378,10 +395,11 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         check_cancelled(stop);if(progress)progress(epoch);
         try {
         auto value=options;value.modem=profile;
-        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(options.timestamp)+
-            (static_cast<double>(modem::training_sample_count(profile))+
-             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
+        if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
+            static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
+        search.search_stream_phases=options.key.has_value();
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         for(std::size_t offset=0;offset<samples.size();) {
@@ -423,6 +441,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
             (static_cast<double>(modem::training_sample_count(profile))+
              static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
+        search.search_stream_phases=options.key.has_value();
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
         modem::SampledSimulationChannel impairments(config,channel);std::array<float,2048> samples{};

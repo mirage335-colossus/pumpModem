@@ -25,6 +25,8 @@ std::atomic<std::uint64_t> playback_sample_limit{std::numeric_limits<std::uint64
 std::atomic<bool> record_playback{false};
 std::atomic<std::shared_ptr<const std::vector<float>>> playback_recording;
 std::atomic<std::shared_ptr<const std::vector<float>>> capture_samples;
+std::atomic<std::uint64_t> capture_sample_limit{std::numeric_limits<std::uint64_t>::max()};
+std::atomic<std::uint64_t> captured_samples{0};
 }
 // Link-time audio adapter: exercise Session's actual playback/capture branch
 // without a host sound card. Simulation must never call this adapter.
@@ -37,10 +39,14 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
     const auto recording=live_test_audio::capture_samples.load();
     std::size_t captured=0;
     while(!stop.stop_requested()) {
+        const auto limit=live_test_audio::capture_sample_limit.load();
+        if(captured>=limit){std::this_thread::sleep_for(2ms);continue;}
         if(recording && captured<recording->size()) {
-            const auto count=std::min(silence.size(),recording->size()-captured);
+            const auto count=std::min<std::size_t>(std::min(silence.size(),recording->size()-captured),
+                static_cast<std::size_t>(limit-captured));
             if(!callback(std::span<const float>(*recording).subspan(captured,count)))return;
             captured+=count;
+            live_test_audio::captured_samples=captured;
         } else if(!callback(silence))return;
         std::this_thread::sleep_for(2ms);
     }
@@ -147,6 +153,13 @@ void check_signal_metrics(const live::Snapshot& snapshot) {
     }
 }
 void check_packet_replay_start(const live::Snapshot& snapshot, const char* description) {
+    if(!snapshot.signals.empty()) {
+        std::string detail=std::string(description)+"; replay="+std::to_string(snapshot.simulation_replay)+
+            " frame="+std::to_string(snapshot.replay_frame_index)+" signals="+std::to_string(snapshot.signals.size());
+        for(const auto& signal:snapshot.signals)detail+=" ["+std::to_string(signal.id)+":"+
+            std::to_string(signal.binary)+":"+std::to_string(signal.complete)+":"+signal.text.substr(0,32)+"]";
+        throw std::runtime_error(detail);
+    }
     check(snapshot.received.empty(), description);
     if (!snapshot.simulation_replay) {
         check(snapshot.signals.empty(), description);
@@ -353,6 +366,15 @@ void check_no_raw_reception(const live::Snapshot& snapshot) {
     check(snapshot.constellation_source != live::ConstellationSource::received,
           "raw transmission cannot supply receiver lock or matched symbol coordinates");
 }
+void check_confident_raw_prefix(const live::Snapshot& snapshot,std::string_view expected) {
+    check(snapshot.received.empty(),"provisional raw confidence must not publish downloadable content");
+    for(const auto& signal:snapshot.signals)
+        check(signal.binary && !signal.complete && !signal.validated && signal.pattern_score.has_value() &&
+              signal.received_bits==signal.text.size() && !signal.text.empty() && expected.starts_with(signal.text),
+              "raw replay may publish only statistically admitted prefixes of the observed bits before completion");
+    check(snapshot.constellation_source!=live::ConstellationSource::received,
+          "provisional pattern evidence must retain independently measured input I/Q");
+}
 void test_binary_simulation_replay_validation_and_cancel() {
     std::atomic<std::int64_t> replay_milliseconds{0};
     live::Session session({}, [&] {
@@ -395,14 +417,14 @@ void test_binary_simulation_replay_validation_and_cancel() {
           "rejected raw input leaves the active replay and its queue untouched");
     replay_milliseconds = 1500;
     const auto middle = session.snapshot();
-    check_no_raw_reception(middle);
+    check_confident_raw_prefix(middle,"001");
     check(middle.simulation_replay && middle.simulation_sample_fraction > .4 && middle.simulation_sample_fraction < .6 &&
           !middle.waveform.empty() && !middle.spectrum_db.empty() && !middle.constellation.empty() &&
           middle.waveform != first.waveform && middle.constellation_source == live::ConstellationSource::input,
           "raw replay shows changing measured waveform, spectrum and input I/Q halfway through its three seconds");
     replay_milliseconds = 2999;
     const auto last = session.snapshot();
-    check_no_raw_reception(last);
+    check_confident_raw_prefix(last,"001");
     check(last.simulation_replay && last.simulation_sample_fraction > .99 &&
           last.replay_frame_index + 1 == last.replay_frame_count && !last.constellation.empty(),
           "raw simulation retains actual input measurements in its last frame through 2999ms");
@@ -491,11 +513,11 @@ void test_keyed_binary_transmission_preserves_exact_bits() {
         });
         check(std::abs(first.transmission_seconds - expected.total_seconds) < 1e-12,
               "key masking preserves the exact raw pattern transmission duration");
+        std::string expected_bits;for(auto bit:bits)expected_bits+=bit?'1':'0';
         replay_milliseconds = 2999;
-        check_no_raw_reception(session.snapshot());
+        check_confident_raw_prefix(session.snapshot(),expected_bits);
         replay_milliseconds = 3000;
         const auto completed = session.snapshot();
-        std::string expected_bits;for(auto bit:bits)expected_bits+=bit?'1':'0';
         check(completed.signals.size()==1 && completed.signals.front().binary &&
               completed.signals.front().text==expected_bits && !completed.simulation_replay,
               "keyed acquisition recovers exact raw bits from independently sampled patterns");
@@ -721,7 +743,9 @@ void test_simulation_replay_and_live_constellation() {
     auto previous = first;
     bool observed_evidence = false, observed_fresh_symbols = false, changed_waveform = false, changed_spectrum = false;
     std::uint64_t points_after_frame_40 = 0;
-    const auto training_fraction = 5 / first.transmission_seconds;
+    const auto training_fraction = (static_cast<double>(modem::training_sample_count(value.transfer.modem))+
+        static_cast<double>(modem::pattern_pulse_padding_samples(value.transfer.modem)))/
+        value.transfer.modem.sample_rate/first.transmission_seconds;
     for (std::size_t index = 1; index < 60; ++index) {
         replay_milliseconds = static_cast<std::int64_t>(index * 50);
         const auto frame = session.snapshot();
@@ -744,7 +768,9 @@ void test_simulation_replay_and_live_constellation() {
         check_signal_metrics(frame);
         if (frame.simulation_sample_fraction + .02 < training_fraction)
             check(frame.signals.empty(), "signal-browser content cannot appear while only the preamble has been presented");
-        check(frame.signals.empty(), "completed packet interpretation remains deferred until the replay deadline");
+        for(const auto& signal:frame.signals)
+            check(signal.binary && !signal.complete && !signal.validated && signal.pattern_score.has_value(),
+                  "replay may show confident binary prefixes while completed packet interpretation waits for its deadline");
         if (index > 40) points_after_frame_40 += frame.constellation.size() + frame.constellation_dropped;
         check(frame.constellation_source == live::ConstellationSource::input,
               "pattern acquisition preserves measured input I/Q throughout replay");
@@ -1067,6 +1093,125 @@ void test_encrypted_epoch_bank_refreshes_while_idle() {
           received.received.front().timestamp == origin + 10,
           "an idle encrypted listener independently refreshes epochs after its initial search window expires");
 }
+void test_noise_epochs_retire_with_bounded_workspace() {
+    constexpr std::uint64_t origin=1800000000;
+    std::atomic<std::uint64_t> local_epoch{origin};
+    live::Session session([&]{return static_cast<double>(local_epoch.load());});
+    auto value=settings();value.transfer.key.emplace(Bytes(32,0x53));
+    value.transfer.modem.scramble=value.transfer.modem.dsss=true;
+    value.transfer.modem.spreading_factor=64;value.transfer.search_seconds=1;
+    value.dsp_workspace_bytes=16*1024*1024;
+    session.start(value);
+    auto previous=wait_for(session,[](const auto& snapshot){return snapshot.samples_received>=800;});
+    std::size_t warm_bytes=0;
+    for(unsigned second=1;second<=24;++second) {
+        local_epoch=origin+second;
+        const auto old_samples=previous.samples_received;
+        previous=wait_for(session,[&](const auto& snapshot){
+            check(snapshot.received.empty() && snapshot.signals.empty(),
+                  "retiring noise-only timestamp searches must not publish a signal");
+            check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+                  "successive noise-only epochs exceeded the shared DSP memory ceiling");
+            return snapshot.samples_received>=old_samples+800;
+        });
+        if(second==12)warm_bytes=previous.dsp_buffered_bytes;
+    }
+    check(previous.dsp_buffered_bytes<=warm_bytes+512*1024,
+          "expired noise-only epochs must release search state instead of growing for the listener's lifetime");
+}
+void test_pattern_audio_publishes_confident_prefix() {
+    constexpr std::uint64_t epoch=1800000000;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.key.emplace(Bytes(32,0x69));value.transfer.timestamp=epoch;
+    value.transfer.modem.spreading_factor=64;value.transfer.modem.scramble=true;
+    value.transfer.modem.pulse_shaping=false;value.transfer.search_seconds=0;
+    value.dsp_workspace_bytes=8*1024*1024;
+    const Bytes bits{0,1,1,0};auto source=transfer::binary_transmitter(bits,value.transfer);
+    const auto symbol=modem::symbol_sample_count(value.transfer.modem);
+    const auto prefix=modem::training_sample_count(value.transfer.modem);
+    std::vector<float> recording(static_cast<std::size_t>(source->total_samples()+3*symbol));
+    std::size_t written=0;
+    while(!source->finished())written+=source->read(std::span(recording).subspan(written));
+    recording.erase(recording.begin(),recording.begin()+static_cast<std::ptrdiff_t>(prefix));
+    live_test_audio::capture_samples=std::make_shared<const std::vector<float>>(std::move(recording));
+    live_test_audio::captured_samples=0;live_test_audio::capture_sample_limit=2*symbol;
+    struct ResetCapture {
+        ~ResetCapture(){live_test_audio::capture_sample_limit=std::numeric_limits<std::uint64_t>::max();
+            live_test_audio::capture_samples.store({});}
+    } reset;
+    live::Session session([=]{return static_cast<double>(epoch);});session.start(value);
+    std::uint64_t signal_id=0;
+    const auto first=wait_for(session,[&](const auto& snapshot){
+        const auto signal=std::find_if(snapshot.signals.begin(),snapshot.signals.end(),[](const auto& item){
+            return item.binary && !item.complete && item.text=="0" && item.pattern_score.has_value();
+        });
+        if(signal==snapshot.signals.end())return false;
+        signal_id=signal->id;return true;
+    });
+    check(live_test_audio::captured_samples==2*symbol && first.received.empty(),
+          "a confident prefix must be reported while capture is paused before burst completion");
+    live_test_audio::capture_sample_limit=std::numeric_limits<std::uint64_t>::max();
+    wait_for(session,[&](const auto& snapshot){
+        return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& item){
+            return item.id==signal_id && item.binary && item.complete && item.text=="0110";
+        });
+    });
+    session.stop();
+}
+void test_public_long_symbol_after_idle_window() {
+    constexpr std::uint64_t origin=1800000000;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.modem.sample_rate=64;value.transfer.modem.bandwidth_hz=4;
+    value.transfer.modem.carrier_hz=16;value.transfer.modem.integration_seconds=60;
+    value.transfer.modem.pulse_shaping=false;value.transfer.search_seconds=0;
+    value.dsp_workspace_bytes=8*1024*1024;
+    const auto symbol=modem::symbol_sample_count(value.transfer.modem);
+    const std::size_t delay=8*value.transfer.modem.sample_rate;
+    modem::PatternTransmitter source(Bytes{1},value.transfer.modem,origin,0,false);
+    std::vector<float> recording(delay+static_cast<std::size_t>(source.total_samples()+symbol));
+    std::size_t written=delay;
+    while(!source.finished())written+=source.read(std::span(recording).subspan(written));
+    live_test_audio::capture_samples=std::make_shared<const std::vector<float>>(std::move(recording));
+    live_test_audio::captured_samples=0;
+    struct ResetCapture {~ResetCapture(){live_test_audio::capture_samples.store({});}} reset;
+    live::Session session([=]{return static_cast<double>(origin)+
+        static_cast<double>(live_test_audio::captured_samples.load())/value.transfer.modem.sample_rate;});
+    session.start(value);
+    const auto received=wait_for(session,[&](const auto& snapshot){
+        check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+              "public long-symbol continuous acquisition exceeded its fitting FFT workspace");
+        return std::any_of(snapshot.signals.begin(),snapshot.signals.end(),[](const auto& signal){
+            return signal.binary && signal.complete && signal.text=="1" && signal.pattern_score.has_value();
+        });
+    });
+    check(received.samples_received>delay+symbol,
+          "public long-symbol detection must come from the later sampled waveform outside the initial clock window");
+    session.stop();
+}
+void test_pattern_packet_completion_keeps_validated_content() {
+    constexpr std::uint64_t epoch=1800000000;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([=]{return static_cast<double>(epoch);},[&]{
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();value.transfer.timestamp=epoch;value.transfer.search_seconds=0;
+    // Other receive keys must neither erase staged content nor replace its
+    // validated browser update after provisional packet validation.
+    value.transfer.key.emplace(Bytes(32,0x46));value.receive_keys.emplace_back(Bytes(32,0x47));
+    value.simulation_snr_db=40;session.start(value);
+    const auto sent=message(0x46,32);session.transmit(sent);
+    wait_for(session,[](const auto& snapshot){
+        check(snapshot.received.empty(),"validated provisional content must wait for the replay deadline");
+        return snapshot.simulation_replay && snapshot.transmission_finished;
+    });
+    replay_milliseconds=3000;
+    const auto completed=wait_for(session,[](const auto& snapshot){return !snapshot.simulation_replay;});
+    check(completed.received.size()==1 && completed.received.front().packet_validated &&
+          completed.received.front().packet.message.data==sent.data,
+          "closing an already validated provisional burst must preserve its staged received packet");
+    check_signal_metrics(completed);
+    check(session.snapshot().received.empty(),"burst completion must not deliver validated content twice");
+}
 void test_pattern_epoch_boundary() {
     constexpr double origin=1800000000;
     std::atomic<double> local_epoch{origin+.9};
@@ -1122,7 +1267,9 @@ void test_pattern_listener_starts_after_hardware_prefix() {
     while(!source->finished())written+=source->read(std::span(recording).subspan(written));
     recording.erase(recording.begin(),recording.begin()+static_cast<std::ptrdiff_t>(prefix));
     live_test_audio::capture_samples=std::make_shared<const std::vector<float>>(std::move(recording));
-    const auto listen_epoch=static_cast<double>(origin)+static_cast<double>(prefix)/value.transfer.modem.sample_rate;
+    // The epoch now addresses the first payload symbol. Hardware settling
+    // preceded that time; the cropped capture starts at the payload second.
+    const auto listen_epoch=static_cast<double>(origin);
     live::Session session([=]{return listen_epoch;});
     session.start(value);
     const auto received=wait_for(session,[](const auto& snapshot){
@@ -1373,6 +1520,10 @@ int main(int argc, char** argv) {
         run("three long keyed banks", test_default_workspace_holds_three_long_keyed_banks);
         run("growing receiver workspace", test_growing_receiver_workspace_is_shared_and_reported);
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
+        run("noise epoch bounded retirement", test_noise_epochs_retire_with_bounded_workspace);
+        run("pattern audio confident prefix", test_pattern_audio_publishes_confident_prefix);
+        run("public long symbol after idle window", test_public_long_symbol_after_idle_window);
+        run("pattern validated completion", test_pattern_packet_completion_keeps_validated_content);
         run("pattern epoch boundary", test_pattern_epoch_boundary);
         run("pattern listener after hardware prefix", test_pattern_listener_starts_after_hardware_prefix);
         run("single pattern replay evidence", test_single_pattern_replay_evidence);

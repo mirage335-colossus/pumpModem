@@ -2,6 +2,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <cmath>
 #include <chrono>
@@ -138,7 +139,8 @@ void test_protected_pattern_pipeline() {
     const auto config=transfer::seeded_config(value,value.timestamp);
     check(config.scramble && config.data_key.has_value(),"selected encryption key did not force private pattern waveforms");
     check(config.spreading_seed!=config.dsss_seed,"Scrambler and DSSS streams share purpose keys");
-    check(config.spreading_seed!=transfer::seeded_config(value,value.timestamp+1).spreading_seed,"epoch does not change private waveform seed");
+    check(config.spreading_seed==transfer::seeded_config(value,value.timestamp+1).spreading_seed,"purpose root must be independent of the original message epoch");
+    check(config.stream_epoch!=transfer::seeded_config(value,value.timestamp+1).stream_epoch,"symbol timing must retain the selected epoch");
     const auto sent=sample();const auto bits=transfer::message_wire_bits(sent,value);
     auto clear=bits;transfer::xor_binary_bits(clear,value);
     check(clear!=bits,"complete framed wire was not encrypted");
@@ -194,10 +196,38 @@ void test_repeat_policy_and_cancellation() {
     rejects([&]{transfer::receive({},options(true),[&](auto){++visits;progress_stop.request_stop();},progress_stop.get_token());},"progress callback cancellation ignored");
     check(visits==1,"cancelled receiver tried additional epochs");
 }
+void test_scheduled_payload_start() {
+    auto value=options(true);value.modem.pulse_shaping=true;
+    double now=1800000000.375;
+    unsigned builds=0;
+    const auto prefix=(static_cast<double>(modem::training_sample_count(value.modem))+
+        static_cast<double>(modem::pattern_pulse_padding_samples(value.modem)))/value.modem.sample_rate;
+    const auto scheduled=detail::schedule_transmission(value.modem,[&](std::uint64_t epoch) {
+        ++builds;value.timestamp=epoch;
+        // First preparation misses its target; the retry must use a new
+        // timestamp before any samples can reach the output device.
+        now+=builds==1?2.:.125;
+        return transfer::binary_transmitter(Bytes{0,1},value);
+    },[&]{return now;});
+    check(builds==2,"slow preparation must be rescheduled before playback");
+    check(scheduled.playback_epoch>now,"scheduled prefix starts in the future");
+    check(std::abs(scheduled.playback_epoch+prefix-static_cast<double>(scheduled.epoch))<1e-6,
+          "first payload sample must be scheduled on the whole-second epoch");
+    check(scheduled.epoch==value.timestamp,"scheduled waveform must use its actual payload epoch");
+    std::stop_source stop;stop.request_stop();
+    rejects([&]{detail::schedule_transmission(value.modem,[&](auto){++builds;return transfer::binary_transmitter(Bytes{0},value);},
+        [&]{return now;},stop.get_token());},"cancelled scheduled preparation proceeded");
+    check(builds==2,"cancelled scheduling must not build another transmitter");
+    rejects([&]{detail::wait_for_playback(now,[&]{return now+1;});},"missed whole second must not silently transmit stale epoch");
+    double backwards=now;
+    rejects([&]{detail::wait_for_playback(now+1,[&]{return --backwards;});},"backwards clock jump extended a scheduled wait");
+    value.capture_epoch=std::numeric_limits<double>::quiet_NaN();
+    rejects([&]{transfer::receive({},value);},"nonfinite hardware capture epoch accepted");
+}
 }
 int main(){try {
     test_callback_lifetime_and_epoch_binding();test_shared_packet_pipeline();
     test_full_content_capacity_with_independent_scratch();test_exact_raw_bits_and_masking();
-    test_protected_pattern_pipeline();test_tone_forces_every_protection_off();test_repeat_policy_and_cancellation();
+    test_protected_pattern_pipeline();test_tone_forces_every_protection_off();test_repeat_policy_and_cancellation();test_scheduled_payload_start();
     std::cout<<"transfer tests passed\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

@@ -23,11 +23,11 @@ The master secret is exactly 32 random bytes. Independent purpose keys are:
 
 Each stream purpose derives `epoch_key = HKDF(purpose_key,
 "datapump/v1/epoch/" || BE64(timestamp))`. A timestamp is an unsigned whole-second
-transmission anchor, normally a Unix-time approximation of absolute time. Each
-purpose uses the **same timestamp** when searching a candidate clock offset.
-The caller maps its symbol/sample schedule to byte positions; this library does
-not convert fractional seconds or automatically advance the anchor during a
-transmission.
+coordinate, normally a Unix-time approximation of absolute time. The
+`Crypto::stream` primitive accepts an explicit timestamp and byte offset;
+it does not read the system clock. Pattern transport selects a new timestamp
+at symbol boundaries using the sample schedule below. Data, Scrambler and
+DSSS use that same symbol-start timestamp under each clock hypothesis.
 
 For byte offset `o`, the AES-256-CTR initial 128-bit counter is
 `domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
@@ -52,16 +52,40 @@ purpose. Tone modes force the key, Data mask, Scrambler and DSSS off; they are
 unencrypted modes for ordinary communications or local experiments and provide
 no LPI claim. Explicit old APSK profiles are rejected.
 
-Transfer derives each 32-byte waveform seed from its purpose's original key
-stream at the selected epoch and byte offset zero. `PatternCode` constructs a
-`Crypto` instance from that seed and selects the same purpose and epoch for
-chip generation. Raw payload Data masking uses the original selected key.
-This waveform convention is incompatible with the former real-sign waveform.
+Transfer derives each stable 32-byte waveform seed from its purpose's original
+key stream at epoch zero and byte offset zero. `PatternCode` constructs a
+`Crypto` instance from that seed and selects the purpose and each symbol's
+start epoch for chip generation. Raw payload Data masking uses the original
+selected key. A later symbol therefore does not require the original message's
+epoch to reconstruct its streams. Both peers must use this addressing scheme;
+it is incompatible with the earlier transmission-wide epoch mapping and the
+former real-sign waveform.
 
-For absolute chip position `k`, a private template consumes eight bytes at
-`8*k`. If Scrambler is enabled its bytes supply the row; otherwise a public
-Scrambler stream supplies the base. Enabled DSSS bytes at the same absolute
-position XOR into that row. Two big-endian 32-bit words determine a circular
+Let `Fs` be the sample rate, `N` the samples per symbol, and
+`C = ceil(N / chip_samples)`. `stream_epoch` is the whole second of symbol
+zero; `stream_phase_samples` is its sample offset within that second. For
+symbol `j`, integer arithmetic evaluates:
+
+```text
+start_samples = stream_phase_samples + j*N
+epoch         = stream_epoch + floor(start_samples / Fs)
+within_second = start_samples mod Fs
+ordinal       = floor(within_second / N)
+chip_position = ordinal*C + chip_in_symbol
+```
+
+The selected epoch stays fixed through the entire symbol, including an
+hours-long pattern. Successive symbols beginning in one second consume
+successive positions; the first symbol beginning in a later second selects
+that newer epoch and resets the local positions. Long symbols skip intervening
+seconds. Partial final chips consume a full position. The helpers avoid
+overflowing intermediate sample products and reject true epoch/address overflow.
+
+A private template consumes eight bytes at `8*chip_position`. If Scrambler is
+enabled its bytes supply the row; otherwise a public Scrambler stream supplies
+the base. Enabled DSSS bytes at the same position and symbol epoch XOR into
+that row. DSSS currently follows the same symbol-boundary schedule. Two
+big-endian 32-bit words determine a circular
 I/Q sample: uniform words `u,v` in `(0,1)` produce phase `2*pi*v` and radius
 `min(1.75, sqrt(-log(u))) / sqrt(1-exp(-1.75^2))`. This caps input-chip peaks and
 normalizes expected complex power to one. Both amplitude and
@@ -69,12 +93,19 @@ phase now depend on the private stream. This removes the former invariant
 where squaring real PCM canceled all private +/- signs and exposed a fixed
 squared carrier.
 
-Let `C = ceil(symbol_samples / chip_samples)`. Symbol `j` starts at chip
-`start_chip + j*C`; a partial final chip consumes its entire stream position.
-All addresses are checked, including the eight-byte expansion. Every enabled
-private purpose advances through fresh positions across symbols. Fixed
-512-byte seek caches retain no duration-proportional keystream history and
-are cleansed on release.
+The public seek coordinate for symbol `j` starts at chip `start_chip + j*C`;
+it indexes this schedule rather than one transmission-wide cryptographic byte
+stream. All addresses are checked, including the eight-byte expansion. Fixed
+512-byte seek caches are indexed by epoch and offset, retain no
+duration-proportional keystream history, and are cleansed on release.
+
+Receiver search state is separate from these caches. Live keyed symbols lasting at
+least 60 seconds use compact scalar correlation rather than a symbol-sized
+FFT history: all configured timing/frequency/rate/phase hypotheses remain,
+with at most 32 diagnostic evidence records and 64 constellation points.
+Failed symbol results and expired epoch searches are discarded. The number
+of still-running epoch hypotheses remains subject to the aggregate DSP budget;
+compact caches do not imply unlimited search or guaranteed real-time operation.
 
 Pulse shaping occurs after this mapping. Eligible profiles use finite 25% RRC
 pulses, followed by a circular radial PCM limiter for overlapping peaks. Neither
@@ -119,8 +150,14 @@ acquisition marker. It uses no payload stream positions; payload starts at
 position zero afterward. Continuous pulse shaping overlaps those independent
 prefix and payload contributions near their boundary; this overlap does not
 change either stream's source bytes or addresses.
-The epoch is fixed before the prefix and receiver clock hypotheses account
-for the rounded settling duration. No epoch, prefix length, chip count, nonce
+For automatically timed hardware output, the epoch is the scheduled whole
+second of the first payload symbol; playback begins earlier by the settling
+duration and leading pulse tail. The sample schedule advances later epochs,
+so buffer generation never polls the clock to change a pattern in progress.
+The output device is opened before scheduling. This is a nominal audio sample
+schedule; unknown hardware/output-buffer latency is not measured or compensated.
+Explicit-timestamp output and simulation remain deterministic; capture timing
+hints account for their prefix offset. No epoch, prefix length, chip count, nonce
 or sender identity is transmitted as an additional field. There is no legacy
 APSK training prefix or post-encryption symbol padding.
 
@@ -133,7 +170,13 @@ or a measured probability of interception.
 
 ### Data, integrity and reuse
 
-`xor_data` XORs arbitrary bytes with the Data stream. `mac` computes the full
+`xor_data` XORs arbitrary bytes at an explicitly selected epoch with the Data
+stream; the standalone byte-packet API retains that convention. On-air pattern
+transport uses `xor_binary_bits`: each symbol consumes Data bit `ordinal` from
+its symbol-start epoch, most-significant bit first within each byte. Data and
+pattern addressing advance on the sample schedule whether preceding symbols
+decoded or not. A 512-byte cache bounds Data mask scratch storage.
+`mac` computes the full
 32-byte HMAC-SHA256 using its independent key; verification requires all 32
 bytes and compares with `CRYPTO_memcmp`. Packet callers authenticate metadata,
 content and local epoch context before FEC and whole-stream encryption.
@@ -151,9 +194,16 @@ CTR output. It can expose plaintext XORs and allow correlation between repeated
 private waveforms; the new mapping cannot repair stream reuse. Independent
 MAC keys remain separate. Automatically timed live keyed bursts wait for a
 fresh whole-second epoch, and encrypted output has its existing cooldown.
+The live hardware guard tracks the greatest symbol epoch whose samples have
+been generated for output, including later symbols in a long message. A
+subsequent automatic burst must start beyond that epoch even after a backward
+clock correction. Backward clock jumps during preparation or its playback
+wait abort that attempt. This local guard is not persistent cross-process state.
 Explicit timestamps are caller-controlled, and separate devices sharing a key
-still require coordination. A cropped reception uses the acquired absolute
-symbol index for Data decryption rather than restarting at zero.
+still require coordination. A surviving reception uses its acquired epoch,
+subsecond phase and stream-symbol index to recover the matching Data positions.
+Recovering later bits does not reconstruct missing packet bytes or bypass the
+packet's original-epoch integrity check.
 
 ## Named key sets: keyfile version 2
 

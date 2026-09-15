@@ -1,11 +1,13 @@
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
 #include <iostream>
 #include <numbers>
+#include <numeric>
 #include <random>
 
 using namespace datapump;
@@ -112,6 +114,30 @@ double direct_score(std::span<const float> pcm,modem::PatternCode& code,const mo
     const auto fraction=std::clamp(explained/energy,0.,1.-1e-15);
     return -.5*static_cast<double>(pcm.size()-2)*std::log1p(-fraction);
 }
+void set_symbol_evidence(std::vector<float>& samples,const modem::Config& c,std::size_t payload_start,
+                        std::uint64_t index,unsigned bit,double target,std::uint32_t seed) {
+    const auto count=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto start=payload_start+static_cast<std::size_t>(index)*count;
+    const std::vector<float> clean(samples.begin()+static_cast<std::ptrdiff_t>(start),
+                                   samples.begin()+static_cast<std::ptrdiff_t>(start+count));
+    std::vector<float> noise(count);std::mt19937 random(seed);std::normal_distribution<float> distribution(0,.5F);
+    for(auto& value:noise)value=distribution(random);
+    modem::PatternCode code(c,c.stream_epoch);
+    const auto measure=[&](double scale) {
+        for(std::size_t i=0;i<count;++i)samples[start+i]=static_cast<float>(scale*clean[i])+noise[i];
+        return direct_score(std::span(samples).subspan(start,count),code,c,start,index,bit);
+    };
+    check(measure(0)<target && measure(1)>target,"noise fixture must bracket its intended pattern evidence");
+    double low=0,high=1;
+    for(unsigned iteration=0;iteration<28;++iteration) {
+        const auto middle=(low+high)/2;
+        if(measure(middle)<target)low=middle;else high=middle;
+    }
+    const auto actual=measure((low+high)/2);
+    const auto alternative=direct_score(std::span(samples).subspan(start,count),code,c,start,index,1-bit);
+    check(std::abs(actual-target)<.01 && actual-alternative>1,
+          "weak-symbol fixture must retain a clear bit preference at its intended evidence level");
+}
 void shaped_raw_sample_evidence() {
     const auto c=config();const Bytes bits{0,1,0};
     const auto padding=modem::pattern_pulse_padding_samples(c);
@@ -151,11 +177,198 @@ void shaped_partial_chips() {
     check(best(capture(waveform(bits,c,delay),c,search,113)).bits==bits,
           "continuous shaped partial-chip symbols must preserve absolute stream addresses and bit labels");
 }
+void majority_obscured_symbol_is_independent() {
+    auto c=config();c.integration_seconds=2;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    constexpr std::size_t payload_start=375;
+    auto samples=waveform({1,0},c,payload_start-modem::pattern_pulse_padding_samples(c));
+    std::mt19937 random(27219);std::normal_distribution<float> noise(0,.55F);
+    // Preserve time while completely replacing three quarters of the first
+    // symbol. Its remaining quarter must supply its own admission evidence.
+    for(std::size_t i=payload_start;i<payload_start+3*symbol/4;++i)samples[i]=noise(random);
+    modem::PatternSearch search;search.start_offset_seconds=.0625;
+    search.start_uncertainty_seconds=0;search.frequency_offsets_hz={0};
+    modem::PatternCorrelator receiver(c,search,1024*1024);
+    const auto first_end=payload_start+symbol;
+    receiver.push(std::span(samples).first(first_end-1));
+    check(receiver.provisional().bits.empty() && receiver.take_bursts().empty(),
+          "an incomplete partially obscured symbol must not be reported before its endpoint");
+    receiver.push(std::span(samples).subspan(first_end-1,1));
+    const auto first=receiver.provisional();
+    check(first.bits==Bytes({1}) && first.first_stream_symbol==0 && first.end_sample==first_end,
+          "a symbol with a mostly obscured prefix must be visible at its endpoint on its own evidence");
+    check(receiver.take_bursts().empty(),"provisional symbol must not be duplicated as a completed burst");
+    receiver.push(std::span(samples).subspan(first_end));receiver.finish();
+    check(best(receiver.take_bursts()).bits==Bytes({1,0}),
+          "a mostly obscured first symbol must retain the correct next-epoch continuation");
+}
+void completely_obscured_symbols_do_not_block_later_symbols() {
+    auto c=config();c.integration_seconds=2;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    constexpr std::size_t payload_start=375;
+    auto samples=waveform({1,0,1,0},c,payload_start-modem::pattern_pulse_padding_samples(c));
+    std::mt19937 random(53371);std::normal_distribution<float> noise(0,.55F);
+    // The receiver is running before the transmitter. First and middle
+    // symbols are wholly lost, with no deleted samples or supplied bit hints.
+    for(const std::size_t index:{0U,2U})
+        for(std::size_t i=payload_start+index*symbol;i<payload_start+(index+1)*symbol;++i)samples[i]=noise(random);
+    modem::PatternSearch search;search.start_offset_seconds=.0625;
+    search.start_uncertainty_seconds=0;search.frequency_offsets_hz={0};
+    modem::PatternCorrelator receiver(c,search,1024*1024);
+    receiver.push(std::span(samples).first(payload_start+symbol));
+    check(receiver.provisional().bits.empty(),"a completely obscured first symbol must not acquire");
+    receiver.push(std::span(samples).subspan(payload_start+symbol,symbol));
+    const auto second=receiver.provisional();
+    check(second.bits==Bytes({0}) && second.first_stream_symbol==1 && second.end_sample==payload_start+2*symbol,
+          "a missed first symbol must not block the independently confident second symbol");
+    receiver.push(std::span(samples).subspan(payload_start+2*symbol,symbol));
+    check(receiver.provisional().bits.empty(),"a wholly obscured middle symbol must not borrow earlier confidence");
+    receiver.push(std::span(samples).subspan(payload_start+3*symbol,symbol));
+    const auto fourth=receiver.provisional();
+    check(fourth.bits==Bytes({0}) && fourth.first_stream_symbol==3 && fourth.end_sample==payload_start+4*symbol,
+          "a missed middle symbol must not block a later independently confident symbol at a new epoch");
+    receiver.push(std::span(samples).subspan(payload_start+4*symbol));receiver.finish();
+    const auto bursts=receiver.take_bursts();
+    check(bursts.size()==2 && bursts[0].bits==Bytes({0}) && bursts[0].first_stream_symbol==1 &&
+          bursts[1].bits==Bytes({0}) && bursts[1].first_stream_symbol==3,
+          "missing symbols must remain gaps rather than fabricated bits in recovered bursts");
+}
+void weak_tails_expire_without_blocking_independent_symbols() {
+    auto c=config();c.integration_seconds=2;c.pulse_shaping=false;
+    constexpr std::size_t payload_start=375;
+    const Bytes bits{1,0,1,0,1,0,1};
+    auto samples=waveform(bits,c,payload_start);
+    // Each intervening symbol exceeds retention but cannot be admitted alone.
+    // Their five-symbol chain can eventually pass if the gap is not bounded.
+    for(std::uint64_t index=1;index<=5;++index)
+        set_symbol_evidence(samples,c,payload_start,index,bits[index],9,static_cast<std::uint32_t>(991+index));
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.start_uncertainty_seconds=0;
+    search.frequency_offsets_hz={0};
+    for(const auto gap:{0.,6.}) {
+        search.max_gap_seconds=gap;
+        const auto result=capture(samples,c,search,113);
+        check(result.size()==2 && result[0].bits==Bytes({1}) && result[0].first_stream_symbol==0 &&
+              result[1].bits==Bytes({1}) && result[1].first_stream_symbol==6,
+              "default and custom gap limits must discard weak tails while preserving a later independent symbol");
+    }
+    search.max_gap_seconds=100;
+    check(best(capture(samples,c,search,113)).bits==bits,
+          "weak-tail fixture must establish its own chain confidence when the configured gap allows it");
+
+    auto boundary=waveform({1,0,1},c,payload_start);
+    set_symbol_evidence(boundary,c,payload_start,1,0,6,711);
+    set_symbol_evidence(boundary,c,payload_start,2,1,23,713);
+    search.max_gap_seconds=0;
+    const auto recovered=capture(boundary,c,search,113);
+    check(recovered.size()==2 && recovered[0].bits==Bytes({1}) && recovered[0].first_stream_symbol==0 &&
+          recovered[1].bits==Bytes({1}) && recovered[1].first_stream_symbol==2,
+          "a newly confident symbol must survive gap expiry without confirming an earlier weak bit");
+
+    auto combined=waveform({1,0,1},c,payload_start);
+    set_symbol_evidence(combined,c,payload_start,1,0,6,711);
+    set_symbol_evidence(combined,c,payload_start,2,1,100,713);
+    search.max_gap_seconds=6;
+    check(best(capture(combined,c,search,113)).bits==Bytes({1,0,1}),
+          "a valid aggregate-chain admission must preserve its pending bit instead of splitting the packet");
+}
+void independent_epoch_recovers_fractional_symbol_phase(bool short_fallback,bool missing_first=false) {
+    auto transmitted=config();transmitted.integration_seconds=short_fallback?.3:7.3;
+    const auto symbol=modem::symbol_sample_count(transmitted);
+    const auto step=std::gcd(symbol,static_cast<std::uint64_t>(transmitted.sample_rate));
+    transmitted.stream_phase_samples=(std::min(symbol,static_cast<std::uint64_t>(transmitted.sample_rate))-1)/step*step;
+    const Bytes bits{1,0,0,1,0,1,1,0,1,0};
+    constexpr std::size_t payload_start=375;
+    auto samples=waveform(bits,transmitted,payload_start-modem::pattern_pulse_padding_samples(transmitted));
+    if(missing_first) {
+        std::mt19937 random(95731);std::normal_distribution<float> noise(0,.55F);
+        for(std::size_t i=payload_start;i<payload_start+symbol;++i)samples[i]=noise(random);
+    }
+    auto received=transmitted;received.stream_phase_samples=0;
+    modem::PatternSearch search;search.search_stream_phases=true;search.start_offset_seconds=.0625;
+    search.start_uncertainty_seconds=0;search.frequency_offsets_hz={0};
+    std::vector<modem::PatternBurst> bursts;
+    if(short_fallback) {
+        modem::PatternReceiver receiver(received,256*1024,search);
+        check(receiver.clock_windowed(),"fractional short-symbol fixture must use the streaming fallback");
+        for(std::size_t offset=0;offset<samples.size();) {
+            const auto count=std::min<std::size_t>(113,samples.size()-offset);
+            receiver.push(std::span(samples).subspan(offset,count));offset+=count;
+            check(receiver.working_bytes()<=256*1024,"phase recovery exceeded the streaming fallback workspace");
+        }
+        receiver.finish();bursts=receiver.take_bursts();
+    } else bursts=capture(samples,received,search,113);
+    const auto& recovered=best(bursts);
+    const auto first=missing_first?1U:0U;
+    const Bytes expected(bits.begin()+first,bits.end());
+    check(recovered.bits==expected && recovered.first_stream_symbol==first,
+          "an independently admitted epoch must retain all bits across fractional second boundaries");
+    // Several phases can remain indistinguishable. The reported phase must
+    // reproduce every observed epoch/counter address, not an arbitrary exact
+    // phase inferred from the transmitter fixture.
+    for(std::uint64_t index=first;index<bits.size();++index) {
+        const auto actual=modem::symbol_stream_address(transmitted.stream_epoch,transmitted.stream_phase_samples,
+            index,symbol,transmitted.sample_rate);
+        const auto acquired=modem::symbol_stream_address(received.stream_epoch,recovered.stream_phase_samples,
+            index,symbol,received.sample_rate);
+        check(actual.epoch==acquired.epoch && actual.ordinal==acquired.ordinal,
+              "acquired subsecond phase must reproduce the observed per-symbol stream positions");
+    }
+}
+void compact_clock_search_preserves_evidence_and_bounds() {
+    auto transmitted=config();transmitted.integration_seconds=.3;transmitted.stream_phase_samples=1200;
+    constexpr std::size_t payload_start=375;
+    const Bytes bits{1,0,0,1,0,1,1,0,1,0};
+    const auto samples=waveform(bits,transmitted,payload_start-modem::pattern_pulse_padding_samples(transmitted));
+    auto received=transmitted;received.stream_phase_samples=0;
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.start_uncertainty_seconds=0;
+    search.frequency_offsets_hz={0};search.search_stream_phases=true;search.candidate_limit=32;
+    modem::PatternCorrelator ordinary(received,search,2*1024*1024);
+    search.compact_clock_search=true;
+    modem::PatternReceiver compact(received,2*1024*1024,search);
+    check(compact.clock_windowed(),"compact mode must select the correlator even when FFT storage would fit");
+    for(std::size_t offset=0;offset<samples.size();) {
+        const auto count=std::min<std::size_t>(113,samples.size()-offset);
+        ordinary.push(std::span(samples).subspan(offset,count));compact.push(std::span(samples).subspan(offset,count));offset+=count;
+    }
+    ordinary.finish();compact.finish();
+    check(best(ordinary.take_bursts()).bits==bits && best(compact.take_bursts()).bits==bits,
+          "compact diagnostics and scratch must preserve every decoded symbol");
+    const auto original=ordinary.candidates(),reduced=compact.candidates();
+    check(original.size()==reduced.size(),"compact mode must retain the requested bounded evidence history");
+    for(std::size_t i=0;i<original.size();++i) {
+        const auto& a=original[i];const auto& b=reduced[i];
+        check(a.first_sample==b.first_sample && a.end_sample==b.end_sample && a.stream_symbol==b.stream_symbol &&
+              a.bit==b.bit && a.stream_phase_samples==b.stream_phase_samples &&
+              std::abs(a.score-b.score)<1e-6*std::max(1.,a.score) &&
+              std::abs(a.alternative_score-b.alternative_score)<1e-6*std::max(1.,a.alternative_score),
+              "smaller projection blocks must preserve the full correlation evidence and phase decisions");
+    }
+    check(compact.take_chip_constellation().size()<=64,"compact mode must cap only its diagnostic point history");
+    auto hours=config();hours.integration_seconds=4*3600;hours.bandwidth_hz=1;
+    modem::PatternSearch full;full.start_offset_seconds=0;full.start_uncertainty_seconds=7;
+    full.search_stream_phases=true;full.compact_clock_search=true;
+    modem::PatternReceiver long_receiver(hours,2*1024*1024,full);
+    const auto bytes=long_receiver.working_bytes();
+    check(long_receiver.clock_windowed() && bytes<64*1024,
+          "four-hour minimum-bandwidth epoch must retain full timing/frequency coverage within 64 KiB");
+    std::array<float,4096> noise{};std::mt19937 random(3181);std::normal_distribution<float> distribution(0,.1F);
+    for(auto& sample:noise)sample=distribution(random);
+    long_receiver.push(noise);
+    check(long_receiver.working_bytes()==bytes,"idle compact epoch must not allocate PCM or duration-proportional state");
+    hours.integration_seconds+=.3;
+    modem::PatternReceiver fractional_hours(hours,2*1024*1024,full);
+    const auto fractional_bytes=fractional_hours.working_bytes();
+    check(fractional_bytes<64*1024,"compact four-hour phase search must retain its additional fits within 64 KiB");
+    fractional_hours.push(noise);
+    check(fractional_hours.working_bytes()==fractional_bytes,"unresolved subsecond phase must not grow idle compact state");
+}
 void bounded_hours_and_noise() {
     auto c=config();c.integration_seconds=4*3600;
     modem::PatternSearch search;search.start_offset_seconds=.03;search.start_uncertainty_seconds=.002;
     search.clock_errors_ppm={-100,0,100};search.frequency_offsets_hz={0};
-    modem::PatternCorrelator long_receiver(c,search,1024*1024);
+    auto phase_config=c;phase_config.integration_seconds+=.3;
+    auto phase_search=search;phase_search.search_stream_phases=true;
+    modem::PatternCorrelator long_receiver(phase_config,phase_search,1024*1024);
     const auto initial=long_receiver.working_bytes();
     check(long_receiver.diagnostics().pattern_score.has_value() && long_receiver.diagnostics().snr_db==0,
           "pattern evidence must not be reported as an SNR measurement");
@@ -163,7 +376,7 @@ void bounded_hours_and_noise() {
     for(auto& sample:noise)sample=normal(rng);
     for(unsigned i=0;i<6;++i)long_receiver.push(noise);
     check(long_receiver.working_bytes()==initial && initial<256*1024,
-          "hour-long symbol accumulation must retain only the finite hypothesis bank");
+          "hour-long symbol accumulation with unresolved epoch phase must retain only the finite hypothesis bank");
     long_receiver.finish();check(long_receiver.take_bursts().empty(),"a short prefix cannot fabricate a completed hour-long symbol");
     auto enormous=search;enormous.start_uncertainty_seconds=1000000;
     rejects([&]{modem::PatternCorrelator rejected(c,enormous,1024*1024);},"unaffordable half-chip coverage must reject, not silently coarsen");
@@ -186,4 +399,4 @@ void bounded_hours_and_noise() {
     rejects([&]{cancelled.push(noise,stop.get_token());},"streaming long search must honor cancellation");
 }
 }
-int main(){try{sampled_bits_and_rates(true);sampled_bits_and_rates(false);late_clock_fragment();weak_prefix_does_not_borrow_confidence();shaped_raw_sample_evidence();shaped_partial_chips();bounded_hours_and_noise();std::cout<<"Streaming clock-window pattern correlator tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{sampled_bits_and_rates(true);sampled_bits_and_rates(false);late_clock_fragment();weak_prefix_does_not_borrow_confidence();shaped_raw_sample_evidence();shaped_partial_chips();majority_obscured_symbol_is_independent();completely_obscured_symbols_do_not_block_later_symbols();weak_tails_expire_without_blocking_independent_symbols();independent_epoch_recovers_fractional_symbol_phase(false);independent_epoch_recovers_fractional_symbol_phase(false,true);independent_epoch_recovers_fractional_symbol_phase(true);compact_clock_search_preserves_evidence_and_bounds();bounded_hours_and_noise();std::cout<<"Streaming clock-window pattern correlator tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

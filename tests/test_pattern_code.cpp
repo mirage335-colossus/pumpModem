@@ -3,6 +3,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/crypto.hpp"
+#include "datapump/symbol_schedule.hpp"
 
 #include <algorithm>
 #include <array>
@@ -43,12 +44,15 @@ void seek_and_domains() {
     const std::uint64_t positions[]{0,1,63,64,127,128,4095,4096,16383,16384,
         1ULL << 40, (1ULL << 40) + 127, (std::numeric_limits<std::uint64_t>::max()-7)/8};
     for (auto chip : positions) {
-        const auto a=pattern.stream(StreamPurpose::Scrambler,epoch,8*chip,8);
-        const auto b=dsss.stream(StreamPurpose::Dsss,epoch,8*chip,8);
+        const auto address=modem::symbol_stream_address(epoch,c.stream_phase_samples,
+            chip/code.chips_per_symbol(),code.symbol_samples(),c.sample_rate);
+        const auto local=modem::symbol_stream_chip(address,code.chips_per_symbol(),chip%code.chips_per_symbol());
+        const auto a=pattern.stream(StreamPurpose::Scrambler,address.epoch,8*local,8);
+        const auto b=dsss.stream(StreamPurpose::Dsss,address.epoch,8*local,8);
         std::uint32_t expected=0;
         for(unsigned i=4;i<8;++i)expected=(expected<<8)|(a[i]^b[i]);
         check(phase_word(code.value(chip,0))==expected,
-              "seeked noise must mix the absolute purpose/epoch byte streams before mapping");
+              "seeked noise must mix each symbol's purpose/epoch byte streams before mapping");
     }
     modem::PatternCode sequential(c,epoch);
     for(std::uint64_t chip=0;chip<145;++chip)
@@ -57,8 +61,83 @@ void seek_and_domains() {
     bool changed = false;
     for (std::uint64_t i = 0; i < 128; ++i) changed |= code.value(i, 0) != next_epoch.value(i, 0);
     check(changed, "changing the clock epoch must select another private pattern");
-    rejects([&] { code.value(std::numeric_limits<std::uint64_t>::max()/8+1,0); },
-            "private noise access must reject byte address wraparound");
+    // Absolute chip coordinates no longer consume one unbounded byte stream:
+    // the per-second position remains small even after very long transmissions.
+    check(std::isfinite(std::abs(code.value(std::numeric_limits<std::uint64_t>::max()/8+1,0))),
+          "a large cumulative chip count must remain seekable after epoch rollovers");
+}
+void symbol_epoch_schedule() {
+    auto c=config();c.scramble=true;c.dsss=true;c.integration_seconds=.3;
+    constexpr std::uint64_t epoch=1800000000;
+    modem::PatternCode code(c,epoch);
+    const auto n=code.symbol_samples(),chips=code.chips_per_symbol();
+    const std::array<std::uint64_t,8> expected_epochs{0,0,0,0,1,1,1,2};
+    const std::array<std::uint64_t,8> expected_ordinals{0,1,2,3,0,1,2,0};
+    for(std::uint64_t j=0;j<expected_epochs.size();++j) {
+        const auto address=modem::symbol_stream_address(epoch,0,j,n,c.sample_rate);
+        check(address.epoch==epoch+expected_epochs[j] && address.ordinal==expected_ordinals[j],
+              "only a new symbol may advance its stream epoch, retaining same-second counter positions");
+        auto rebased=c;rebased.stream_phase_samples=address.sample_in_second;
+        modem::PatternCode later(rebased,address.epoch);
+        for(auto local:std::array<std::uint64_t,3>{0,1,chips-1})
+            check(later.value(local,0)==code.value(j*chips+local,0),
+                  "a later symbol must be reproducible from its own start second and phase");
+    }
+    const auto later=modem::symbol_stream_address(epoch,0,4,n,c.sample_rate);
+    auto changed=c;changed.stream_phase_samples=later.sample_in_second;
+    modem::PatternCode shifted(changed,epoch);
+    const auto original=code.shaped_value(chips,0,static_cast<double>(code.chip_samples()));
+    code.set_stream_phase_samples(later.sample_in_second);
+    check(code.shaped_value(chips,0,static_cast<double>(code.chip_samples()))==
+          shifted.shaped_value(chips,0,static_cast<double>(code.chip_samples())),
+          "changing a timing hypothesis must invalidate shaped chip mappings");
+    code.set_stream_phase_samples(0);
+    check(code.shaped_value(chips,0,static_cast<double>(code.chip_samples()))==original,
+          "revisiting a timing hypothesis must recreate its exact template");
+    rejects([&]{code.set_stream_phase_samples(c.sample_rate);},
+            "a timing hypothesis phase must remain within one second");
+
+    c.integration_seconds=4*3600+.5;
+    modem::PatternCode long_code(c,epoch);
+    const auto long_chips=long_code.chips_per_symbol();
+    const auto long_n=long_code.symbol_samples();
+    check(modem::symbol_stream_address(epoch,0,1,long_n,c.sample_rate).epoch==epoch+14400 &&
+          modem::symbol_stream_address(epoch,0,2,long_n,c.sample_rate).epoch==epoch+28801,
+          "hours-long symbols must skip intervening seconds without changing their own epoch");
+    Crypto pattern(c.spreading_seed),dsss(c.dsss_seed);
+    const auto verify=[&](std::uint64_t chip,std::uint64_t time,std::uint64_t position) {
+        const auto a=pattern.stream(StreamPurpose::Scrambler,time,position*8,8);
+        const auto b=dsss.stream(StreamPurpose::Dsss,time,position*8,8);
+        std::uint32_t expected=0;
+        for(unsigned i=4;i<8;++i)expected=(expected<<8)|(a[i]^b[i]);
+        check(phase_word(long_code.value(chip,0))==expected,
+              "a complete long pattern must retain its start epoch through its final chip");
+    };
+    verify(long_chips-1,epoch,long_chips-1);
+    verify(long_chips,epoch+14400,0);
+    verify(0,epoch,0); // Reuse byte offset zero while switching back to an old epoch.
+    verify(long_chips,epoch+14400,0);
+    check(long_code.working_bytes()<8192,
+          "epoch rollover and random seeks must retain fixed-size keystream caches");
+}
+void symbol_schedule_integer_bounds() {
+    const auto max=std::numeric_limits<std::uint64_t>::max();
+    // The product is wider than 64 bits, while the resulting seconds still fit.
+    const auto large=modem::symbol_stream_address(0,0,max,3,3);
+    check(large.epoch==max && large.sample_in_second==0 && large.ordinal==0,
+          "symbol timing arithmetic must not overflow an intermediate sample product");
+    const auto rate=std::numeric_limits<std::uint32_t>::max();
+    const auto fractional=modem::symbol_stream_address(0,rate-1,rate-1,rate-1,rate);
+    check(fractional.epoch==rate-1 && fractional.sample_in_second==0,
+          "maximum sample-rate remainders must fit exact integer timing arithmetic");
+    rejects([&]{(void)modem::symbol_stream_address(max,0,1,3,3);},
+            "symbol epoch addition must reject overflow");
+    rejects([&]{(void)modem::symbol_stream_address(0,0,max,4,3);},
+            "symbol time multiplication must reject a true epoch overflow");
+    rejects([&]{(void)modem::symbol_stream_address(0,3,0,1,3);},
+            "symbol start phases outside their epoch must be rejected");
+    rejects([&]{(void)modem::symbol_stream_chip({0,max,0},2,0);},
+            "symbol stream chip multiplication must reject overflow");
 }
 void alphabet_and_repetition() {
     auto c = config(); modem::PatternCode public_code(c);
@@ -118,7 +197,8 @@ void exact_pcm_and_chunks() {
     c.data_key.emplace(c.spreading_seed);
     c.bandwidth_hz = 1100; c.integration_seconds = .071; // Partial final chip.
     const Bytes bits{0,1,0};
-    modem::PatternTransmitter whole(bits, c, 91, 3), chunked(bits, c, 91, 3);
+    const auto first_chip=3*modem::pattern_chips_per_symbol(c);
+    modem::PatternTransmitter whole(bits, c, 91, first_chip), chunked(bits, c, 91, first_chip);
     check(whole.total_samples() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c)+
           2*modem::pattern_pulse_padding_samples(c),
           "three bits must retain exactly three payload symbols plus settling and filter tails");
@@ -143,11 +223,11 @@ void exact_pcm_and_chunks() {
               "preview must reconstruct the actual final partial-chip waveform");
     std::array<float, 31> after{};
     check(whole.read(after) == 0, "finished waveform must not append synthetic samples");
-    modem::PatternTransmitter real(bits, c, 91, 3);
+    modem::PatternTransmitter real(bits, c, 91, first_chip);
     std::vector<float> pcm(count); real.read(pcm);
     for (std::size_t i = 0; i < count; ++i)
         check(std::abs(pcm[i] - a[i].real()) < 1e-7, "PCM must be the real projection of the same analytic waveform");
-    modem::PatternTransmitter mixed(bits,c,91,3);
+    modem::PatternTransmitter mixed(bits,c,91,first_chip);
     std::size_t observed=0;
     const auto observer=[&](auto) { ++observed; };
     std::array<float,17> real_chunk{};
@@ -217,6 +297,21 @@ void streaming_and_modem_integration() {
           "status helper must use the same exact unframed pattern waveform");
     rejects([&] { (void)modem::demodulate(status, c, {}); },
             "legacy known-training demodulator must reject pattern mode explicitly");
+}
+void complete_symbols_require_aligned_starts() {
+    auto c=config();c.integration_seconds=.3;
+    for(const bool private_pattern:{false,true})for(const bool shaped:{false,true}) {
+        c.scramble=private_pattern;c.pulse_shaping=shaped;
+        const auto chips=modem::pattern_chips_per_symbol(c);
+        rejects([&]{modem::PatternTransmitter invalid({0},c,73,chips+1,false);},
+                "complete symbols must reject chip fragments that would cross a logical epoch boundary");
+        modem::PatternTransmitter aligned({0},c,73,3*chips,false);
+        check(aligned.total_samples()==modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c),
+              "an aligned nonzero stream seek must retain one complete symbol");
+        modem::PatternCode fragment(c,73);
+        check(std::isfinite(std::abs(fragment.value(chips+1,0))),
+              "PatternCode must retain arbitrary chip fragment access");
+    }
 }
 void tones_and_bounded_state() {
     auto c = config(); c.spreading_mode = modem::SpreadingMode::tone;
@@ -302,7 +397,8 @@ void hardware_noise_keystreams() {
         (scrambler?ignored.spreading_seed:ignored.dsss_seed)[0]^=0x80;
         check(prefix(disabled,epoch)==prefix(ignored,epoch),"a disabled spreading layer must not affect settling");
     }
-    modem::PatternTransmitter original({0,0,1},c,epoch,19),other({0,0,1},changed,epoch,19),bare({0,0,1},c,epoch,19,false);
+    const auto first_chip=19*modem::pattern_chips_per_symbol(c);
+    modem::PatternTransmitter original({0,0,1},c,epoch,first_chip),other({0,0,1},changed,epoch,first_chip),bare({0,0,1},c,epoch,first_chip,false);
     std::vector<std::complex<double>> a(static_cast<std::size_t>(original.total_samples())),b(a.size()),payload(static_cast<std::size_t>(bare.total_samples()));
     original.read_analytic(a);other.read_analytic(b);bare.read_analytic(payload);
     const auto offset=static_cast<std::size_t>(modem::training_sample_count(c));
@@ -422,9 +518,9 @@ void short_private_patterns_preserve_noise_and_addressing() {
         c.sample_rate=48000;c.bandwidth_hz=12000;c.carrier_hz=9000;c.spreading_factor=chips;
         auto longer=c;longer.spreading_factor=128;
         modem::PatternCode short_code(c,epoch),long_code(longer,epoch);
-        for(const auto position:{0ULL,1ULL,63ULL,64ULL,127ULL,128ULL,16383ULL,16384ULL,1ULL<<40})
+        for(const auto position:{0ULL,1ULL,63ULL,64ULL,127ULL,128ULL})
             check(short_code.value(position,0)==long_code.value(position,0),
-                  "shortening private patterns must preserve absolute keystream chip addressing and mapping");
+                  "shortening private patterns must preserve within-second chip addressing before rollover");
 
         Bytes bits(symbol_count),complement(symbol_count);
         for(std::size_t symbol=0;symbol<symbol_count;++symbol) {
@@ -556,9 +652,11 @@ void shaped_coordinate_and_duration_bounds() {
 }
 int main() {
     try {
-        seek_and_domains(); alphabet_and_repetition(); public_waveform_uses_amplitude_and_phase();
+        seek_and_domains(); symbol_epoch_schedule(); symbol_schedule_integer_bounds();
+        alphabet_and_repetition(); public_waveform_uses_amplitude_and_phase();
         exact_pcm_and_chunks(); tones_and_bounded_state();
-        streaming_and_modem_integration();rounded_hardware_duration();hardware_noise_keystreams();
+        streaming_and_modem_integration();complete_symbols_require_aligned_starts();
+        rounded_hardware_duration();hardware_noise_keystreams();
         hardware_data_byte_encryption();
         private_waveform_has_no_fixed_squared_carrier();
         short_private_patterns_preserve_noise_and_addressing();

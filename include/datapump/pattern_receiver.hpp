@@ -10,6 +10,7 @@ struct PatternEvidence {
     std::uint64_t first_sample = 0, end_sample = 0, stream_symbol = 0;
     double frequency_hz = 0, score = 0, alternative_score = 0;
     unsigned bit = 0;
+    std::uint64_t stream_phase_samples = 0;
 };
 struct PatternBurst {
     Bytes bits;
@@ -17,6 +18,7 @@ struct PatternBurst {
     std::uint64_t first_stream_symbol = 0;
     double frequency_hz = 0, score = 0;
     bool complete = false;
+    std::uint64_t stream_phase_samples = 0;
 };
 struct PatternSearch {
     // A finite, explicit frequency bank. Empty selects five offsets separated
@@ -24,10 +26,22 @@ struct PatternSearch {
     std::vector<double> frequency_offsets_hz;
     double false_alarm_probability = 1e-8;
     double retain_score = 5;
+    // Preserve established timing across missing symbols until at least two
+    // symbols and more than this many seconds have failed. Failed symbols
+    // never become guessed payload bits; surviving spans retain their index.
+    double max_gap_seconds = 6;
     std::size_t candidate_limit = 2048, track_limit = 16, bit_limit = 1024 * 1024;
     // Independently try these first stream positions (0 through count-1).
     // This bounded local keystream search adds no transmitted metadata.
     std::size_t initial_stream_symbols = 4;
+    // An independently admitted whole-second epoch can begin between symbol
+    // boundaries. Search the finite phase lattice inherited from an original
+    // whole-second start; equivalent addresses share one template/track.
+    bool search_stream_phases = false;
+    // Prefer the clock-window correlator with compact diagnostic histories
+    // and projection scratch. Retains every requested correlation hypothesis;
+    // requires start_offset_seconds and does not change confidence gates.
+    bool compact_clock_search = false;
     // Optional system-clock prediction of symbol zero relative to the first
     // supplied sample. The long-symbol correlator searches this entire window
     // at half-chip resolution; it rejects unaffordable coverage explicitly.

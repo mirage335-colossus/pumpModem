@@ -35,7 +35,12 @@ Every complete pattern carries one bit. Chip duration is
 `ceil(2*sample_rate/bandwidth)` samples; the final chip of a symbol can be
 partial. Symbol `j` uses absolute chip positions starting at `j*C`, where
 `C = ceil(symbol_samples/chip_samples)`. Partial chips consume a full position.
-Epoch and chip index are local hypotheses and are never transmitted fields.
+These absolute chip coordinates index a symbol schedule. Each private symbol
+uses the whole second at its scheduled start, held fixed throughout that
+pattern, plus a symbol ordinal within that second. A later-second symbol
+resets its local positions under the new epoch; hours-long symbols skip
+intervening seconds. Epoch, subsecond phase and chip index are local hypotheses
+and are never transmitted fields.
 
 Public unkeyed patterns use a deterministic circular I/Q noise row that restarts
 each symbol. Its amplitude and phase both vary; a binary pattern alphabet
@@ -43,7 +48,7 @@ means two complete codewords, not two permitted chip values. A short public
 codeword still has few distinct points: repeated transmissions reuse its chips,
 so the scatter plot contains at most twice its chip count across both bit values.
 Selected keys always enable private Scrambler waveforms on the
-transfer path. A private row consumes eight bytes per absolute chip, mixing
+transfer path. A private row consumes eight bytes per addressed chip, mixing
 Scrambler and enabled DSSS bytes before mapping to circular noise. Both its
 amplitude and phase depend on the private streams. The radius is capped to
 stay inside PCM headroom, with unit expected complex power before scaling.
@@ -148,6 +153,13 @@ It budgets the full time × frequency × clock-rate combination before allocatio
 and rejects a window it cannot cover. A negative start offset also identifies
 which private stream symbols precede the surviving capture.
 
+For an independently acquired later epoch, phase search retains the finite
+subsecond lattice implied by a whole-second first-symbol start. Phases mapping
+to the same `(epoch, symbol ordinal)` share their current reference. Only
+distinct addresses need separate running fits; this does not allocate a
+keystream or a fit for every possible chip in an hours-long symbol. A confident
+symbol narrows the phase interval, while a failed symbol leaves it undecided.
+
 `PatternCorrelator` generates chip references on demand and retains sufficient
 statistics for each hypothesis. Fixed blocks of 128 real PCM samples share
 carrier projection work. Each fit retains the two carrier projections, their
@@ -169,27 +181,22 @@ coherent for hours. Tests cover constant storage during a four-hour symbol,
 sampled short bursts, a finite clock-rate bank and cropped keyed captures;
 they do not claim a measured multi-hour radio link budget.
 
-At 1,200 Hz bandwidth, 6,000 samples/s, ten samples/chip and the default five
-frequencies, the four-hour-symbol constructor retains the following state on
-the tested 64-bit build. These amounts are **per epoch/profile**; the live
-receiver also budgets its wrappers, audio, plots and other admitted epochs.
-
-| Start uncertainty | One clock rate | Three rates: -100, 0, +100 ppm |
-| --- | ---: | ---: |
-| ±1 second | 3.65 MiB | 13.22 MiB |
-| ±2 seconds | 7.13 MiB | 26.27 MiB |
-| ±7 seconds | 24.53 MiB | 91.50 MiB |
-
 Transfer's default six-second epoch search supplies a ±7-second start window.
-Thus an 8 MiB direct receiver can hold the ±2-second, one-rate example, but not
-the default ±7-second coverage. The live receiver reserves other DSP storage
-and caps each receiver's share, so its total configured ceiling must be larger
-still. Adding memory does not make an unaffordable CPU search real time. A
-benchmark before the circular private-waveform change needed about 34 ms
-for a 21.3 ms PCM block at ±2 seconds with one rate, and 111 ms at ±7 seconds.
-Those historical timings do not measure the current private templates. The scalar
+Each alignment accumulates through the symbol's duration; the window does not
+restart or discard observations every six seconds. Low-confidence symbol
+results are discarded separately from the running timing/frequency fits.
+Allocation depends on timing resolution, frequency/rate hypotheses and the
+distinct phase-address groups. `working_bytes()` reports actual allocated
+state. The live receiver also budgets wrappers, audio, plots and other admitted
+epochs, and retires unsuccessful searches according to its finite gap policy.
+
+Earlier measurements before symbol-start epoch rotation reported 7.13 MiB
+per epoch/profile for ±2 seconds at one clock rate and 24.53 MiB for ±7 seconds
+(1,200 Hz bandwidth, 6,000 samples/s, five frequencies). Those values are a
+historical baseline, not the allocation of the current phase-group search.
+Adding memory does not make an unaffordable CPU search real time. The scalar
 fallback provides bounded offline/streaming state; sustained live operation
-requires current measurements for its admitted bank.
+requires measurements for the actual admitted bank.
 
 ## Modem flow inspection
 

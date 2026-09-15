@@ -21,9 +21,9 @@ Bytes from_hex(std::string_view text) {
     return result;
 }
 void unchanged_crypto_and_chip_vectors() {
-    // Frozen before the pulse-shaping change. These values cover plaintext
-    // encryption and private amplitude/phase
-    // mapping across keystream-cache and symbol boundaries.
+    // The primitive ciphertext vector predates pulse shaping and symbol epoch
+    // rotation; that byte API is unchanged. Private chip vectors below use
+    // stable epoch-zero waveform roots and the current symbol-start schedule.
     Bytes seed(32);for(unsigned i=0;i<32;++i)seed[i]=static_cast<std::uint8_t>(i);
     const Crypto key(seed);constexpr std::uint64_t epoch=1720000000;
     const std::string plain="clipboard text\nsecond line";
@@ -39,21 +39,24 @@ void unchanged_crypto_and_chip_vectors() {
     modem::PatternCode a(transfer::seeded_config(shaped,epoch),epoch);
     modem::PatternCode b(transfer::seeded_config(rectangular,epoch),epoch);
     constexpr std::array<std::uint64_t,7> positions{0,1,63,64,127,128,4096};
+    // Independently calculated from Crypto streams: N=640, C=64, Fs=6000;
+    // E=epoch+floor((k/64)*640/6000), q=floor((((k/64)*640)%6000)/640),
+    // byte offset=8*(q*64+k%64). Includes cache, symbol and epoch boundaries.
     constexpr std::array<std::complex<double>,14> expected{{
-        {0x1.004a66f6996cfp+0,0x1.1711e5662aeecp-1},
-        {0x1.004a66f6996cfp+0,0x1.1711e5662aeecp-1},
-        {0x1.8e79f099fed8p-1,-0x1.8616759b3d74cp-3},
-        {-0x1.8e79f099fed8p-1,0x1.8616759b3d74cp-3},
-        {0x1.d13fff953527ep-1,0x1.25218ef7b3444p-1},
-        {-0x1.d13fff953527ep-1,-0x1.25218ef7b3444p-1},
-        {0x1.799e204a58471p-3,0x1.d17bbe2ce003bp-2},
-        {0x1.799e204a58471p-3,0x1.d17bbe2ce003bp-2},
-        {-0x1.20de7c9d4007p-3,0x1.6c16e7ace29f4p-7},
-        {0x1.20de7c9d4007p-3,-0x1.6c16e7ace29f4p-7},
-        {0x1.b6aadbe1697c2p-2,-0x1.65cf4ae9e29bdp-1},
-        {0x1.b6aadbe1697c2p-2,-0x1.65cf4ae9e29bdp-1},
-        {-0x1.65fb2ec0fa6f5p-1,0x1.2e731e9de182dp+0},
-        {-0x1.65fb2ec0fa6f5p-1,0x1.2e731e9de182dp+0}
+        {-0x1.f25a2d0de95ddp-4,0x1.fa7890129aaa1p-4},
+        {-0x1.f25a2d0de95ddp-4,0x1.fa7890129aaa1p-4},
+        {0x1.060f7b38f7bc9p-3,-0x1.3ddd41787f15ep-2},
+        {-0x1.060f7b38f7bc9p-3,0x1.3ddd41787f15ep-2},
+        {0x1.165869f9c1305p-1,-0x1.3d2e85b0f027ep+0},
+        {-0x1.165869f9c1305p-1,0x1.3d2e85b0f027ep+0},
+        {-0x1.a59a0158c8406p-1,0x1.163ea6061edfcp-1},
+        {-0x1.a59a0158c8406p-1,0x1.163ea6061edfcp-1},
+        {0x1.efe50976ee926p-2,0x1.aaab098f280cep-1},
+        {-0x1.efe50976ee926p-2,-0x1.aaab098f280cep-1},
+        {0x1.c8ff7f65d533cp+0,0x1.4a47038d0140fp-3},
+        {0x1.c8ff7f65d533cp+0,0x1.4a47038d0140fp-3},
+        {-0x1.366b99e7dd348p-1,-0x1.aca822034df6p-2},
+        {-0x1.366b99e7dd348p-1,-0x1.aca822034df6p-2}
     }};
     for(std::size_t index=0;index<positions.size();++index)for(unsigned bit=0;bit<2;++bit) {
         const auto value=a.value(positions[index],bit);
@@ -230,11 +233,9 @@ void fast_same_cn0_confidence() {
         const auto rectangular=fast_score(bits,c,channel,seed);
         shaped_score+=shaped.score;rectangular_score+=rectangular.score;
         shaped_exact+=static_cast<unsigned>(shaped.exact);rectangular_exact+=static_cast<unsigned>(rectangular.exact);
-        // Seed 0 exposed a real marginal endpoint: approximately 37.68 versus
-        // 40.09 evidence at an approximately 37.80 acceptance threshold. All
-        // six keyed bit choices are correct, but shaping leaves the last bit
-        // unconfirmed in that realization. Report it; never lower thresholds
-        // or force an endpoint to make the two noisy outputs identical.
+        // Report a representative endpoint. Changes to the keyed waveform can
+        // change which realization is marginal; never lower thresholds or
+        // force an endpoint to make the two noisy outputs identical.
         if(seed==0)std::cout<<"Fast seed 0: last evidence "<<shaped.last_score<<" / "<<rectangular.last_score
             <<", emitted bits "<<shaped.emitted_bits<<" / "<<rectangular.emitted_bits<<'\n';
     }

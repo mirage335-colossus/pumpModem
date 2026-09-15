@@ -329,6 +329,10 @@ class CommandTests(PumpCase):
         verified = [event for event in events if event.get("validated")]
         self.assertEqual(len(verified), 1)
         self.assertEqual(base64.b64decode(verified[0]["data_base64"]), b"stream packet content")
+        prefixes = [event for event in events if event.get("event") == "raw_bits" and not event["complete"]]
+        self.assertTrue(prefixes, "confident symbols must be visible before the message completes")
+        self.assertTrue(all(event["signal_id"] > 0 and event["raw_bit_count"] > 0 and
+                            not event["authenticated"] and not event["packet_validated"] for event in prefixes))
 
     def test_packet_boundaries_and_metadata(self):
         for length in (0, 1, 255, 256, 257):
@@ -514,7 +518,17 @@ class EncryptedCommandTests(PumpCase):
                 self.assertTrue(packet["authenticated"])
                 self.assertEqual(base64.b64decode(packet["data_base64"]).decode(), text)
                 self.assertIn(f"Searching epoch {EPOCH}".encode(), result.stderr)
-        self.run_pump("rx", "--input", path, "--keyfile", self.key, "--time", EPOCH + 3,
+        # Excluding the original message epoch may still recover independently
+        # addressed later symbols, without validating the missing packet.
+        fragment = json.loads(self.run_pump("rx", "--input", path, "--keyfile", self.key,
+            "--time", EPOCH + 3, "--search-seconds", "2", "--json", *AUDIO).stdout)
+        self.assertFalse(fragment["packet_validated"])
+        self.assertFalse(fragment["authenticated"])
+        self.assertGreater(fragment["raw_bit_count"], 0)
+        self.assertGreater(fragment["timestamp"], EPOCH)
+        with wave.open(str(path), "rb") as wav:
+            after_capture = EPOCH + math.ceil(wav.getnframes() / wav.getframerate()) + 3
+        self.run_pump("rx", "--input", path, "--keyfile", self.key, "--time", after_capture,
                       "--search-seconds", "2", *AUDIO, ok=False)
         self.run_pump("rx", "--input", path, "--keyfile", self.other_key, "--time", EPOCH,
                       "--search-seconds", "0", *AUDIO, ok=False)

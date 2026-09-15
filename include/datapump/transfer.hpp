@@ -26,6 +26,9 @@ struct Options {
     bool compression = true;
     std::optional<Crypto> key;
     std::uint64_t timestamp = 0;
+    // Optional wall-clock origin of sample zero in a hardware recording.
+    // Without it, offline buffers retain their deterministic prefix origin.
+    std::optional<double> capture_epoch;
     unsigned search_seconds = 6;
     // Manual callers retain their explicit modem profile. Automatic GUI/CLI
     // receive searches resolve only these targets at the selected band/mode.
@@ -57,7 +60,7 @@ Estimate estimate(const Message& message, const Options& options, PacketLayout* 
 // storage equivalents; payload time excludes that prefix, total time includes it.
 Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& options);
 // Uses the one-bit pattern modem. A selected non-tone key masks
-// MSB-first bits with its data stream at options.timestamp; no tag is added.
+// MSB-first bits with the symbol-start epoch/local Data position; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
 // Pattern transport: short text uses the fixed dictionary's exact bits;
@@ -68,7 +71,8 @@ Bytes message_bits(const Message&, const Options&);
 // Raw binary and short dictionary text carry no recovery markers.
 Bytes message_wire_bits(const Message&, const Options&);
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message&, const Options&);
-// Symmetric raw data-stream masking, including fragments starting mid-byte.
+// Symmetric Data masking by symbol-start second and local symbol ordinal,
+// including fragments starting at an arbitrary global bit offset.
 // Without a key the bits are unchanged. Does not authenticate decoded guesses.
 void xor_binary_bits(std::span<std::uint8_t> bits, const Options& options,
                      std::size_t bit_offset = 0);

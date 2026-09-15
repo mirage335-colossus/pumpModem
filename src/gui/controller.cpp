@@ -596,10 +596,23 @@ struct Controller::Impl {
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
         plot_update.clear_waterfall=plot_update.clear_waterfall||changed.clear_waterfall;
+        const auto raw_pattern_match=[](const auto& signal,const auto& received) {
+            return signal.binary && signal.complete && signal.received_bits && !received.packet_validated &&
+                !received.packet.message.data.empty() && received.raw_bits.size()==signal.received_bits &&
+                signal.text.size()<=received.raw_bits.size() && received.diagnostics.pattern_score==signal.pattern_score &&
+                std::equal(signal.text.begin(),signal.text.end(),received.raw_bits.begin(),
+                    [](char text,std::uint8_t bit){return text==(bit?'1':'0');});
+        };
         for(auto& received:next.received) {
             if(received.packet_validated)inbox.put(std::move(received.packet));
             else if(!received.packet.message.data.empty()) {
-                SignalLine line;line.id=next_pattern_text_id--;line.frequency_hz=settings.transfer.modem.carrier_hz;
+                const auto source=std::find_if(next.signals.begin(),next.signals.end(),[&](const auto& signal){
+                    return raw_pattern_match(signal,received);
+                });
+                // Replace this reception's provisional bits with its decoded
+                // text, preserving its browser identity through completion.
+                SignalLine line;line.id=source==next.signals.end()?next_pattern_text_id--:source->id;
+                line.frequency_hz=settings.transfer.modem.carrier_hz;
                 line.text=std::string(received.packet.message.data.begin(),received.packet.message.data.end());
                 line.complete=true;line.pattern_score=received.diagnostics.pattern_score;
                 line.received_bits=received.raw_bits.size();
@@ -611,14 +624,9 @@ struct Controller::Impl {
         for(const auto& signal:next.signals) {
             // Decoded text already has its own row. Its compressed transport
             // bits need no second row, even when they end in a partial byte.
-            if(signal.binary && signal.complete && signal.received_bits &&
-               std::any_of(next.received.begin(),next.received.end(),[&](const auto& received) {
-                   return !received.packet_validated && !received.packet.message.data.empty() &&
-                       received.raw_bits.size()==signal.received_bits && signal.text.size()<=received.raw_bits.size() &&
-                       received.diagnostics.pattern_score==signal.pattern_score &&
-                       std::equal(signal.text.begin(),signal.text.end(),received.raw_bits.begin(),
-                           [](char text,std::uint8_t bit) { return text==(bit?'1':'0'); });
-               }))continue;
+            if(std::any_of(next.received.begin(),next.received.end(),[&](const auto& received){
+                return raw_pattern_match(signal,received);
+            }))continue;
             const auto packet=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.packet_id; });
             const bool text=packet!=inbox.items().end()&&packet->message.kind==MessageKind::text;
             signals.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score});

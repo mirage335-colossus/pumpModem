@@ -1,5 +1,6 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "datapump/crypto.hpp"
 
 #include <openssl/crypto.h>
@@ -39,6 +40,9 @@ struct StreamCache {
                 std::uint64_t time, StreamDomain counter_domain=StreamDomain::Payload):
         StreamCache(Crypto(seed),use,time,counter_domain) {}
     ~StreamCache() { OPENSSL_cleanse(bytes.data(), bytes.size()); }
+    void select_epoch(std::uint64_t time) {
+        if (epoch != time) { epoch = time; valid = false; }
+    }
     std::uint8_t byte(std::uint64_t offset) {
         const auto aligned = offset - offset % capacity;
         if (!valid || aligned != begin) {
@@ -89,7 +93,7 @@ std::uint64_t pattern_chips_per_symbol(const Config& config) {
 
 struct PatternCode::Impl {
     Config config;
-    std::uint64_t chip = 0, symbol = 0, chips = 0;
+    std::uint64_t chip = 0, symbol = 0, chips = 0, epoch = 0;
     bool shaped = false;
     StreamCache pattern, dsss;
     struct CachedChip {
@@ -98,14 +102,16 @@ struct PatternCode::Impl {
         bool valid=false;
     };
     std::array<CachedChip,32> shaped_chips{};
-    Impl(Config value, std::uint64_t epoch): config(value),
+    Impl(Config value, std::uint64_t start_epoch): config(value), epoch(start_epoch),
         pattern(config.scramble ? std::span<const std::uint8_t>(config.spreading_seed) :
                                  std::span<const std::uint8_t>(public_seed),
-                StreamPurpose::Scrambler, config.scramble ? epoch : 0),
-        dsss(config.dsss_seed, StreamPurpose::Dsss, epoch) {
+                StreamPurpose::Scrambler, config.scramble ? start_epoch : 0),
+        dsss(config.dsss_seed, StreamPurpose::Dsss, start_epoch) {
         chip = pattern_chip_samples(config);
         symbol = symbol_sample_count(config);
         chips = symbol / chip + (symbol % chip != 0);
+        require(config.stream_phase_samples < config.sample_rate,
+                "pattern stream phase must be within its first second");
         shaped=pattern_pulse_enabled(config);
         require(sizeof(Impl) + sizeof(PatternCode) <= config.memory_limit,
                 "pattern code exceeds memory limit");
@@ -115,6 +121,14 @@ struct PatternCode::Impl {
         require(bit <= 1, "pattern symbol must be a zero or one bit");
         require(std::isfinite(fraction) && fraction >= 0 && fraction < 1,
                 "pattern chip fraction must be within [0,1)");
+        auto position = absolute_chip % chips;
+        if (config.scramble || config.dsss) {
+            const auto address = symbol_stream_address(epoch, config.stream_phase_samples,
+                absolute_chip / chips, symbol, config.sample_rate);
+            position = symbol_stream_chip(address, chips, position);
+            if (config.scramble) pattern.select_epoch(address.epoch);
+            if (config.dsss) dsss.select_epoch(address.epoch);
+        }
         if (config.spreading_mode == SpreadingMode::pattern) {
             // A secret +/- sign on a real carrier disappears on squaring.
             // Mix every enabled private stream before mapping both amplitude
@@ -122,7 +136,6 @@ struct PatternCode::Impl {
             // between the two candidate patterns used by blind acquisition.
             // Public rows use the same I/Q map and repeat at symbol boundaries
             // so acquisition needs no transmission-index hypothesis.
-            const auto position = config.scramble || config.dsss ? absolute_chip : absolute_chip % chips;
             auto result = pattern.noise(position, config.dsss ? &dsss : nullptr);
             if (bit) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
             return result;
@@ -130,7 +143,7 @@ struct PatternCode::Impl {
         const auto angle = (bit ? 1. : -1.) * std::numbers::pi / 2 *
                            (static_cast<double>(absolute_chip % 4) + fraction);
         auto result = std::polar(1., angle);
-        if (config.dsss) result *= static_cast<double>(dsss.sign(absolute_chip));
+        if (config.dsss) result *= static_cast<double>(dsss.sign(position));
         return result;
     }
     std::complex<double> shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
@@ -166,6 +179,13 @@ std::complex<double> PatternCode::value(std::uint64_t chip, unsigned bit, double
 std::complex<double> PatternCode::shaped_value(std::uint64_t first_chip,unsigned bit,double within) {
     return impl_->shaped_value(first_chip,bit,within);
 }
+void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
+    require(phase_samples < impl_->config.sample_rate,
+            "pattern stream phase must be within its first second");
+    if (phase_samples == impl_->config.stream_phase_samples) return;
+    impl_->config.stream_phase_samples = phase_samples;
+    for (auto& entry : impl_->shaped_chips) entry.valid = false;
+}
 std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
@@ -188,6 +208,8 @@ struct PatternTransmitter::Impl {
         require(!bits.empty(), "pattern transmission requires at least one bit");
         require(std::all_of(bits.begin(), bits.end(), [](auto bit) { return bit <= 1; }),
                 "pattern input elements must be zero or one");
+        require(start % code.chips_per_symbol() == 0,
+                "complete pattern transmission must start at a symbol-aligned chip address");
         require(bits.size() <= std::numeric_limits<std::uint64_t>::max() / code.symbol_samples(),
                 "pattern transmission duration would overflow");
         total = static_cast<std::uint64_t>(bits.size()) * code.symbol_samples();

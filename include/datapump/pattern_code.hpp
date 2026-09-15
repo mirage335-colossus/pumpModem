@@ -12,10 +12,12 @@ std::uint64_t pattern_chip_samples(const Config& config);
 std::uint64_t pattern_chips_per_symbol(const Config& config);
 
 // Seekable, bounded pattern templates. Public patterns restart each symbol;
-// secret Scrambler and DSSS bytes use the full absolute chip address. Each
-// chip consumes eight bytes to map circular noise amplitude and phase.
-// Epoch/address are local clock
-// hypotheses and are never transmitted as metadata.
+// secret Scrambler and DSSS bytes use the whole second at each symbol start
+// and distinct positions for symbols starting in that second. That epoch stays
+// fixed throughout the symbol. Each chip consumes eight bytes to map circular
+// noise amplitude and phase. Epoch/address are local clock hypotheses and are
+// never transmitted as metadata. absolute_chip indexes the symbol schedule
+// anchored at stream_epoch and config.stream_phase_samples.
 class PatternCode {
 public:
     explicit PatternCode(Config config, std::uint64_t stream_epoch = 0);
@@ -34,6 +36,9 @@ public:
     // symbols contribute zero; receivers use this without any guessed bits.
     std::complex<double> shaped_value(std::uint64_t first_chip, unsigned bit,
                                       double within_symbol);
+    // Reuse one bounded template for a different subsecond start hypothesis.
+    // This changes only stream addressing and invalidates mapped chip caches.
+    void set_stream_phase_samples(std::uint64_t phase_samples);
     std::uint64_t chip_samples() const;
     std::uint64_t chips_per_symbol() const;
     std::uint64_t symbol_samples() const;
@@ -48,7 +53,9 @@ private:
 // eight chip times at either burst edge to emit the full finite filter tails.
 // The lead-in carries
 // no payload or acquisition marker. Input bytes are individual 0/1 bits;
-// start_chip addresses the first payload stream fragment. Disable the lead-in
+// start_chip addresses the first complete payload symbol and must be a multiple
+// of pattern_chips_per_symbol(config). Use PatternCode for arbitrary chip
+// fragment access. Disable the lead-in
 // explicitly when generating a bare capture or testing preamble loss.
 class PatternTransmitter {
 public:

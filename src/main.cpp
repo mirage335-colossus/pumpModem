@@ -8,6 +8,7 @@
 #include "datapump/tuning.hpp"
 #include "datapump/live.hpp"
 #include "datapump/streaming_modem.hpp"
+#include "transmit_timing.hpp"
 #include <algorithm>
 #include <charconv>
 #include <chrono>
@@ -244,6 +245,24 @@ audio::StreamFormatCallback audio_passband_guard(const modem::Config& config) {
                         " Hz). Choose a narrower band, a wider audio device, or simulation.");
     };
 }
+template<class Factory>
+void play_transmission(const Args& a, transfer::Options& options, Factory make) {
+    std::unique_ptr<modem::StreamingTransmitter> source;
+    if(a.has("time"))source=make(options);
+    audio::playback(options.modem.sample_rate,a.get("device"),[&](std::span<float> chunk) {
+        return source->read(chunk);
+    },{},[&](const auto& format) {
+        audio_passband_guard(options.modem)(format);
+        if(a.has("time"))return;
+        const auto clock=[] {return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();};
+        options.modem.stream_phase_samples=0;
+        auto scheduled=detail::schedule_transmission(options.modem,[&](std::uint64_t epoch) {
+            options.timestamp=epoch;return make(options);
+        },clock);
+        source=std::move(scheduled.transmitter);
+        detail::wait_for_playback(scheduled.playback_epoch,clock);
+    });
+}
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count()));
@@ -429,14 +448,15 @@ void listen(const Args& a,const transfer::Options& options) {
                 <<",\"dsp_buffered_bytes\":"<<snapshot.dsp_buffered_bytes
                 <<",\"simulation\":"<<(snapshot.simulation?"true":"false")
                 <<",\"transmitting\":"<<(snapshot.transmitting?"true":"false")<<"}\n";
-            for(const auto& signal:snapshot.signals) if(!signal.validated && !signal.complete) {
+            for(const auto& signal:snapshot.signals) if(!signal.binary && !signal.validated && !signal.complete) {
                 const Bytes text(signal.text.begin(),signal.text.end());
                 std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
                     <<",\"data_base64\":\""<<base64_encode(text)<<"\"}\n";
             }
         }
-        if(a.has("json"))for(const auto& signal:snapshot.signals)if(signal.binary && signal.complete) {
-            std::cout<<"{\"event\":\"raw_bits\",\"packet_validated\":false,\"authenticated\":false,\"complete\":true,\"raw_bits\":\""
+        if(a.has("json"))for(const auto& signal:snapshot.signals)if(signal.binary) {
+            std::cout<<"{\"event\":\"raw_bits\",\"packet_validated\":false,\"authenticated\":false,\"signal_id\":"<<signal.id
+                <<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
                 <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
             if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
             std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
@@ -531,8 +551,8 @@ int main(int argc,char** argv) {
             const auto plain=status_bits(a,{},timestamp);
             if(a.command=="status-tx") {
                 if(!a.has("output") && !a.has("device"))throw Error("status-tx requires --output or --device");
-                auto source=transfer::binary_transmitter(plain,settings);
                 if(a.has("output")) {
+                    auto source=transfer::binary_transmitter(plain,settings);
                     if(source->total_samples()>c.memory_limit/sizeof(float))throw Error("status WAV exceeds the configured waveform memory limit");
                     std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
                     for(std::size_t offset=0;offset<samples.size();)offset+=source->read(std::span(samples).subspan(offset,std::min<std::size_t>(4096,samples.size()-offset)));
@@ -540,7 +560,7 @@ int main(int argc,char** argv) {
                 } else {
                     const auto delay=a.number("tx-delay",6);
                     if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
-                    audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source->read(chunk);},{},audio_passband_guard(c));
+                    play_transmission(a,settings,[&](const auto& options){return transfer::binary_transmitter(plain,options);});
                     if(k)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
                 }
             } else {
@@ -556,7 +576,16 @@ int main(int argc,char** argv) {
         }
         if(a.command=="rx") {
             std::vector<float> samples;
-            if(a.has("device")) {if(a.has("input"))throw Error("choose --input WAV or --device");samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a),{},audio_passband_guard(c));}
+            if(a.has("device")) {
+                if(a.has("input"))throw Error("choose --input WAV or --device");
+                samples=audio::record(a.number("seconds",15),c.sample_rate,a.get("device"),budget(a),{},[&](const auto& format) {
+                    audio_passband_guard(c)(format);
+                    if(!a.has("time")) {
+                        settings.capture_epoch=std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
+                        settings.timestamp=static_cast<std::uint64_t>(*settings.capture_epoch);
+                    }
+                });
+            }
             else {auto wav=input_wav(a);c.sample_rate=wav.sample_rate;modem::validate(c);samples=std::move(wav.samples);}
             settings.modem=c;
             auto result=transfer::receive(samples,settings,progress);report_received(a,result);return 0;
@@ -569,14 +598,13 @@ int main(int argc,char** argv) {
             if(a.has("device")) {
                 const auto delay=a.number("tx-delay",6);
                 if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
-                auto source=transfer::message_transmitter(outgoing,settings);
-                audio::playback(c.sample_rate,a.get("device"),[&](std::span<float> chunk){return source->read(chunk);},{},audio_passband_guard(c));
+                play_transmission(a,settings,[&](const auto& options){return transfer::message_transmitter(outgoing,options);});
                 if(settings.key)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
             } else output_wave(a,transfer::transmit(outgoing,settings),c);
             std::cerr<<"Transmitted ";
             std::cerr<<estimate.waveform_samples/modem::symbol_sample_count(c)<<" pattern bits, ";
             std::cerr<<estimate.total_seconds
-                     <<" seconds; start epoch "<<timestamp<<'\n';return 0;
+                     <<" seconds; start epoch "<<settings.timestamp<<'\n';return 0;
         }
         modem::ChannelConfig channel;
         channel.snr_db=a.number("snr",20);channel.seed=a.integer("seed",1);
