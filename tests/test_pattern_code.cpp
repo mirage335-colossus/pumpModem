@@ -652,7 +652,7 @@ void shaped_coordinate_and_duration_bounds() {
     c.integration_seconds=std::nextafter(std::ldexp(1.,64)/c.sample_rate,0.);
     modem::PatternTransmitter without_noise({0},c,0,0,false);
     check(without_noise.total_samples()>std::numeric_limits<std::uint64_t>::max()-modem::suppression_sample_count(c),
-          "suppression overflow fixture must leave less than two seconds in the sample counter");
+          "suppression overflow fixture must leave less than three seconds in the sample counter");
     rejects([&]{modem::PatternTransmitter tail_overflow({0},c);},
             "suppression noise must reject a 64-bit sample duration overflow");
 }

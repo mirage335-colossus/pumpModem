@@ -17,12 +17,12 @@ PatternMode parse_pattern_mode(std::string_view name);
 std::string_view pattern_mode_name(PatternMode mode);
 std::span<const PatternMode> pattern_modes();
 bool tone_mode(PatternMode mode);
-inline constexpr double default_receive_target_db_hz = 40;
+inline constexpr double default_receive_target_db_hz = 60;
 inline constexpr std::size_t maximum_receive_targets = 16;
 inline constexpr std::size_t maximum_receive_target_text = 512;
 struct ReceiveTargets {
     std::vector<double> values{default_receive_target_db_hz};
-    std::string canonical = "40";
+    std::string canonical = "60";
     bool reset = false;
 };
 // One invalid token resets the complete list. Accept at most 16 finite

@@ -71,8 +71,9 @@ void timed_acquisition_coordinates() {
     transfer::StreamReceiver late(value,value.timestamp);
     auto burst=chunk(std::span(long_wire).subspan(1216),1216,300,true);burst.stream_first_symbol=1216;
     const auto suffix=late.push(std::move(burst));
+    const auto skipped_source=source_bytes_per_interval(interval_data_bytes(value.fec,value.key.has_value()),value.compression);
     check(suffix.content_validated && suffix.content.authenticated &&
-          suffix.content.message.data==Bytes(long_source.data.begin()+65,long_source.data.end()),
+          suffix.content.message.data==Bytes(long_source.data.begin()+skipped_source,long_source.data.end()),
           "late interval acquisition must authenticate the received segment at its actual address");
 }
 void refined_phase_and_post_end_gate() {

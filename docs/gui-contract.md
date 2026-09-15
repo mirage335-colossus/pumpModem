@@ -39,14 +39,14 @@ to the existing `max(1500, 0.75 × rate)` Hz recommendation. A carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
-**TX SNR (dB-Hz)** defaults to `80`; its presets include
+**TX SNR (dB-Hz)** defaults to `60`; its presets include
 `140`, `120`, `100`, `80`, `60`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
 `-30` alongside the existing targets.
 
-The **RX targets (dB-Hz)** comma-list initially matches the TX default, `80`.
+The **RX targets (dB-Hz)** comma-list initially matches the TX default, `60`.
 Changing TX SNR to a valid value replaces the RX list with that single matching
 target. The RX list can then be edited independently without changing TX SNR.
-It trims and deduplicates valid entries, and resets the entire list to `40` on
+It trims and deduplicates valid entries, and resets the entire list to `60` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
 profiles hold the selected rate, carrier and pattern/tone mode fixed.
@@ -118,7 +118,7 @@ to accept input across page changes.
 eligibility, options and records. Options have IDs, literal labels and enabled
 flags. `display_text` optionally shows an effective value without replacing a
 saved selection or disabling an otherwise enabled choice. For example, the
-selected Reed-Solomon preset remains saved
+selected Reed-Solomon preset (60% by default) remains saved
 while a tiny message reports `Off (short dictionary)`.
 
 A record has a stable ID, enabled/activation eligibility and ordered native text

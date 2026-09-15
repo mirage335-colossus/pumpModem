@@ -150,7 +150,7 @@ range whose high eight bytes are ASCII `preamble`. This pad is local state,
 never an on-air field; no preamble-specific key is generated.
 
 After the full payload waveform and its final filter tail, every nonempty
-transmission emits exactly two seconds of suppression noise. It uses the same
+transmission emits exactly three seconds of suppression noise. It uses the same
 noise mapping and enabled Data/Scrambler/DSSS mixture, but a third counter
 domain, `StreamDomain::Suppression`, whose high eight bytes are ASCII
 `suppress`. This separates its bytes from both the prefix and every payload

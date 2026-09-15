@@ -63,7 +63,7 @@ slots for Reed–Solomon erasure correction. EOF and codec success do not comple
 a stream.
 
 Receive searches use the selected rate, carrier and pattern mode, plus the separate
-comma-separated target C/N0 list. Invalid list text resets it to `40`. Carrier,
+comma-separated target C/N0 list. Invalid list text resets it to `60`. Carrier,
 clock and key coverage is finite. The long-symbol fallback requires an explicit
 clock-start window and budgets every frequency/rate/timing combination; memory
 or CPU can still make that coverage impractical. See
@@ -80,7 +80,7 @@ bit, with zero modem training and symbol padding. A separate hardware-settling
 block rounds two seconds to the nearest whole payload-symbol duration, with
 ties upward; it is absent for symbols longer than four seconds. Its duration
 contributes to total airtime without adding meaningful bits. A separate echo-suppression
-block follows the payload and filter tail for exactly two seconds, even for
+block follows the payload and filter tail for exactly three seconds, even for
 hour-long symbols. It carries no bits and supplies no ending rule. The diagrams show
 counts and placeholders,
 never input contents, metadata values, key bytes or private spreading sequences.

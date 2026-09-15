@@ -33,7 +33,7 @@ public:
     // bitmap frame of physical chips, including a chip already in progress.
     static std::size_t constellation_history_capacity(const Config& config);
     // Both input forms include the rounded settling prefix and an exact
-    // two-second suppression-noise tail, outside all payload symbol slots.
+    // three-second suppression-noise tail, outside all payload symbol slots.
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();

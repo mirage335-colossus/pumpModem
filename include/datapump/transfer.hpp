@@ -21,7 +21,7 @@ struct Options {
     modem::Config modem;
     std::size_t content_limit = default_memory_limit;
     std::size_t dsp_workspace_bytes = runtime::default_dsp_workspace_bytes();
-    FecMode fec = FecMode::rs20;
+    FecMode fec = FecMode::rs60;
     bool compression = true;
     std::optional<Crypto> key;
     std::uint64_t timestamp = 0;

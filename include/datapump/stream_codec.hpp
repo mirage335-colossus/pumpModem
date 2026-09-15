@@ -57,7 +57,7 @@ inline constexpr std::size_t stream_mac_bytes=32;
 // The caller binds domain/version, canonical profile and symbol address into
 // these independently keyed HMAC callbacks. No public digest is generated.
 struct IntervalOptions {
-    FecMode fec=FecMode::rs20;
+    FecMode fec=FecMode::rs60;
     std::function<Bytes(const Bytes&)> authenticator;
     std::function<bool(const Bytes&,const Bytes&)> verifier;
 };

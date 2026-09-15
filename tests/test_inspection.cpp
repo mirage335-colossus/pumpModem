@@ -119,7 +119,7 @@ void raw_and_short_sources() {
           "hardware prefix must have separate airtime and cannot inflate the three meaningful bits");
     check(section(raw,"Pulse tails").symbols==0 && section(raw,"Pulse tails").duration_seconds==pulse_seconds,
           "pulse edges must account for both tails without adding meaningful symbols");
-    check(section(raw,"Echo suppression").symbols==0 && section(raw,"Echo suppression").duration_seconds==2. && field(raw,"Echo suppression")=="2 s / 0 payload bits", "tail must cost exactly two seconds without payload symbols");
+    check(section(raw,"Echo suppression").symbols==0 && section(raw,"Echo suppression").duration_seconds==3. && field(raw,"Echo suppression")=="3 s / 0 payload bits", "tail must cost exactly three seconds without payload symbols");
     check_airtime(raw);
     request.options.modem.pulse_shaping=false;
     const auto rectangular=gui::inspect(request);
@@ -157,7 +157,7 @@ void raw_and_short_sources() {
     const auto slow=gui::inspect(request);
     check(slow.estimate.wire_bits==3 && slow.estimate.coded_seconds==10800 &&
           field(slow,"Meaningful bits")=="3" && field(slow,"Hardware settling")=="0 s / 0 symbol durations" && section(slow,"Pulse tails").symbols==0 &&
-          std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds-2.)<1e-8,
+          std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds-3.)<1e-8,
           "hour-long pattern inspection must retain pulse tails separately from its zero hardware prefix");
     request.options.modem.integration_seconds=0;request.message.data=Bytes(400,'e');
     const auto marked=gui::inspect(request);

@@ -42,12 +42,12 @@ struct Harness {
 void six_second_end_and_eof() {
     auto value=options();const auto sent=message();const auto pcm=transfer::transmit(sent,value);
     const auto tail=static_cast<std::size_t>(modem::suppression_sample_count(value.modem));
-    check(tail==2*value.modem.sample_rate && tail<pcm.size(),"capture must include exactly two seconds of suppression noise");
+    check(tail==3*value.modem.sample_rate && tail<pcm.size(),"capture must include exactly three seconds of suppression noise");
     Harness receiver(value);receiver.feed(std::span(pcm).first(pcm.size()-tail));
     check(receiver.ended.empty(),"complete fixed codeword must not end physical stream");
     receiver.feed(std::span(pcm).last(tail));
     check(receiver.ended.empty(),"suppression noise is not a physical end marker");
-    receiver.silence(3.75);check(receiver.ended.empty(),"5.75 seconds of symbol absence must not end physical stream");
+    receiver.silence(2.75);check(receiver.ended.empty(),"5.75 seconds of symbol absence must not end physical stream");
     receiver.silence(.75);
     check(receiver.ended.size()==1,"six seconds of resolved absence must emit one stream end");
     check(receiver.ended.front().content_validated && receiver.ended.front().content.message.data==sent.data,"post-end compressed source must roundtrip sampled PCM");

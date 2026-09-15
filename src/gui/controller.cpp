@@ -156,7 +156,7 @@ struct Controller::Impl {
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
-        f(UiField::snr).text="80"; for(const auto* s:{"140","120","100","80","60","40","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
+        f(UiField::snr).text="60"; for(const auto* s:{"140","120","100","80","60","40","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
         f(UiField::receive_snr).text=f(UiField::snr).text;
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
@@ -166,7 +166,7 @@ struct Controller::Impl {
         f(UiField::send_key).options={{"enter","on Enter"},{"ctrl-enter","on Ctrl+Enter"}}; f(UiField::send_key).selected="enter";
         for(auto mode:tuning::pattern_modes()) { const std::string id(tuning::pattern_mode_name(mode)); auto label=id; std::replace(label.begin(),label.end(),'-',' '); f(UiField::pattern).options.push_back({id,label}); }
         f(UiField::pattern).selected="auto-pattern";
-        f(UiField::fec).options={{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"},{"off","Off"}}; f(UiField::fec).selected="rs20";
+        f(UiField::fec).options={{"rs20","Reed-Solomon 20%"},{"rs60","Reed-Solomon 60%"},{"off","Off"}}; f(UiField::fec).selected="rs60";
         f(UiField::dsp_workspace).options={{"ram-25","25% available RAM"},{"ram-50","50% available RAM"},{"ram-75","75% available RAM"}};
         f(UiField::dsp_workspace).selected="ram-50";
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
@@ -776,7 +776,7 @@ void Controller::edit(UiField field,std::string text) {
         if(declaration==screen.end()) throw Error("This field is not editable text");
         if(const auto error=ui::edit_error(*declaration,text);!error.empty()) {
             if(field!=UiField::receive_snr)throw Error(error);
-            p.f(field).text="40";p.configure();p.controls();return;
+            p.f(field).text="60";p.configure();p.controls();return;
         }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;

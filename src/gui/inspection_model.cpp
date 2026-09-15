@@ -50,7 +50,7 @@ Inspection inspect(const InspectionRequest& request) {
     result.summary=count(transmitted)+" transmitted bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
     result.preamble_description="Hardware settling sends independent noise-like chips for two seconds rounded to the nearest whole data-symbol duration: "+
         count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than four seconds need no prefix. The receiver acquires timing and keystream synchronization from pattern evidence. Six seconds of iterative search without adequate pattern evidence is the sole stream ending rule.";
-    result.preamble_description+=" After the payload and pulse tail, two seconds of independent noise suppress weaker echoes. This noise carries no data or end marker; receive completion still requires six seconds without symbols.";
+    result.preamble_description+=" After the payload and pulse tail, three seconds of independent noise suppress weaker echoes. This noise carries no data or end marker; receive completion still requires six seconds without symbols.";
     if(keyed)result.preamble_description+=" The independent Data stream protects the prefix before the enabled Scrambler and DSSS layers; prefix addresses never overlap data addresses.";
     result.chip_description=tone?
         "Public tone patterns are for unencrypted communication and local experiments. Tone modes disable Data encryption, Scrambler and DSSS and do not provide Low-Probability-of-Intercept protection.":
@@ -80,7 +80,7 @@ Inspection inspect(const InspectionRequest& request) {
     if(pulse_samples)result.sections.push_back({"Pulse tails", "Smooth pulse edges add this combined time at the beginning and end of the burst. They add no payload bits or acquisition evidence.",{},0,pulse_seconds});
     result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,static_cast<double>(meaningful)*symbol_seconds});
     if(recovery)result.sections.push_back({"Byte-boundary recovery", "Two copies of a 96-bit alignment word precede each 128-byte coded interval. Encryption masks markers along with coded data. The last interval has no following marker.",{},recovery,static_cast<double>(recovery)*symbol_seconds});
-    if(suppression_seconds)result.sections.push_back({"Echo suppression", "Exactly two seconds of independent noise after the payload and pulse tail suppress weaker echoes. This segment does not mark or determine stream completion.",{},0,suppression_seconds});
+    if(suppression_seconds)result.sections.push_back({"Echo suppression", "Exactly three seconds of independent noise after the payload and pulse tail suppress weaker echoes. This segment does not mark or determine stream completion.",{},0,suppression_seconds});
     if(raw)result.fields.insert(result.fields.end(),{{"Integrity","None"},{"FEC","Off"},
         {"Compression",short_message?"Fixed short-text dictionary":"Off (raw bits)"},{"Byte-boundary recovery","0 bits"},
         {"Transmitted bits",count(transmitted)}});
@@ -102,7 +102,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Byte-boundary recovery",raw?"No recovery bits added.":"Insert the repeated alignment word before every 128-byte coded interval, before the private data mask. No terminal marker is added.",raw?InspectionState::off:InspectionState::active},
         {"Private data stream",keyed?"Mask the entire bitstream, including alignment words, with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
         {"Pattern selection",result.chip_description},
-        {"Echo suppression","Append exactly two seconds of independent noise after the pulse tail. No payload positions or end marker are added."},
+        {"Echo suppression","Append exactly three seconds of independent noise after the pulse tail. No payload positions or end marker are added."},
         {request.simulation?"Sampled channel":"Audio output",request.simulation?"Transmit sampled PCM through independent clock, frequency, phase-noise and additive-noise simulation.":"Generate PCM at the internal clock and resample to the selected audio output."}}});
     result.lanes.push_back({"Receive • pattern evidence",{{"Bounded hypotheses","Search only the configured receive targets, selected rate, carrier and pattern mode, with local clock/key hypotheses."},
         {"Pattern versus noise","Accumulate soft pattern evidence. Refine timing and frequency using that score; I/Q plots show diagnostic measurements."},

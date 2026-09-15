@@ -41,7 +41,7 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['raw_bit_count'],16)
         self.assertEqual(value['filename'],'')
     def test_automatic_profile_short_text_and_binary_dictionary(self):
-        defaults=('--bw','3600','--target-snr','80','--receive-targets','80','--pattern','auto-pattern',
+        defaults=('--bw','3600','--pattern','auto-pattern',
                   '--time','1800000000','--search-seconds','0')
         for source,expected_bits in (('quick brown',70),('quick brown fox ',98),('e'*16,48)):
             estimate=json.loads(self.run_pump('estimate','--text',source,*defaults).stdout)

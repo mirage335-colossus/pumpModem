@@ -134,8 +134,8 @@ void weak_auto_without_training() {
           "changing the weak-signal target must change transmitted timing");
     check(modem::training_sample_count(value.modem)==0 &&
           std::abs(slow.total_seconds-slow.coded_seconds-
-            2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate-2.)<1e-9,
-          "hour-long symbols add finite filter tails and exact two-second suppression, with no hardware settling");
+            2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate-3.)<1e-9,
+          "hour-long symbols add finite filter tails and exact three-second suppression, with no hardware settling");
     bounded_sampled_prefix(sent,value);
 }
 void obscured_training_pcm_roundtrip() {

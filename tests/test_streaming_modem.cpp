@@ -46,9 +46,9 @@ void exact_suppression_noise() {
         const auto training=modem::training_sample_count(config),padding=modem::pattern_pulse_padding_samples(config);
         const auto noise=modem::suppression_sample_count(config);
         const auto content=training+2*padding+bits.size()*modem::symbol_sample_count(config);
-        if(noise!=2*config.sample_rate || packed.total_samples()!=content+noise || raw.total_samples()!=content+noise ||
+        if(noise!=3*config.sample_rate || packed.total_samples()!=content+noise || raw.total_samples()!=content+noise ||
            modem::waveform_sample_count(wire.size(),config)!=content+noise)
-            throw std::runtime_error("all nonempty input forms need exactly two seconds of trailing noise");
+            throw std::runtime_error("all nonempty input forms need exactly three seconds of trailing noise");
         std::vector<Complex> a(packed.total_samples()),b(a.size());
         packed.read_analytic(a);raw.read_analytic(b);
         if(a!=b || a[content]!=Complex{} || a.back()!=Complex{})
@@ -76,17 +76,17 @@ void exact_suppression_noise() {
     long_config.integration_seconds=3600;long_config.pulse_shaping=false;
     modem::PatternTransmitter long_source({0},long_config);
     const auto content=modem::symbol_sample_count(long_config);
-    if(modem::training_sample_count(long_config) || long_source.total_samples()!=content+128 ||
+    if(modem::training_sample_count(long_config) || long_source.total_samples()!=content+192 ||
        long_source.working_bytes()>16384)
-        throw std::runtime_error("hour-long symbols must retain a two-second tail with bounded state");
+        throw std::runtime_error("hour-long symbols must retain a three-second tail with bounded state");
     std::array<Complex,317> block{};
     while(long_source.samples_emitted()<content) {
         const auto count=std::min<std::uint64_t>(block.size(),content-long_source.samples_emitted());
         long_source.read_analytic(std::span(block).first(static_cast<std::size_t>(count)));
     }
     const auto count=long_source.read_analytic(block);
-    if(count!=128 || !long_source.finished() ||
-       std::none_of(block.begin(),block.begin()+128,[](auto value){return value!=Complex{};}))
+    if(count!=192 || !long_source.finished() ||
+       std::none_of(block.begin(),block.begin()+192,[](auto value){return value!=Complex{};}))
         throw std::runtime_error("long-symbol tail was rounded, omitted or replaced by silence");
 }
 
@@ -98,9 +98,9 @@ void suppression_hides_delayed_echo() {
     modem::StreamingTransmitter source(modem::RawBits{bits},config);
     const auto training=modem::training_sample_count(config);
     std::vector<float> audio(source.total_samples());source.read(audio);
-    // A weaker copy delayed by the complete two-second guard. Supply actual
+    // A weaker copy delayed by the complete three-second guard. Supply actual
     // received samples through the echo's end and the six-second absence.
-    const std::size_t delay=2*config.sample_rate;
+    const std::size_t delay=3*config.sample_rate;
     modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
     for(const bool suppress:{false,true}) {
         std::vector<float> received(audio.size()-training+delay+7*config.sample_rate);
@@ -121,7 +121,7 @@ void suppression_hides_delayed_echo() {
         receiver.finish();harvest();
         const auto decoded=streams.longest();
         if(suppress?(decoded.bits!=bits || !decoded.complete):(decoded.bits.size()<=bits.size()))
-            throw std::runtime_error(suppress?"two-second delayed echo or suppression noise added decoded payload bits":
+            throw std::runtime_error(suppress?"three-second delayed echo or suppression noise added decoded payload bits":
                 "echo control must expose delayed symbols without suppression noise");
     }
 }

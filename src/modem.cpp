@@ -154,7 +154,7 @@ std::uint64_t training_sample_count(const Config& c) {
     return count*symbol;
 }
 std::uint64_t suppression_sample_count(const Config& c) {
-    return static_cast<std::uint64_t>(c.sample_rate)*2;
+    return static_cast<std::uint64_t>(c.sample_rate)*3;
 }
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
 double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }

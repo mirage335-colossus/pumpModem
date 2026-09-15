@@ -114,17 +114,17 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `80`.
+`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `60`.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. Carrier can then be selected or entered separately.
-The **RX targets (dB-Hz)** comma-list also starts at `80`. Changing TX SNR to
+The **RX targets (dB-Hz)** comma-list also starts at `60`. Changing TX SNR to
 a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
-the entire list to `40`.
+the entire list to `60`.
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
 sample offset and replays its presentation over three seconds. Signal progress
@@ -294,7 +294,7 @@ updating while idle. Transmissions run at CPU speed through noisy PCM, with
 virtual airtime reported separately. The receiver runs independently through
 idle noise and burst starts and derives timing, phase and spreading correlation
 from its samples. Transmit start and completion do not reset its acquisition.
-After computation completes, the entire transmission (including any hardware-settling prefix and the two-second echo-suppression noise)
+After computation completes, the entire transmission (including any hardware-settling prefix and the three-second echo-suppression noise)
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and pattern evidence follow the same timeline. Each frame shows fresh measured
 input I/Q and the retained pattern evidence at that transmission position.
@@ -400,7 +400,9 @@ and `content_validated: false`. Manual sample-rate/carrier overrides use the sam
 pattern transport.
 
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
-forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz.
+forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
+defaulting to 60 (60 dB/1Hz). Large messages and attachments default to 60%
+Reed–Solomon parity overhead (`--fec 60`).
 Auto planning uses one bit per pattern symbol, a 16/32/64-chip floor based on
 in-band SNR and an initial 18 dB integrated-energy model. Forced short patterns
 preserve their duration and report unsupported automatic confidence assumptions

@@ -249,16 +249,16 @@ struct Smoke::Impl {
             controller.select(F::qr_brightness,"dim");controller.activate(C::zoom_in);controller.activate(C::reset_zoom);
             controller.select(F::send_key,"ctrl-enter");controller.select(F::send_key,"enter");
             require(controller.revision()==revision,"Display/input-preference actions changed modem settings");
-            phase=Phase::fec20;break;
+            phase=Phase::fec60;break;
         }
         case Phase::fec20:
             if(!controller.estimate()||!saw_idle_change||!snapshot.samples_received)break;
             check_fec(controller,FecMode::rs20);
             require(controller.field(F::fec).enabled&&controller.field(F::fec).display_text.empty(),"Long text did not expose its retained FEC selection");
-            controller.select(F::fec,"rs60");phase=Phase::fec60;break;
+            phase=Phase::generate;break;
         case Phase::fec60:
             if(!controller.estimate())break;
-            check_fec(controller,FecMode::rs60);controller.select(F::fec,"rs20");phase=Phase::generate;break;
+            check_fec(controller,FecMode::rs60);controller.select(F::fec,"rs20");phase=Phase::fec20;break;
         case Phase::generate:
             if(!controller.estimate())break;
             key_samples=snapshot.samples_received;generate(controller,"A|B, None");

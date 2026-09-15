@@ -30,8 +30,9 @@ void rate_carrier_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.5 kHz" &&
-          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500,
-          "GUI defaults must use the 3.6 kHz rate and 1.5 kHz audio carrier");
+          controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500 &&
+          controller.field(F::snr).text=="60" && controller.settings().transfer.fec==FecMode::rs60,
+          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz audio carrier, 60 dB-Hz target and 60% FEC");
     controller.edit(F::carrier,"1650 Hz");
     check(controller.settings().transfer.modem.carrier_hz==1650,
           "A custom audio carrier did not reach the modem configuration");
@@ -622,7 +623,7 @@ void short_text_reception() {
     Controller controller({true,true});controller.edit(F::message,"quick brown fox");prepare(controller);
     check(!controller.inspection()->stream_layout && !controller.inspection()->binary &&
           controller.estimate()->wire_bits==compression::encode_short_bits(Bytes{'q','u','i','c','k',' ','b','r','o','w','n',' ','f','o','x'}).size() && !controller.field(F::fec).enabled &&
-          controller.field(F::fec).selected=="rs20" && controller.field(F::fec).display_text=="Off (short dictionary)",
+          controller.field(F::fec).selected=="rs60" && controller.field(F::fec).display_text=="Off (short dictionary)",
           "15-byte text must use exact dictionary bits and retain the selected FEC for later longer messages");
     receive_pattern_text(controller,"quick brown fox");
     check(controller.inbox().items().empty() && controller.signals().lines().size()==1 &&
@@ -637,7 +638,7 @@ void short_text_reception() {
           "A 16-byte message must remain exactly 98 dictionary bits through both message and code previews");
     controller.edit(F::message,"quick brown fox!!");prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->wire_bits==1216 &&
-          controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs20" &&
+          controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs60" &&
           controller.field(F::fec).display_text.empty(),
           "17-byte text must restore selected fixed interval coding");
     controller.close();
@@ -853,8 +854,8 @@ void binary_source_representation() {
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
-    check(controller.field(F::receive_snr).text=="80" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{80} &&
-          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 80");
+    check(controller.field(F::receive_snr).text=="60" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{60} &&
+          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 60");
     const auto tx=controller.settings().transfer.modem;
     controller.edit(F::receive_snr,"40,");
     controller.poll();
@@ -863,7 +864,7 @@ void receive_target_controls() {
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     check(controller.field(F::receive_snr).text=="40, 6, -6" &&
           controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),"receive target field must canonicalize a valid list");
-    check(controller.field(F::snr).text=="80" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
+    check(controller.field(F::snr).text=="60" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
           controller.settings().transfer.modem.integration_seconds==tx.integration_seconds,"receive search targets must not change the transmitted profile");
     controller.edit(F::bandwidth,"18 kHz");
     check(controller.settings().transfer.modem.bandwidth_hz==18000 &&
@@ -887,10 +888,10 @@ void receive_target_controls() {
           "correcting TX SNR must restore matching receive targets");
     controller.edit(F::receive_snr,"40, wrong");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.field(F::receive_snr).text=="40" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{40},
+    check(controller.field(F::receive_snr).text=="60" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{60},
           "invalid receive target text must reset the complete field to its default");
     controller.edit(F::receive_snr,std::string(513,'1'));
-    check(controller.field(F::receive_snr).text=="40","overlong receive target input must reset to the default too");
+    check(controller.field(F::receive_snr).text=="60","overlong receive target input must reset to the default too");
     const auto& controls=ui::console_screen();
     const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.field==F::receive_snr;});
     check(found!=controls.end() && found->persistent && found->kind==ui::Kind::text,

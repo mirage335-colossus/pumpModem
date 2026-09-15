@@ -440,8 +440,8 @@ void typed_short_text_inspection() {
     Application app({}); // Production defaults; no audio session is needed to inspect a draft.
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
-          app.field(F::snr).text=="80" && app.field(F::receive_snr).text=="80" &&
-          app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs20" &&
+          app.field(F::snr).text=="60" && app.field(F::receive_snr).text=="60" &&
+          app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs60" &&
           !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");
     const auto await_layout=[&] {
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);

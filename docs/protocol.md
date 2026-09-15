@@ -12,7 +12,8 @@ bit codes; the interval transport is incompatible with the previous packets.
 
 Nonempty text of up to 16 source bytes uses the [exact raw-bit path](#exact-raw-bit-path).
 The following geometry applies to text longer than 16 bytes, empty sources sent
-through the byte API, and attachments of every size.
+through the byte API, and attachments of every size. The default FEC preset is
+RS60 (60% parity overhead).
 
 ```text
 192-bit marker | 128 coded bytes | 192-bit marker | 128 coded bytes | ...
@@ -25,7 +26,7 @@ A separate approximately two-second hardware-settling waveform may precede the
 stream, rounded to the nearest whole symbol duration with ties upward. It
 carries no data or acquisition condition; sufficiently long symbols have no
 settling prefix. Pulse-filter tails also carry no additional source bits.
-Exactly two seconds of independent noise follow the payload and filter tail,
+Exactly three seconds of independent noise follow the payload and filter tail,
 including for symbols longer than six seconds. Its separate suppression domain
 consumes no payload positions. It suppresses weaker delayed echoes and provides
 no ending signal: physical completion still requires absence of admitted symbols.

@@ -50,7 +50,7 @@ private:
 
 // Binary pattern PCM: exactly bits.size() payload symbols,
 // optionally preceded by rounded hardware-settling audio and followed by
-// exactly two seconds of independent suppression noise. Shaped patterns add
+// exactly three seconds of independent suppression noise. Shaped patterns add
 // eight chip times at either payload edge to emit the full finite filter tails;
 // the suppression noise starts after those tails. Neither noise section carries
 // payload or an acquisition marker. Input bytes are individual 0/1 bits;
