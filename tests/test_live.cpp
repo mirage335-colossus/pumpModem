@@ -22,7 +22,8 @@ live::Settings settings() {
 void run() {
     auto value=settings();live::Session session;
     session.start(value);
-    Message sent;sent.data={'h','e','l','l','o',0,0};
+    Message sent;const std::string source="hello fixed intervals";
+    sent.data.assign(source.begin(),source.end());sent.data.insert(sent.data.end(),2,0);
     session.transmit(sent);
     const auto deadline=std::chrono::steady_clock::now()+40s;
     bool received=false;
@@ -78,7 +79,7 @@ void short_keyed_stream_survives_epoch_refresh() {
         const auto snapshot=session.snapshot();
         if(!snapshot.error.empty())throw Error(snapshot.error);
         check(snapshot.received.empty(),"raw keyed input must not release source content");
-        // The payload has ended, but its sub-chunk decisions are still waiting
+        // The payload has ended, but the admitted stream is still waiting
         // for physical absence. Expire all ordinary unconfirmed epoch ages.
         if(!jumped && snapshot.transmitting && snapshot.transmission_fraction>.75 && snapshot.transmission_fraction<1) {
             epoch=origin+10;jumped=true;

@@ -5,10 +5,31 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <map>
 #include <numbers>
 #include <stdexcept>
 using namespace datapump;
 using Complex=std::complex<double>;
+
+struct ReceivedStreams {
+    std::map<std::pair<std::uint64_t,std::uint64_t>,modem::PatternBurst> streams;
+    void append(const modem::PatternBurst& chunk) {
+        const auto id=std::pair{chunk.stream_first_sample,chunk.stream_first_symbol};
+        auto [it,added]=streams.try_emplace(id);
+        auto& stream=it->second;
+        if(added)stream.first_stream_symbol=chunk.first_stream_symbol;
+        if(stream.complete || chunk.first_stream_symbol!=stream.first_stream_symbol+stream.bits.size())
+            throw std::runtime_error("incremental raw chunks repeated or shifted a received symbol");
+        stream.bits.insert(stream.bits.end(),chunk.missing_slots,modem::missing_pattern_bit);
+        stream.bits.insert(stream.bits.end(),chunk.bits.begin(),chunk.bits.end());
+        stream.complete=chunk.complete;
+    }
+    modem::PatternBurst longest() const {
+        modem::PatternBurst result;
+        for(const auto& [id,stream]:streams)if(stream.bits.size()>result.bits.size())result=stream;
+        return result;
+    }
+};
 
 void exact_suppression_noise() {
     for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
@@ -89,19 +110,17 @@ void suppression_hides_delayed_echo() {
             if(i+delay>=training)received[i-training+delay]+=.2F*audio[i];
         }
         modem::PatternReceiver receiver(config,8*1024*1024,search);
-        Bytes decoded;bool complete=false;
+        ReceivedStreams streams;
         const auto harvest=[&] {
-            for(const auto& burst:receiver.take_bursts()) {
-                if(burst.bits.size()>decoded.size())decoded=burst.bits;
-                complete=complete || burst.complete;
-            }
+            for(const auto& burst:receiver.take_bursts())streams.append(burst);
         };
         for(std::size_t offset=0;offset<received.size();) {
             const auto count=std::min<std::size_t>(317,received.size()-offset);
             receiver.push(std::span(received).subspan(offset,count));offset+=count;harvest();
         }
         receiver.finish();harvest();
-        if(suppress?(decoded!=bits || !complete):(decoded.size()<=bits.size()))
+        const auto decoded=streams.longest();
+        if(suppress?(decoded.bits!=bits || !decoded.complete):(decoded.bits.size()<=bits.size()))
             throw std::runtime_error(suppress?"two-second delayed echo or suppression noise added decoded payload bits":
                 "echo control must expose delayed symbols without suppression noise");
     }
@@ -269,12 +288,12 @@ int main() {
         std::vector<float> settling(modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config));source.read(settling);
         modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
         modem::StreamingReceiver receiver(config,8*1024*1024,search);
-        std::array<float,317> samples{};Bytes received;
-        const auto harvest=[&]{for(const auto& burst:receiver.take_pattern_bursts())if(burst.bits.size()>received.size())received=burst.bits;};
+        std::array<float,317> samples{};ReceivedStreams received;
+        const auto harvest=[&]{for(const auto& burst:receiver.take_pattern_bursts())received.append(burst);};
         while(const auto count=source.read(samples)){receiver.push(std::span(samples).first(count));harvest();}
         std::vector<float> silence(2*modem::symbol_sample_count(config));receiver.push(silence);harvest();
         receiver.finish();harvest();
-        if(received!=bits)throw std::runtime_error("pattern streaming PCM did not recover exact unpadded bits");
+        if(received.longest().bits!=bits)throw std::runtime_error("pattern streaming PCM did not recover exact unpadded bits");
         const auto before=receiver.working_bytes();receiver.set_workspace_bytes(before+1024*1024);
         receiver.reset();
         if(receiver.synchronized() || receiver.acquiring())throw std::runtime_error("receiver reset retained acquisition state");

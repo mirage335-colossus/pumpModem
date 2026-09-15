@@ -574,16 +574,17 @@ BitmapImage render(const plots::PlotSnapshot& source) {
 }
 void fixed_text_reception() {
     using F=ui::Field;using C=ui::Command;
-    Controller controller({true,true});controller.edit(F::message,"e");prepare(controller);
+    const std::string expected="A fixed interval";
+    Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->coded_bytes==128,
-          "one-byte message uses the single fixed coded interval");
+          "16-byte message uses the single fixed coded interval");
     controller.start();controller.activate(C::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
     while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==Bytes{'e'},
-          "fixed source reception preserves one-byte text");
+    check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==Bytes(expected.begin(),expected.end()),
+          "fixed source reception preserves text");
     check(controller.inbox().file_items().empty(),"Ordinary source text became a received file");
     std::optional<std::size_t> index;
     for(std::size_t i=0;i<controller.signals().lines().size();++i)
@@ -591,10 +592,10 @@ void fixed_text_reception() {
     check(index.has_value(),"completed source has a validated display row");
     controller.select(F::signals,std::to_string(controller.signals().lines()[*index].id));
     controller.activate(C::copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1 && requests.front().value=="e","copy uses exact decoded source bytes");
+    check(requests.size()==1 && requests.front().value==expected,"copy uses exact decoded source bytes");
     controller.complete_service({requests.front().id,false,{},{}});
     controller.activate(C::paste_signal);
-    check(controller.message_bytes()==Bytes{'e'},"paste uses source bytes rather than coded data");
+    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"paste uses source bytes rather than coded data");
     controller.close();
 }
 
@@ -615,11 +616,22 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         throw Error(detail);
     }
 }
-void fixed_sentence_reception() {
+void short_text_reception() {
     using F=ui::Field;
     Controller controller({true,true});controller.edit(F::message,"quick brown fox");prepare(controller);
-    check(controller.inspection()->stream_layout && !controller.inspection()->binary &&
-          controller.estimate()->wire_bits==1216,"short sentence has the same fixed interval as other sources");
+    check(!controller.inspection()->stream_layout && !controller.inspection()->binary &&
+          controller.estimate()->wire_bits==120 && !controller.field(F::fec).enabled &&
+          controller.field(F::fec).selected=="rs20" && controller.field(F::fec).display_text=="Off (short raw message)",
+          "15-byte text must use raw bytes and retain the selected FEC for later longer messages");
+    receive_pattern_text(controller,"quick brown fox");
+    check(controller.inbox().items().empty() && controller.signals().lines().size()==1 &&
+          !controller.signals().lines().front().validated,
+          "short raw text must be copyable without acquiring coded validation or an attachment");
+    controller.edit(F::message,"quick brown fox!");prepare(controller);
+    check(controller.inspection()->stream_layout && controller.estimate()->wire_bits==1216 &&
+          controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs20" &&
+          controller.field(F::fec).display_text.empty(),
+          "16-byte text must restore selected fixed interval coding");
     controller.close();
 }
 
@@ -777,20 +789,16 @@ void binary_source_representation() {
         Controller controller({true,true});const BinaryEditor editor(expected);
         controller.edit(F::binary,editor.binary()); // Establish the byte editor's explicit escaped mode.
         controller.edit(F::message,editor.text());prepare(controller);
-        check(controller.message_bytes()==expected && controller.inspection()->stream_layout &&
-              !controller.inspection()->binary,"all exact source bytes use fixed coding with selected codec");
+        check(controller.message_bytes()==expected && !controller.inspection()->stream_layout &&
+              !controller.inspection()->binary && controller.estimate()->wire_bits==expected.size()*8,
+              "short exact source bytes must bypass fixed coding and preserve trailing zeros");
         if(expected.front()==0) {
-            controller.start();controller.activate(ui::Command::transmit);
-            const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
-            while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
-                controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
-            }
-            check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==expected &&
-                  controller.inbox().file_items().empty(),"Ordinary binary source became a file or lost its bytes");
+            receive_pattern_text(controller,editor.text());
+            check(controller.inbox().items().empty(),"Short raw binary source became an attachment or validated source");
             const auto& lines=controller.signals().lines();
-            const auto found=std::find_if(lines.begin(),lines.end(),[](const auto& line){return line.validated;});
-            check(found!=lines.end(),"Binary source had no decoded message row");
-            controller.select(F::signals,std::to_string(found->id));controller.activate(ui::Command::copy_signal);
+            check(lines.size()==1 && lines.front().complete && !lines.front().validated,
+                  "Short binary source had no completed raw message row");
+            controller.select(F::signals,std::to_string(lines.front().id));controller.activate(ui::Command::copy_signal);
             const auto copied=controller.take_services();
             check(copied.size()==1 && copied.front().value==editor.text(),"Binary source copy lost its escaped representation");
             controller.complete_service({copied.front().id,false,{},{}});
@@ -965,7 +973,7 @@ int main(int argc,char** argv) {
         binary_editor_controls();
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
-        receive_target_controls();fixed_sentence_reception();fixed_text_reception();byte_aligned_pattern_reception();
+        receive_target_controls();short_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

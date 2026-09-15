@@ -59,8 +59,9 @@ void completed_source_only() {
 void rejected_source_is_not_published() {
     for(const bool compressed:{false,true})for(const bool file:{false,true}) {
         transfer::Options sender;sender.timestamp=1800000000;sender.search_seconds=0;
-        sender.compression=compressed;sender.content_limit=3;
+        sender.compression=compressed;sender.content_limit=file?3:16;
         Message sent;sent.data={0,255,0};
+        if(!file)sent.data.resize(16,0);
         if(file){sent.kind=MessageKind::file;sent.filename="oversized.bin";}
         const auto wire=transfer::message_wire_bits(sent,sender);
         auto value=sender;value.content_limit=2;

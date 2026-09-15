@@ -29,9 +29,18 @@ void records() {
     check(rows[0].cells[2].text==signal_preamble_label(pending)&&rows[0].cells[3].text==signal_data_label(pending),"Reception measurements diverged from common formatters");
     pending.text_message=false;signals.update(pending);
     check(!signal_records(signals)[0].activatable,"A file signal can be copied as text");
-    SignalLine bits;bits.id=82;bits.frequency_hz=1500;bits.binary=true;bits.text="001";bits.received_bits=3;bits.expected_bits=3;
-    signals.update(bits);check(!signal_records(signals).back().activatable,"Incomplete raw bits became copyable");
+    SignalLine bits;bits.id=82;bits.frequency_hz=1500;bits.binary=true;bits.pattern_score=24.5;
+    const auto before_bits=signals.lines().size();
+    for(const auto* prefix:{"0","00","001"}) {
+        bits.text=prefix;bits.received_bits=bits.text.size();signals.update(bits);rows=signal_records(signals);
+        check(rows.size()==before_bits+1 && rows.back().id=="82" && !rows.back().activatable &&
+              rows.back().cells[1].text=="binary pending" && rows.back().cells[4].text==prefix &&
+              rows.back().cells[4].tone==ui::TextTone::muted &&
+              !signals.copy_bits(before_bits) && !signals.copy_raw_bits(before_bits),
+              "Each accepted raw bit must immediately update one pending row without waiting for a byte or enabling copy");
+    }
     bits.complete=true;signals.update(bits);rows=signal_records(signals);
+    check(rows.size()==before_bits+1 && rows.back().id=="82","Physical completion must reuse the pending raw row");
     check(rows.back().activatable&&rows.back().cells.back().text=="001","Completed raw bits lost leading zeros or activation");
     bits.expected_bits=0;bits.pattern_score=24.5;signals.update(bits);
     check(signals.copy_bits(signals.lines().size()-1)=="001","pattern-discovered length must not require a transmitted expected count to copy");

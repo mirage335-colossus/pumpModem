@@ -75,7 +75,7 @@ struct PatternCorrelator::Impl {
         const Hypothesis* owner=nullptr;
         std::uint64_t first_symbol=0,last_symbol=0;
         long double origin=0;
-        double frequency=0;
+        double frequency=0,reported_frequency=0,carrier_score=0;
         bool ended=false;
     };
     std::vector<Emission> emissions;
@@ -242,14 +242,14 @@ struct PatternCorrelator::Impl {
             (candidate.burst.stream_first_symbol<owner->burst.stream_first_symbol ||
              (candidate.burst.stream_first_symbol==owner->burst.stream_first_symbol && candidate.sum_score>owner->sum_score)))owner=&candidate;
         Emission emission{owner,owner->burst.stream_first_symbol,owner->burst.first_stream_symbol,
-            owner->origin,owner->burst.frequency_hz,false};
+            owner->origin,owner->burst.frequency_hz,owner->burst.frequency_hz,owner->committed_score,false};
         if(emissions.size()==search.track_limit) {
             const auto reusable=std::find_if(emissions.begin(),emissions.end(),[](const auto& item){return item.ended;});
             require(reusable!=emissions.end(),"pattern output stream quota exhausted");*reusable=emission;return *reusable;
         }
         emissions.push_back(emission);return emissions.back();
     }
-    double carrier_estimate(const Hypothesis& owner) const {
+    double carrier_estimate(const Hypothesis& owner,Emission& stream) const {
         // Keep immutable bit ownership, but report the strongest accumulated
         // carrier evidence over comparable observations. A startup distortion
         // must not lock the displayed frequency to its first winning grid bin.
@@ -263,10 +263,17 @@ struct PatternCorrelator::Impl {
                     config.sample_rate/static_cast<double>(code.symbol_samples()))continue;
             if(candidate.committed_score>best->committed_score)best=&candidate;
         }
-        return best->burst.frequency_hz;
+        // Nearby clocks may retire in a different order at the terminal
+        // absence observation. Their retirement must not revert an already
+        // stronger accumulated carrier estimate to the startup hypothesis.
+        if(best->committed_score>=stream.carrier_score) {
+            stream.carrier_score=best->committed_score;stream.reported_frequency=best->burst.frequency_hz;
+        }
+        return stream.reported_frequency;
     }
-    void publish(Hypothesis& h,bool complete=false,bool flush=true) {
+    void publish(Hypothesis& h,bool complete=false,bool flush=true,bool draining=false) {
         if(!h.admitted)return;
+        if(draining && !h.committed)return;
         const auto chunk=std::min(search.chunk_bits,bit_limit);
         if(!complete && !flush && h.committed<chunk)return;
         auto& stream=output_stream(h);
@@ -278,11 +285,12 @@ struct PatternCorrelator::Impl {
         do {
             const auto count=std::min(h.committed,chunk);
             if(!count && !complete)break;
+            if(draining && bursts.size()==search.track_limit)break;
             room_for(count);
             PatternBurst result;
             result.first_sample=h.burst.first_sample;result.first_stream_symbol=h.burst.first_stream_symbol;
             result.stream_first_sample=h.burst.stream_first_sample;result.stream_first_symbol=h.burst.stream_first_symbol;
-            result.frequency_hz=carrier_estimate(h);result.stream_phase_samples=h.burst.stream_phase_samples;
+            result.frequency_hz=carrier_estimate(h,stream);result.stream_phase_samples=h.burst.stream_phase_samples;
             result.bits.assign(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             result.complete=complete && count==h.committed;
             result.end_sample=count==h.committed?h.committed_end:
@@ -342,7 +350,7 @@ struct PatternCorrelator::Impl {
         event.first_sample=h.burst.first_sample;event.end_sample=resumed_sample;
         event.first_stream_symbol=h.burst.first_stream_symbol;
         event.stream_first_sample=h.burst.stream_first_sample;event.stream_first_symbol=h.burst.stream_first_symbol;
-        event.frequency_hz=carrier_estimate(h);event.score=h.committed_score;
+        event.frequency_hz=carrier_estimate(h,stream);event.score=h.committed_score;
         event.stream_phase_samples=h.burst.stream_phase_samples;event.missing_slots=h.gap_slots;
         bursts.push_back(std::move(event));h.gap_slots=0;
         h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;stream.last_symbol=h.index;
@@ -533,7 +541,13 @@ void PatternCorrelator::finish(std::stop_token stop) {
     s.finished=true;
 }
 std::vector<PatternBurst> PatternCorrelator::take_bursts(){
-    auto& s=*impl_;auto result=std::move(s.bursts);s.bursts={};s.bursts.reserve(s.search.track_limit);
+    auto& s=*impl_;
+    // A consumer drain is also a presentation boundary. Publish every
+    // accepted decision available now, even when a whole message is much
+    // shorter than chunk_bits or each symbol takes hours. Draining does not
+    // admit weak decisions, release the clock, or imply physical completion.
+    for(auto& h:s.hypotheses)s.publish(h,false,true,true);
+    auto result=std::move(s.bursts);s.bursts={};s.bursts.reserve(s.search.track_limit);
     s.accounted_bytes=s.working_bytes();return result;
 }
 PatternBurst PatternCorrelator::provisional()const {

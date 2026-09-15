@@ -31,10 +31,13 @@ void arbitrary_content_limits() {
     for(const auto limit:{1U,2U,15U,16U,17U,63U,100U})for(const bool compressed:{false,true}) {
         auto value=options();value.content_limit=limit;value.compression=compressed;
         const auto sent=message(limit);const auto wire=transfer::message_wire_bits(sent,value);
-        check(wire.size()%1216==0 && wire.size()<=transfer::pattern_bit_limit(limit),"arbitrary local byte limits must produce a complete bounded interval budget");
+        check(wire.size()<=transfer::pattern_bit_limit(limit),"arbitrary local byte limits must remain bounded");
         transfer::StreamReceiver receiver(value,value.timestamp);
         const auto received=receiver.push(chunk(wire,0,100,true));
-        check(received.content_validated && received.content.message.data==sent.data,"small local content limit must roundtrip its advertised capacity");
+        if(limit<16)check(wire.size()==limit*8 && received.raw_bits==wire && !received.content_validated && received.stream_complete,
+                         "short text within a small local content limit must retain exact raw bits");
+        else check(wire.size()%1216==0 && received.content_validated && received.content.message.data==sent.data,
+                   "interval text within a small local content limit must roundtrip its advertised capacity");
     }
 }
 void timed_acquisition_coordinates() {
@@ -82,7 +85,7 @@ void refined_phase_and_post_end_gate() {
           "later precise phase information must control decryption and interval authentication");
 }
 void final_parity_statistics() {
-    const auto value=options();const auto sent=message(5);auto wire=transfer::message_wire_bits(sent,value);
+    const auto value=options();const auto sent=message(16);auto wire=transfer::message_wire_bits(sent,value);
     wire.pop_back();transfer::StreamReceiver receiver(value,value.timestamp);
     const auto pending=receiver.push(chunk(wire,0));
     check(!pending.stream_complete && !pending.content_validated && !pending.content.fec_stats.parity.repaired_bytes,
@@ -96,7 +99,7 @@ void final_parity_statistics() {
 }
 void shared_quota_cleanup_and_identity() {
     auto value=options();value.fec=FecMode::off;
-    const auto wire=transfer::message_wire_bits(message(1),value);
+    const auto wire=transfer::message_wire_bits(message(16),value);
     auto invalid=std::make_shared<transfer::ReceiveStorageQuota>(transfer::ReceiveStorageQuota{1,2});
     bool rejected_quota=false;
     try {transfer::StreamReceiver rejected(value,value.timestamp,invalid);}catch(const Error&){rejected_quota=true;}
@@ -152,9 +155,34 @@ void diagnostics_accounting() {
     receiver.push(chunk({},4,100,true));
     check(receiver.working_bytes()<empty,"complete physical state must release diagnostic allocations");
 }
+void few_bits_remain_visible_until_physical_end() {
+    const Bytes bits{0,0,1};
+    for(bool keyed:{false,true}) {
+        auto value=options(keyed);value.modem.integration_seconds=4*3600+.5;
+        const auto estimate=transfer::estimate_binary(bits,value);
+        check(estimate.wire_bits==3 && estimate.content_seconds==3*modem::symbol_seconds(value.modem),
+              "three multi-hour raw symbols must not gain framing or a final padded byte");
+        auto wire=bits;transfer::xor_binary_bits(wire,value);
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        std::size_t maximum=0;
+        for(std::size_t i=0;i<wire.size();++i) {
+            const auto pending=receiver.push(chunk(std::span(wire).subspan(i,1),i));
+            check(pending.raw_bits==Bytes(bits.begin(),bits.begin()+static_cast<std::ptrdiff_t>(i+1)) &&
+                  pending.observed_bits==i+1 && !pending.stream_complete && !pending.content_validated &&
+                  pending.content.message.data.empty(),
+                  "each raw symbol must be visible pending without waiting for a byte or marker");
+            maximum=std::max(maximum,receiver.working_bytes());
+        }
+        const auto complete=receiver.push(chunk({},3,100,true));
+        check(complete.stream_complete && complete.raw_bits==bits && complete.observed_bits==3 &&
+              !complete.missing_symbols && !complete.content_validated && !complete.content.authenticated &&
+              !complete.content.consumed_bytes && complete.content.message.data.empty() && maximum<65536,
+              "physical completion retains all three raw bits with no invented padding, source decode or duration-sized storage");
+    }
+}
 }
 int main() {
     try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();final_parity_statistics();
-         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();std::cout<<"stream receive integration passed\n";}
+         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

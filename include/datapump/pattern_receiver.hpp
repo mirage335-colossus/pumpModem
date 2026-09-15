@@ -45,7 +45,8 @@ struct PatternSearch {
     double retain_score = 5;
     // Unknown interior slots retain their original symbol positions. Consumers
     // must preserve missing_pattern_bit through byte packing/erasure handling.
-    // Confirmed decisions drain without ending the stream. The actual chunk
+    // Maximum decisions per event, not a minimum before presentation.
+    // Confirmed decisions drain without ending the stream; actual chunk
     // capacity is also capped by the available decision-storage budget.
     std::size_t chunk_bits = 1024;
     std::size_t candidate_limit = 2048, track_limit = 16, bit_limit = 1024 * 1024;
@@ -86,6 +87,8 @@ public:
     void push(std::span<const float>,std::span<const std::complex<double>> projected,std::stop_token = {});
     // Flush available decisions as incomplete; capture EOF is not stream end.
     void finish(std::stop_token = {});
+    // Drain accepted decisions, including a final short chunk, as pending.
+    // Only a physical absence event marks the stream complete.
     std::vector<PatternBurst> take_bursts();
     PatternBurst provisional() const;
     std::vector<PatternEvidence> candidates() const;

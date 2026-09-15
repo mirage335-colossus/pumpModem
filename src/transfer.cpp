@@ -110,6 +110,14 @@ Bytes encoded_intervals(const Message& message,const Options& options,StreamLayo
     }
     return wire;
 }
+Bytes byte_bits(std::span<const std::uint8_t> bytes) {
+    Bytes bits;bits.reserve(bytes.size()*8);
+    for(auto byte:bytes)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
+    return bits;
+}
+}
+bool uses_raw_message(const Message& message) noexcept {
+    return message.kind==MessageKind::text && !message.data.empty() && message.data.size()<16;
 }
 std::size_t source_storage_limit(std::size_t content_limit) {
     if(!content_limit || content_limit>(Bytes{}.max_size()-4096)/2)throw Error("invalid content limit");
@@ -145,12 +153,19 @@ modem::Config seeded_config(const Options& input_options, std::uint64_t timestam
 Estimate estimate(const Message& message,const Options& options) {return estimate(message,options,nullptr);}
 Estimate estimate(const Message& message,const Options& input,StreamLayout* layout) {
     const auto options=effective_options(input);
-    auto coded=encoded_intervals(message,options,layout);
-    Bytes bits;bits.reserve(boundary_sync::encoded_size(coded.size()*8));
-    for(auto byte:coded)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
-    bits=boundary_sync::insert(bits,pattern_bit_limit(options.content_limit));
+    Bytes bits;std::size_t coded_bytes;
+    if(uses_raw_message(message)) {
+        validate_message(message,options);
+        bits=byte_bits(message.data);coded_bytes=message.data.size();
+        if(layout) {
+            *layout={};layout->source_bytes=layout->encoded_source_bytes=layout->wire_bytes=coded_bytes;
+        }
+    } else {
+        const auto coded=encoded_intervals(message,options,layout);coded_bytes=coded.size();
+        bits=boundary_sync::insert(byte_bits(coded),pattern_bit_limit(options.content_limit));
+    }
     auto context=options;context.content_limit=std::max(options.content_limit,bits.size());
-    auto result=estimate_binary(bits,context);result.content_bytes=message.data.size();result.coded_bytes=coded.size();
+    auto result=estimate_binary(bits,context);result.content_bytes=message.data.size();result.coded_bytes=coded_bytes;
     result.repeatable_allowed=message.kind==MessageKind::text &&
         (message.data.size()<=options.repeat_policy.minimum_payload_bytes || result.content_seconds<=options.repeat_policy.maximum_seconds);
     return result;
@@ -212,14 +227,13 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
 
 Bytes message_bits(const Message& message,const Options& input) {
     const auto options=effective_options(input);
-    const auto coded=encoded_intervals(message,options);
-    Bytes bits;bits.reserve(coded.size()*8);
-    for(auto byte:coded)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
-    return bits;
+    if(uses_raw_message(message)) {validate_message(message,options);return byte_bits(message.data);}
+    return byte_bits(encoded_intervals(message,options));
 }
 Bytes message_wire_bits(const Message& message,const Options& input) {
     const auto options=effective_options(input);
-    auto bits=boundary_sync::insert(message_bits(message,options),pattern_bit_limit(options.content_limit));
+    auto bits=message_bits(message,options);
+    if(!uses_raw_message(message))bits=boundary_sync::insert(bits,pattern_bit_limit(options.content_limit));
     auto context=options;context.content_limit=std::max(context.content_limit,bits.size());xor_binary_bits(bits,context);
     return bits;
 }

@@ -9,9 +9,10 @@ three-second simulation replay running.
 cards. Automatic profiles carry one meaningful bit in each of two distinguishable
 patterns. Their cards show content-bit encoding, optional private Data masking,
 pattern selection, hardware settling, audio or sampled simulation, and reception
-by pattern evidence. Every ordinary text, file or screenshot source uses fixed
-128-byte coded intervals, with one alignment marker before each interval.
-Explicit raw bits bypass the source and interval codecs. The separate settling
+by pattern evidence. Text of at least 16 source bytes, files and screenshots use
+fixed 128-byte coded intervals, with one alignment marker before each interval.
+Nonempty text below 16 bytes and explicit raw bits bypass the source and interval
+codecs. The separate settling
 waveform helps external hardware prepare and is never an acquisition condition.
 Active, disabled and unavailable stages have
 different labels. Configured symbols here are distinct from Console measurements.
@@ -88,12 +89,14 @@ For raw input, the layout reports the exact supplied bits, including leading
 zeros and partial bytes, with compression, integrity and FEC all off. An empty
 draft adds no transmission.
 
-All ordinary sources use the same interval size. RS20 reserves 22 parity bytes;
+All interval-coded sources use the same interval size. RS20 reserves 22 parity bytes;
 RS60 reserves 48. Encryption additionally reserves 32 bytes for HMAC-SHA256
 inside the protected data area. Public mode has no message digest. One marker
 precedes each interval, including the first; there is no terminal marker or
 transmitted length. The layout reports actual source, coded and marker bit
-counts. A one-byte source therefore still occupies one interval and one marker.
+counts. A one-byte text draft sends eight raw bits; a one-byte attachment still
+occupies an interval and marker. Raw text reports no source, integrity or parity
+overhead and effective FEC Off, while retaining the chosen longer-message preset.
 See [protocol](protocol.md) for exact geometry and correction limits.
 
 Compression uses raw LZMA2 with a fixed dictionary, even when encoding makes

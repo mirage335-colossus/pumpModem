@@ -4,6 +4,44 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Short raw messages and incremental symbols — 15 September 2026
+
+Commit `4dd23c5` removed the automatic under-16-byte text bypass along with the
+old packet/dictionary codecs. Explicit Binary/status transmission survived, but
+the drainable receiver buffered fewer than 1,024 accepted bits until stream end.
+That delayed pending presentation for precisely the few-bit, very slow use case.
+
+Nonempty text of 1–15 source bytes now sends its exact MSB-first byte bits,
+without markers, compression, padding, FEC or MAC. The old dictionary stays
+removed: text `e` is eight bits, while explicit Binary `001` is three bits.
+Text of at least 16 bytes and all attachments retain fixed coding intervals.
+The threshold affects transmission only and never ends a reception.
+
+Receiver drains now expose accepted symbols below the chunk capacity. Regression
+coverage includes:
+
+- 1/3/15/16-byte thresholds across FEC, compression and keyed/public settings,
+  including source quotas and matching raw waveform estimates.
+- Pending `0` → `00` → `001`, stable row identity, no byte padding or premature
+  completion, exact copied bytes and restored longer-message FEC selection.
+- Actual generated PCM for three four-hour symbols at a 64 Hz sample clock,
+  consumed in 4,096-sample blocks. Each accepted bit appears at its own endpoint
+  within a 1 MiB receiver workspace. A subsequent wholly absent four-hour symbol
+  completes reception; six seconds inside that symbol does not preempt it.
+- Incremental chunks collected by physical stream identity, including interleaved
+  hypotheses, timed gaps, carrier labeling, echo suppression and EOF flushes.
+
+These generated-sample checks exercise long symbol coordinates and bounded
+processing; they do not establish a measured acoustic or radio sensitivity.
+
+Validation passed: the Release build, all 54 headless tests across the suite and
+affected reruns, and the full shared GUI workflow with its existing 300-second
+timeout. The physical suites include 29 receiver cases and 23 correlator cases.
+Targeted ASan/UBSan runs passed for transfer/source reception, four-hour symbols,
+incremental gaps, clock-rate hypotheses, carrier reporting and physical end.
+Three tests requiring a native graphical display were not run; the native
+executable built and its headless self-check passed.
+
 ## Reception, echo suppression and attachments — September 2026
 
 The follow-up changes retain the fixed 128-byte interval format and the sole

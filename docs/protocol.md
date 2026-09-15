@@ -10,13 +10,17 @@ the previous compact packet and short-dictionary formats.
 
 ## Fixed wire geometry
 
+Nonempty text shorter than 16 source bytes uses the [exact raw-bit path](#exact-raw-bit-path).
+The following geometry applies to text of at least 16 bytes, empty sources sent
+through the byte API, and attachments of every size.
+
 ```text
 192-bit marker | 128 coded bytes | 192-bit marker | 128 coded bytes | ...
 ```
 
 One marker precedes each coding interval. No extra marker announces completion.
 Every interval therefore occupies 1,216 one-bit symbols, including its marker.
-All intervals use the same width, including the last and a one-byte source.
+All intervals use the same width, including the last and a one-byte attachment.
 A separate approximately two-second hardware-settling waveform may precede the
 stream, rounded to the nearest whole symbol duration with ties upward. It
 carries no data or acquisition condition; sufficiently long symbols have no
@@ -53,8 +57,9 @@ reconstructed byte, so parity-only and missing-zero repairs remain visible.
 
 ## Source bytes and compression
 
-The application selects one source convention locally. There is no automatic
-15/16/255/256-byte switch, dictionary fallback, or compression flag on air.
+For interval-coded sources, the application selects one source convention locally.
+Short raw text bypasses both conventions. There is no dictionary fallback or
+compression flag on air.
 
 ### Compressed source (default)
 
@@ -215,11 +220,27 @@ without claiming observed silence or invoking decompression.
 
 ## Exact raw-bit path
 
-Explicit binary/status input preserves leading zeros and non-byte bit counts.
-It has no byte intervals, source codec, markers, FEC or MAC; optional Data masking
-still uses the normal symbol schedule. It never falls back into an automatic
-short-text dictionary. Raw receptions use the same physical end rule and retain
-bounded bit diagnostics without claiming authentication.
+Nonempty text shorter than 16 source bytes automatically sends those bytes as
+MSB-first raw bits. This threshold counts bytes, including visible convenience
+text, not characters. Attachments always use intervals. Explicit binary/status
+input preserves leading zeros and non-byte bit counts independently of this
+text threshold: `001` is exactly three payload symbols, with no byte padding.
+The 16-byte threshold is a transmit choice only. It does not impose a received
+bit count or end a reception at 128 bits.
+
+Both raw paths have no byte intervals, source codec, marker, transmitted length,
+FEC or MAC. Optional Data masking still uses the normal symbol schedule and adds
+no bits. The selected FEC preset is retained for later interval-coded drafts but
+is ineffective for raw transmission. There is no automatic short-text dictionary.
+
+Every newly accepted symbol is available on the next receiver progress poll;
+there is no byte, marker or 1,024-bit prerequisite. Pending rows retain leading
+zeros and the exact partial-byte prefix. Raw receptions remain unvalidated and
+use the same physical end rule: consecutive fully scored failed symbols must
+cover six seconds. At symbol durations of six seconds or longer, one wholly
+missed symbol ends reception; six seconds inside an unfinished long symbol does
+not. Completion never waits for a byte boundary, marker, parity or source codec.
+The existing settling/filter/suppression waveforms carry no additional bits.
 
 ## API and memory boundary
 

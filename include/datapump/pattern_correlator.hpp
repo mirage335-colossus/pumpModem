@@ -13,6 +13,8 @@ public:
     PatternCorrelator& operator=(PatternCorrelator&&) noexcept;
     void push(std::span<const float>, std::stop_token = {});
     void finish(std::stop_token = {});
+    // Publish accepted decisions at each drain; chunk capacity never
+    // requires a longer message before a pending symbol becomes visible.
     std::vector<PatternBurst> take_bursts();
     PatternBurst provisional() const;
     std::vector<PatternEvidence> candidates() const;

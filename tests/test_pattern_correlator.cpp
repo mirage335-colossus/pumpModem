@@ -49,10 +49,22 @@ std::vector<modem::PatternBurst> capture(const std::vector<float>& samples,const
     const auto drain=[&] {
         for(auto& burst:receiver.take_bursts()) {
             if(burst.missing_slots){burst.bits.assign(burst.missing_slots,modem::missing_pattern_bit);burst.missing_slots=0;}
-            if(!result.empty() && result.back().stream_first_sample==burst.stream_first_sample &&
-               result.back().stream_first_symbol==burst.stream_first_symbol &&
-               result.back().first_stream_symbol+result.back().bits.size()==burst.first_stream_symbol) {
-                auto& prior=result.back();prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
+            // Drains can interleave independent frequency hypotheses. Join
+            // only contiguous chunks of the same physical candidate, even
+            // when another candidate was the last item delivered.
+            auto match=result.end();
+            auto frequency_distance=static_cast<double>(c.sample_rate)/modem::symbol_sample_count(c);
+            for(auto candidate=result.begin();candidate!=result.end();++candidate) {
+                const auto distance=std::abs(candidate->frequency_hz-burst.frequency_hz);
+                if(!candidate->complete && candidate->stream_first_sample==burst.stream_first_sample &&
+                   candidate->stream_first_symbol==burst.stream_first_symbol &&
+                   candidate->first_stream_symbol+candidate->bits.size()==burst.first_stream_symbol &&
+                   candidate->end_sample==burst.first_sample && distance<=frequency_distance) {
+                    match=candidate;frequency_distance=distance;
+                }
+            }
+            if(match!=result.end()) {
+                auto& prior=*match;prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
                 prior.complete=burst.complete;prior.end_sample=burst.end_sample;prior.score=burst.score;prior.stream_phase_samples=burst.stream_phase_samples;
                 prior.frequency_hz=burst.frequency_hz;
             } else result.push_back(std::move(burst));
@@ -80,7 +92,14 @@ void sampled_bits_and_rates(bool shaped) {
     auto rate_search=search;rate_search.clock_errors_ppm={0,5000};rate_search.frequency_offsets_hz={0,c.carrier_hz*.005};
     const Bytes longer{0,1,1,0,1,0};
     const auto altered=capture(waveform(longer,c,137,1.005),c,rate_search,173);
-    check(best(altered).bits==longer,"finite clock-rate and frequency hypotheses must jointly recover physical rate error");
+    if(best(altered).bits!=longer) {
+        std::string detail="finite clock-rate and frequency hypotheses must jointly recover physical rate error:";
+        for(const auto& burst:altered) {
+            detail+=" ["+std::to_string(burst.first_sample)+","+std::to_string(burst.end_sample)+")@"+std::to_string(burst.frequency_hz)+" ";
+            for(auto bit:burst.bits)detail+=std::to_string(bit);
+        }
+        throw Error(detail);
+    }
     auto wrong=c;wrong.spreading_seed[0]^=0x5a;
     check(capture(samples,wrong,search,128).empty(),"incorrect pattern key must not acquire a strong waveform");
 }
@@ -242,10 +261,12 @@ void majority_obscured_symbol_is_independent() {
     const auto first=receiver.provisional();
     check(first.bits==Bytes({1}) && first.first_stream_symbol==0 && first.end_sample==first_end,
           "a symbol with a mostly obscured prefix must be visible at its endpoint on its own evidence");
-    check(receiver.take_bursts().empty(),"provisional symbol must not be duplicated as a completed burst");
+    const auto pending=receiver.take_bursts();
+    check(pending.size()==1 && pending[0].bits==Bytes({1}) && !pending[0].complete && receiver.take_bursts().empty(),
+          "an admitted first symbol must drain once as pending without requiring a second symbol");
     receiver.push(std::span(samples).subspan(first_end));receiver.finish();
-    check(best(receiver.take_bursts()).bits==Bytes({1,0}),
-          "a mostly obscured first symbol must retain the correct next-epoch continuation");
+    check(best(receiver.take_bursts()).bits==Bytes({0}),
+          "a mostly obscured first symbol must retain the correct next-epoch continuation without repeating its first bit");
 }
 void completely_obscured_symbols_do_not_block_later_symbols() {
     auto c=config();c.integration_seconds=2;c.pulse_shaping=false;
@@ -343,14 +364,17 @@ void default_gap_expiry_releases_payload_workspace() {
     check(receiver.provisional().bits==prefix && receiver.working_bytes()>baseline,
           "a confirmed prefix must allocate its bounded active payload buffer");
     receiver.push(std::span(samples).subspan(gap_start,2*symbol));
-    check(receiver.synchronized() && receiver.provisional().bits==prefix && receiver.take_bursts().empty(),
+    check(receiver.synchronized() && receiver.provisional().bits==prefix,
           "four seconds of missing symbols must retain the established clock for recovery");
+    const auto pending=receiver.take_bursts();
+    check(pending.size()==1 && pending[0].bits==prefix && !pending[0].complete,
+          "confirmed data must drain during a pending gap without ending the message");
     receiver.push(std::span(samples).subspan(gap_start+2*symbol,symbol));
     check(!receiver.synchronized() && receiver.provisional().bits.empty(),
           "three failed two-second symbols must end the active message at six seconds");
     const auto ended=receiver.take_bursts();
-    check(ended.size()==1 && ended[0].bits==prefix && ended[0].complete && ended[0].end_sample==gap_start,
-          "gap termination must publish only the confirmed prefix without trailing placeholders");
+    check(ended.size()==1 && ended[0].bits.empty() && ended[0].complete && ended[0].end_sample==gap_start,
+          "gap termination must complete the drained prefix without repeating data or adding trailing placeholders");
     check(receiver.working_bytes()==baseline,
           "draining an expired message must reclaim its payload allocation from the correlator workspace");
     receiver.push(std::span(samples).subspan(gap_start+3*symbol,(suffix.size()+1)*symbol));
@@ -367,7 +391,7 @@ void drained_stream_keeps_acquisition_state() {
     constexpr std::size_t start=375;
     const auto symbol=modem::symbol_sample_count(c);
     auto samples=waveform({1},c,start);samples.resize(start+symbol+modem::pattern_absence_samples(c),0.F);
-    modem::PatternSearch search;search.start_offset_seconds=.0625;search.frequency_offsets_hz={0};search.chunk_bits=1;
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.frequency_offsets_hz={0};
     modem::PatternCorrelator receiver(c,search,1024*1024);
     receiver.push(std::span(samples).first(start+symbol));
     const auto chunk=receiver.take_bursts();
@@ -441,11 +465,14 @@ void one_missing_long_symbol_ends_but_eof_does_not() {
     modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(delay)/c.sample_rate;search.frequency_offsets_hz={0};
     modem::PatternCorrelator receiver(c,search,1024*1024);
     receiver.push(std::span(samples).first(delay+symbol+6*c.sample_rate));
-    check(receiver.synchronized() && receiver.take_bursts().empty() && !receiver.provisional().complete,
+    check(receiver.synchronized() && !receiver.provisional().complete,
           "six seconds within an unfinished long symbol must not substitute for its full symbol evidence");
+    const auto pending=receiver.take_bursts();
+    check(pending.size()==1 && pending[0].bits==Bytes({1}) && !pending[0].complete,
+          "a long symbol must be visible while the next full-symbol observation remains unfinished");
     receiver.push(std::span(samples).subspan(delay+symbol+6*c.sample_rate,2*c.sample_rate));
     const auto ended=receiver.take_bursts();
-    check(ended.size()==1 && ended[0].complete && ended[0].bits==Bytes({1}) && !receiver.synchronized(),
+    check(ended.size()==1 && ended[0].complete && ended[0].bits.empty() && !receiver.synchronized(),
           "one fully missed eight-second symbol must end the stream without waiting for a second symbol");
     for(const bool clock_window:{false,true}) {
         search.compact_clock_search=clock_window;
@@ -454,6 +481,51 @@ void one_missing_long_symbol_ends_but_eof_does_not() {
         const auto partial=cropped.take_bursts();
         check(partial.size()==1 && partial[0].bits==Bytes({1}) && !partial[0].complete,
               "capture EOF must only flush observed decisions and never establish stream end in either physical path");
+    }
+}
+void four_hour_symbols_drain_individually() {
+    // Use the lowest supported sample rate so this exercises actual
+    // multi-hour stream coordinates with only a bounded PCM block in RAM.
+    auto c=config();c.sample_rate=64;c.bandwidth_hz=1;c.carrier_hz=16;
+    c.integration_seconds=4*3600;c.pulse_shaping=false;
+    const Bytes bits{0,0,1};const auto symbol=modem::symbol_sample_count(c);
+    modem::PatternTransmitter source(bits,c,c.stream_epoch,0,false);
+    check(source.total_samples()==3*symbol,"three slow raw bits must contain exactly three pattern symbols");
+    modem::PatternSearch search;search.start_offset_seconds=0;search.frequency_offsets_hz={0};search.compact_clock_search=true;
+    constexpr std::size_t workspace=1024*1024;
+    modem::PatternReceiver receiver(c,workspace,search);
+    std::array<float,4096> block{};
+    std::uint64_t consumed=0;
+    for(std::size_t bit=0;bit<bits.size();++bit) {
+        const auto end=(bit+1)*symbol;
+        while(consumed<end) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),end-consumed));
+            check(source.read(std::span(block).first(count))==count,"slow transmitter ended before its next symbol");
+            receiver.push(std::span(block).first(count));consumed+=count;
+            const auto events=receiver.take_bursts();
+            if(consumed<end)check(events.empty(),"an unfinished four-hour symbol must not fabricate a pending decision");
+            else check(events.size()==1 && events[0].bits==Bytes({bits[bit]}) && !events[0].complete &&
+                       events[0].first_stream_symbol==bit && events[0].stream_first_symbol==0 && events[0].stream_first_sample==0,
+                       "each four-hour symbol must become pending at its endpoint with one stable stream identity");
+            check(receiver.take_bursts().empty(),"a second consumer drain must never duplicate a slow symbol");
+            check(receiver.working_bytes()<=workspace,"multi-hour per-bit presentation exceeded bounded DSP workspace");
+        }
+    }
+    block.fill(0);
+    // Six seconds inside the next four-hour symbol is insufficient evidence
+    // to reject that entire symbol under the mandatory whole-symbol rule.
+    receiver.push(std::span(block).first(6*c.sample_rate));
+    check(receiver.take_bursts().empty() && receiver.synchronized(),
+          "partial silence must not preempt full observation of the next long symbol");
+    std::uint64_t absent=6*c.sample_rate;
+    while(absent<symbol) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(block.size(),symbol-absent));
+        receiver.push(std::span(block).first(count));absent+=count;
+        const auto events=receiver.take_bursts();
+        if(absent<symbol)check(events.empty(),"an unfinished missing long symbol must not end the stream");
+        else check(events.size()==1 && events[0].complete && events[0].bits.empty() && events[0].missing_slots==0 &&
+                   events[0].first_stream_symbol==bits.size() && !receiver.synchronized(),
+                   "one fully absent long symbol must complete the exact three-bit message without padding or duplication");
     }
 }
 void timed_gaps_cannot_resolve_stream_phase() {
@@ -631,6 +703,7 @@ int main(int argc,char** argv) {
     run("drainable_chunks_and_compact_gaps",drainable_chunks_and_compact_gaps);
     run("output_pressure_never_claims_stream_end",output_pressure_never_claims_stream_end);
     run("one_missing_long_symbol_ends_but_eof_does_not",one_missing_long_symbol_ends_but_eof_does_not);
+    run("four_hour_symbols_drain_individually",four_hour_symbols_drain_individually);
     run("compact_clock_search_preserves_evidence_and_bounds",compact_clock_search_preserves_evidence_and_bounds);
     run("bounded_hours_and_noise",bounded_hours_and_noise);
     run("independent_epoch",[]{independent_epoch_recovers_fractional_symbol_phase(false);independent_epoch_recovers_fractional_symbol_phase(false,true);independent_epoch_recovers_fractional_symbol_phase(true);});

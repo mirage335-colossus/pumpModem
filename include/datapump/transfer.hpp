@@ -13,7 +13,7 @@
 namespace datapump::transfer {
 struct RepeatPolicy {
     // Local compose policy only. Tiny distress messages remain repeatable
-    // even when their fixed interval exceeds the normal time limit.
+    // even when their raw symbols exceed the normal time limit.
     double maximum_seconds = 2;
     std::size_t minimum_payload_bytes = 1;
 };
@@ -63,7 +63,10 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& opti
 // MSB-first bits with the symbol-start epoch/local Data position; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
-// Every ordinary source uses fixed 128-byte coded intervals.
+// Nonempty text shorter than 16 source bytes sends exactly its MSB-first bits,
+// without a source codec, alignment markers, padding, parity or authentication.
+// Files/screenshots and longer text use fixed 128-byte coded intervals.
+bool uses_raw_message(const Message&) noexcept;
 Bytes message_bits(const Message&, const Options&);
 // Insert one alignment marker before every coded interval, then Data-mask
 // the entire bitstream at its original symbol positions. Raw bits have no markers.

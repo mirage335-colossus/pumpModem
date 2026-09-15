@@ -28,7 +28,8 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
     return result;
 }
 std::string compression_reference() {
-    return "Messages use one agreed LZMA2 stream in fixed 128-byte coding intervals.\n"
+    return "Text messages of 16 bytes or more and attachments of every size use one agreed LZMA2 stream in fixed 128-byte coding intervals.\n"
+        "Shorter nonempty text messages send their bytes as raw bits without coding.\n"
         "Raw bits are sent exactly as entered.\n"
         "Reception ends only after six seconds without symbols.\n"
         "Decompression starts after that end event.";
@@ -464,9 +465,10 @@ struct Controller::Impl {
         const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
-        const bool raw=!attachment&&composer.raw_bits().has_value();
+        const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<16;
+        const bool raw=!attachment&&(composer.raw_bits().has_value()||short_message);
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw;
-        f(UiField::fec).display_text=raw?"Off (raw bits)":"";
+        f(UiField::fec).display_text=short_message?"Off (short raw message)":raw?"Off (raw bits)":"";
         short_bits_status();
     }
     void refresh_files() {

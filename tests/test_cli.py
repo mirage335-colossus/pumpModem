@@ -21,13 +21,23 @@ class StreamCLI(unittest.TestCase):
         self.assertNotIn(b'pack/unpack',helptext)
         for command in ('pack','unpack'):
             self.run_pump(command,'--text','x',ok=False)
-    def test_fixed_geometry_and_no_small_message_switch(self):
-        one=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)
-        longer=json.loads(self.run_pump('estimate','--text','fixed intervals',*AUDIO).stdout)
-        self.assertEqual(one['coded_bytes'],128)
-        self.assertEqual(one['wire_bits'],1216)
-        self.assertEqual(one['wire_bits'],longer['wire_bits'])
-        self.assertNotIn('packet_bytes',one)
+    def test_short_text_raw_threshold(self):
+        for size in (1,15,16):
+            for fec in ('off','20','60'):
+                value=json.loads(self.run_pump('estimate','--text','e'*size,'--fec',fec,*AUDIO).stdout)
+                self.assertEqual(value['coded_bytes'],size if size<16 else 128)
+                self.assertEqual(value['wire_bits'],8*size if size<16 else 1216)
+                self.assertNotIn('packet_bytes',value)
+    def test_short_text_received_as_exact_raw_bits(self):
+        source=b'e\x00'
+        value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',
+            '--clock-error-ppm','0','--phase-noise','0',*AUDIO,data=source).stdout)
+        self.assertTrue(value['stream_complete'])
+        self.assertFalse(value['content_validated'])
+        self.assertFalse(value['authenticated'])
+        self.assertEqual(value['raw_bits'],''.join(f'{byte:08b}' for byte in source))
+        self.assertEqual(value['raw_bit_count'],len(source)*8)
+        self.assertEqual(value['filename'],'')
     def test_sampled_stream_roundtrip(self):
         source=b'fixed intervals\x00\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',
@@ -64,7 +74,7 @@ class StreamCLI(unittest.TestCase):
     def test_wav_end_and_eof_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
             path=pathlib.Path(directory)/'source.wav'
-            self.run_pump('tx','--text','physical end','--output',path,*AUDIO)
+            self.run_pump('tx','--text','physical stream end','--output',path,*AUDIO)
             full=json.loads(self.run_pump('rx','--input',path,'--json',*AUDIO).stdout)
             self.assertTrue(full['content_validated'])
             self.assertTrue(full['stream_complete'])

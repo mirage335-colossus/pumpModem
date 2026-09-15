@@ -58,7 +58,45 @@ void fixed_pipeline_and_local_metadata() {
         check(received.content.message.local_id!=sent.local_id,"receiver identity is local, not transmitted");
     }
     auto tiny=sample(1);const auto value=options();
-    check(transfer::message_wire_bits(tiny,value).size()==1216,"tiny source must use the same fixed format");
+    check(transfer::message_wire_bits(tiny,value).size()==1216,"tiny attachment must retain its fixed format and filename");
+}
+void short_text_is_exact_raw_bits() {
+    for(const auto length:{1U,3U,15U,16U})for(bool encrypted:{false,true})
+        for(auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(bool compressed:{false,true}) {
+        auto value=options(encrypted);value.fec=fec;value.compression=compressed;value.content_limit=length;
+        auto sent=sample(length);sent.kind=MessageKind::text;
+        Bytes plain;for(auto byte:sent.data)for(unsigned bit=0;bit<8;++bit)plain.push_back((byte>>(7-bit))&1);
+        StreamLayout layout;layout.intervals=99;
+        const auto estimate=transfer::estimate(sent,value,&layout);
+        const auto wire=transfer::message_wire_bits(sent,value);
+        if(length==16) {
+            check(!transfer::uses_raw_message(sent) && wire.size()%1216==0 && layout.intervals>0,
+                  "16-byte text must use complete fixed intervals");
+            check(consume(wire,value).content_validated,"16-byte text retains source decoding");
+            continue;
+        }
+        check(transfer::uses_raw_message(sent) && transfer::message_bits(sent,value)==plain &&
+              wire.size()==length*8 && estimate.wire_bits==length*8 && estimate.coded_bytes==length,
+              "short text preserves every source bit without markers, byte padding or a codec");
+        check(!layout.intervals && !layout.compressed && !layout.authenticated && layout.fec==FecMode::off &&
+              layout.source_bytes==length && layout.encoded_source_bytes==length && layout.wire_bytes==length &&
+              !layout.parity_bytes_per_interval && !layout.integrity_bytes_per_interval,
+              "short text layout must expose zero FEC, MAC and source-codec overhead");
+        auto masking=value;masking.content_limit=plain.size();auto expected=plain;transfer::xor_binary_bits(expected,masking);
+        check(wire==expected,"selected key may mask short data but adds no tag or framing");
+        auto actual=transfer::message_transmitter(sent,value);
+        auto binary=transfer::binary_transmitter(plain,masking);
+        check(actual->total_samples()==estimate.waveform_samples && actual->total_samples()==binary->total_samples(),
+              "short text uses exactly the raw-bit waveform duration");
+        const auto received=consume(wire,value,true,1);
+        check(received.stream_complete && received.raw_bits==plain && received.observed_bits==plain.size() &&
+              !received.content_validated && !received.content.authenticated && received.content.message.data.empty(),
+              "raw text remains exact received bits without inventing validated content");
+        sent.data.push_back(0);
+        rejects([&]{transfer::message_wire_bits(sent,value);},"raw text still obeys the source byte quota");
+    }
+    Message empty;
+    check(!transfer::uses_raw_message(empty),"empty input must not create an empty raw transmission");
 }
 void keys_and_unknown_slots() {
     const auto sent=sample(230);
@@ -155,4 +193,4 @@ void protection_and_cancellation() {
     rejects([&]{transfer::simulate(sent,value,channel,{},stop.get_token());},"cancelled simulation stops");
 }
 }
-int main(){try{fixed_pipeline_and_local_metadata();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{fixed_pipeline_and_local_metadata();short_text_is_exact_raw_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -119,7 +119,7 @@ eligibility, options and records. Options have IDs, literal labels and enabled
 flags. `display_text` optionally shows an effective value without replacing a
 saved selection or disabling an otherwise enabled choice. For example, the
 selected Reed-Solomon preset remains saved
-while a tiny message reports `Off (under 16 B)`.
+while a tiny message reports `Off (short raw message)`.
 
 A record has a stable ID, enabled/activation eligibility and ordered native text
 cells. Cells carry literal text, relative logical rectangles, font size, semantic
@@ -127,10 +127,10 @@ tone and emphasis. Negative cell width means remaining row width minus that
 amount. The list declaration supplies row height, empty/help text, tail-following
 and activation policy. Signal records include frequency, status, preamble/data
 quality and message text. Pattern-only rows show model log evidence rather than
-dB or a calibrated confidence percentage. Complete discovered raw bits and
-short dictionary text can be copied without packet validation; provisional
-prefixes and file rows cannot. Decoded dictionary text uses one text record
-regardless of its compressed bit length. When no text is decoded, whole raw
+dB or a calibrated confidence percentage. Complete discovered raw bits can be
+copied without interval validation; provisional prefixes and file rows cannot.
+Each newly accepted raw symbol updates the pending row without waiting for a
+complete byte or coding interval. There is no short dictionary decoder. Whole raw
 bytes use the editor's lossless escaped-byte representation, and a partial
 final byte uses an exact-bit record. **Paste as message** loads text/byte records
 into the composer without interpreting their display escapes as literal

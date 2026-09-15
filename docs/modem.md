@@ -4,10 +4,11 @@ The default CLI and GUI transport carries one bit per independent pattern
 codeword. The pattern receiver discovers signal start, bit sequence and end
 from pattern evidence alone. It compares timing, carrier and keystream positions
 without a preamble, packet header, checksum or APSK residual lock condition.
-Every ordinary source uses fixed 128-byte intervals with locally selected FEC
-and source encoding, plus HMAC only when keyed. The same format covers one-byte
-text and attachments. Explicit raw drafts send exactly their 0/1 bits without
-source or interval coding. See [protocol.md](protocol.md).
+Nonempty text shorter than 16 bytes sends its exact MSB-first raw byte bits.
+Text of at least 16 bytes and attachments use fixed 128-byte intervals with
+locally selected FEC and source encoding, plus HMAC only when keyed. Explicit raw
+drafts send exactly their 0/1 bits, including partial bytes. Both raw paths bypass
+markers, source coding, padding, FEC and MAC. See [protocol.md](protocol.md).
 
 Pattern transport is the only supported waveform. Explicit
 `Config::pattern_symbols = false` or multi-bit APSK profiles are rejected.
@@ -599,6 +600,10 @@ presets may fail decoding.
 
 ## Raw binary transmission
 
+Nonempty text shorter than 16 source bytes automatically uses raw MSB-first
+byte bits. It bypasses compression, markers, interval padding, FEC and MAC.
+This threshold does not apply to attachments or change explicit bit drafts.
+
 The GUI's Binary editor is an alternative to its message/file source. It accepts
 `0` and `1`, preserves leading zeros and ignores whitespace. Its estimate and
 transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter`.
@@ -620,7 +625,9 @@ range; neither section adds transmitted data bits.
 Raw signals have no interval coding or authentication. Simulation and audio
 feed their waveform to the same blind pattern receiver, without transmitting
 or passing the bit count, start sample or carrier phase as decoder metadata.
-Pattern evidence discovers the bits and burst end. Completed raw bits can be
+Pattern evidence discovers the bits and burst end. Accepted bits are drained
+on each receive poll and displayed while pending, without waiting for a byte,
+1,024-bit chunk or stream end. Completed raw bits can be
 copied even when the expected bit count is unknown. The aligned legacy
 `modem::BinaryReceiver` API has been removed.
 

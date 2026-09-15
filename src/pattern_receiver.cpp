@@ -386,7 +386,7 @@ struct PatternReceiver::Impl {
         return {start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
     }
-    void publish(Track& track,bool complete,bool flush=false) {
+    void publish(Track& track,bool complete,bool flush=false,bool draining=false) {
         track.burst.score=track.confirmed_score;
         if(!track.established)return;
         const auto chunk=std::min(search.chunk_bits,search.bit_limit);
@@ -394,6 +394,7 @@ struct PatternReceiver::Impl {
         do {
             const auto count=std::min(track.confirmed,chunk);
             if(!count && !complete)break;
+            if(draining && bursts.size()==search.track_limit)break;
             if(bursts.size()>=search.track_limit)throw Error("pattern output queue requires draining");
             PatternBurst event;
             event.first_sample=track.burst.first_sample;event.first_stream_symbol=track.burst.first_stream_symbol;
@@ -852,6 +853,9 @@ void PatternReceiver::finish(std::stop_token stop) {
 }
 std::vector<PatternBurst> PatternReceiver::take_bursts(){
     auto& s=*impl_;if(s.fallback)return s.fallback->take_bursts();
+    // The chunk limit bounds storage, not when an accepted symbol becomes
+    // visible. Flush at consumer drains without claiming the stream ended.
+    for(auto& track:s.tracks)s.publish(track,false,true,true);
     std::vector<PatternBurst> result;result.reserve(s.bursts.size());
     for(auto& burst:s.bursts)result.push_back(std::move(burst));
     s.bursts.clear();return result;

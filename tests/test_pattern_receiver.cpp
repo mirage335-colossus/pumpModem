@@ -273,8 +273,9 @@ void carrier_evidence_recovers_after_distorted_start() {
             const std::array<std::size_t,1> chunks{chunk};
             const auto result=receive(samples,c,chunks,search);const auto& burst=exact(result,bits);
             check(burst.complete,"carrier correction must preserve the six-second physical end");
-            check(std::abs(burst.frequency_hz-(c.carrier_hz-(persistent_offset?step:0)))<1e-8,
-                  "carrier label must follow accumulated pattern evidence, including a real off-center signal");
+            if(std::abs(burst.frequency_hz-(c.carrier_hz-(persistent_offset?step:0)))>=1e-8)
+                throw Error("carrier label must follow accumulated pattern evidence, including a real off-center signal: "+
+                    std::to_string(persistent_offset)+"/"+std::to_string(clock_window)+"/"+std::to_string(chunk)+"@"+std::to_string(burst.frequency_hz));
         }
     }
 }
@@ -475,15 +476,18 @@ void default_gap_timeout_ends_active_message() {
     check(!receiver.clock_windowed(),"gap timeout fixture must exercise the FFT path");
     const auto at_limit=end+5*c.sample_rate;
     receiver.push(std::span(samples).first(at_limit));
-    check(receiver.synchronized() && receiver.take_bursts().empty() && receiver.provisional().bits==bits,
+    check(receiver.synchronized() && receiver.provisional().bits==bits,
           "five seconds of missing slots must retain the active clock without publishing a final event");
+    const auto pending=receiver.take_bursts();
+    check(pending.size()==1 && pending.front().bits==bits && !pending.front().complete,
+          "confirmed FFT decisions must be visible while the six-second absence window is pending");
     const auto expired_at=at_limit+2*symbol;
     receiver.push(std::span(samples).subspan(at_limit,expired_at-at_limit));
     check(!receiver.synchronized() && !receiver.acquiring(),
           "continued missing symbols beyond six seconds must discard the active FFT track");
     const auto completed=receiver.take_bursts();
-    check(completed.size()==1 && completed.front().complete && completed.front().bits==bits,
-          "gap timeout must publish the confirmed message once without its unobserved tail");
+    check(completed.size()==1 && completed.front().complete && completed.front().bits.empty(),
+          "gap timeout must complete the confirmed message without repeating its drained bits or adding an unobserved tail");
     const auto idle_bytes=receiver.working_bytes();
     receiver.push(std::span(samples).subspan(expired_at));
     check(receiver.take_bursts().empty() && receiver.working_bytes()<=idle_bytes && idle_bytes<=workspace,
