@@ -119,7 +119,8 @@ Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
-`max(1500, 0.75 × rate)` Hz. Carrier can then be selected or entered separately.
+`max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
+default carrier; manual frequency entry remains available.
 The **RX targets (dB-Hz)** comma-list also starts at `60`. Changing TX SNR to
 a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding

@@ -211,8 +211,6 @@ struct Controller::Impl {
         auto& carrier=f(UiField::carrier);
         carrier.text=frequency_text(recommended_gui_carrier(rate));
         carrier.options={{carrier.text,carrier.text}};
-        for(const auto* preset:{"1 kHz","1.5 kHz","1.8 kHz","2 kHz","2.5 kHz","2.7 kHz","3 kHz","6 kHz","9 kHz","13.5 kHz","18 kHz"})
-            if(carrier.text!=preset)carrier.options.push_back({preset,preset});
     }
     void configure(bool match_receive_target=false,bool match_carrier=false) {
         receive_targets_due.reset();

@@ -35,7 +35,8 @@ received-message/file cache.
 The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
 available as a preset. The adjacent editable **Carrier** dropdown defaults to
 `1.5 kHz`. Changing Rate resets Carrier to `1.5 kHz` for `3.6 kHz`, otherwise
-to the existing `max(1500, 0.75 × rate)` Hz recommendation. A carrier override
+to the existing `max(1500, 0.75 × rate)` Hz recommendation. The dropdown offers
+only the current rate's default carrier. A manually entered carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
