@@ -9,9 +9,9 @@ three-second simulation replay running.
 cards. Automatic profiles carry one meaningful bit in each of two distinguishable
 patterns. Their cards show content-bit encoding, optional private Data masking,
 pattern selection, hardware settling, audio or sampled simulation, and reception
-by pattern evidence. Text of at least 16 source bytes, files and screenshots use
+by pattern evidence. Text longer than 16 source bytes, files and screenshots use
 fixed 128-byte coded intervals, with one alignment marker before each interval.
-Nonempty text below 16 bytes uses the fixed short dictionary, bypassing interval
+Nonempty text of up to 16 bytes uses the fixed short dictionary, bypassing interval
 codecs. Explicit raw bits bypass both. The separate settling
 waveform helps external hardware prepare and is never an acquisition condition.
 Active, disabled and unavailable stages have

@@ -62,7 +62,7 @@ void fixed_pipeline_and_local_metadata() {
     check(transfer::message_wire_bits(tiny,value).size()==1216,"tiny attachment must retain its fixed format and filename");
 }
 void short_text_uses_exact_dictionary_bits() {
-    for(const auto length:{1U,3U,15U,16U})for(bool encrypted:{false,true})
+    for(const auto length:{1U,3U,15U,16U,17U})for(bool encrypted:{false,true})
         for(auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(bool compressed:{false,true}) {
         auto value=options(encrypted);value.fec=fec;value.compression=compressed;value.content_limit=length;
         auto sent=sample(length);sent.kind=MessageKind::text;
@@ -70,10 +70,10 @@ void short_text_uses_exact_dictionary_bits() {
         StreamLayout layout;layout.intervals=99;
         const auto estimate=transfer::estimate(sent,value,&layout);
         const auto wire=transfer::message_wire_bits(sent,value);
-        if(length==16) {
+        if(length==17) {
             check(!transfer::uses_raw_message(sent) && wire.size()%1216==0 && layout.intervals>0,
-                  "16-byte text must use complete fixed intervals");
-            check(consume(wire,value).content_validated,"16-byte text retains source decoding");
+                  "text beyond 16 bytes must use complete fixed intervals");
+            check(consume(wire,value).content_validated,"17-byte text retains source decoding");
             continue;
         }
         check(transfer::uses_raw_message(sent) && transfer::message_bits(sent,value)==plain &&
@@ -103,6 +103,29 @@ void short_text_uses_exact_dictionary_bits() {
     check(transfer::message_wire_bits(letter,options())==Bytes({0,0,1}) &&
           transfer::estimate(letter,options()).wire_bits==3,"historical e dictionary entry must use exactly three symbols");
     rejects([&]{transfer::transmission_wire(letter,options());},"packed byte API must reject a partial dictionary byte without padding or writing out of bounds");
+    // Independent historical codewords, including two literal escapes.
+    const std::string greeting="quick brown";
+    const std::string coded="1111101110001" "110101" "1010" "110110" "1111101101011"
+                            "000" "111100" "110010" "100" "111001" "1011";
+    Message short_greeting;short_greeting.data.assign(greeting.begin(),greeting.end());
+    Bytes exact;for(const char bit:coded)exact.push_back(static_cast<std::uint8_t>(bit-'0'));
+    for(const auto duration:{0.,60.,3600.}) {
+        auto slow=options();slow.modem.integration_seconds=duration;
+        const auto estimate=transfer::estimate(short_greeting,slow);
+        check(exact.size()==70 && transfer::message_wire_bits(short_greeting,slow)==exact && estimate.wire_bits==70,
+              "quick brown must send exactly 70 dictionary bits at ordinary, minute and hour symbol durations");
+        check(transfer::message_transmitter(short_greeting,slow)->total_samples()==
+              transfer::binary_transmitter(exact,slow)->total_samples(),
+              "short text must have exactly the same waveform extent as its explicit compressed bits");
+    }
+    for(const Bytes bits:{Bytes{0,0},Bytes{0,1},Bytes{1,0},Bytes{1,1},Bytes{0,1,0}}) {
+        const auto received=consume(bits,options(),true,1);
+        check(received.raw_bits==bits && received.observed_bits==bits.size() && received.stream_complete,
+              "two- and three-bit raw messages must retain their exact endpoint");
+        check(bits.size()==3 ? received.short_text_decoded && received.content.message.data==Bytes{'t'} :
+              !received.short_text_decoded && received.content.message.data.empty(),
+              "010 must decode as t; two-bit messages must stay raw without invented dictionary characters");
+    }
 }
 void keys_and_unknown_slots() {
     const auto sent=sample(230);

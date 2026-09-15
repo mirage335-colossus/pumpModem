@@ -15,7 +15,7 @@ unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
 The transport sends one bit per pattern symbol. Pattern evidence alone admits
-timing, carrier and keystream candidates. Nonempty text below 16 source bytes and
+timing, carrier and keystream candidates. Nonempty text of up to 16 source bytes and
 explicit bit drafts use raw transmission. Longer byte streams use a fixed 128-byte coding
 interval after each alignment marker, with no packet header, received length,
 or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
@@ -54,10 +54,10 @@ The model score is evidence for comparing pattern hypotheses;
 it is not a calibrated false-alarm probability, measured SNR, authentication or
 a demonstration of extreme weak-signal performance.
 
-Nonempty text shorter than 16 source bytes uses the fixed short dictionary,
+Nonempty text of up to 16 source bytes uses the fixed short dictionary,
 with no marker, padding, FEC or MAC: `e` sends exactly `001`. Explicit Binary/status input
 also supports individual bits: `001` sends exactly three payload symbols.
-Text of at least 16 bytes and attachments use the fixed interval format. Each 192-bit
+Text longer than 16 bytes and attachments use the fixed interval format. Each 192-bit
 alignment marker precedes 128 coded bytes, for 1,216 symbols per interval. RS20
 uses 106 systematic bytes plus 22 parity bytes; RS60 uses 80 plus 48. Only
 encrypted intervals reserve 32 systematic bytes for HMAC-SHA256. Public intervals
@@ -256,11 +256,14 @@ limited to 128 meaningful bits, with optional whitespace between groups. While
 an attachment is selected, both message draft views are inactive; Use text
 restores the synchronized draft.
 
-The raw-bit controls preserve exact short patterns, including leading zeros and
-incomplete bytes. After physical completion, eligible short receptions also show
-their fixed-dictionary text interpretation. Select a reception to copy its retained raw bits or load a short pattern for
-sending again. **Paste as message** loads decoded source bytes into the message
-editor; Console Binary supports longer raw drafts up to 128 bits.
+The **Compression / raw bits** tab shows the full dictionary bitstream for text
+of 1–16 bytes: `quick brown` shows 70 bits. Its editor accepts up to 208 exact
+bits and previews the expected dictionary text; `010` previews `t`. Editing this
+field selects exact raw transmission. One- and two-bit inputs and incomplete
+codes remain usable raw messages without invented characters or padding.
+After physical completion, eligible short receptions show their dictionary
+text and retain the exact bits for copying or retransmission. **Paste as message**
+loads decoded bytes into Message. Console Binary keeps its 128-bit editing limit.
 
 **Callsign** and **Grid** are convenience fields for the editable greeting in
 Message. Clearing Message inserts `CQ CQ CQ`, followed by ` DE ` and Callsign

@@ -131,6 +131,18 @@ void exact_raw_drafts() {
 }
 }
 
+void bounded_dictionary_selection() {
+    BinaryEditor editor(Bytes(16,'A'));const auto preview=editor.text();
+    Bytes bits(208,1);bits.front()=0;
+    editor.select_raw_bits(bits,208);
+    check(editor.raw_bits()==bits && editor.text()==preview && editor.bytes()==Bytes(16,'A'),
+          "Extended raw selection changed its independent dictionary preview or padded bits");
+    rejects_unchanged(editor,[&]{editor.select_raw_bits(Bytes(209,0),208);},"Raw selection exceeded its declared bound");
+    rejects_unchanged(editor,[&]{editor.select_raw_bits(Bytes{0,2,1},208);},"Nonbinary raw selection was accepted");
+    rejects_unchanged(editor,[&]{editor.select_raw_bits({},208);},"Empty raw selection was accepted");
+    rejects_unchanged(editor,[&]{editor.edit_binary(std::string(129,'0'));},"Console prefix editing exceeded its own 128-bit bound");
+}
+
 int main() {
     try {
         synchronized_prefix();
@@ -138,7 +150,7 @@ int main() {
         escaped_roundtrip();
         invalid_drafts();
         payload_limit();
-        exact_raw_drafts();
+        exact_raw_drafts();bounded_dictionary_selection();
         std::cout << "Binary editor synchronization and lossless byte editing passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

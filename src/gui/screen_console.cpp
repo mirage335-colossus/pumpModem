@@ -19,13 +19,13 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::message)control.help="Edits also update the first 16 bytes in Binary. In escaped-byte mode, use \\xNN for byte values and \\\\ for a literal backslash. Enter transmits; Shift+Enter inserts a newline.";
     if(slot==Slot::binary)control.help="Edit the first 16 message bytes, most significant bit first. Whitespace is optional. Inputs up to 128 bits can transmit exact bits, including incomplete bytes. Raw reception shows exact bits or whole bytes; use Compression / raw bits to inspect the retained observations. Ctrl+C copies and Ctrl+V pastes. Enter transmits; Shift+Enter inserts a newline.";
     if(slot==Slot::short_bits) {
-        control.font_size=22;control.submit=Command::transmit_short_bits;control.submit_mode=Field::send_key;
-        control.help="Enter 1 to 4 exact 0/1 bits; leading zeros are preserved and whitespace is optional. Editing selects raw transmission. Enter transmits using the selected send-key rule.";
+        control.font_size=14;control.submit=Command::transmit_short_bits;control.submit_mode=Field::send_key;
+        control.help="Enter up to 208 exact 0/1 bits; leading zeros are preserved and whitespace is optional. Short Message text fills these dictionary bits automatically. Editing this field selects exact raw transmission. Enter transmits; Shift+Enter inserts a newline.";
     }
     if(slot==Slot::compression_codes)control.font_size=12;
     if(slot==Slot::short_bits_detail)control.help="Raw patterns preserve the exact entered bits. Stream completion requires six seconds without symbols.";
     if(slot==Slot::copy_raw_signal)control.help="Copy the selected completed reception's exact transport bits, including leading zeros and compression bits.";
-    if(slot==Slot::paste_raw_signal)control.help="Load the selected reception's exact 1 to 4 bits into the raw editor for retransmission.";
+    if(slot==Slot::paste_raw_signal)control.help="Load the selected reception's exact bits (up to 208) into the raw editor for retransmission.";
     if(slot==Slot::signals) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
@@ -35,7 +35,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::compression_signals) {
         control.list_row_height=54;control.follow_tail=true;control.activate_record=Command::copy_raw_signal;
         control.empty_text="Listening for signals...";
-        control.help="Select a completed reception to inspect its exact transport bits below. Double-click or use Copy raw bits to copy them. Use received bits loads a 1 to 4 bit reception for retransmission.";
+        control.help="Select a completed reception to inspect its exact transport bits below. Double-click or use Copy raw bits to copy them. Use received bits loads up to 208 bits for exact retransmission.";
     }
     if(slot==Slot::files) {control.activate_record=Command::save_file;control.empty_text="No received files";}
     if(slot==Slot::qr) {
@@ -119,11 +119,11 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,
-            "Text below 16 bytes uses the fixed dictionary with no marker, FEC or padding.\n"
-            "Longer text uses fixed 128-byte coding intervals. Explicit raw bits stay exactly as entered.\n"
-            "Send 1-4 bits below; Console Binary accepts up to 128 bits. Codes show their dictionary text."}, Slot::compression_explanation),
-        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,1,"Exact raw bits (1-4)"}, Slot::short_bits_label),
-        placed({Kind::text,Field::short_bits,Command::none,Bitmap::none,Page::compression,1,"",1,false,128}, Slot::short_bits),
+            "Text of 1-16 bytes uses only dictionary bits: quick brown = 70 bits. No markers, parity or padding.\n"
+            "Edit up to 208 exact bits below; complete codes show the expected text. Raw 010 stays exactly 010.\n"
+            "Longer text and attachments use fixed 128-byte coding intervals."}, Slot::compression_explanation),
+        placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,1,"Dictionary / exact raw bits (1-208)"}, Slot::short_bits_label),
+        placed({Kind::text,Field::short_bits,Command::none,Bitmap::none,Page::compression,1,"",1,true,416}, Slot::short_bits),
         placed({Kind::label,Field::short_bits_detail,Command::none,Bitmap::none,Page::compression,2,""}, Slot::short_bits_detail),
         placed({Kind::label,Field::compression_codes,Command::none,Bitmap::none,Page::compression,2,""}, Slot::compression_codes),
         placed({Kind::action,Field::count,Command::use_text,Bitmap::none,Page::compression,3,"Use text"}, Slot::short_use_text),

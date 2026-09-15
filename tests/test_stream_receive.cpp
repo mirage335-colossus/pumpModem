@@ -36,7 +36,7 @@ void arbitrary_content_limits() {
         check(wire.size()<=transfer::pattern_bit_limit(limit),"arbitrary local byte limits must remain bounded");
         transfer::StreamReceiver receiver(value,value.timestamp);
         const auto received=receiver.push(chunk(wire,0,100,true));
-        if(limit<16)check(wire==compression::encode_short_bits(sent.data) && received.raw_bits==wire &&
+        if(limit<=16)check(wire==compression::encode_short_bits(sent.data) && received.raw_bits==wire &&
                          !received.content_validated && received.stream_complete && received.short_text_decoded &&
                          received.content.message.data==sent.data,
                          "short dictionary text within a small local content limit must preserve its bytes and exact bits");
@@ -89,7 +89,7 @@ void refined_phase_and_post_end_gate() {
           "later precise phase information must control decryption and interval authentication");
 }
 void final_parity_statistics() {
-    const auto value=options();const auto sent=message(16);auto wire=transfer::message_wire_bits(sent,value);
+    const auto value=options();const auto sent=message(17);auto wire=transfer::message_wire_bits(sent,value);
     wire.pop_back();transfer::StreamReceiver receiver(value,value.timestamp);
     const auto pending=receiver.push(chunk(wire,0));
     check(!pending.stream_complete && !pending.content_validated && !pending.content.fec_stats.parity.repaired_bytes,
@@ -103,7 +103,7 @@ void final_parity_statistics() {
 }
 void shared_quota_cleanup_and_identity() {
     auto value=options();value.fec=FecMode::off;
-    const auto wire=transfer::message_wire_bits(message(16),value);
+    const auto wire=transfer::message_wire_bits(message(17),value);
     auto invalid=std::make_shared<transfer::ReceiveStorageQuota>(transfer::ReceiveStorageQuota{1,2});
     bool rejected_quota=false;
     try {transfer::StreamReceiver rejected(value,value.timestamp,invalid);}catch(const Error&){rejected_quota=true;}
@@ -203,9 +203,11 @@ void dictionary_interpretation_is_bounded_and_post_end() {
     auto missing=bits;missing.front()=modem::missing_pattern_bit;
     check(!decode(missing).short_text_decoded && decode(missing).missing_symbols==1,
           "unknown placeholders must never be interpreted as dictionary characters");
-    check(!decode(compression::encode_short_bits(Bytes(16,'e'))).short_text_decoded,
-          "raw reception must not expand beyond the 15-byte short dictionary limit");
-    check(!decode(Bytes(196,0)).short_text_decoded,
+    check(decode(compression::encode_short_bits(Bytes(16,'e'))).short_text_decoded,
+          "all 16 source bytes must remain eligible for short dictionary interpretation");
+    check(!decode(compression::encode_short_bits(Bytes(17,'e'))).short_text_decoded,
+          "raw reception must not expand beyond the 16-byte short dictionary limit");
+    check(!decode(Bytes(209,0)).short_text_decoded,
           "a long raw diagnostic prefix must not be reconsidered as a tiny dictionary message");
     const auto marker=boundary_sync::insert(Bytes(1024,0));
     check(!decode(Bytes(marker.begin(),marker.begin()+192)).short_text_decoded,

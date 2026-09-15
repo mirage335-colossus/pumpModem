@@ -10,8 +10,8 @@ bit codes; the interval transport is incompatible with the previous packets.
 
 ## Fixed wire geometry
 
-Nonempty text shorter than 16 source bytes uses the [exact raw-bit path](#exact-raw-bit-path).
-The following geometry applies to text of at least 16 bytes, empty sources sent
+Nonempty text of up to 16 source bytes uses the [exact raw-bit path](#exact-raw-bit-path).
+The following geometry applies to text longer than 16 bytes, empty sources sent
 through the byte API, and attachments of every size.
 
 ```text
@@ -220,7 +220,7 @@ without claiming observed silence or invoking decompression.
 
 ## Exact raw-bit path
 
-Nonempty text shorter than 16 source bytes automatically uses the fixed short
+Nonempty text of up to 16 source bytes automatically uses the fixed short
 dictionary. This threshold counts bytes, including visible convenience text,
 not characters or encoded bits. Attachments always use intervals. Explicit
 binary/status input bypasses the dictionary and preserves leading zeros and
@@ -241,7 +241,13 @@ identifier or original size. Both peers use these original codes:
 Text `e` therefore sends exactly `001`. No padding or terminator follows its
 last token. All short text uses this dictionary, including when the local
 interval compression option is off or literal escapes expand the input. There
-is no ambiguous raw-byte fallback. At most 15 decoded bytes occupy 195 bits.
+is no ambiguous raw-byte fallback. At most 16 decoded bytes occupy 208 bits.
+
+For example, `quick brown` is 11 bytes and sends exactly 70 dictionary bits.
+`quick brown fox `, including its trailing space, is 16 bytes and sends exactly
+98 bits. The first interval-coded text size is 17 bytes. The threshold is shared
+by the transmitter, receiver and GUI; it counts decoded source bytes, including
+spaces, rather than the number of visible escaped characters or packed bits.
 
 Both unmarked paths have no byte intervals, marker, transmitted length, FEC or
 MAC. Optional Data masking uses the normal symbol schedule and adds no bits.
@@ -258,7 +264,7 @@ The existing settling/filter/suppression waveforms carry no additional bits.
 
 Only after physical completion may the application interpret an unmarked short
 stream with this dictionary. It requires complete canonical tokens, no unknown
-symbol slots, at most 195 observed bits and at most 15 decoded bytes under the
+symbol slots, at most 208 observed bits and at most 16 decoded bytes under the
 local content quota. Recognized interval markers and failed interval sources do
 not fall back to this decoder. Invalid/truncated tokens retain raw bits without
 inventing missing bits or releasing a partial decoded prefix.

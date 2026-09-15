@@ -29,8 +29,8 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
     return result;
 }
 std::string compression_reference() {
-    std::string result="Nonempty text below 16 bytes uses the fixed short-text dictionary, with no framing, FEC or padding.\n";
-    for(const auto group:{" etao","in","shrd","lucm","fwyp","bg","jk","qv","xz"}) {
+    std::string result="Fixed dictionary (up to "+std::to_string(transfer::short_message_bytes)+" source bytes)\n";
+    for(const auto group:{" etao","in","shrdluc","mfwypbg"}) {
         const auto first=static_cast<std::uint8_t>(group[0]);
         result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
         for(const char* byte=group;*byte;++byte) {
@@ -40,9 +40,9 @@ std::string compression_reference() {
         }
         result+='\n';
     }
-    result+="Other bytes use a 13-bit literal escape. Explicit raw bits are sent exactly as entered.\n"
-        "Text of 16 bytes or more and attachments of every size use fixed 128-byte coding intervals.\n"
-        "Both source decoders wait for the physical six-second symbol-search ending rule.";
+    result+="Other bytes: 11111 followed by 8 literal bits (13 total).\n"
+        "Raw bits add no markers, padding, checksum or FEC.\n"
+        "Reception completes only after the six-second search rule.";
     return result;
 }
 
@@ -267,10 +267,9 @@ struct Controller::Impl {
     void sync_short_bits() {
         auto& text=f(UiField::short_bits).text;text.clear();
         if(composer.raw_bits()) {
-            if(composer.raw_bits()->size()<=4)text=bit_text(*composer.raw_bits());
-        } else if(composer.bytes().size()==1) {
-            try { text=bit_text(compression::encode_short_bits(composer.bytes(),4)); }
-            catch(const Error&) {} // This byte has a longer dictionary code.
+            if(composer.raw_bits()->size()<=transfer::short_message_bits)text=bit_text(*composer.raw_bits());
+        } else if(!composer.bytes().empty()&&composer.bytes().size()<=transfer::short_message_bytes) {
+            text=bit_text(compression::encode_short_bits(composer.bytes(),transfer::short_message_bits));
         }
     }
 
@@ -278,11 +277,11 @@ struct Controller::Impl {
         const auto input=f(UiField::short_bits).text;
         try {
             const auto bits=parse_binary_bits(input);
-            if(bits.size()>4)throw Error("Enter 1-4 bits; use Console for longer input.");
+            if(bits.size()>transfer::short_message_bits)throw Error("Enter 1-"+std::to_string(transfer::short_message_bits)+" exact bits.");
             Bytes decoded;
-            try { decoded=compression::decode_short_bits(bits,15); }
+            try { decoded=compression::decode_short_bits(bits,transfer::short_message_bytes); }
             catch(const Error&) {} // An incomplete dictionary code remains a valid raw draft.
-            BinaryEditor next(std::move(decoded));next.edit_binary(input);
+            BinaryEditor next(std::move(decoded));next.select_raw_bits(bits,transfer::short_message_bits);
             composer=std::move(next);
             repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
             seeded_message.clear();sync_composer();f(UiField::short_bits).text=input;
@@ -295,16 +294,16 @@ struct Controller::Impl {
         auto& detail=f(UiField::short_bits_detail).text;
         if(attachment||file_loading)detail="Attachment selected. Choose Use text\nto enter a short raw pattern.";
         else if(!draft_error.empty())detail=draft_error;
-        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to 4 bits to replace the current draft.\nLeading zeros are preserved.";
+        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to "+std::to_string(transfer::short_message_bits)+" exact bits, or type a short Message.\nLeading zeros and incomplete codes are preserved.";
         else {
             const auto bits=parse_binary_bits(f(UiField::short_bits).text);
-            detail="Current draft: "+std::to_string(bits.size())+" payload bits, "+bit_text(bits)+".\n";
+            detail=std::to_string(bits.size())+" payload bits. Sent exactly as entered.\n";
             try {
-                const auto decoded=compression::decode_short_bits(bits,15);
-                detail+="Dictionary preview: "+(decoded==Bytes{' '}?std::string("space"):"'"+BinaryEditor(decoded).text()+"'");
-                detail+=". Message byte: "+BinaryEditor(decoded).binary()+".";
-            } catch(const Error&) { detail+="No complete dictionary code."; }
-            detail+=" Sent exactly as entered.";
+                const auto decoded=compression::decode_short_bits(bits,transfer::short_message_bits/3);
+                if(decoded.size()>transfer::short_message_bytes)
+                    detail+="Complete codes exceed the "+std::to_string(transfer::short_message_bytes)+"-byte short-text limit; received as raw bits.";
+                else detail+="Expected text: "+(decoded==Bytes{' '}?std::string("space"):"'"+BinaryEditor(decoded).text()+"'");
+            } catch(const Error&) { detail+="Incomplete dictionary code; received as raw bits."; }
         }
         auto& received=f(UiField::received_raw_bits).text;
         const auto index=selected_signal();
@@ -459,7 +458,7 @@ struct Controller::Impl {
         case Command::copy_raw_signal: { const auto index=selected_signal();return index&&signals.copy_raw_bits(*index).has_value(); }
         case Command::paste_raw_signal: {
             const auto index=selected_signal();const auto bits=index?signals.copy_raw_bits(*index):std::nullopt;
-            return !attachment&&!file_loading&&bits&&bits->size()<=4;
+            return !attachment&&!file_loading&&bits&&bits->size()<=transfer::short_message_bits;
         }
         case Command::paste_signal: {
             if(closing||attachment||file_loading)return false;
@@ -488,7 +487,7 @@ struct Controller::Impl {
         const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
-        const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<16;
+        const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<=transfer::short_message_bytes;
         const bool raw=!attachment&&(composer.raw_bits().has_value()||short_message);
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw;
         f(UiField::fec).display_text=short_message?"Off (short dictionary)":raw?"Off (raw bits)":"";

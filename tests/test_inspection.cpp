@@ -127,10 +127,10 @@ void raw_and_short_sources() {
           std::abs(raw.estimate.total_seconds-rectangular.estimate.total_seconds-pulse_seconds)<1e-9,
           "disabling shaping must remove only its filter-tail airtime");
     request.options.modem.pulse_shaping=true;request.binary.reset();request.options.compression=false;request.options.fec=FecMode::off;
-    for(const auto size:{1,4,15,16})for(const auto kind:{MessageKind::text,MessageKind::file}) {
+    for(const auto size:{1,4,15,16,17})for(const auto kind:{MessageKind::text,MessageKind::file}) {
         request.message.kind=kind;request.message.filename="sample.bin";request.message.data=Bytes(static_cast<std::size_t>(size),'e');
         const auto source=gui::inspect(request);
-        if(kind==MessageKind::text && size<16) {
+        if(kind==MessageKind::text && static_cast<std::size_t>(size)<=transfer::short_message_bytes) {
             check(!source.binary && !source.stream_layout && source.estimate.coded_bytes==static_cast<std::size_t>((size*3+7)/8) &&
                   source.estimate.wire_bits==static_cast<std::size_t>(size)*3 &&
                   field(source,"Meaningful bits")==std::to_string(size*3) && field(source,"FEC")=="Off" &&
@@ -140,7 +140,7 @@ void raw_and_short_sources() {
         } else check(source.stream_layout && source.stream_layout->intervals==1 && source.estimate.coded_bytes==128 &&
               source.estimate.wire_bits==1216 && field(source,"Meaningful bits")=="1024" &&
               section(source,"Byte-boundary recovery").symbols==192,
-              "attachments and text of at least 16 bytes must retain fixed interval coding");
+              "attachments and text longer than 16 bytes must retain fixed interval coding");
     }
     request.message.kind=MessageKind::text;request.message.data=Bytes{'e'};
     for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(const bool keyed:{false,true}) {

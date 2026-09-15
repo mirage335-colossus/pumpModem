@@ -4,7 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
-## Fixed short dictionary restored — 15 September 2026
+## Short-message GUI and inclusive 16-byte limit — 15 September 2026
+
+The short dictionary now includes 16 source bytes. Shared transfer constants
+set the transmit/receive/GUI limit to 16 bytes and at most 208 exact bits; text
+starts using fixed coding intervals at 17 bytes. `quick brown` sends 70 bits;
+`quick brown fox `, including its trailing space, sends 98. Explicit `010` sends
+three bits and is interpreted as `t` after physical completion, with its exact
+bits retained. Two-bit inputs remain raw without inferred characters or padding.
+
+The Compression page now mirrors full short-text dictionary bits and accepts
+up to 208 exact bits with an expected-text preview, replacing its four-bit entry
+limit. Console byte-prefix editing retains its separate 128-bit limit.
+
+The code-path audit found no separate current GUI encoder: FLTK and Rev share
+the same controller, inspection model and transfer library. A stale
+`build-native/datapump-gui` predated dictionary restoration despite showing the
+same version number. The user reported normally launching `build/datapump-gui`,
+could no longer reproduce the oversized layout, and suspected an older running
+instance. Neither a stale process nor the stale alternative executable was
+confirmed as the original cause. All three current GUI build targets were
+rebuilt; a running instance must be closed and relaunched to load the new code.
+
+Regression coverage now types `quick brown` character by character through the
+shared application's production defaults (3.6 kHz rate, 1500 Hz carrier,
+80 dB-Hz transmit/receive targets). It checks the actual Transmission document,
+including replacing an older long draft while its estimate is running, clearing
+pending details, page changes, raw `010` edits and returning to the same visible
+text. Explicit Repeatable text remains visible and counts toward source size;
+turning it off restores the exact short draft. End-to-end GUI simulations cover
+70-bit text, two-bit raw reception, `010` interpreted as `t`, and copied/reused
+dictionary bits. The full 208-bit input limit and rejected over-limit/invalid
+edits are checked independently from Console's 128-bit limit.
+
+Validation passed: Release builds in `build` (FLTK), `build-native` (FLTK) and
+`build-rev` (Rev), plus the main FLTK and Rev headless self-checks; transfer and
+stream-receive suites; all 12 CLI integration cases; six focused GUI suites
+(layout, inspection, binary editor, application, adapter boundary, controller);
+and the full shared GUI smoke workflow in about 96 seconds under its existing
+300-second timeout. Targeted ASan/UBSan runs passed for transfer, stream receive
+and short compression without diagnostics. `git diff --check` is clean.
+GUI geometry and shared application paths were checked headlessly; no physical
+audio link or native-window rendering was measured in this environment.
+
+## Earlier fixed short dictionary restoration — 15 September 2026
+
+The newer inclusive 16-byte limit and expanded Compression editor above supersede
+this entry's original 15-byte limit.
 
 Text of 1–15 source bytes again uses the original fixed dictionary. The exact-bit
 encoder and decoder are restored without the former packed/length APIs or packet

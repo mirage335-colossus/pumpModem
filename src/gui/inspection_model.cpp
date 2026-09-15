@@ -71,7 +71,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Stream end","Six seconds of iterative search without adequate pattern evidence"},
         {"Acquisition evidence","Received pattern evidence versus noise; I/Q plots are diagnostic only"}};
     const std::string source_encoding=result.binary?"Raw bits are used exactly as supplied, preserving leading zeros.":short_message?
-        "Messages shorter than 16 bytes use the fixed short-text dictionary. Each bit is sent directly, with no marker, validity cells, digest, parity or padding.":options.compression?
+        "Messages of up to 16 bytes use the fixed short-text dictionary. Each bit is sent directly, with no marker, validity cells, digest, parity or padding.":options.compression?
         "Selected raw LZMA2 compression produces source bytes for fixed data areas. Zero padding fills the final area. Decompression runs only after the physical six-second stream end.":
         "Fixed 9-bit cells contain a validity bit and eight source bits. Unused cells are zero. This preserves arbitrary bytes, including trailing zeros, without a transmitted length or an end token.";
     const std::string encoding=raw?source_encoding:

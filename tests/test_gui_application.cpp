@@ -1,6 +1,7 @@
 #include "application.hpp"
 #include "control_interactions.hpp"
 #include "record_presentations.hpp"
+#include "datapump/transfer.hpp"
 #include <array>
 #include <iostream>
 #include <set>
@@ -429,6 +430,66 @@ void declarations() {
     const auto a=ui::control_layout(extension[0],{},1180,866,extension),b=ui::control_layout(extension[1],{},1180,866,extension);
     check(a.frame.x+a.frame.w<b.frame.x&&a.frame.y==b.frame.y,"Generic extension declarations overlap or ignore order");
 }
+std::string document_text(const ui::DocumentNode& node) {
+    std::string result=node.text+"\n";
+    for(const auto& child:node.children)result+=document_text(child);
+    return result;
+}
+void typed_short_text_inspection() {
+    using F=ui::Field;using P=ui::Page;
+    Application app({}); // Production defaults; no audio session is needed to inspect a draft.
+    const auto& message=control(F::message);
+    check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
+          app.field(F::snr).text=="80" && app.field(F::receive_snr).text=="80" &&
+          app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs20" &&
+          !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");
+    const auto await_layout=[&] {
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+        do {app.tick();if(app.field(F::transmission_detail).text.find("Transmitted bits:")!=std::string::npos)return;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        } while(std::chrono::steady_clock::now()<deadline);
+        throw Error("Typed message did not produce its current transmission layout: "+app.field(F::inspection).text);
+    };
+    app.edit(message,"A longer previous message");await_layout();
+    const auto old_document=app.document(P::transmission,900);
+    check(document_text(*old_document).find("Fixed 128-byte coded interval")!=std::string::npos,
+          "Long source fixture did not exercise the old interval document cache");
+    const std::string source="quick brown";
+    app.edit(message,std::string(4096,'Q'));
+    std::this_thread::sleep_for(std::chrono::milliseconds(130));app.tick(); // Start an older long draft's estimate.
+    for(std::size_t count=1;count<=source.size();++count) {
+        app.edit(message,source.substr(0,count));
+        check(app.field(F::message).text==source.substr(0,count),"Native-style typing inserted hidden source text");
+    }
+    app.select_page(P::transmission);
+    check(app.field(F::transmission_detail).text.empty() &&
+          document_text(*app.document(P::transmission,900)).find("Fixed 128-byte coded interval")==std::string::npos,
+          "A changed short draft must immediately replace the old interval layout with pending state");
+    await_layout();
+    const auto check_short=[&](std::size_t bits) {
+        const auto& layout=app.field(F::transmission_detail).text;
+        const auto document=app.document(P::transmission,900);const auto rendered=document_text(*document);
+        check(document!=old_document && layout.find("Meaningful bits: "+std::to_string(bits)+"\n")!=std::string::npos &&
+              layout.find("Transmitted bits: "+std::to_string(bits)+"\n")!=std::string::npos &&
+              layout.find("Coded stream:")==std::string::npos && layout.find("Byte-boundary recovery: 0 bits")!=std::string::npos &&
+              rendered.find("Fixed 128-byte coded interval")==std::string::npos,
+              "Transmission layout retained interval coding or an earlier draft after short text input");
+    };
+    check_short(70);
+    app.select_page(P::console);app.edit(control(F::binary),"010");await_layout();check_short(3);
+    // A partial raw edit retains the text preview. Re-entering that same text
+    // must still switch dispatch back to dictionary text rather than be ignored.
+    app.edit(message,source);await_layout();check_short(70);
+    app.toggle(control(F::repeatable),true);await_layout();
+    check(app.field(F::message).text.starts_with("REPEATABLE-") &&
+          app.field(F::transmission_detail).text.find("Coded stream:")!=std::string::npos,
+          "Explicit Repeatable prefix must remain visible and count toward actual source size");
+    app.toggle(control(F::repeatable),false);await_layout();check_short(70);
+    check(app.field(F::message).text==source,"Turning Repeatable off did not recover the exact short draft");
+    app.edit(control(F::callsign),"N0CALL");app.edit(message,"");app.edit(message,source);await_layout();check_short(70);
+    app.close();
+}
+
 void compression_declarations() {
     const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[](const auto& p){return p.id==ui::Page::compression;});
     check(page!=ui::pages().end()&&!page->document&&std::string_view(page->title)=="Compression / raw bits",
@@ -441,7 +502,7 @@ void compression_declarations() {
         controls.push_back(&c);fields.insert(c.field);commands.insert(c.command);
         check(!c.persistent&&c.slot!=ui::Slot::none,"Compression binding lost shared page geometry");
         if(c.field==ui::Field::short_bits)
-            check(c.kind==ui::Kind::text&&!c.multiline&&c.submit==ui::Command::transmit_short_bits&&
+            check(c.kind==ui::Kind::text&&c.multiline&&c.byte_limit==2*transfer::short_message_bits&&c.submit==ui::Command::transmit_short_bits&&
                   c.submit_mode==ui::Field::send_key,"Short-bit editor lost its guarded send-key binding");
         if(c.field==ui::Field::signals)
             check(c.kind==ui::Kind::list&&c.follow_tail&&!c.activate_on_select&&c.activate_record==ui::Command::copy_raw_signal,
@@ -452,7 +513,7 @@ void compression_declarations() {
                 label.find("fixed 128-byte coding intervals")!=label.npos;
         }
     }
-    check(explains_code,"Raw-bit page retained an implicit dictionary or omitted fixed interval behavior");
+    check(explains_code,"Raw-bit page must explain short dictionary and longer fixed interval behavior");
     for(const auto field:{ui::Field::short_bits,ui::Field::short_bits_detail,ui::Field::compression_codes,
                          ui::Field::received_raw_bits,ui::Field::signals,ui::Field::send_key,ui::Field::airtime})
         check(fields.contains(field),"Compression page lost a shared field binding");
@@ -479,6 +540,6 @@ void compression_declarations() {
 }
 }
 int main() {
-    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

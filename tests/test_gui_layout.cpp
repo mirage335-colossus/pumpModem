@@ -94,7 +94,8 @@ void supported_sizes() {
                 Slot::paste_raw_signal,Slot::received_raw_bits})
             check(!persistent_slot(slot)&&contains(page,layout[slot]),"Compression page control escaped its viewport");
         const auto short_bits=layout[Slot::short_bits],codes=layout[Slot::compression_codes];
-        check(short_bits.x+short_bits.w<codes.x&&codes.w>=489&&codes.h>=160&&
+        check(short_bits.w>=489&&short_bits.h>=72&&short_bits.y+short_bits.h<layout[Slot::short_bits_detail].y&&
+              short_bits.x+short_bits.w<codes.x&&codes.w>=489&&codes.h>=160&&
               layout[Slot::short_bits_detail].x+layout[Slot::short_bits_detail].w<codes.x,
               "Exact-bit editor overlaps the lowercase compression reference");
         const auto raw_signals=layout[Slot::compression_signals],raw_copy=layout[Slot::copy_raw_signal];

@@ -118,7 +118,7 @@ Bytes byte_bits(std::span<const std::uint8_t> bytes) {
 }
 }
 bool uses_raw_message(const Message& message) noexcept {
-    return message.kind==MessageKind::text && !message.data.empty() && message.data.size()<16;
+    return message.kind==MessageKind::text && !message.data.empty() && message.data.size()<=short_message_bytes;
 }
 std::size_t source_storage_limit(std::size_t content_limit) {
     if(!content_limit || content_limit>(Bytes{}.max_size()-4096)/2)throw Error("invalid content limit");
@@ -157,7 +157,7 @@ Estimate estimate(const Message& message,const Options& input,StreamLayout* layo
     Bytes bits;std::size_t coded_bytes;
     if(uses_raw_message(message)) {
         validate_message(message,options);
-        bits=compression::encode_short_bits(message.data,15*13);coded_bytes=(bits.size()+7)/8;
+        bits=compression::encode_short_bits(message.data,short_message_bits);coded_bytes=(bits.size()+7)/8;
         if(layout) {
             *layout={};layout->compressed=true;layout->source_bytes=message.data.size();
             layout->encoded_source_bytes=layout->wire_bytes=coded_bytes;
@@ -229,7 +229,7 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
 
 Bytes message_bits(const Message& message,const Options& input) {
     const auto options=effective_options(input);
-    if(uses_raw_message(message)) {validate_message(message,options);return compression::encode_short_bits(message.data,15*13);}
+    if(uses_raw_message(message)) {validate_message(message,options);return compression::encode_short_bits(message.data,short_message_bits);}
     return byte_bits(encoded_intervals(message,options));
 }
 Bytes message_wire_bits(const Message& message,const Options& input) {
@@ -438,10 +438,10 @@ struct StreamReceiver::Impl {
         if(burst.complete && !state.failed && !state.seen_marker &&
            !state.collector.leading_marker_recognized() && !state.result.missing_symbols &&
            !(options.key && burst.stream_first_symbol) && !state.result.raw_bits.empty() &&
-           state.result.observed_bits==state.result.raw_bits.size() && state.result.observed_bits<=15*13) {
+           state.result.observed_bits==state.result.raw_bits.size() && state.result.observed_bits<=short_message_bits) {
             try {
                 state.result.content.message.data=compression::decode_short_bits(
-                    state.result.raw_bits,std::min<std::size_t>(15,options.content_limit));
+                    state.result.raw_bits,std::min(short_message_bytes,options.content_limit));
                 state.result.short_text_decoded=true;
             } catch(const Error&) {} // Keep exact raw bits when no complete interpretation fits.
         }

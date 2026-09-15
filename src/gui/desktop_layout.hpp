@@ -129,8 +129,8 @@ struct DesktopLayout {
         const int compression_column = (compression_width - 20) / 2;
         out[Slot::compression_explanation] = {margin, 130, compression_width, 54};
         out[Slot::short_bits_label] = {margin, 190, compression_column, 22};
-        out[Slot::short_bits] = {margin, 216, 230, 40};
-        out[Slot::short_bits_detail] = {margin, 270, compression_column, 72};
+        out[Slot::short_bits] = {margin, 216, compression_column, 72};
+        out[Slot::short_bits_detail] = {margin, 296, compression_column, 58};
         out[Slot::compression_codes] = {margin + compression_column + 20, 184,
             compression_width - compression_column - 20, 166};
         constexpr int short_actions_y = 362;

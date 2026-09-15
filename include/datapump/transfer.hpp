@@ -63,7 +63,9 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& opti
 // MSB-first bits with the symbol-start epoch/local Data position; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
-// Nonempty text shorter than 16 source bytes uses the fixed short dictionary's
+inline constexpr std::size_t short_message_bytes = 16;
+inline constexpr std::size_t short_message_bits = 13 * short_message_bytes;
+// Nonempty text up to and including 16 source bytes uses the fixed dictionary's
 // exact bits, without alignment markers, padding, parity or authentication.
 // Files/screenshots and longer text use fixed 128-byte coded intervals.
 bool uses_raw_message(const Message&) noexcept;

@@ -575,10 +575,10 @@ BitmapImage render(const plots::PlotSnapshot& source) {
 }
 void fixed_text_reception() {
     using F=ui::Field;using C=ui::Command;
-    const std::string expected="A fixed interval";
+    const std::string expected="A fixed interval!";
     Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->coded_bytes==128,
-          "16-byte message uses the single fixed coded interval");
+          "17-byte message uses the single fixed coded interval");
     controller.start();controller.activate(C::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
     while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
@@ -631,11 +631,15 @@ void short_text_reception() {
     const auto& received=controller.signals().lines().front();
     check(!received.raw_bits.empty() && signal_data_label(received)=="No checksum / FEC" &&
           !controller.signals().copy_id(0),"Dictionary decoding must retain exact bits without claiming validation");
-    controller.edit(F::message,"quick brown fox!");prepare(controller);
+    controller.edit(F::message,"quick brown fox ");prepare(controller);
+    check(!controller.inspection()->stream_layout && controller.estimate()->wire_bits==98 &&
+          parse_binary_bits(controller.field(F::short_bits).text).size()==98 && !controller.field(F::fec).enabled,
+          "A 16-byte message must remain exactly 98 dictionary bits through both message and code previews");
+    controller.edit(F::message,"quick brown fox!!");prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->wire_bits==1216 &&
           controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs20" &&
           controller.field(F::fec).display_text.empty(),
-          "16-byte text must restore selected fixed interval coding");
+          "17-byte text must restore selected fixed interval coding");
     controller.close();
 }
 
@@ -665,22 +669,38 @@ void short_raw_editor() {
           controller.field(F::short_bits_detail).text.find("exactly as entered")!=std::string::npos,
           "Raw tab did not distinguish three transmitted bits from the decoded t byte");
     const auto& reference=controller.field(F::compression_codes).text;
-    check(reference.find("128-byte")!=std::string::npos && reference.find("e 001")!=std::string::npos &&
+    check(reference.find("13 total")!=std::string::npos && reference.find("e 001")!=std::string::npos &&
           reference.find("t 010")!=std::string::npos && reference.find("space 000")!=std::string::npos,
           "Compression reference must show the fixed dictionary and long source transport");
-    for(const auto invalid:{"01010","01x",""}) {
+    for(const auto& invalid:{std::string(transfer::short_message_bits+1,'0'),std::string("01x"),std::string{}}) {
         controller.edit(F::short_bits,invalid);controller.poll();
         check(controller.field(F::short_bits).text==invalid&&!controller.estimate()&&
               !controller.enabled(C::transmit_short_bits)&&!controller.enabled(C::transmit),
               "Invalid short raw input silently transmitted the previous draft");
     }
-    for(const auto raw:{"0","00","0010","1111","1011"}) {
+    for(const auto raw:{"0","00","0010","1111","1011","01010","110000","1111101000001"}) {
         controller.edit(F::short_bits,raw);prepare(controller);
-        check(controller.field(F::binary).text==raw&&controller.enabled(C::transmit_short_bits)&&
+        check(parse_binary_bits(controller.field(F::binary).text)==parse_binary_bits(raw)&&controller.enabled(C::transmit_short_bits)&&
               controller.inspection()->binary&&controller.estimate()->total_seconds==
                   transfer::estimate_binary(parse_binary_bits(raw),controller.settings().transfer).total_seconds,
-              "One- to four-bit raw input was padded, compressed, or rejected as an incomplete dictionary token");
+              "Exact raw input was padded, compressed, or rejected as an incomplete dictionary token");
     }
+    for(const auto& source:{std::string("s"),std::string("A"),std::string("quick brown"),std::string(transfer::short_message_bytes,'A')}) {
+        const Bytes bytes(source.begin(),source.end());const auto expected_bits=compression::encode_short_bits(bytes);
+        controller.edit(F::message,source);prepare(controller);
+        check(parse_binary_bits(controller.field(F::short_bits).text)==expected_bits && !controller.inspection()->binary &&
+              !controller.inspection()->stream_layout && controller.estimate()->wire_bits==expected_bits.size() &&
+              controller.field(F::short_bits_detail).text.find("Expected text: '"+source+"'")!=std::string::npos,
+              "Compression tab must expose the full short text code without changing Message transmission mode");
+        controller.edit(F::short_bits,controller.field(F::short_bits).text);prepare(controller);
+        check(controller.inspection()->binary && controller.message_bytes()==bytes &&
+              parse_binary_bits(controller.field(F::binary).text)==expected_bits && controller.estimate()->wire_bits==expected_bits.size(),
+              "Selecting displayed dictionary bits must preserve its text preview and exact raw transmission");
+    }
+    controller.edit(F::short_bits,std::string(3*(transfer::short_message_bytes+1),'0'));prepare(controller);
+    check(controller.inspection()->binary && controller.estimate()->wire_bits==3*(transfer::short_message_bytes+1) &&
+          controller.field(F::short_bits_detail).text.find("exceed")!=std::string::npos,
+          "Complete codes beyond the short text byte limit must remain usable raw bits with an honest preview");
     controller.edit(F::message,"t");prepare(controller);
     check(controller.field(F::short_bits).text=="010"&&!controller.inspection()->binary&&
           controller.field(F::binary).text=="01110100"&&controller.enabled(C::transmit_short_bits),
@@ -709,7 +729,7 @@ void short_raw_editor() {
 }
 void short_raw_reception() {
     using F=ui::Field;using C=ui::Command;
-    for(const auto raw:{"010","1","0010"}) {
+    for(const auto raw:{"010","01","0010","1111101110001110101101011011011111011010110001111001100101001110011011"}) {
         Controller controller({true,true});controller.edit(F::short_bits,raw);prepare(controller);
         controller.start();controller.activate(C::transmit_short_bits);
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
@@ -726,19 +746,20 @@ void short_raw_reception() {
         check(received.has_value(),"Simulated short raw pattern did not retain its exact received bits");
         controller.select(F::signals,std::to_string(controller.signals().lines()[*received].id));
         check(controller.enabled(C::copy_raw_signal)&&controller.enabled(C::paste_raw_signal)&&
-              controller.field(F::received_raw_bits).text.find(raw)!=std::string::npos,
+              controller.field(F::received_raw_bits).text.find(std::string(raw).substr(0,64))!=std::string::npos,
               "Completed raw reception did not enable inspection, copy and reuse");
         controller.activate(C::copy_raw_signal);const auto requests=controller.take_services();
         check(requests.size()==1&&requests.front().value==raw,"Copy raw bits copied decoded text or padded byte bits");
         controller.complete_service({requests.front().id,false,{},{}});
-        if(std::string_view(raw)=="010") {
-            check(controller.signals().copy_text(*received)=="t" && !controller.signals().copy_id(*received) &&
+        if(std::string_view(raw)=="010" || std::string_view(raw).size()==70) {
+            check(controller.signals().copy_text(*received)==(std::string_view(raw)=="010"?"t":"quick brown") && !controller.signals().copy_id(*received) &&
                   controller.signals().lines().size()==1 && controller.inbox().items().empty(),
                   "Complete dictionary token must replace its pending row with unvalidated text and retain exact bits");
         } else check(!controller.signals().copy_text(*received),"Incomplete dictionary token must remain raw bits");
         controller.activate(C::paste_raw_signal);prepare(controller);
-        check(controller.field(F::short_bits).text==raw&&controller.field(F::binary).text==raw&&
-              controller.inspection()->binary&&controller.enabled(C::transmit_short_bits),
+        check(controller.field(F::short_bits).text==raw&&parse_binary_bits(controller.field(F::binary).text)==parse_binary_bits(raw)&&
+              controller.inspection()->binary&&controller.enabled(C::transmit_short_bits)&&
+              controller.estimate()->wire_bits==std::string_view(raw).size(),
               "Reusing received raw bits changed their exact length or value");
         controller.activate(C::clear_received);
         check(!controller.enabled(C::copy_raw_signal)&&!controller.enabled(C::paste_raw_signal),

@@ -137,6 +137,17 @@ final byte uses an exact-bit record. **Paste as message** loads text/byte record
 into the composer without interpreting their display escapes as literal
 characters. Binary shows the first 16 message bytes.
 
+The Compression page mirrors the entire dictionary encoding of a 1–16-byte
+Message draft and previews its expected text. Its separate exact-bit editor
+accepts 1–208 bits, including leading zeros and incomplete codes; it preserves
+the dictionary preview independently of byte packing. Editing that field
+selects raw transmission. Console Binary retains its separate 128-bit edit
+limit. Both fields represent the same active draft, so a later Message edit
+returns to text encoding and a later exact-bit edit sends precisely those bits.
+The transmission layout uses the same short-message limit as the transmitter
+and receiver, including the 16-byte endpoint. Dictionary bytes are never rounded
+up to transmitted whole bytes merely for display.
+
 ## Behavior every adapter preserves
 
 - Applying state is silent and preserves unchanged native widgets, focus, text
