@@ -163,7 +163,7 @@ struct Controller::Impl {
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
-        f(UiField::snr).text="60"; for(const auto* s:{"140","120","100","80","60","40","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
+        f(UiField::snr).text="32"; for(const auto* s:{"140","120","100","80","60","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
         f(UiField::receive_snr).text=f(UiField::snr).text;
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
@@ -825,7 +825,7 @@ void Controller::edit(UiField field,std::string text) {
         if(declaration==screen.end()) throw Error("This field is not editable text");
         if(const auto error=ui::edit_error(*declaration,text);!error.empty()) {
             if(field!=UiField::receive_snr)throw Error(error);
-            p.f(field).text="60";p.configure();p.controls();return;
+            p.f(field).text="32";p.configure();p.controls();return;
         }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;

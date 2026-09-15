@@ -277,7 +277,7 @@ void receive_target_lists() {
           "receive list parsing must trim, deduplicate and canonicalize without changing order");
     for(const auto* input:{"", "40,", ",40", "40,,6", "40, nonsense", "nan", "inf", "1e999", "201", "-201", "40 dB", "0x40", "+-6"}) {
         const auto rejected=tuning::parse_receive_targets(input);
-        check(rejected.reset && rejected.values==std::vector<double>{60} && rejected.canonical=="60",
+        check(rejected.reset && rejected.values==std::vector<double>{32} && rejected.canonical=="32",
               "one invalid target must reset the entire receive list");
     }
     check(tuning::parse_receive_targets(std::string(513,' ')).reset,"receive target text exceeds its bounded parser");
@@ -350,7 +350,7 @@ void receive_target_lists() {
     check(!forced.target_supported && forced.config.spreading_factor==8 && forced.config.pattern_symbols,
           "forced short patterns must remain available with unsupported standalone confidence");
     const transfer::Options defaults;
-    check(defaults.receive_targets_db_hz==std::vector<double>{60} && !defaults.automatic_receive_profiles,
+    check(defaults.receive_targets_db_hz==std::vector<double>{32} && !defaults.automatic_receive_profiles,
           "manual API configurations must preserve their explicit profile by default");
 }
 }

@@ -120,26 +120,26 @@ independently.
 The DSP workspace dropdown is an upper limit: 25%, 50% (default), or 75% of
 available RAM. It does not request that amount of history. Received messages
 and files have a separate 256 MiB quota. The GUI defaults to **Rate**
-`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `60`.
+`3.6 kHz`, **Carrier** `1.5 kHz`, and **TX SNR (dB-Hz)** `32`.
 Rate is the nominal chip-rate planning parameter, not a measured occupied
 bandwidth: the default produces 1,800 chips/s and an ideal shaped spectrum of
 375–2,625 Hz, including the 25% RRC rolloff. Rate presets still include `18 kHz`.
 Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
 default carrier; manual frequency entry remains available.
-The **RX targets (dB-Hz)** comma-list also starts at `60`. Changing TX SNR to
+The **RX targets (dB-Hz)** comma-list also starts at `32`. Changing TX SNR to
 a valid value replaces the RX list with that single matching target; the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
-the entire list to `60`.
+the entire list to `32`.
 
 Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
 selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
 capacity: `B * log2(1 + 10^(C/N0_dBHz / 10) / B)` bit/s, with `B` in Hz. At the
-GUI defaults (3.6 kHz, 60 dB-Hz), it is about **29.2 kbit/s**. Actual payload
+GUI defaults (3.6 kHz, 32 dB-Hz), it is about **1.89 kbit/s**. Actual payload
 throughput depends on the waveform and coding overhead. CLI `estimate` reports
 the same value as `shannon_capacity_bps`, using `--bw` and `--target-snr` (default
-60 dB-Hz, including manual modem profiles); values beyond the numeric range are
+32 dB-Hz, including manual modem profiles); values beyond the numeric range are
 reported as `null` (GUI: `Unavailable`).
 
 Simulation feeds the actual PCM receiver with independent carrier phase and
@@ -444,7 +444,7 @@ pattern transport.
 
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
-defaulting to 60 (60 dB/1Hz). Large messages and attachments default to 60%
+defaulting to 32 (32 dB/1Hz). Large messages and attachments default to 60%
 Reed–Solomon parity overhead (`--fec 60`).
 Auto planning uses one bit per pattern symbol, a 16/32/64-chip floor based on
 in-band SNR and an initial 18 dB integrated-energy model. Forced short patterns

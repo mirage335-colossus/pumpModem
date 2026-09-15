@@ -63,7 +63,7 @@ slots for Reed–Solomon erasure correction. EOF and codec success do not comple
 a stream.
 
 Receive searches use the selected rate, carrier and pattern mode, plus the separate
-comma-separated target C/N0 list. Invalid list text resets it to `60`. Carrier,
+comma-separated target C/N0 list. Invalid list text resets it to `32`. Carrier,
 clock and key coverage is finite. The long-symbol fallback requires an explicit
 clock-start window and budgets every frequency/rate/timing combination; memory
 or CPU can still make that coverage impractical. See

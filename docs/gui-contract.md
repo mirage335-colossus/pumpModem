@@ -58,8 +58,8 @@ only the current rate's default carrier. A manually entered carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
-**TX SNR (dB-Hz)** defaults to `60`; its presets include
-`140`, `120`, `100`, `80`, `60`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
+**TX SNR (dB-Hz)** defaults to `32`; its presets include
+`140`, `120`, `100`, `80`, `60`, `32`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
 `-30` alongside the existing targets.
 
 Diagnostics show the gross modem bitrate followed by the **Shannon-Hartley
@@ -69,10 +69,10 @@ not select this estimate. It updates with accepted settings and retains the last
 valid value while a setting contains an invalid draft. The diagnostic tooltip
 explains the formula and distinguishes channel capacity from payload throughput.
 
-The **RX targets (dB-Hz)** comma-list initially matches the TX default, `60`.
+The **RX targets (dB-Hz)** comma-list initially matches the TX default, `32`.
 Changing TX SNR to a valid value replaces the RX list with that single matching
 target. The RX list can then be edited independently without changing TX SNR.
-It trims and deduplicates valid entries, and resets the entire list to `60` on
+It trims and deduplicates valid entries, and resets the entire list to `32` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
 profiles hold the selected rate, carrier and pattern/tone mode fixed.

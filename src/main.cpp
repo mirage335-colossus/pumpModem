@@ -68,9 +68,9 @@ Modem:
   --sample-rate HZ      Internal DSP clock, 64..120000000; default max(6000,4*bw)
   --carrier HZ          Default max(1500,0.75*bw); explicit overrides stay available
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)
-  --target-snr DBHZ     Automatic target C/N0; default60, auto unless manual controls
-  --receive-targets LIST Receive C/N0 search list, e.g. 40,6,-6; default60
-                        Invalid lists reset to60; selected bandwidth/pattern stay fixed
+  --target-snr DBHZ     Automatic target C/N0; default32, auto unless manual controls
+  --receive-targets LIST Receive C/N0 search list, e.g. 40,6,-6; default32
+                        Invalid lists reset to32; selected bandwidth/pattern stay fixed
   --pattern MODE        auto-keystream, auto-pattern, auto-tone, pattern-N, tone-N
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Independent encrypted direct-sequence spreading
@@ -217,7 +217,7 @@ modem::Config config(const Args& a) {
     if(automatic) {
         if(a.has("spreading") || a.has("scramble") || a.has("dsss") || a.has("sample-rate") || a.has("carrier"))
             throw Error("automatic tuning cannot be combined with manual spreading/scramble/dsss/sample-rate/carrier");
-        const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",60),
+        const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
             tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
         c=plan.config;
         if(a.has("progress") || !plan.target_supported) std::cerr<<plan.explanation<<'\n';
@@ -289,9 +289,9 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
     if(a.has("receive-targets") && !automatic_tuning(a))throw Error("receive-targets requires automatic tuning");
     options.automatic_receive_profiles=automatic_tuning(a);
     options.receive_pattern_mode=tuning::parse_pattern_mode(a.get("pattern",k?"auto-keystream":"auto-pattern"));
-    const auto targets=tuning::parse_receive_targets(a.get("receive-targets","60"));
+    const auto targets=tuning::parse_receive_targets(a.get("receive-targets","32"));
     options.receive_targets_db_hz=targets.values;
-    if(targets.reset)std::cerr<<"Invalid receive target list; reset to 60 dB-Hz.\n";
+    if(targets.reset)std::cerr<<"Invalid receive target list; reset to 32 dB-Hz.\n";
     auto fec=a.get("fec","60");
     if(fec=="20") options.fec=FecMode::rs20;
     else if(fec=="60") options.fec=FecMode::rs60;
@@ -555,7 +555,7 @@ int main(int argc,char** argv) {
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="estimate") {
             const auto result=transfer::estimate(message(a),settings);
-            const auto capacity=tuning::shannon_capacity_bps(c.bandwidth_hz,a.number("target-snr",60));
+            const auto capacity=tuning::shannon_capacity_bps(c.bandwidth_hz,a.number("target-snr",32));
             std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
                 <<"{\"coded_bytes\":"<<result.coded_bytes<<",\"wire_bits\":"<<result.wire_bits<<",\"content_bytes\":"<<result.content_bytes
                 <<",\"coded_seconds\":"<<result.coded_seconds<<",\"content_seconds\":"<<result.content_seconds
@@ -569,7 +569,7 @@ int main(int argc,char** argv) {
                 <<",\"memory_supported\":"<<(result.memory_supported?"true":"false")
                 <<",\"batch_memory_supported\":"<<(result.batch_memory_supported?"true":"false");
             if(automatic_tuning(a)) {
-                const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",60),
+                const auto plan=tuning::resolve(c.bandwidth_hz,a.number("target-snr",32),
                     tuning::parse_pattern_mode(a.get("pattern",a.has("keyfile")?"auto-keystream":"auto-pattern")),a.has("keyfile"));
                 std::cout<<",\"estimated_symbol_snr_db\":"<<plan.estimated_symbol_snr_db
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)

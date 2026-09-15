@@ -62,8 +62,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::mono)control.help="Transmit through the right channel only on stereo devices, or the sole channel on mono devices. Turn off to transmit through both stereo channels. Enabled by default.";
     if(slot==Slot::bandwidth)control.help="Nominal modem rate in Hz; occupied bandwidth depends on the waveform. Defaults to 3.6 kHz with a 1.5 kHz carrier. Changing Rate resets Carrier to the recommended frequency; edit Carrier afterward to choose another frequency.";
     if(slot==Slot::carrier)control.help="Audio carrier frequency. The dropdown offers only the current rate's default carrier: 1.5 kHz at the 3.6 kHz rate. Manual entry accepts Hz, kHz or MHz. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
-    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0), default 60 dB-Hz. This scalar sets the transmitted pattern duration. Changing it to a valid value resets RX targets to that single matching target; RX targets can then be edited independently.";
-    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 60. Changing TX SNR to a valid value resets this list to that single matching target. Edit it independently to search other targets with the selected rate, carrier and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 60. Duplicate profiles share one search.";
+    if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0), default 32 dB-Hz. This scalar sets the transmitted pattern duration. Changing it to a valid value resets RX targets to that single matching target; RX targets can then be edited independently.";
+    if(slot==Slot::receive_snr)control.help="Receive target C/N0 values in dB-Hz, separated by commas; initially 32. Changing TX SNR to a valid value resets this list to that single matching target. Edit it independently to search other targets with the selected rate, carrier and pattern mode. Up to 16 values from -200 to 200; invalid text resets the complete list to 32. Duplicate profiles share one search.";
     if(slot==Slot::dsp_workspace)control.help="Upper limit for waveform history and DSP processing, measured at startup and when this choice changes. Storage grows only as useful receiver state needs it. The default is 50% of available RAM. Received messages and files have a separate 256 MiB limit.";
     if(slot==Slot::diagnostics)control.help="Gross modem bitrate followed by the Shannon-Hartley theoretical capacity for an ideal Gaussian-noise channel. Uses the selected nominal Rate as bandwidth B in Hz and TX SNR as C/N0 in dB-Hz: B * log2(1 + 10^(C/N0 / 10) / B). This is a channel capacity estimate; actual payload throughput depends on the modem and coding overhead.";
     if(slot==Slot::waterfall) {control.footer_height=24;control.click=Command::clear_waterfall;control.help="Click to clear the spectrum history.";}
@@ -129,7 +129,6 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::transmit_scope_caption,Command::none,Bitmap::none,Page::console,9,""}, Slot::transmit_scope_caption),
         placed({Kind::choice,Field::transmit_scope_format,Command::none,Bitmap::none,Page::console,9,""}, Slot::transmit_scope_format),
         placed({Kind::list,Field::transmit_scope,Command::none,Bitmap::none,Page::console,9,""}, Slot::transmit_scope),
-        placed({Kind::list,Field::profile_reference,Command::none,Bitmap::none,Page::console,10,"Pattern steps"}, Slot::profile_reference),
         placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::console,10,"Signals",3}, Slot::signals),
         placed({Kind::list,Field::files,Command::none,Bitmap::none,Page::console,10,"Files in memory"}, Slot::files),
         placed({Kind::action,Field::count,Command::copy_signal,Bitmap::none,Page::console,11,"Copy selected"}, Slot::copy_signal),
@@ -139,6 +138,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"}, Slot::waveform),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::constellation,Page::console,12,"Constellation"}, Slot::constellation),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::pattern_scores,Page::console,12,"Pattern evidence"}, Slot::pattern_scores),
+        placed({Kind::list,Field::profile_reference,Command::none,Bitmap::none,Page::console,12,"Pattern steps"}, Slot::profile_reference),
         placed({Kind::action,Field::count,Command::clear_waterfall,Bitmap::none,Page::console,13,"Clear waterfall"}, Slot::clear_waterfall),
         placed({Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"}, Slot::zoom_in),
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),

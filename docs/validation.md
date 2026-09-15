@@ -4,6 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Pattern steps beside evidence — 15 September 2026
+
+The Console's scrollable **Pattern steps** text list now sits at the right edge
+beside **Pattern evidence**, with the same top and height as the plot row.
+Received-message history starts at the left margin again. Plot widths and the
+reference's 280-pixel width are preserved; showing or hiding the generation
+scope resizes the reference with the plots. This changes shared layout and
+declaration order only.
+
+The FLTK Release build passed. All 31 focused shared GUI and compatibility
+tests passed in 92.06 seconds, including layout at supported window sizes,
+hidden-scope reflow, independent short-message vectors, fixed intervals,
+physical completion, four-hour sampled symbols and pending prefixes.
+FLTK windows were captured at 1180 by 866 and 1030 by 786 with the generation
+scope hidden and visible. The reference aligns with the plots, and wheel
+scrolling reaches the final longer-integration row at minimum height.
+FLTK document conformance passed; adapter conformance reproduced the existing
+minimum-size Compression dictionary-label clipping failure. Its assertion was
+retained.
+
+The ordinary Rev Release build hit an existing Clang 19 error in
+`src/live_pattern_scores.hpp`: `key()` has a deduced return type and is used
+before its definition. For native layout validation only, a temporary Clang
+virtual-file overlay supplied the equivalent explicit return type; repository
+source was unchanged. That build passed, as did Rev adapter, platform and
+1x/2x coordinate conformance (49.75 seconds total). Rev's default and minimum
+windows with the scope hidden, plus its minimum window with the scope visible,
+also show the reference aligned at the right, with lower rows reachable by
+scrolling. This is not a clean unmodified Rev build result. Native transmission
+workflows and physical audio links were not rerun for this layout change.
+`git diff --check` passed.
+
+## Default target C/N0 — 15 September 2026
+
+CLI and GUI target C/N0 now default to 32 dB-Hz (32 dB/1Hz). Initial receive
+targets and invalid-list resets use the same value, and the GUI preset list
+includes 32. Help and current documentation reflect the new default, including
+the GUI's approximately 1.89 kbit/s Shannon-Hartley limit at 3.6 kHz.
+
+The Release build passed. All 14 focused tests passed in 78.99 seconds:
+`compression_short`, `transfer`, `stream_codec`, `stream_receive`, `attachment`,
+`pattern_correlator`, `pattern_receiver`, `gui_application`, `gui_controller`,
+`gui_inspection`, `gui_binary_editor`, `gui_profile_reference`, `tuning` and `cli`.
+The default CLI estimate also matched an explicit `--target-snr 32`.
+`git diff --check` passed. Native window rendering and physical audio links were
+not exercised for this shared default-setting change.
+
 ## Automatic profile reference — 15 September 2026
 
 The Console now has a compact **Pattern steps** list on the left of reception

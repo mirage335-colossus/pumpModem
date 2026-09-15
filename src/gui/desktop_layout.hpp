@@ -97,10 +97,7 @@ struct DesktopLayout {
         out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,transmit_scope_visible?206:0};
         const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
         constexpr int files_width = 252;
-        // A compact profile reference shares the height of reception history
-        // and plots. Keep the generated TX scope at its full diagnostic width.
-        constexpr int reference_width=280;
-        const int reception_x=margin+reference_width+12;
+        const int reception_x=margin;
         // Reclaim the hidden scope for two more full signal rows and taller
         // plots. The format choice stays reachable above the received lists.
         const int signal_height = 84+std::min(26,height_growth*26/80)+(transmit_scope_visible?0:108);
@@ -111,15 +108,19 @@ struct DesktopLayout {
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
         const int plots_y = signal_y + signal_height + 23, plot_height = height - plots_y - 124;
-        out[Slot::profile_reference] = {margin, signal_y, reference_width, plots_y + plot_height - signal_y};
-        const int plots_width = width - reception_x - margin;
+        // Keep the scrollable profile reference inline with the plots at the
+        // right edge, leaving reception history its full width.
+        constexpr int reference_width=280;
+        const int reference_x=width-margin-reference_width;
+        out[Slot::profile_reference] = {reference_x, plots_y, reference_width, plot_height};
+        const int plots_width = reference_x - 12 - reception_x;
         const int waterfall_width = plots_width * 24 / 100;
         const int waveform_width = std::max(240, plots_width * 24 / 100);
         const int constellation_width = (plots_width - waterfall_width - waveform_width - 36) / 2;
         const int waveform_x = reception_x + waterfall_width + 12;
         const int constellation_x = waveform_x + waveform_width + 12;
         const int pattern_scores_x = constellation_x + constellation_width + 12;
-        const int pattern_scores_width = width - margin - pattern_scores_x;
+        const int pattern_scores_width = reference_x - 12 - pattern_scores_x;
         out[Slot::waterfall_label] = {reception_x, plots_y - 23, waterfall_width, 21};
         out[Slot::waterfall] = {reception_x, plots_y, waterfall_width, plot_height};
         out[Slot::waveform_label] = {waveform_x, plots_y - 23, waveform_width, 21};

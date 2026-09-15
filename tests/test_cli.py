@@ -40,7 +40,7 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(value['wire_bits'],3)
             self.assertIn('bit_rate',value)
         manual=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)
-        self.assertTrue(math.isclose(manual['shannon_capacity_bps'],9967.226258835993,rel_tol=1e-12))
+        self.assertTrue(math.isclose(manual['shannon_capacity_bps'],1370.1046697509862,rel_tol=1e-12))
         extreme=json.loads(self.run_pump('estimate','--text','e','--bw','1000','--target-snr','1e308').stdout)
         self.assertIsNone(extreme['shannon_capacity_bps'])
     def test_short_dictionary_text_received_with_exact_bits(self):

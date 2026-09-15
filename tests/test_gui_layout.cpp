@@ -25,10 +25,10 @@ void established_default() {
     check(layout[Slot::binary] == Rect{852, 152, 220, 78}, "binary editor moved");
     check(layout[Slot::qr] == Rect{1086, 152, 78, 78}, "QR preview moved");
     check(layout[Slot::transmit_scope] == Rect{16, 289, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{16, 518, 280, 224}, "profile reference must span history and plots on the left");
-    check(layout[Slot::signals] == Rect{308, 518, 590, 110}, "received signals size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 651, 280, 91}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 518, 882, 110}, "received signals size changed");
     check(layout[Slot::files] == Rect{912, 518, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{308, 651, 205, 91}, "waterfall size changed");
+    check(layout[Slot::waterfall] == Rect{16, 651, 205, 91}, "waterfall size changed");
     check(layout[Slot::device] == Rect{16, 774, 112, 27}, "persistent modem controls moved");
     check(layout[Slot::bandwidth] == Rect{138, 774, 93, 27} &&
           layout[Slot::carrier] == Rect{241, 774, 101, 27}, "Rate and Carrier editors lost their reserved widths");
@@ -94,14 +94,13 @@ void supported_sizes() {
               waveform.x == waterfall.x + waterfall.w + 12 &&
               constellation.x == waveform.x + waveform.w + 12 &&
               pattern_scores.x == constellation.x + constellation.w + 12 &&
-              pattern_scores.x + pattern_scores.w == size.w - margin &&
               constellation.w >= 130 && pattern_scores.w >= 130,
               "plot row is misaligned");
         const auto reference=layout[Slot::profile_reference];
-        check(reference.x==margin&&reference.w==280&&reference.y==signals.y&&reference.h>=172&&
-              reference.x+reference.w+12==signals.x&&signals.x==waterfall.x&&
-              reference.y+reference.h==waterfall.y+waterfall.h&&contains(layout[Slot::page],reference),
-              "Profile reference must fit beside history and plots without covering received bits");
+        check(reference.x==pattern_scores.x+pattern_scores.w+12&&reference.w==280&&
+              reference.x+reference.w==size.w-margin&&reference.y==pattern_scores.y&&reference.h==pattern_scores.h&&
+              signals.x==margin&&signals.x==waterfall.x&&contains(layout[Slot::page],reference),
+              "Profile reference must fit beside pattern evidence at the same height without narrowing received history");
         check(waterfall.h>=64&&waterfall.y>=signals.y+signals.h+23&&
               waterfall.y+waterfall.h<=layout[Slot::page].y+layout[Slot::page].h,
               "Generation scope displaced plots outside the Console page");
@@ -181,7 +180,7 @@ void hidden_scope_reclaims_space() {
               files.y+files.h+7==save.y&&save.y+save.h==signals.y+signals.h&&
               contains(signals,hidden[Slot::copy_signal])&&contains(signals,hidden[Slot::paste_signal]),
               "Expanded reception history detached its file list or action footers");
-        for(const auto slot:{Slot::waterfall,Slot::waveform,Slot::constellation,Slot::pattern_scores}) {
+        for(const auto slot:{Slot::waterfall,Slot::waveform,Slot::constellation,Slot::pattern_scores,Slot::profile_reference}) {
             const auto plot=hidden[slot],old=visible[slot];
             check(contains(page,plot)&&plot.x==old.x&&plot.w==old.w&&
                   plot.y>=signals.y+signals.h+23&&plot.y+plot.h==old.y+old.h&&
