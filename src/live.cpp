@@ -164,6 +164,7 @@ struct Session::Impl {
         std::function<void(Prepared&)> prepare_hardware;
         std::optional<std::uint64_t> protected_epoch;
         bool binary = false;
+        bool noise = false;
         double pattern_score = -1;
         std::uint64_t stream_signal_id = 0;
         std::uint64_t generation = 0, serial = 0;
@@ -221,7 +222,7 @@ struct Session::Impl {
     std::uint64_t last_pattern_transmit_epoch = 0;
     bool tx_busy = false;
     Clock::time_point next_hardware_send{};
-    using Transmission = std::variant<Message, Bytes>;
+    using Transmission = std::variant<Message, Bytes, modem::Noise>;
     std::deque<Transmission> queued;
     std::shared_ptr<Prepared> ready;
     std::deque<AudioBlock> input;
@@ -281,11 +282,15 @@ struct Session::Impl {
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
     void enqueue(Transmission transmission) {
+        if (current.transmitting_noise) throw Error("stop noise before transmitting a message");
+        const bool noise = std::holds_alternative<modem::Noise>(transmission);
+        if (noise && (tx_busy || !queued.empty())) throw Error("wait for transmission to finish before starting noise");
         if (queued.size() >= 8) throw Error("transmit queue contains eight pending messages");
         advance_replay(replay_clock());
         queued.push_back(std::move(transmission)); current.transmitting = true;
         current.transmission_finished = current.transmission_cancelled = false;
         if (!tx_busy) {
+            current.transmitting_noise = noise;
             current.transmission_fraction = current.transmission_seconds = 0;
             current.transmit_trace = {};
             clear_replay();
@@ -374,7 +379,7 @@ struct Session::Impl {
     }
     void halt() {
         std::lock_guard lock(mutex);
-        current.running = current.transmitting = false;
+        current.running = current.transmitting = current.transmitting_noise = false;
         current.transmission_finished = true; current.transmission_cancelled = true;
         current.status = "Stopped";
         clear_replay(); pending_points = {};
@@ -715,7 +720,7 @@ struct Session::Impl {
                         std::string bits;bits.reserve(result.raw_bits.size());
                         for(auto bit:result.raw_bits)bits.push_back(bit?'1':'0');
                         std::lock_guard lock(mutex);
-                        if(!current.running || generation!=version || (simulation_wave && simulation_wave->stop.stop_requested()))return;
+                        if(!current.running || generation!=version || stop.stop_requested())return;
                         const auto complete=result.stream_complete;
                         const auto filtered=simulation_wave && !result.content_validated &&
                             ((simulation_wave->verified && simulation_wave->verified->validated) || score<simulation_wave->pattern_score);
@@ -785,7 +790,7 @@ struct Session::Impl {
             }
         }
         std::lock_guard lock(mutex);
-        if (current.running && generation == version) {
+        if (current.running && generation == version && !stop.stop_requested()) {
             if (simulation_wave) {
                 simulation_wave->pattern_scores = std::move(pattern_scores);
             } else if (value.simulation || !tx_busy) {
@@ -818,9 +823,10 @@ struct Session::Impl {
         std::lock_guard lock(mutex);
         if (wave.generation != generation || wave.serial != tx_serial) return;
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
-        if(!settings.simulation)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
+        if(!settings.simulation && !wave.noise)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
             std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(settings.transfer.modem))/settings.transfer.modem.sample_rate+1.));
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
+        current.transmitting_noise = false;
         current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
         current.status = idle_status();
         if (!error.empty()) { current.error = error; staged_received_bytes = 0; }
@@ -848,7 +854,7 @@ struct Session::Impl {
         if (generation != wave.generation || tx_serial != wave.serial) return;
         current.transmit_trace = wave.transmitter->transmit_trace();
         current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
-        current.transmission_fraction = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
+        current.transmission_fraction = wave.noise ? 0 : static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
     }
     void retain_emitted_epoch(const Prepared& wave, const Settings& value) {
@@ -893,7 +899,9 @@ struct Session::Impl {
                 if (!wave && ready) {
                     wave = std::move(ready); new_burst = true; pending_points = {};
                     if (!value.simulation) plot_window.reset();
-                    current.status = value.simulation ? "Transmitting sampled audio to an independent receiver" : "Transmitting; audio input paused";
+                    current.status = wave->noise ? (value.simulation ? "Simulating continuous noise; stop when finished" :
+                        "Transmitting continuous noise; stop when finished") :
+                        value.simulation ? "Transmitting sampled audio to an independent receiver" : "Transmitting; audio input paused";
                 }
                 capture_stop = std::stop_source{}; capture_token = capture_stop.get_token();
             }
@@ -906,6 +914,31 @@ struct Session::Impl {
                         value.transfer.modem, channel_config(value));
                     if (new_burst) simulation_channel->begin_burst();
                     std::array<float, plot_size> samples{};
+                    if (wave && wave->noise) {
+                        // An open-ended tuning source has no completion replay.
+                        // Pace its physical samples while the independent RX
+                        // retains its ordinary keys and admission rules.
+                        const auto block_start = Clock::now();
+                        const auto capacity = std::min<std::size_t>(samples.size(),
+                            std::max<std::size_t>(1, value.transfer.modem.sample_rate / 20));
+                        const auto count = simulation_channel->read(*wave->transmitter,
+                            std::span(samples).first(capacity), wave->stop);
+                        wave->transmitted_samples = simulation_channel->transmitted_samples();
+                        if (!count) { complete_tx(*wave); wave.reset(); continue; }
+                        const auto input_samples = std::span(samples).first(count);
+                        account(count, version); progress(*wave, value);
+                        plot_window.push(input_samples);
+                        feed_samples(*simulation_bank,input_samples,value,version,wave->stop);
+                        publish(plot_window,value.transfer.modem,version,last_plot,false,
+                            wave->transmitter.get(),wave->serial);
+                        const auto deadline = block_start + std::chrono::duration_cast<Clock::duration>(
+                            std::chrono::duration<double>(static_cast<double>(count) / value.transfer.modem.sample_rate));
+                        std::unique_lock lock(mutex);
+                        changed.wait_until(lock,stop,deadline,[&] {
+                            return !current.running || generation != version || wave->stop.stop_requested();
+                        });
+                        continue;
+                    }
                     if (wave) {
                         // First replay frame records the independently running
                         // receiver before any newly transmitted samples arrive.
@@ -1036,11 +1069,28 @@ struct Session::Impl {
                 current.constellation.clear(); current.constellation_source = ConstellationSource::input;
                 current.constellation_dropped = 0;
                 tx_busy = true; current.transmitting = true; current.transmission_finished = false;
+                current.transmitting_noise = std::holds_alternative<modem::Noise>(transmission);
                 current.transmission_fraction = current.transmission_seconds = 0;
-                current.status = std::holds_alternative<Bytes>(transmission) ? "Preparing raw binary signal" :
+                current.status = current.transmitting_noise ? "Preparing noise with temporary keys" :
+                    std::holds_alternative<Bytes>(transmission) ? "Preparing raw binary signal" :
                     "Preparing fixed-interval stream";
             }
             try {
+                if (std::holds_alternative<modem::Noise>(transmission)) {
+                    // Ephemeral streams need no saved-key epoch scheduling,
+                    // source encoding, receiver-bank key or message replay.
+                    auto prepared = std::make_shared<Prepared>();
+                    prepared->generation = version; prepared->serial = serial;
+                    prepared->stop = token; prepared->noise = true;
+                    prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(
+                        modem::Noise{}, value.transfer.modem, value.dsp_workspace_bytes / 4);
+                    std::lock_guard lock(mutex);
+                    if (!current.running || generation != version || tx_serial != serial || token.stop_requested()) continue;
+                    ready = std::move(prepared);
+                    if (!value.simulation) capture_stop.request_stop();
+                    changed.notify_all();
+                    continue;
+                }
                 // Only the transmitter reads its send epoch here. The
                 // running receiver admits its own candidates independently.
                 if(!value.simulation) {
@@ -1121,6 +1171,7 @@ struct Session::Impl {
                 std::lock_guard lock(mutex);
                 if (generation != version || tx_serial != serial) continue;
                 tx_busy = false; current.transmitting = !queued.empty(); current.transmission_finished = queued.empty();
+                current.transmitting_noise = false;
                 current.status = idle_status(); if (!token.stop_requested()) current.error = exception.what(); changed.notify_all();
             }
         }
@@ -1189,11 +1240,17 @@ void Session::transmit_bits(std::span<const std::uint8_t> bits) {
         throw Error("binary input must contain only 0 and 1 bits");
     impl_->enqueue(Bytes(bits.begin(), bits.end()));
 }
+void Session::transmit_noise() {
+    std::lock_guard lock(impl_->mutex);
+    if (!impl_->current.running) throw Error("continuous receiver is not running");
+    impl_->enqueue(modem::Noise{});
+}
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);
     impl_->advance_replay(impl_->replay_clock());
     impl_->tx_stop.request_stop(); ++impl_->tx_serial; impl_->queued.clear(); impl_->ready.reset(); impl_->tx_busy = false;
-    impl_->current.transmitting = false; impl_->current.transmission_finished = true; impl_->current.transmission_cancelled = true;
+    impl_->current.transmitting = impl_->current.transmitting_noise = false;
+    impl_->current.transmission_finished = true; impl_->current.transmission_cancelled = true;
     impl_->clear_replay(); impl_->pending_points = {}; impl_->replay_omitted = 0;
     impl_->current.constellation.clear(); impl_->current.constellation_source = ConstellationSource::input;
     impl_->current.constellation_dropped = 0;

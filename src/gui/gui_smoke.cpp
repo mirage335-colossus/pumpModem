@@ -35,7 +35,7 @@ std::vector<unsigned char> preview_pixels(const plots::PlotSnapshot& source) {
 }
 struct Smoke::Impl {
     enum class Phase {
-        initialize,fec20,fec60,generate,generated,reloaded,key_failed,text_ready,text_received,
+        initialize,fec20,fec60,generate,generated,reloaded,key_failed,noise_ready,noise_active,noise_stopped,text_ready,text_received,
         file_ready,file_received,interrupt_ready,interrupt_replay,replacement_ready,
         replacement_replay,cancelled,binary_attachment,binary_ready,binary_received,tiny,long_text
     };
@@ -54,6 +54,8 @@ struct Smoke::Impl {
     Phase phase=Phase::initialize;
     bool done=false,launched_binary=false,saw_idle_change=false,key_reception=false,owns_directory=false;
     std::uint64_t polls=0,completed_replay=0,key_samples=0,cancel_samples=0;
+    std::uint64_t noise_revision=0;
+    std::shared_ptr<const Inspection> noise_inspection;
     std::vector<float> idle_waveform;
     std::set<std::uint64_t> interrupted;
     std::set<std::string> verified_ids;
@@ -304,7 +306,38 @@ struct Smoke::Impl {
             controller.activate(C::acknowledge_key_failure);
             require(!controller.enabled(C::acknowledge_key_failure)&&controller.field(F::key).selected==first_key_id,
                     "Key failure acknowledgement changed the retained selected key");
-            controller.select(F::key,"none");phase=Phase::text_ready;break;
+            phase=Phase::noise_ready;break;
+        case Phase::noise_ready:
+            if(!controller.estimate())break;
+            require(controller.enabled(C::transmit_noise)&&controller.field(F::message).text==message,
+                    "Tuning noise was unavailable or changed the prepared message before starting");
+            noise_revision=controller.revision();noise_inspection=controller.inspection();
+            controller.activate(C::transmit_noise);
+            require(controller.enabled(C::cancel)&&!controller.enabled(C::transmit_noise)&&
+                    !controller.enabled(C::transmit)&&controller.command_label(C::cancel)=="Stop noise",
+                    "Noise did not immediately expose Stop noise and claim the single transmitter");
+            phase=Phase::noise_active;break;
+        case Phase::noise_active:
+            if(!snapshot.transmitting_noise||snapshot.transmission_seconds<.1)break;
+            require(snapshot.transmitting&&!snapshot.simulation_replay&&snapshot.transmission_fraction==0&&
+                    controller.field(F::mode).text.starts_with("Simulating noise / ")&&
+                    controller.field(F::mode).text.find("elapsed")!=std::string::npos&&
+                    controller.command_label(C::cancel)=="Stop noise",
+                    "Noise did not present continuous elapsed generation and its stop action");
+            controller.activate(C::cancel);phase=Phase::noise_stopped;break;
+        case Phase::noise_stopped:
+            if(snapshot.transmitting||!snapshot.transmission_finished)break;
+            require(!snapshot.transmitting_noise&&!snapshot.simulation_replay&&
+                    controller.enabled(C::transmit_noise)&&!controller.enabled(C::cancel)&&
+                    controller.command_label(C::cancel)=="Cancel TX",
+                    "Stop noise failed to return to continuous reception without replay");
+            require(controller.field(F::message).text==message&&controller.revision()==noise_revision&&
+                    controller.inspection()==noise_inspection&&controller.field(F::key).selected==first_key_id&&
+                    controller.settings().transfer.key&&controller.settings().transfer.key->mac(file_bytes)==first_key_mac&&
+                    controller.settings().receive_keys.size()==2&&controller.inbox().items().empty()&&
+                    controller.signals().lines().empty()&&!controller.enabled(C::paste_previous),
+                    "Noise changed the draft, prepared inspection, saved keys or message history");
+            noise_inspection.reset();controller.select(F::key,"none");phase=Phase::text_ready;break;
         case Phase::text_ready:
             if(!controller.enabled(C::transmit))break;
             require(!controller.settings().transfer.key,"Plaintext smoke retained an encryption key");

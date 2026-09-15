@@ -206,6 +206,27 @@ WAV output and simulation keep their existing single-channel waveform.
 
 ## Desktop console
 
+**Transmit noise**, beside the transmit controls on Console and Compression,
+starts continuous tuning noise; **Stop noise** stops it. It works without a
+draft or loaded key and leaves your draft, attachments and selected keys intact.
+Noise uses the selected carrier, bandwidth, audio device and Mono routing at
+the normal transmit signal level. It always generates noise, including when
+a tone mode is selected. Simulation previews it continuously until stopped.
+
+Every start generates fresh temporary cryptographic key material for the usual
+Data, Scrambler and DSSS streams. The regular pattern encoder modulates
+Data-masked dummy bits using its ordinary encrypted symbol schedule, shaping,
+settling prefix and signal level. No user content, message framing or headers
+are added. The generator advances the streams without looping a recording or
+reusing symbol addresses. Temporary keys never enter the receive key bank or
+keyfile. See [tuning noise](docs/crypto.md#continuous-tuning-noise).
+Chance repetitions in random samples remain possible. Noise supplies no
+public or saved-key pattern for a receiver to recognize, but an unauthenticated raw-bit
+receiver can still make false detections, as it can with background noise.
+Received power and bandwidth determine how much it raises the noise floor;
+cryptographic randomness alone does not establish thermal indistinguishability
+or absence of interference.
+
 FLTK remains the default GUI. An optional Rev backend uses the pinned upstream
 `clean` branch, shared semantic controls/controller and the same bitmap plot
 producers. Build it separately with `-DDATAPUMP_GUI_BACKEND=rev`; see the

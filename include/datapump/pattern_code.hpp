@@ -70,9 +70,13 @@ public:
     // chip's position in the padded output waveform.
     // Surrounding noise and preview reconstruction never notify the observer.
     using ChipObserver = std::function<void(std::complex<double>)>;
+    // A bounded lazy source equivalent to zero bits encrypted with the
+    // configured Data key and the usual symbol-start epoch/ordinal schedule.
+    struct MaskedZeroBits { std::uint64_t count; };
     PatternTransmitter(Bytes bits, Config config, std::uint64_t stream_epoch = 0,
                        std::uint64_t start_chip = 0, bool surrounding_noise = true,
                        bool trace = false);
+    PatternTransmitter(Config config, MaskedZeroBits bits, std::uint64_t stream_epoch = 0);
     ~PatternTransmitter();
     PatternTransmitter(PatternTransmitter&&) noexcept;
     PatternTransmitter& operator=(PatternTransmitter&&) noexcept;
@@ -89,6 +93,32 @@ public:
     double bit_rate() const;
     std::size_t working_bytes() const;
     void copy_transmit_trace(TransmitTrace&, std::uint64_t begun_chips) const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+// Continuous encrypted random bits through the ordinary pattern transmitter,
+// including its usual settling, symbol scheduling, bit patterns and shaping.
+// Each construction owns a fresh key with purpose-separated Data, Scrambler
+// and DSSS streams. Configured message keys are ignored; no buffer is looped.
+class NoiseTransmitter {
+public:
+    using ChipObserver = PatternTransmitter::ChipObserver;
+    static constexpr std::uint64_t sample_target = 1ULL << 48;
+    explicit NoiseTransmitter(Config config);
+    ~NoiseTransmitter();
+    NoiseTransmitter(NoiseTransmitter&&) noexcept;
+    NoiseTransmitter& operator=(NoiseTransmitter&&) noexcept;
+    std::size_t read(std::span<float> output, std::stop_token stop = {},
+                     const ChipObserver& observer = {});
+    std::size_t read_analytic(std::span<std::complex<double>> output,
+                              std::stop_token stop = {}, const ChipObserver& observer = {});
+    void preview_last_analytic(std::span<std::complex<double>> output) const;
+    bool finished() const;
+    std::uint64_t total_samples() const;
+    std::uint64_t samples_emitted() const;
+    std::size_t working_bytes() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

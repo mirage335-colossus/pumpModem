@@ -184,6 +184,40 @@ aid a keyless energy detector. Removing the squared-carrier
 invariant is not proof of indistinguishability from arbitrary background noise
 or a measured probability of interception.
 
+### Continuous tuning noise
+
+The GUI's **Transmit noise** action continuously modulates dummy bits through
+the regular encrypted pattern transmitter. Each start obtains fresh temporary
+master key material through `Crypto::random()` (OpenSSL `RAND_priv_bytes`).
+The usual purpose-separated Data, Scrambler and DSSS streams use the same
+derivation and addressing as ordinary encrypted transmission. FHSS is not an
+active modem stage. Saved key material is not a noise input; temporary keys
+are never registered with reception, saved or shown in the transmission trace,
+and their owned cryptographic storage is cleansed on release.
+
+Noise keeps the selected carrier, chip rate, waveform shaping and normal signal
+level, using encrypted pattern modulation even when the saved mode is Tone.
+A bounded source masks all-zero dummy bits with the usual Data stream and feeds
+the resulting bits into the ordinary `PatternCode` and `PatternTransmitter`.
+This preserves the two pattern alternatives, symbol boundaries, private
+Scrambler/DSSS mapping, pulse shaping and normal settling waveform. It does not
+replace the payload with the preamble's noise distribution. No user content,
+dictionary or interval framing is added. Each symbol uses its own normal
+epoch/ordinal address; no finite buffer loops or stream positions restart on
+successive reads. Finite coordinate limits stop generation before exhaustion
+rather than wrapping. This prevents intentional periodic reuse; it does not
+forbid chance repetition in random output values.
+
+The independent receiver retains its ordinary local key bank and admission
+thresholds. Noise is intended to present unrelated random evidence, like
+background noise at comparable received power and spectrum, rather than a
+recognizable public or saved-key message template. This is not an absolute
+false-detection guarantee: raw-bit reception is unauthenticated, finite random
+observations can correlate by chance, and transmitted power can raise the
+receiver's noise floor. The bounded Gaussian mapping, chip clock, filtering and
+hardware remain distinguishable physical characteristics; no thermal-noise
+indistinguishability or RF interference measurement is claimed.
+
 ### Data, integrity and reuse
 
 `xor_data` XORs arbitrary bytes at an explicitly selected epoch with the Data

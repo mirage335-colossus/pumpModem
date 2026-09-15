@@ -106,7 +106,7 @@ void supported_sizes() {
             check(contains(waveform, layout[slot]), "waveform action escapes its block");
         const auto page=layout[Slot::page];
         for(const auto slot:{Slot::compression_explanation,Slot::short_bits_label,Slot::short_bits,Slot::short_bits_detail,
-                Slot::compression_codes,Slot::short_use_text,Slot::short_send_key,Slot::short_transmit,
+                Slot::compression_codes,Slot::short_use_text,Slot::short_send_key,Slot::short_transmit,Slot::short_transmit_noise,
                 Slot::short_cancel,Slot::short_airtime,Slot::compression_signals,Slot::copy_raw_signal,
                 Slot::paste_raw_signal,Slot::received_raw_bits})
             check(!persistent_slot(slot)&&contains(page,layout[slot]),"Compression page control escaped its viewport");
@@ -163,7 +163,7 @@ void hidden_scope_reclaims_space() {
                (slot>=Slot::compression_explanation&&slot<=Slot::received_raw_bits))
                 check(rect==visible[slot],"Console scope visibility moved another page or persistent controls");
         }
-        for(const auto slot:{Slot::message,Slot::binary,Slot::qr,Slot::transmit,Slot::cancel,Slot::transmit_scope_format})
+        for(const auto slot:{Slot::message,Slot::binary,Slot::qr,Slot::transmit,Slot::transmit_noise,Slot::cancel,Slot::transmit_scope_format})
             check(hidden[slot]==visible[slot],"Scope reflow moved composition or its always-available display choice");
         const auto signals=hidden[Slot::signals],files=hidden[Slot::files],save=hidden[Slot::save_file];
         const auto format=hidden[Slot::transmit_scope_format];

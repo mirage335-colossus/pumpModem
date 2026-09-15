@@ -3,6 +3,7 @@
 #include "../src/gui/binary_editor.hpp"
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
+#include "datapump/runtime.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -26,6 +27,131 @@ void prepare(Controller& controller) {
         controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
+}
+void noise_start_stop(Controller& controller) {
+    using F=ui::Field;using C=ui::Command;
+    const auto draft=controller.field(F::message).text,binary=controller.field(F::binary).text;
+    const auto short_bits=controller.field(F::short_bits).text,key=controller.field(F::key).selected;
+    const auto key_path=controller.field(F::key_path).text,message_label=controller.field(F::message_label).text;
+    const auto bytes=controller.message_bytes();const auto inspection=controller.inspection();
+    const auto revision=controller.revision();const auto cursor=controller.field(F::message).text_cursor_end_revision;
+    const auto signals=controller.field(F::signals).records,files=controller.field(F::files).records;
+    const auto inbox_size=controller.inbox().items().size();
+    const auto previous=controller.enabled(C::paste_previous),attachment=controller.enabled(C::use_text);
+    const auto settings=controller.settings();
+    check(controller.enabled(C::transmit_noise),"Valid noise transmission was coupled to a draft or key selection");
+    controller.activate(C::transmit_noise);
+    check(!controller.enabled(C::transmit_noise)&&!controller.enabled(C::transmit)&&
+          controller.enabled(C::cancel)&&controller.command_label(C::cancel)=="Stop noise",
+          "Queued noise did not immediately disable competing sends and expose Stop noise");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    do { controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+    while((!controller.snapshot().transmitting_noise||controller.snapshot().transmission_seconds<=0)&&
+          std::chrono::steady_clock::now()<deadline);
+    check(controller.snapshot().transmitting&&controller.snapshot().transmitting_noise&&
+          controller.snapshot().transmission_seconds>0&&controller.snapshot().transmission_fraction==0&&
+          controller.field(F::mode).text.find("noise / ")!=std::string::npos&&
+          controller.field(F::mode).text.find("elapsed")!=std::string::npos&&
+          controller.field(F::mode).text.find('%')==std::string::npos,
+          "Continuous noise did not show active elapsed progress without a finite percentage");
+    check(controller.field(F::transmit_scope_format).selected=="hex-auto-hide"&&
+          !controller.field(F::transmit_scope).visible&&!controller.field(F::transmit_scope_caption).visible,
+          "Automatic noise preview exposed an empty message capture instead of leaving room for live plots");
+    for(const auto* format:{"hex","bits"}) {
+        controller.select(F::transmit_scope_format,format);
+        check(controller.field(F::transmit_scope).visible&&controller.field(F::transmit_scope_caption).visible&&
+              controller.field(F::transmit_scope_caption).text.find("Tuning noise / ordinary encrypted modulation")!=std::string::npos&&
+              !controller.snapshot().transmit_trace.active&&
+              controller.field(F::transmit_scope).records==transmit_scope_records({},std::string_view(format)=="bits"),
+              "Manual noise preview claimed to wait for transmission or showed a retained message capture");
+    }
+    controller.select(F::transmit_scope_format,"hex-auto-hide");
+    check(!controller.field(F::transmit_scope).visible,
+          "Returning to automatic preview kept the unused noise capture open");
+    const auto transmission=controller.snapshot().transmission_id;
+    controller.activate(C::transmit_noise);controller.poll();
+    check(controller.snapshot().transmission_id==transmission,
+          "Repeated noise activation restarted the keystreams or replaced the transmission");
+    controller.activate(C::cancel);
+    const auto stop_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    do { controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
+    while((controller.snapshot().transmitting||!controller.snapshot().transmission_finished)&&
+          std::chrono::steady_clock::now()<stop_deadline);
+    check(controller.snapshot().transmission_finished&&!controller.snapshot().transmitting&&
+          !controller.snapshot().transmitting_noise&&!controller.snapshot().simulation_replay&&
+          controller.enabled(C::transmit_noise)&&!controller.enabled(C::cancel)&&
+          controller.command_label(C::cancel)=="Cancel TX",
+          "Stopping noise did not return to reception without a simulation replay");
+    check(controller.field(F::message).text==draft&&controller.field(F::binary).text==binary&&
+          controller.field(F::short_bits).text==short_bits&&controller.message_bytes()==bytes&&
+          controller.field(F::message_label).text==message_label&&controller.revision()==revision&&
+          controller.field(F::message).text_cursor_end_revision==cursor&&
+          (!inspection||controller.inspection()==inspection)&&
+          controller.enabled(C::paste_previous)==previous&&controller.enabled(C::use_text)==attachment,
+          "Noise changed the draft, attachment, previous-message state or prepared inspection");
+    check(controller.field(F::key).selected==key&&controller.field(F::key_path).text==key_path&&
+          controller.settings().transfer.key.has_value()==settings.transfer.key.has_value()&&
+          controller.settings().receive_keys.size()==settings.receive_keys.size()&&
+          controller.settings().transfer.modem.carrier_hz==settings.transfer.modem.carrier_hz&&
+          controller.settings().transfer.modem.spreading_mode==settings.transfer.modem.spreading_mode&&
+          controller.settings().mono==settings.mono,
+          "Temporary noise keys or waveform selection replaced saved modem settings");
+    for(const auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
+        if(settings.transfer.key)
+            check(controller.settings().transfer.key->stream(purpose,0,0,32)==settings.transfer.key->stream(purpose,0,0,32),
+                  "Noise replaced a selected message keystream");
+        for(std::size_t index=0;index<settings.receive_keys.size();++index)
+            check(controller.settings().receive_keys[index].stream(purpose,0,0,32)==settings.receive_keys[index].stream(purpose,0,0,32),
+                  "Noise replaced a configured receive key");
+    }
+    check(controller.field(F::signals).records==signals&&controller.field(F::files).records==files&&
+          controller.inbox().items().size()==inbox_size,
+          "Noise replaced received history or created an apparent local message");
+}
+void noise_transmission_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    check(controller.field(F::message).text.empty()&&!controller.estimate()&&controller.enabled(C::transmit_noise),
+          "Empty unestimated composer disabled tuning noise");
+    controller.activate(C::transmit_noise);
+    check(controller.enabled(C::transmit_noise)&&!controller.enabled(C::cancel)&&
+          controller.command_label(C::cancel)=="Cancel TX",
+          "Rejected noise start left the controller busy");
+    controller.edit(F::bandwidth,"invalid");
+    check(!controller.enabled(C::transmit_noise),"Invalid modem settings allowed noise output");
+    controller.edit(F::bandwidth,"3.6 kHz");
+    controller.edit(F::binary,"invalid");
+    check(!controller.estimate()&&!controller.enabled(C::transmit)&&controller.enabled(C::transmit_noise),
+          "An invalid data draft disabled independent noise output");
+    controller.start();noise_start_stop(controller);
+    controller.edit(F::message,"Keep this draft");prepare(controller);noise_start_stop(controller);
+    struct TemporaryAttachment {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-noise-attachment-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~TemporaryAttachment(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    write_new_file(fixture.path.string(),Bytes{'n','o','i','s','e'});
+    controller.activate(C::attach_file);auto requests=controller.take_services();
+    check(requests.size()==1,"Noise fixture did not request its attachment chooser");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    prepare(controller);
+    check(controller.enabled(C::use_text)&&!controller.field(F::message).enabled,
+          "Noise fixture attachment did not load");
+    noise_start_stop(controller);controller.activate(C::use_text);
+    check(controller.field(F::message).text=="Keep this draft","Noise discarded the attachment's text draft");
+    controller.activate(C::open_keyfile);requests=controller.take_services();
+    check(requests.size()==1,"Noise fixture did not request its key chooser");
+    controller.complete_service({requests.front().id,false,fixture.path.string()+".missing-key",{}});
+    check(!controller.enabled(C::transmit_noise),"Noise began while a key load could reconfigure the session");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!controller.enabled(C::acknowledge_key_failure)&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.enabled(C::acknowledge_key_failure)&&!controller.enabled(C::transmit)&&
+          controller.enabled(C::transmit_noise),"Failed message keys disabled independent temporary noise keys");
+    noise_start_stop(controller);
+    check(controller.enabled(C::acknowledge_key_failure),"Noise silently acknowledged a keyfile failure");
+    controller.close();check(!controller.enabled(C::transmit_noise),"Closing left tuning noise available");
 }
 std::size_t check_pending_snapshot(Controller& controller) {
     using F=ui::Field;using C=ui::Command;
@@ -230,6 +356,7 @@ void tone_key_controls() {
     load();
     check(controller.settings().transfer.key && controller.settings().receive_keys.size()==1,
           "Production keyfile did not activate private transmission and reception");
+    controller.start();noise_start_stop(controller);
     for(const auto mode:tuning::pattern_modes()) {
         const std::string name(tuning::pattern_mode_name(mode));
         if(!tuning::tone_mode(mode))continue;
@@ -715,6 +842,9 @@ void fixed_text_reception() {
     controller.complete_service({requests.front().id,false,{},{}});
     controller.activate(C::paste_signal);
     check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"paste uses source bytes rather than coded data");
+    prepare(controller);noise_start_stop(controller);
+    controller.activate(C::paste_previous);
+    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Noise replaced the previous transmitted message");
     controller.close();
 }
 
@@ -1182,6 +1312,7 @@ int main(int argc,char** argv) {
         rate_carrier_controls();
         shannon_capacity_display();
         mono_controls();
+        noise_transmission_controls();
         tone_mode_controls();
         tone_key_controls();
         composer_conveniences();

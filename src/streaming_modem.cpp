@@ -1,5 +1,6 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
+#include <openssl/crypto.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -13,6 +14,7 @@ void cancelled(std::stop_token stop) {if(stop.stop_requested())throw Error("mode
 
 struct StreamingTransmitter::Impl {
     std::unique_ptr<PatternTransmitter> pattern;
+    std::unique_ptr<NoiseTransmitter> noise;
     TransmitTrace trace;
     std::uint64_t chips_per_symbol=1;
     std::vector<Complex> constellation;
@@ -58,6 +60,12 @@ struct StreamingTransmitter::Impl {
         pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch,0,true,trace.active);
         if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
+    Impl(Noise,Config config,std::size_t workspace) {
+        const auto remaining=initialize_constellation(config,workspace);
+        config.memory_limit=remaining;
+        noise=std::make_unique<NoiseTransmitter>(config);
+        if(noise->working_bytes()>remaining)throw Error("noise transmitter workspace is too small");
+    }
     void retain_constellation(Complex value) {
         if(trace.active) {
             ++trace.generated_chips;
@@ -86,14 +94,22 @@ std::size_t StreamingTransmitter::constellation_history_capacity(const Config& c
 StreamingTransmitter::StreamingTransmitter(Bytes wire,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(wire),c,workspace)){}
 StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace,TransmitTrace trace):
     impl_(std::make_unique<Impl>(std::move(bits),c,workspace,std::move(trace))){}
+StreamingTransmitter::StreamingTransmitter(Noise,Config c,std::size_t workspace) {
+    c.data_key.reset();
+    OPENSSL_cleanse(c.spreading_seed.data(),c.spreading_seed.size());
+    OPENSSL_cleanse(c.dsss_seed.data(),c.dsss_seed.size());
+    c.spreading_mode=SpreadingMode::pattern;
+    impl_=std::make_unique<Impl>(Noise{},c,workspace);
+}
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;
-bool StreamingTransmitter::finished()const{return impl_->pattern->finished();}
-std::uint64_t StreamingTransmitter::total_samples()const{return impl_->pattern->total_samples();}
-std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->pattern->samples_emitted();}
+bool StreamingTransmitter::finished()const{return impl_->noise?impl_->noise->finished():impl_->pattern->finished();}
+std::uint64_t StreamingTransmitter::total_samples()const{return impl_->noise?impl_->noise->total_samples():impl_->pattern->total_samples();}
+std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->noise?impl_->noise->samples_emitted():impl_->pattern->samples_emitted();}
 std::size_t StreamingTransmitter::working_bytes()const{return sizeof(StreamingTransmitter)+sizeof(Impl)+
-    impl_->constellation.capacity()*sizeof(Complex)+impl_->pattern->working_bytes()+impl_->trace.working_bytes();}
+    impl_->constellation.capacity()*sizeof(Complex)+(impl_->noise?impl_->noise->working_bytes():impl_->pattern->working_bytes())+
+    impl_->trace.working_bytes();}
 std::vector<Complex> StreamingTransmitter::payload_constellation()const {
     const auto& s=*impl_;std::vector<Complex> result;result.reserve(s.constellation_count);
     for(std::size_t i=0;i<s.constellation_count;++i)result.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);
@@ -110,16 +126,18 @@ TransmitTrace StreamingTransmitter::transmit_trace()const {
     const auto count=std::min(result.generated_bits,TransmitTrace::bit_limit);
     for(auto* bits:{&result.wire_plain_bits,&result.wire_bits,&result.data_key_bits})
         if(bits->size()>count)bits->resize(count);
-    impl_->pattern->copy_transmit_trace(result,result.generated_chips);
+    if(impl_->pattern)impl_->pattern->copy_transmit_trace(result,result.generated_chips);
     return result;
 }
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);
-    return s.pattern->read(output,stop,[&](Complex point){s.retain_constellation(point);});
+    const auto observer=[&](Complex point){s.retain_constellation(point);};
+    return s.noise?s.noise->read(output,stop,observer):s.pattern->read(output,stop,observer);
 }
 std::size_t StreamingTransmitter::read_analytic(std::span<Complex> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);
-    return s.pattern->read_analytic(output,stop,[&](Complex point){s.retain_constellation(point);});
+    const auto observer=[&](Complex point){s.retain_constellation(point);};
+    return s.noise?s.noise->read_analytic(output,stop,observer):s.pattern->read_analytic(output,stop,observer);
 }
 std::optional<SymbolObservation> StreamingTransmitter::next_symbol(std::stop_token stop) {
     cancelled(stop);
@@ -132,7 +150,8 @@ void StreamingTransmitter::preview_last(std::span<float> output)const {
 }
 void StreamingTransmitter::preview_last_analytic(std::span<Complex> output)const {
     if(output.size()>analytic_preview_limit)throw Error("analytic streaming preview exceeds its bounded history");
-    impl_->pattern->preview_last_analytic(output);
+    if(impl_->noise)impl_->noise->preview_last_analytic(output);
+    else impl_->pattern->preview_last_analytic(output);
 }
 
 struct StreamingReceiver::Impl {

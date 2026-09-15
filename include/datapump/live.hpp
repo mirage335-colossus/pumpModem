@@ -83,6 +83,7 @@ struct Snapshot {
     std::string error;
     bool running = false;
     bool transmitting = false;
+    bool transmitting_noise = false; // Continuous tuning noise; fraction has no endpoint.
     bool simulation = false;
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
@@ -135,6 +136,10 @@ public:
     // simulations pass sampled audio to ordinary blind acquisition. Without
     // raw discovery framing, no timing/length-assisted raw result is emitted.
     void transmit_bits(std::span<const std::uint8_t> bits);
+    // Continuous noise at the selected carrier/bandwidth and normal signal
+    // level, with fresh temporary private streams. Does not encode a message
+    // or use/register saved keys. Stop with cancel_transmit().
+    void transmit_noise();
     void cancel_transmit();
     Snapshot snapshot();
     void stop();

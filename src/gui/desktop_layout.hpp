@@ -12,13 +12,13 @@ inline constexpr int action_height = 29, compact_action_height = 20;
 enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
-    binary, qr_brightness, qr, attach_file, use_text, send_key, transmit,
+    binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, signal_label, signals, copy_signal, paste_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
     constellation, pattern_scores_label, pattern_scores,
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
-    short_use_text, short_send_key, short_transmit, short_cancel, short_airtime,
+    short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, received_raw_bits,
     device, mono, bandwidth, carrier, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
@@ -88,8 +88,9 @@ struct DesktopLayout {
         out[Slot::use_text] = {194, buttons_y, 78, action_height};
         out[Slot::send_key] = {281, buttons_y, 129, action_height};
         out[Slot::transmit] = {419, buttons_y, 112, action_height};
-        out[Slot::cancel] = {540, buttons_y, 106, action_height};
-        out[Slot::airtime] = {657, buttons_y, width - margin - 657, action_height};
+        out[Slot::transmit_noise] = {540, buttons_y, 130, action_height};
+        out[Slot::cancel] = {679, buttons_y, 106, action_height};
+        out[Slot::airtime] = {796, buttons_y, width - margin - 796, action_height};
 
         out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,transmit_scope_visible?18:0};
         out[Slot::transmit_scope_format]={width-margin-136,buttons_y+31,136,18};
@@ -149,8 +150,9 @@ struct DesktopLayout {
         out[Slot::short_use_text] = {margin, short_actions_y, 90, action_height};
         out[Slot::short_send_key] = {116, short_actions_y, 150, action_height};
         out[Slot::short_transmit] = {276, short_actions_y, 125, action_height};
-        out[Slot::short_cancel] = {411, short_actions_y, 115, action_height};
-        out[Slot::short_airtime] = {536, short_actions_y, width - margin - 536, action_height};
+        out[Slot::short_transmit_noise] = {411, short_actions_y, 130, action_height};
+        out[Slot::short_cancel] = {551, short_actions_y, 115, action_height};
+        out[Slot::short_airtime] = {676, short_actions_y, width - margin - 676, action_height};
         const int raw_detail_y = out[Slot::page].y + out[Slot::page].h - 62;
         const int raw_actions_y = raw_detail_y - 38;
         out[Slot::compression_signals] = {margin, 426, compression_width, raw_actions_y - 436};

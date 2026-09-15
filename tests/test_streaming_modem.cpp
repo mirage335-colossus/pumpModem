@@ -1,6 +1,7 @@
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/transfer.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -30,6 +31,162 @@ struct ReceivedStreams {
         return result;
     }
 };
+
+void generated_bits_use_the_ordinary_modem() {
+    for(const bool shaped:{false,true}) {
+        transfer::Options options;
+        options.timestamp=1800000123;
+        options.key.emplace(Bytes(32,0x59));
+        options.modem.scramble=true;options.modem.dsss=true;
+        options.modem.pulse_shaping=shaped;
+        options.modem.bandwidth_hz=1100;
+        options.modem.integration_seconds=.071; // Partial chips, multiple symbols per epoch.
+        options.modem.stream_phase_samples=5573;
+        auto config=transfer::seeded_config(options,options.timestamp);
+        Bytes bits(93,0);
+        transfer::xor_binary_bits(bits,options);
+        modem::PatternTransmitter ordinary(bits,config,options.timestamp);
+        modem::PatternTransmitter generated(config,
+            modem::PatternTransmitter::MaskedZeroBits{bits.size()},options.timestamp);
+        if(ordinary.total_samples()!=generated.total_samples())
+            throw std::runtime_error("lazy Data bits changed ordinary settling, symbol or suppression duration");
+        std::vector<Complex> expected(ordinary.total_samples());
+        std::vector<Complex> expected_chips,actual_chips;
+        ordinary.read_analytic(expected,{},[&](Complex value){expected_chips.push_back(value);});
+        std::array<Complex,317> chunk{};
+        constexpr std::array<std::size_t,5> sizes{1,7,317,13,129};
+        std::size_t position=0,iteration=0;
+        while(!generated.finished()) {
+            const auto count=generated.read_analytic(std::span(chunk).first(sizes[iteration++%sizes.size()]),{},
+                [&](Complex value){actual_chips.push_back(value);});
+            for(std::size_t i=0;i<count;++i)
+                if(std::abs(chunk[i]-expected[position+i])>1e-9)
+                    throw std::runtime_error("lazy noise bits differ from the ordinary Data mask and pattern encoder");
+            position+=count;
+        }
+        if(position!=expected.size() || actual_chips!=expected_chips)
+            throw std::runtime_error("lazy input changed ordinary chip observations or endpoints");
+    }
+    modem::Config unkeyed;
+    bool rejected=false;
+    try { modem::PatternTransmitter source(unkeyed,modem::PatternTransmitter::MaskedZeroBits{1}); }
+    catch(const Error&) { rejected=true; }
+    if(!rejected)throw std::runtime_error("lazy zero input must never bypass its required Data stream");
+}
+
+void continuous_private_noise() {
+    modem::Config config;
+    config.spreading_factor=128;
+    // All ordinary message masks start disabled, but tuning still has fresh
+    // private streams. The public API accepts no deterministic noise key.
+    modem::StreamingTransmitter source(modem::Noise{},config),other(modem::Noise{},config);
+    const auto bytes=source.working_bytes();
+    const auto chip=modem::pattern_chip_samples(config);
+    const auto symbol=modem::symbol_sample_count(config);
+    const auto padding=modem::pattern_pulse_padding_samples(config);
+    const auto payload=modem::training_sample_count(config)+padding;
+    const auto endpoint=payload+8192*chip;
+    if(source.total_samples()>modem::NoiseTransmitter::sample_target || source.total_samples()<endpoint || source.finished())
+        throw std::runtime_error("noise must reserve a bounded continuous duration without buffering its bits");
+    std::array<Complex,317> a{},b{},preview{};
+    source.preview_last_analytic(preview);
+    if(std::any_of(preview.begin(),preview.end(),[](Complex value){return value!=Complex{};}))
+        throw std::runtime_error("new noise preview must be empty");
+    source.read_analytic(a);other.read_analytic(b);
+    if(a==b)throw std::runtime_error("two tuning starts reused the same private waveform");
+    std::vector<Complex> samples(a.begin(),a.end()),points;
+    auto initial=source.take_payload_constellation();
+    points.insert(points.end(),initial.points.begin(),initial.points.end());
+    constexpr std::array<std::size_t,5> sizes{1,7,317,13,129};
+    std::array<float,317> real{};
+    std::size_t iteration=0;
+    while(source.samples_emitted()<endpoint) {
+        const auto before=source.samples_emitted();
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(sizes[iteration%sizes.size()],endpoint-before));
+        if(iteration++%2)source.read(std::span(real).first(count));
+        else source.read_analytic(std::span(a).first(count));
+        source.preview_last_analytic(std::span(preview).first(count));
+        for(std::size_t i=0;i<count;++i) {
+            if(iteration%2==0 ? std::abs(real[i]-static_cast<float>(preview[i].real()))>1e-6F :
+                               std::abs(a[i]-preview[i])>1e-9)
+                throw std::runtime_error("mixed reads or previews changed the continuous noise waveform");
+            samples.push_back(preview[i]);
+        }
+        if(source.read_analytic(std::span<Complex>{}) || source.samples_emitted()!=before+count)
+            throw std::runtime_error("empty read or preview advanced noise transmission");
+        const auto batch=source.take_payload_constellation();
+        if(batch.dropped)throw std::runtime_error("incremental noise polling lost physical chips");
+        points.insert(points.end(),batch.points.begin(),batch.points.end());
+        source.preview_last_analytic(std::span(preview).first(count));
+        if(!source.take_payload_constellation().points.empty())
+            throw std::runtime_error("preview replayed transmitted noise chips");
+    }
+    if(points.size()!=8192 || source.working_bytes()!=bytes || source.transmit_trace().active || source.finished())
+        throw std::runtime_error("noise buffering, message trace or chip bookkeeping changed while streaming");
+    for(const auto lag:std::array<std::uint64_t,3>{symbol/chip,64,4096})
+        if(std::equal(points.begin(),points.begin()+64,points.begin()+static_cast<std::ptrdiff_t>(lag)))
+            throw std::runtime_error("noise repeated a symbol or finite stream cache");
+    Complex mean{},square{};double power=0;
+    for(const auto point:points) { mean+=point;square+=point*point;power+=std::norm(point); }
+    if(std::abs(mean)/points.size()>.06 || std::abs(square)/power>.08 ||
+       std::abs(power/points.size()/(2*modem::nominal_signal_power)-1)>.08)
+        throw std::runtime_error("private tuning patterns changed ordinary power or introduced a coherent carrier");
+    double waveform_power=0;
+    for(std::size_t i=payload;i<samples.size();++i) {
+        if(std::abs(samples[i])>modem::pattern_pcm_radius_limit+1e-10)
+            throw std::runtime_error("noise exceeded ordinary PCM headroom");
+        samples[i]*=std::polar(1.,-2*std::numbers::pi*static_cast<double>(i)*config.carrier_hz/config.sample_rate);
+        waveform_power+=std::norm(samples[i]);
+    }
+    if(std::abs(waveform_power/(samples.size()-payload)/(2*modem::nominal_signal_power)-1)>.08)
+        throw std::runtime_error("shaped tuning noise changed ordinary mean transmitted power");
+    const auto spectral_power=[&](double frequency) {
+        constexpr std::size_t window=2048;
+        double result=0;
+        const auto step=std::polar(1.,-2*std::numbers::pi*frequency/config.sample_rate);
+        for(std::size_t first=payload;first+window<=samples.size();first+=window/2) {
+            Complex sum{},oscillator{1,0};
+            for(std::size_t i=0;i<window;++i) {
+                const auto weight=.5-.5*std::cos(2*std::numbers::pi*static_cast<double>(i)/(window-1));
+                sum+=weight*samples[first+i]*oscillator;oscillator*=step;
+            }
+            result+=std::norm(sum);
+        }
+        return result;
+    };
+    double inband=0;
+    for(double frequency:{-200.,-100.,0.,100.,200.})inband+=spectral_power(frequency)/5;
+    for(double frequency:{-1000.,-550.,-400.,400.,550.,1000.})
+        if(spectral_power(frequency)>inband*.005)
+            throw std::runtime_error("tuning noise increased ordinary shaped-pattern sidelobes");
+    modem::StreamingTransmitter exact(modem::Noise{},config,bytes);
+    bool rejected=false;
+    try { modem::StreamingTransmitter too_small(modem::Noise{},config,bytes-1); }
+    catch(const Error&) { rejected=true; }
+    if(!rejected || exact.working_bytes()!=bytes)
+        throw std::runtime_error("noise workspace limit ignored retained private stream state");
+    std::stop_source stop;stop.request_stop();rejected=false;
+    const auto before=source.samples_emitted();
+    try { source.read_analytic(a,stop.get_token()); }catch(const Error&) { rejected=true; }
+    if(!rejected || source.samples_emitted()!=before || source.finished())
+        throw std::runtime_error("noise cancellation must stop promptly without inventing a completed stream");
+
+    config.spreading_mode=modem::SpreadingMode::tone;
+    config.data_key.emplace(Bytes(32,0x37));config.spreading_seed.fill(0xa5);config.dsss_seed.fill(0x59);
+    config.integration_seconds=4*3600;
+    const auto original=config.data_key->stream(StreamPurpose::Data,0,0,32);
+    modem::StreamingTransmitter long_noise(modem::Noise{},config);
+    long_noise.read_analytic(a);
+    if(long_noise.working_bytes()>128*1024 || long_noise.samples_emitted()!=a.size() ||
+       long_noise.take_payload_constellation().points.empty() ||
+       original!=config.data_key->stream(StreamPurpose::Data,0,0,32) ||
+       config.spreading_seed.front()!=0xa5 || config.dsss_seed.front()!=0x59)
+        throw std::runtime_error("long-symbol tuning blocked chip output or changed selected message keys");
+    config.integration_seconds=static_cast<double>(modem::NoiseTransmitter::sample_target)/config.sample_rate;
+    rejected=false;
+    try { modem::StreamingTransmitter excessive(modem::Noise{},config); }catch(const Error&) { rejected=true; }
+    if(!rejected)throw std::runtime_error("noise must reject a symbol beyond its safe continuous duration");
+}
 
 void exact_suppression_noise() {
     for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
@@ -273,6 +430,8 @@ void frame_wide_transmit_constellation() {
 
 int main() {
     try {
+        generated_bits_use_the_ordinary_modem();
+        continuous_private_noise();
         exact_suppression_noise();
         suppression_hides_delayed_echo();
         pattern_transmit_constellation();

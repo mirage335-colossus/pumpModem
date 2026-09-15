@@ -235,5 +235,71 @@ void transmit_capture_tracks_generation_and_replay() {
           "replacement transmission exposed bits from a retired generation");
     session.cancel_transmit();session.stop();
 }
+void continuous_noise_lifecycle() {
+    // A frozen keyed clock must never delay ephemeral noise or consume the
+    // saved key's epoch. Also exercise the public and tone receive profiles.
+    for (unsigned mode=0;mode<3;++mode) {
+        auto value=settings();value.transfer.timestamp=0;
+        value.transfer.modem.integration_seconds=5;
+        if(mode==1) {
+            value.transfer.key.emplace(Bytes(32,0x5c));
+            value.receive_keys.emplace_back(Bytes(32,0x6d));
+            value.transfer.modem.scramble=value.transfer.modem.dsss=true;
+        } else if(mode==2) {
+            value.transfer.modem.spreading_mode=modem::SpreadingMode::tone;
+        }
+        live::Session session([] {return 1800000000.;});
+        bool rejected=false;
+        try {session.transmit_noise();} catch(const Error&) {rejected=true;}
+        check(rejected,"stopped session accepted noise");
+        session.start(value);
+        session.transmit_noise();
+        const auto queued=session.snapshot();
+        check(queued.transmitting && queued.transmitting_noise && !queued.transmission_finished,
+              "noise must become cancellable before asynchronous preparation");
+        rejected=false;
+        try {session.transmit_noise();} catch(const Error&) {rejected=true;}
+        check(rejected,"a second noise request was queued behind continuous noise");
+        rejected=false;
+        try {session.transmit_bits(Bytes{0});} catch(const Error&) {rejected=true;}
+        check(rejected,"message was silently queued behind continuous noise");
+        const auto first=wait_for(session,[](const auto& snapshot) {
+            return snapshot.transmission_seconds>=.15 && !snapshot.waveform.empty();
+        });
+        const auto later=wait_for(session,[](const auto& snapshot) {
+            return snapshot.transmission_seconds>=.4;
+        });
+        check(later.transmitting && later.transmitting_noise && !later.transmission_finished &&
+              !later.simulation_replay && later.transmission_fraction==0,
+              "continuous noise acquired a finite message endpoint or replay");
+        check(later.waveform!=first.waveform && !later.constellation.empty() &&
+              later.constellation_source==live::ConstellationSource::transmitted,
+              "noise plots must show fresh emitted waveform and chips");
+        check(!later.transmit_trace.active && later.transmit_trace.source.empty() &&
+              later.transmit_trace.data_key_bits.empty() && later.received.empty(),
+              "noise was presented as encoded message content or exposed temporary streams");
+        check(later.dsp_buffered_bytes<=value.dsp_workspace_bytes,"noise exceeded the live DSP budget");
+        const auto serial=later.transmission_id;
+        session.cancel_transmit();
+        const auto cancelled=session.snapshot();
+        check(cancelled.running && !cancelled.transmitting && !cancelled.transmitting_noise &&
+              cancelled.transmission_cancelled && cancelled.transmission_finished && !cancelled.simulation_replay,
+              "noise cancellation did not return to continuous reception");
+        session.transmit_noise();
+        const auto restarted=wait_for(session,[&](const auto& snapshot) {
+            return snapshot.transmission_id!=serial && snapshot.transmission_seconds>=.1;
+        });
+        check(restarted.transmitting_noise && !restarted.transmit_trace.active,
+              "restarted noise retained stale message state");
+        session.cancel_transmit();
+        session.transmit_bits(Bytes{0,0,1});
+        const auto message=wait_for(session,[](const auto& snapshot) {return snapshot.transmit_trace.active;});
+        check(!message.transmitting_noise && message.transmit_trace.total_wire_bits==3 &&
+              message.transmit_trace.data_masked==(mode==1),
+              "noise changed the following raw message's framing or saved key selection");
+        session.stop();
+        check(!session.snapshot().transmitting_noise,"stopping retained noise state");
+    }
 }
-int main(int argc,char** argv){try{if(argc==1){run();transmit_capture_tracks_generation_and_replay();}short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(int argc,char** argv){try{if(argc==1){run();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

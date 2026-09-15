@@ -24,6 +24,9 @@ struct ConstellationBatch {
 // Unframed binary input: one meaningful 0/1 bit per element, including leading
 // zeros. Every symbol carries exactly one bit, including the last symbol.
 struct RawBits { Bytes bits; };
+// Continuous random bits through the ordinary encrypted pattern modem, with
+// a private temporary key per start and no message contents or framing.
+struct Noise {};
 
 class StreamingTransmitter {
 public:
@@ -38,6 +41,7 @@ public:
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024,
                          TransmitTrace trace = {});
+    StreamingTransmitter(Noise, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;

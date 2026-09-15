@@ -755,8 +755,62 @@ void compression_declarations() {
     check(std::string_view(control(ui::Field::binary).help).find("Incomplete bytes pause")==std::string_view::npos,
           "Binary help still rejects supported short raw patterns");
 }
+void noise_declarations_and_dispatch() {
+    using C=ui::Command;using F=ui::Field;using P=ui::Page;
+    const auto declaration=[](C command,P page)->const ui::Control& {
+        const auto& controls=ui::console_screen();
+        const auto found=std::find_if(controls.begin(),controls.end(),[&](const auto& c){return c.command==command&&c.page==page;});
+        if(found==controls.end())throw Error("Missing shared tuning-noise control");
+        return *found;
+    };
+    Application app({.simulation=true});
+    for(const auto page:{P::console,P::compression}) {
+        const auto& noise=declaration(C::transmit_noise,page);
+        const auto& send=declaration(page==P::console?C::transmit:C::transmit_short_bits,page);
+        const auto& cancel=declaration(C::cancel,page);
+        check(noise.kind==ui::Kind::action&&!noise.persistent&&noise.field==F::count&&
+              noise.slot==(page==P::console?ui::Slot::transmit_noise:ui::Slot::short_transmit_noise)&&
+              std::string_view(noise.label)=="Transmit noise"&&
+              std::string_view(noise.help).find("fresh temporary keys")!=std::string_view::npos&&
+              std::string_view(noise.help).find("Stop noise")!=std::string_view::npos,
+              "Tuning noise lost its shared button, temporary-key help or stop instructions");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto a=app.control_layout(send,size.w,size.h).frame;
+            const auto b=app.control_layout(noise,size.w,size.h).frame;
+            const auto c=app.control_layout(cancel,size.w,size.h).frame;
+            check(a.y==b.y&&b.y==c.y&&a.h==b.h&&b.h==c.h&&
+                  a.x+a.w<b.x&&b.x+b.w<c.x&&b.w>=130&&c.x+c.w<=size.w-ui::margin,
+                  "Transmit noise overlaps its neighboring actions or clips at a supported desktop size");
+        }
+        app.select_page(page);
+        check(app.control(noise).enabled&&app.control(noise).visible,
+              "Empty composer disabled or hid the shared tuning-noise action");
+    }
+    app.select_page(P::console);app.edit(control(F::binary),"invalid draft");
+    const auto draft=app.field(F::binary).text;
+    const auto& noise=declaration(C::transmit_noise,P::console);
+    check(app.control(noise).enabled&&!app.enabled(C::transmit),
+          "Invalid message draft disabled noise in the shared facade");
+    app.start();app.activate(noise);
+    check(!app.control(noise).enabled&&app.control(declaration(C::cancel,P::console)).label=="Stop noise",
+          "Native noise action did not dispatch the controller's start and dynamic stop label");
+    app.select_page(P::compression);
+    const auto& cancel=declaration(C::cancel,P::compression);
+    check(app.control(cancel).enabled&&app.control(cancel).label=="Stop noise"&&
+          !app.control(declaration(C::transmit_noise,P::compression)).enabled,
+          "Changing pages lost the common active noise state");
+    app.activate(cancel);
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(!app.enabled(C::transmit_noise)&&std::chrono::steady_clock::now()<deadline) {
+        app.tick();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    check(app.enabled(C::transmit_noise)&&!app.control(cancel).enabled&&app.control(cancel).label=="Cancel TX"&&
+          app.field(F::binary).text==draft,
+          "Shared Stop noise failed to restore controls and preserve the invalid draft");
+    app.close();check(!app.enabled(C::transmit_noise),"Closed application retained an active noise action");
+}
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

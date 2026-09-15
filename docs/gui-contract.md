@@ -25,6 +25,16 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+**Transmit noise** appears beside the transmit controls on Console and
+Compression. It starts the regular encrypted pattern modulation with fresh
+temporary keys and dummy bits, independently of draft/attachment validity or
+the selected saved key. Valid modem settings and an idle transmitter are
+required; key loading disables startup. **Stop noise** cancels it, and the mode
+line shows elapsed time. Drafts, prepared inspection, previous-message history
+and saved keys remain intact. Simulation runs continuously without a completion
+replay. Automatic transmission capture stays hidden during noise; manual Hex/Bits
+show an explanatory caption and no retained temporary keystream diagnostics.
+
 The persistent **Mono** toggle below **Audio device** starts enabled. Transmit
 audio uses the right channel of a stereo output, with silence on the left;
 mono-only outputs use their sole channel. Turning Mono off sends the same audio

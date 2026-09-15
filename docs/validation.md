@@ -4,6 +4,48 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Continuous tuning transmission — 15 September 2026
+
+Both shared compose pages now provide **Transmit noise** and **Stop noise**.
+Noise uses the regular encrypted pattern transmitter with fresh temporary
+Data/Scrambler/DSSS key material and a bounded source of Data-masked dummy bits.
+The ordinary pattern alternatives, epoch/ordinal schedule, settling, shaping,
+carrier and signal level remain in use. No user content, keyfile entry or
+receive-bank key is created. Normal message framing, exact short/raw endpoints,
+physical completion and pending presentation remain unchanged.
+
+FLTK and Rev Release builds passed. `streaming_modem` and `noise_receive`
+passed in both builds. Independent lazy-source/ordinary-source comparisons
+check sampled waveform and chip equality through partial-chip symbols,
+multiple epochs, shaping on/off and both surrounding noise sections. Other
+new checks cover fresh starts, non-looping symbol/cache blocks, preview/read
+continuity, ordinary power and sidelobes, bounded storage, four-hour symbols,
+coordinate exhaustion and cancellation. The receiver comparison admits zero
+bits for tuning noise, unknown-key encrypted transmission and Gaussian
+background across 16/128/512-chip public/private/tone receiver scenarios;
+actual-message positive controls must decode exactly. These are finite sampled
+regressions, not a lifetime false-detection or thermal-indistinguishability proof.
+
+All 15 focused compatibility/live/GUI suites passed in 119.65 seconds, including
+the independent dictionary vectors, fixed intervals, physical absence,
+four-hour sampled symbols and exact pending prefixes. All 23 shared GUI tests
+passed in 58.63 seconds after the final presentation change. Noise-specific GUI
+coverage includes empty/invalid drafts, attachments, loaded/failed keys,
+repeated start/stop, unchanged draft/inspection/history/settings, immediate
+busy state, elapsed status, and automatic/manual capture presentation.
+
+FLTK native document conformance passed. Its adapter conformance reached the
+already documented minimum-size Compression dictionary-label clipping failure;
+that assertion was retained. The updated FLTK native workflow passed in 200.16
+seconds, including keyed noise start/stop before its existing message and
+attachment tests. Rev adapter, platform, 1x and 2x coordinate conformance passed.
+Its concurrent workflow missed a late replay frame (maximum observed fraction
+0.847458 rather than the required 0.9); the isolated rerun passed in 260.88
+seconds. No assertion was changed. Both private virtual displays were stopped
+after validation.
+Hardware audio/RF operation and Windows runtime behavior were not exercised.
+No radio was keyed by these tests. `git diff --check` passed.
+
 ## Transmission scope space reclamation — 15 September 2026
 
 Hidden scopes now collapse their entire 206-pixel area. The signal and file

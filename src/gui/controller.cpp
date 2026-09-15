@@ -100,7 +100,7 @@ struct Controller::Impl {
     PlotReplayPolicy plot_policy;
     PlotUpdate plot_update;
     bool started=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
-    bool need_devices=true,settings_valid=true,transmit_requested=false,was_encrypted=false;
+    bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
     BinaryEditor composer;
     std::optional<BinaryEditor> previous_message;
@@ -454,6 +454,7 @@ struct Controller::Impl {
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
+        case Command::transmit_noise: return !busy && !key_loading && settings_valid;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
         case Command::show_key_folder: return !busy&&!key_loading&&!key_path.empty();
@@ -486,7 +487,8 @@ struct Controller::Impl {
     void controls() {
         const auto& scope_mode=f(UiField::transmit_scope_format).selected;
         const bool scope_visible=!closing&&(scope_mode=="hex"||scope_mode=="bits"||
-            (scope_mode=="hex-auto-hide"&&(snapshot.transmitting||snapshot.simulation_replay)));
+            (scope_mode=="hex-auto-hide"&&!noise_requested&&!snapshot.transmitting_noise&&
+                (snapshot.transmitting||snapshot.simulation_replay)));
         f(UiField::transmit_scope).visible=f(UiField::transmit_scope_caption).visible=scope_visible;
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
@@ -624,7 +626,9 @@ struct Controller::Impl {
             f(UiField::transmit_scope).records=transmit_scope_records(next.transmit_trace,f(UiField::transmit_scope_format).selected=="bits");
         const auto scope_status=next.simulation_replay?"replay":next.transmission_cancelled?"cancelled":
             !next.error.empty()?"interrupted":next.transmitting?"generating":"complete";
-        f(UiField::transmit_scope_caption).text=transmit_scope_caption(next.transmit_trace,scope_status);
+        f(UiField::transmit_scope_caption).text=next.transmitting_noise?
+            "Tuning noise / ordinary encrypted modulation / temporary keys are not saved":
+            transmit_scope_caption(next.transmit_trace,scope_status);
         const auto changed=plot_policy.observe(next.sequence,next.transmission_id,next.simulation_replay,next.replay_frame_index);
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
@@ -642,9 +646,14 @@ struct Controller::Impl {
             signals.update(std::move(line));
         }
         if(!next.signals.empty() || !next.received.empty()) refresh_signals();
-        if(transmit_requested&&!next.transmitting&&next.transmission_finished) { transmit_requested=false; gate.finished(); }
+        if(transmit_requested&&!next.transmitting&&next.transmission_finished) {
+            if(!noise_requested)gate.finished();
+            transmit_requested=false; noise_requested=false;
+        }
         const auto mode=next.simulation?"Simulation / continuous receive":"Listening / "+settings.device;
-        const auto tx_mode=std::string(next.simulation?"Calculating simulation ":"Transmitting ")+std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(next.transmission_seconds)+" media";
+        const auto tx_mode=next.transmitting_noise?
+            std::string(next.simulation?"Simulating noise / ":"Transmitting noise / ")+seconds_text(next.transmission_seconds)+" elapsed":
+            std::string(next.simulation?"Calculating simulation ":"Transmitting ")+std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(next.transmission_seconds)+" media";
         f(UiField::mode).text=next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode;
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
@@ -686,10 +695,17 @@ struct Controller::Impl {
             if(sent) { previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
+        case Command::transmit_noise:
+            transmit_requested=true; noise_requested=true;
+            try { session.transmit_noise(); }
+            catch(...) { transmit_requested=false; noise_requested=false; throw; }
+            notice(settings.simulation?"Simulating noise with temporary keys. Stop noise to finish.":
+                "Transmitting noise with temporary keys. Stop noise to finish."); break;
         case Command::paste_previous:
             composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
-        case Command::cancel: session.cancel_transmit(); notice(snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
+        case Command::cancel: session.cancel_transmit(); notice(noise_requested||snapshot.transmitting_noise?
+            "Stopping noise...":snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
         case Command::clear_received: inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
         case Command::attach_file:
             ++attachment_revision; pending_file.reset(); file_loading=false;
@@ -852,7 +868,8 @@ std::vector<ui::ServiceRequest> Controller::take_services() { auto result=std::m
 const ui::FieldState& Controller::field(UiField field) const { return impl_->f(field); }
 bool Controller::enabled(Command command) const { return impl_->enabled(command); }
 std::string Controller::command_label(Command command) const {
-    if(command==Command::cancel)return impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
+    if(command==Command::cancel)return impl_->noise_requested||impl_->snapshot.transmitting_noise?
+        "Stop noise":impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
     if(command==Command::transmit) {
         const auto remaining=impl_->gate.remaining(impl_->settings.simulation,impl_->encrypted()).count();
         if(remaining>0&&!impl_->snapshot.transmitting)return "TX wait "+std::to_string((remaining+999)/1000)+"s";

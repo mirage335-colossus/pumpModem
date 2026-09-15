@@ -16,7 +16,7 @@ enum class Field {
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, count
 };
 enum class Command {
-    none, transmit, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
+    none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
