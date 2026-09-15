@@ -33,12 +33,13 @@ For byte offset `o`, the AES-256-CTR initial 128-bit counter is
 `domain_pad || BE64(floor(o / 16))`. The optional final `Crypto::stream`
 argument selects `StreamDomain::Payload` by default, whose eight-byte pad is
 all zero, preserving existing payload output. `StreamDomain::Preamble` uses
-the eight ASCII bytes `preamble`. Both domains use the same purpose and epoch
+the eight ASCII bytes `preamble`; `StreamDomain::Suppression` uses `suppress`.
+All three domains use the same purpose and epoch
 key; the counter pad is not another key derivation. Discard the first `o % 16`
 keystream bytes and produce the requested count. OpenSSL increments the whole
 counter in big-endian order. The API rejects an offset/count combination whose
-final byte exceeds `2^64-1`, so neither domain can carry into the high counter
-bytes or overlap the other domain.
+final byte exceeds `2^64-1`, so no domain can carry into the high counter
+bytes or overlap another domain.
 Changing the whole-second anchor derives a fresh epoch key; counter positions
 therefore do not collide merely because adjacent transmissions cross a second.
 Within one anchor, purpose and domain, random access and sequential generation
@@ -147,6 +148,18 @@ stream before amplitude and phase mapping. Each layer uses the existing key
 and transmission epoch with `StreamDomain::Preamble`, the separate counter
 range whose high eight bytes are ASCII `preamble`. This pad is local state,
 never an on-air field; no preamble-specific key is generated.
+
+After the full payload waveform and its final filter tail, every nonempty
+transmission emits exactly two seconds of suppression noise. It uses the same
+noise mapping and enabled Data/Scrambler/DSSS mixture, but a third counter
+domain, `StreamDomain::Suppression`, whose high eight bytes are ASCII
+`suppress`. This separates its bytes from both the prefix and every payload
+stream without deriving another key. The same transmission epoch anchors
+these bounded noise caches. There is no payload bit, symbol slot, transmitted
+metadata or change to the Data counter schedule associated with this tail.
+Its duration is independent of symbol duration, including when the rounded
+prefix is absent. The tail is a guard against weaker delayed echoes, not a
+proof of echo cancellation or a receiver ending condition.
 
 The prefix's input chips are generated independently of both payload codewords and carry no
 acquisition marker. It uses no payload stream positions; payload starts at

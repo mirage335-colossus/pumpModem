@@ -497,7 +497,7 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
                       std::uint64_t offset, std::size_t count, StreamDomain domain) const {
     const auto index = static_cast<std::size_t>(purpose);
     require(index < 4, "invalid keystream purpose");
-    require(domain == StreamDomain::Payload || domain == StreamDomain::Preamble,
+    require(domain == StreamDomain::Payload || domain == StreamDomain::Preamble || domain == StreamDomain::Suppression,
             "invalid keystream domain");
     require(count == 0 || count - 1 <= std::numeric_limits<std::uint64_t>::max() - offset,
             "keystream byte offset would overflow");
@@ -511,6 +511,10 @@ Bytes Crypto::stream(StreamPurpose purpose, std::uint64_t timestamp,
     std::array<std::uint8_t, 16> counter{};
     if(domain == StreamDomain::Preamble) {
         constexpr std::string_view pad = "preamble";
+        std::copy(pad.begin(), pad.end(), counter.begin());
+    }
+    if(domain == StreamDomain::Suppression) {
+        constexpr std::string_view pad = "suppress";
         std::copy(pad.begin(), pad.end(), counter.begin());
     }
     put_u64(std::span(counter).last(8), offset / 16);

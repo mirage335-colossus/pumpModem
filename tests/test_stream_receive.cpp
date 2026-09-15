@@ -81,6 +81,19 @@ void refined_phase_and_post_end_gate() {
     check(complete.content_validated && complete.content.authenticated && complete.content.message.data==sent.data,
           "later precise phase information must control decryption and interval authentication");
 }
+void final_parity_statistics() {
+    const auto value=options();const auto sent=message(5);auto wire=transfer::message_wire_bits(sent,value);
+    wire.pop_back();transfer::StreamReceiver receiver(value,value.timestamp);
+    const auto pending=receiver.push(chunk(wire,0));
+    check(!pending.stream_complete && !pending.content_validated && !pending.content.fec_stats.parity.repaired_bytes,
+          "an unfinished interval must not report a speculative tail repair");
+    const auto complete=receiver.push(chunk({},wire.size(),100,true));
+    check(complete.content_validated && complete.content.message.data==sent.data &&
+          complete.content.fec_stats.parity.missing_bits==1 && complete.content.fec_stats.parity.erased_bytes==1 &&
+          complete.content.fec_stats.parity.repaired_bytes==1 && complete.content.pre_fec_accuracy &&
+          !complete.content.pre_fec_accuracy->missing_data_bits && !complete.content.pre_fec_accuracy->corrected_data_bits,
+          "physical completion must expose the final parity erasure repair beside unchanged data accuracy");
+}
 void shared_quota_cleanup_and_identity() {
     auto value=options();value.fec=FecMode::off;
     const auto wire=transfer::message_wire_bits(message(1),value);
@@ -141,7 +154,7 @@ void diagnostics_accounting() {
 }
 }
 int main() {
-    try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();
+    try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();final_parity_statistics();
          shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -231,7 +231,7 @@ struct PatternCorrelator::Impl {
     Emission& output_stream(Hypothesis& h) {
         const auto same_clock=[&](long double origin,double frequency) {
             return std::abs(origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
-                std::abs(frequency-h.burst.frequency_hz)<=.5*config.sample_rate/static_cast<double>(code.symbol_samples());
+                std::abs(frequency-h.burst.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples());
         };
         for(auto& emission:emissions)if(same_clock(emission.origin,emission.frequency) &&
             (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return emission;
@@ -248,6 +248,22 @@ struct PatternCorrelator::Impl {
             require(reusable!=emissions.end(),"pattern output stream quota exhausted");*reusable=emission;return *reusable;
         }
         emissions.push_back(emission);return emissions.back();
+    }
+    double carrier_estimate(const Hypothesis& owner) const {
+        // Keep immutable bit ownership, but report the strongest accumulated
+        // carrier evidence over comparable observations. A startup distortion
+        // must not lock the displayed frequency to its first winning grid bin.
+        const auto* best=&owner;
+        for(const auto& candidate:hypotheses) {
+            if(!candidate.admitted || candidate.burst.stream_first_symbol!=owner.burst.stream_first_symbol)continue;
+            const auto difference=candidate.committed_end>owner.committed_end?
+                candidate.committed_end-owner.committed_end:owner.committed_end-candidate.committed_end;
+            if(difference>code.symbol_samples() || std::abs(candidate.origin-owner.origin)>=code.symbol_samples()/3.L ||
+               std::abs(candidate.burst.frequency_hz-owner.burst.frequency_hz)>
+                    config.sample_rate/static_cast<double>(code.symbol_samples()))continue;
+            if(candidate.committed_score>best->committed_score)best=&candidate;
+        }
+        return best->burst.frequency_hz;
     }
     void publish(Hypothesis& h,bool complete=false,bool flush=true) {
         if(!h.admitted)return;
@@ -266,7 +282,7 @@ struct PatternCorrelator::Impl {
             PatternBurst result;
             result.first_sample=h.burst.first_sample;result.first_stream_symbol=h.burst.first_stream_symbol;
             result.stream_first_sample=h.burst.stream_first_sample;result.stream_first_symbol=h.burst.stream_first_symbol;
-            result.frequency_hz=h.burst.frequency_hz;result.stream_phase_samples=h.burst.stream_phase_samples;
+            result.frequency_hz=carrier_estimate(h);result.stream_phase_samples=h.burst.stream_phase_samples;
             result.bits.assign(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
             result.complete=complete && count==h.committed;
             result.end_sample=count==h.committed?h.committed_end:
@@ -275,7 +291,7 @@ struct PatternCorrelator::Impl {
             const auto duplicate=std::find_if(bursts.begin(),bursts.end(),[&](const auto& prior) {
                 const auto delta=prior.first_sample>result.first_sample?prior.first_sample-result.first_sample:result.first_sample-prior.first_sample;
                 return prior.first_stream_symbol==result.first_stream_symbol && prior.complete==result.complete &&
-                    delta<code.symbol_samples()/3 && std::abs(prior.frequency_hz-result.frequency_hz)<=.5*config.sample_rate/static_cast<double>(code.symbol_samples());
+                    delta<code.symbol_samples()/3 && std::abs(prior.frequency_hz-result.frequency_hz)<=config.sample_rate/static_cast<double>(code.symbol_samples());
             });
             const auto emitted_end=result.end_sample;
             if(duplicate!=bursts.end()) {
@@ -326,7 +342,7 @@ struct PatternCorrelator::Impl {
         event.first_sample=h.burst.first_sample;event.end_sample=resumed_sample;
         event.first_stream_symbol=h.burst.first_stream_symbol;
         event.stream_first_sample=h.burst.stream_first_sample;event.stream_first_symbol=h.burst.stream_first_symbol;
-        event.frequency_hz=h.burst.frequency_hz;event.score=h.committed_score;
+        event.frequency_hz=carrier_estimate(h);event.score=h.committed_score;
         event.stream_phase_samples=h.burst.stream_phase_samples;event.missing_slots=h.gap_slots;
         bursts.push_back(std::move(event));h.gap_slots=0;
         h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;stream.last_symbol=h.index;
@@ -537,7 +553,7 @@ std::vector<Complex> PatternCorrelator::take_chip_constellation() {
     for(std::size_t i=0;i<s.point_count;++i)result.push_back(s.points[(s.point_begin+i)%s.points.size()]);
     s.point_begin=s.point_count=0;return result;
 }
-bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return !h.burst.bits.empty();});}
+bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted || !h.burst.bits.empty();});}
 bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {

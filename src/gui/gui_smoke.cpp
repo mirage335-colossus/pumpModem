@@ -311,7 +311,7 @@ struct Smoke::Impl {
             transmit(controller);phase=Phase::text_received;break;
         case Phase::text_received: {
             if(verified_ids.size()!=1)break;
-            require(controller.inbox().file_items().size()==1,"Received source was unavailable for explicit saving");
+            require(controller.inbox().file_items().empty(),"Ordinary text appeared as a received attachment");
             bool copied=false;
             for(const auto& line:controller.signals().lines())if(line.validated) {
                 require((line.pattern_score||line.preamble_received_percent)&&line.pre_fec_accuracy&&line.pre_fec_accuracy->received_data_bits,
@@ -340,7 +340,7 @@ struct Smoke::Impl {
                 break;
             }
             const auto files=controller.inbox().file_items();
-            require(files.size()==2&&files.back()->message.data==file_bytes,"Received file list did not retain the exact binary attachment");
+            require(files.size()==1&&files.back()->message.data==file_bytes&&files.back()->message.filename==path_text(input_path.filename()),"Received file list did not retain the exact binary attachment");
             const auto id=id_label(files.back()->message);
             bool measured_file=false;
             for(const auto& line:controller.signals().lines())if(line.reception_id==id) {

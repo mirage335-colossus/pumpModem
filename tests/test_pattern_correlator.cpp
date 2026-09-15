@@ -54,6 +54,7 @@ std::vector<modem::PatternBurst> capture(const std::vector<float>& samples,const
                result.back().first_stream_symbol+result.back().bits.size()==burst.first_stream_symbol) {
                 auto& prior=result.back();prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
                 prior.complete=burst.complete;prior.end_sample=burst.end_sample;prior.score=burst.score;prior.stream_phase_samples=burst.stream_phase_samples;
+                prior.frequency_hz=burst.frequency_hz;
             } else result.push_back(std::move(burst));
         }
     };
@@ -153,6 +154,35 @@ void set_symbol_evidence(std::vector<float>& samples,const modem::Config& c,std:
     check(std::abs(actual-target)<.01 && actual-alternative>1,
           "weak-symbol fixture must retain a clear bit preference at its intended evidence level");
 }
+void stronger_significance_rejects_marginal_symbol() {
+    auto c=config();c.integration_seconds=.1;c.pulse_shaping=false;
+    constexpr std::size_t start=375;
+    auto samples=waveform({1},c,start);
+    set_symbol_evidence(samples,c,start,0,1,23,537);
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.frequency_offsets_hz={0};
+    auto previous=search;previous.false_alarm_probability=1e-8;
+    check(best(capture(samples,c,previous,113)).bits==Bytes({1}),
+          "marginal symbol fixture must be admitted by the former significance threshold");
+    check(capture(samples,c,search,113).empty(),
+          "stronger default significance must leave marginal isolated evidence unadmitted");
+    check(best(capture(waveform({1},c,start),c,search,113)).bits==Bytes({1}),
+          "stronger significance must retain independently confident sampled symbols");
+}
+void overlapping_carrier_hypotheses_emit_one_stream() {
+    auto c=config();c.scramble=c.dsss=false;c.pulse_shaping=false;
+    constexpr std::size_t start=375;
+    const Bytes bits{1,0,1,1,0,0,1,0};
+    const auto half_width=.5*c.sample_rate/static_cast<double>(modem::symbol_sample_count(c));
+    modem::PatternSearch search;search.start_offset_seconds=.0625;
+    // Both sides of an unresolved main lobe can independently pass the
+    // noise test. They are alternative observations of one physical stream.
+    search.frequency_offsets_hz={-half_width,half_width};search.chunk_bits=2;
+    const auto result=capture(waveform(bits,c,start),c,search,113);
+    check(result.size()==1 && result[0].bits==bits,
+          "overlapping carrier hypotheses must not emit duplicate raw streams for one sampled signal");
+    check(std::abs(result[0].frequency_hz-c.carrier_hz)==half_width,
+          "an unresolved carrier bank must report measured grid evidence without inventing the center");
+}
 void shaped_raw_sample_evidence() {
     const auto c=config();const Bytes bits{0,1,0};
     const auto padding=modem::pattern_pulse_padding_samples(c);
@@ -239,6 +269,7 @@ void weak_tails_expire_without_blocking_independent_symbols() {
         set_symbol_evidence(samples,c,payload_start,index,bits[index],9,static_cast<std::uint32_t>(991+index));
     modem::PatternSearch search;search.start_offset_seconds=.0625;search.start_uncertainty_seconds=0;
     search.frequency_offsets_hz={0};
+    search.false_alarm_probability=1e-8; // The 6/23 score pair below brackets this specific admission boundary.
     const auto expired=capture(samples,c,search,113);
     check(expired.size()==2 && expired[0].bits==Bytes({1}) && expired[0].first_stream_symbol==0 &&
           expired[0].complete && expired[1].bits==Bytes({1}) && expired[1].first_stream_symbol==6,
@@ -330,6 +361,23 @@ void default_gap_expiry_releases_payload_workspace() {
     const auto finished=receiver.take_bursts();
     check(finished.size()==1 && finished[0].bits==suffix && !finished[0].complete && receiver.working_bytes()==baseline,
           "end of capture must publish the final message and reclaim its active payload allocation");
+}
+void drained_stream_keeps_acquisition_state() {
+    auto c=config();c.integration_seconds=1;c.pulse_shaping=false;
+    constexpr std::size_t start=375;
+    const auto symbol=modem::symbol_sample_count(c);
+    auto samples=waveform({1},c,start);samples.resize(start+symbol+modem::pattern_absence_samples(c),0.F);
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.frequency_offsets_hz={0};search.chunk_bits=1;
+    modem::PatternCorrelator receiver(c,search,1024*1024);
+    receiver.push(std::span(samples).first(start+symbol));
+    const auto chunk=receiver.take_bursts();
+    check(chunk.size()==1 && chunk[0].bits==Bytes({1}) && !chunk[0].complete && receiver.provisional().bits.empty(),
+          "fixture must drain every stored bit while retaining its admitted clock");
+    check(receiver.acquiring() && receiver.synchronized(),"draining decisions must not make an admitted stream appear idle to epoch retirement");
+    receiver.push(std::span(samples).subspan(start+symbol));
+    const auto ended=receiver.take_bursts();
+    check(ended.size()==1 && ended[0].complete && !receiver.acquiring(),
+          "only physical absence may release the drained stream's acquisition state");
 }
 void drainable_chunks_and_compact_gaps() {
     for(const bool clock_window:{false,true}) {
@@ -568,6 +616,8 @@ int main(int argc,char** argv) {
     run("sampled_plain",[]{sampled_bits_and_rates(false);});
     run("late_clock_fragment",late_clock_fragment);
     run("weak_prefix_does_not_borrow_confidence",weak_prefix_does_not_borrow_confidence);
+    run("stronger_significance_rejects_marginal_symbol",stronger_significance_rejects_marginal_symbol);
+    run("overlapping_carrier_hypotheses_emit_one_stream",overlapping_carrier_hypotheses_emit_one_stream);
     run("shaped_raw_sample_evidence",shaped_raw_sample_evidence);
     run("shaped_partial_chips",shaped_partial_chips);
     run("majority_obscured_symbol_is_independent",majority_obscured_symbol_is_independent);
@@ -576,6 +626,7 @@ int main(int argc,char** argv) {
     run("timed_gaps_preserve_admitted_clock_and_trim_silence",timed_gaps_preserve_admitted_clock_and_trim_silence);
     run("timed_gap_expiry",timed_gap_expiry);
     run("default_gap_expiry_releases_payload_workspace",default_gap_expiry_releases_payload_workspace);
+    run("drained_stream_keeps_acquisition_state",drained_stream_keeps_acquisition_state);
     run("timed_gaps_cannot_resolve_stream_phase",timed_gaps_cannot_resolve_stream_phase);
     run("drainable_chunks_and_compact_gaps",drainable_chunks_and_compact_gaps);
     run("output_pressure_never_claims_stream_end",output_pressure_never_claims_stream_end);

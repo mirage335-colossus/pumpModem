@@ -318,7 +318,7 @@ Message message(const Args& a) {
     else if(kind=="screenshot") m.kind=MessageKind::screenshot;
     else throw Error("unknown message kind");
     if(m.kind!=MessageKind::text) m.filename=a.get("filename",std::filesystem::path(a.get("input")).filename().string());
-    m.callsign=a.get("callsign");m.grid=a.get("grid");m.repeatable=a.has("repeatable");
+    m.callsign=a.get("callsign");m.grid=a.get("grid");m.repeatable=m.kind==MessageKind::text && a.has("repeatable");
     if(m.data.size()>content_budget(a)) throw Error("message exceeds content limit");
     return m;
 }
@@ -363,6 +363,11 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
 std::string id_string(const Message& m) {
     std::ostringstream id;for(auto b:m.local_id) id<<std::hex<<std::setfill('0')<<std::setw(2)<<static_cast<unsigned>(b);return id.str();
 }
+void report_fec_region(const FecRegionStats& stats) {
+    std::cout<<"{\"received_bits\":"<<stats.received_bits<<",\"corrected_bits\":"<<stats.corrected_bits
+        <<",\"missing_bits\":"<<stats.missing_bits<<",\"corrected_bytes\":"<<stats.corrected_bytes
+        <<",\"erased_bytes\":"<<stats.erased_bytes<<",\"repaired_bytes\":"<<stats.repaired_bytes<<'}';
+}
 void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
             bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={}) {
     const auto& m=stream.message;
@@ -379,7 +384,13 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
           <<"\",\"filename\":\""<<json_escape(m.filename)<<"\",\"callsign\":\""<<json_escape(m.callsign)
           <<"\",\"grid\":\""<<json_escape(m.grid)<<"\",\"repeatable\":"<<(m.repeatable?"true":"false")
           <<",\"data_base64\":\""<<base64_encode(m.data)<<"\",\"corrected_bytes\":"<<stream.corrected_bytes
-          <<",\"timestamp\":"<<timestamp<<",\"raw_bits\":\"";
+          <<",\"fec_repairs\":{\"data\":";
+        report_fec_region(stream.fec_stats.data);std::cout<<",\"integrity\":";report_fec_region(stream.fec_stats.integrity);
+        std::cout<<",\"parity\":";report_fec_region(stream.fec_stats.parity);std::cout<<"},\"pre_fec_accuracy\":";
+        if(stream.pre_fec_accuracy)std::cout<<"{\"received_data_bits\":"<<stream.pre_fec_accuracy->received_data_bits
+            <<",\"corrected_data_bits\":"<<stream.pre_fec_accuracy->corrected_data_bits
+            <<",\"missing_data_bits\":"<<stream.pre_fec_accuracy->missing_data_bits<<'}';else std::cout<<"null";
+        std::cout<<",\"timestamp\":"<<timestamp<<",\"raw_bits\":\"";
         for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
         std::cout<<"\",\"raw_bit_count\":"<<raw_bits.size()<<",\"missing_symbols\":"<<missing_symbols
           <<",\"observed_bit_count\":"<<observed_bits<<",\"error\":\""<<json_escape(std::string(error))<<"\""

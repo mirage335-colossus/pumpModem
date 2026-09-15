@@ -48,8 +48,11 @@ void records() {
           gap_row.cells[1].text=="binary received" && gap_row.cells[4].text=="001" &&
           gap_row.cells[4].y+gap_row.cells[4].h<=gap_row.cells.back().y,
           "Raw gap placeholders must be disclosed beside the retained bits without overlapping their preview");
-    pending.missing_symbols=3;signals.update(pending);rows=signal_records(signals);
-    check(rows[0].cells.back().text=="3 missing bits filled with 0" &&
+    pending.missing_symbols=3;pending.pre_fec_accuracy=StreamBitAccuracy{97,1,3};
+    pending.fec_stats.data.missing_bits=3;pending.fec_stats.data.erased_bytes=1;
+    pending.fec_stats.data.repaired_bytes=1;pending.fec_stats.parity.repaired_bytes=1;
+    signals.update(pending);rows=signal_records(signals);
+    check(rows[0].cells.back().text=="3 missing timed bits; RS repaired 2 B (data 1, parity 1; erasures 1; missing data bits 3)" &&
           rows[0].cells[1].text=="decoded bytes" && rows[0].cells[3].text==signal_data_label(pending),
           "Validated gap recovery must preserve verification and the existing pre-FEC metric");
     check(signal_gap_label(recovered).empty(),"An intact reception must not show a gap notice");

@@ -20,11 +20,11 @@ int main(){try {
     for(const std::size_t count:{1,3,5,7,31}) {
         const Bytes bytes(count,0xa7);const auto samples=m::modulate(bytes,config);
         require(m::payload_symbol_count(count,config)==count*8,"byte stream added symbol padding");
-        require(samples.size()==m::training_sample_count(config)+2*m::pattern_pulse_padding_samples(config)+count*8*m::symbol_sample_count(config),"byte modulation sample count mismatch");
+        require(samples.size()==m::training_sample_count(config)+2*m::pattern_pulse_padding_samples(config)+m::suppression_sample_count(config)+count*8*m::symbol_sample_count(config),"byte modulation sample count mismatch");
         require(m::waveform_sample_count(count,config)==samples.size(),"waveform estimate mismatch");
     }
     const Bytes status{1,0,1};const auto wave=m::modulate_status(status,config);
-    require(wave.size()==m::training_sample_count(config)+2*m::pattern_pulse_padding_samples(config)+status.size()*m::symbol_sample_count(config),"raw waveform length differs from exact bits and physical overhead");
+    require(wave.size()==m::training_sample_count(config)+2*m::pattern_pulse_padding_samples(config)+m::suppression_sample_count(config)+status.size()*m::symbol_sample_count(config),"raw waveform length differs from exact bits and physical overhead");
     require(m::detect_status(wave,status,config)>.99,"status waveform reference mismatch");
     m::ChannelConfig channel;channel.clock_error_ppm=0;channel.phase_noise_degrees_per_sqrt_second=0;channel.snr_db=15;channel.seed=731;
     require(m::simulate(wave,config,channel)==m::simulate(wave,config,channel),"sampled simulation is nondeterministic");

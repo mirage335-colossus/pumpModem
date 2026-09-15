@@ -9,6 +9,104 @@
 #include <stdexcept>
 using namespace datapump;
 using Complex=std::complex<double>;
+
+void exact_suppression_noise() {
+    for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
+    for(const bool shaped:{false,true})for(const bool keyed:{false,true}) {
+        if(mode==modem::SpreadingMode::tone && keyed)continue;
+        modem::Config config;
+        config.sample_rate=512;config.carrier_hz=128;config.bandwidth_hz=128;
+        config.integration_seconds=1;config.spreading_mode=mode;config.pulse_shaping=shaped;
+        config.scramble=keyed;config.dsss=keyed;config.spreading_seed[0]=13;config.dsss_seed[0]=29;
+        config.stream_epoch=1800000031;
+        if(keyed)config.data_key.emplace(Bytes(32,0x57));
+        const Bytes wire{0xa5},bits{1,0,1,0,0,1,0,1};
+        modem::StreamingTransmitter packed(wire,config),raw(modem::RawBits{bits},config);
+        const auto training=modem::training_sample_count(config),padding=modem::pattern_pulse_padding_samples(config);
+        const auto noise=modem::suppression_sample_count(config);
+        const auto content=training+2*padding+bits.size()*modem::symbol_sample_count(config);
+        if(noise!=2*config.sample_rate || packed.total_samples()!=content+noise || raw.total_samples()!=content+noise ||
+           modem::waveform_sample_count(wire.size(),config)!=content+noise)
+            throw std::runtime_error("all nonempty input forms need exactly two seconds of trailing noise");
+        std::vector<Complex> a(packed.total_samples()),b(a.size());
+        packed.read_analytic(a);raw.read_analytic(b);
+        if(a!=b || a[content]!=Complex{} || a.back()!=Complex{})
+            throw std::runtime_error("raw and byte inputs must share tapered suppression noise");
+        double energy=0;Complex circularity{};
+        for(std::size_t i=content;i<a.size();++i) {
+            const auto value=a[i]*std::polar(1.,-2*std::numbers::pi*i*config.carrier_hz/config.sample_rate);
+            energy+=std::norm(value);circularity+=value*value;
+            if(std::norm(value)>=1)throw std::runtime_error("suppression noise exceeded PCM headroom");
+        }
+        if(energy/noise<modem::nominal_signal_power || energy/noise>3*modem::nominal_signal_power ||
+           std::abs(circularity)/energy>.4)
+            throw std::runtime_error("suppression must contain independent circular noise at useful power");
+        modem::PatternTransmitter bare(bits,config,config.stream_epoch,0,false);
+        std::vector<Complex> reference(bare.total_samples());bare.read_analytic(reference);
+        const auto rotation=std::polar(1.,2*std::numbers::pi*training*config.carrier_hz/config.sample_rate);
+        for(std::size_t i=2*padding;i<reference.size();++i)
+            if(std::abs(a[training+i]-reference[i]*rotation)>1e-9)
+                throw std::runtime_error("surrounding noise changed payload or its final filter samples");
+        if(std::equal(a.begin()+static_cast<std::ptrdiff_t>(content),a.end(),a.begin()))
+            throw std::runtime_error("suppression reused the preamble waveform");
+    }
+    modem::Config long_config;
+    long_config.sample_rate=64;long_config.carrier_hz=16;long_config.bandwidth_hz=32;
+    long_config.integration_seconds=3600;long_config.pulse_shaping=false;
+    modem::PatternTransmitter long_source({0},long_config);
+    const auto content=modem::symbol_sample_count(long_config);
+    if(modem::training_sample_count(long_config) || long_source.total_samples()!=content+128 ||
+       long_source.working_bytes()>16384)
+        throw std::runtime_error("hour-long symbols must retain a two-second tail with bounded state");
+    std::array<Complex,317> block{};
+    while(long_source.samples_emitted()<content) {
+        const auto count=std::min<std::uint64_t>(block.size(),content-long_source.samples_emitted());
+        long_source.read_analytic(std::span(block).first(static_cast<std::size_t>(count)));
+    }
+    const auto count=long_source.read_analytic(block);
+    if(count!=128 || !long_source.finished() ||
+       std::none_of(block.begin(),block.begin()+128,[](auto value){return value!=Complex{};}))
+        throw std::runtime_error("long-symbol tail was rounded, omitted or replaced by silence");
+}
+
+void suppression_hides_delayed_echo() {
+    modem::Config config;
+    config.sample_rate=512;config.carrier_hz=128;config.bandwidth_hz=128;
+    config.integration_seconds=1;config.pulse_shaping=false;
+    const Bytes bits{1,0,0,1,1,0,1,0};
+    modem::StreamingTransmitter source(modem::RawBits{bits},config);
+    const auto training=modem::training_sample_count(config);
+    std::vector<float> audio(source.total_samples());source.read(audio);
+    // A weaker copy delayed by the complete two-second guard. Supply actual
+    // received samples through the echo's end and the six-second absence.
+    const std::size_t delay=2*config.sample_rate;
+    modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
+    for(const bool suppress:{false,true}) {
+        std::vector<float> received(audio.size()-training+delay+7*config.sample_rate);
+        const auto emitted=suppress?audio.size():audio.size()-modem::suppression_sample_count(config);
+        for(std::size_t i=0;i<emitted;++i) {
+            if(i>=training)received[i-training]+=audio[i];
+            if(i+delay>=training)received[i-training+delay]+=.2F*audio[i];
+        }
+        modem::PatternReceiver receiver(config,8*1024*1024,search);
+        Bytes decoded;bool complete=false;
+        const auto harvest=[&] {
+            for(const auto& burst:receiver.take_bursts()) {
+                if(burst.bits.size()>decoded.size())decoded=burst.bits;
+                complete=complete || burst.complete;
+            }
+        };
+        for(std::size_t offset=0;offset<received.size();) {
+            const auto count=std::min<std::size_t>(317,received.size()-offset);
+            receiver.push(std::span(received).subspan(offset,count));offset+=count;harvest();
+        }
+        receiver.finish();harvest();
+        if(suppress?(decoded!=bits || !complete):(decoded.size()<=bits.size()))
+            throw std::runtime_error(suppress?"two-second delayed echo or suppression noise added decoded payload bits":
+                "echo control must expose delayed symbols without suppression noise");
+    }
+}
+
 void pattern_transmit_constellation() {
     for(const auto mode:{modem::SpreadingMode::pattern,modem::SpreadingMode::tone})
     for(unsigned layers=0;layers<(mode==modem::SpreadingMode::pattern?4U:1U);++layers)
@@ -52,7 +150,7 @@ void pattern_transmit_constellation() {
                 if(std::abs(pcm_block[i]-static_cast<float>(block[i].real()))>1e-6F)
                     throw std::runtime_error("pattern constellation observation altered transmitted PCM");
                 const auto position=start+i;
-                if((position-training)%symbol%chip==0) {
+                if(position<training+bits.size()*symbol && (position-training)%symbol%chip==0) {
                     // Recover baseband directly from the emitted analytic
                     // waveform, independently of the chip observer's values.
                     const auto angle=2*std::numbers::pi*static_cast<double>(position)*config.carrier_hz/config.sample_rate;
@@ -156,13 +254,15 @@ void frame_wide_transmit_constellation() {
 
 int main() {
     try {
+        exact_suppression_noise();
+        suppression_hides_delayed_echo();
         pattern_transmit_constellation();
         frame_wide_transmit_constellation();
         modem::Config config;config.memory_limit=1024; // Batch PCM ceiling does not limit explicit streaming DSP.
         const Bytes bits{0,0,1,1,0,1,0,1,1};
         modem::StreamingTransmitter source(modem::RawBits{bits},config);
         if(source.total_samples()!=modem::training_sample_count(config)+2*modem::pattern_pulse_padding_samples(config)+
-            bits.size()*modem::symbol_sample_count(config))
+            bits.size()*modem::symbol_sample_count(config)+modem::suppression_sample_count(config))
             throw std::runtime_error("raw waveform length differs from exact bits, settling and pulse tails");
         bool rejected=false;try{source.next_symbol();}catch(const Error&){rejected=true;}
         if(!rejected)throw std::runtime_error("pattern transmitter exposed symbol oracle");

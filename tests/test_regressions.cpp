@@ -57,8 +57,8 @@ modem::ChannelConfig ideal_channel() {
 void same_stream(const transfer::Received& received,const Message& sent) {
     check(received.stream_complete && received.content_validated && received.content.message.data==sent.data,
           "physical stream regression changed exact source bytes or missed six-second end");
-    check(received.content.message.filename=="received.bin" && received.content.message.callsign.empty() && received.content.message.grid.empty(),
-          "opaque source must not restore transmitted packet metadata");
+    check(received.content.message.filename==(sent.kind==MessageKind::text?"":sent.filename) && received.content.message.callsign.empty() && received.content.message.grid.empty(),
+          "application attachment name is restored without packet metadata");
     check(received.diagnostics.bit_rate>0 && std::isfinite(received.diagnostics.snr_db),
           "received source retains measured diagnostics");
 }
@@ -122,7 +122,7 @@ void weak_auto_without_training() {
     auto value = options(2400, tuning::PatternMode::auto_pattern);
     value.modem = ordinary.config;
     auto sent = payload();
-    sent.data = {0x51};
+    sent.data = {0x51};sent.kind=MessageKind::text;
     sent.repeatable = true;
     const auto normal = transfer::estimate(sent, value);
     value.modem = weak.config;
@@ -133,8 +133,8 @@ void weak_auto_without_training() {
           "changing the weak-signal target must change transmitted timing");
     check(modem::training_sample_count(value.modem)==0 &&
           std::abs(slow.total_seconds-slow.coded_seconds-
-            2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate)<1e-9,
-          "hour-long symbols add only finite filter tails, with no hardware settling");
+            2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate-2.)<1e-9,
+          "hour-long symbols add finite filter tails and exact two-second suppression, with no hardware settling");
     bounded_sampled_prefix(sent,value);
 }
 void obscured_training_pcm_roundtrip() {
@@ -173,6 +173,10 @@ void keyed_sampled_roundtrip() {
     const auto result=transfer::simulate(sent,value,channel);
     same_stream(result,sent);
     check(result.content.authenticated,"keyed fixed intervals must authenticate in sampled simulation");
+    check(result.missing_symbols>0 && result.content.corrected_bytes>0 &&
+          result.content.fec_stats.data.repaired_bytes+result.content.fec_stats.integrity.repaired_bytes+
+              result.content.fec_stats.parity.repaired_bytes>0,
+          "sampled short private patterns must preserve missing slots for measured RS recovery before source validation");
 }
 
 }

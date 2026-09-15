@@ -107,6 +107,7 @@ struct PatternReceiver::Impl {
         std::uint64_t phase_lower=0,phase_upper=0;
         double total_score=0,penalty=0;
         double pending_score=0,confirmed_score=0;
+        std::array<double,65> frequency_scores{};
         std::size_t confirmed=0,gap_slots=0;
         std::uint64_t confirmed_end=0;
         std::size_t frequency=0;
@@ -454,6 +455,22 @@ struct PatternReceiver::Impl {
                         if(fit.score>best.score){best=fit;chosen=start;selected=groups[g];}
                     }
                 }
+                // Acquisition can select a neighboring carrier from one
+                // distorted startup symbol. Compare the same disjoint PCM
+                // against the finite carrier bank as reception continues;
+                // frequency is evidence accumulated over the stream, not a
+                // permanent label inherited from its first admitted peak.
+                std::array<std::array<double,2>,65> frequency_scores{};
+                stream_phase(selected.lower);
+                const auto timing_fit=best;
+                auto selected_frequency=track.frequency;
+                for(std::size_t f=0;f<templates.size();++f) {
+                    auto fit=f==track.frequency?timing_fit:measure(chosen,track.index,f,track.burst.end_sample/bin_samples);
+                    if(f!=track.frequency)++trials;
+                    frequency_scores[f][fit.bit]=fit.score;
+                    frequency_scores[f][1-fit.bit]=fit.alternative_score;
+                    if(fit.score>best.score){best=fit;selected_frequency=f;}
+                }
                 remember(best);
                 const auto standalone=best.score>=threshold();
                 ++track.unconfirmed_symbols;
@@ -517,6 +534,7 @@ struct PatternReceiver::Impl {
                         track.burst.stream_first_sample=best.first_sample;
                         track.burst.stream_first_symbol=best.stream_symbol;
                         track.total_score=track.pending_score=track.penalty=0;
+                        track.frequency_scores.fill(0);
                         track.confirmed=0;track.confirmed_score=0;
                     }
                 }
@@ -534,6 +552,12 @@ struct PatternReceiver::Impl {
                 // so an earlier timing correction never counts evidence twice.
                 const auto bound=track.pending_score>count?track.pending_score-count-count*std::log(track.pending_score/count)-track.penalty:0;
                 if(bound>=threshold() || standalone) {
+                    for(std::size_t f=0;f<templates.size();++f)
+                        track.frequency_scores[f]+=frequency_scores[f][best.bit];
+                    const auto winner=static_cast<std::size_t>(std::max_element(track.frequency_scores.begin(),
+                        track.frequency_scores.begin()+static_cast<std::ptrdiff_t>(templates.size()))-track.frequency_scores.begin());
+                    track.burst.frequency_hz=config.carrier_hz+search.frequency_offsets_hz[winner];
+                    track.frequency=selected_frequency;
                     track.admitted=track.established=true;track.unconfirmed_symbols=0;
                     track.pending_gap=false;
                     track.confirmed=track.burst.bits.size();track.confirmed_end=best.end_sample;
@@ -626,6 +650,7 @@ struct PatternReceiver::Impl {
         }
         track.burst.stream_phase_samples=track.phase_lower;
         track.next=item.end_sample/bin_samples;track.frequency=f;track.total_score=item.score;track.penalty=std::log(2.);
+        track.frequency_scores[f]=item.score;
         track.admitted=track.established=item.score>=threshold();
         if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;}
         else track.pending_score=item.score;

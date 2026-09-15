@@ -580,6 +580,10 @@ struct Session::Impl {
         const auto now = current_epoch();
         if (std::floor(now)==std::floor(bank.created_at)) return;
         std::erase_if(bank.receivers,[&](const auto& receiver){
+            // Short streams can hold fewer than one output chunk throughout
+            // the physical absence window. Their admitted clock must survive
+            // epoch refresh even before any chunk updates last_confident_end.
+            if(receiver.modem->synchronized())return false;
             const auto& config=receiver.options.modem;
             const auto symbol=static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate;
             const auto prefix=(static_cast<double>(modem::training_sample_count(config))+
@@ -591,7 +595,7 @@ struct Session::Impl {
             // Retire confirmed receivers only after their physical search has
             // ended the stream using the fixed complete-symbol absence rule.
             if(receiver.last_confident_end) {
-                return !receiver.modem->acquiring() && now>receiver.last_confident_at+6.+allowance;
+                return now>receiver.last_confident_at+6.+allowance;
             }
             if(receiver.key_tag.empty())
                 return receiver.modem->clock_windowed() && now>receiver.admitted_at+prefix+symbol+allowance;
@@ -713,7 +717,7 @@ struct Session::Impl {
                             event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
                             if(result.content_validated) {
                                 event.text=display_text(result.content.message);event.binary=false;event.validated=true;
-                                event.reception_id=reception_id(result.content.message);event.pre_fec_accuracy=result.content.pre_fec_accuracy;
+                                event.reception_id=reception_id(result.content.message);event.pre_fec_accuracy=result.content.pre_fec_accuracy;event.fec_stats=result.content.fec_stats;
                             }
                             add_signal(std::move(event),simulation_wave);
                             if(result.content_validated && !display.content_reported) {
@@ -832,7 +836,7 @@ struct Session::Impl {
         if(!wave.protected_epoch)return;
         const auto& config=value.transfer.modem;
         const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
-        const auto end=wave.transmitter->total_samples()-modem::pattern_pulse_padding_samples(config);
+        const auto end=wave.transmitter->total_samples()-modem::pattern_pulse_padding_samples(config)-modem::suppression_sample_count(config);
         const auto emitted=std::min(end,wave.transmitter->samples_emitted());
         if(emitted<=prefix)return;
         const auto symbol=(emitted-prefix-1)/modem::symbol_sample_count(config);

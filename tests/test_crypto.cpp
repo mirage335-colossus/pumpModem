@@ -158,6 +158,36 @@ void test_authentication() {
     check(!crypto.verify(cipher, tag), "keystream knowledge forged authenticator");
 }
 
+void test_suppression_domain() {
+    Bytes master(32);
+    for(std::size_t i=0;i<master.size();++i)master[i]=static_cast<std::uint8_t>(i);
+    const Crypto crypto(master);
+    constexpr std::uint64_t epoch=1720000000;
+    constexpr auto domain=StreamDomain::Suppression;
+    // Independent Python hashlib/hmac HKDF plus openssl AES-256-CTR, using
+    // the existing Data epoch key and high counter bytes ASCII "suppress".
+    const auto vector=from_hex("43e0f33002feb8ada0341c2489c1a27a43457c9cb855eaf2ec443fa528abfc3b"
+                               "59ea5b82942cd8fb2d950e2714fa77b17989eedb47f45f47cfc2f72857c71432");
+    check(crypto.stream(StreamPurpose::Data,epoch,0,vector.size(),domain)==vector,
+          "suppression counter format vector mismatch");
+    for(auto purpose:{StreamPurpose::Data,StreamPurpose::Dsss,StreamPurpose::Scrambler,StreamPurpose::Fhss}) {
+        const auto all=crypto.stream(purpose,epoch,0,1024,domain);
+        check(all!=crypto.stream(purpose,epoch,0,1024) &&
+              all!=crypto.stream(purpose,epoch,0,1024,StreamDomain::Preamble),
+              "suppression must not reuse payload or preamble keystream bytes");
+        check(all!=crypto.stream(purpose,epoch+1,0,1024,domain),"suppression epoch keys overlap");
+        for(auto offset:{0U,1U,15U,16U,17U,255U,511U}) {
+            const auto slice=crypto.stream(purpose,epoch,offset,127,domain);
+            check(std::equal(slice.begin(),slice.end(),all.begin()+offset),"suppression random access mismatch");
+        }
+        constexpr auto final=std::numeric_limits<std::uint64_t>::max();
+        const auto tail=crypto.stream(purpose,epoch,final-30,31,domain);
+        const auto last=crypto.stream(purpose,epoch,final,1,domain);
+        check(tail.back()==last.front(),"suppression final byte lost random access");
+        rejects([&]{crypto.stream(purpose,epoch,final,2,domain);},"suppression byte offset wrapped");
+    }
+}
+
 void test_keyfiles() {
     TempDir dir;
     const testing::KeyfilePolicy policy{4096, 8193};
@@ -242,6 +272,7 @@ int main() {
     try {
         test_streams();
         test_preamble_domain();
+        test_suppression_domain();
         test_authentication();
         test_keyfiles();
         test_production_keyfile();

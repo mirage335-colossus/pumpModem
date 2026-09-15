@@ -153,6 +153,9 @@ std::uint64_t training_sample_count(const Config& c) {
     check(count<=std::numeric_limits<std::uint64_t>::max()/symbol,"hardware preamble duration overflow");
     return count*symbol;
 }
+std::uint64_t suppression_sample_count(const Config& c) {
+    return static_cast<std::uint64_t>(c.sample_rate)*2;
+}
 double symbol_seconds(const Config& c) { validate(c); return c.integration_seconds>0?c.integration_seconds:2.*c.spreading_factor/c.bandwidth_hz; }
 double bit_rate(const Config& c) { return c.constellation_bits/symbol_seconds(c); }
 std::size_t payload_symbol_count(std::size_t payload_bytes,const Config& c) {
@@ -171,7 +174,10 @@ std::size_t waveform_sample_count(std::size_t wire_bytes,const Config& c) {
     check(payload<=std::numeric_limits<std::size_t>::max()-training,"modem sample count overflow");
     const auto content=payload+static_cast<std::size_t>(training);
     check(padding<=(std::numeric_limits<std::size_t>::max()-content)/2,"pulse tail sample count overflow");
-    return content+2*static_cast<std::size_t>(padding);
+    const auto shaped=content+2*static_cast<std::size_t>(padding);
+    const auto suppression=suppression_sample_count(c);
+    check(suppression<=std::numeric_limits<std::size_t>::max()-shaped,"suppression sample count overflow");
+    return shaped+static_cast<std::size_t>(suppression);
 }
 bool memory_supported(std::size_t wire_bytes,std::size_t preamble_bytes,const Config& c) {
     validate(c);

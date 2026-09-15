@@ -196,14 +196,16 @@ struct PatternTransmitter::Impl {
     Config config;
     PatternCode code;
     std::unique_ptr<StreamCache> settling, settling_data, settling_pattern, settling_dsss;
-    std::uint64_t start = 0, position = 0, total = 0, training = 0, padding = 0;
+    std::unique_ptr<StreamCache> suppression, suppression_data, suppression_pattern, suppression_dsss;
+    std::uint64_t start = 0, position = 0, total = 0, training = 0, padding = 0, content_end = 0, suppression_samples = 0;
     struct SettlingChip {
         std::uint64_t address=0;
         std::complex<double> value{};
         bool valid=false;
     };
     std::array<SettlingChip,32> settling_chips{};
-    Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool hardware_preamble):
+    std::array<SettlingChip,32> suppression_chips{};
+    Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise):
         bits(std::move(input)), config(value), code(config, epoch), start(start_chip) {
         require(!bits.empty(), "pattern transmission requires at least one bit");
         require(std::all_of(bits.begin(), bits.end(), [](auto bit) { return bit <= 1; }),
@@ -213,12 +215,17 @@ struct PatternTransmitter::Impl {
         require(bits.size() <= std::numeric_limits<std::uint64_t>::max() / code.symbol_samples(),
                 "pattern transmission duration would overflow");
         total = static_cast<std::uint64_t>(bits.size()) * code.symbol_samples();
-        training=hardware_preamble?training_sample_count(config):0;
+        training=surrounding_noise?training_sample_count(config):0;
         require(training<=std::numeric_limits<std::uint64_t>::max()-total,"pattern transmission duration would overflow");
         total+=training;
         padding=pattern_pulse_padding_samples(config);
         require(padding<=(std::numeric_limits<std::uint64_t>::max()-total)/2,"pattern transmission duration would overflow");
         total+=2*padding;
+        content_end=total;
+        suppression_samples=surrounding_noise?suppression_sample_count(config):0;
+        require(suppression_samples<=std::numeric_limits<std::uint64_t>::max()-total,
+                "pattern suppression duration would overflow");
+        total+=suppression_samples;
         require(bits.size() <= std::numeric_limits<std::uint64_t>::max() / code.chips_per_symbol(),
                 "pattern transmission chip count would overflow");
         const auto chip_count = static_cast<std::uint64_t>(bits.size()) * code.chips_per_symbol();
@@ -227,8 +234,9 @@ struct PatternTransmitter::Impl {
         if(config.scramble || config.dsss)
             require(start+chip_count-1 <= (std::numeric_limits<std::uint64_t>::max()-7)/8,
                     "private pattern byte address would overflow");
-        const auto caches=training?1U+static_cast<unsigned>(config.data_key.has_value())+
-            static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss):0U;
+        const auto caches=(static_cast<unsigned>(training!=0)+static_cast<unsigned>(suppression_samples!=0))*
+            (1U+static_cast<unsigned>(config.data_key.has_value())+
+             static_cast<unsigned>(config.scramble)+static_cast<unsigned>(config.dsss));
         const auto fixed = sizeof(Impl) + sizeof(PatternTransmitter) + code.working_bytes()+caches*sizeof(StreamCache);
         require(fixed <= config.memory_limit && bits.capacity() <= config.memory_limit - fixed,
                 "pattern transmitter exceeds memory limit");
@@ -245,8 +253,44 @@ struct PatternTransmitter::Impl {
             if(config.dsss)settling_dsss=std::make_unique<StreamCache>(
                 config.dsss_seed,StreamPurpose::Dsss,epoch,domain);
         }
+        if(suppression_samples) {
+            // A third CTR domain makes the tail independent of both the
+            // settling prefix and every valid payload pattern/mask position.
+            constexpr auto domain=StreamDomain::Suppression;
+            suppression=std::make_unique<StreamCache>(public_seed,StreamPurpose::Scrambler,epoch,domain);
+            if(config.data_key)suppression_data=std::make_unique<StreamCache>(
+                *config.data_key,StreamPurpose::Data,epoch,domain);
+            if(config.scramble)suppression_pattern=std::make_unique<StreamCache>(
+                config.spreading_seed,StreamPurpose::Scrambler,epoch,domain);
+            if(config.dsss)suppression_dsss=std::make_unique<StreamCache>(
+                config.dsss_seed,StreamPurpose::Dsss,epoch,domain);
+        }
     }
-    ~Impl() { OPENSSL_cleanse(settling_chips.data(),sizeof(settling_chips)); }
+    ~Impl() {
+        OPENSSL_cleanse(settling_chips.data(),sizeof(settling_chips));
+        OPENSSL_cleanse(suppression_chips.data(),sizeof(suppression_chips));
+    }
+    std::complex<double> suppression_sample(std::uint64_t offset) {
+        const auto noise=[&](std::uint64_t chip) {
+            auto& entry=suppression_chips[chip%suppression_chips.size()];
+            if(!entry.valid || entry.address!=chip) {
+                entry.value=suppression->noise(chip,suppression_data.get(),suppression_pattern.get(),suppression_dsss.get());
+                entry.address=chip;entry.valid=true;
+            }
+            return entry.value;
+        };
+        // Virtual surrounding chips give shaped noise its normal power from
+        // the first sample, without changing or overlapping the payload tail.
+        const auto value=padding?pattern_pulse_sum(static_cast<double>(offset+padding),
+            suppression_samples+2*padding,code.chip_samples(),noise):noise(offset/code.chip_samples());
+        // A ten-millisecond edge taper avoids an abrupt boundary. The fixed
+        // output duration includes both tapers, including for very long bits.
+        const auto edge=std::min(offset,suppression_samples-1-offset);
+        const auto ramp=std::max<std::uint64_t>(1,(config.sample_rate+99U)/100U);
+        const auto window=edge>=ramp?1.:std::pow(std::sin(.5*std::numbers::pi*
+            static_cast<double>(edge)/static_cast<double>(ramp)),2);
+        return value*window;
+    }
     std::complex<double> shaped_sample(std::uint64_t cursor) {
         const auto relative=static_cast<long double>(cursor)-padding;
         std::complex<double> result{};
@@ -283,8 +327,9 @@ struct PatternTransmitter::Impl {
         if(padding) {
             for(std::size_t i=0;i<count;++i,++cursor) {
                 if((i&4095U)==0)cancelled(stop);
-                output[i]=convert(oscillator*pattern_limit_pcm(amplitude*shaped_sample(cursor)));
-                if(observer && cursor>=padding+training && cursor<total-padding) {
+                const auto baseband=cursor<content_end?shaped_sample(cursor):suppression_sample(cursor-content_end);
+                output[i]=convert(oscillator*pattern_limit_pcm(amplitude*baseband));
+                if(observer && cursor>=padding+training && cursor<content_end-padding) {
                     const auto payload=cursor-padding-training;
                     const auto symbol=payload/code.symbol_samples();
                     const auto within=payload%code.symbol_samples();
@@ -298,6 +343,14 @@ struct PatternTransmitter::Impl {
         }
         for (std::size_t i = 0; i < count;) {
             cancelled(stop);
+            if(cursor>=content_end) {
+                for(;i<count;++i,++cursor) {
+                    if((i&4095U)==0)cancelled(stop);
+                    output[i]=convert(amplitude*oscillator*suppression_sample(cursor-content_end));
+                    oscillator*=step;
+                }
+                continue;
+            }
             if(cursor<training) {
                 const auto chip=cursor/code.chip_samples();
                 auto pattern=settling->noise(chip,settling_data.get(),settling_pattern.get(),settling_dsss.get());
@@ -333,8 +386,8 @@ struct PatternTransmitter::Impl {
     }
 };
 
-PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool hardware_preamble):
-    impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip, hardware_preamble)) {}
+PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise):
+    impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip, surrounding_noise)) {}
 PatternTransmitter::~PatternTransmitter() = default;
 PatternTransmitter::PatternTransmitter(PatternTransmitter&&) noexcept = default;
 PatternTransmitter& PatternTransmitter::operator=(PatternTransmitter&&) noexcept = default;
@@ -360,7 +413,8 @@ double PatternTransmitter::bit_rate() const { return static_cast<double>(impl_->
 std::size_t PatternTransmitter::working_bytes() const {
     return sizeof(PatternTransmitter) + sizeof(Impl) + impl_->code.working_bytes() + impl_->bits.capacity()+
         ((impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
-         (impl_->settling_dsss?1U:0U))*sizeof(StreamCache);
+         (impl_->settling_dsss?1U:0U)+(impl_->suppression?1U:0U)+(impl_->suppression_data?1U:0U)+
+         (impl_->suppression_pattern?1U:0U)+(impl_->suppression_dsss?1U:0U))*sizeof(StreamCache);
 }
 
 } // namespace datapump::modem

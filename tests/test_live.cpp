@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include <chrono>
+#include <atomic>
 #include <iostream>
 #include <thread>
 using namespace datapump;
@@ -61,5 +62,36 @@ void run() {
     }
     session.stop();check(!session.snapshot().running,"session stops cleanly");
 }
+void short_keyed_stream_survives_epoch_refresh() {
+    constexpr std::uint64_t origin=1800000000;
+    std::atomic<std::uint64_t> epoch{origin};std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([&]{return static_cast<double>(epoch.load());},[&] {
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();value.transfer.timestamp=0;
+    value.transfer.modem=tuning::resolve(3600,80,tuning::PatternMode::auto_pattern,true,1500).config;
+    value.transfer.key.emplace(Bytes(32,0x45));value.receive_keys.emplace_back(Bytes(32,0x46));
+    session.start(value);const std::string expected="01001000011001010110110001110000";
+    Bytes bits;for(auto digit:expected)bits.push_back(static_cast<std::uint8_t>(digit-'0'));session.transmit_bits(bits);
+    const auto deadline=std::chrono::steady_clock::now()+30s;bool jumped=false,computed=false;
+    while(std::chrono::steady_clock::now()<deadline) {
+        const auto snapshot=session.snapshot();
+        if(!snapshot.error.empty())throw Error(snapshot.error);
+        check(snapshot.received.empty(),"raw keyed input must not release source content");
+        // The payload has ended, but its sub-chunk decisions are still waiting
+        // for physical absence. Expire all ordinary unconfirmed epoch ages.
+        if(!jumped && snapshot.transmitting && snapshot.transmission_fraction>.75 && snapshot.transmission_fraction<1) {
+            epoch=origin+10;jumped=true;
+        }
+        if(snapshot.transmission_finished && snapshot.simulation_replay){computed=true;break;}
+        std::this_thread::sleep_for(1ms);
+    }
+    check(jumped && computed,"short keyed epoch-refresh fixture did not cross the pending physical-end window");
+    replay_milliseconds=3000;bool received=false;
+    for(const auto& signal:session.snapshot().signals)
+        received=received || (signal.binary && signal.complete && signal.text==expected && !signal.validated);
+    check(received,"epoch refresh discarded a short admitted keyed stream before six-second physical completion");
+    session.stop();
 }
-int main(){try{run();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(int argc,char** argv){try{if(argc==1)run();short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

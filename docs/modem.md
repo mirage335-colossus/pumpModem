@@ -37,10 +37,11 @@ The modem's nominal chip rate is bandwidth / 2.
 `symbol_seconds` is the bandwidth-derived duration (or explicit integration),
 independent of the hardware clock. `symbol_sample_count` rounds that duration
 up once to an internal PCM sample; exact airtime estimates include this rounding.
-Shaped transmissions also include the two finite filter tails described below;
-these add a fixed burst duration, without changing any payload-symbol duration.
+Shaped transmissions also include the two finite filter tails described below.
+Every nonempty transmission then adds exactly two seconds of suppression noise;
+these durations do not change any payload-symbol duration.
 The nominal gross bit rate is selected bits per symbol divided by nominal symbol
-duration, before interval markers, integrity/parity and settling overhead. Audio conversion does not alter
+duration, before interval markers, integrity/parity and surrounding-noise overhead. Audio conversion does not alter
 these modem settings or rates.
 
 ### Automatic-pattern hardware settling
@@ -76,9 +77,35 @@ timestamp denotes that payload boundary. Explicit-timestamp captures and
 simulation retain deterministic timing, including their prefix offset.
 The output device is opened before choosing the scheduled start. Unmeasured
 device and output-buffer latency can still shift the physical audio boundary.
-Airtime estimates include the prefix and filter tails without adding meaningful
+Airtime estimates include the prefix, filter tails and suppression noise without adding meaningful
 payload bits. For shaped profiles the first payload position is
 `pattern_pulse_padding_samples(config) + training_sample_count(config)`.
+
+### Trailing suppression noise
+
+Every nonempty transmission, including raw bits and tone mode, appends exactly
+`2 * sample_rate` samples of independent circular noise after the payload's
+complete final filter tail. It is never rounded to a symbol boundary, even
+when a symbol lasts hours and the rounded settling prefix is absent. The
+noise is generated from fixed-size caches; no duration-sized tail buffer is
+allocated. Input bits, symbol epochs, Data positions and the original payload
+waveform remain unchanged. Low-level bare-capture tests may explicitly disable
+both surrounding noise sections with `surrounding_noise=false`.
+
+The tail uses the same chip cadence, noise mapping and selected protections as
+the settling prefix, with the independent `Suppression` counter domain: its
+high eight bytes are ASCII `suppress`, rather than `preamble` or zero. Eligible
+profiles shape this noise with the same pulse, using virtual neighboring noise
+chips without overlapping the payload waveform. Ten-millisecond edge tapers
+are included within the exact two-second duration. Waveform previews include
+the tail, while payload constellation observations exclude it.
+
+The noise can mask weaker delayed copies of recently transmitted patterns.
+Two seconds is a selected guard duration, not a bound on possible acoustic or
+radio echoes, and stronger interference can still disrupt reception. It is
+neither a valid payload pattern nor an end marker. Reception still ends only
+after completed unsuccessful pattern searches cover six seconds; suppression
+noise contributes to that absence only when those searches reject it.
 
 ### Private waveform and remaining signal structure
 
@@ -296,8 +323,8 @@ and adaptive timing selection must be included in future calibration. Long
 integration alone does not establish tolerance of clock drift or interference.
 
 At 12 kHz and 80 dB-Hz, the selected 16-chip pattern improves gross throughput
-fourfold over the previous fixed floor. Symbol and chain admission thresholds,
-keystream generation and the transmitted chip distribution are unchanged.
+fourfold over the previous fixed floor through shorter supported patterns.
+Keystream generation and the transmitted chip distribution are unchanged.
 Short private symbols with nonorthogonal carrier bins now use the same exact
 real-PCM fit as short public symbols, retaining the cap of four real evidence
 dimensions per chip. Orthogonal private bins retain their compact search. This
@@ -327,7 +354,12 @@ in natural-log units derived from a white Gaussian model. It is not APSK
 point error, measured dB, a calibrated confidence percentage or authentication.
 Timing, carrier and keystream candidates are compared only using this pattern
 evidence. High individual evidence can admit a single symbol; weaker retained
-symbols can contribute to a chain. Once admitted, a stream retains its symbol
+symbols can contribute to a chain. The default nominal search significance is
+`1e-10`, tightened from `1e-8`; each receiver also charges its finite search
+trials. This adds approximately 4.61 natural-log units to the admission gate
+at the same trial count. It reduces marginal false starts under the reference
+model without making a calibrated probability claim for correlated interference.
+Once admitted, a stream retains its symbol
 clock across missing slots. The only end rule is consecutive fully scored
 failed symbols whose received duration covers at least six seconds. One failed
 symbol suffices when its duration is six seconds or longer; shorter symbols
@@ -339,7 +371,10 @@ Unknown interior slots have no evidence, score or timing refinement and cannot
 select an unresolved private schedule. A later independently confident symbol
 confirms a surviving gap's extent. Unconfirmed trailing slots are trimmed on
 physical end. EOF, quota exhaustion, cancellation and replacement can interrupt
-processing and release resources but never emit a completed stream. Continued
+processing and release resources but never emit a completed stream. Receiver
+epoch refresh retains admitted physical streams even before their first output
+chunk, or after a correlator drains its admitted bits. Short receptions therefore
+retain the full physical absence window. Continued
 silence cannot extend an expired stream; later independent evidence can acquire
 a new one.
 
@@ -363,6 +398,17 @@ count. Pending observations remain incomplete in both APIs and the GUI.
 
 The default frequency bank contains five offsets at 0, ±1/(4T), ±1/(2T),
 where T is symbol duration. The API permits an explicit bounded offset bank.
+FFT continuation compares the same observed symbol against this bank and
+accumulates carrier evidence across admitted symbols. The reported frequency
+follows the strongest accumulated grid evidence, so a disturbed first symbol
+cannot permanently label a later 1500 Hz stream as 1472 Hz. A persistent
+off-center signal retains its measured offset. The clock-window correlator
+likewise reports the strongest carrier evidence over comparable observations
+while preserving its immutable bit-owner identity. Overlapping carrier
+hypotheses within one symbol's frequency resolution (`1/T`) share stream
+ownership rather than publishing duplicate raw streams. The finite grid still
+limits frequency accuracy; these rules do not force the selected center.
+
 Keyed search tries a finite set of epochs and initial stream positions. Where
 symbol duration does not divide one second, its subsecond phase hypotheses
 follow the finite `gcd(symbol_samples, sample_rate)` lattice. Phases yielding
@@ -488,7 +534,7 @@ performance, nonlinear hardware behavior or interference rejection.
 
 During computation, snapshots are captured at evenly spaced media positions from
 the start to the end of the transmitted signal, including any hardware-settling
-prefix. The normal timeline contains 60 frames. Each
+prefix and the two-second suppression tail. The normal timeline contains 60 frames. Each
 stores a compact 256-sample waveform, 257 peak-pooled spectrum bins, the fresh
 measured input I/Q and retained pattern evidence for its interval. Pattern
 acquisition does not switch the I/Q source. Reception continues through ordinary
@@ -560,14 +606,16 @@ transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter
 or the sampled simulation channel. Binary mode does not send callsign/grid
 metadata, an attachment, repeat requests, compression, interval markers,
 integrity tags or error correction. The separate hardware-settling prefix
-uses the same rounded duration as other pattern transmissions.
+uses the same rounded duration as other pattern transmissions, and the
+suppression tail adds exactly two seconds after the final filter samples.
 
 In default pattern mode, each bit occupies exactly one complete pattern symbol,
 so a three-bit draft occupies three payload symbols with no byte padding. Any
-hardware-settling prefix adds airtime but no payload symbols or bits. Selected keys
+hardware-settling prefix and the suppression tail add airtime but no payload symbols or bits. Selected keys
 mask the actual data bits and seed independent pattern/DSSS streams. When a
 prefix is present, those same keys also mask its noise through the separate
-`preamble` CTR range; they add no transmitted data bits.
+`preamble` CTR range. They mask the tail through the independent `suppress`
+range; neither section adds transmitted data bits.
 
 Raw signals have no interval coding or authentication. Simulation and audio
 feed their waveform to the same blind pattern receiver, without transmitting

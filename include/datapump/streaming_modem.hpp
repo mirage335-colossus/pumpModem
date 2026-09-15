@@ -32,6 +32,8 @@ public:
     // Preserve the existing narrow-band history and at least one nominal
     // bitmap frame of physical chips, including a chip already in progress.
     static std::size_t constellation_history_capacity(const Config& config);
+    // Both input forms include the rounded settling prefix and an exact
+    // two-second suppression-noise tail, outside all payload symbol slots.
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
     ~StreamingTransmitter();
@@ -51,7 +53,7 @@ public:
     std::size_t working_bytes() const;
     // Actual payload points whose transmission has begun, oldest first.
     // Retains physical baseband chips, including all enabled waveform masks.
-    // Settling/training is excluded.
+    // Settling and suppression noise are excluded.
     // Each point is retained once, regardless of PCM block size or duration.
     std::vector<std::complex<double>> payload_constellation() const;
     ConstellationBatch take_payload_constellation();

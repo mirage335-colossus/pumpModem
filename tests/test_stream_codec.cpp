@@ -77,10 +77,16 @@ void intervals() {
             decoded=decode_interval(damaged,options);
             check(decoded.data==input && decoded.corrected_bytes==parity/2,"last parity positions remain correctable");
             check(decoded.pre_fec_accuracy && !decoded.pre_fec_accuracy->corrected_data_bits,"parity damage excluded from data accuracy");
+            check(decoded.fec_stats.parity.corrected_bits && decoded.fec_stats.parity.repaired_bytes==parity/2 &&
+                  !decoded.fec_stats.data.repaired_bytes,"parity-only repairs must remain visible with perfect data accuracy");
             std::vector<std::size_t> erased(parity);std::iota(erased.begin(),erased.end(),0);
             damaged=wire;for(auto position:erased)damaged[position]=0;
             decoded=decode_interval(damaged,options,erased);
-            check(decoded.data==input && decoded.erased_bytes==parity && !decoded.pre_fec_accuracy,"full erasure budget recovers without invented accuracy");
+            check(decoded.data==input && decoded.erased_bytes==parity && decoded.pre_fec_accuracy &&
+                  decoded.pre_fec_accuracy->missing_data_bits==parity*8 &&
+                  decoded.pre_fec_accuracy->received_data_bits==(input.size()-parity)*8 &&
+                  !decoded.pre_fec_accuracy->corrected_data_bits,
+                  "byte-only erasures exclude all eight unknown bits while retaining other known observations");
         } else {
             const std::array<std::size_t,1> erased{0};
             rejects([&]{decode_interval(wire,options,erased);},"no-FEC unknown occupancy cannot become a source byte");
@@ -94,6 +100,58 @@ void intervals() {
     options.verifier=[](const Bytes&,const Bytes&){return true;};options.authenticator={};
     rejects([&]{encode_interval(Bytes(96),options);},"keyed encode cannot accidentally omit authenticator");
     rejects([]{interval_parity_bytes(static_cast<FecMode>(99));},"unknown FEC profile rejected");
+}
+void correction_statistics() {
+    for(const auto mode:{FecMode::rs20,FecMode::rs60})for(const bool encrypted:{false,true}) {
+        const auto options=encrypted?keyed(mode,17,100):IntervalOptions{mode,{},{}};
+        const auto data_size=interval_data_bytes(mode,encrypted),parity=interval_parity_bytes(mode);
+        const Bytes input(data_size,0xa5);const auto pristine=encode_interval(input,options);
+        auto damaged=pristine;std::array<std::uint8_t,128> masks{};
+        std::vector<std::size_t> erasures;
+        const auto lose=[&](std::size_t position,std::uint8_t mask) {
+            masks[position]=mask;erasures.push_back(position);
+            damaged[position]&=static_cast<std::uint8_t>(~mask);
+        };
+        // An erased byte can also contain known wrong bits. Only the latter
+        // belong in the accuracy numerator, even though RS replaces the byte.
+        damaged[5]^=0x24;lose(6,0x81);damaged[6]^=0x04;
+        lose(128-parity,0x80);damaged[128-parity]^=0x02;damaged.back()^=0x01;
+        if(encrypted) {lose(data_size,0x40);damaged[data_size]^=0x01;damaged[data_size+1]^=0x03;}
+        const auto decoded=decode_interval(damaged,options,erasures,masks);
+        check(decoded.data==input && decoded.authenticated==encrypted,"metric fixture must recover the original accepted codeword");
+        const auto& accuracy=*decoded.pre_fec_accuracy;
+        check(accuracy.received_data_bits==data_size*8-2 && accuracy.corrected_data_bits==3 &&
+              accuracy.missing_data_bits==2,"partial data coverage must preserve known errors without counting guessed bits");
+        const auto& data=decoded.fec_stats.data;
+        check(data.received_bits==accuracy.received_data_bits && data.corrected_bits==3 && data.missing_bits==2 &&
+              data.corrected_bytes==2 && data.erased_bytes==1 && data.repaired_bytes==2,
+              "data repair counts must not double-count changed erased bytes");
+        const auto& checkbits=decoded.fec_stats.parity;
+        check(checkbits.received_bits==parity*8-1 && checkbits.corrected_bits==2 && checkbits.missing_bits==1 &&
+              checkbits.corrected_bytes==2 && checkbits.erased_bytes==1 && checkbits.repaired_bytes==2,
+              "parity observations, known errors and erasures must be reported separately");
+        const auto& integrity=decoded.fec_stats.integrity;
+        check(integrity.received_bits==(encrypted?255U:0U) && integrity.corrected_bits==(encrypted?3U:0U) &&
+              integrity.missing_bits==(encrypted?1U:0U) && integrity.corrected_bytes==(encrypted?2U:0U) &&
+              integrity.erased_bytes==(encrypted?1U:0U) && integrity.repaired_bytes==(encrypted?2U:0U),
+              "only keyed intervals have authentication-tag repair statistics");
+        check(decoded.corrected_bytes==(encrypted?6U:4U) && decoded.erased_bytes==(encrypted?3U:2U),
+              "legacy interval counters must retain changed-value and erased-byte semantics");
+        rejects([&]{decode_interval(damaged,options,erasures,std::span(masks).first(127));},"short erasure mask rejected");
+        auto inconsistent=masks;inconsistent[0]=1;
+        rejects([&]{decode_interval(damaged,options,erasures,inconsistent);},"mask cannot introduce an unlisted erased byte");
+        inconsistent=masks;inconsistent[6]=0;
+        rejects([&]{decode_interval(damaged,options,erasures,inconsistent);},"listed erased byte requires a nonzero mask");
+    }
+    const IntervalOptions options{FecMode::rs20,{},{}};
+    const auto zeros=encode_interval(Bytes(106),options);
+    const std::array<std::size_t,2> erasures{0,127};std::array<std::uint8_t,128> masks{};
+    masks[0]=1;masks[127]=0x80;
+    const auto recovered=decode_interval(zeros,options,erasures,masks);
+    check(!recovered.corrected_bytes && recovered.fec_stats.data.repaired_bytes==1 &&
+          recovered.fec_stats.parity.repaired_bytes==1 && recovered.pre_fec_accuracy->received_data_bits==847 &&
+          recovered.pre_fec_accuracy->missing_data_bits==1 && !recovered.pre_fec_accuracy->corrected_data_bits,
+          "RS recovery of correct zero fillers must show repairs without inventing a bit error");
 }
 void source_cells() {
     std::mt19937 random(0x842);
@@ -138,6 +196,6 @@ void compressed_sources() {
 }
 }
 int main() {
-    try { generic_rs();intervals();source_cells();compressed_sources();std::cout<<"fixed stream codec passed\n"; }
+    try { generic_rs();intervals();correction_statistics();source_cells();compressed_sources();std::cout<<"fixed stream codec passed\n"; }
     catch(const std::exception& error) { std::cerr<<error.what()<<'\n';return 1; }
 }

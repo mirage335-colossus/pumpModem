@@ -6,6 +6,7 @@
 #include <array>
 #include <iostream>
 #include <stdexcept>
+#include <utility>
 using namespace datapump;
 namespace {
 void check(bool value,const char* message){if(!value)throw std::runtime_error(message);}
@@ -40,9 +41,13 @@ struct Harness {
 };
 void six_second_end_and_eof() {
     auto value=options();const auto sent=message();const auto pcm=transfer::transmit(sent,value);
-    Harness receiver(value);receiver.feed(pcm);
+    const auto tail=static_cast<std::size_t>(modem::suppression_sample_count(value.modem));
+    check(tail==2*value.modem.sample_rate && tail<pcm.size(),"capture must include exactly two seconds of suppression noise");
+    Harness receiver(value);receiver.feed(std::span(pcm).first(pcm.size()-tail));
     check(receiver.ended.empty(),"complete fixed codeword must not end physical stream");
-    receiver.silence(5.75);check(receiver.ended.empty(),"five-second absence must not end physical stream");
+    receiver.feed(std::span(pcm).last(tail));
+    check(receiver.ended.empty(),"suppression noise is not a physical end marker");
+    receiver.silence(3.75);check(receiver.ended.empty(),"5.75 seconds of symbol absence must not end physical stream");
     receiver.silence(.75);
     check(receiver.ended.size()==1,"six seconds of resolved absence must emit one stream end");
     check(receiver.ended.front().content_validated && receiver.ended.front().content.message.data==sent.data,"post-end compressed source must roundtrip sampled PCM");
@@ -52,8 +57,9 @@ void six_second_end_and_eof() {
 }
 void pcm_symbol_loss() {
     const auto sent=message();
-    for(bool keyed:{false,true}) {
+    for(const auto [keyed,spreading]:std::array<std::pair<bool,unsigned>,3>{{{false,8},{true,8},{false,16}}}) {
         auto value=options(keyed);value.compression=false;
+        value.modem.spreading_factor=spreading;value.modem.pulse_shaping=spreading>=16;
         auto pcm=transfer::transmit(sent,value);
         const auto config=transfer::seeded_config(value,value.timestamp);
         const auto start=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
@@ -63,8 +69,19 @@ void pcm_symbol_loss() {
             std::fill(pcm.begin()+static_cast<std::ptrdiff_t>(start+position*symbol),pcm.begin()+static_cast<std::ptrdiff_t>(start+(position+1)*symbol),0.f);
         Harness receiver(value);receiver.feed(pcm);receiver.silence(7);
         const auto found=std::find_if(receiver.ended.begin(),receiver.ended.end(),[&](const auto& result){return result.content_validated && result.content.message.data==sent.data;});
-        if(found==receiver.ended.end())throw std::runtime_error(std::string(keyed?"keyed":"public")+" sampled lost-symbol stream failed"+(receiver.ended.empty()?" without end event":": "+receiver.ended.back().error));
+        if(found==receiver.ended.end())throw std::runtime_error(std::string(keyed?"keyed":"public")+" SF"+std::to_string(spreading)+" sampled lost-symbol stream failed"+(receiver.ended.empty()?" without end event":": "+receiver.ended.back().error));
         check(found->content.corrected_bytes>0 && found->missing_symbols>=3,"marker/data gap positions must engage RS without shifting bytes");
+        const auto& stats=found->content.fec_stats;
+        check(stats.data.corrected_bytes>0 && stats.data.repaired_bytes>0 && stats.data.erased_bytes>0 &&
+              stats.parity.repaired_bytes>0 && stats.parity.erased_bytes>0,
+              "blanked PCM data and final parity symbols must produce visible RS repairs");
+        const auto& accuracy=found->content.pre_fec_accuracy;
+        const auto data_bits=wire.size()/1216*interval_data_bytes(value.fec,keyed)*8;
+        check(accuracy && accuracy->missing_data_bits>0 && accuracy->received_data_bits>0 &&
+              accuracy->received_data_bits+accuracy->missing_data_bits==data_bits &&
+              accuracy->corrected_data_bits<=accuracy->received_data_bits &&
+              stats.data.missing_bits==accuracy->missing_data_bits && stats.parity.missing_bits>0,
+              "sampled timed gaps must retain known-bit accuracy with explicit missing-data coverage");
         check(found->content.authenticated==keyed,"only keyed sampled stream authenticates");
     }
 }

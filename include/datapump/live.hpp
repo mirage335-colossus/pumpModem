@@ -54,7 +54,8 @@ struct SignalUpdate {
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
     std::optional<double> pattern_score = std::nullopt;
-    std::size_t missing_symbols = 0; // Unobserved slots filled with plaintext zero.
+    std::size_t missing_symbols = 0; // Unobserved symbol slots.
+    StreamFecStats fec_stats;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {

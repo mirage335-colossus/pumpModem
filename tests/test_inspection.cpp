@@ -112,21 +112,22 @@ void raw_and_short_sources() {
           "pattern inspector must identify its sole acquisition evidence");
     const auto hardware_samples=modem::training_sample_count(request.options.modem);
     const auto pulse_seconds=2.*static_cast<double>(modem::pattern_pulse_padding_samples(request.options.modem))/request.options.modem.sample_rate;
-    check(hardware_samples>0 && raw.sections.size()==3 && raw.sections.front().title=="Hardware settling" &&
-          raw.sections.back().symbols==3 && raw.sections.back().duration_seconds==raw.estimate.coded_seconds &&
+    check(hardware_samples>0 && raw.sections.size()==4 && raw.sections.front().title=="Hardware settling" &&
+          section(raw,"Meaningful pattern symbols").symbols==3 && section(raw,"Meaningful pattern symbols").duration_seconds==raw.estimate.coded_seconds &&
           raw.estimate.total_seconds>raw.estimate.coded_seconds,
           "hardware prefix must have separate airtime and cannot inflate the three meaningful bits");
     check(section(raw,"Pulse tails").symbols==0 && section(raw,"Pulse tails").duration_seconds==pulse_seconds,
           "pulse edges must account for both tails without adding meaningful symbols");
+    check(section(raw,"Echo suppression").symbols==0 && section(raw,"Echo suppression").duration_seconds==2. && field(raw,"Echo suppression")=="2 s / 0 payload bits", "tail must cost exactly two seconds without payload symbols");
     check_airtime(raw);
     request.options.modem.pulse_shaping=false;
     const auto rectangular=gui::inspect(request);
-    check(rectangular.sections.size()==2 && field(rectangular,"Pulse tails")=="0 s / 0 payload bits" &&
+    check(rectangular.sections.size()==3 && field(rectangular,"Pulse tails")=="0 s / 0 payload bits" &&
           std::abs(raw.estimate.total_seconds-rectangular.estimate.total_seconds-pulse_seconds)<1e-9,
           "disabling shaping must remove only its filter-tail airtime");
     request.options.modem.pulse_shaping=true;request.binary.reset();request.options.compression=false;request.options.fec=FecMode::off;
     for(const auto size:{1,4,15,16})for(const auto kind:{MessageKind::text,MessageKind::file}) {
-        request.message.kind=kind;request.message.data=Bytes(static_cast<std::size_t>(size),'e');
+        request.message.kind=kind;request.message.filename="sample.bin";request.message.data=Bytes(static_cast<std::size_t>(size),'e');
         const auto source=gui::inspect(request);
         check(source.stream_layout && source.stream_layout->intervals==1 && source.estimate.coded_bytes==128 &&
               source.estimate.wire_bits==1216 && field(source,"Meaningful bits")=="1024" &&
@@ -136,7 +137,7 @@ void raw_and_short_sources() {
     request.message.kind=MessageKind::text;request.options.modem.integration_seconds=3600;
     const auto slow=gui::inspect(request);
     check(field(slow,"Hardware settling")=="0 s / 0 symbol durations" && section(slow,"Pulse tails").symbols==0 &&
-          std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds)<1e-8,
+          std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds-2.)<1e-8,
           "hour-long pattern inspection must retain pulse tails separately from its zero hardware prefix");
     request.options.modem.integration_seconds=0;request.message.data=Bytes(400,'e');
     const auto marked=gui::inspect(request);

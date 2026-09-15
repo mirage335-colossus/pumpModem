@@ -1,3 +1,4 @@
+#include "datapump/attachment.hpp"
 #include "controller.hpp"
 #include "record_presentations.hpp"
 #include "text_policy.hpp"
@@ -104,6 +105,7 @@ struct Controller::Impl {
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
     std::filesystem::path attachment_path,key_path;
+    std::optional<std::string> attached_message_draft;
     std::optional<std::filesystem::path> pending_key,pending_file;
     std::vector<std::string> pending_names;
     std::optional<transfer::Estimate> estimate;
@@ -500,6 +502,7 @@ struct Controller::Impl {
         } else if(pending_file) {
             result.kind=PrepKind::file; result.path=*pending_file; result.revision=attachment_revision; pending_file.reset();
             start_worker([](Prepared& value,std::stop_token) {
+                (void)attachment::marker(path_text(value.path.filename()));
                 std::ifstream input(value.path,std::ios::binary); if(!input) throw Error("Cannot read attached file"); value.file=std::make_shared<const Bytes>(read_bounded(input,default_memory_limit));
                 auto extension=path_text(value.path.extension()); std::transform(extension.begin(),extension.end(),extension.begin(),[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
                 value.image=extension==".png"||extension==".jpg"||extension==".jpeg"||extension==".bmp"||extension==".webp"||extension==".gif";
@@ -536,7 +539,11 @@ struct Controller::Impl {
             f(UiField::key_path).text=path_text(key_path.filename()); encryption_changed(); configure();
             notice(tone()?"Key entries loaded. Tone modes keep encryption off.":result.created?"New keyfile saved and loaded. First key entry selected.":"Encryption key entries loaded. First key entry selected.");
         } else if(result.kind==PrepKind::file&&!pending_file) {
-            attachment=std::move(result.file); attachment_path=result.path; attachment_image=result.image; f(UiField::message_label).text="Attached: "+display_label(path_text(attachment_path.filename())); dirty();
+            attachment=std::move(result.file); attachment_path=result.path; attachment_image=result.image;
+            set_repeatable(false);
+            if(!attached_message_draft)attached_message_draft=f(UiField::message).text;
+            f(UiField::message).text=attachment::marker(path_text(attachment_path.filename()));
+            f(UiField::message_label).text="Attached: "+display_label(path_text(attachment_path.filename())); dirty();
         } else if(result.kind==PrepKind::devices) {
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
@@ -582,9 +589,9 @@ struct Controller::Impl {
         if(!next.received.empty()) refresh_files();
         for(const auto& signal:next.signals) {
             const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.reception_id; });
-            const bool text=stream!=inbox.items().end()&&valid_clipboard_text(stream->message.data);
+            const bool text=stream!=inbox.items().end()&&stream->message.kind==MessageKind::text;
             SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
-            line.missing_symbols=signal.missing_symbols;
+            line.missing_symbols=signal.missing_symbols;line.fec_stats=signal.fec_stats;
             signals.update(std::move(line));
         }
         if(!next.signals.empty() || !next.received.empty()) refresh_signals();
@@ -640,7 +647,9 @@ struct Controller::Impl {
             request(Purpose::attach,ui::ServiceKind::open_file,"Choose an attachment"); break;
         case Command::use_text:
             ++attachment_revision; pending_file.reset(); file_loading=false;
-            attachment.reset(); attachment_path.clear(); message_label(); dirty(); break;
+            attachment.reset(); attachment_path.clear();
+            if(attached_message_draft){f(UiField::message).text=std::move(*attached_message_draft);attached_message_draft.reset();}
+            message_label();dirty();break;
         case Command::open_keyfile: request(Purpose::open_key,ui::ServiceKind::open_file,"Choose encryption keyfile"); break;
         case Command::generate_keyfile: request(Purpose::generate_names,ui::ServiceKind::prompt,"Key entry names, separated by commas","Default"); break;
         case Command::show_key_folder: { const auto folder=std::filesystem::absolute(key_path).parent_path(); if(!std::filesystem::is_directory(folder)) throw Error("The keyfile folder is no longer available"); request(Purpose::folder,ui::ServiceKind::open_folder,"Show keyfile folder",folder_uri(folder)); break; }
@@ -653,8 +662,9 @@ struct Controller::Impl {
                 const auto found=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& p) { return id_label(p.message)==*id; });
                 if(found==inbox.items().end()) throw Error("That received message has left the memory cache");
                 const auto& bytes=found->message.data;
-                if(found->message.kind!=MessageKind::text||!valid_clipboard_text(bytes)||bytes.size()>static_cast<std::size_t>(std::numeric_limits<int>::max())) throw Error("This message is a file; use Save selected");
-                request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy decoded text",std::string(bytes.begin(),bytes.end()));
+                if(found->message.kind!=MessageKind::text)throw Error("This message is an attachment; use Save selected");
+                const auto text=valid_clipboard_text(bytes)?std::string(bytes.begin(),bytes.end()):BinaryEditor(bytes).text();
+                request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy decoded text",text);
             } break;
         }
         case Command::copy_raw_signal: {

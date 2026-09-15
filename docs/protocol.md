@@ -1,10 +1,10 @@
 # Fixed-interval pattern stream
 
 The modem transports opaque source bytes using one bit per pattern symbol.
-There are no packets, received integer lengths, variable headers, transmitted
-filenames/types, packet IDs, repeat flags, bootstrap CRCs, or whole-stream
-integrity footers. Both peers select the same waveform, FEC, source codec and
-key locally. There is no over-air negotiation or old-packet fallback.
+There are no packets, received integer lengths, variable modem headers, packet
+IDs, repeat flags, bootstrap CRCs, or whole-stream integrity footers. An optional
+attachment prefix is ordinary source content interpreted by the application.
+Both peers select the same waveform, FEC, source codec and key locally. There is no over-air negotiation or old-packet fallback.
 Existing keyfiles remain usable; the new byte transport is incompatible with
 the previous compact packet and short-dictionary formats.
 
@@ -21,6 +21,10 @@ A separate approximately two-second hardware-settling waveform may precede the
 stream, rounded to the nearest whole symbol duration with ties upward. It
 carries no data or acquisition condition; sufficiently long symbols have no
 settling prefix. Pulse-filter tails also carry no additional source bits.
+Exactly two seconds of independent noise follow the payload and filter tail,
+including for symbols longer than six seconds. Its separate suppression domain
+consumes no payload positions. It suppresses weaker delayed echoes and provides
+no ending signal: physical completion still requires absence of admitted symbols.
 
 | Local FEC | Public data area | Keyed data area | HMAC when keyed | RS parity | Unknown-location byte errors |
 |---|---:|---:|---:|---:|---:|
@@ -41,6 +45,11 @@ or final shortened-word rule. The generic implementation accepts unique known
 erasure positions. Its mixed correction budget is `2*errors + erasures <= p`,
 where `p` is 22 or 48 parity bytes. Errors can occur in data, HMAC or parity.
 A successful public RS correction is not cryptographic authentication.
+
+Diagnostics report received, corrected and missing bits separately for data,
+keyed HMAC and parity. Known-bit accuracy excludes unknown slots. Repaired-byte
+counts include declared erasures even when a zero placeholder matched the
+reconstructed byte, so parity-only and missing-zero repairs remain visible.
 
 ## Source bytes and compression
 
@@ -99,6 +108,22 @@ If an interval cannot be repaired, its occupancy and original source-byte count
 are unknown. Do not turn unknown validity bits into an apparently empty interval
 or advance an exact source offset by a guessed count. Keep its coded-symbol
 address and mark reconstruction incomplete.
+
+### Explicit attachments
+
+Before source encoding, an attachment adds the literal prefix
+`#ATTACHMENT### fileName.ext ###ATTACHMENT# ` followed by the exact file bytes.
+Attaching forces Repeatable off. Ordinary binary or text sources have no prefix
+and do not create file entries.
+
+Only after physical completion and source decoding does the application inspect
+a bounded prefix at source byte zero. A valid UTF-8 basename is 1–255 bytes with
+no path separators or control characters. The application removes that prefix,
+retains the filename as a local Save suggestion, and exposes the exact remaining
+bytes. Malformed markers remain ordinary message content. No received name is
+opened or saved automatically. The source quota allows only the fixed maximum
+prefix overhead beyond the configured file-content quota. There are no length
+fields or repeated attachment records in the modem.
 
 ## Marker alignment and erasures
 
@@ -199,7 +224,8 @@ bounded bit diagnostics without claiming authentication.
 ## API and memory boundary
 
 `stream_codec.hpp` contains fixed interval/source APIs and generic `fec` routines.
-`Message` metadata and `local_id` are application-local and are not serialized.
+`Message.local_id`, callsign, grid and repeat flags remain application-local.
+Attachment names use the bounded source-text convention above.
 `transfer::StreamReceiver` consumes drainable physical chunks and gates the source
 codec on true completion. `encode_packet`, `decode_packet`, header probes,
 `pack`/`unpack`, original-size decoders and short-dictionary codecs are removed.

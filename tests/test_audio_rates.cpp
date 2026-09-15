@@ -79,7 +79,7 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
     const auto received = transfer::receive(samples, options);
     check(received.stream_complete && (voice_channel?received.raw_bits==voice_bits:
           received.content_validated && received.content.message.data==message.data &&
-          received.content.message.filename=="received.bin"),
+          received.content.message.filename==message.filename),
           ("content must survive different output/input card sample rates at " + std::to_string(bandwidth) + " Hz").c_str());
     check(options.modem.sample_rate == internal_rate && modem::bit_rate(options.modem) == planned_rate,
           "hardware rates must not alter bandwidth, symbol timing or selected throughput");
@@ -100,7 +100,7 @@ void pattern_roundtrip(bool keyed,double bandwidth=1200) {
     };
     const Bytes bits{0,0,1};auto source=transfer::binary_transmitter(bits,options);
     check(source->total_samples()==modem::training_sample_count(options.modem)+
-          2*modem::pattern_pulse_padding_samples(options.modem)+3*symbol,
+          2*modem::pattern_pulse_padding_samples(options.modem)+modem::suppression_sample_count(options.modem)+3*symbol,
           "three raw bits must occupy exactly three payload symbols with settling and pulse tails");
     std::vector<float> pcm(static_cast<std::size_t>(source->total_samples()));
     std::size_t offset=0;while(!source->finished())offset+=source->read(std::span(pcm).subspan(offset));
@@ -111,7 +111,7 @@ void pattern_roundtrip(bool keyed,double bandwidth=1200) {
         const auto expected=transfer::message_wire_bits(message,options);
         const auto received=transfer::receive(cross_cards(transfer::transmit(message,options)),options);
         check(received.raw_bits==expected && received.stream_complete && received.content_validated &&
-              received.content.message.data==message.data && received.content.message.filename=="received.bin",
+              received.content.message.data==message.data && received.content.message.filename==message.filename,
               "a fixed-interval stream must survive independent card sample rates");
     }
 }

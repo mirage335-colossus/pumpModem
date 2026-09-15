@@ -78,7 +78,9 @@ to airtime. Automatic pattern transmission uses exactly one payload symbol per
 bit, with zero modem training and symbol padding. A separate hardware-settling
 block rounds two seconds to the nearest whole payload-symbol duration, with
 ties upward; it is absent for symbols longer than four seconds. Its duration
-contributes to total airtime without adding meaningful bits. The diagrams show
+contributes to total airtime without adding meaningful bits. A separate echo-suppression
+block follows the payload and filter tail for exactly two seconds, even for
+hour-long symbols. It carries no bits and supplies no ending rule. The diagrams show
 counts and placeholders,
 never input contents, metadata values, key bytes or private spreading sequences.
 

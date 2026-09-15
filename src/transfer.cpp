@@ -1,3 +1,4 @@
+#include "datapump/attachment.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/channel.hpp"
@@ -89,7 +90,8 @@ bool better_reception(const Received& candidate,const Received& current) {
 Bytes encoded_intervals(const Message& message,const Options& options,StreamLayout* layout=nullptr) {
     validate_message(message,options);
     const auto capacity=interval_data_bytes(options.fec,options.key.has_value());
-    auto source=encode_source(message.data,capacity,options.compression,source_storage_limit(options.content_limit));
+    const auto application_source=attachment::encode(message,options.content_limit);
+    auto source=encode_source(application_source,capacity,options.compression,source_storage_limit(options.content_limit));
     const auto count=source.size()/capacity;
     if(count>Bytes{}.max_size()/stream_interval_bytes)throw Error("encoded source exceeds address space");
     Bytes wire;wire.reserve(count*stream_interval_bytes);
@@ -100,7 +102,7 @@ Bytes encoded_intervals(const Message& message,const Options& options,StreamLayo
     }
     if(layout) {
         layout->fec=options.fec;layout->compressed=options.compression;layout->authenticated=options.key.has_value();
-        layout->source_bytes=message.data.size();layout->encoded_source_bytes=source.size();
+        layout->source_bytes=application_source.size();layout->encoded_source_bytes=source.size();
         layout->wire_bytes=wire.size();layout->intervals=count;layout->data_bytes_per_interval=capacity;
         layout->source_bytes_per_interval=source_bytes_per_interval(capacity,options.compression);
         layout->parity_bytes_per_interval=interval_parity_bytes(options.fec);
@@ -149,8 +151,8 @@ Estimate estimate(const Message& message,const Options& input,StreamLayout* layo
     bits=boundary_sync::insert(bits,pattern_bit_limit(options.content_limit));
     auto context=options;context.content_limit=std::max(options.content_limit,bits.size());
     auto result=estimate_binary(bits,context);result.content_bytes=message.data.size();result.coded_bytes=coded.size();
-    result.repeatable_allowed=message.data.size()<=options.repeat_policy.minimum_payload_bytes ||
-        result.content_seconds<=options.repeat_policy.maximum_seconds;
+    result.repeatable_allowed=message.kind==MessageKind::text &&
+        (message.data.size()<=options.repeat_policy.minimum_payload_bytes || result.content_seconds<=options.repeat_policy.maximum_seconds);
     return result;
 }
 Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input_options) {
@@ -168,7 +170,11 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
     const auto unpadded=hardware_samples+content_samples;
     if(padding>(std::numeric_limits<std::uint64_t>::max()-unpadded)/2)
         throw Error("pulse tails exceed 64-bit sample counter");
-    const auto samples=unpadded+2*padding;
+    const auto payload_end=unpadded+2*padding;
+    const auto suppression=modem::suppression_sample_count(value.modem);
+    if(suppression>std::numeric_limits<std::uint64_t>::max()-payload_end)
+        throw Error("echo suppression exceeds 64-bit sample counter");
+    const auto samples=payload_end+suppression;
     Estimate result;result.wire_bits=bits.size();
     result.content_bytes=result.coded_bytes=bits.size()/8+(bits.size()%8!=0);
     result.content_seconds=result.coded_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
@@ -220,7 +226,7 @@ Bytes message_wire_bits(const Message& message,const Options& input) {
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& input) {
     const auto options=effective_options(input);
     auto bits=message_wire_bits(message,options);
-    if(message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
+    if(message.kind==MessageKind::text && message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
        static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
         throw Error("repeatable content exceeds airtime limit");
     return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
@@ -304,7 +310,7 @@ struct StreamReceiver::Impl {
             std::array<std::size_t,stream_interval_bytes> erasures{};std::size_t count=0;
             for(std::size_t i=0;i<interval.erasures.size();++i)if(interval.erasures[i])erasures[count++]=i;
             auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol),
-                std::span(erasures).first(count));
+                std::span(erasures).first(count),interval.erasure_bits);
             auto& content=state.result.content;
             content.corrected_bytes+=decoded.corrected_bytes;content.consumed_bytes+=stream_interval_bytes;
             content.authenticated=decoded.authenticated;
@@ -313,7 +319,16 @@ struct StreamReceiver::Impl {
             if(content.pre_fec_accuracy && decoded.pre_fec_accuracy) {
                 content.pre_fec_accuracy->received_data_bits+=decoded.pre_fec_accuracy->received_data_bits;
                 content.pre_fec_accuracy->corrected_data_bits+=decoded.pre_fec_accuracy->corrected_data_bits;
+                content.pre_fec_accuracy->missing_data_bits+=decoded.pre_fec_accuracy->missing_data_bits;
             } else content.pre_fec_accuracy.reset();
+            const auto accumulate=[](FecRegionStats& total,const FecRegionStats& part) {
+                total.received_bits+=part.received_bits;total.corrected_bits+=part.corrected_bits;
+                total.missing_bits+=part.missing_bits;total.corrected_bytes+=part.corrected_bytes;
+                total.erased_bytes+=part.erased_bytes;total.repaired_bytes+=part.repaired_bytes;
+            };
+            accumulate(content.fec_stats.data,decoded.fec_stats.data);
+            accumulate(content.fec_stats.integrity,decoded.fec_stats.integrity);
+            accumulate(content.fec_stats.parity,decoded.fec_stats.parity);
             if(state.failed)return;
             const auto limit=quota->limit;
             if(quota->used>limit || decoded.data.size()>limit-quota->used){fail(state,"received source storage quota exhausted");return;}
@@ -389,9 +404,13 @@ struct StreamReceiver::Impl {
                 if(std::fflush(state.spool.get()) || std::fseek(state.spool.get(),0,SEEK_SET) ||
                    std::fread(source.data(),1,source.size(),state.spool.get())!=source.size())
                     throw Error("cannot read sealed received source");
-                state.result.content.message.data=decode_source(source,
-                    interval_data_bytes(options.fec,options.key.has_value()),options.compression,options.content_limit);
-                state.result.content.message.filename="received.bin";
+                auto message=state.result.content.message;
+                message.data=decode_source(source,
+                    interval_data_bytes(options.fec,options.key.has_value()),options.compression,attachment::source_limit(options.content_limit));
+                attachment::interpret(message,options.content_limit);
+                // Application interpretation can still reject the decoded
+                // source. Publish neither its bytes nor its name before that.
+                state.result.content.message=std::move(message);
                 state.result.content_validated=true;
             } catch(const Error& error){fail(state,error.what());}
         }

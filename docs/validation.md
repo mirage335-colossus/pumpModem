@@ -4,6 +4,44 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Reception, echo suppression and attachments — September 2026
+
+The follow-up changes retain the fixed 128-byte interval format and the sole
+six-second physical absence rule. Deterministic regressions now cover:
+
+- A first symbol shifted by −28.125 Hz followed by a 1500 Hz stream: exact bits
+  finish labeled 1500 Hz. A genuinely shifted stream remains labeled 1471.875 Hz.
+- Duplicate overlapping carrier hypotheses in the clock correlator, with one
+  physical stream emitted. Marginal isolated evidence admitted by the former
+  `1e-8` significance is rejected by the new `1e-10` default. The stricter
+  `1e-12` trial rejected short-pattern source fixtures and was not adopted.
+- Exactly two seconds of independently generated suppression noise after the
+  payload/filter tail. A weaker two-second delayed copy produces extra bits in
+  the no-suppression control and exact bits with suppression. This is one
+  deterministic channel fixture, not a bound on real-world echo delays.
+- Actual sampled PCM with erased marker, data and final-parity symbols, including
+  public shaped SF16/RS20 and keyed cases. Exact source recovery reports separate
+  data/parity repairs and known versus missing bit coverage. A noisy keyed source
+  also requires measurable RS recovery before successful source decoding.
+- Short keyed streams surviving an epoch refresh before their first output chunk.
+  An admitted receiver and a correlator with a drained bit buffer remain
+  active until their physical search ends; an empty output buffer cannot make
+  receiver retirement discard the six-second wait. Unconfirmed noise searches
+  still retire within the receiver workspace budget.
+- The explicit attachment prefix, exact file bytes and filename restoration,
+  Repeatable disabled, ordinary binary/text excluded from the file list,
+  post-end interpretation, bounded names and no released source on quota failure.
+
+The Release build and all 54 headless tests pass, including a targeted rerun of
+the application presentation fixture updated for the new gap/repair label.
+Targeted ASan/UBSan checks passed for the codec, carrier recovery/correlator and
+suppression waveform paths. Three native-window tests remain excluded because
+no graphical display is available; the native executable and its self-check build
+and pass. The full shared GUI workflow passes with the same 300-second budget as the
+native workflow. It covers generated production keys, the formerly lost short
+keyed raw message, attachment filename and exact saved bytes, ordinary message
+copying, replay replacement/cancellation and fixed FEC for short source text.
+
 ## Fixed-interval migration — September 2026
 
 The current implementation uses the fixed-interval format in [protocol.md](protocol.md).

@@ -125,6 +125,16 @@ int main() {
               signals.lines()[0].pre_fec_accuracy->corrected_data_bits==3);
         quality.pre_fec_accuracy=StreamBitAccuracy{800,0};
         check(gui::signal_data_label(quality)=="Data 100% pre-FEC");
+        quality.fec_stats.parity.repaired_bytes=2;
+        check(gui::signal_repair_label(quality)=="RS repaired 2 B (data 0, parity 2)");
+        quality.pre_fec_accuracy=StreamBitAccuracy{799,0,1};
+        quality.fec_stats.data.erased_bytes=quality.fec_stats.data.repaired_bytes=1;
+        quality.fec_stats.data.missing_bits=1;
+        check(gui::signal_data_label(quality)=="Data 100% known" &&
+              gui::signal_repair_label(quality)=="RS repaired 3 B (data 1, parity 2; erasures 1; missing data bits 1)");
+        quality.pre_fec_accuracy=StreamBitAccuracy{800,3,1};
+        check(gui::signal_data_label(quality)=="Data 99.62% known");
+        quality.fec_stats={};
         quality.pre_fec_accuracy=StreamBitAccuracy{8000000,1};
         check(gui::signal_data_label(quality)=="Data >99.99% pre-FEC");
         quality.pre_fec_accuracy=StreamBitAccuracy{800,800};
@@ -239,14 +249,14 @@ int main() {
         byte_signals.update(byte_line);
         check(!gui::signal_byte_aligned(byte_signals.lines()[3]) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
         gui::Inbox mixed;
-        mixed.put(content(1,3)); // Every opaque source can be saved locally.
+        mixed.put(content(1,3)); // Ordinary bytes remain messages, never attachments.
         auto file=content(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";
         mixed.put(file);
         mixed.put(content(3,2));
         auto screenshot=content(4,5); screenshot.message.kind=MessageKind::screenshot; screenshot.message.filename="capture.png";
         mixed.put(screenshot);
         const auto files=mixed.file_items();
-        check(files.size()==4 && files[0]->message.local_id[0]==1 && files[3]->message.local_id[0]==4);
+        check(files.size()==2 && files[0]->message.local_id[0]==2 && files[1]->message.local_id[0]==4);
         check(mixed.items().size()==4); // Verified text remains available for exact clipboard copy.
         gui::TransmissionPolicy policy;
         const auto time=gui::TransmissionPolicy::Clock::time_point{};

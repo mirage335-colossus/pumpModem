@@ -200,7 +200,7 @@ void exact_pcm_and_chunks() {
     const auto first_chip=3*modem::pattern_chips_per_symbol(c);
     modem::PatternTransmitter whole(bits, c, 91, first_chip), chunked(bits, c, 91, first_chip);
     check(whole.total_samples() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c)+
-          2*modem::pattern_pulse_padding_samples(c),
+          2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c),
           "three bits must retain exactly three payload symbols plus settling and filter tails");
     const auto count = static_cast<std::size_t>(whole.total_samples());
     std::vector<std::complex<double>> a(count), b(count);
@@ -287,13 +287,13 @@ void streaming_and_modem_integration() {
               "streaming wrapper preview must retain actual pattern samples");
     const Bytes packed{0xa5};
     modem::StreamingTransmitter packed_tx(packed, c);
-    const auto packed_samples = modem::training_sample_count(c)+8 * modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c);
+    const auto packed_samples = modem::training_sample_count(c)+8 * modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c);
     check(packed_tx.total_samples() == packed_samples && modem::waveform_sample_count(packed.size(), c) == packed_samples,
           "packed bytes must expand to eight meaningful bits after hardware settling");
     check(modem::preamble(c).empty() && modem::memory_supported(packed.size(), 0, c),
           "pattern modem estimation must accept a zero-length preamble");
     const auto status = modem::modulate_status(bits, c);
-    check(status.size() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c) && modem::detect_status(status, bits, c) > .999999,
+    check(status.size() == modem::training_sample_count(c)+bits.size() * modem::symbol_sample_count(c)+2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c) && modem::detect_status(status, bits, c) > .999999,
           "status helper must use the same exact unframed pattern waveform");
     rejects([&] { (void)modem::demodulate(status, c, {}); },
             "legacy known-training demodulator must reject pattern mode explicitly");
@@ -341,14 +341,14 @@ void tones_and_bounded_state() {
     modem::PatternTransmitter long_tx({0,1,0}, c, 73);
     check(long_code.working_bytes() < 8192 && long_tx.working_bytes() < 16384,
           "multi-hour symbols must not allocate waveform or complete keystream history");
-    check(long_tx.total_samples() == 12ULL * 3600 * c.sample_rate+2*modem::pattern_pulse_padding_samples(c),
+    check(long_tx.total_samples() == 12ULL * 3600 * c.sample_rate+2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c),
           "multi-hour symbol durations must remain exact with bounded state");
     c.spreading_factor=16384;
     transfer::Options options;options.modem=c;options.dsp_workspace_bytes=384*1024;
     options.key=Crypto(c.spreading_seed);
     const auto estimate=transfer::estimate_binary(Bytes{0,0,1},options);
     check(estimate.memory_supported && !estimate.batch_memory_supported &&
-          estimate.waveform_samples==12ULL*3600*c.sample_rate+2*modem::pattern_pulse_padding_samples(c),
+          estimate.waveform_samples==12ULL*3600*c.sample_rate+2*modem::pattern_pulse_padding_samples(c)+modem::suppression_sample_count(c),
           "three multi-hour pattern bits require bounded transmitter state, not retained chips or PCM");
     modem::StreamingTransmitter wrapped(modem::RawBits{{0,0,1}},c,options.dsp_workspace_bytes/4);
     check(wrapped.working_bytes()<128*1024,"streaming wrapper memory must remain independent of integration duration");
@@ -370,7 +370,7 @@ void rounded_hardware_duration() {
     }
     c.integration_seconds=.1;
     modem::PatternTransmitter framed({0,0,1},c,73),bare({0,0,1},c,73,0,false);
-    check(framed.total_samples()-bare.total_samples()==modem::training_sample_count(c),
+    check(framed.total_samples()-bare.total_samples()==modem::training_sample_count(c)+modem::suppression_sample_count(c),
           "optional settling must not change the exact payload length");
 }
 void hardware_noise_keystreams() {
@@ -412,7 +412,7 @@ void hardware_noise_keystreams() {
           std::abs(power/observations-1)<.1,
           "hardware noise must fill both quadratures with the payload's mean power, not a binary line");
     const auto settled=offset+2*modem::pattern_pulse_padding_samples(c);
-    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(settled),a.end(),b.begin()+static_cast<std::ptrdiff_t>(settled)),
+    check(std::equal(a.begin()+static_cast<std::ptrdiff_t>(settled),a.end()-static_cast<std::ptrdiff_t>(modem::suppression_sample_count(c)),b.begin()+static_cast<std::ptrdiff_t>(settled)),
           "hardware Data encryption key must not change payload beyond the filter overlap");
     const auto rotation=std::polar(1.,2*std::numbers::pi*static_cast<double>(offset)*c.carrier_hz/c.sample_rate);
     for(std::size_t i=2*modem::pattern_pulse_padding_samples(c);i<payload.size();++i)
@@ -648,6 +648,13 @@ void shaped_coordinate_and_duration_bounds() {
     c.pulse_shaping=false;
     modem::PatternTransmitter valid({0},c,0,0,false);
     check(valid.total_samples()==near_max,"the duration overflow fixture must fit before adding filter tails");
+    c.sample_rate=6000;c.bandwidth_hz=1200;c.carrier_hz=1500;
+    c.integration_seconds=std::nextafter(std::ldexp(1.,64)/c.sample_rate,0.);
+    modem::PatternTransmitter without_noise({0},c,0,0,false);
+    check(without_noise.total_samples()>std::numeric_limits<std::uint64_t>::max()-modem::suppression_sample_count(c),
+          "suppression overflow fixture must leave less than two seconds in the sample counter");
+    rejects([&]{modem::PatternTransmitter tail_overflow({0},c);},
+            "suppression noise must reject a 64-bit sample duration overflow");
 }
 }
 int main() {

@@ -45,7 +45,7 @@ void Inbox::clear() noexcept { items_.clear(); used_ = 0; }
 std::vector<const StreamContent*> Inbox::file_items() const {
     std::vector<const StreamContent*> files;
     for (const auto& stream : items_) {
-        files.push_back(&stream);
+        if(stream.message.kind!=MessageKind::text)files.push_back(&stream);
     }
     return files;
 }
@@ -168,7 +168,21 @@ std::string signal_status_label(const SignalLine& line) {
 }
 std::string signal_gap_label(const SignalLine& line) {
     if(!line.missing_symbols)return {};
+    if(line.validated)return std::to_string(line.missing_symbols)+(line.missing_symbols==1?" missing timed bit":" missing timed bits");
     return std::to_string(line.missing_symbols)+(line.missing_symbols==1?" missing bit filled with 0":" missing bits filled with 0");
+}
+std::string signal_repair_label(const SignalLine& line) {
+    if(!line.validated)return {};
+    const auto& stats=line.fec_stats;
+    const auto repaired=stats.data.repaired_bytes+stats.integrity.repaired_bytes+stats.parity.repaired_bytes;
+    if(!repaired)return {};
+    const auto erased=stats.data.erased_bytes+stats.integrity.erased_bytes+stats.parity.erased_bytes;
+    auto label="RS repaired "+std::to_string(repaired)+" B (data "+std::to_string(stats.data.repaired_bytes);
+    if(stats.integrity.repaired_bytes)label+=", HMAC "+std::to_string(stats.integrity.repaired_bytes);
+    label+=", parity "+std::to_string(stats.parity.repaired_bytes);
+    if(erased)label+="; erasures "+std::to_string(erased);
+    if(stats.data.missing_bits)label+="; missing data bits "+std::to_string(stats.data.missing_bits);
+    return label+")";
 }
 std::string signal_preamble_label(const SignalLine& line) {
     if(line.pattern_score && std::isfinite(*line.pattern_score)) {
@@ -191,19 +205,19 @@ std::string signal_data_label(const SignalLine& line) {
     const auto& accuracy=line.pre_fec_accuracy;
     if (!accuracy || !accuracy->received_data_bits || accuracy->corrected_data_bits>accuracy->received_data_bits)
         return "Data pre-FEC --";
-    if (!accuracy->corrected_data_bits) return "Data 100% pre-FEC";
+    if (!accuracy->corrected_data_bits) return accuracy->missing_data_bits?"Data 100% known":"Data 100% pre-FEC";
     const auto percent=100.*(1.-static_cast<double>(accuracy->corrected_data_bits)/static_cast<double>(accuracy->received_data_bits));
     // A small error in a large file must never round to a perfect reception.
-    if (percent>99.99) return "Data >99.99% pre-FEC";
+    if (percent>99.99) return accuracy->missing_data_bits?"Data >99.99% known":"Data >99.99% pre-FEC";
     std::ostringstream text; text.imbue(std::locale::classic());
-    text<<"Data "<<std::fixed<<std::setprecision(2)<<percent<<"% pre-FEC";
+    text<<"Data "<<std::fixed<<std::setprecision(2)<<percent<<(accuracy->missing_data_bits?"% known":"% pre-FEC");
     return text.str();
 }
 
 void Signals::update(SignalLine line) {
     if (line.binary) {
         line.validated=false; line.reception_id.clear(); line.text_message=false;
-        line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();
+        line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();line.fec_stats={};
     }
     if (line.raw_bits.size()>4096 || line.raw_bits.find_first_not_of("01")!=std::string::npos ||
         (line.received_bits && line.raw_bits.size()!=line.received_bits) ||

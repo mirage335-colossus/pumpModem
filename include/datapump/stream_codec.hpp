@@ -18,13 +18,31 @@ struct Message {
     std::array<std::uint8_t,16> local_id{};
 };
 struct StreamBitAccuracy {
+    // Known observed data-area bits and the subset changed by correction.
+    // Missing bits are coverage, never part of the accuracy denominator.
     std::uint64_t received_data_bits=0,corrected_data_bits=0;
+    std::uint64_t missing_data_bits=0;
+};
+struct FecRegionStats {
+    // received_bits are known observations; corrected_bits is the subset
+    // changed to match the accepted codeword. Missing bits are separate.
+    std::uint64_t received_bits=0,corrected_bits=0,missing_bits=0;
+    // corrected_bytes counts changed values. erased_bytes counts recovered
+    // unknown positions, even when their zero placeholder was already right.
+    // repaired_bytes counts their union, without counting a byte twice.
+    std::uint64_t corrected_bytes=0,erased_bytes=0,repaired_bytes=0;
+};
+struct StreamFecStats {
+    // These are fixed encoded areas, not decompressed application bytes.
+    // Comparisons use an accepted codeword, not a measured error probability.
+    FecRegionStats data,integrity,parity;
 };
 struct StreamContent {
     Message message;
     std::size_t corrected_bytes=0,consumed_bytes=0;
     bool authenticated=false;
     std::optional<StreamBitAccuracy> pre_fec_accuracy;
+    StreamFecStats fec_stats;
 };
 struct StreamLayout {
     FecMode fec=FecMode::off;
@@ -47,14 +65,19 @@ struct DecodedInterval {
     Bytes data;
     std::size_t corrected_bytes=0,erased_bytes=0;
     bool authenticated=false;
-    // Actual unknown bits cannot supply a measured pre-FEC accuracy.
+    // Known bits remain measurable when other bits of an interval are missing.
     std::optional<StreamBitAccuracy> pre_fec_accuracy;
+    StreamFecStats fec_stats;
 };
 std::size_t interval_parity_bytes(FecMode);
 std::size_t interval_data_bytes(FecMode,bool keyed);
 Bytes encode_interval(std::span<const std::uint8_t> data,const IntervalOptions& = {});
 DecodedInterval decode_interval(std::span<const std::uint8_t> coded,
-    const IntervalOptions& = {},std::span<const std::size_t> erasure_positions = {});
+    const IntervalOptions& = {},std::span<const std::size_t> erasure_positions = {},
+    // Optional one-mask-per-byte detail: 1 marks an unknown bit. Nonzero masks
+    // must agree exactly with erasure_positions. Without masks, all eight bits
+    // of each listed erased byte are conservatively excluded from accuracy.
+    std::span<const std::uint8_t> erasure_bits = {});
 
 // Returns full fixed data areas, before interval HMAC/RS. Compressed mode is
 // exactly one raw LZMA2 stream plus <one area's zero padding. Uncompressed mode

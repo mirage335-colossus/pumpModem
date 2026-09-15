@@ -39,7 +39,9 @@ struct PatternSearch {
     // A finite, explicit frequency bank. Empty selects five offsets separated
     // by 1/(4 symbol duration). No carrier/constellation lock precedes scoring.
     std::vector<double> frequency_offsets_hz;
-    double false_alarm_probability = 1e-8;
+    // Nominal per-search significance, before finite-search trial penalties.
+    // Correlated interference still needs independent pattern evidence.
+    double false_alarm_probability = 1e-10;
     double retain_score = 5;
     // Unknown interior slots retain their original symbol positions. Consumers
     // must preserve missing_pattern_bit through byte packing/erasure handling.

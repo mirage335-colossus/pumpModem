@@ -37,12 +37,30 @@ class StreamCLI(unittest.TestCase):
         self.assertFalse(value['authenticated'])
         self.assertEqual(base64.b64decode(value['data_base64']),source)
         self.assertNotIn('packet_validated',value)
+        self.assertEqual(value['kind'],'text')
+        self.assertEqual(value['filename'],'')
+        self.assertEqual(value['fec_repairs']['data']['repaired_bytes'],0)
+        self.assertGreater(value['pre_fec_accuracy']['received_data_bits'],0)
     def test_uncompressed_exact_binary(self):
         source=bytes(range(32))+b'\x00\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--no-compression','--json',
             '--snr','30','--clock-error-ppm','0','--phase-noise','0',*AUDIO,data=source).stdout)
         self.assertTrue(value['content_validated'])
         self.assertEqual(base64.b64decode(value['data_base64']),source)
+        self.assertEqual(value['kind'],'text')
+        self.assertEqual(value['filename'],'')
+    def test_explicit_attachment(self):
+        source=bytes(range(32))+b'\x00\x00'
+        with tempfile.TemporaryDirectory() as directory:
+            path=pathlib.Path(directory)/'payload.bin'
+            path.write_bytes(source)
+            value=json.loads(self.run_pump('simulate','--input',path,'--repeatable','--json',
+                '--snr','30','--clock-error-ppm','0','--phase-noise','0',*AUDIO).stdout)
+            self.assertTrue(value['content_validated'])
+            self.assertEqual(value['kind'],'file')
+            self.assertEqual(value['filename'],path.name)
+            self.assertFalse(value['repeatable'])
+            self.assertEqual(base64.b64decode(value['data_base64']),source)
     def test_wav_end_and_eof_are_distinct(self):
         with tempfile.TemporaryDirectory() as directory:
             path=pathlib.Path(directory)/'source.wav'

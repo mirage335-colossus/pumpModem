@@ -18,9 +18,12 @@ inline std::vector<ui::Record> signal_records(const Signals& signals) {
             {signal_data_label(signal),11,34,178,15,11,tone,false},
             {display_label(signal_display_text(signal)),194,14,-10,27,15,tone,false}
         };
-        if(signal.missing_symbols) {
+        auto detail=signal_gap_label(signal);
+        const auto repairs=signal_repair_label(signal);
+        if(!repairs.empty())detail+=(detail.empty()?"":"; ")+repairs;
+        if(!detail.empty()) {
             row.cells.back().y=5;
-            row.cells.push_back({signal_gap_label(signal),194,34,-10,15,11,tone,false});
+            row.cells.push_back({detail,194,34,-10,15,11,tone,false});
         }
         rows.push_back(std::move(row));
     }

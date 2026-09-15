@@ -64,6 +64,7 @@ Reception receive(const std::vector<float>& samples,const modem::Config& c,
                result.bursts.back().first_stream_symbol+result.bursts.back().bits.size()==burst.first_stream_symbol) {
                 auto& prior=result.bursts.back();prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
                 prior.complete=burst.complete;prior.end_sample=burst.end_sample;prior.score=burst.score;prior.stream_phase_samples=burst.stream_phase_samples;
+                prior.frequency_hz=burst.frequency_hz;
             } else result.bursts.push_back(std::move(burst));
         }
     };
@@ -249,6 +250,34 @@ void changing_chunks_and_late_start() {
     check(first.first_sample==second.first_sample && first.end_sample==second.end_sample && first.score==second.score,
           "PCM push chunk boundaries changed acquisition evidence");
 }
+void carrier_evidence_recovers_after_distorted_start() {
+    auto c=config(16);c.sample_rate=14400;c.bandwidth_hz=3600;c.carrier_hz=1500;c.spreading_seed.fill(0);
+    const auto symbol=modem::symbol_sample_count(c),padding=modem::pattern_pulse_padding_samples(c);
+    Bytes bits;for(unsigned i=0;i<64;++i)bits.push_back(static_cast<std::uint8_t>((i+i/3)&1));
+    modem::PatternTransmitter tx(bits,c,c.stream_epoch,0,false);
+    std::vector<std::complex<double>> analytic(tx.total_samples());tx.read_analytic(analytic);
+    const auto step=.25*c.sample_rate/static_cast<double>(symbol);
+    for(const bool persistent_offset:{false,true}) {
+        std::vector<float> samples(137+analytic.size()+8*c.sample_rate);
+        for(std::size_t i=0;i<analytic.size();++i) {
+            // The transient case disturbs only startup. The persistent case
+            // verifies that correcting a stale label never forces the center.
+            const auto shifted=persistent_offset?i:std::min<std::uint64_t>(i,padding+symbol);
+            const auto phase=-2*std::numbers::pi*step*static_cast<double>(shifted)/c.sample_rate;
+            samples[137+i]=static_cast<float>((analytic[i]*std::polar(1.,phase)).real());
+        }
+        for(const bool clock_window:{false,true})for(const auto chunk:std::array<std::size_t,2>{37,2048}) {
+            modem::PatternSearch search;search.chunk_bits=16;
+            search.compact_clock_search=clock_window;
+            search.start_offset_seconds=static_cast<double>(137+padding)/c.sample_rate;
+            const std::array<std::size_t,1> chunks{chunk};
+            const auto result=receive(samples,c,chunks,search);const auto& burst=exact(result,bits);
+            check(burst.complete,"carrier correction must preserve the six-second physical end");
+            check(std::abs(burst.frequency_hz-(c.carrier_hz-(persistent_offset?step:0)))<1e-8,
+                  "carrier label must follow accumulated pattern evidence, including a real off-center signal");
+        }
+    }
+}
 void weak_prefix_cannot_borrow_payload_confidence() {
     const auto c=config(64);const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     constexpr std::size_t delay=137;
@@ -265,6 +294,7 @@ void pending_tail_requires_joint_confidence() {
     auto c=config(64,true);c.pulse_shaping=false;
     const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
     modem::PatternSearch search;search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
+    search.false_alarm_probability=1e-8; // This fixture brackets the original 30.5/34 evidence boundary.
     constexpr std::array<std::size_t,3> changing{137,503,17};
     for(const bool joint_confident:{false,true}) {
         auto samples=waveform(c,{0,1,0},0,3*symbol,.73);
@@ -740,6 +770,7 @@ int main(int argc,char** argv) {
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+    run("carrier evidence after distorted startup",carrier_evidence_recovers_after_distorted_start);
     run("short pattern sample timing",short_pattern_sample_timing);
     run("short pattern wrong keys and noise",short_pattern_wrong_key_and_noise);
     run("high-bandwidth short public and private patterns",high_bandwidth_short_patterns);

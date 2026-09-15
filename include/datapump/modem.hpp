@@ -92,6 +92,9 @@ double bit_rate(const Config& config);
 double symbol_seconds(const Config& config);
 std::uint64_t symbol_sample_count(const Config& config);
 std::uint64_t training_sample_count(const Config& config);
+// Exactly two seconds of independent noise after the complete waveform.
+// Unlike the settling prefix, this is never rounded to a symbol boundary.
+std::uint64_t suppression_sample_count(const Config& config);
 std::size_t payload_symbol_count(std::size_t payload_bytes, const Config& config);
 std::size_t waveform_sample_count(std::size_t wire_bytes, const Config& config);
 // Checks modulation and acquisition working buffers without allocating either.
@@ -113,7 +116,8 @@ void write_wav(std::ostream& output, std::span<const float> samples,
                std::uint32_t sample_rate);
 Wav read_wav(std::istream& input, std::size_t memory_limit = default_memory_limit);
 // Each element is one 0/1 payload bit, with no padding bits. Pattern output
-// includes rounded hardware-settling audio, which carries no payload.
+// includes rounded hardware-settling audio and exactly two seconds of trailing
+// suppression noise; neither carries payload.
 std::vector<float> modulate_status(std::span<const std::uint8_t> bits, const Config& config);
 double detect_status(std::span<const float> samples, std::span<const std::uint8_t> known_bits,
                      const Config& config);

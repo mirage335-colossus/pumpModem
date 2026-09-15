@@ -52,8 +52,9 @@ void fixed_pipeline_and_local_metadata() {
         if(!received.content_validated)throw std::runtime_error("fixed pipeline: "+received.error);
         check(received.stream_complete && received.content.message.data==sent.data,"stream source bytes roundtrip");
         check(received.content.authenticated==encrypted,"only encrypted streams authenticate");
-        check(received.content.message.kind==MessageKind::text && received.content.message.filename=="received.bin" &&
-              received.content.message.callsign.empty() && received.content.message.grid.empty(),"transmitted metadata parser must be absent");
+        check(received.content.message.kind==MessageKind::file && received.content.message.filename==sent.filename &&
+              received.content.message.callsign.empty() && received.content.message.grid.empty(),
+              "application attachment names must survive without restoring modem metadata headers");
         check(received.content.message.local_id!=sent.local_id,"receiver identity is local, not transmitted");
     }
     auto tiny=sample(1);const auto value=options();
@@ -67,9 +68,26 @@ void keys_and_unknown_slots() {
         auto damaged=wire;damaged[192+17]=modem::missing_pattern_bit;
         auto repaired=consume(damaged,value);
         check(repaired.content_validated && repaired.content.message.data==sent.data && repaired.missing_symbols==1,"timed unknown retains exact cipher/FEC slot");
-        check(!repaired.content.pre_fec_accuracy,"unknown source decisions cannot become measured accuracy");
+        const auto total_data_bits=wire.size()/1216*interval_data_bytes(value.fec,encrypted)*8;
+        check(repaired.content.pre_fec_accuracy && repaired.content.pre_fec_accuracy->missing_data_bits==1 &&
+              repaired.content.pre_fec_accuracy->received_data_bits==total_data_bits-1 &&
+              !repaired.content.pre_fec_accuracy->corrected_data_bits,
+              "one missing source bit must preserve every other measured bit across interval drains");
+        damaged[192+18]^=1;damaged[1216+192+41]^=1;damaged[192+1023]^=1;
+        repaired=consume(damaged,value);
+        check(repaired.content_validated && repaired.content.message.data==sent.data &&
+              repaired.content.pre_fec_accuracy->received_data_bits==total_data_bits-1 &&
+              repaired.content.pre_fec_accuracy->corrected_data_bits==2 &&
+              repaired.content.pre_fec_accuracy->missing_data_bits==1 &&
+              repaired.content.fec_stats.data.repaired_bytes==2 && repaired.content.fec_stats.data.erased_bytes==1 &&
+              repaired.content.fec_stats.parity.corrected_bits==1 && repaired.content.fec_stats.parity.repaired_bytes==1,
+              "known data errors and parity repairs must remain visible alongside partial erasures");
         damaged=wire;damaged.pop_back();repaired=consume(damaged,value);
         check(repaired.content_validated && repaired.content.message.data==sent.data,"lost final parity bit recovers at fixed extent after end");
+        check(repaired.content.pre_fec_accuracy && repaired.content.pre_fec_accuracy->received_data_bits==total_data_bits &&
+              !repaired.content.pre_fec_accuracy->corrected_data_bits && !repaired.content.pre_fec_accuracy->missing_data_bits &&
+              repaired.content.fec_stats.parity.missing_bits==1 && repaired.content.fec_stats.parity.repaired_bytes==1,
+              "missing parity must report an RS repair without reducing known data accuracy");
         if(encrypted) {
             auto wrong=value;wrong.key.emplace(Bytes(32,0x73));check(!consume(wire,wrong).content_validated,"wrong key rejected");
             wrong=value;++wrong.timestamp;check(!consume(wire,wrong).content_validated,"wrong canonical epoch rejected");
@@ -103,7 +121,7 @@ void exact_raw_masking_and_scheduling() {
         auto value=options(encrypted);value.modem.dsss=encrypted;
         const auto estimate=transfer::estimate_binary(bits,value);
         const auto payload=bits.size()*modem::symbol_sample_count(value.modem);
-        const auto total=payload+modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem);
+        const auto total=payload+modem::training_sample_count(value.modem)+2*modem::pattern_pulse_padding_samples(value.modem)+modem::suppression_sample_count(value.modem);
         check(estimate.waveform_samples==total && estimate.coded_bytes==2,"raw path preserves exact unpadded bits");
         auto masked=bits;transfer::xor_binary_bits(masked,value);const auto encrypted_bits=masked;
         for(std::size_t offset=0;offset<masked.size();) {

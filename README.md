@@ -284,7 +284,7 @@ updating while idle. Transmissions run at CPU speed through noisy PCM, with
 virtual airtime reported separately. The receiver runs independently through
 idle noise and burst starts and derives timing, phase and spreading correlation
 from its samples. Transmit start and completion do not reset its acquisition.
-After computation completes, the entire transmission (including any hardware-settling prefix)
+After computation completes, the entire transmission (including any hardware-settling prefix and the two-second echo-suppression noise)
 replays chronologically over three seconds. Waveform, waterfall, constellation
 and pattern evidence follow the same timeline. Each frame shows fresh measured
 input I/Q and the retained pattern evidence at that transmission position.
@@ -312,12 +312,21 @@ and retained candidate/bit records within its workspace. The selected compressed
 source profile always encodes LZMA2; it does not switch formats by source size.
 Pattern results show a model log-evidence score, not an SNR or calibrated
 confidence percentage. Source results separately report RS correction and keyed
-authentication. Data pre-FEC accuracy is unavailable for unknown decisions; parity
-corrections do not count as data errors. Hardware settling supplies no lock
+authentication. Data pre-FEC accuracy compares observed bits with corrected bits;
+unknown bits are counted separately and never treated as measured errors. RS
+repair counts include data, keyed HMAC and parity bytes, including erased bytes
+whose zero placeholder already matched the repaired value. Hardware settling supplies no lock
 diagnostic. See [modem diagnostics](docs/modem.md).
 Sequential hardware sends need the complete-symbol absence guard after waveform
 and filter tails so reception can finish. This rule applies to public and keyed
 streams; separate processes and hosts are not globally coordinated.
+
+Ordinary received text and binary content remain messages. Selecting an attachment
+forces Repeatable off and prepends `#ATTACHMENT### fileName.ext ###ATTACHMENT# `
+to the source before compression. Only that explicit prefix creates a received
+file entry. The application recognizes it after physical completion and source
+decoding; the modem has no filename or length parser. Save remains an explicit
+local action. Filenames are bounded UTF-8 basenames, with no path separators.
 
 ## Shared keys and encrypted transfers
 

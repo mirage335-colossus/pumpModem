@@ -156,8 +156,20 @@ Bytes encode_interval(std::span<const std::uint8_t> data,const IntervalOptions& 
     return parity?fec::rs_encode(body,parity):body;
 }
 DecodedInterval decode_interval(std::span<const std::uint8_t> coded,const IntervalOptions& options,
-                                std::span<const std::size_t> erasures) {
+                                std::span<const std::size_t> erasures,
+                                std::span<const std::uint8_t> erasure_bits) {
     if(coded.size()!=stream_interval_bytes)throw Error("Incomplete fixed coding interval");
+    if(!erasure_bits.empty() && erasure_bits.size()!=coded.size())throw Error("Incorrect interval erasure mask width");
+    std::array<std::uint8_t,stream_interval_bytes> missing{};
+    for(auto position:erasures) {
+        if(position>=coded.size() || missing[position])throw Error("Invalid interval erasure position");
+        missing[position]=0xff;
+    }
+    if(!erasure_bits.empty())for(std::size_t i=0;i<missing.size();++i) {
+        if(static_cast<bool>(missing[i])!=static_cast<bool>(erasure_bits[i]))
+            throw Error("Interval erasure masks disagree with byte positions");
+        missing[i]=erasure_bits[i];
+    }
     const bool keyed=static_cast<bool>(options.authenticator)||static_cast<bool>(options.verifier);
     if(keyed&&!options.verifier)throw Error("Keyed interval requires a verifier");
     const auto parity=interval_parity_bytes(options.fec),data_size=interval_data_bytes(options.fec,keyed);
@@ -170,12 +182,20 @@ DecodedInterval decode_interval(std::span<const std::uint8_t> coded,const Interv
         if(!options.verifier(result.data,tag))throw Error("Interval authentication failed");
         result.authenticated=true;
     }
-    if(erasures.empty()) {
-        StreamBitAccuracy accuracy;accuracy.received_data_bits=data_size*8;
-        for(std::size_t i=0;i<data_size;++i)
-            accuracy.corrected_data_bits+=static_cast<std::uint64_t>(std::popcount(static_cast<unsigned>(coded[i]^body[i])));
-        result.pre_fec_accuracy=accuracy;
+    for(std::size_t i=0;i<coded.size();++i) {
+        auto& stats=i<data_size?result.fec_stats.data:
+            i<stream_interval_bytes-parity?result.fec_stats.integrity:result.fec_stats.parity;
+        const auto lost=static_cast<std::uint64_t>(std::popcount(missing[i]));
+        const auto changed=static_cast<std::uint8_t>(coded[i]^body[i]);
+        stats.received_bits+=8-lost;stats.missing_bits+=lost;
+        stats.corrected_bits+=static_cast<std::uint64_t>(std::popcount(
+            static_cast<std::uint8_t>(changed&static_cast<std::uint8_t>(~missing[i]))));
+        stats.corrected_bytes+=changed!=0;
+        stats.erased_bytes+=missing[i]!=0;
+        stats.repaired_bytes+=changed!=0 || missing[i]!=0;
     }
+    const auto& data=result.fec_stats.data;
+    result.pre_fec_accuracy=StreamBitAccuracy{data.received_bits,data.corrected_bits,data.missing_bits};
     return result;
 }
 std::size_t source_bytes_per_interval(std::size_t area,bool compressed) {

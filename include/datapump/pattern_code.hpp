@@ -49,23 +49,24 @@ private:
 };
 
 // Binary pattern PCM: exactly bits.size() payload symbols,
-// optionally preceded by rounded hardware-settling audio. Shaped patterns add
-// eight chip times at either burst edge to emit the full finite filter tails.
-// The lead-in carries
-// no payload or acquisition marker. Input bytes are individual 0/1 bits;
+// optionally preceded by rounded hardware-settling audio and followed by
+// exactly two seconds of independent suppression noise. Shaped patterns add
+// eight chip times at either payload edge to emit the full finite filter tails;
+// the suppression noise starts after those tails. Neither noise section carries
+// payload or an acquisition marker. Input bytes are individual 0/1 bits;
 // start_chip addresses the first complete payload symbol and must be a multiple
 // of pattern_chips_per_symbol(config). Use PatternCode for arbitrary chip
-// fragment access. Disable the lead-in
-// explicitly when generating a bare capture or testing preamble loss.
+// fragment access. Disable surrounding_noise explicitly when generating a
+// bare capture without either noise section.
 class PatternTransmitter {
 public:
     static constexpr std::size_t analytic_preview_limit = 2112;
     // Input chip constellation before pulse shaping, reported at each payload
     // chip's position in the padded output waveform.
-    // Settling audio and preview reconstruction never notify the observer.
+    // Surrounding noise and preview reconstruction never notify the observer.
     using ChipObserver = std::function<void(std::complex<double>)>;
     PatternTransmitter(Bytes bits, Config config, std::uint64_t stream_epoch = 0,
-                       std::uint64_t start_chip = 0, bool hardware_preamble = true);
+                       std::uint64_t start_chip = 0, bool surrounding_noise = true);
     ~PatternTransmitter();
     PatternTransmitter(PatternTransmitter&&) noexcept;
     PatternTransmitter& operator=(PatternTransmitter&&) noexcept;

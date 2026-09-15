@@ -226,6 +226,8 @@ void composer_conveniences() {
     prepare(controller);
     check(!controller.field(F::message).enabled&&!controller.field(F::repeatable).enabled,
           "An attached file retained the repeatable convenience control");
+    check(controller.field(F::message).text=="#ATTACHMENT### test_gui_controller.cpp ###ATTACHMENT# ",
+          "Attachment did not show its source marker and filename");
     controller.activate(C::use_text);
     check(controller.field(F::repeatable).enabled&&!controller.field(F::repeatable).checked&&
           controller.field(F::message).text=="short", "Returning to text restored repeatable or damaged the draft");
@@ -582,6 +584,7 @@ void fixed_text_reception() {
     }
     check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==Bytes{'e'},
           "fixed source reception preserves one-byte text");
+    check(controller.inbox().file_items().empty(),"Ordinary source text became a received file");
     std::optional<std::size_t> index;
     for(std::size_t i=0;i<controller.signals().lines().size();++i)
         if(controller.signals().lines()[i].validated)index=i;
@@ -776,6 +779,22 @@ void binary_source_representation() {
         controller.edit(F::message,editor.text());prepare(controller);
         check(controller.message_bytes()==expected && controller.inspection()->stream_layout &&
               !controller.inspection()->binary,"all exact source bytes use fixed coding with selected codec");
+        if(expected.front()==0) {
+            controller.start();controller.activate(ui::Command::transmit);
+            const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
+            while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
+                controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            }
+            check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==expected &&
+                  controller.inbox().file_items().empty(),"Ordinary binary source became a file or lost its bytes");
+            const auto& lines=controller.signals().lines();
+            const auto found=std::find_if(lines.begin(),lines.end(),[](const auto& line){return line.validated;});
+            check(found!=lines.end(),"Binary source had no decoded message row");
+            controller.select(F::signals,std::to_string(found->id));controller.activate(ui::Command::copy_signal);
+            const auto copied=controller.take_services();
+            check(copied.size()==1 && copied.front().value==editor.text(),"Binary source copy lost its escaped representation");
+            controller.complete_service({copied.front().id,false,{},{}});
+        }
         controller.close();
     }
 }
@@ -951,7 +970,7 @@ int main(int argc,char** argv) {
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});
-            datapump::gui::Smoke smoke({},100);
+            datapump::gui::Smoke smoke({},300); // Match the native workflow budget.
             datapump::gui::BitmapSources bitmaps;
             controller.start();
             while(!smoke.done()) {
