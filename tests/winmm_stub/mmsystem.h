@@ -26,8 +26,11 @@ struct State {
     bool recording=false,paused=false,started=false,timeout=false,gap=false,bad_capture_length=false;
     unsigned events=0,opened=0,open_calls=0,prepared=0,resets=0,writes=0,initial_queue=0;
     UINT selected_device=0;
-    unsigned rate=0;
+    unsigned rate=0,channels=0,frame_bytes=0;
     std::vector<unsigned> supported_rates,attempted_rates;
+    // Existing scalar PCM fixtures model a mono-only sound card.
+    std::vector<unsigned> supported_channels{1},attempted_channels;
+    std::vector<std::size_t> queued_frames;
     std::vector<DWORD> attempted_flags;
     std::function<std::int16_t(std::size_t,unsigned)> sample;
     std::size_t captured=0;
@@ -58,6 +61,8 @@ inline MMRESULT close() {
 inline MMRESULT queue(WAVEHDR* h,bool recording) {
     if(fail(recording?Failure::Add:Failure::Write)) return 1;
     if(!(h->dwFlags&WHDR_PREPARED) || (h->dwFlags&WHDR_INQUEUE)) throw std::runtime_error("invalid audio queue lifecycle");
+    if(!state.frame_bytes || !h->dwBufferLength || h->dwBufferLength%state.frame_bytes)throw std::runtime_error("audio buffer must contain complete PCM frames");
+    state.queued_frames.push_back(h->dwBufferLength/state.frame_bytes);
     if(state.started && !state.paused && state.pending.empty()) state.gap=true;
     h->dwFlags&=~WHDR_DONE;h->dwFlags|=WHDR_INQUEUE;
     state.pending.push_back(h);
@@ -90,12 +95,18 @@ inline MMRESULT waveOutGetDevCapsA(UINT,WAVEOUTCAPSA*,UINT){return 0;}
 inline MMRESULT waveOutOpen(HWAVEOUT* h,UINT device,const WAVEFORMATEX* format,DWORD_PTR,DWORD_PTR,DWORD flags) {
     if((flags&~WAVE_FORMAT_DIRECT)!=CALLBACK_EVENT) throw std::runtime_error("event callback required");
     auto& state=winmm_test::state;state.attempted_rates.push_back(format->nSamplesPerSec);state.attempted_flags.push_back(flags);
+    state.attempted_channels.push_back(format->nChannels);
+    if(format->wFormatTag!=WAVE_FORMAT_PCM || (format->nChannels!=1 && format->nChannels!=2) || format->wBitsPerSample!=16 ||
+       format->nBlockAlign!=format->nChannels*2 || format->nAvgBytesPerSec!=format->nSamplesPerSec*format->nBlockAlign || format->cbSize!=0)
+        throw std::runtime_error("inconsistent interleaved S16 Windows PCM format");
+    if(std::find(state.supported_channels.begin(),state.supported_channels.end(),format->nChannels)==state.supported_channels.end())return 1;
     if(!state.supported_rates.empty() && std::find(state.supported_rates.begin(),state.supported_rates.end(),format->nSamplesPerSec)==state.supported_rates.end())return 1;
-    state.rate=format->nSamplesPerSec;
+    state.rate=format->nSamplesPerSec;state.channels=format->nChannels;state.frame_bytes=format->nBlockAlign;
     *h=reinterpret_cast<HWAVEOUT>(1);++winmm_test::state.opened;++winmm_test::state.open_calls;
     winmm_test::state.selected_device=device;winmm_test::state.recording=false;return 0;
 }
 inline MMRESULT waveInOpen(HWAVEIN* h,UINT device,const WAVEFORMATEX* f,DWORD_PTR c,DWORD_PTR d,DWORD flags) {
+    if(f->nChannels!=1)throw std::runtime_error("capture channel contract changed");
     auto result=waveOutOpen(h,device,f,c,d,flags);winmm_test::state.recording=true;return result;
 }
 inline MMRESULT waveOutPrepareHeader(HWAVEOUT,WAVEHDR* h,UINT){return winmm_test::prepare(h);}

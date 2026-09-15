@@ -149,7 +149,7 @@ class StreamCLI(unittest.TestCase):
     def test_raw_bits_same_physical_rule(self):
         with tempfile.TemporaryDirectory() as directory:
             path=pathlib.Path(directory)/'raw.wav'
-            self.run_pump('status-tx','--bits','001','--output',path,*AUDIO)
+            self.run_pump('status-tx','--bits','001','--output',path,'--no-mono',*AUDIO)
             value=json.loads(self.run_pump('status-rx','--bits','001','--input',path,*AUDIO).stdout)
             self.assertEqual(value['raw_bits'],'001')
             self.assertTrue(value['known_bits_match'])
@@ -157,6 +157,7 @@ class StreamCLI(unittest.TestCase):
             self.assertTrue(value['stream_complete'])
             with wave.open(str(path),'rb') as f:
                 params=f.getparams();pcm=f.readframes(f.getnframes())
+            self.assertEqual(params.nchannels,1,'Live stereo routing must not change WAV framing')
             trim=6*params.framerate*params.sampwidth*params.nchannels
             with wave.open(str(path),'wb') as f:
                 f.setparams(params);f.writeframes(pcm[:-trim])

@@ -153,6 +153,7 @@ struct Controller::Impl {
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value) {
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
+        f(UiField::mono).checked=true;
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
@@ -232,6 +233,7 @@ struct Controller::Impl {
             if(encrypted()) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
             if(!tone())for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
+            next.mono=f(UiField::mono).checked;
             const auto preset=tuning::parse_simulation_preset(f(UiField::simulation).selected); next.simulation=preset.enabled;
             if(preset.enabled) { const auto budget=tuning::link_budget(preset,next.transfer.modem.bandwidth_hz,next.transfer.modem.sample_rate); next.simulation_snr_db=budget.sample_snr_db; channel_snr=budget.snr_db; }
             const auto workspace_percent=f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
@@ -477,7 +479,7 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -810,6 +812,11 @@ void Controller::toggle(UiField field,bool value) {
     auto& p=*impl_;
     if(p.f(field).enabled&&p.f(field).checked!=value) {
         if(field==UiField::repeatable)p.set_repeatable(value);
+        else if(field==UiField::mono) {
+            p.f(field).checked=value;
+            p.settings.mono=value;
+            if(p.started)p.session.set_mono(value);
+        }
         else { p.f(field).checked=value; p.dirty(); }
         p.controls();
     }

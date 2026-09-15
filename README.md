@@ -189,6 +189,12 @@ transmitted by the automated tests. Physical audio transfer and Windows hardware
 operation still require device testing. Use a capture long enough to contain the
 complete rounded two-second hardware-settling prefix and payload.
 
+Transmit audio defaults to the right channel on stereo outputs and the sole
+channel on mono outputs. Use `--no-mono` to send the same audio to both stereo
+channels. The GUI's **Mono** toggle, below **Audio device**, controls the same
+routing and starts enabled. Mono-only devices remain usable with either setting;
+WAV output and simulation keep their existing single-channel waveform.
+
 ## Desktop console
 
 FLTK remains the default GUI. An optional Rev backend uses the pinned upstream

@@ -954,6 +954,8 @@ struct Session::Impl {
                     continue;
                 }
                 if (wave) {
+                    bool mono;
+                    { std::lock_guard lock(mutex); mono = settings.mono; }
                     discontinuity();
                     audio::playback(value.transfer.modem.sample_rate, value.device, [&](std::span<float> output) {
                         const auto before=wave->transmitter->samples_emitted();
@@ -976,7 +978,7 @@ struct Session::Impl {
                             wave->prepare_hardware(*wave);
                             wave->prepare_hardware={};
                         }
-                    });
+                    }, mono);
                     discontinuity(); complete_tx(*wave); wave.reset(); plot_window.reset(); continue;
                 }
                 {
@@ -1153,6 +1155,10 @@ Session::Session(EpochClock epoch_clock, ReplayClock replay_clock)
 Session::~Session() = default;
 void Session::start(const Settings& settings) { impl_->configure(settings); }
 void Session::configure(const Settings& settings) { impl_->configure(settings); }
+void Session::set_mono(bool mono) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->settings.mono = mono;
+}
 void Session::transmit(const Message& message) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");

@@ -42,6 +42,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_expanded;
         control.help="Click to expand the QR code to fill the window. Click again or press Escape to restore its original size.";
     }
+    if(slot==Slot::mono)control.help="Transmit through the right channel only on stereo devices, or the sole channel on mono devices. Turn off to transmit through both stereo channels. Enabled by default.";
     if(slot==Slot::bandwidth)control.help="Nominal modem rate in Hz; occupied bandwidth depends on the waveform. Defaults to 3.6 kHz with a 1.5 kHz carrier. Changing Rate resets Carrier to the recommended frequency; edit Carrier afterward to choose another frequency.";
     if(slot==Slot::carrier)control.help="Audio carrier frequency. The dropdown offers only the current rate's default carrier: 1.5 kHz at the 3.6 kHz rate. Manual entry accepts Hz, kHz or MHz. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
     if(slot==Slot::snr)control.help="Transmit target signal-to-noise ratio in a 1 Hz noise bandwidth (C/N0), default 60 dB-Hz. This scalar sets the transmitted pattern duration. Changing it to a valid value resets RX targets to that single matching target; RX targets can then be edited independently.";
@@ -116,6 +117,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"}, Slot::zoom_in),
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),
         placed({Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"}, Slot::reset_zoom),
+        placed({Kind::toggle,Field::mono,Command::none,Bitmap::none,Page::console,14,"Mono"}, Slot::mono),
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,

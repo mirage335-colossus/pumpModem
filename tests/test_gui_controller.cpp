@@ -98,6 +98,64 @@ void rate_carrier_controls() {
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
           "Raising the carrier did not recover the selected tone profile");
 }
+void mono_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    check(controller.field(F::mono).checked&&controller.field(F::mono).enabled&&controller.settings().mono,
+          "Mono audio routing must be enabled by default in the shared GUI and live settings");
+    controller.edit(F::binary,"001");prepare(controller);
+    const auto prepared_revision=controller.revision();
+    const auto prepared_inspection=controller.inspection();
+    controller.toggle(F::mono,false);
+    check(!controller.field(F::mono).checked&&!controller.settings().mono&&
+          controller.revision()==prepared_revision&&controller.inspection()==prepared_inspection&&
+          controller.estimate()&&controller.estimate()->wire_bits==3&&controller.enabled(C::transmit),
+          "Turning Mono off must configure stereo transmission without invalidating the prepared message");
+    const auto revision=controller.revision();
+    controller.toggle(F::mono,false);
+    check(controller.revision()==revision,"An unchanged Mono callback reconfigured the modem");
+    controller.edit(F::device,"test-device");controller.edit(F::snr,"40");
+    check(!controller.field(F::mono).checked&&!controller.settings().mono,
+          "Changing the device or modem settings discarded the audio routing choice");
+    controller.toggle(F::mono,true);
+    check(controller.field(F::mono).checked&&controller.settings().mono,
+          "Turning Mono back on did not restore single-channel transmission");
+    prepare(controller);controller.start();
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(controller.snapshot().samples_received<controller.settings().transfer.modem.sample_rate/5&&
+          std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.snapshot().samples_received>=controller.settings().transfer.modem.sample_rate/5,
+          "Continuous simulated reception did not advance its sample clock");
+    const auto live_revision=controller.revision();
+    const auto live_inspection=controller.inspection();
+    const auto estimated_airtime=controller.estimate()->total_seconds;
+    controller.plot_update();
+    for(const bool mono:{false,true}) {
+        const auto samples=controller.snapshot().samples_received;
+        const auto seconds=controller.snapshot().virtual_seconds;
+        controller.toggle(F::mono,mono);controller.poll();
+        check(controller.field(F::mono).checked==mono&&controller.settings().mono==mono&&
+              controller.snapshot().running&&controller.snapshot().samples_received>=samples&&
+              controller.snapshot().virtual_seconds>=seconds,
+              "Changing audio output routing reset or interrupted the running receiver clock");
+        check(controller.revision()==live_revision&&controller.inspection()==live_inspection&&
+              controller.estimate()&&controller.estimate()->wire_bits==3&&
+              controller.estimate()->total_seconds==estimated_airtime&&controller.enabled(C::transmit)&&
+              !controller.plot_update().clear_waterfall,
+              "Changing audio output routing invalidated the prepared message or cleared receiver plots");
+    }
+    controller.activate(C::transmit);
+    check(!controller.field(F::mono).enabled&&!controller.field(F::device).enabled,
+          "Audio routing remained editable while transmitting");
+    controller.toggle(F::mono,false);
+    check(controller.field(F::mono).checked&&controller.settings().mono,
+          "A disabled Mono callback changed the active transmission routing");
+    controller.close();controller.toggle(F::mono,false);
+    check(!controller.field(F::mono).enabled&&controller.field(F::mono).checked&&controller.settings().mono,
+          "A stale Mono callback changed a closing session");
+}
 void tone_mode_controls() {
     using F=ui::Field;
     Controller controller({true,true});
@@ -1044,6 +1102,7 @@ int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
         rate_carrier_controls();
+        mono_controls();
         tone_mode_controls();
         tone_key_controls();
         composer_conveniences();

@@ -12,6 +12,9 @@ namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
     std::string device = "default";
+    // Right channel on stereo output, sole channel on mono output. When off,
+    // send the same signal to both stereo channels.
+    bool mono = true;
     bool simulation = false;
     double simulation_snr_db = 18;
     double simulation_clock_error_ppm = 100;
@@ -120,6 +123,9 @@ public:
     void start(const Settings& settings);
     void configure(const Settings& settings);
     void update(const Settings& settings) { configure(settings); }
+    // Apply output routing to the next playback without interrupting reception
+    // or changing audio already being transmitted.
+    void set_mono(bool mono);
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no interval coding, preamble or FEC. Raw

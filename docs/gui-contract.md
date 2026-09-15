@@ -25,6 +25,14 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+The persistent **Mono** toggle below **Audio device** starts enabled. Transmit
+audio uses the right channel of a stereo output, with silence on the left;
+mono-only outputs use their sole channel. Turning Mono off sends the same audio
+to both stereo channels. It follows the audio device control's availability
+during transmission. Changing it preserves the running receiver, pending bits,
+plots and airtime estimate; the selected routing applies to the next playback.
+Simulated samples and exported WAV framing are independent of this choice.
+
 The persistent **DSP workspace** choice selects 25%, 50% (default), or 75% of
 available RAM. Its display includes the resolved MiB/GiB ceiling. The value is
 sampled at controller startup and when the percentage changes; other modem edits

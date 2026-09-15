@@ -89,6 +89,7 @@ Modem:
 
 Audio/simulation:
   --device ID           OS audio endpoint; listen automatically uses default
+  --no-mono             TX on both stereo channels; default right only (mono devices use their sole channel)
   --device-type audio   Analog audio input only; no network/raw serial input
   --seconds N           RX recording duration(default15); listen limit(default0)
   --tx-delay N          Delay after live TX completes; default6 seconds
@@ -118,7 +119,7 @@ class Args {
 public:
     std::string command;
     Args(int argc,char** argv) {
-        const std::set<std::string> booleans={"json","repeatable","no-compression","scramble","dsss","progress","help","version"};
+        const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
@@ -262,7 +263,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         },clock);
         source=std::move(scheduled.transmitter);
         detail::wait_for_playback(scheduled.playback_epoch,clock);
-    });
+    },!a.has("no-mono"));
 }
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -356,7 +357,7 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
     }
     if(a.has("device")) {
         const auto delay=hardware_delay(a,c);
-        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c));
+        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c),!a.has("no-mono"));
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
@@ -441,6 +442,7 @@ void listen(const Args& a,const transfer::Options& options) {
     settings.dsp_workspace_bytes=dsp_budget(a);
     if(!a.has("time")) settings.transfer.timestamp=0;
     settings.device=a.get("device","default");
+    settings.mono=!a.has("no-mono");
     if(a.has("simulation")) {
         const auto preset=tuning::parse_simulation_preset(a.get("simulation"));
         settings.simulation=preset.enabled;

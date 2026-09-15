@@ -4,6 +4,51 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Mono transmit channel routing — 15 September 2026
+
+The shared console now has a persistent **Mono** checkbox below **Audio device**,
+enabled by default. ALSA and WinMM try stereo output, with mono fallback at each
+existing sample-rate candidate. Enabled stereo output contains silent left PCM
+and unchanged right PCM; disabling Mono duplicates the signal to both channels.
+Mono-only endpoints use their sole channel in either mode. CLI hardware playback
+uses the same default, with `--no-mono` to enable both stereo channels.
+
+Changing the checkbox updates the next playback without restarting the receiver,
+discarding pending reception, clearing plots or recalculating the draft. Channel
+interleaving happens after resampling; modem bits, framing, source codecs,
+physical-end detection, receive PCM and exported mono WAVs are unchanged.
+
+New ALSA/WinMM stub regressions cover stereo preference, stereo-only and mono-only
+devices, exact signed/clipped PCM on each channel, streaming frame counts,
+partial ALSA writes, rate conversion and Windows double buffering. Existing
+capture and error/cancellation tests remain. Shared GUI checks cover the default,
+toggle propagation, busy/closing guards, all-page visibility and minimum-width
+layout. Live/GUI regressions protect the receive clock, plots, prepared estimate
+and ongoing hours-long symbol processing while output routing changes.
+
+Validation:
+
+- Release builds passed for FLTK (`build`) and Rev (`build-rev`).
+- The full headless suite passed, 55/55 tests in 137.67 seconds, including the
+  independent short-message/fixed-interval/physical-end/pending-progress tests,
+  CLI integration and both audio backend contracts.
+- After refining Mono updates to preserve reception, rebuilt both backends and
+  reran `live`, `live_resources`, `gui_controller`, `gui_application` and
+  `gui_layout`: 5/5 passed in 57.12 seconds.
+- Rev self-check and native adapter/platform/coordinate conformance passed,
+  5/5 tests on a private Xvfb display; the final rebuilt adapter conformance
+  passed again. The FLTK default window was also captured
+  and inspected: the checked Mono control fits below Audio device alongside
+  the diagnostics.
+- FLTK native document conformance passed. Adapter conformance reports that the
+  existing Compression dictionary reference clips at minimum window size. Its
+  text, Courier 12 font and 489-by-166-pixel frame match the pre-change source;
+  the Mono layout does not alter that reference.
+- `git diff --check` passed.
+
+Windows audio was tested through the compiled WinMM stub on Linux. Physical
+sound-card routing, including an IC-7100, was not tested.
+
 ## Message preservation contract and regressions — 15 September 2026
 
 This change updates documentation and tests only. Runtime sources, protocol

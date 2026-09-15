@@ -67,6 +67,19 @@ void idle_workspace_and_plots() {
           "idle spectrum contains nonfinite evidence");
     check(later.constellation.size()>10 && later.constellation_source==live::ConstellationSource::input,
           "idle constellation must come from observed input samples");
+    auto previous=later;
+    for(const bool mono:{false,true}) {
+        session.set_mono(mono);
+        const auto changed=session.snapshot();
+        bounded(changed,value);no_reception(changed);
+        check(changed.running && changed.samples_received>=previous.samples_received &&
+              changed.sequence>=previous.sequence && changed.waveform.size()==2048,
+              "output-only mono update restarted reception or cleared its plots");
+        previous=wait_for(session,[&](const auto& snapshot) {
+            bounded(snapshot,value);no_reception(snapshot);
+            return snapshot.samples_received>changed.samples_received;
+        });
+    }
     session.stop();check(!session.snapshot().running,"stop must become observable immediately");
 }
 void default_workspace_admits_long_key_banks() {
@@ -139,6 +152,21 @@ void long_raw_symbol_is_bounded_and_cancellable() {
     check(expected.total_seconds>3600 && processing.transmission_fraction<1 && processing.transmission_seconds>0 &&
           std::abs(processing.transmission_seconds/processing.transmission_fraction-expected.total_seconds)<1e-6,
           "hours-long raw symbols must advance actual bounded sample processing");
+    auto previous=processing;
+    for(const bool mono:{false,true}) {
+        session.set_mono(mono);
+        const auto changed=session.snapshot();
+        bounded(changed,value);no_reception(changed);
+        check(changed.transmitting && !changed.transmission_cancelled &&
+              changed.transmission_id==processing.transmission_id &&
+              changed.samples_received>=previous.samples_received &&
+              changed.transmission_fraction>=previous.transmission_fraction,
+              "mono update interrupted a symbol already being processed");
+        previous=wait_for(session,[&](const auto& snapshot) {
+            bounded(snapshot,value);no_reception(snapshot);
+            return snapshot.transmission_fraction>changed.transmission_fraction;
+        });
+    }
     const auto started=std::chrono::steady_clock::now();session.cancel_transmit();
     check(std::chrono::steady_clock::now()-started<100ms,"cancellation waited for a long symbol boundary");
     const auto cancelled=session.snapshot();

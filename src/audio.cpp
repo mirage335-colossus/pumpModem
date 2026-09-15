@@ -43,6 +43,14 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback) {
     if(callback)callback({logical,hardware,(logical==hardware?.5:.42)*std::min(logical,hardware),workspace});
 }
+void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,bool mono) {
+    for(std::size_t i=0;i<samples.size();++i) {
+        if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
+        const auto sample=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
+        output[i*channels]=channels==2 && mono?0:sample;
+        if(channels==2)output[i*channels+1]=sample;
+    }
+}
 class PlaybackSource {
     const PlaybackCallback& next_;
     std::stop_token stop_;
@@ -134,19 +142,26 @@ struct Alsa {
 struct Stream {
     Alsa& api; Alsa::PCM* pcm=nullptr;
     std::uint32_t hardware_rate=0;
+    unsigned channels=1;
     Stream(Alsa& a,const std::string& device,int direction,std::uint32_t rate,bool nonblocking=false):api(a) {
         const auto rates=rate_candidates(rate);
         const auto requested=device.empty()?std::string("default"):device;
         std::string attempted;
         const auto try_device=[&](const std::string& name) {
             for(const auto candidate:rates) {
-                if(!attempted.empty())attempted+=", ";
-                attempted+=name+"@"+std::to_string(candidate)+"Hz";
-                if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
-                // Let the application own rate conversion: an accepted ALSA
-                // rate is the selected endpoint's clock, not a modem setting.
-                if(api.set_params(pcm,2,3,1,candidate,0,100000)>=0) {hardware_rate=candidate;return true;}
-                api.close(pcm);pcm=nullptr;
+                // Stereo lets us route transmit PCM explicitly. Mono-only
+                // endpoints still work, while capture retains one channel.
+                for(unsigned candidate_channels=direction?1:2;candidate_channels>0;--candidate_channels) {
+                    if(!attempted.empty())attempted+=", ";
+                    attempted+=name+"@"+std::to_string(candidate)+"Hz/"+std::to_string(candidate_channels)+"ch";
+                    if(api.open(&pcm,name.c_str(),direction,nonblocking?1:0)<0){pcm=nullptr;return false;}
+                    // Let the application own rate conversion: an accepted ALSA
+                    // rate is the selected endpoint's clock, not a modem setting.
+                    if(api.set_params(pcm,2,3,candidate_channels,candidate,0,100000)>=0) {
+                        hardware_rate=candidate;channels=candidate_channels;return true;
+                    }
+                    api.close(pcm);pcm=nullptr;
+                }
             }
             return false;
         };
@@ -207,13 +222,13 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     Alsa api; Stream stream(api,device,0,rate);
     PlaybackSource source(rate,stream.hardware_rate,next_samples,stop);
-    std::vector<std::int16_t> block(4096);
-    const auto chunk_limit=std::min<std::size_t>(block.size(),stream.hardware_rate/20);
+    const auto chunk_limit=std::min<std::size_t>(4096,stream.hardware_rate/20);
+    std::vector<std::int16_t> block(chunk_limit*stream.channels);
     std::vector<float> samples(chunk_limit);
     report_format(rate,stream.hardware_rate,source.workspace_bytes()+block.capacity()*sizeof(std::int16_t)+samples.capacity()*sizeof(float),on_format);
     unsigned failures=0;
@@ -222,14 +237,11 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         const auto count=source.read(samples);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count)break;
-        for(std::size_t i=0;i<count;++i) {
-            if(!std::isfinite(samples[i])) throw Error("nonfinite transmit sample");
-            block[i]=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
-        }
+        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,mono);
         std::size_t offset=0;
         while(offset<count) {
             check_cancelled(stop);
-            const auto n=api.write(stream.pcm,block.data()+offset,count-offset);
+            const auto n=api.write(stream.pcm,block.data()+offset*stream.channels,count-offset);
             check_cancelled(stop);
             if(n<0) {if(++failures>8 || api.recover(stream.pcm,static_cast<int>(n),1)<0) throw Error("audio playback failed");}
             else if(n==0 || static_cast<std::size_t>(n)>count-offset) throw Error("audio playback returned invalid sample count");
@@ -285,10 +297,10 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 #else
 namespace {
-WAVEFORMATEX format(std::uint32_t rate) {
+WAVEFORMATEX format(std::uint32_t rate,unsigned channels) {
     if(rate<8000 || rate>384000) throw Error("invalid audio sample rate");
-    WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=1;f.nSamplesPerSec=rate;
-    f.wBitsPerSample=16;f.nBlockAlign=2;f.nAvgBytesPerSec=rate*2;return f;
+    WAVEFORMATEX f{};f.wFormatTag=WAVE_FORMAT_PCM;f.nChannels=static_cast<WORD>(channels);f.nSamplesPerSec=rate;
+    f.wBitsPerSample=16;f.nBlockAlign=static_cast<WORD>(channels*2);f.nAvgBytesPerSec=rate*f.nBlockAlign;return f;
 }
 UINT device_id(const std::string& device) {
     if(device.empty() || device=="default") return WAVE_MAPPER;
@@ -304,12 +316,13 @@ void mm_check(MMRESULT result,const char* message) {
 // Ordinary completion checks cleanup calls; exception unwinding retries cleanup
 // without allowing a second exception to obscure the original device failure.
 struct WaveSession {
-    static constexpr std::size_t block_samples=4096;
+    static constexpr std::size_t block_frames=4096;
     HWAVEOUT output=nullptr;
     HWAVEIN input=nullptr;
     HANDLE event=nullptr;
     std::uint32_t hardware_rate=0;
-    std::array<std::array<std::int16_t,block_samples>,2> pcm{};
+    unsigned channels=1;
+    std::array<std::array<std::int16_t,block_frames*2>,2> pcm{};
     std::array<WAVEHDR,2> headers{};
     std::array<bool,2> prepared{};
     WaveSession(bool recording,std::uint32_t rate,const std::string& device) {
@@ -319,14 +332,16 @@ struct WaveSession {
         if(!event) throw Error("cannot create audio completion event");
         const auto callback=reinterpret_cast<DWORD_PTR>(event);
         for(const auto candidate:rates) {
-            const auto f=format(candidate);
-            // Keep rate conversion at our bounded PCM boundary. Otherwise ACM
-            // may accept an unsupported candidate by converting it silently.
-            constexpr DWORD flags=CALLBACK_EVENT|WAVE_FORMAT_DIRECT;
-            const auto result=recording ? waveInOpen(&input,id,&f,callback,0,flags)
-                                        : waveOutOpen(&output,id,&f,callback,0,flags);
-            if(result==MMSYSERR_NOERROR){hardware_rate=candidate;return;}
-            input=nullptr;output=nullptr;
+            for(unsigned candidate_channels=recording?1:2;candidate_channels>0;--candidate_channels) {
+                const auto f=format(candidate,candidate_channels);
+                // Keep rate conversion at our bounded PCM boundary. Otherwise ACM
+                // may accept an unsupported candidate by converting it silently.
+                constexpr DWORD flags=CALLBACK_EVENT|WAVE_FORMAT_DIRECT;
+                const auto result=recording ? waveInOpen(&input,id,&f,callback,0,flags)
+                                            : waveOutOpen(&output,id,&f,callback,0,flags);
+                if(result==MMSYSERR_NOERROR){hardware_rate=candidate;channels=candidate_channels;return;}
+                input=nullptr;output=nullptr;
+            }
         }
         CloseHandle(event);event=nullptr;
         throw Error(recording ? "cannot open waveIn device at a supported sample rate" : "cannot open waveOut device at a supported sample rate");
@@ -348,7 +363,7 @@ struct WaveSession {
         for(std::size_t i=0;i<headers.size();++i) {
             auto& header=headers[i];
             header.lpData=reinterpret_cast<LPSTR>(pcm[i].data());
-            header.dwBufferLength=static_cast<DWORD>(pcm[i].size()*sizeof(std::int16_t));
+            header.dwBufferLength=static_cast<DWORD>(block_frames*channels*sizeof(std::int16_t));
             mm_check(output ? waveOutPrepareHeader(output,&header,sizeof(WAVEHDR))
                             : waveInPrepareHeader(input,&header,sizeof(WAVEHDR)),
                      "audio buffer preparation failed");
@@ -394,14 +409,14 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
     PlaybackSource source(rate,session.hardware_rate,next_samples,stop);
     session.prepare();
     mm_check(waveOutPause(session.output),"waveOut pause failed");
-    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_samples,session.hardware_rate/20));
+    std::vector<float> samples(std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20));
     report_format(rate,session.hardware_rate,source.workspace_bytes()+sizeof(session)+samples.capacity()*sizeof(float),on_format);
     bool finished=false,started=false;
     std::array<bool,2> queued{};
@@ -412,12 +427,9 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         check_cancelled(stop);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){finished=true;return;}
-        for(std::size_t i=0;i<count;++i) {
-            if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
-            session.pcm[slot][i]=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
-        }
+        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,mono);
         auto& header=session.headers[slot];
-        header.dwBufferLength=static_cast<DWORD>(count*sizeof(std::int16_t));
+        header.dwBufferLength=static_cast<DWORD>(count*session.channels*sizeof(std::int16_t));
         // The other buffer may finish while the producer computes this block.
         // Detect that gap after generation, before publishing more PCM.
         if(started && queued[1-slot] && (session.headers[1-slot].dwFlags&WHDR_DONE))
@@ -459,7 +471,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
     WaveSession session(true,rate,device);
     CaptureSink sink(rate,session.hardware_rate,on_chunk,stop);
     session.prepare();
-    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_samples,session.hardware_rate/20);
+    const auto chunk_samples=std::min<std::size_t>(WaveSession::block_frames,session.hardware_rate/20);
     std::vector<float> converted(chunk_samples);
     report_format(rate,session.hardware_rate,sink.workspace_bytes()+sizeof(session)+converted.capacity()*sizeof(float),on_format);
     for(auto& header:session.headers) {
@@ -487,7 +499,7 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 
 #endif
-void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format) {
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
     check_cancelled(stop);
     for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
     std::size_t offset=0;
@@ -495,6 +507,6 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
         const auto count=std::min(chunk.size(),samples.size()-offset);
         std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
         offset+=count;return count;
-    },stop,std::move(on_format));
+    },stop,std::move(on_format),mono);
 }
 }

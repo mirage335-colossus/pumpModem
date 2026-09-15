@@ -307,6 +307,34 @@ void rate_carrier_declarations() {
         }
     }
 }
+void mono_declaration() {
+    Application app({.simulation=true});
+    const auto& mono=control(ui::Field::mono);
+    const std::string_view help=mono.help;
+    check(mono.kind==ui::Kind::toggle&&mono.persistent&&std::string_view(mono.label)=="Mono"&&
+          app.field(mono.field).checked&&help.find("right channel")!=help.npos&&
+          help.find("sole channel")!=help.npos&&help.find("both stereo channels")!=help.npos,
+          "Mono must be a default-on shared toggle explaining stereo and mono-device routing");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);
+        const auto presentation=app.control(mono);
+        check(presentation.visible&&presentation.enabled,"Mono routing disappeared or became unavailable on another page");
+        app.toggle(mono,false);
+        check(!app.field(mono.field).checked,"Declared Mono off callback did not reach the shared controller");
+        app.toggle(mono,true);
+        check(app.field(mono.field).checked,"Declared Mono on callback did not reach the shared controller");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto geometry=ui::control_layout(mono,app.field(mono.field),size.w,size.h);
+            const auto diagnostics=ui::control_layout(control(ui::Field::diagnostics),app.field(ui::Field::diagnostics),size.w,size.h);
+            check(!geometry.has_label&&geometry.widget.w>=74&&geometry.widget.h>=22&&
+                  geometry.frame.x+geometry.frame.w<diagnostics.frame.x,
+                  "Mono's native checkbox label or diagnostic text lost its reserved space");
+        }
+    }
+    app.close();app.toggle(mono,false);
+    check(!app.control(mono).enabled&&app.field(mono.field).checked,
+          "A stale declared Mono callback reconfigured a closing application");
+}
 void declared_submission() {
     Application app({.simulation=true});
     app.edit(ui::Field::binary,"001");
@@ -580,6 +608,6 @@ void compression_declarations() {
 }
 }
 int main() {
-    try {records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

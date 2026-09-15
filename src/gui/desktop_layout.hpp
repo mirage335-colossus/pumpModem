@@ -21,7 +21,7 @@ enum class Slot {
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, received_raw_bits,
-    device, bandwidth, carrier, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    device, mono, bandwidth, carrier, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -29,7 +29,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::header: case Slot::mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
-    case Slot::device: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::receive_snr: case Slot::pattern:
+    case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
@@ -164,7 +164,10 @@ struct DesktopLayout {
         out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + control_gap;
         out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
-        out[Slot::diagnostics] = {margin, height - 56, width - 2 * margin, 22};
+        // Audio routing sits directly below its device without narrowing the
+        // modem editors or their labels at the minimum desktop width.
+        out[Slot::mono] = {margin, height - 56, 74, 22};
+        out[Slot::diagnostics] = {margin + 82, height - 56, width - 2 * margin - 82, 22};
         out[Slot::status] = {margin, height - 31, width - 2 * margin, 24};
     }
 };
