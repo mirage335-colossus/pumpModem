@@ -1,5 +1,5 @@
 #include "datapump/channel.hpp"
-#include "datapump/packet.hpp"
+#include "datapump/stream_codec.hpp"
 #include "datapump/transfer.hpp"
 #include <algorithm>
 #include <array>
@@ -160,12 +160,12 @@ void sampled_chunking_and_idle(){
     std::stop_source stop;stop.request_stop();
     rejects([&]{whole.read_noise(first,stop.get_token());},"cancelled sampled idle read was accepted");
 }
-void packet_and_preview(){
+void stream_and_preview(){
     transfer::Options options;options.timestamp=1800000000;options.search_seconds=0;
     options.modem=config();options.modem.sample_rate=9600;options.modem.bandwidth_hz=2400;
     options.modem.carrier_hz=1800;options.modem.spreading_factor=64;
     Message message;message.kind=MessageKind::file;message.filename="channel.bin";
-    message.id[0]=83;message.data=Bytes(16,0x5c);
+    message.local_id[0]=83;message.data=Bytes(16,0x5c);
     auto source=transfer::message_transmitter(message,options),control=transfer::message_transmitter(message,options);
     m::ChannelConfig model;model.snr_db=35;model.seed=517;
     m::SampledSimulationChannel channel(options.modem,model),without_plots(options.modem,model);
@@ -177,8 +177,18 @@ void packet_and_preview(){
         source->preview_last(preview);
         require(std::all_of(preview.begin(),preview.end(),[](float value){return std::isfinite(value);}),"nonfinite simulation preview");
     }
+    auto remaining=m::pattern_absence_samples(options.modem)+options.modem.sample_rate+
+                   2*m::symbol_sample_count(options.modem);
+    while(remaining) {
+        const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,a.size()));
+        channel.read_noise(std::span(a).first(count));without_plots.read_noise(std::span(b).first(count));
+        require(std::equal(a.begin(),a.begin()+static_cast<std::ptrdiff_t>(count),b.begin()),
+                "plotting changed post-transmission capture noise");
+        samples.insert(samples.end(),a.begin(),a.begin()+static_cast<std::ptrdiff_t>(count));remaining-=count;
+    }
     const auto decoded=transfer::receive(samples,options);
-    require(decoded.packet_validated && decoded.packet.message.data==message.data,"ordinary 100 ppm pattern packet changed content");
+    require(decoded.stream_complete && decoded.content_validated && decoded.content.message.data==message.data,
+            "ordinary 100 ppm pattern stream changed content");
 }
 void preview_interpolation_edges(){
     const auto cfg=config();const Bytes wire(32,0xa5);
@@ -205,4 +215,4 @@ void invalid(){
     require(m::ChannelConfig{}.clock_error_ppm==100 && m::ChannelConfig{}.phase_noise_degrees_per_sqrt_second==.5,"simulationdefaultsarenotbadcrystalmodel");
 }
 }
-int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();packet_and_preview();preview_interpolation_edges();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{clock_and_carrier();long_coherence();phase_diffusion();pcm_clock();analytic_source_matches_hardware_pcm();sampled_startup_and_carrier();sampled_chunking_and_idle();stream_and_preview();preview_interpolation_edges();invalid();std::cout<<"channel tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

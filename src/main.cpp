@@ -1,7 +1,9 @@
 #include "datapump/audio.hpp"
+#include "datapump/channel.hpp"
+#include <array>
 #include "datapump/crypto.hpp"
 #include "datapump/modem.hpp"
-#include "datapump/packet.hpp"
+#include "datapump/stream_codec.hpp"
 #include "datapump/qr.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/transfer.hpp"
@@ -44,20 +46,19 @@ Usage: pump COMMAND [OPTIONS]
   estimate     Calculate exact message airtime without creating a waveform
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
-  pack/unpack  Framed packet byte streams, for external tools; no device I/O
   keygen       Create an owner-only 128 MiB symmetric keyfile (--output)
   keys         List the named key sets in --keyfile
   devices      Enumerate local audio devices
-  status-tx    Transmit exact few-bit callsign to WAV, without packet overhead
+  status-tx    Transmit exact few-bit callsign to WAV, without stream overhead
   status-rx    Discover raw pattern bits in WAV, then compare --bits; no MAC
   qr           Generate optical transfer QR Level L (--format svg|pbm)
 
 Input/output:
   --text TEXT           Text to send (otherwise --input FILE or - for stdin)
-  --input PATH          TX file, RX WAV, or packet input (- means stdin)
+  --input PATH          TX file or RX WAV (- means stdin)
   --kind text|file|screenshot  Default: text with --text/stdin, file with path
   --filename NAME       Display filename for file/screenshot (basename only)
-  --output PATH         Explicit WAV/keyfile/packet output; never overwrite
+  --output PATH         Explicit WAV/keyfile output; never overwrite
   --save PATH           Explicit save of received content or raw 0/1 text; never overwrite
   --json                Received content as JSON with base64 payload and diagnostics
   --callsign TEXT --grid TEXT --repeatable
@@ -74,7 +75,7 @@ Modem:
   --scramble            Cryptographic pattern rotation (requires keyfile)
   --dsss                Independent encrypted direct-sequence spreading
   --fec 20|60|off        Reed-Solomon parity overhead, default20
-  --no-compression      Diagnostic override; normal compression is automatic
+  --no-compression      Diagnostic override; both peers must select the same source codec
   --memory-mb N         Legacy batch PCM workspace budget, default256 MiB
   --cache-mb N          Received content/input limit, default256 MiB
   --dsp-mb N            Independent streaming DSP workspace, default64 MiB
@@ -167,11 +168,11 @@ public:
             for(const auto name:names) if(has(name)) throw Error("--"+std::string(name)+" "+reason);
         };
         if(command=="qr") reject({"keyfile","key-name","pad","scramble","dsss","repeatable","device"},"cannot be used with QR; QR contains plaintext input");
-        if(command=="rx" || command=="unpack" || command=="status-rx") {
-            reject({"output"},"is not a receive output; use --save PATH for verified text/files");
+        if(command=="rx" || command=="status-rx") {
+            reject({"output"},"is not a receive output; use --save PATH for decoded source bytes");
             reject({"text"},"is a transmit input; use --input for reception");
         }
-        if(command!="rx" && command!="unpack") reject({"save"},"is only valid for rx/unpack");
+        if(command!="rx") reject({"save"},"is only valid for rx");
         if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
@@ -300,7 +301,7 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
 }
 Bytes input_bytes(const Args& a) {
     auto path=a.get("input","-");
-    const auto limit=a.command=="unpack"?transfer::packet_workspace_limit(content_budget(a)):content_budget(a);
+    const auto limit=content_budget(a);
     if(path=="-") return read_bounded(std::cin,limit);
     std::ifstream input(path,std::ios::binary);
     if(!input) throw Error("cannot open input: "+path);
@@ -331,45 +332,57 @@ modem::Wav input_wav(const Args& a) {
 void output_bytes(const Args& a,const Bytes& data) {
     if(a.has("output")) write_new_file(a.get("output"),data);
     else {
-        if(a.command=="pack" && stdout_terminal()) throw Error("binary packets require stdout redirection or --output PATH");
         std::cout.write(reinterpret_cast<const char*>(data.data()),static_cast<std::streamsize>(data.size()));if(!std::cout)throw Error("stdout write failed");
     }
 }
-void output_wave(const Args& a,const std::vector<float>& samples,const modem::Config& c) {
+double hardware_delay(const Args& a,const modem::Config& c) {
+    const auto requested=a.number("tx-delay",6);
+    if(!std::isfinite(requested) || requested<6 || requested>3600)
+        throw Error("tx-delay must be 6..3600 seconds");
+    return std::max(requested,static_cast<double>(modem::pattern_absence_samples(c))/c.sample_rate+1.);
+}
+void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c,bool add_tail=true) {
+    // A generated capture includes actual quiet samples for the receiver's
+    // sole end rule. Reading a truncated external WAV never invents this tail.
+    const auto tail=add_tail?modem::pattern_absence_samples(c)+c.sample_rate:0;
+    if(tail>c.memory_limit/sizeof(float) || samples.size()>c.memory_limit/sizeof(float)-tail)
+        throw Error("WAV including receive separation exceeds memory limit");
+    samples.resize(samples.size()+tail,0);
+
     if(a.has("output")) {
         std::ostringstream wav(std::ios::out|std::ios::binary);
         modem::write_wav(wav,samples,c.sample_rate);auto bytes=wav.str();
         write_new_file(a.get("output"),std::span(reinterpret_cast<const std::uint8_t*>(bytes.data()),bytes.size()));
     }
     if(a.has("device")) {
-        auto delay=a.number("tx-delay",6);
-        if(delay<0 || delay>3600) throw Error("tx-delay must be0..3600 seconds");
+        const auto delay=hardware_delay(a,c);
         audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c));
-        if(a.has("keyfile"))std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
 std::string id_string(const Message& m) {
-    std::ostringstream id;for(auto b:m.id) id<<std::hex<<std::setfill('0')<<std::setw(2)<<static_cast<unsigned>(b);return id.str();
+    std::ostringstream id;for(auto b:m.local_id) id<<std::hex<<std::setfill('0')<<std::setw(2)<<static_cast<unsigned>(b);return id.str();
 }
-void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
-            bool packet_validated=true,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0) {
-    const auto& m=packet.message;
+void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
+            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={}) {
+    const auto& m=stream.message;
     if(a.has("save")) {
-        if(!packet_validated && m.data.empty() && !raw_bits.empty()) {
-            Bytes text; text.reserve(raw_bits.size());for(auto bit:raw_bits)text.push_back(bit?'1':'0');
-            write_new_file(a.get("save"),text);
-        } else write_new_file(a.get("save"),m.data);
+        if(!stream_complete || !content_validated)
+            throw Error("No complete decoded source to save; use --json for reception diagnostics");
+        write_new_file(a.get("save"),m.data);
     }
     if(a.has("json")) {
-        std::cout<<"{\"validated\":"<<(packet_validated?"true":"false")<<",\"packet_validated\":"<<(packet_validated?"true":"false")
-          <<",\"authenticated\":"<<(packet_validated&&packet.authenticated?"true":"false")
+        std::cout<<"{\"validated\":"<<(content_validated?"true":"false")<<",\"content_validated\":"<<(content_validated?"true":"false")
+          <<",\"stream_complete\":"<<(stream_complete?"true":"false")
+          <<",\"authenticated\":"<<(content_validated&&stream.authenticated?"true":"false")
           <<",\"id\":\""<<id_string(m)<<"\",\"kind\":\""<<(m.kind==MessageKind::text?"text":m.kind==MessageKind::file?"file":"screenshot")
           <<"\",\"filename\":\""<<json_escape(m.filename)<<"\",\"callsign\":\""<<json_escape(m.callsign)
           <<"\",\"grid\":\""<<json_escape(m.grid)<<"\",\"repeatable\":"<<(m.repeatable?"true":"false")
-          <<",\"data_base64\":\""<<base64_encode(m.data)<<"\",\"corrected_bytes\":"<<packet.corrected_bytes
+          <<",\"data_base64\":\""<<base64_encode(m.data)<<"\",\"corrected_bytes\":"<<stream.corrected_bytes
           <<",\"timestamp\":"<<timestamp<<",\"raw_bits\":\"";
         for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
         std::cout<<"\",\"raw_bit_count\":"<<raw_bits.size()<<",\"missing_symbols\":"<<missing_symbols
+          <<",\"observed_bit_count\":"<<observed_bits<<",\"error\":\""<<json_escape(std::string(error))<<"\""
           <<",\"diagnostics\":{\"sample_offset\":"<<d.sample_offset
           <<",\"correlation\":"<<d.preamble_correlation<<",\"snr_db\":";
         if(d.pattern_score || !std::isfinite(d.snr_db))std::cout<<"null";else std::cout<<d.snr_db;
@@ -381,7 +394,7 @@ void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& 
         for(std::size_t i=0;i<d.constellation.size();++i) std::cout<<(i?",":"")<<'['<<d.constellation[i].real()<<','<<d.constellation[i].imag()<<']';
         std::cout<<"]}}\n";
     } else if(!a.has("save")) {
-        if(!packet_validated && m.data.empty() && !raw_bits.empty()) {
+        if(!content_validated && m.data.empty() && !raw_bits.empty()) {
             for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
             std::cout<<'\n';
         } else if(m.kind!=MessageKind::text) {
@@ -389,11 +402,16 @@ void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& 
         } else if(stdout_terminal()) std::cout<<terminal_text(m.data);
         else std::cout.write(reinterpret_cast<const char*>(m.data.data()),static_cast<std::streamsize>(m.data.size()));
     }
+    if(!a.has("json") && !content_validated) {
+        if(!stream_complete)std::cerr<<"Incomplete capture: physical symbol absence has not completed the stream.\n";
+        if(!error.empty())std::cerr<<error<<'\n';
+        if(observed_bits>raw_bits.size())std::cerr<<"Showing only the first "<<raw_bits.size()<<" of "<<observed_bits<<" observed symbol slots.\n";
+    }
     if(missing_symbols && !a.has("json"))
         std::cerr<<"Raw bits include "<<missing_symbols<<(missing_symbols==1?" zero placeholder for a missing symbol.\n":" zero placeholders for missing symbols.\n");
 }
 void report_received(const Args& a,const transfer::Received& received) {
-    report(a,received.packet,received.diagnostics,received.timestamp,received.packet_validated,received.raw_bits,received.missing_symbols);
+    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error);
 }
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");
@@ -458,7 +476,7 @@ void listen(const Args& a,const transfer::Options& options) {
             }
         }
         if(a.has("json"))for(const auto& signal:snapshot.signals)if(signal.binary) {
-            std::cout<<"{\"event\":\"raw_bits\",\"packet_validated\":false,\"authenticated\":false,\"signal_id\":"<<signal.id
+            std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false,\"signal_id\":"<<signal.id
                 <<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
                 <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
             if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
@@ -512,7 +530,7 @@ int main(int argc,char** argv) {
             for(const auto& d:audio::devices()) std::cout<<d.id<<'\t'<<d.description<<'\n';
             return 0;
         }
-        const std::set<std::string> commands={"pack","unpack","tx","rx","simulate","status-tx","status-rx","estimate","listen"};
+        const std::set<std::string> commands={"tx","rx","simulate","status-tx","status-rx","estimate","listen"};
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
         auto c=config(a);auto timestamp=epoch(a);
         auto k=c.spreading_mode==modem::SpreadingMode::tone?std::optional<Crypto>{}:key(a);
@@ -524,8 +542,8 @@ int main(int argc,char** argv) {
         if(a.command=="estimate") {
             const auto result=transfer::estimate(message(a),settings);
             std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
-                <<"{\"packet_bytes\":"<<result.packet_bytes<<",\"content_bytes\":"<<result.content_bytes
-                <<",\"packet_seconds\":"<<result.packet_seconds<<",\"content_seconds\":"<<result.content_seconds
+                <<"{\"coded_bytes\":"<<result.coded_bytes<<",\"wire_bits\":"<<result.wire_bits<<",\"content_bytes\":"<<result.content_bytes
+                <<",\"coded_seconds\":"<<result.coded_seconds<<",\"content_seconds\":"<<result.content_seconds
                 <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
                 <<",\"spreading\":"<<c.spreading_factor
                 <<",\"constellation_bits\":"<<c.constellation_bits
@@ -544,12 +562,6 @@ int main(int argc,char** argv) {
             return 0;
         }
         if(a.command=="listen") {listen(a,settings);return 0;}
-        if(a.command=="pack") {
-            output_bytes(a,transfer::pack(message(a),settings));return 0;
-        }
-        if(a.command=="unpack") {
-            report(a,transfer::unpack(input_bytes(a),settings),{},timestamp);return 0;
-        }
         if(a.command=="status-tx" || a.command=="status-rx") {
             const auto plain=status_bits(a,{},timestamp);
             if(a.command=="status-tx") {
@@ -561,18 +573,18 @@ int main(int argc,char** argv) {
                     for(std::size_t offset=0;offset<samples.size();)offset+=source->read(std::span(samples).subspan(offset,std::min<std::size_t>(4096,samples.size()-offset)));
                     output_wave(a,samples,c);
                 } else {
-                    const auto delay=a.number("tx-delay",6);
-                    if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
+                    const auto delay=hardware_delay(a,c);
                     play_transmission(a,settings,[&](const auto& options){return transfer::binary_transmitter(plain,options);});
-                    if(k)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+                    std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
                 }
             } else {
                 auto wav=input_wav(a);settings.modem.sample_rate=wav.sample_rate;modem::validate(settings.modem);
                 const auto result=transfer::receive(wav.samples,settings,progress);
-                std::cout<<"{\"authenticated\":false,\"packet_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
+                std::cout<<"{\"authenticated\":false,\"content_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
                 for(auto bit:result.raw_bits)std::cout<<(bit?'1':'0');
                 std::cout<<"\",\"raw_bit_count\":"<<result.raw_bits.size()<<",\"missing_symbols\":"<<result.missing_symbols
-                    <<",\"known_bits_match\":"<<(result.raw_bits==plain?"true":"false")<<",\"pattern_score\":";
+                    <<",\"stream_complete\":"<<(result.stream_complete?"true":"false")
+                    <<",\"known_bits_match\":"<<(result.stream_complete && !result.missing_symbols && result.observed_bits==plain.size() && result.raw_bits==plain?"true":"false")<<",\"pattern_score\":";
                 if(result.diagnostics.pattern_score && std::isfinite(*result.diagnostics.pattern_score))std::cout<<*result.diagnostics.pattern_score;else std::cout<<"null";
                 std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
             }
@@ -600,13 +612,12 @@ int main(int argc,char** argv) {
             const auto outgoing=message(a);
             const auto estimate=transfer::estimate(outgoing,settings);
             if(a.has("device")) {
-                const auto delay=a.number("tx-delay",6);
-                if(delay<0 || delay>3600)throw Error("tx-delay must be 0..3600 seconds");
+                const auto delay=hardware_delay(a,c);
                 play_transmission(a,settings,[&](const auto& options){return transfer::message_transmitter(outgoing,options);});
-                if(settings.key)std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
+                std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
             } else output_wave(a,transfer::transmit(outgoing,settings),c);
             std::cerr<<"Transmitted ";
-            std::cerr<<estimate.waveform_samples/modem::symbol_sample_count(c)<<" pattern bits, ";
+            std::cerr<<estimate.wire_bits<<" pattern bits, ";
             std::cerr<<estimate.total_seconds
                      <<" seconds; start epoch "<<settings.timestamp<<'\n';return 0;
         }
@@ -624,12 +635,23 @@ int main(int argc,char** argv) {
         const auto outgoing=message(a);
         transfer::Received result;
         if(a.has("output")) {
-            const auto samples=transfer::transmit(outgoing,settings);
-            const auto noisy=modem::simulate(samples,transfer::seeded_config(settings,timestamp),channel);
-            output_wave(a,noisy,c);
+            auto source=transfer::message_transmitter(outgoing,settings);
+            modem::SampledSimulationChannel impairments(transfer::seeded_config(settings,timestamp),channel);
+            std::array<float,2048> block{};std::vector<float> noisy;
+            const auto append=[&](std::size_t count) {
+                if(count>c.memory_limit/sizeof(float)-noisy.size())throw Error("simulated WAV exceeds memory limit");
+                noisy.insert(noisy.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(count));
+            };
+            while(const auto count=impairments.read(*source,block))append(count);
+            auto tail=modem::pattern_absence_samples(c)+c.sample_rate;
+            while(tail) {
+                const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(tail,block.size()));
+                impairments.read_noise(std::span(block).first(count));append(count);tail-=count;
+            }
             auto receiver_settings=settings;
             receiver_settings.timestamp=channel.receiver_timestamp.value_or(timestamp);
             result=transfer::receive(noisy,receiver_settings,progress);
+            output_wave(a,std::move(noisy),c,false);
         } else result=transfer::simulate(outgoing,settings,channel,progress);
         report_received(a,result);
         return 0;

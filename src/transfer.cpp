@@ -1,17 +1,14 @@
 #include "datapump/transfer.hpp"
 #include "datapump/symbol_schedule.hpp"
-#include "datapump/runtime.hpp"
-#include "datapump/streaming_modem.hpp"
 #include "datapump/channel.hpp"
-#include "datapump/compression.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <limits>
-#include <random>
-#include <string>
+#include <map>
 #include <utility>
 
 namespace datapump::transfer {
@@ -33,126 +30,95 @@ Options effective_options(const Options& input) {
 void check_cancelled(std::stop_token stop) {
     if (stop.stop_requested()) throw Error("transfer cancelled");
 }
+
 void validate(const Options& options) {
     modem::validate(options.modem);
     if(options.capture_epoch && (!std::isfinite(*options.capture_epoch) || *options.capture_epoch<0 ||
        static_cast<long double>(*options.capture_epoch)>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())))
-        throw Error("capture epoch must be finite, nonnegative and within the epoch range");
-    if ((options.modem.scramble || options.modem.dsss) && !options.key)
+        throw Error("invalid capture epoch");
+    if((options.modem.scramble || options.modem.dsss) && !options.key)
         throw Error("encrypted spreading requires a symmetric key");
-    if (options.fec != FecMode::off && options.fec != FecMode::rs20 && options.fec != FecMode::rs60)
-        throw Error("unknown Reed-Solomon mode");
-    if (!std::isfinite(options.repeat_policy.maximum_seconds) || options.repeat_policy.maximum_seconds < 0)
-        throw Error("repeatable content airtime limit must be finite and nonnegative");
-    (void)packet_workspace_limit(options.content_limit);
-    if (options.dsp_workspace_bytes < 256*1024) throw Error("streaming DSP workspace must be at least 256 KiB");
+    (void)interval_parity_bytes(options.fec);
+    (void)source_storage_limit(options.content_limit);
+    if(options.dsp_workspace_bytes<256*1024)throw Error("streaming DSP workspace must be at least 256 KiB");
 }
-std::size_t packet_budget(const Options& options) { return packet_workspace_limit(options.content_limit); }
-struct PatternBudget { std::size_t payload_bits,wire_bits; };
-PatternBudget pattern_budget(std::size_t content_limit) {
-    // The codec budget counts packed bytes and scratch. Pattern storage uses
-    // one byte per bit, then adds recovery words before the Data mask. Keep
-    // these capacities separate; neither changes the admitted content or DSP
-    // workspace limits, which still constrain actual allocations independently.
-    const auto bytes=packet_workspace_limit(content_limit);
-    if(bytes>Bytes{}.max_size()/8)throw Error("pattern packet bit capacity exceeds address space");
-    const auto bits=bytes*8;
-    const auto wire=boundary_sync::encoded_size(bits);
-    if(wire>Bytes{}.max_size())throw Error("pattern wire bit capacity exceeds address space");
-    return {bits,wire};
-}
-void validate_message(const Message& message, const Options& options) {
+void validate_message(const Message& message,const Options& options) {
     validate(options);
-    if (message.data.size() > options.content_limit)
-        throw Error("message exceeds content limit");
+    if(message.data.size()>options.content_limit)throw Error("message exceeds content limit");
 }
 Options binary_options(std::span<const std::uint8_t> bits,const Options& options) {
-    auto result=options;
-    // These controls describe packets and cannot alter a raw bit sequence.
-    result.fec=FecMode::off;result.compression=false;result.repeat_policy={};
+    auto result=options;result.fec=FecMode::off;result.compression=false;
     validate(result);
-    if(bits.empty())throw Error("raw binary transmission requires at least one bit");
-    if(bits.size()>result.content_limit)throw Error("raw binary input exceeds content limit");
-    if(std::any_of(bits.begin(),bits.end(),[](auto bit){return bit>1;}))
-        throw Error("raw binary input elements must be zero or one");
+    if(bits.empty() || bits.size()>result.content_limit)throw Error("invalid raw bit input size");
+    if(std::any_of(bits.begin(),bits.end(),[](auto b){return b>1;}))throw Error("raw bits must be zero or one");
     return result;
 }
-Estimate estimate_encoded(const Message& message, const Options& options, std::size_t frame_size) {
-    // Tiny actual packets use no FEC. A larger packet's hypothetical empty
-    // baseline must retain that larger packet's effective code, otherwise
-    // metadata parity would be wrongly charged as forwarded content.
-    const auto overhead=packet_empty_layout(message,options.fec).wire_bytes;
-    Estimate result;
-    result.packet_bytes = frame_size;
-    result.content_bytes = frame_size > overhead ? frame_size - overhead : 0;
-    const auto symbols = modem::payload_symbol_count(frame_size, options.modem);
-    const auto overhead_symbols = modem::payload_symbol_count(overhead, options.modem);
-    const auto symbol_seconds = static_cast<double>(modem::symbol_sample_count(options.modem)) / options.modem.sample_rate;
-    result.packet_seconds = static_cast<double>(symbols) * symbol_seconds;
-    result.content_seconds = static_cast<double>(symbols > overhead_symbols ? symbols - overhead_symbols : 0) * symbol_seconds;
-    result.repeatable_allowed = message.data.size() <= options.repeat_policy.minimum_payload_bytes ||
-                               result.content_seconds <= options.repeat_policy.maximum_seconds;
-    const auto training_bytes = modem::preamble(options.modem).size();
-    if (frame_size > std::numeric_limits<std::size_t>::max() - training_bytes)
-        throw Error("transmission length exceeds platform size limit");
-    const auto wire_bytes = frame_size + training_bytes;
-    result.total_seconds = (static_cast<double>(modem::training_sample_count(options.modem))+
-        2.*static_cast<double>(modem::pattern_pulse_padding_samples(options.modem)))/options.modem.sample_rate + result.packet_seconds;
-    try {
-        result.waveform_samples = modem::waveform_sample_count(wire_bytes, options.modem);
-        result.batch_memory_supported = modem::memory_supported(wire_bytes, training_bytes, options.modem);
-    } catch (const Error&) { return result; }
-    try {
-        // Complete-frame matching retains measured pattern symbols under the
-        // DSP budget, separately from content and a hypothetical PCM vector.
-        modem::StreamingReceiver probe(options.modem,options.dsp_workspace_bytes);
-        result.memory_supported = probe.frame_supported(frame_size);
-    } catch (const Error&) {
-        result.memory_supported = false;
+IntervalOptions interval_options(const Options& options,std::uint64_t first_symbol) {
+    IntervalOptions result;result.fec=options.fec;
+    if(options.key) {
+        const auto address=modem::symbol_stream_address(options.timestamp,options.modem.stream_phase_samples,
+            first_symbol,modem::symbol_sample_count(options.modem),options.modem.sample_rate);
+        Bytes domain{'D','P','-','I','N','T','E','R','V','A','L',2,
+            static_cast<std::uint8_t>(options.fec),static_cast<std::uint8_t>(options.compression)};
+        for(auto value:{address.epoch,address.ordinal})
+            for(int i=7;i>=0;--i)domain.push_back(static_cast<std::uint8_t>(value>>(8*i)));
+        result.authenticator=[key=*options.key,domain](const Bytes& data) {
+            auto context=domain;context.insert(context.end(),data.begin(),data.end());return key.mac(context);
+        };
+        result.verifier=[key=*options.key,domain](const Bytes& data,const Bytes& tag) {
+            auto context=domain;context.insert(context.end(),data.begin(),data.end());return key.verify(context,tag);
+        };
     }
     return result;
 }
-void enforce_repeat_policy(const Message& message, const Options& options, std::size_t frame_size) {
-    if (message.repeatable && !estimate_encoded(message, options, frame_size).repeatable_allowed)
-        throw Error("repeatable content exceeds airtime limit");
+bool better_reception(const Received& candidate,const Received& current) {
+    if(candidate.content_validated!=current.content_validated)return candidate.content_validated;
+    if(candidate.content_validated) {
+        // A later acquisition can authenticate a shorter suffix of a stream.
+        // Prefer the widest recovered source before comparing radio scores.
+        if(candidate.content.consumed_bytes!=current.content.consumed_bytes)
+            return candidate.content.consumed_bytes>current.content.consumed_bytes;
+        if(candidate.content.message.data.size()!=current.content.message.data.size())
+            return candidate.content.message.data.size()>current.content.message.data.size();
+        if(candidate.observed_bits!=current.observed_bits)return candidate.observed_bits>current.observed_bits;
+    }
+    const auto score=candidate.diagnostics.pattern_score.value_or(-1),prior=current.diagnostics.pattern_score.value_or(-1);
+    if(score!=prior)return score>prior;
+    return candidate.stream_complete || !current.stream_complete;
 }
-Bytes epoch_context(const Bytes& data, std::uint64_t timestamp) {
-    Bytes bound{'D', 'P', '-', 'E', 'P', 'O', 'C', 'H', 1};
-    for (int i = 7; i >= 0; --i) bound.push_back(static_cast<std::uint8_t>(timestamp >> (i * 8)));
-    bound.insert(bound.end(), data.begin(), data.end());
-    return bound;
+Bytes encoded_intervals(const Message& message,const Options& options,StreamLayout* layout=nullptr) {
+    validate_message(message,options);
+    const auto capacity=interval_data_bytes(options.fec,options.key.has_value());
+    auto source=encode_source(message.data,capacity,options.compression,source_storage_limit(options.content_limit));
+    const auto count=source.size()/capacity;
+    if(count>Bytes{}.max_size()/stream_interval_bytes)throw Error("encoded source exceeds address space");
+    Bytes wire;wire.reserve(count*stream_interval_bytes);
+    for(std::size_t i=0;i<count;++i) {
+        const auto first=i*(boundary_sync::marker_bits+boundary_sync::interval_bits)+boundary_sync::marker_bits;
+        auto block=encode_interval(std::span(source).subspan(i*capacity,capacity),interval_options(options,first));
+        wire.insert(wire.end(),block.begin(),block.end());
+    }
+    if(layout) {
+        layout->fec=options.fec;layout->compressed=options.compression;layout->authenticated=options.key.has_value();
+        layout->source_bytes=message.data.size();layout->encoded_source_bytes=source.size();
+        layout->wire_bytes=wire.size();layout->intervals=count;layout->data_bytes_per_interval=capacity;
+        layout->source_bytes_per_interval=source_bytes_per_interval(capacity,options.compression);
+        layout->parity_bytes_per_interval=interval_parity_bytes(options.fec);
+        layout->integrity_bytes_per_interval=options.key?stream_mac_bytes:0;
+    }
+    return wire;
 }
-
 }
-
-std::size_t packet_workspace_limit(std::size_t content_limit) {
-    // The encoder reserves two coded copies, two uncoded bodies, input and
-    // fixed scratch. RS60 needs just over six input sizes; eight also covers
-    // framing metadata, small-block rounding and the decoder's copies.
-    if(!content_limit || content_limit>(std::numeric_limits<std::size_t>::max()-65568)/8)
-        throw Error("invalid content limit");
-    return content_limit*8+65536;
+std::size_t source_storage_limit(std::size_t content_limit) {
+    if(!content_limit || content_limit>(Bytes{}.max_size()-4096)/2)throw Error("invalid content limit");
+    return content_limit*2+4096;
 }
 std::size_t pattern_bit_limit(std::size_t content_limit) {
-    return pattern_budget(content_limit).wire_bits;
+    const auto limit=source_storage_limit(content_limit);
+    if(limit>(Bytes{}.max_size()-boundary_sync::interval_bits+1)/32)throw Error("source bit limit exceeds address space");
+    const auto intervals=(limit*32+boundary_sync::interval_bits-1)/boundary_sync::interval_bits;
+    return boundary_sync::encoded_size(intervals*boundary_sync::interval_bits);
 }
-
-PacketOptions packet_options(const Options& input_options, std::uint64_t timestamp) {
-    const auto options=effective_options(input_options);
-    PacketOptions result;
-    result.fec = options.fec;
-    result.compression = options.compression;
-    if (options.key) {
-        result.authenticator = [key = *options.key, timestamp](const Bytes& data) {
-            return key.mac(epoch_context(data, timestamp));
-        };
-        result.verifier = [key = *options.key, timestamp](const Bytes& data, const Bytes& tag) {
-            return key.verify(epoch_context(data, timestamp), tag);
-        };
-    }
-    return result;
-}
-
 modem::Config seeded_config(const Options& input_options, std::uint64_t timestamp) {
     const auto options=effective_options(input_options);
     validate(options);
@@ -173,28 +139,20 @@ modem::Config seeded_config(const Options& input_options, std::uint64_t timestam
     return result;
 }
 
-Estimate estimate(const Message& message, const Options& input_options) {
-    const auto options=effective_options(input_options);
-    return estimate(message,options,nullptr);
-}
 
-Estimate estimate(const Message& message,const Options& input_options,PacketLayout* layout) {
-    const auto options=effective_options(input_options);
-    validate_message(message, options);
-    const auto bits=message_wire_bits(message,options);
-    if(layout) {
-        *layout={};layout->original_bytes=message.data.size();
-        if(message.kind!=MessageKind::text || message.data.size()>=16)
-            *layout=packet_layout(encode_packet(message,packet_options(options,options.timestamp),packet_budget(options)),packet_budget(options));
-    }
-    if(bits.empty()) { Estimate empty;empty.memory_supported=empty.batch_memory_supported=empty.repeatable_allowed=true;return empty; }
-    auto value=options;value.content_limit=std::max(value.content_limit,bits.size());
-    auto result=estimate_binary(bits,value);
-    result.content_bytes=message.data.size();
-    result.repeatable_allowed=message.data.size()<=options.repeat_policy.minimum_payload_bytes || result.content_seconds<=options.repeat_policy.maximum_seconds;
+Estimate estimate(const Message& message,const Options& options) {return estimate(message,options,nullptr);}
+Estimate estimate(const Message& message,const Options& input,StreamLayout* layout) {
+    const auto options=effective_options(input);
+    auto coded=encoded_intervals(message,options,layout);
+    Bytes bits;bits.reserve(boundary_sync::encoded_size(coded.size()*8));
+    for(auto byte:coded)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
+    bits=boundary_sync::insert(bits,pattern_bit_limit(options.content_limit));
+    auto context=options;context.content_limit=std::max(options.content_limit,bits.size());
+    auto result=estimate_binary(bits,context);result.content_bytes=message.data.size();result.coded_bytes=coded.size();
+    result.repeatable_allowed=message.data.size()<=options.repeat_policy.minimum_payload_bytes ||
+        result.content_seconds<=options.repeat_policy.maximum_seconds;
     return result;
 }
-
 Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input_options) {
     const auto options=effective_options(input_options);
     const auto value=binary_options(bits,options);
@@ -211,9 +169,9 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
     if(padding>(std::numeric_limits<std::uint64_t>::max()-unpadded)/2)
         throw Error("pulse tails exceed 64-bit sample counter");
     const auto samples=unpadded+2*padding;
-    Estimate result;
-    result.content_bytes=result.packet_bytes=bits.size()/8+(bits.size()%8!=0);
-    result.content_seconds=result.packet_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
+    Estimate result;result.wire_bits=bits.size();
+    result.content_bytes=result.coded_bytes=bits.size()/8+(bits.size()%8!=0);
+    result.content_seconds=result.coded_seconds=static_cast<double>(content_samples)/value.modem.sample_rate;
     result.total_seconds=static_cast<double>(samples)/value.modem.sample_rate;
     result.repeatable_allowed=true;
     std::size_t scratch=std::numeric_limits<std::size_t>::max();
@@ -245,137 +203,29 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),value.dsp_workspace_bytes/4);
 }
 
-Bytes message_bits(const Message& message,const Options& input_options) {
-    const auto options=effective_options(input_options);
-    validate_message(message,options);
-    const auto budget=pattern_budget(options.content_limit);
-    if(message.kind==MessageKind::text && message.data.size()<16)
-        return compression::encode_short_bits(message.data,budget.payload_bits);
-    const auto packet=encode_packet(message,packet_options(options,options.timestamp),packet_budget(options));
-    if(packet.size()>budget.payload_bits/8)throw Error("pattern packet bit storage exceeds content workspace");
-    Bytes bits;bits.reserve(packet.size()*8);
-    for(auto byte:packet)for(unsigned i=0;i<8;++i)bits.push_back(static_cast<std::uint8_t>((byte>>(7-i))&1));
+
+Bytes message_bits(const Message& message,const Options& input) {
+    const auto options=effective_options(input);
+    const auto coded=encoded_intervals(message,options);
+    Bytes bits;bits.reserve(coded.size()*8);
+    for(auto byte:coded)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
     return bits;
 }
-Bytes message_wire_bits(const Message& message,const Options& input_options) {
-    const auto options=effective_options(input_options);
-    auto bits=message_bits(message,options);
-    if(message.kind!=MessageKind::text || message.data.size()>=16)
-        bits=boundary_sync::insert(bits,pattern_bit_limit(options.content_limit));
-    auto context=options;context.content_limit=std::max(context.content_limit,bits.size());
-    xor_binary_bits(bits,context);
+Bytes message_wire_bits(const Message& message,const Options& input) {
+    const auto options=effective_options(input);
+    auto bits=boundary_sync::insert(message_bits(message,options),pattern_bit_limit(options.content_limit));
+    auto context=options;context.content_limit=std::max(context.content_limit,bits.size());xor_binary_bits(bits,context);
     return bits;
 }
-std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& input_options) {
-    const auto options=effective_options(input_options);
+std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& input) {
+    const auto options=effective_options(input);
     auto bits=message_wire_bits(message,options);
     if(message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
        static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
         throw Error("repeatable content exceeds airtime limit");
-    // The entire stream, including alignment markers, is already masked.
-    // Passing through binary_transmitter would apply that mask twice.
     return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
         seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4);
 }
-Received interpret_pattern(modem::PatternBurst burst,const Options& input_options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {
-    const auto options=effective_options(input_options);
-    auto context=options;context.timestamp=timestamp;
-    context.modem.stream_phase_samples=burst.stream_phase_samples;
-    context.content_limit=std::max(context.content_limit,burst.bits.size());
-    if(burst.first_stream_symbol>std::numeric_limits<std::size_t>::max())throw Error("received pattern stream index exceeds bit address space");
-    Received result;result.timestamp=timestamp;result.diagnostics=std::move(diagnostics);
-    result.diagnostics.pattern_score=burst.score;
-    result.diagnostics.sample_offset=static_cast<std::size_t>(burst.first_sample);
-    result.raw_bits=std::move(burst.bits);result.packet_validated=false;
-    // Decrypt known spans at their original symbol positions. An unknown
-    // ciphertext bit has no known plaintext value: fill its slot with zero
-    // after decryption, without shifting any subsequent mask addresses.
-    const auto first_symbol=static_cast<std::size_t>(burst.first_stream_symbol);
-    if(result.raw_bits.size()>std::numeric_limits<std::size_t>::max()-first_symbol)
-        throw Error("received pattern stream extent exceeds bit address space");
-    std::size_t begin=0;
-    for(std::size_t i=0;i<=result.raw_bits.size();++i) {
-        if(i<result.raw_bits.size() && result.raw_bits[i]!=modem::missing_pattern_bit)continue;
-        xor_binary_bits(std::span(result.raw_bits).subspan(begin,i-begin),context,first_symbol+begin);
-        if(i<result.raw_bits.size())++result.missing_symbols;
-        begin=i+1;
-    }
-    // Recovery has one fixed cadence anchored to this burst, never a search
-    // for embedded packets. Decryption and its constellation-supplied stream
-    // position are unchanged; only the decrypted byte grouping is recovered.
-    std::optional<boundary_sync::Recovery> candidate;
-    try { candidate=boundary_sync::recover_packet(result.raw_bits,pattern_bit_limit(options.content_limit),
-                                                  static_cast<std::size_t>(burst.first_stream_symbol)); }
-    catch(const Error&) {} // Invalid recovery leaves only raw evidence.
-    // The marker matcher excludes unknown slots from its evidence. Only now
-    // materialize diagnostic zeroes; recovered packet data uses the same fill.
-    std::replace(result.raw_bits.begin(),result.raw_bits.end(),modem::missing_pattern_bit,std::uint8_t{0});
-    // Content grammar is interpreted only after pattern acquisition. A bad
-    // packet never changes the winning signal timing or discards its raw bits.
-    // A late burst may contain the first packet only when its surviving
-    // leading marker supplies enough evidence for the original packet origin.
-    if(candidate && ((!burst.first_stream_symbol && !result.missing_symbols) || candidate->leading_marker_recognized) && candidate->bits.size()%8==0) {
-        Bytes bytes(candidate->bits.size()/8);
-        for(std::size_t i=0;i<candidate->bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(candidate->bits[i]<<(7-i%8));
-        try {
-            auto packet=decode_packet(bytes,packet_options(options,timestamp),packet_budget(options));
-            if(packet.consumed_bytes==bytes.size() && packet.message.data.size()<=options.content_limit) {
-                result.packet=std::move(packet);result.packet_validated=true;return result;
-            }
-        } catch(const Error&) {}
-    }
-    if(result.missing_symbols || (options.key && burst.first_stream_symbol) ||
-       (candidate && candidate->leading_marker_recognized) || result.raw_bits.size()>15*13)return result;
-    try {
-        auto decoded=compression::decode_short_bits(result.raw_bits,std::min<std::size_t>(15,options.content_limit));
-        result.packet.message.data=std::move(decoded);
-    } catch(const Error&) {} // Preserve uninterpreted or truncated raw bits.
-    return result;
-}
-
-bool pattern_packet_complete(const modem::PatternBurst& burst,std::size_t confirmed_bits,
-                             const modem::Config& config,std::size_t content_limit) {
-    if(!content_limit || confirmed_bits>burst.bits.size() || burst.first_stream_symbol>boundary_sync::maximum_marker_loss_bits)
-        return false;
-    constexpr auto probe_limit=boundary_sync::marker_bits+boundary_sync::maximum_slip_bits+packet_prefix_size*8;
-    constexpr auto minimum=boundary_sync::marker_bits-boundary_sync::maximum_marker_loss_bits+packet_min_prefix_size*8;
-    if(confirmed_bits<minimum)return false;
-    try {
-        Options options;options.modem=config;options.modem.stream_phase_samples=burst.stream_phase_samples;
-        options.key=config.data_key;options.timestamp=config.stream_epoch;
-        // Full validation retains the actual receiver's content budget,
-        // including highly compressed packets. Partial probes stay fixed-size.
-        options.content_limit=content_limit;
-        if(confirmed_bits>pattern_bit_limit(content_limit))return false;
-        Bytes prefix(burst.bits.begin(),burst.bits.begin()+static_cast<std::ptrdiff_t>(std::min(confirmed_bits,probe_limit)));
-        auto context=options;context.content_limit=std::max(context.content_limit,prefix.size());
-        const auto first=static_cast<std::size_t>(burst.first_stream_symbol);
-        std::size_t begin=0;
-        for(std::size_t i=0;i<=prefix.size();++i) {
-            if(i<prefix.size() && prefix[i]!=modem::missing_pattern_bit)continue;
-            xor_binary_bits(std::span(prefix).subspan(begin,i-begin),context,first+begin);
-            begin=i+1;
-        }
-        const auto recovered=boundary_sync::recover_packet(prefix,prefix.size(),first);
-        if(!recovered.leading_marker_recognized)return false;
-        Bytes header(std::min(packet_prefix_size,recovered.bits.size()/8));
-        for(std::size_t i=0;i<header.size()*8;++i)
-            header[i/8]|=static_cast<std::uint8_t>(recovered.bits[i]<<(7-i%8));
-        const auto frame=packet_probe_frame_size(header,packet_budget(options));
-        if(!frame || *frame>std::numeric_limits<std::size_t>::max()/8)return false;
-        const auto marked=boundary_sync::encoded_size(*frame*8);
-        const auto leading=prefix.size()-recovered.bits.size();
-        const auto rest=marked-boundary_sync::marker_bits;
-        if(leading>std::numeric_limits<std::size_t>::max()-rest || confirmed_bits!=rest+leading)return false;
-
-        modem::PatternBurst complete;
-        complete.bits.assign(burst.bits.begin(),burst.bits.begin()+static_cast<std::ptrdiff_t>(confirmed_bits));
-        complete.first_sample=burst.first_sample;complete.first_stream_symbol=burst.first_stream_symbol;
-        complete.stream_phase_samples=burst.stream_phase_samples;complete.score=burst.score;complete.complete=true;
-        return interpret_pattern(std::move(complete),options,config.stream_epoch).packet_validated;
-    } catch(const Error&) { return false; }
-}
-
 void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,std::size_t bit_offset) {
     const auto options=effective_options(input_options);
     if(bits.empty())return;
@@ -406,33 +256,173 @@ void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,s
     }
 }
 
-Bytes pack(const Message& message, const Options& input_options) {
-    const auto options=effective_options(input_options);
-    validate_message(message, options);
-    auto frame = encode_packet(message, packet_options(options, options.timestamp), packet_budget(options));
-    enforce_repeat_policy(message, options, frame.size());
-    return options.key ? options.key->xor_data(frame, options.timestamp) : std::move(frame);
-}
 
-DecodedPacket unpack(const Bytes& wire, const Options& input_options) {
-    const auto options=effective_options(input_options);
-    validate(options);
-    if (wire.size() > packet_budget(options)) throw Error("packet input exceeds content budget");
-    const auto plaintext=options.key?options.key->xor_data(wire,options.timestamp):wire;
-    auto packet=decode_packet(plaintext,packet_options(options,options.timestamp),packet_budget(options));
-    if(packet.message.data.size()>options.content_limit)throw Error("received message exceeds content limit");
-    return packet;
-}
-
-Bytes transmission_wire(const Message& message,const Options& input_options) {
-    const auto options=effective_options(input_options);
-    if(message.kind==MessageKind::text && message.data.size()<16)
-        throw Error("short pattern text has an exact bit length; use message_transmitter");
-    const auto bits=message_wire_bits(message,options);
-    if(bits.size()%8)throw Error("pattern wire has an exact partial byte; use message_transmitter");
-    Bytes bytes(bits.size()/8);
+Bytes transmission_wire(const Message& message,const Options& options) {
+    const auto bits=message_wire_bits(message,options);Bytes bytes(bits.size()/8);
     for(std::size_t i=0;i<bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(bits[i]<<(7-i%8));
     return bytes;
+}
+
+struct StreamReceiver::Impl {
+    struct FileCloser { void operator()(std::FILE* file)const {if(file)std::fclose(file);} };
+    struct State {
+        boundary_sync::Collector collector;
+        std::unique_ptr<std::FILE,FileCloser> spool;
+        Options options;
+        Received result;
+        std::uint64_t next_symbol=0;
+        std::size_t stored=0;
+        bool failed=false,seen_marker=false;
+        State(const Options& value,const modem::PatternBurst& burst)
+            :collector(burst.first_stream_symbol,0,true),options(value),next_symbol(burst.first_stream_symbol) {
+            options.modem.stream_phase_samples=burst.stream_phase_samples;
+            result.timestamp=options.timestamp;
+            const std::array<std::uint64_t,2> identity{options.timestamp,burst.stream_first_sample};
+            for(std::size_t j=0;j<2;++j)for(std::size_t i=0;i<8;++i)
+                result.content.message.local_id[j*8+i]=static_cast<std::uint8_t>(identity[j]>>(8*i));
+        }
+    };
+    Options options;
+    std::map<std::pair<std::uint64_t,std::uint64_t>,std::unique_ptr<State>> states;
+    std::shared_ptr<ReceiveStorageQuota> quota;
+    explicit Impl(Options value,std::uint64_t timestamp,std::shared_ptr<ReceiveStorageQuota> budget)
+        :options(effective_options(value)),quota(std::move(budget)) {
+        options.timestamp=timestamp;validate(options);
+        if(!quota)quota=std::make_shared<ReceiveStorageQuota>(ReceiveStorageQuota{source_storage_limit(options.content_limit),0});
+        if(quota->used>quota->limit)throw Error("Invalid receive source storage quota");
+    }
+    ~Impl() {for(auto& [id,state]:states)quota->used-=state->stored;}
+
+    void fail(State& state,const std::string& error) {
+        state.failed=true;state.result.error=error;
+        quota->used-=state.stored;state.stored=0;state.spool.reset();
+    }
+    void interval(State& state,const boundary_sync::Interval& interval) {
+        state.seen_marker|=interval.marker_recognized;
+        if(!state.seen_marker){fail(state,"alignment marker not established");return;}
+        try {
+            std::array<std::size_t,stream_interval_bytes> erasures{};std::size_t count=0;
+            for(std::size_t i=0;i<interval.erasures.size();++i)if(interval.erasures[i])erasures[count++]=i;
+            auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol),
+                std::span(erasures).first(count));
+            auto& content=state.result.content;
+            content.corrected_bytes+=decoded.corrected_bytes;content.consumed_bytes+=stream_interval_bytes;
+            content.authenticated=decoded.authenticated;
+            if(!content.pre_fec_accuracy && content.consumed_bytes==stream_interval_bytes)
+                content.pre_fec_accuracy=StreamBitAccuracy{};
+            if(content.pre_fec_accuracy && decoded.pre_fec_accuracy) {
+                content.pre_fec_accuracy->received_data_bits+=decoded.pre_fec_accuracy->received_data_bits;
+                content.pre_fec_accuracy->corrected_data_bits+=decoded.pre_fec_accuracy->corrected_data_bits;
+            } else content.pre_fec_accuracy.reset();
+            if(state.failed)return;
+            const auto limit=quota->limit;
+            if(quota->used>limit || decoded.data.size()>limit-quota->used){fail(state,"received source storage quota exhausted");return;}
+            if(!state.spool)state.spool.reset(std::tmpfile());
+            if(!state.spool || std::fwrite(decoded.data.data(),1,decoded.data.size(),state.spool.get())!=decoded.data.size()) {
+                fail(state,"cannot store received source");return;
+            }
+            state.stored+=decoded.data.size();quota->used+=decoded.data.size();
+        } catch(const Error& error) {fail(state,error.what());}
+    }
+    Received push(modem::PatternBurst burst,modem::Diagnostics diagnostics) {
+        if(burst.missing_slots) {
+            if(!burst.bits.empty())throw Error("mixed bit and missing-run event");
+            auto remaining=burst.missing_slots;
+            const auto complete=burst.complete;
+            burst.missing_slots=0;burst.complete=false;
+            Received result;
+            while(remaining) {
+                const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,2048));
+                burst.bits.assign(count,modem::missing_pattern_bit);
+                result=push(burst,diagnostics);
+                if(count>std::numeric_limits<std::uint64_t>::max()-burst.first_stream_symbol)
+                    throw Error("missing-run symbol counter exhausted");
+                burst.first_stream_symbol+=count;remaining-=count;
+            }
+            if(complete) {burst.bits.clear();burst.complete=true;return push(std::move(burst),std::move(diagnostics));}
+            return result;
+        }
+        const auto id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
+        auto it=states.find(id);
+        if(it==states.end()) {
+            if(states.size()>=16) {
+                Received unavailable;unavailable.error="receiver content candidate quota exhausted";
+                unavailable.stream_complete=burst.complete;return unavailable;
+            }
+            it=states.emplace(id,std::make_unique<State>(options,burst)).first;
+        }
+        auto& state=*it->second;
+        state.options.modem.stream_phase_samples=burst.stream_phase_samples;
+        state.result.diagnostics=std::move(diagnostics);state.result.diagnostics.pattern_score=burst.score;
+        state.result.diagnostics.sample_offset=static_cast<std::size_t>(burst.stream_first_sample);
+        if(burst.first_stream_symbol!=state.next_symbol && !burst.bits.empty())fail(state,"noncontiguous received source");
+        auto& bits=burst.bits;
+        std::size_t begin=0;
+        for(std::size_t i=0;i<=bits.size();++i) {
+            if(i<bits.size() && bits[i]!=modem::missing_pattern_bit)continue;
+            if(i>begin) {
+                auto context=state.options;context.content_limit=std::max(context.content_limit,i-begin);
+                xor_binary_bits(std::span(bits).subspan(begin,i-begin),context,
+                    static_cast<std::size_t>(burst.first_stream_symbol)+begin);
+            }
+            if(i<bits.size())++state.result.missing_symbols;
+            begin=i+1;
+        }
+        if(bits.size()>std::numeric_limits<std::size_t>::max()-state.result.observed_bits)fail(state,"source observation counter exhausted");
+        else state.result.observed_bits+=bits.size();
+        if(bits.size()>std::numeric_limits<std::uint64_t>::max()-burst.first_stream_symbol)fail(state,"source symbol counter exhausted");
+        else state.next_symbol=burst.first_stream_symbol+bits.size();
+        const auto preview=std::min<std::size_t>(4096-state.result.raw_bits.size(),bits.size());
+        for(std::size_t i=0;i<preview;++i)state.result.raw_bits.push_back(bits[i]==1?1:0);
+        {
+            try {
+                const auto sink=[&](const boundary_sync::Interval& interval){this->interval(state,interval);};
+                state.collector.push(bits,sink);
+                if(burst.complete)state.collector.finish(true,sink);
+            } catch(const Error& error){fail(state,error.what());}
+        }
+        state.result.stream_complete=burst.complete;
+        // The sole decompression gate. No EOF, size, codeword or MAC can enter it.
+        if(burst.complete && !state.failed && state.seen_marker && state.stored) {
+            try {
+                Bytes source(state.stored);
+                if(std::fflush(state.spool.get()) || std::fseek(state.spool.get(),0,SEEK_SET) ||
+                   std::fread(source.data(),1,source.size(),state.spool.get())!=source.size())
+                    throw Error("cannot read sealed received source");
+                state.result.content.message.data=decode_source(source,
+                    interval_data_bytes(options.fec,options.key.has_value()),options.compression,options.content_limit);
+                state.result.content.message.filename="received.bin";
+                state.result.content_validated=true;
+            } catch(const Error& error){fail(state,error.what());}
+        }
+        if(burst.complete) {
+            auto result=std::move(state.result);quota->used-=state.stored;states.erase(it);return result;
+        }
+        return state.result;
+    }
+};
+StreamReceiver::StreamReceiver(Options options,std::uint64_t timestamp,std::shared_ptr<ReceiveStorageQuota> quota):impl_(std::make_unique<Impl>(std::move(options),timestamp,std::move(quota))){}
+StreamReceiver::~StreamReceiver()=default;
+StreamReceiver::StreamReceiver(StreamReceiver&&) noexcept=default;
+StreamReceiver& StreamReceiver::operator=(StreamReceiver&&) noexcept=default;
+Received StreamReceiver::push(modem::PatternBurst burst,modem::Diagnostics diagnostics) {return impl_->push(std::move(burst),std::move(diagnostics));}
+std::size_t StreamReceiver::working_bytes()const {
+    auto bytes=sizeof(StreamReceiver)+sizeof(Impl)+impl_->options.receive_targets_db_hz.capacity()*sizeof(double);
+    for(const auto& [id,state]:impl_->states) {
+        const auto& result=state->result;const auto& message=result.content.message;
+        // Include map links, the actual diagnostic/preview allocations and
+        // the standard I/O buffer reserved by a live temporary file.
+        bytes+=sizeof(Impl::State)+sizeof(id)+sizeof(state)+4*sizeof(void*)+
+            state->collector.working_bytes()+state->options.receive_targets_db_hz.capacity()*sizeof(double)+
+            result.raw_bits.capacity()+result.diagnostics.constellation.capacity()*sizeof(std::complex<double>)+
+            result.diagnostics.waveform.capacity()*sizeof(float)+result.error.capacity()+
+            message.data.capacity()+message.filename.capacity()+message.callsign.capacity()+message.grid.capacity();
+        if(state->spool)bytes+=sizeof(std::FILE)+BUFSIZ;
+    }
+    return bytes;
+}
+Received interpret_pattern(modem::PatternBurst burst,const Options& options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {
+    StreamReceiver receiver(options,timestamp);return receiver.push(std::move(burst),std::move(diagnostics));
 }
 
 std::vector<float> transmit(const Message& message, const Options& input_options, std::stop_token stop) {
@@ -449,7 +439,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
     const auto options=effective_options(input_options);
     check_cancelled(stop);
     validate(options);
-    std::optional<Received> best;double best_score=-1;
+    std::optional<Received> best;
     std::string last_error;
     auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
     for(const auto& profile:profiles)for(auto epoch:drift_candidates(options.timestamp,options.search_seconds,options.key.has_value())) {
@@ -460,21 +450,22 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
-        search.preserve_symbol_gaps=true;
-        search.packet_complete=pattern_packet_complete;
-        search.packet_content_limit=value.content_limit;
+
         search.search_stream_phases=options.key.has_value();
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
+        StreamReceiver content(value,epoch);
         for(std::size_t offset=0;offset<samples.size();) {
             const auto count=std::min<std::size_t>(4096,samples.size()-offset);decoder.push(samples.subspan(offset,count),stop);offset+=count;
-            for(auto& burst:decoder.take_bursts())if(burst.score>best_score) {
-                best_score=burst.score;best=interpret_pattern(std::move(burst),value,epoch,decoder.diagnostics());
+            for(auto& burst:decoder.take_bursts()){
+                auto candidate=content.push(std::move(burst),decoder.diagnostics());
+                if(!best || better_reception(candidate,*best))best=std::move(candidate);
             }
         }
         decoder.finish(stop);
-        for(auto& burst:decoder.take_bursts())if(burst.score>best_score) {
-            best_score=burst.score;best=interpret_pattern(std::move(burst),value,epoch,decoder.diagnostics());
+        for(auto& burst:decoder.take_bursts()){
+            auto candidate=content.push(std::move(burst),decoder.diagnostics());
+                if(!best || better_reception(candidate,*best))best=std::move(candidate);
         }
         } catch(const Error& error){check_cancelled(stop);last_error=error.what();}
     }
@@ -493,7 +484,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
     validate_message(message,options);
     const auto config = seeded_config(options, options.timestamp);
     modem::validate_channel(config,channel);
-    std::optional<Received> best;double best_score=-1;
+    std::optional<Received> best;
     std::string last_error;
     const auto center=channel.receiver_timestamp.value_or(options.timestamp);
     const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(options.modem,options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{options.modem};
@@ -505,22 +496,22 @@ Received simulate(const Message& message, const Options& input_options, const mo
             (static_cast<double>(modem::training_sample_count(profile))+
              static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
-        search.preserve_symbol_gaps=true;
-        search.packet_complete=pattern_packet_complete;
-        search.packet_content_limit=value.content_limit;
+
         search.search_stream_phases=options.key.has_value();
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
+        StreamReceiver content(value,epoch);
         modem::SampledSimulationChannel impairments(config,channel);std::array<float,2048> samples{};
         std::size_t preview_count=0;
         const auto harvest=[&] {
-            for(auto& burst:decoder.take_bursts())if(burst.score>best_score) {
-                best_score=burst.score;best=interpret_pattern(std::move(burst),value,epoch,decoder.diagnostics());
+            for(auto& burst:decoder.take_bursts()){
+                auto candidate=content.push(std::move(burst),decoder.diagnostics());
+                if(!best || better_reception(candidate,*best))best=std::move(candidate);
                 best->diagnostics.waveform.assign(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(preview_count));
             }
         };
         while(const auto count=impairments.read(*source,samples,stop)){preview_count=count;decoder.push(std::span(samples).first(count),stop);harvest();}
-        auto trailing=2*modem::symbol_sample_count(profile);
+        auto trailing=modem::pattern_absence_samples(profile)+profile.sample_rate+2*modem::pattern_pulse_padding_samples(profile);
         while(trailing) {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(trailing,samples.size()));
             auto tail=std::span(samples).first(count);impairments.read_noise(tail,stop);preview_count=count;decoder.push(tail,stop);trailing-=count;harvest();

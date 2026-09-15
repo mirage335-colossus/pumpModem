@@ -28,9 +28,9 @@ inline std::vector<ui::Record> signal_records(const Signals& signals) {
 }
 inline std::vector<ui::Record> file_records(const Inbox& inbox) {
     std::vector<ui::Record> rows;
-    for(const auto* packet:inbox.file_items()) {
-        const auto id=id_label(packet->message);
-        const auto label=(packet->message.filename.empty()?"file-"+id.substr(0,8):display_label(packet->message.filename))+" ("+std::to_string(packet->message.data.size())+" B)";
+    for(const auto* stream:inbox.file_items()) {
+        const auto id=id_label(stream->message);
+        const auto label=(stream->message.filename.empty()?"file-"+id.substr(0,8):display_label(stream->message.filename))+" ("+std::to_string(stream->message.data.size())+" B)";
         rows.push_back({id,{{label,7,3,-7,24,13,ui::TextTone::normal,false}},true,true});
     }
     return rows;

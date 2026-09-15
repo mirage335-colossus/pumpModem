@@ -4,6 +4,42 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fixed-interval migration — September 2026
+
+The current implementation uses the fixed-interval format in [protocol.md](protocol.md).
+Its only end rule is six seconds covered by consecutive fully scored failed
+symbols; one failed symbol suffices at durations of six seconds or longer.
+The old packet parser, early completion callbacks, transmitted lengths and
+short-text dictionary are removed. FEC/MAC outcomes and codec ends cannot release
+content before physical completion. EOF and resource limits remain interruptions.
+
+Current regression coverage includes fixed geometry and local metadata, RS errors
+and erasures in data and parity, missing final bits, keyed address/phase recovery,
+marker loss and attempt budgets, bounded source spooling, shared quotas, real
+quiet capture tails, exact binary source recovery and cancellation. The receiver,
+marker and codec suites have also been exercised with ASan/UBSan. Final migration results on 15 September 2026:
+
+| Check | Result |
+|---|---|
+| Release build, including native FLTK executable | Passed |
+| `ctest --test-dir build --output-on-failure -LE native_gui -j 2` | 52/53 passed initially; the remaining GUI application suite passed after migrating its obsolete under-16-byte FEC fixtures |
+| Final headless suite status | All 53 passed, including the new stream receive and six-case live resource suites |
+| Full shared GUI workflow, run serially | Passed: replay, keyed raw bits, exact file save, overwrite refusal, clipboard retention, cancellation and fixed FEC for tiny sources |
+| RS/source codec, marker collector, FFT receiver, correlator and wrapper | ASan/UBSan runs passed without diagnostics; final fixed-six-second API cleanup also passed Release receiver suites |
+| `git diff --check` and removed API scan | Passed; no packet parser, short dictionary codec, packet completion callback or configurable gap timeout remains in production code |
+
+The graphical display could not be opened (`DISPLAY=:0`), so three native-window
+conformance tests were excluded. The native executable built and its self-check
+passed. The shared smoke initially missed a keyed raw reception while competing
+with the full suite; its prescribed serial run passed. These checks do not
+establish real-time reception throughput under arbitrary competing CPU load.
+
+## Historical validation entries
+
+The following dated entries describe earlier checkouts and their then-current
+packet/dictionary behavior. They are retained as history, not the current wire
+format, end policy or acceptance tests.
+
 ## Weak-symbol timeout and payload memory — 14 September 2026
 
 The existing timeout remains six seconds of consecutive unconfirmed symbols,

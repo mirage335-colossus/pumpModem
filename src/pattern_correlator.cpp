@@ -63,13 +63,22 @@ struct PatternCorrelator::Impl {
         std::uint64_t index=0,observed_start=0,phase_lower=0,phase_upper=0;
         std::size_t frequency=0,rate_index=0;
         std::array<Fit,2> fits{};
+        std::uint64_t last_found=0;
         PatternBurst burst;
         double sum_score=0,pending_score=0,committed_score=0;
-        std::size_t committed=0;
+        std::size_t committed=0,gap_slots=0;
         std::uint64_t committed_end=0;
         bool admitted=false,pending_gaps=false;
     };
     std::vector<Hypothesis> hypotheses;
+    struct Emission {
+        const Hypothesis* owner=nullptr;
+        std::uint64_t first_symbol=0,last_symbol=0;
+        long double origin=0;
+        double frequency=0;
+        bool ended=false;
+    };
+    std::vector<Emission> emissions;
     // Only unresolved subsecond schedules need extra fits. Ordinary explicit
     // schedules retain the original pair of per-hypothesis accumulators.
     std::vector<std::array<Fit,2>> alternate_fits;
@@ -99,8 +108,7 @@ struct PatternCorrelator::Impl {
                 std::isfinite(search.start_uncertainty_seconds) && search.start_uncertainty_seconds>=0,
                 "long pattern correlation requires a finite system-clock start window");
         require(std::isfinite(search.false_alarm_probability) && search.false_alarm_probability>0 && search.false_alarm_probability<1 &&
-                std::isfinite(search.retain_score) && search.retain_score>=0 && search.bit_limit &&
-                std::isfinite(search.max_gap_seconds) && search.max_gap_seconds>=0 &&
+                std::isfinite(search.retain_score) && search.retain_score>=0 && search.bit_limit && search.chunk_bits &&
                 search.candidate_limit && search.candidate_limit<=65536 && search.track_limit && search.track_limit<=128,
                 "invalid long pattern search limits");
         require(!search.clock_errors_ppm.empty() && search.clock_errors_ppm.size()<=65,"clock-rate bank must contain 1..65 hypotheses");
@@ -131,7 +139,7 @@ struct PatternCorrelator::Impl {
         const long double fixed=sizeof(PatternCorrelator)+sizeof(Impl)+code.working_bytes()+
             total*(sizeof(Hypothesis)+alternate_groups*sizeof(std::array<Fit,2>))+
             bank_count*(sizeof(Bank)+(block_samples+1)*sizeof(Projection))+point_capacity*sizeof(Complex)+
-            static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*sizeof(PatternBurst)+
+            static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
         require(total>=1 && total<=std::numeric_limits<std::size_t>::max() && fixed<bytes,
                 "complete half-chip clock/frequency/rate coverage exceeds DSP workspace");
@@ -140,7 +148,7 @@ struct PatternCorrelator::Impl {
         const auto denominator=2*count+2*search.track_limit+2;
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
-        hypotheses.reserve(count);banks.resize(bank_count);
+        hypotheses.reserve(count);emissions.reserve(search.track_limit);banks.resize(bank_count);
         for(auto& bank:banks)bank.prefix.resize(block_samples+1);
         points.resize(point_capacity);
         require(!alternate_groups || count<=std::numeric_limits<std::size_t>::max()/alternate_groups,
@@ -170,6 +178,7 @@ struct PatternCorrelator::Impl {
     }
     std::size_t working_bytes() const {
         auto value=sizeof(Impl)+code.working_bytes()+hypotheses.capacity()*sizeof(Hypothesis)+banks.capacity()*sizeof(Bank)+
+            emissions.capacity()*sizeof(Emission)+
             alternate_fits.capacity()*sizeof(decltype(alternate_fits)::value_type)+
             points.capacity()*sizeof(Complex)+
             history.capacity()*sizeof(PatternEvidence)+bursts.capacity()*sizeof(PatternBurst)+
@@ -219,32 +228,77 @@ struct PatternCorrelator::Impl {
         require(group<=alternate_groups,"pattern phase fit exceeds its allocated bank");
         return alternate_fits[hypothesis*alternate_groups+group-1];
     }
-    void publish(Hypothesis& h) {
-        if(!h.admitted || !h.committed)return;
-        room_for(h.burst.bits.size());
-        auto result=h.burst;result.bits.resize(h.committed);result.complete=true;
-        result.end_sample=h.committed_end;result.score=h.committed_score;
-        const auto same=std::find_if(bursts.begin(),bursts.end(),[&](const auto& b) {
-            const auto difference=b.first_sample>h.burst.first_sample?b.first_sample-h.burst.first_sample:h.burst.first_sample-b.first_sample;
-            return b.first_stream_symbol==h.burst.first_stream_symbol && difference<code.symbol_samples()/3 &&
-                std::abs(b.frequency_hz-h.burst.frequency_hz)<=.5*config.sample_rate/static_cast<double>(code.symbol_samples());
-        });
-        if(same!=bursts.end()) {
-            if(result.score>same->score){accounted_bytes=accounted_bytes-same->bits.capacity()+result.bits.capacity();*same=std::move(result);}
+    Emission& output_stream(Hypothesis& h) {
+        const auto same_clock=[&](long double origin,double frequency) {
+            return std::abs(origin-h.origin)<static_cast<long double>(code.symbol_samples())/3 &&
+                std::abs(frequency-h.burst.frequency_hz)<=.5*config.sample_rate/static_cast<double>(code.symbol_samples());
+        };
+        for(auto& emission:emissions)if(same_clock(emission.origin,emission.frequency) &&
+            (!emission.ended || h.burst.stream_first_symbol<emission.last_symbol))return emission;
+        // Choose once before immutable output starts. Other hypotheses retain
+        // their evidence but cannot replace already delivered stream bytes.
+        const Hypothesis* owner=&h;
+        for(const auto& candidate:hypotheses)if(candidate.admitted && same_clock(candidate.origin,candidate.burst.frequency_hz) &&
+            (candidate.burst.stream_first_symbol<owner->burst.stream_first_symbol ||
+             (candidate.burst.stream_first_symbol==owner->burst.stream_first_symbol && candidate.sum_score>owner->sum_score)))owner=&candidate;
+        Emission emission{owner,owner->burst.stream_first_symbol,owner->burst.first_stream_symbol,
+            owner->origin,owner->burst.frequency_hz,false};
+        if(emissions.size()==search.track_limit) {
+            const auto reusable=std::find_if(emissions.begin(),emissions.end(),[](const auto& item){return item.ended;});
+            require(reusable!=emissions.end(),"pattern output stream quota exhausted");*reusable=emission;return *reusable;
+        }
+        emissions.push_back(emission);return emissions.back();
+    }
+    void publish(Hypothesis& h,bool complete=false,bool flush=true) {
+        if(!h.admitted)return;
+        const auto chunk=std::min(search.chunk_bits,bit_limit);
+        if(!complete && !flush && h.committed<chunk)return;
+        auto& stream=output_stream(h);
+        if(stream.owner!=&h) {
+            h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(h.committed));
+            h.burst.first_stream_symbol+=h.committed;h.burst.first_sample=h.committed_end;h.committed=0;
             return;
         }
-        if(bursts.size()==search.track_limit) {
-            const auto weakest=std::min_element(bursts.begin(),bursts.end(),[](const auto& a,const auto& b){return a.score<b.score;});
-            if(weakest->score>=result.score)return;
-            accounted_bytes=accounted_bytes-weakest->bits.capacity()+result.bits.capacity();*weakest=std::move(result);
-        } else {accounted_bytes+=result.bits.capacity();bursts.push_back(std::move(result));}
+        do {
+            const auto count=std::min(h.committed,chunk);
+            if(!count && !complete)break;
+            room_for(count);
+            PatternBurst result;
+            result.first_sample=h.burst.first_sample;result.first_stream_symbol=h.burst.first_stream_symbol;
+            result.stream_first_sample=h.burst.stream_first_sample;result.stream_first_symbol=h.burst.stream_first_symbol;
+            result.frequency_hz=h.burst.frequency_hz;result.stream_phase_samples=h.burst.stream_phase_samples;
+            result.bits.assign(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
+            result.complete=complete && count==h.committed;
+            result.end_sample=count==h.committed?h.committed_end:
+                result.first_sample+static_cast<std::uint64_t>(count*code.symbol_samples()/h.rate);
+            result.score=h.committed_score;
+            const auto duplicate=std::find_if(bursts.begin(),bursts.end(),[&](const auto& prior) {
+                const auto delta=prior.first_sample>result.first_sample?prior.first_sample-result.first_sample:result.first_sample-prior.first_sample;
+                return prior.first_stream_symbol==result.first_stream_symbol && prior.complete==result.complete &&
+                    delta<code.symbol_samples()/3 && std::abs(prior.frequency_hz-result.frequency_hz)<=.5*config.sample_rate/static_cast<double>(code.symbol_samples());
+            });
+            const auto emitted_end=result.end_sample;
+            if(duplicate!=bursts.end()) {
+                if(result.score>duplicate->score) {
+                    accounted_bytes=accounted_bytes-duplicate->bits.capacity()+result.bits.capacity();*duplicate=std::move(result);
+                }
+            } else {
+                require(bursts.size()<search.track_limit,"pattern output queue requires draining");
+                accounted_bytes+=result.bits.capacity();bursts.push_back(std::move(result));
+            }
+            h.burst.bits.erase(h.burst.bits.begin(),h.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
+            h.burst.first_stream_symbol+=count;h.burst.first_sample=emitted_end;h.committed-=count;
+            stream.last_symbol=h.burst.first_stream_symbol;
+            if(complete && !h.committed)stream.ended=true;
+            if(!h.committed)break;
+        } while(complete || flush || h.committed>=chunk);
     }
     void clear(Hypothesis& h) {
         // Keep the finite clock hypothesis, but release a terminated message's
         // payload allocation so later hypotheses can use the same workspace.
         accounted_bytes-=h.burst.bits.capacity();Bytes{}.swap(h.burst.bits);
         h.burst.complete=false;h.admitted=h.pending_gaps=false;
-        h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+        h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;h.gap_slots=0;
     }
     void append(Hypothesis& h,std::uint8_t bit) {
         require(h.burst.bits.size()<bit_limit,"pattern bit retention limit reached");
@@ -255,14 +309,27 @@ struct PatternCorrelator::Impl {
         h.burst.bits.push_back(bit);
     }
     void mark_pending_gaps(Hypothesis& h) {
-        if(!h.pending_gaps)
-            std::fill(h.burst.bits.begin()+static_cast<std::ptrdiff_t>(h.committed),h.burst.bits.end(),missing_pattern_bit);
+        if(!h.pending_gaps) {
+            h.gap_slots=h.burst.bits.size()-h.committed;h.burst.bits.resize(h.committed);
+        }
         h.sum_score=h.committed_score;h.pending_score=0;h.pending_gaps=true;
     }
-    bool gap_expired(const Hypothesis& h,std::size_t additional=0) const {
-        const auto pending=static_cast<long double>(h.burst.bits.size()-h.committed)+additional;
-        const auto symbol=static_cast<long double>(code.symbol_samples())/h.rate;
-        return pending>=2 && pending*symbol>static_cast<long double>(search.max_gap_seconds)*config.sample_rate;
+    void emit_gap(Hypothesis& h,std::uint64_t resumed_sample) {
+        if(!h.gap_slots)return;
+        publish(h);
+        auto& stream=output_stream(h);
+        if(stream.owner!=&h) {
+            h.gap_slots=0;h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;return;
+        }
+        require(bursts.size()<search.track_limit,"pattern output queue requires draining");
+        PatternBurst event;
+        event.first_sample=h.burst.first_sample;event.end_sample=resumed_sample;
+        event.first_stream_symbol=h.burst.first_stream_symbol;
+        event.stream_first_sample=h.burst.stream_first_sample;event.stream_first_symbol=h.burst.stream_first_symbol;
+        event.frequency_hz=h.burst.frequency_hz;event.score=h.committed_score;
+        event.stream_phase_samples=h.burst.stream_phase_samples;event.missing_slots=h.gap_slots;
+        bursts.push_back(std::move(event));h.gap_slots=0;
+        h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;stream.last_symbol=h.index;
     }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end) {
         std::size_t group_count=0;
@@ -281,9 +348,8 @@ struct PatternCorrelator::Impl {
         }
         remember(e);
         const auto standalone=e.score>=threshold();
-        // A timing placeholder cannot disambiguate an unresolved stream
-        // schedule. Resume that search from independently observed evidence.
-        if(h.pending_gaps && group_count!=1) {publish(h);clear(h);}
+        // Unknown slots never select a private phase. Keep the existing clock
+        // until an independently confident later symbol resolves the schedule.
         const auto pending_count=h.burst.bits.size()-h.committed;
         const auto next_count=static_cast<double>(pending_count)+1;
         const auto next_score=h.pending_score+e.score;
@@ -294,32 +360,22 @@ struct PatternCorrelator::Impl {
         // An unadmitted prefix cannot borrow that later symbol's confidence.
         const auto reliable=e.score>=search.retain_score && e.score-e.alternative_score>=1 &&
             (group_count==1 || standalone);
-        const auto can_preserve=search.preserve_symbol_gaps && h.admitted && group_count==1;
+        const auto can_preserve=h.admitted;
         auto preserve_gap=can_preserve &&
             (h.pending_gaps || !reliable || (standalone && pending_count && next_chain<threshold()));
-        // A weak retained tail can also enter gap mode when its ordinary
-        // evidence timeout fires before the rate-corrected timing timeout.
-        const auto convert_weak_tail=can_preserve && reliable && !standalone && next_chain<threshold() &&
-            next_count>=2 && static_cast<long double>(next_count)*code.symbol_samples()>
-                static_cast<long double>(search.max_gap_seconds)*config.sample_rate && !gap_expired(h,1);
-        if((preserve_gap || convert_weak_tail) && !h.pending_gaps && search.packet_complete &&
-           search.packet_complete(h.burst,h.committed,config,search.packet_content_limit)) {
-            // Packet validation only closes an already admitted buffer. The
-            // current observation still follows the ordinary evidence gates.
-            publish(h);clear(h);preserve_gap=false;
-        }
         if(preserve_gap) {
             // Retain only the admitted clock and symbol positions. Missing
             // slots provide neither bit evidence nor confidence to the track.
-            if(h.burst.bits.size()==bit_limit && !(reliable && standalone)) {publish(h);clear(h);}
-            else {
-                mark_pending_gaps(h);
-                append(h,reliable && standalone?static_cast<std::uint8_t>(e.bit):missing_pattern_bit);
-                h.burst.end_sample=end;
-                if(reliable && standalone) {
-                    h.sum_score+=e.score;h.committed=h.burst.bits.size();h.committed_end=end;
-                    h.committed_score=h.sum_score;h.pending_gaps=false;
-                } else if(gap_expired(h)) {publish(h);clear(h);}
+            mark_pending_gaps(h);
+            h.burst.end_sample=end;
+            if(reliable && standalone) {
+                h.phase_lower=groups[selected].lower;h.phase_upper=groups[selected].upper;
+                h.burst.stream_phase_samples=h.phase_lower;
+                emit_gap(h,h.observed_start);append(h,static_cast<std::uint8_t>(e.bit));
+                h.sum_score+=e.score;h.committed=h.burst.bits.size();h.committed_end=end;
+                h.committed_score=h.sum_score;h.pending_gaps=false;h.last_found=end;
+            } else {
+                require(h.gap_slots<std::numeric_limits<std::size_t>::max(),"pattern missing-slot count overflow");++h.gap_slots;
             }
             h.burst.score=h.committed_score;
         } else {
@@ -335,9 +391,11 @@ struct PatternCorrelator::Impl {
                     h.burst.stream_phase_samples=h.phase_lower;
                 }
                 if(h.burst.bits.empty()) {
+                    if(!h.admitted) {h.burst.stream_first_sample=h.observed_start;h.burst.stream_first_symbol=h.index;}
                     h.burst.first_sample=h.observed_start;h.burst.first_stream_symbol=h.index;
                     h.burst.stream_phase_samples=h.phase_lower;
-                    h.burst.frequency_hz=e.frequency_hz;h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+                    h.burst.frequency_hz=e.frequency_hz;
+                    if(!h.admitted){h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;h.gap_slots=0;}
                 }
                 append(h,static_cast<std::uint8_t>(e.bit));h.burst.end_sample=end;h.sum_score+=e.score;h.pending_score+=e.score;
                 const auto pending=h.burst.bits.size()-h.committed;
@@ -345,17 +403,16 @@ struct PatternCorrelator::Impl {
                 const auto chain=h.pending_score>n?h.pending_score-n-n*std::log(h.pending_score/n)-n*std::log(2.):0;
                 if((n==1 && standalone) || chain>=threshold()) {
                     h.admitted=true;h.committed=h.burst.bits.size();h.committed_end=end;
-                    h.committed_score=h.sum_score;h.pending_score=0;
-                } else if(pending>=2 && static_cast<long double>(pending)*code.symbol_samples()>
-                        static_cast<long double>(search.max_gap_seconds)*config.sample_rate) {
-                    // Expire only this unconfirmed chain. The fixed clock
-                    // hypotheses still examine later symbols independently.
-                    if(search.preserve_symbol_gaps && h.admitted && group_count==1 && !gap_expired(h))mark_pending_gaps(h);
-                    else {publish(h);clear(h);}
+                    h.committed_score=h.sum_score;h.pending_score=0;h.last_found=end;
                 }
                 h.burst.score=h.committed_score;
+                if(!h.admitted && static_cast<long double>(pending)*code.symbol_samples()/h.rate>=
+                    static_cast<long double>(pattern_absence_seconds)*config.sample_rate)clear(h);
             } else {publish(h);clear(h);}
         }
+        if(h.admitted && static_cast<long double>(end-h.last_found)>=
+            static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {publish(h,true);clear(h);}
+        else publish(h,false,false);
         h.fits={};
         for(std::size_t group=0;group<alternate_groups;++group)
             alternate_fits[hypothesis*alternate_groups+group]={};
@@ -401,8 +458,10 @@ struct PatternCorrelator::Impl {
                             // Each alternative schedule fits the same disjoint
                             // raw observations. Its score never borrows samples
                             // or evidence from another possible schedule.
-                            for(unsigned bit=0;bit<2;++bit)
-                                fit[bit].add(projection,code.shaped_value(first_chip,bit,static_cast<double>(within)),1);
+                            for(unsigned bit=0;bit<2;++bit) {
+                                const auto phase=code.shaped_value(first_chip,bit,static_cast<double>(within));
+                                fit[bit].add(projection,phase,1);
+                            }
                             ++observed;continue;
                         }
                         const auto local=static_cast<std::uint64_t>(std::floor(within/code.chip_samples()));
@@ -421,7 +480,8 @@ struct PatternCorrelator::Impl {
                                 const auto tone=bank.frequency-config.carrier_hz-search.frequency_offsets_hz[h.frequency];
                                 phase*=std::polar(1.,-static_cast<double>(std::remainder(static_cast<long double>(observed)*tau*tone/config.sample_rate,static_cast<long double>(tau))));
                             }
-                            fit[bit].add(bank.prefix[right]-bank.prefix[left],phase,right-left);
+                            const auto projection=bank.prefix[right]-bank.prefix[left];
+                            fit[bit].add(projection,phase,right-left);
                         }
                         observed=until;
                     }
@@ -465,7 +525,7 @@ PatternBurst PatternCorrelator::provisional()const {
     const auto best=std::max_element(h.begin(),h.end(),[](const auto& a,const auto& b){return (a.admitted?a.sum_score:-1)<(b.admitted?b.sum_score:-1);});
     if(best==h.end() || !best->admitted)return {};
     auto result=best->burst;result.bits.resize(best->committed);result.end_sample=best->committed_end;
-    result.complete=best->pending_gaps;return result;
+    result.complete=false;return result;
 }
 std::vector<PatternEvidence> PatternCorrelator::candidates()const{return impl_->history;}
 std::vector<PatternEvidence> PatternCorrelator::candidates(std::size_t limit)const{

@@ -258,7 +258,7 @@ void gui_self_check() {
     transfer::Options options;options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
     options.timestamp=1800000000;modem::ChannelConfig channel;channel.snr_db=18;channel.delay_samples=137;
     const auto result=transfer::simulate(message,options,channel);
-    if(result.packet.message.data!=message.data)throw Error("Shared GUI transfer self-check failed");
+    if(result.content.message.data!=message.data)throw Error("Shared GUI transfer self-check failed");
     BitmapImage bitmap(137,101);const auto plot=plots::PlotSnapshot::qr(encode_qr(text),plots::QrBrightness::normal);
     plot.paint(full_bitmap_request(137,101,false,true),[&](unsigned x,unsigned y,PixelBlock block){bitmap.blit(x,y,block);});
     std::cout<<"Data Pump shared GUI self-check passed; no display required.\n";

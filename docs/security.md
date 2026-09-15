@@ -1,171 +1,132 @@
 # Security boundaries
 
-Data Pump decodes analog audio into deliberately limited application content.
-No decoded address selects a network endpoint. No received command is executed,
-no received filename selects a write path, and no received file is auto-opened.
-The native GUI calls the C++ transfer service directly without a subprocess or
-shell. File saves require a user-selected path and exclusive creation.
-Automatic transport uses binary pattern evidence for acquisition, followed by
-bounded byte-boundary recovery for compact packets. Packet integrity and
-authentication and existing keyfile formats are unchanged. Legacy APSK and its
-public audio whitening layer have been removed. Keyfile
-generation in the GUI uses the same exclusive creation and 128 MiB keyring codec
-as the CLI. Show in folder passes an encoded parent-directory URI to the OS;
-it does not open or execute received content.
+Data Pump transports analog-audio decisions into opaque application bytes.
+No received address selects a network endpoint, filename selects a destination,
+or command is executed. Files are not automatically opened. The native GUI calls
+the C++ transfer service without a shell; saving requires a local explicit path.
+The byte transport has no packet header, remote integer length, filename/type,
+packet ID, repeat flag, bootstrap CRC, or automatic legacy parser fallback.
+Existing keyfiles remain usable, but peers must use the same fixed-interval wire
+format and local profile. See [protocol](protocol.md).
 
-The protected computer still trusts its audio/ADC hardware, firmware, operating
-system drivers, and application runtime. Audio modulation does not prove the
-absence of BadUSB, malicious peripheral firmware, electrical fault injection,
-bus corruption, host malware, or driver vulnerabilities. Hardware attenuation
-and isolation are external engineering responsibilities. This application does
-not accept raw digital modem/serial data as an analog-device substitute and does
-not implement a shielded serial randomizer.
+## Signal evidence, error correction and authentication
 
-Packet parsers validate fixed metadata, checked lengths, kind/flags, filename
-boundaries, CRC, FEC syndromes, and whole-content integrity before exposing a
-download. Unencrypted SHA256/CRC/FEC protect against accidental corruption; an
-attacker can generate new valid unencrypted packets. HMAC-SHA256 with a separate
-key authenticates encrypted frame metadata and payload. The CLI includes a
-versioned domain and candidate timestamp in HMAC input. Physical training is not
-part of the authenticated user message and is not signed.
+Pattern evidence alone establishes symbol timing and keystream coordinates.
+It is a model score, not authentication or a calibrated probability for arbitrary
+real interference. Fixed marker recognition follows normal Data unmasking and
+cannot restart the cipher or select a packet parser.
 
-Pattern-only raw bits and short text can be displayed without packet
-authentication. Only a complete verified packet releases a received file or
-screenshot. Packet content is interpreted after pattern acquisition and
-whole-extent recovery; no provisional APSK bootstrap/packet ticker remains.
+Each marker precedes exactly 128 coded bytes. Public intervals contain only their
+fixed data area and optional RS parity: no SHA-256 content digest or substitute
+checksum. Anyone can generate valid public RS codewords; neither marker confidence
+nor successful correction makes public content trustworthy. Public source-format
+validation is likewise not proof of origin or harmlessness.
 
-Text written directly to a terminal escapes control characters that could
-otherwise manipulate terminal state or clipboard selections. Redirected stdout
-and pipes preserve exact bytes. Binary packet output requires a pipe/redirection
-or an explicit output path. Metadata must be well-formed UTF8; GUI clipboard copy
-also requires valid UTF8 and refuses to silently replace binary bytes.
+Encrypted intervals use the existing independently keyed HMAC-SHA256. Their fixed
+layout is data area, 32-byte HMAC, then optional RS parity. The HMAC binds the local
+FEC/source profile, a versioned domain, the canonical `(epoch, ordinal)` address
+of the interval's first coded symbol, and the complete fixed data area. RS protects
+the data and tag together; MAC verification follows correction. Missing timing
+addresses remain unresolved, and failed authentication cannot become accepted
+source content. The cipher masks markers and all other interval bits at their
+normal symbol positions.
 
-Encrypted compact-packet processing on the pattern transport is:
+Generic RS supports known byte erasures with `2*errors+erasures <= parity`.
+Unknown slots contribute no marker evidence. Their zero placeholders retain an
+erasure mask through packing; they cannot silently become observed zero bits or
+empty source cells. Uncorrectable intervals make exact source reconstruction
+incomplete. Later markers may permit later segments to be received independently.
+There is no public integrity claim merely because an error pattern was accepted
+by an algebraic decoder.
 
-```
-protected bootstrap || interleaved RS(metadata || content || HMAC)
-  -> fixed recovery marker initially and after every 256 encoded bytes
-  -> Data-stream AES-256-CTR over every bit, including markers
-  -> configured pattern mapping and Scrambler/DSSS layers
-```
+The marker's independent-fair-bit model budgets at most `2^-84` false acceptance
+across a drained collector, charging all bounded start/deletion/mismatch trials.
+See [marker evidence](protocol.md#marker-evidence-threshold). This model does not
+cover a sender constructing marker-like bytes and supplies no authentication.
+Runtime derivation from a stored public label reduces literal self-recognition;
+it cannot make a finite marker absent from every possible source file.
 
-The HMAC covers the canonical bootstrap, metadata and encoded content with the
-existing local context. A separate hardware-settling prefix precedes payload.
-Raw bits and short dictionary text have neither packet integrity nor recovery
-markers. Byte packet APIs retain their existing formats.
+## Stream completion and post-end decoding
 
-Recovery runs on plaintext after the existing whole-stream Data decryption.
-The initial marker is searched at offsets 0 through 7 from the burst origin;
-subsequent markers are searched within seven bits of an expected boundary.
-Recognition permits up to eight changed bits in a complete marker, or one
-contiguous loss of up to 80 bits while retaining an exact final 32-bit anchor.
-Every accepted hypothesis must pass a conservative independent-fair-bit
-false-match budget of at most `2^-84` over the complete recovery call,
-including all slot, start, deletion and mismatch trials. Shorter surviving
-markers and larger inputs tighten the mismatch allowance. Different passing
-endpoints reject recovery. The [protocol evidence model](protocol.md#marker-evidence-threshold)
-defines this analytic bound; it is neither measured channel performance nor
-authentication and does not model deliberately constructed bytes.
-Timed unknown slots contribute no marker evidence and cannot satisfy an
-inferred endpoint's exact trailing anchor. The model assumes the remaining
-known bits are independent and fair conditional on the unknown-slot positions.
+Only iterative search finding consecutive **fully scored failed symbols** whose
+received duration covers at least six seconds ends a stream. If one symbol lasts
+six seconds or more, its first completed failure suffices. Shorter symbols require
+enough consecutive failures to cover six seconds. Long symbols are not preempted
+by a partial six-second window.
 
-An acquisition-supplied leading stream index of up to 80 may identify a missing
-initial marker prefix after ordinary Data decryption. Recovery still does not
-try crypto offsets. That supplied index fixes the suffix endpoint, allowing
-trailing mismatches or unknown slots; inferred endpoints require the exact
-trailing anchor. An unrecognized damaged marker consumes its nominal slot
-when available. Before each periodic marker, the plaintext interval is trimmed
-or zero-filled to 256 bytes. Marker positions consume Data-stream positions
-and are stripped before deinterleaving and FEC.
-Thus every transmitted marker bit is ciphertext when
-encryption is enabled. Recovery changes only downstream byte grouping; it does
-not select crypto offsets, reset counters or reseed streams. The marker supplies
-no data length, command, packet identity or new parser entry point. A recovered
-burst is eligible for a single packet parse
-from its original beginning, with exact whole-extent validation. Failure never
-triggers inner-packet scanning, an unstripped-stream retry or fallback to older
-packets without the initial marker. Short dictionary interpretation is bounded
-to 195 acquired bits. A recognized complete or partial marker suppresses
-dictionary fallback even for a short failed packet. Packet metadata determines
-the validated content type; marker acceptance alone never releases packet
-content. Raw diagnostics remain available independently.
+EOF, cancellation, receiver replacement, exhausted quotas, FEC/MAC results and
+codec end markers are not evidence of physical completion. They cannot bypass
+the application source-decoder gate. Reception may be interrupted and buffers
+released while its status remains incomplete.
 
-The marker is derived at runtime from a stored label rather than embedded as
-literal wire bytes. This reduces self-recognition in program/source transfers,
-but cannot exclude accidental or deliberate collisions in arbitrary content.
-The fixed cadence and narrow search window bound a collision's effect to the
-candidate data; they do not authenticate it. Missing bits can still cause
-corruption or rejection: distributed missing marker bits and lost marker
-trailers are outside the recovery model, and FEC can repair only errors within
-its capacity. The alignment marker cannot repair lost cryptographic stream
-alignment or replace missing packet data.
-Only a complete SHA-256/HMAC check releases validated packet content. Neither
-markers nor FEC prove a received file harmless or prevent host vulnerabilities.
+Compressed mode is exactly one raw LZMA2 source with a fixed 4 MiB dictionary and
+less than one fixed data area's trailing zero fill. It transmits no original
+length. A bounded spool retains corrected compressed areas until physical end;
+only then may the application decompress. No compressed previews or speculative
+codec probes run during reception. The decoder has explicit scratch/output caps,
+requires its own end, and rejects noncanonical trailing fill. Uncompressed mode
+uses fixed validity/byte cells with bounded loops to retain exact trailing zeros.
+Malformed occupancy, unresolved holes or failed MACs cannot be concatenated away.
 
-The exact packet layout is in [protocol.md](protocol.md). Wrong keys, modified
-authenticated frames, uncorrectable FEC, unsupported field values, and malformed lengths fail
-closed. The modem's acquisition correlation is only a signal-detection heuristic;
-it is never treated as payload authenticity. Few-bit status is explicitly
-unauthenticated and cannot establish identity.
+LZMA2 has an internal chunk grammar; it is a separately bounded post-end application
+codec, not modem framing. Public senders can construct syntactically valid
+compressed data. Decoder bounds and safe output handling remain necessary even
+when a source is well formed or keyed authentication succeeds. The format rewrite
+removes old parser dependencies; this review did not establish a buffer-overflow
+exploit in the previous implementation.
 
-Repeating a timestamp under the same shared key repeats stream positions. This
-can expose matching portions of plaintexts but does not replace the independent
-MAC. The GUI's six-second cooldown applies only to actual encrypted output;
-simulation and unencrypted output retain the one-active-TX rule without this
-delay. Users sharing a key must coordinate large sends; GUI cooldown does not
-coordinate separate hosts. Replay within the clock window remains possible.
-Packet IDs allow external scripts to deduplicate repeat requests but do not
-constitute durable anti-replay state.
+Independent MACs authenticate received intervals at their canonical positions.
+They do not prove the sender intended no additional intervals. A whole lost final
+interval removes the sole codec endpoint of a canonical compressed source and
+therefore makes that source truncated; an independently acquired later segment,
+or an uncompressed source, still carries no authenticated total transfer count.
+A long fade may terminate a receiving segment rather than the intended file.
 
-The cache is RAM-only at the application level. OS swapping, hibernation, core
-dumps, terminal scrollback, explicit redirection, and clipboard managers may
-persist content outside the application. Key buffers are cleansed where
-practical; the entire process memory is not locked or scrubbed. Very large
-inputs are bounded and can be rejected before processing. Continuous TX/RX uses
-bounded chunks/integrals, with a default DSP budget of 50% of available RAM,
-resolved once at startup and distinct from the 256 MiB content/cache limits. Packet coding scratch is checked separately from
-DSP. A long symbol does not require retaining its whole PCM duration;
-batch PCM/WAV calls still have full-waveform allocation limits. These bounds are
-not a total process resource sandbox or a guarantee against CPU exhaustion.
+## Keys, replay and private waveforms
 
-Actual acquisition evaluates a finite timing/key/epoch bank at one carrier.
-Too many candidate receivers can exceed the configured workspace and fail
-explicitly. Successful symbol correlation alone never validates packet content;
-raw bits and short dictionary text are separately available without that claim.
-Simulation supplies receiver-clock PCM with arbitrary startup timing and phase,
-relative crystal error and Wiener phase noise. It uses the same finite blind
-acquisition and spreading correlation as audio reception, without giving the
-receiver transmitter timing, length or epoch. Successful simulation does not
-establish calibrated hardware sensitivity or oscillator tracking. Pattern
-acquisition does not require training or a valid bootstrap; byte-boundary markers
-are used only after bits are acquired and decrypted in the same burst. Pattern
-constellation decoding remains the sole source of timing and keystream alignment.
-Markers cannot recover an unknown absolute offset, whole lost blocks or lost
-Data-stream/Scrambler/DSSS alignment.
-No legacy APSK receiver or protected-bootstrap acquisition fallback remains.
+AES-256-CTR and HKDF purpose separation retain distinct Data, MAC, Scrambler,
+DSSS and reserved FHSS roles. A symbol selects its start-second epoch for its
+entire duration; same-second ordinals and fixed seek caches preserve addresses
+through missing bits and interval drains. A canonical schedule address is not a
+fresh nonce. Reusing key/epoch/ordinal positions exposes XOR relationships between
+plaintexts and permits replay within accepted timing windows. Local cooldowns do
+not coordinate separate processes or hosts; there is no durable replay database.
 
-Continuous reception is local audio only; there is no network API, built-in
-repeater, or automatic radio-control channel.
+Every selected non-tone key enables private pattern templates. Private chips and
+protected settling use capped circular I/Q values with varying amplitude/phase.
+Settling uses separate preamble counter positions and supplies no acquisition
+condition. Tone modes clear private protections. Bandwidth, chip cadence, capped
+amplitudes and finite edges remain observable; no measured interception or
+indistinguishability guarantee is made. Exact raw-bit/status signals have no MAC
+and cannot authenticate identity.
 
-Automated tests and review do not substitute for an independent security audit.
-The reference release should be evaluated on the intended hardware before
-being relied on as a security boundary or for sensitive communications.
+The 128 MiB named-keyfile codec and optional pad remain separate from radio data.
+New keyfiles use exclusive creation. Large keyfiles do not guarantee physical
+SSD erasure, and possession of a complete keyfile and required pad compromises
+its shared secrets. Buffers are cleansed where practical; all process memory is
+not locked or scrubbed. See [cryptography](crypto.md).
 
-## Private waveform boundary
+## Resource and host boundary
 
-Every selected non-tone transfer key enables Data encryption and private
-Scrambler templates. Private Scrambler/DSSS bytes map to capped circular I/Q
-noise with varying amplitude and phase, correcting the old invariant where
-squaring PCM canceled every private sign. Hardware settling combines Data and
-all enabled private streams before the same mapping, at the same chip cadence
-in separate preamble counter positions. No fixed APSK prefix or post-encryption
-symbol padding is transmitted. Tone modes clear all private protections and
-make no LPI claim.
+The receiver drains decisions and fixed intervals; retained waveform/candidate
+state, marker overlap, RS scratch and diagnostic prefixes are bounded. A continuous
+confident signal is limited by local content, spool and output quotas, not by a
+silence timeout. Received compressed bytes may occupy a capped temporary-file
+spool until completion. Application caches, caller buffers, spool storage and
+codec scratch are separately charged; a content quota is not a process RSS limit.
+Current fixed LZMA2 scratch caps are 64 MiB for encoding and 8 MiB for decoding.
+Batch PCM APIs still require a full-waveform budget; simulation work grows with
+sample count. Finite key/timing/frequency banks can be refused when unaffordable.
 
-Acquisition still compares patterns alone. FFT evidence uses actual template
-energy; long clock-window fits retain the full quadrature Gram matrix. These
-changes do not conceal every physical property: bandwidth, regular chip timing,
-capped amplitudes and finite burst edges remain, and key/epoch reuse can repeat
-waveforms. No measured probability of interception or indistinguishability
-from arbitrary ambient noise is established.
+Temporary files, OS swap/hibernation/core dumps, terminal scrollback, redirection
+and clipboard managers can persist data outside the application. Terminal display
+escapes control bytes; pipes preserve exact bytes. Clipboard text requires valid
+UTF-8. No source bytes supply a destination path or executable file type.
+
+The system still trusts audio hardware, firmware, OS drivers and its runtime.
+Analog modulation does not establish protection against hostile peripherals,
+BadUSB, electrical faults, host compromise or driver defects. Hardware isolation
+and attenuation remain external engineering responsibilities. There is no serial
+modem substitute, network receiver API, built-in repeater or automatic radio-control
+channel. Tests and source review do not replace independent security assessment
+on the intended hardware.

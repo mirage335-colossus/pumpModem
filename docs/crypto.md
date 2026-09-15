@@ -125,7 +125,10 @@ its candidate key, epoch and stream position, fitting unknown common gain and
 phase. FFT correlation divides by the actual template energy; the bounded
 clock-window correlator retains the full two-quadrature Gram matrix. Signal
 start, continuation, end and time/key alignment still come from pattern
-evidence alone, never a preamble, packet header, FEC or MAC.
+evidence alone, never a preamble, coding interval, FEC or MAC. Ending requires
+consecutive fully scored failed symbols whose durations cover six seconds;
+an individual symbol lasting at least six seconds ends the stream on its first
+completed failure. A partial long-symbol window cannot end reception.
 
 Unkeyed public patterns use the same circular I/Q mapping with the public
 Scrambler seed, epoch zero and symbol-local chip positions. Amplitude and phase
@@ -171,47 +174,85 @@ or a measured probability of interception.
 ### Data, integrity and reuse
 
 `xor_data` XORs arbitrary bytes at an explicitly selected epoch with the Data
-stream; the standalone byte-packet API retains that convention. On-air pattern
-transport uses `xor_binary_bits`: each symbol consumes Data bit `ordinal` from
-its symbol-start epoch, most-significant bit first within each byte. Data and
+stream. On-air pattern transport uses `xor_binary_bits`: each symbol consumes
+Data bit `ordinal` from its symbol-start epoch, most-significant bit first
+within each byte. Data and
 pattern addressing advance on the sample schedule whether preceding symbols
 decoded or not. A 512-byte cache bounds Data mask scratch storage.
-`mac` computes the full
-32-byte HMAC-SHA256 using its independent key; verification requires all 32
-bytes and compares with `CRYPTO_memcmp`. Packet callers authenticate metadata,
-content and local epoch context before FEC and whole-stream encryption.
+`mac` computes the full 32-byte HMAC-SHA256 using its independent key;
+verification requires all 32
+bytes and compares with `CRYPTO_memcmp`.
 
-Raw bits and dictionary-coded short text carry no MAC or checksum. Their
-pattern evidence supplies neither cryptographic authentication nor replay
-protection. Compact packets begin with a 24-byte marker containing two copies
-of their 96-bit recovery word and repeat that marker after every complete 256
-encoded bytes, before Data encryption. Every marker, header, integrity and FEC
-bit is therefore masked. Recovery runs only after
-ordinary Data decryption and never changes a crypto offset, resets a counter,
-or creates another packet parser entry point. It can accept a marker with
-bounded changed bits or one contiguous missing run while retaining an intact
-trailing anchor; the [marker evidence threshold](protocol.md#marker-evidence-threshold)
-accounts for all tested hypotheses under an independent-fair-bit model.
-This bound does not authenticate content or change SHA-256/HMAC validation.
-If acquisition reports up to 80 missing leading stream symbols, the existing
-symbol index selects the Data positions and recovery checks the surviving
-initial marker suffix. The marker search never selects or trials those
-positions, and cannot repair a later loss of Data-stream alignment.
+Every source interval carries exactly 128 coded bytes. A 24-byte marker made
+from two copies of the 96-bit recovery word precedes each interval; there is no
+terminal marker or whole-stream footer. FEC and compression profiles are agreed
+locally. The data area, optional keyed HMAC and optional RS parity occupy fixed
+positions:
+
+| FEC | Public data bytes | Keyed data bytes | Keyed HMAC bytes | Parity bytes |
+| --- | ---: | ---: | ---: | ---: |
+| Off | 128 | 96 | 32 | 0 |
+| RS20 | 106 | 74 | 32 | 22 |
+| RS60 | 80 | 48 | 32 | 48 |
+
+Only encrypted intervals contain an integrity tag. For each keyed interval,
+transfer computes the HMAC over the following exact concatenation:
+
+```text
+ASCII("DP-INTERVAL") || 0x02 || U8(fec) || U8(compressed)
+    || BE64(epoch) || BE64(ordinal) || fixed_data_area
+```
+
+Here `fec` is 0, 1 or 2 for Off, RS20 or RS60; `compressed` is 0 or 1. The
+canonical `(epoch, ordinal)` comes from `symbol_stream_address` for the first
+coded symbol after that interval's marker. It is not a received-interval count,
+measured carrier frequency, transmitted identifier or original-stream origin.
+A later acquisition can verify a surviving interval if it acquires the same
+canonical address. The full tag is appended before RS encoding, so RS protects
+data and tag together. Data encryption then masks all marker, data, tag and
+parity bits. Reception reverses this order and verifies the tag after RS.
+
+Public intervals contain no content digest, checksum or MAC. Raw bits bypass
+markers, the source codec, FEC and MAC altogether, even when Data encryption is
+selected. Pattern evidence and successful public RS correction provide no
+cryptographic authentication or replay protection. There is no dictionary-coded
+short-text wire format, packet parser, transmitted metadata or length field.
+
+Marker recovery runs after Data decryption and cannot change a crypto offset or
+reset a counter. Its [evidence threshold](protocol.md#marker-evidence-threshold)
+accounts for tested marker hypotheses under an independent-fair-bit model,
+including bounded leading and interior missing runs. Missing leading positions
+come from the physical receiver's symbol clock. Marker search cannot select a
+new Data-stream alignment or turn its model bound into authentication.
 
 An established pattern track can retain unknown interior symbol slots until a
 later confident observation confirms their extent. Data decryption processes
 the known spans at their original symbol addresses; a missing slot consumes
 its position without supplying a ciphertext decision. Marker matching excludes
-these unknowns from its evidence, then packet recovery fills their plaintext
-values with zero for FEC. A recovered packet still needs complete integrity or
-MAC validation. This preserves alignment across a detection gap; it does not
+these unknowns from its evidence. Any coded byte containing an unknown bit is
+passed to RS as a declared erasure; its zero filler is not an observed value.
+At physical completion, a partially observed final interval can supply its
+remaining fixed positions as erasures. No entirely unobserved interval is
+manufactured from a marker alone. Keyed intervals must still pass HMAC after
+correction. This preserves alignment across a detection gap; it does not
 recover from an unknown change in the capture clock or keystream origin.
+
+The bounded receiver spools corrected data areas during reception. Only the
+physical six-second ending event permits the raw LZMA2 source decoder or exact
+uncompressed validity-cell decoder to run. Raw LZMA2 uses a fixed dictionary;
+its endpoint and final zero padding are checked after physical completion.
+Codec success does not provide public integrity. Independent interval MACs do
+not authenticate a total stream length or prove that no later interval was
+intended. Losing the final interval of one canonical LZMA2 source removes its
+codec endpoint and causes post-end source decoding to fail. Whole-interval loss
+can remain undetected for an uncompressed source or independently valid suffix.
 
 Reusing the same key, timestamp, purpose, domain and stream positions repeats
 CTR output. It can expose plaintext XORs and allow correlation between repeated
 private waveforms; the new mapping cannot repair stream reuse. Independent
 MAC keys remain separate. Automatically timed live keyed bursts wait for a
-fresh whole-second epoch, and encrypted output has its existing cooldown.
+fresh whole-second epoch. Hardware output also waits through the symbol-duration
+aware receive-separation period, whether encryption is enabled or not.
 The live hardware guard tracks the greatest symbol epoch whose samples have
 been generated for output, including later symbols in a long message. A
 subsequent automatic burst must start beyond that epoch even after a backward
@@ -220,8 +261,8 @@ wait abort that attempt. This local guard is not persistent cross-process state.
 Explicit timestamps are caller-controlled, and separate devices sharing a key
 still require coordination. A surviving reception uses its acquired epoch,
 subsecond phase and stream-symbol index to recover the matching Data positions.
-Recovering later bits does not reconstruct missing packet bytes or bypass the
-packet's original-epoch integrity check.
+Recovering later bits does not reconstruct wholly missing intervals or prove
+that reception includes the complete original source.
 
 ## Named key sets: keyfile version 2
 

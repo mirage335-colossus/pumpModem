@@ -24,48 +24,47 @@ Bytes parse_binary_bits(std::string_view text) {
 Inbox::Inbox(std::size_t capacity) : capacity_(capacity) {
     if (!capacity) throw Error("Receive cache capacity must be positive");
 }
-void Inbox::put(DecodedPacket packet) {
-    if (packet.message.data.size() > capacity_) throw Error("Received message exceeds the cache capacity");
+void Inbox::put(StreamContent stream) {
+    if (stream.message.data.size() > capacity_) throw Error("Received message exceeds the cache capacity");
     auto existing = std::find_if(items_.begin(), items_.end(), [&](const auto& item) {
-        return item.message.id == packet.message.id;
+        return item.message.local_id == stream.message.local_id;
     });
     if (existing != items_.end()) {
         used_ -= existing->message.data.size();
         items_.erase(existing);
     }
     while (!items_.empty() &&
-           (packet.message.data.size() > capacity_ - used_ || items_.size() >= 4096)) {
+           (stream.message.data.size() > capacity_ - used_ || items_.size() >= 4096)) {
         used_ -= items_.front().message.data.size();
         items_.pop_front();
     }
-    used_ += packet.message.data.size();
-    items_.push_back(std::move(packet));
+    used_ += stream.message.data.size();
+    items_.push_back(std::move(stream));
 }
 void Inbox::clear() noexcept { items_.clear(); used_ = 0; }
-std::vector<const DecodedPacket*> Inbox::file_items() const {
-    std::vector<const DecodedPacket*> files;
-    for (const auto& packet : items_) {
-        if (packet.message.kind == MessageKind::file || packet.message.kind == MessageKind::screenshot)
-            files.push_back(&packet);
+std::vector<const StreamContent*> Inbox::file_items() const {
+    std::vector<const StreamContent*> files;
+    for (const auto& stream : items_) {
+        files.push_back(&stream);
     }
     return files;
 }
 
 void TransmissionPolicy::started(bool simulation, bool encrypted, Clock::time_point now) {
     if (remaining(simulation, encrypted, now).count() > 0)
-        throw Error(active_ ? "A transmission is already active" : "The encrypted transmit cooldown is still active");
+        throw Error(active_ ? "A transmission is already active" : "The six-second transmit separation is still active");
     active_ = true;
-    active_encrypted_output_ = !simulation && encrypted;
+    active_hardware_output_ = !simulation;
 }
 void TransmissionPolicy::finished(Clock::time_point now) noexcept {
-    if (active_ && active_encrypted_output_) next_encrypted_ = now + std::chrono::seconds(6);
+    if (active_ && active_hardware_output_) next_hardware_ = now + std::chrono::seconds(6);
     abort_start();
 }
-void TransmissionPolicy::abort_start() noexcept { active_ = false; active_encrypted_output_ = false; }
-std::chrono::milliseconds TransmissionPolicy::remaining(bool simulation, bool encrypted, Clock::time_point now) const noexcept {
+void TransmissionPolicy::abort_start() noexcept { active_ = false; active_hardware_output_ = false; }
+std::chrono::milliseconds TransmissionPolicy::remaining(bool simulation, bool /*encrypted*/, Clock::time_point now) const noexcept {
     if (active_) return std::chrono::milliseconds::max();
-    if (simulation || !encrypted || now >= next_encrypted_) return std::chrono::milliseconds::zero();
-    return std::chrono::ceil<std::chrono::milliseconds>(next_encrypted_ - now);
+    if (simulation || now >= next_hardware_) return std::chrono::milliseconds::zero();
+    return std::chrono::ceil<std::chrono::milliseconds>(next_hardware_ - now);
 }
 
 PlotUpdate PlotReplayPolicy::observe(std::uint64_t sequence, std::uint64_t transmission_id,
@@ -165,7 +164,7 @@ std::string signal_status_label(const SignalLine& line) {
     if (signal_byte_aligned(line)) return "text received";
     if (line.binary) return line.complete?"binary received":"binary pending";
     if(line.complete && line.pattern_score && !line.validated)return "text received";
-    return line.validated?(line.text_message?"verified":"verified file"):"pending";
+    return line.validated?(line.text_message?"decoded":"decoded bytes"):"pending";
 }
 std::string signal_gap_label(const SignalLine& line) {
     if(!line.missing_symbols)return {};
@@ -186,9 +185,8 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
-    if (signal_byte_aligned(line)) return line.received_bits>line.text.size()?"No checksum / FEC / prefix":"No checksum / FEC";
-    if(line.pattern_score && line.complete && !line.validated && !line.binary)return "No checksum / FEC";
-    if (line.binary) return line.received_bits>line.text.size()?"FEC off / prefix":"FEC off";
+    if (line.binary || (line.pattern_score && line.complete && !line.validated))
+        return line.received_bits>line.text.size()?"Raw observations / prefix":"Raw observations";
     if (!line.validated) return "Data pre-FEC pending";
     const auto& accuracy=line.pre_fec_accuracy;
     if (!accuracy || !accuracy->received_data_bits || accuracy->corrected_data_bits>accuracy->received_data_bits)
@@ -204,7 +202,7 @@ std::string signal_data_label(const SignalLine& line) {
 
 void Signals::update(SignalLine line) {
     if (line.binary) {
-        line.validated=false; line.packet_id.clear(); line.text_message=false;
+        line.validated=false; line.reception_id.clear(); line.text_message=false;
         line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();
     }
     if (line.raw_bits.size()>4096 || line.raw_bits.find_first_not_of("01")!=std::string::npos ||
@@ -221,8 +219,8 @@ void Signals::update(SignalLine line) {
     }
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
-    if (index>=lines_.size() || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].packet_id.empty()) return std::nullopt;
-    return lines_[index].packet_id;
+    if (index>=lines_.size() || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;
+    return lines_[index].reception_id;
 }
 std::optional<std::string> Signals::copy_bits(std::size_t index) const {
     if (index>=lines_.size()) return std::nullopt;
@@ -255,7 +253,7 @@ std::optional<Bytes> Signals::copy_bytes(std::size_t index) const {
 std::string id_label(const Message& message) {
     constexpr char digits[]="0123456789abcdef";
     std::string result;
-    for (auto value:message.id) { result+=digits[value>>4]; result+=digits[value&15]; }
+    for (auto value:message.local_id) { result+=digits[value>>4]; result+=digits[value&15]; }
     return result;
 }
 std::string display_label(std::string_view text) {

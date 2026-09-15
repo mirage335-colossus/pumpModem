@@ -53,13 +53,23 @@ follow new arrivals only when already at the tail. Native clipboard and
 asynchronous prompt services stay inside the adapter.
 Pending Save requests retain their payload across inbox eviction.
 
+Both adapters use the same fixed 128-coded-byte intervals and locally selected
+source/FEC profile. Public content has no digest; encrypted intervals carry
+HMAC-SHA256 bound to their canonical symbol addresses. Only a physical end from
+six seconds of fully scored failed symbols allows source decoding and admission
+to the inbox. A long symbol is scored in full before it can cause that end.
+Raw display prefixes are bounded to 4096 bits; a shortened prefix is not eligible
+for an exact whole-reception copy. Received names and cache identifiers are
+local, with no filename, identifier or length header on the wire. See the
+[protocol](protocol.md) and [security boundaries](security.md).
+
 `inspection_page.hpp` builds the inspection document from the shared `Inspection`
 model. `document_layout.hpp` computes its document rectangles from native glyph
 measurements; `backend_rev_document.hpp` applies those rectangles and renders headings, numbered step/section
 cards, notes, navigation and parameter rows with native Rev elements. Modem flow
 follows the FLTK section order: processing lanes, chosen alphabets, full pattern
 inspection, then preamble and integration notes. Transmission separates on-air
-and logical packet sections, shows proportional data/parity codeword bars and
+and logical source sections, shows proportional fixed-interval data/parity bars and
 coding notes, and places the parameter table last. Card columns respond to the
 page width; native text measurement supplies their heights. The pages scroll
 inside the same tab viewport as FLTK. Their section structure is shared policy;

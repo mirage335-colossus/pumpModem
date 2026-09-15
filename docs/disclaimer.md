@@ -1,7 +1,7 @@
 # Public release and scope
 
 Data Pump is an independently developed civilian audio modem for text and file
-transfer. Version 0.5 implements the features recorded in `requirements.md`.
+transfer. The implemented features are recorded in [requirements.md](requirements.md).
 It excludes routed addressing, built-in repeaters, asymmetric key exchange,
 and rapid uncontrolled Doppler tracking. These statements describe its actual
 functionality; they are not a legal classification or a claim that a particular
@@ -9,7 +9,12 @@ class of user could never use the software.
 
 The implementation uses publicly documented standard symmetric cryptographic
 primitives through OpenSSL: AES256-CTR, AES256-GCM, HKDF-SHA256, and HMAC-SHA256.
-The packet and waveform specifications are documented alongside the source.
+The fixed 128-byte interval format and waveform are documented alongside the
+source. Public intervals contain no content digest; encrypted intervals carry
+HMAC-SHA256 bound to their canonical symbol addresses. Source decoding begins
+only after the physical six-second absence rule ends reception. The format has
+no transmitted packet length or metadata header. See [protocol.md](protocol.md)
+and [crypto.md](crypto.md).
 No assertion is made that these choices alone establish an export-control
 classification, public-information exclusion, RF authorization, or exemption.
 

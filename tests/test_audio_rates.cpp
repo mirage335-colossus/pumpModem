@@ -28,6 +28,17 @@ std::vector<float> convert(std::span<const float> input, std::uint32_t from, std
     }
     return result;
 }
+std::vector<float> render_raw(const Bytes& bits,const transfer::Options& options) {
+    auto source=transfer::binary_transmitter(bits,options);
+    std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
+    std::size_t offset=0;
+    while(!source->finished())offset+=source->read(std::span(samples).subspan(offset));
+    return samples;
+}
+void append_quiet(std::vector<float>& samples,const modem::Config& config) {
+    samples.resize(samples.size()+modem::pattern_absence_samples(config)+
+                   config.sample_rate+2*modem::symbol_sample_count(config));
+}
 void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_card, bool voice_channel=false) {
     transfer::Options options;
     options.modem = tuning::resolve(bandwidth, 100, tuning::PatternMode::auto_pattern, false).config;
@@ -38,17 +49,22 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
     Message message;
     message.kind = MessageKind::file;
     message.filename = "radio-circuit.kicad_pcb";
-    message.id.fill(0x5c);
+    message.local_id.fill(0x5c);
     for (unsigned i = 0; i < 16; ++i) message.data.push_back(static_cast<std::uint8_t>(i * 37));
     const auto planned_rate = modem::bit_rate(options.modem);
     const auto internal_rate = options.modem.sample_rate;
     // The continuous analog channel has one physical timeline. Its two cards
     // sample that timeline at different rates; neither changes the modem plan.
-    auto samples = convert(transfer::transmit(message, options), internal_rate, output_card);
+    // The very slow voice-passband case needs only a short changing pattern
+    // to test carrier filtering; the other cases carry full coded intervals.
+    const Bytes voice_bits{0,0,1,1,0,1,0,1};
+    auto samples=voice_channel?render_raw(voice_bits,options):transfer::transmit(message,options);
+    append_quiet(samples,options.modem);
+    samples=convert(samples,internal_rate,output_card);
     if(voice_channel) {
         // Four cascaded 300 Hz high-pass sections model a voice path that
         // cannot use a sub-audio carrier. Preserve the actual channel phase
-        // and amplitude response; the packet must still validate afterward.
+        // and amplitude response; the bits must still survive afterward.
         const auto coefficient=std::exp(-2*std::numbers::pi*300/output_card);
         for(unsigned section=0;section<4;++section) {
             double previous_input=0,previous_output=0;
@@ -61,8 +77,10 @@ void roundtrip(double bandwidth, std::uint32_t output_card, std::uint32_t input_
     samples = convert(samples, output_card, input_card);
     samples = convert(samples, input_card, internal_rate);
     const auto received = transfer::receive(samples, options);
-    check(received.packet.message.data == message.data && received.packet.message.filename == message.filename,
-          ("a packet must survive different output/input card sample rates at " + std::to_string(bandwidth) + " Hz").c_str());
+    check(received.stream_complete && (voice_channel?received.raw_bits==voice_bits:
+          received.content_validated && received.content.message.data==message.data &&
+          received.content.message.filename=="received.bin"),
+          ("content must survive different output/input card sample rates at " + std::to_string(bandwidth) + " Hz").c_str());
     check(options.modem.sample_rate == internal_rate && modem::bit_rate(options.modem) == planned_rate,
           "hardware rates must not alter bandwidth, symbol timing or selected throughput");
 }
@@ -77,7 +95,7 @@ void pattern_roundtrip(bool keyed,double bandwidth=1200) {
     const auto symbol=modem::symbol_sample_count(options.modem);
     const auto internal=options.modem.sample_rate;
     const auto cross_cards=[&](std::vector<float> pcm) {
-        pcm.insert(pcm.begin(),137,0);pcm.resize(pcm.size()+static_cast<std::size_t>(2*symbol));
+        pcm.insert(pcm.begin(),137,0);append_quiet(pcm,options.modem);
         pcm=convert(pcm,internal,44100);pcm=convert(pcm,44100,48000);return convert(pcm,48000,internal);
     };
     const Bytes bits{0,0,1};auto source=transfer::binary_transmitter(bits,options);
@@ -87,14 +105,14 @@ void pattern_roundtrip(bool keyed,double bandwidth=1200) {
     std::vector<float> pcm(static_cast<std::size_t>(source->total_samples()));
     std::size_t offset=0;while(!source->finished())offset+=source->read(std::span(pcm).subspan(offset));
     const auto raw=transfer::receive(cross_cards(std::move(pcm)),options);
-    check(raw.raw_bits==bits,"automatic pattern acquisition must preserve leading zeros and exact count across audio cards");
+    check(raw.stream_complete && raw.raw_bits==bits,"automatic pattern acquisition must preserve leading zeros and exact count across audio cards");
     if(!keyed) {
-        Message message;message.kind=MessageKind::file;message.filename="sample.bin";message.data=Bytes(16,0x5c);message.id.fill(0x5c);
+        Message message;message.kind=MessageKind::file;message.filename="sample.bin";message.data=Bytes(16,0x5c);message.local_id.fill(0x5c);
         const auto expected=transfer::message_wire_bits(message,options);
-        const auto packet=transfer::receive(cross_cards(transfer::transmit(message,options)),options);
-        check(packet.raw_bits==expected && packet.packet_validated && packet.packet.message.data==message.data &&
-              packet.packet.message.filename==message.filename,
-              "a pattern-decoded packet must survive independent card sample rates");
+        const auto received=transfer::receive(cross_cards(transfer::transmit(message,options)),options);
+        check(received.raw_bits==expected && received.stream_complete && received.content_validated &&
+              received.content.message.data==message.data && received.content.message.filename=="received.bin",
+              "a fixed-interval stream must survive independent card sample rates");
     }
 }
 }
@@ -111,7 +129,7 @@ int main() {
         pattern_roundtrip(true);
         pattern_roundtrip(false,3600);
         pattern_roundtrip(true,3600);
-        std::cout << "Packets survive independent hardware sample rates\n";
+        std::cout << "Streams survive independent hardware sample rates\n";
         return 0;
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

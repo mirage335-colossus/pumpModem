@@ -113,7 +113,7 @@ services and native rendering differences likewise remain adapter work.
 A `Control` stores behavior as named commands and ordinary metadata. Adapters
 never switch on a particular application field, command, bitmap or page. A
 Choice's optional `display_text` reports an effective value without changing its
-saved selected ID, for example FEC being off for input under sixteen bytes. Key labels
+saved selected ID, for example FEC being off for explicit raw-bit input. Key labels
 are literal UTF-8; FLTK-specific escaping stays in its menu adapter.
 `control_binding.hpp` groups a menu only with declarations in the same scope and
 with the same `instance`: ordinary menus belong to a page, while persistent

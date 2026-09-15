@@ -1,5 +1,6 @@
 #include "../src/gui/inspection_page.hpp"
 #include <iostream>
+#include <cmath>
 
 using namespace datapump;
 using namespace datapump::gui;
@@ -15,7 +16,7 @@ std::size_t find(const std::vector<const document::Node*>& nodes,const std::stri
 }
 Inspection fixture() {
     Inspection model;model.title="Configured model";model.summary="Summary";
-    model.lanes={{"Transmit",{{"Packet","Packet details",InspectionState::active},{"Encryption","Encryption details",InspectionState::off},{"Coding","Coding details",InspectionState::active},{"Modulation","Modulation details",InspectionState::active},{"Audio","Audio details",InspectionState::unavailable}}}};
+    model.lanes={{"Transmit",{{"Source","Fixed validity cells",InspectionState::active},{"Encryption","Encryption details",InspectionState::off},{"Coding","Coding details",InspectionState::active},{"Modulation","Modulation details",InspectionState::active},{"Audio","Audio details",InspectionState::unavailable}}}};
     model.constellations={{"Illustrative I/Q","Ideal payload points",{{1,0},{-1,0}}}};
     inspection::PatternSpace pattern;pattern.code.resize(133,1);pattern.chip_weights.resize(133,1);
     pattern.coefficients={{1,0},{-1,0}};pattern.chip_samples=1;pattern.symbol_samples=133;pattern.symbol_seconds=1;
@@ -25,9 +26,9 @@ Inspection fixture() {
                     {"Logical","Logical detail",12,std::nullopt,std::nullopt,true,false},
                     {"Coding note","Coding detail",std::nullopt,std::nullopt,std::nullopt,false,true}};
     model.fields={{"Carrier","1500 Hz"},{"Modem mode","Pattern waveforms"}};
-    model.packet_layout=PacketLayout{};model.packet_layout->header_bytes=16;model.packet_layout->header_parity_bytes=8;
-    model.packet_layout->block_count=2;model.packet_layout->block_capacity=192;model.packet_layout->full_block_parity=32;
-    model.packet_layout->last_block_data=48;model.packet_layout->last_block_parity=16;
+    model.stream_layout=StreamLayout{};model.stream_layout->intervals=2;
+    model.stream_layout->data_bytes_per_interval=74;model.stream_layout->integrity_bytes_per_interval=32;
+    model.stream_layout->parity_bytes_per_interval=22;model.stream_layout->wire_bytes=256;
     return model;
 }
 void semantic_order_and_geometry() {
@@ -52,13 +53,15 @@ void semantic_order_and_geometry() {
 void transmission_and_pending() {
     const auto model=fixture();const auto page=document::build(&model,false,900);
     std::vector<const document::Node*> nodes;flatten(page.root,nodes);
-    check(find(nodes,"Physical")<find(nodes,"Packet before body interleaving"),"physical structure must appear first");
-    check(find(nodes,"Logical")<find(nodes,"Reed-Solomon codewords"),"logical structure must precede coding diagrams");
-    check(find(nodes,"Final body block")<find(nodes,"Coding note"),"codeword bars must precede coding notes");
-    check(find(nodes,"Preamble and coding structure")<find(nodes,"Current packet and modem parameters"),"parameter table must appear after structural notes");
+    check(find(nodes,"Physical")<find(nodes,"Source and interval fields"),"physical structure must appear first");
+    check(find(nodes,"Logical")<find(nodes,"Fixed 128-byte coded interval"),"logical structure must precede coding diagrams");
+    check(find(nodes,"Every interval")<find(nodes,"Coding note"),"codeword bars must precede coding notes");
+    check(find(nodes,"Preamble and coding structure")<find(nodes,"Current stream and modem parameters"),"parameter table must appear after structural notes");
     check(nodes.back()->text=="Pattern waveforms","parameter fields must be last");
-    const auto data=nodes[find(nodes,"16 data bytes")],parity=nodes[find(nodes,"8 parity bytes")];
-    check(data->width==2*parity->width&&data->width+parity->width==900,"codeword blocks must be proportional to byte counts");
+    const auto data=nodes[find(nodes,"74 data-area bytes")],tag=nodes[find(nodes,"32 HMAC bytes")],parity=nodes[find(nodes,"22 parity bytes")];
+    check(std::abs(data->width-900.*74/128)<1e-5 && std::abs(tag->width-225)<1e-5 &&
+          std::abs(parity->width-900.*22/128)<1e-5 && data->width+tag->width+parity->width==900,
+          "fixed codeword blocks must be proportional to data, HMAC and parity bytes");
     const auto pending=document::build(nullptr,true,900,0,"Estimate pending");
     check(pending.root.children.size()==2&&pending.root.children.back().text=="Estimate pending","pending state must keep page title and native message");
 }

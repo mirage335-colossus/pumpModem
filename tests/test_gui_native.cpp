@@ -1,12 +1,15 @@
 #include "../src/gui/state.hpp"
 #include <iostream>
 #include <limits>
+#include <source_location>
 
 using namespace datapump;
-void check(bool value) { if (!value) throw Error("Native GUI policy test failed"); }
-DecodedPacket packet(std::uint8_t id, std::size_t size) {
-    DecodedPacket result;
-    result.message.id[0]=id;
+void check(bool value, std::source_location location=std::source_location::current()) {
+    if (!value) throw Error("Native GUI policy test failed at line "+std::to_string(location.line()));
+}
+StreamContent content(std::uint8_t id, std::size_t size) {
+    StreamContent result;
+    result.message.local_id[0]=id;
     result.message.data.resize(size,id);
     return result;
 }
@@ -73,20 +76,20 @@ int main() {
             check(rejected_bits);
         }
         gui::Inbox inbox(5);
-        inbox.put(packet(1,3));
-        inbox.put(packet(1,2));
+        inbox.put(content(1,3));
+        inbox.put(content(1,2));
         check(inbox.items().size()==1 && inbox.size_bytes()==2);
-        inbox.put(packet(2,4));
-        check(inbox.items().size()==1 && inbox.items()[0].message.id[0]==2);
+        inbox.put(content(2,4));
+        check(inbox.items().size()==1 && inbox.items()[0].message.local_id[0]==2);
         bool rejected=false;
-        try { inbox.put(packet(3,6)); } catch (const Error&) { rejected=true; }
+        try { inbox.put(content(3,6)); } catch (const Error&) { rejected=true; }
         check(rejected && inbox.size_bytes()==4);
         inbox.clear();
         check(inbox.items().empty() && inbox.size_bytes()==0);
         gui::Inbox empty_payloads(1);
         for (std::size_t n=0;n<4097;++n) {
-            auto item=packet(static_cast<std::uint8_t>(n),0);
-            item.message.id[1]=static_cast<std::uint8_t>(n>>8);
+            auto item=content(static_cast<std::uint8_t>(n),0);
+            item.message.local_id[1]=static_cast<std::uint8_t>(n>>8);
             empty_payloads.put(std::move(item));
         }
         check(empty_payloads.items().size()==4096 && empty_payloads.size_bytes()==0);
@@ -96,7 +99,7 @@ int main() {
             check(!gui::valid_clipboard_text(bad));
         check(gui::valid_clipboard_text({}));
         check(gui::display_label("name\n\tlabel")=="name  label");
-        check(gui::id_label(packet(0xab,0).message).substr(0,2)=="ab");
+        check(gui::id_label(content(0xab,0).message).substr(0,2)=="ab");
         gui::Signals signals;
         signals.update({7,1500,"uncertain tezt",false,{}});
         check(!signals.copy_id(0));
@@ -107,7 +110,7 @@ int main() {
         signals.update({7,1500,"corrected text",true,"verified-id"});
         check(signals.copy_id(0)=="verified-id");
         gui::SignalLine quality{7,1500,"corrected text",true,"verified-id",true,75.0,
-                                PacketBitAccuracy{800,3}};
+                                StreamBitAccuracy{800,3}};
         check(gui::signal_preamble_label(quality)=="Preamble 75.0%");
         quality.preamble_received_percent=99.96;
         check(gui::signal_preamble_label(quality)=="Preamble >99.9%");
@@ -120,19 +123,19 @@ int main() {
         check(signals.lines()[0].text=="corrected text" && signals.copy_id(0)=="verified-id");
         check(signals.lines()[0].preamble_received_percent==75.0 &&
               signals.lines()[0].pre_fec_accuracy->corrected_data_bits==3);
-        quality.pre_fec_accuracy=PacketBitAccuracy{800,0};
+        quality.pre_fec_accuracy=StreamBitAccuracy{800,0};
         check(gui::signal_data_label(quality)=="Data 100% pre-FEC");
-        quality.pre_fec_accuracy=PacketBitAccuracy{8000000,1};
+        quality.pre_fec_accuracy=StreamBitAccuracy{8000000,1};
         check(gui::signal_data_label(quality)=="Data >99.99% pre-FEC");
-        quality.pre_fec_accuracy=PacketBitAccuracy{800,800};
+        quality.pre_fec_accuracy=StreamBitAccuracy{800,800};
         check(gui::signal_data_label(quality)=="Data 0.00% pre-FEC");
-        for (const auto invalid : {PacketBitAccuracy{0,0},PacketBitAccuracy{10,11}}) {
+        for (const auto invalid : {StreamBitAccuracy{0,0},StreamBitAccuracy{10,11}}) {
             quality.pre_fec_accuracy=invalid;
             check(gui::signal_data_label(quality)=="Data pre-FEC --");
         }
         quality.pre_fec_accuracy.reset();
         check(gui::signal_data_label(quality)=="Data pre-FEC --");
-        quality.validated=false; quality.pre_fec_accuracy=PacketBitAccuracy{800,0};
+        quality.validated=false; quality.pre_fec_accuracy=StreamBitAccuracy{800,0};
         check(gui::signal_data_label(quality)=="Data pre-FEC pending");
         for (const auto invalid : {-1.,101.,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
             quality.preamble_received_percent=invalid;
@@ -148,7 +151,7 @@ int main() {
         binary_line.expected_bits=3;
         check(gui::signal_status_label(binary_line)=="binary pending");
         check(gui::signal_preamble_label(binary_line)=="Preamble none");
-        check(gui::signal_data_label(binary_line)=="FEC off");
+        check(gui::signal_data_label(binary_line)=="Raw observations");
         signals.clear(); signals.update(binary_line);
         check(!signals.copy_id(0) && !signals.copy_bits(0));
         binary_line.text="00"; binary_line.received_bits=2;
@@ -164,13 +167,13 @@ int main() {
         signals.update(binary_line);
         check(signals.lines()[0].text=="001" && signals.lines()[0].complete);
         check(signals.copy_bits(0)=="001");
-        // A raw result never gains packet authentication or accuracy labels,
-        // even if a caller accidentally supplies unrelated packet fields.
+        // A raw result never gains stream authentication or accuracy labels,
+        // even if a caller accidentally supplies unrelated content fields.
         binary_line.id=92; binary_line.text="001"; binary_line.complete=true;
-        binary_line.validated=true; binary_line.packet_id="not-a-raw-packet-id";
-        binary_line.preamble_received_percent=100.; binary_line.pre_fec_accuracy=PacketBitAccuracy{8,0};
+        binary_line.validated=true; binary_line.reception_id="not-a-raw-reception-id";
+        binary_line.preamble_received_percent=100.; binary_line.pre_fec_accuracy=StreamBitAccuracy{8,0};
         signals.update(binary_line);
-        check(!signals.lines()[1].validated && signals.lines()[1].packet_id.empty() &&
+        check(!signals.lines()[1].validated && signals.lines()[1].reception_id.empty() &&
               !signals.lines()[1].preamble_received_percent && !signals.lines()[1].pre_fec_accuracy);
         check(!signals.copy_id(1) && signals.copy_bits(1)=="001");
         for (const auto& invalid_text : {std::string{},std::string("00x"),std::string("0 1"),std::string("00\0",3)}) {
@@ -188,7 +191,7 @@ int main() {
         binary_line.text=std::string(5000,'0'); binary_line.expected_bits=binary_line.received_bits=5000;
         signals.update(binary_line);
         check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));
-        check(gui::signal_data_label(signals.lines()[2])=="No checksum / FEC / prefix");
+        check(gui::signal_data_label(signals.lines()[2])=="Raw observations / prefix");
         check(gui::signal_byte_aligned(signals.lines()[2]) && gui::signal_status_label(signals.lines()[2])=="text received");
         std::string escaped_prefix;
         for(std::size_t index=0;index<512;++index)escaped_prefix+="\\x00";
@@ -236,14 +239,14 @@ int main() {
         byte_signals.update(byte_line);
         check(!gui::signal_byte_aligned(byte_signals.lines()[3]) && !byte_signals.copy_text(3) && !byte_signals.copy_bytes(3));
         gui::Inbox mixed;
-        mixed.put(packet(1,3)); // Text belongs to the signal browser only.
-        auto file=packet(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";
+        mixed.put(content(1,3)); // Every opaque source can be saved locally.
+        auto file=content(2,4); file.message.kind=MessageKind::file; file.message.filename="payload.bin";
         mixed.put(file);
-        mixed.put(packet(3,2));
-        auto screenshot=packet(4,5); screenshot.message.kind=MessageKind::screenshot; screenshot.message.filename="capture.png";
+        mixed.put(content(3,2));
+        auto screenshot=content(4,5); screenshot.message.kind=MessageKind::screenshot; screenshot.message.filename="capture.png";
         mixed.put(screenshot);
         const auto files=mixed.file_items();
-        check(files.size()==2 && files[0]->message.id[0]==2 && files[1]->message.id[0]==4);
+        check(files.size()==4 && files[0]->message.local_id[0]==1 && files[3]->message.local_id[0]==4);
         check(mixed.items().size()==4); // Verified text remains available for exact clipboard copy.
         gui::TransmissionPolicy policy;
         const auto time=gui::TransmissionPolicy::Clock::time_point{};
@@ -252,22 +255,22 @@ int main() {
         try { policy.started(true,false,time); } catch (const Error&) { concurrent_rejected=true; }
         check(concurrent_rejected); // All modes allow only one active transmission.
         policy.finished(time+std::chrono::seconds(1));
-        check(policy.remaining(false,false,time+std::chrono::seconds(1)).count()==0);
+        check(policy.remaining(false,false,time+std::chrono::seconds(1))==std::chrono::seconds(6));
         policy.started(true,true,time+std::chrono::seconds(1));
         policy.finished(time+std::chrono::seconds(2));
         check(policy.remaining(true,true,time+std::chrono::seconds(2)).count()==0);
-        check(policy.remaining(false,true,time+std::chrono::seconds(2)).count()==0);
-        policy.started(false,true,time+std::chrono::seconds(2));
-        policy.finished(time+std::chrono::seconds(3));
-        check(policy.remaining(false,true,time+std::chrono::seconds(4))==std::chrono::seconds(5));
-        check(policy.remaining(true,true,time+std::chrono::seconds(4)).count()==0);
-        check(policy.remaining(false,false,time+std::chrono::seconds(4)).count()==0);
-        policy.started(true,false,time+std::chrono::seconds(4));
-        policy.finished(time+std::chrono::seconds(5));
-        check(policy.remaining(false,true,time+std::chrono::seconds(5))==std::chrono::seconds(4));
-        policy.started(false,true,time+std::chrono::seconds(9));
+        check(policy.remaining(false,true,time+std::chrono::seconds(2))==std::chrono::seconds(5));
+        policy.started(false,true,time+std::chrono::seconds(7));
+        policy.finished(time+std::chrono::seconds(8));
+        check(policy.remaining(false,true,time+std::chrono::seconds(9))==std::chrono::seconds(5));
+        check(policy.remaining(true,true,time+std::chrono::seconds(9)).count()==0);
+        check(policy.remaining(false,false,time+std::chrono::seconds(9))==std::chrono::seconds(5));
+        policy.started(true,false,time+std::chrono::seconds(9));
+        policy.finished(time+std::chrono::seconds(10));
+        check(policy.remaining(false,true,time+std::chrono::seconds(10))==std::chrono::seconds(4));
+        policy.started(false,true,time+std::chrono::seconds(14));
         policy.abort_start();
-        check(policy.remaining(false,true,time+std::chrono::seconds(9)).count()==0);
+        check(policy.remaining(false,true,time+std::chrono::seconds(14)).count()==0);
         check(gui::format_bit_rate(1200)=="1.2 kbit/s");
         check(gui::format_bit_rate(.025)=="0.025 bit/s");
         check(gui::format_bit_rate(6.34e-9)=="6.34e-09 bit/s");

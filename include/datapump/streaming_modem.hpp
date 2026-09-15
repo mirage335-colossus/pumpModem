@@ -80,16 +80,15 @@ public:
     // Removed integrated-symbol interface: throws; use physical samples.
     Bytes push_symbols(std::span<const SymbolObservation> observations, std::stop_token stop = {});
     // Finish a finite capture without inserting silence or extra symbols.
-    // Pattern mode returns only complete, sufficiently supported symbols.
+    // Only sufficiently supported symbols are flushed. Their chunks remain
+    // incomplete unless sampled search absence already established stream end.
     // No synthetic tail samples or bits are inserted.
     Bytes finish(std::stop_token stop = {});
     bool synchronized() const;
     // Pattern candidates are accumulating.
     bool acquiring() const;
-    // No packet interpretation occurs during acquisition; returns empty.
-    Bytes provisional_frame() const;
-    // Pattern decisions, independent of packet interpretation. Opt-in gap
-    // preservation retains missing_pattern_bit at unknown interior positions.
+    // Bounded previews and drainable immutable decision chunks. Only observed
+    // six-second search absence sets complete; EOF returns incomplete chunks.
     PatternBurst provisional_pattern() const;
     std::vector<PatternBurst> take_pattern_bursts();
     std::vector<PatternEvidence> pattern_candidates() const;
@@ -104,9 +103,6 @@ public:
     // Shared receiver banks can lend unused DSP space to an active recording.
     // The limit cannot be reduced below storage already in use.
     void set_workspace_bytes(std::size_t bytes);
-    // Checks storage for pattern observations and decoded bit candidates.
-    // Independent of Config::memory_limit and the received-content quota.
-    bool frame_supported(std::size_t encoded_bytes) const;
     void reset();
 private:
     struct Impl;

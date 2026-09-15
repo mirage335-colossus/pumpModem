@@ -17,6 +17,15 @@ template<class F> void rejects(F action,const char* text) {
     throw std::runtime_error(text);
 }
 void near(double a,double b,const char* text) {check(std::abs(a-b)<1e-8,text);}
+std::vector<float> raw_capture(const Bytes& bits,const transfer::Options& options) {
+    auto source=transfer::binary_transmitter(bits,options);
+    std::vector<float> samples(static_cast<std::size_t>(source->total_samples()));
+    std::size_t offset=0;
+    while(!source->finished())offset+=source->read(std::span(samples).subspan(offset));
+    samples.resize(samples.size()+modem::pattern_absence_samples(options.modem)+
+                   options.modem.sample_rate+2*modem::symbol_sample_count(options.modem));
+    return samples;
+}
 void changing_pattern(const modem::Config& config) {
     check(config.spreading_mode==modem::SpreadingMode::pattern,"automatic waveform checks require changing patterns");
     modem::PatternCode code(config);
@@ -143,13 +152,13 @@ void explicit_carrier_planning() {
 void audio_passband_pattern_roundtrips() {
     // Exercise real PCM with non-integer carrier cycles per chip using the
     // same one-bit patterns and integration floor as automatic plans.
-    Message message;message.data=Bytes{'e'};
+    const Bytes bits{0,0,1};
     for(const double bandwidth:{100.,1200.,1499.,1499.25,1703.,1800.}) {
         transfer::Options options;
         options.modem=tuning::resolve(bandwidth,100,tuning::PatternMode::auto_pattern,false).config;
         options.timestamp=1800000000;options.search_seconds=0;
-        const auto decoded=transfer::receive(transfer::transmit(message,options),options);
-        check(decoded.packet.message.data==message.data && decoded.raw_bits==Bytes({0,0,1}),
+        const auto decoded=transfer::receive(raw_capture(bits,options),options);
+        check(decoded.stream_complete && decoded.raw_bits==bits && !decoded.content_validated,
               "audio passband corrupted exact pattern bits");
     }
 }
@@ -310,9 +319,9 @@ void receive_target_lists() {
     customized.data_key.reset();
     transfer::Options custom_receive;custom_receive.modem=customized;custom_receive.modem.dsss=false;
     custom_receive.automatic_receive_profiles=true;custom_receive.timestamp=1800000000;custom_receive.search_seconds=0;
-    Message tiny;tiny.data=Bytes{'e'};
-    const auto actual=transfer::receive(transfer::transmit(tiny,custom_receive),custom_receive);
-    check(actual.packet.message.data==tiny.data && actual.raw_bits==Bytes({0,0,1}) && !actual.packet_validated,
+    const Bytes bits{0,0,1};
+    const auto actual=transfer::receive(raw_capture(bits,custom_receive),custom_receive);
+    check(actual.stream_complete && actual.raw_bits==bits && !actual.content_validated,
           "automatic receive profiles lost an explicit carrier or PCM clock during physical short-bit recovery");
     rejects([]{tuning::receive_profiles(1200,{},tuning::PatternMode::auto_pattern,false);},"empty programmatic target list accepted");
     const auto forced=tuning::resolve(1200,100,tuning::PatternMode::pattern_8,false);

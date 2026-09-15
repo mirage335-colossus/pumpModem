@@ -1,6 +1,6 @@
 # Plan: fixed-interval data stream without packets or transmitted lengths
 
-**Status:** design and code-path review, not an implemented wire-format change.
+**Status:** implemented. [protocol.md](protocol.md) describes the fixed-interval format and [validation.md](validation.md#fixed-interval-migration--september-2026) records the checks. The code-path audit and staged recommendations below document the pre-migration checkout.
 **Reviewed:** 14 September 2026, checkout `7c63c5e`.
 
 ## 1. Recommendation and scope
@@ -14,7 +14,7 @@ Apply the user's latest requirements directly:
 - Reed–Solomon parity at fixed positions in every interval.
 - No modem SHA-256 digest or replacement modem checksum for unencrypted streams.
 - For encrypted streams, retain the existing independently keyed **HMAC-SHA256**, at a fixed position in every interval and protected by that interval's RS parity. No whole-message digest/footer.
-- Only the iterative search establishing six seconds without symbols emits a stream-end event. Packet/header results, FEC/MAC success or failure, interval occupancy, codec end markers, EOF, cancellation, quotas and receiver replacement never end a stream.
+- Only the iterative search establishing six seconds covered by consecutive fully scored failed symbols emits a stream-end event. One failure suffices when a symbol lasts six seconds or longer; there is no partial-symbol preemption. Packet/header results, FEC/MAC success or failure, interval occupancy, codec end markers, EOF, cancellation, quotas and receiver replacement never end a stream.
 - Symbol evidence controls acquisition and the six-second timeout. FEC/MAC results do not restart that timer, admit timing hypotheses, or keep a stream open.
 - Keep XZ/LZMA2 compression outside the modem. Decompression may start only after that physical stream-end event; no compressed preview or speculative decoder may run beforehand.
 - Fixed scratch buffers, bounded output queues and a local content quota control memory even when a signal never stops.
@@ -46,7 +46,7 @@ The recovered source is 44 bytes, including the final space (shown as a quoted s
 
 There is no filename, callsign, grid value, or repeat request in this example. Nevertheless their empty-length fields, the ID, both checksums and the original length are present. The missing bit is in the final parity byte, not in the text.
 
-This example was rejected at the byte-alignment gate in [transfer.cpp:317](/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp:317), before RS was called. A byte-truncated version would also fail the strict body-size check in [packet.cpp:613](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:613). Appending `1` instead also recovers the same text, with one corrected byte. The failure demonstrates a dependency on the packet envelope, not exhausted FEC capacity.
+This example was rejected at the byte-alignment gate in `src/transfer.cpp` (reviewed checkout), before RS was called. A byte-truncated version would also fail the strict body-size check in `src/packet.cpp` (reviewed checkout). Appending `1` instead also recovers the same text, with one corrected byte. The failure demonstrates a dependency on the packet envelope, not exhausted FEC capacity.
 
 ## 3. Current code paths and dependencies
 
@@ -66,7 +66,7 @@ flowchart LR
   I --> J[Pattern symbols and sampled audio]
 ```
 
-The high-level split occurs in [transfer.cpp:248](/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp:248). Text below 16 source bytes bypasses packets, markers, MAC and FEC; larger text and all attachments use the packet codec. Direct `pack`/`unpack` APIs additionally expose packet bytes to CLI consumers. The physical transmitter already accepts raw bits, but retains a complete source-bit vector; streaming PCM generation is not yet an incremental source-byte API.
+The high-level split occurs in `src/transfer.cpp` (reviewed checkout). Text below 16 source bytes bypasses packets, markers, MAC and FEC; larger text and all attachments use the packet codec. Direct `pack`/`unpack` APIs additionally expose packet bytes to CLI consumers. The physical transmitter already accepts raw bits, but retains a complete source-bit vector; streaming PCM generation is not yet an incremental source-byte API.
 
 ### Receive
 
@@ -88,20 +88,20 @@ The physical receivers do not normally need packet lengths. Their explicit packe
 
 | Area | Current dependency | Required replacement |
 |---|---|---|
-| [packet.cpp:171](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:171) | Tries protected header sizes and FEC modes; parses canonical ULEB128 body length | Fixed local interval/FEC profile; no received bootstrap |
-| [packet.cpp:228](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:228) | Three string lengths, original length, kind, flags and ID checksum | Opaque source bytes; local display/save choices |
-| [packet.cpp:288](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:288) | Column interleaving across all body codewords; row count and final width depend on total body length | One independent codeword per interval |
-| [packet.cpp:613](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:613) | Exact body extent, final SHA/MAC, original-size-selected decompression | Interval correction and encrypted-only interval MAC; separate decompression after the six-second end event |
-| [transfer.cpp:280](/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp:280) | Reinterprets whole bursts and requires exact packet consumption | Incremental fixed-interval consumer |
-| [transfer.cpp:336](/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp:336) | Packet completion hook crosses into physical RX | Explicit physical stream-finalization events |
-| [streaming_modem.cpp:114](/home/user/___quick/p/_cur/dataPump/pumpModem/src/streaming_modem.cpp:114) | Thin wrapper emits whole pattern bursts; old byte/frame methods are mostly stubs | Drainable interval/decision events with absolute coordinates |
-| [live.cpp:676](/home/user/___quick/p/_cur/dataPump/pumpModem/src/live.cpp:676) | Copies whole provisional prefixes; one-shot content reporting and packet-ID upgrades | Bounded chunk delivery, preview deltas and local stream IDs |
-| [gui/controller.cpp:594](/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/controller.cpp:594) | Validated packet goes into an ID-indexed inbox; transmitted kind chooses text/file handling | Receive opaque bytes with independent correction/authentication status |
-| [gui/state.cpp:27](/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/state.cpp:27) | Cache replacement by transmitted ID | Local reception identity and observed byte offsets |
-| [gui/inspection_model.cpp:27](/home/user/___quick/p/_cur/dataPump/pumpModem/src/gui/inspection_model.cpp:27) | Estimates and diagrams encode/inspect a full packet | Arithmetic from fixed geometry and local input size |
-| [main.cpp:301](/home/user/___quick/p/_cur/dataPump/pumpModem/src/main.cpp:301) | Packet scratch, kinds, filenames, `pack/unpack`, packet JSON | Stream input/output and local-only presentation options |
+| `src/packet.cpp` (reviewed checkout) | Tries protected header sizes and FEC modes; parses canonical ULEB128 body length | Fixed local interval/FEC profile; no received bootstrap |
+| `src/packet.cpp` (reviewed checkout) | Three string lengths, original length, kind, flags and ID checksum | Opaque source bytes; local display/save choices |
+| `src/packet.cpp` (reviewed checkout) | Column interleaving across all body codewords; row count and final width depend on total body length | One independent codeword per interval |
+| `src/packet.cpp` (reviewed checkout) | Exact body extent, final SHA/MAC, original-size-selected decompression | Interval correction and encrypted-only interval MAC; separate decompression after the six-second end event |
+| `src/transfer.cpp` (reviewed checkout) | Reinterprets whole bursts and requires exact packet consumption | Incremental fixed-interval consumer |
+| `src/transfer.cpp` (reviewed checkout) | Packet completion hook crosses into physical RX | Explicit physical stream-finalization events |
+| `src/streaming_modem.cpp` (reviewed checkout) | Thin wrapper emits whole pattern bursts; old byte/frame methods are mostly stubs | Drainable interval/decision events with absolute coordinates |
+| `src/live.cpp` (reviewed checkout) | Copies whole provisional prefixes; one-shot content reporting and packet-ID upgrades | Bounded chunk delivery, preview deltas and local stream IDs |
+| `src/gui/controller.cpp` (reviewed checkout) | Validated packet goes into an ID-indexed inbox; transmitted kind chooses text/file handling | Receive opaque bytes with independent correction/authentication status |
+| `src/gui/state.cpp` (reviewed checkout) | Cache replacement by transmitted ID | Local reception identity and observed byte offsets |
+| `src/gui/inspection_model.cpp` (reviewed checkout) | Estimates and diagrams encode/inspect a full packet | Arithmetic from fixed geometry and local input size |
+| `src/main.cpp` (reviewed checkout) | Packet scratch, kinds, filenames, `pack/unpack`, packet JSON | Stream input/output and local-only presentation options |
 
-The older [original specification](/home/user/___quick/p/_cur/dataPump/pumpModem/docs/original-specification.md:98) explicitly described repeatable packets and a text/file packet format. The user's current direction supersedes those sections; they should not be used to retain the old parser in the new receiver.
+The older `docs/original-specification.md` (reviewed checkout) explicitly described repeatable packets and a text/file packet format. The user's current direction supersedes those sections; they should not be used to retain the old parser in the new receiver.
 
 ## 4. Security assessment
 
@@ -177,7 +177,7 @@ For unencrypted RS20:
 
 These data-area capacities are fully available to compressed bytes under the zero-fill proposal in section 7. The alternative uncompressed validity-cell representation reduces them. Tags have a fixed position within their selected profile; their location never depends on how many source bytes are present in the interval.
 
-Compute HMAC over a fixed domain/version, canonical local profile, the canonical `(epoch, ordinal)` address of the interval's first coded symbol, and the entire fixed data area including occupancy/padding bits. The address is already defined by [symbol_schedule.hpp:36](/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/symbol_schedule.hpp:36) and used for Data masking. It supports later interval acquisition without recovering a transmitted packet ID or the original stream's start counter.
+Compute HMAC over a fixed domain/version, canonical local profile, the canonical `(epoch, ordinal)` address of the interval's first coded symbol, and the entire fixed data area including occupancy/padding bits. The address is already defined by `include/datapump/symbol_schedule.hpp` (reviewed checkout) and used for Data masking. It supports later interval acquisition without recovering a transmitted packet ID or the original stream's start counter.
 
 Do not use noisy measured frequency, estimated fractional sample offsets, or a counter incremented only for successfully received intervals as MAC context. If the canonical address cannot be established, leave authentication unresolved. Preserve existing key/epoch acceptance and reuse limitations: the address identifies a schedule position, not a fresh unique transmission nonce.
 
@@ -194,7 +194,7 @@ Markers, data, HMAC and parity all consume normal symbol/keystream positions. Ne
 
 ### Marker confidence
 
-The reviewed checkout already sets `false_match_bits=84`, allows up to 80 contiguous missing marker bits within its bounded deletion model, and treats unknown timed slots as no evidence in [boundary_sync.hpp:8](/home/user/___quick/p/_cur/dataPump/pumpModem/include/datapump/boundary_sync.hpp:8). Keep the 192-bit repeated marker and that target when changing cadence. This is a modeled random false-match bound, not proof of uniqueness or resistance to a sender deliberately transmitting the public marker.
+The reviewed checkout already sets `false_match_bits=84`, allows up to 80 contiguous missing marker bits within its bounded deletion model, and treats unknown timed slots as no evidence in `include/datapump/boundary_sync.hpp` (reviewed checkout). Keep the 192-bit repeated marker and that target when changing cadence. This is a modeled random false-match bound, not proof of uniqueness or resistance to a sender deliberately transmitting the public marker.
 
 The current acceptance calculation charges the number of candidate paths and marker slots in one call. An incremental receiver must charge repeated attempts consistently across the declared search scope; restarting an independent `2^-84` budget on each update does not establish the same bound over their union. At the denser 128-byte cadence, recompute that accounting and retain rejection of competing plausible alignment endpoints. Neither a marker match nor failure ends the stream.
 
@@ -285,18 +285,18 @@ The audit found these concrete alternate completion/decompression paths to remov
 
 | Current path | Conflict and replacement |
 |---|---|
-| [pattern_receiver.cpp:530](/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_receiver.cpp:530) | Final processing publishes and erases a track regardless of observed absence. EOF may flush observed decisions but cannot declare stream end. |
-| [pattern_correlator.cpp:454](/home/user/___quick/p/_cur/dataPump/pumpModem/src/pattern_correlator.cpp:454) | `finish()` publishes and clears every hypothesis. Separate processing shutdown from the sole search-derived end event. |
-| [transfer.cpp:475](/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp:475) | Offline receive calls `finish()` at input EOF, then interprets output. Preserve an incomplete state when the capture lacks six seconds of absence. |
-| [transfer.cpp:523](/home/user/___quick/p/_cur/dataPump/pumpModem/src/transfer.cpp:523), [live.cpp:913](/home/user/___quick/p/_cur/dataPump/pumpModem/src/live.cpp:913) | Simulations append two or three symbol periods before finalization. Generate sufficient actual samples for the same six-second search rule instead. |
-| [packet.cpp:595](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:595) | `preview_packet_partial()` can call `compression::preview_long()`. Remove compressed previews from active reception. |
-| [packet.cpp:640](/home/user/___quick/p/_cur/dataPump/pumpModem/src/packet.cpp:640) | Successful packet decoding invokes decompression immediately. Move codec invocation behind the physical end gate. |
+| `src/pattern_receiver.cpp` (reviewed checkout) | Final processing publishes and erases a track regardless of observed absence. EOF may flush observed decisions but cannot declare stream end. |
+| `src/pattern_correlator.cpp` (reviewed checkout) | `finish()` publishes and clears every hypothesis. Separate processing shutdown from the sole search-derived end event. |
+| `src/transfer.cpp` (reviewed checkout) | Offline receive calls `finish()` at input EOF, then interprets output. Preserve an incomplete state when the capture lacks six seconds of absence. |
+| `src/transfer.cpp` (reviewed checkout), `src/live.cpp` (reviewed checkout) | Simulations append two or three symbol periods before finalization. Generate sufficient actual samples for the same six-second search rule instead. |
+| `src/packet.cpp` (reviewed checkout) | `preview_packet_partial()` can call `compression::preview_long()`. Remove compressed previews from active reception. |
+| `src/packet.cpp` (reviewed checkout) | Successful packet decoding invokes decompression immediately. Move codec invocation behind the physical end gate. |
 
 EOF, capture failure, cancellation, quota exhaustion and receiver replacement are processing interruptions, never evidence of a completed stream. Release local buffers or stop retaining content when necessary, report the reception as incomplete, and do not hand it to XZ. If sampled input is still available, retain bounded search state until the actual six-second event, even after the content quota is exhausted. A recorded input that stops without the required observed absence remains incomplete; file EOF must not synthesize silence.
 
-Share one search-window policy between FFT, correlator and live bank retirement. The current `at least two failed symbols && failed duration > 6 seconds`, evaluated only at complete symbol boundaries, is not an exact implementation of the user's rule for all rates. Remove the independent minimum-symbol exception and specify the window in received-sample time, including rate correction and search lookahead. At the sample that completes six seconds, finalize once the iterative search has resolved that window without symbols; processing latency must not introduce a second delimiter.
+Share one full-symbol absence policy between FFT, correlator and live reception. A completed symbol is judged from its full pattern evidence. Consecutive missed symbols end the stream when their combined received-media duration reaches six seconds. If one symbol itself spans six seconds or longer, that one miss ends the stream. There is no minimum-two-symbol exception and no partial-window probe that prematurely rejects an unfinished long symbol.
 
-Long symbols need explicit implementation work: an unfinished integration is neither proof of absence nor permission to replace six seconds with an arbitrarily longer timeout. The search must be able to establish symbol presence within its six-second window, with bounded partial-integration/evidence state where appropriate. If a configured waveform cannot support that decision, it is a compatibility issue to resolve and document before adopting the profile, not a silent exception to stream ending. Apply the same rule to raw bits, protected bytes, public/keyed modes, live audio, WAV and simulation.
+This follows the user's implementation clarification: survive burst interference lasting a large fraction of six seconds, while ending after a wholly missed long pattern. Evaluate rate-corrected duration and preserve the same physical-only rule for raw bits, protected bytes, public/keyed modes, live audio, WAV and simulation.
 
 Do not use RS success, HMAC success, a valid-cell count or a source padding pattern to end the stream or keep the active clock alive. FEC can deliver corrected interval bytes to bounded storage during reception; this is internal progress, not a completed received message. XZ decompression, including previews, is gated strictly on `StreamEnded`.
 
@@ -328,7 +328,7 @@ Because XZ must wait, corrected compressed bytes need a bounded sink until `Stre
 
 The current GUI cooldown and CLI `--tx-delay` are primarily enforced for encrypted output. Unencrypted sends and queued session work do not universally guarantee a six-second gap. Hardware settling is approximately two seconds; simulation often adds only three symbol periods of post-signal noise. None is a general replacement for the proposed physical delimiter.
 
-If separate Send actions are intended to produce separate receiving streams, enforce at least six seconds of observable symbol absence, plus the measured waveform-tail and timing/search margin, in the common TX scheduler for all modes and entry points. Under the old whole-symbol implementation, the failed-symbol opportunity was instead quantized by `T * max(2, floor(6/T)+1)`; remove that implementation-dependent end rule rather than making it the new specification. Evaluate cross-profile cases explicitly. Two sends without an intervening six-second absence remain one physical stream, regardless of separate Send actions or valid compressed end markers.
+If separate Send actions are intended to produce separate receiving streams, enforce at least six seconds of observable symbol absence, rounded up to a full-symbol decision opportunity, plus the measured waveform-tail and timing/search margin, in the common TX scheduler for all modes and entry points. Under the old whole-symbol implementation, the failed-symbol opportunity was instead quantized by `T * max(2, floor(6/T)+1)`; remove that implementation-dependent end rule rather than making it the new specification. Evaluate cross-profile cases explicitly. Two sends without an intervening six-second absence remain one physical stream, regardless of separate Send actions or valid compressed end markers.
 
 Simulation must supply actual sampled silence/noise sufficient for the same six-second search window; do not pass a transmitter-known end/length directly into reception. EOF without those samples remains incomplete. Distinguish physical transmission time, receiver-finalization delay and the GUI's shortened replay clock.
 
@@ -340,7 +340,7 @@ The first implementation may use a bounded local source buffer. An unknown-lengt
 
 The current short dictionary has an exact-bit API that uses bounded 3/4/6/13-bit tokens without an original-length field. The packed packet variant relies on original size to distinguish real characters from zero fill. It cannot be retained unchanged.
 
-**Keep XZ/LZMA2 support, with a strict post-end gate.** The user explicitly accepts its internal compression grammar outside the modem. The library currently uses raw LZMA2, rather than the full XZ container, and derives both its dictionary profile and exact output allocation from the packet's original-size field in [compression_lzma.cpp:15](/home/user/___quick/p/_cur/dataPump/pumpModem/src/compression_lzma.cpp:15). Those dependencies must be replaced; they do not require dropping compression.
+**Keep XZ/LZMA2 support, with a strict post-end gate.** The user explicitly accepts its internal compression grammar outside the modem. The library currently uses raw LZMA2, rather than the full XZ container, and derives both its dictionary profile and exact output allocation from the packet's original-size field in `src/compression_lzma.cpp` (reviewed checkout). Those dependencies must be replaced; they do not require dropping compression.
 
 The target pipeline is:
 
@@ -363,13 +363,13 @@ Do not retain “compress only when smaller” or the hidden 15/16/255/256-byte 
 
 ## 11. Implementation sequence
 
-Each stage should leave a reviewable boundary. No production format changes were made during this review.
+Each stage should leave a reviewable boundary. The stages below guided the implementation authorized after the review.
 
 ### Stage 1 — freeze constants and observable lifecycle
 
 - Specify the one 128-byte coded interval, marker-before-interval ordering, FEC presets, encrypted-only HMAC positions, canonical MAC context and selected application source-codec/padding convention.
 - Separate pending-gap preview from true stream finalization in `PatternBurst`, streaming wrapper, live events and GUI state.
-- Make the six-second iterative-search window the sole end-event producer across both receivers, live banks and every input/mode; resolve partial-symbol evidence and remove alternate minimum-symbol end rules.
+- Make the six-second iterative-search window the sole end-event producer across both receivers, live banks and every input/mode; use full-symbol evidence and remove the minimum-two-symbol exception.
 - Define whole-interval loss, processing interruption and quota status separately from stream ending.
 - Gate every XZ/LZMA2 entry point, including previews, on the physical end event.
 
@@ -437,7 +437,7 @@ Each stage should leave a reviewable boundary. No production format changes were
 - Probed the bundled raw LZMA2 codec with a fixed 4 KiB dictionary: 1,364 zero-padded round trips across those four capacities passed, including empty input, trailing source zeros and 18 exact area multiples. Removing the final complete data-area interval failed decoding in all cases. This checks padding feasibility; it does not test a production six-second lifecycle gate or new incremental wrapper.
 - Traced transmitter, both physical receivers, wrapper, transfer codec, live queues, GUI storage/copy/save, CLI, compression and existing memory checks.
 
-These are architecture feasibility checks, not validation of a new production receiver. Product behavior was not changed in this planning turn.
+These are architecture feasibility checks, not validation of a new production receiver. These initial experiments preceded the production implementation; current regression coverage lives in the test suite.
 
 ### Required regression and adversarial matrix
 
@@ -446,7 +446,7 @@ These are architecture feasibility checks, not validation of a new production re
 | Fixed format | Every profile, empty/one/full/underfilled interval, fixed tag/parity offsets, no received length fields |
 | Source bytes | Every byte value, embedded marker-like bytes, trailing `00`/`80`/`ff`, exact compressed-area multiples, expanded/empty compressed input, malformed final fill; validity bits if that alternative is selected |
 | Corrections | Data/MAC/parity errors; mixed erasures at and beyond `2e+s=p`; one lost final bit; whole interval lost; loss crossing a marker |
-| Timing | Short gap, exactly six seconds of resolved search, long/partial-symbol evidence, rate error, ambiguous private phase, EOF without observed silence |
+| Timing | Short gap, exactly six seconds of resolved search, one missed long symbol and full-symbol evidence, rate error, ambiguous private phase, EOF without observed silence |
 | Cipher/MAC | Epoch transition, later interval acquisition, missing whole blocks without renumbering, wrong key/profile/address, reused-address limitations documented |
 | Segmentation | Same-grid sends shorter/equal/longer than guard, long fades, no false claim of authenticated whole-stream completeness |
 | Memory/work | Continuous confident input exceeding workspace, all-unknown gap ranges, every admitted receiver/key bank, slow consumer, queue overrun, spool/output quota exhaustion, cancellation without false stream-end events |

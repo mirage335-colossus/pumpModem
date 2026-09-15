@@ -1,3 +1,9 @@
+# Historical specification
+
+This document records the original proposal. The implemented wire format and
+stream-ending rules are defined in [protocol.md](protocol.md); old packet and
+short-dictionary descriptions below are superseded.
+
 
 Data Pump
 

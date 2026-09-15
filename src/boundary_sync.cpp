@@ -9,8 +9,6 @@
 
 namespace datapump::boundary_sync {
 namespace {
-constexpr std::uint8_t unknown_bit = 2;
-
 void validate_bits(std::span<const std::uint8_t> bits, std::size_t limit,
                    bool allow_unknown = false) {
     if (bits.size() > limit || bits.size() > Bytes{}.max_size())
@@ -82,13 +80,15 @@ const Volumes& mismatch_costs() {
 
 struct Acceptance {
     std::array<int, marker_bits + 1> errors{};
-    explicit Acceptance(std::size_t input_bits) {
+    explicit Acceptance(std::uint64_t slot) {
         errors.fill(-1);
-        // A recovered periodic slot advances at least this many input bits.
-        // The first false match under the iid null must occur on the nominal
-        // cadence (no previous accepted match); this also bounds that cadence.
-        const auto slots = 1 + input_bits / (interval_bits - maximum_slip_bits + minimum_marker_bits);
-        const auto penalty = false_match_bits + ceil_log2(hypothesis_count()) + ceil_log2(slots);
+        if (!slot || slot == std::numeric_limits<std::uint64_t>::max())
+            throw Error("Byte-boundary marker trial counter exhausted");
+        // Allocate at most 2^-84 / (j*(j+1)) to marker attempt j. The budgets
+        // telescope to 2^-84 over an indefinitely drained stream. Chunking
+        // never adds marker trials, and no future input length is required.
+        const auto penalty = false_match_bits + ceil_log2(hypothesis_count()) +
+            ceil_log2(slot) + ceil_log2(slot + 1);
         const auto& costs = mismatch_costs();
         // Marker geometry still occupies at least minimum_marker_bits slots,
         // but erased slots contribute no independent bit observations.
@@ -186,8 +186,9 @@ std::optional<Match> match_known_suffix(std::span<const std::uint8_t> bits,
 }
 
 std::size_t encoded_size(std::size_t data_bits) {
-    if (data_bits % 8 != 0) throw Error("Byte-boundary input must be byte aligned");
-    const auto markers = 1 + data_bits / interval_bits;
+    if (data_bits % interval_bits != 0)
+        throw Error("Byte-boundary input must contain complete coded intervals");
+    const auto markers = data_bits / interval_bits;
     if (markers > (std::numeric_limits<std::size_t>::max() - data_bits) / marker_bits)
         throw Error("Byte-boundary encoded size overflow");
     return data_bits + markers * marker_bits;
@@ -200,59 +201,168 @@ Bytes insert(std::span<const std::uint8_t> bits, std::size_t limit) {
         throw Error("Byte-boundary encoded storage exceeds memory limit");
     Bytes output;
     output.reserve(size);
-    append(output, marker());
-    std::size_t position = 0;
-    while (bits.size() - position >= interval_bits) {
-        append(output, bits.subspan(position, interval_bits));
+    for (std::size_t position = 0; position < bits.size(); position += interval_bits) {
         append(output, marker());
-        position += interval_bits;
+        append(output, bits.subspan(position, interval_bits));
     }
-    append(output, bits.subspan(position));
     return output;
 }
 
-Recovery recover_packet(std::span<const std::uint8_t> wire_bits, std::size_t limit,
-                        std::size_t leading_missing_bits) {
-    validate_bits(wire_bits, limit, true);
-    if (leading_missing_bits > maximum_marker_loss_bits)
-        throw Error("Missing leading marker exceeds recovery limit");
-    const Acceptance acceptance(wire_bits.size());
-    const auto initial = leading_missing_bits ? match_known_suffix(wire_bits, leading_missing_bits, acceptance) :
-        match_marker(wire_bits, 0, maximum_slip_bits, acceptance);
-    Recovery result;
-    result.leading_marker_recognized = initial.has_value();
-    auto& output = result.bits;
-    // Every recognized or damaged full slot removes more bits than the
-    // maximum zero fill can add, so output never exceeds the input bound.
-    output.reserve(wire_bits.size());
-    const auto initial_length = marker_bits - leading_missing_bits;
-    if (!initial && wire_bits.size() < initial_length) {
-        append(output, wire_bits);
-        std::replace(output.begin(), output.end(), unknown_bit, std::uint8_t{0});
-        return result;
+struct Collector::Impl {
+    Bytes buffer;
+    std::uint64_t position, attempts = 0;
+    std::size_t leading_missing;
+    bool need_marker = true, aligned = false, recognized = false;
+    bool leading_recognized = false, finished = false, timed_slots;
+
+    Impl(std::uint64_t first, std::size_t missing, bool timed)
+        : position(first), leading_missing(missing), timed_slots(timed) {
+        if (missing > maximum_marker_loss_bits || first < missing)
+            throw Error("Invalid acquired leading marker offset");
+        buffer.reserve(interval_bits);
     }
-    std::size_t position = initial ? initial->offset + initial->length : initial_length;
-    constexpr auto first_candidate = interval_bits - maximum_slip_bits;
-    while (wire_bits.size() - position >= first_candidate + minimum_marker_bits) {
-        const auto remaining = wire_bits.subspan(position);
-        const auto matched = match_marker(remaining, first_candidate, interval_bits + maximum_slip_bits, acceptance);
+
+    void advance(std::uint64_t count) {
+        if (count > std::numeric_limits<std::uint64_t>::max() - position)
+            throw Error("Byte-boundary stream position overflow");
+        position += count;
+    }
+
+    void consume(std::size_t count, std::size_t nominal) {
+        advance(nominal);
+        buffer.erase(buffer.begin(), buffer.begin() + static_cast<std::ptrdiff_t>(count));
+    }
+
+    bool acquire(bool final) {
+        constexpr auto window = marker_bits + maximum_slip_bits;
+        const auto known_length = marker_bits - leading_missing;
+        const bool known = !aligned && leading_missing;
+        // A complete exact marker excludes every different nearby endpoint,
+        // including endpoints whose last few bits have not arrived yet.
+        const bool exact = buffer.size() >= marker_bits &&
+            std::equal(marker().begin(), marker().end(), buffer.begin());
+        if (!final && buffer.size() < (known ? known_length : window) && !exact) return false;
+        if (buffer.size() < minimum_marker_bits) return false;
+        if (attempts == std::numeric_limits<std::uint64_t>::max() - 1)
+            throw Error("Byte-boundary marker trial counter exhausted");
+        const Acceptance acceptance(++attempts);
+        const auto observed = std::span<const std::uint8_t>(buffer);
+        const auto matched = known ? match_known_suffix(observed, leading_missing, acceptance) :
+            match_marker(observed, 0, maximum_slip_bits, acceptance);
         if (matched) {
-            const auto kept = std::min(interval_bits, matched->offset);
-            append(output, remaining.first(kept));
-            output.insert(output.end(), interval_bits - kept, 0);
-            position += matched->offset + matched->length;
-        } else {
-            if (remaining.size() < interval_bits + marker_bits) break;
-            append(output, remaining.first(interval_bits));
-            position += interval_bits + marker_bits;
+            // Timed input already carries every physical slot, including
+            // unknowns. An acquired prefix is already absent from its start
+            // coordinate. Untimed input instead restores inferred deletions.
+            consume(matched->offset + matched->length, timed_slots ?
+                    matched->offset + matched->length :
+                    matched->offset + marker_bits - (known ? leading_missing : 0));
+            leading_missing = 0;
+            recognized = true;
+            if (!aligned) leading_recognized = true;
+            aligned = true;
+            need_marker = false;
+            return true;
         }
+        if (known) {
+            if (buffer.size() < known_length) return false;
+            consume(known_length, known_length);
+            leading_missing = 0;
+            return true;
+        }
+        if (aligned) {
+            // An established clock owns the fixed slot even if its marker
+            // cannot be recognized. Never treat a partial trailer as data.
+            if (buffer.size() < marker_bits) return false;
+            consume(marker_bits, marker_bits);
+            recognized = false;
+            need_marker = false;
+            return true;
+        }
+        // Late acquisition has no assumed source origin. Keep the overlap and
+        // try the next disjoint group of eight starts; each group pays its own
+        // trial budget. Arbitrarily long input never increases retained state.
+        constexpr auto step = maximum_slip_bits + 1;
+        consume(step, step);
+        return true;
     }
-    append(output, wire_bits.subspan(position));
-    std::replace(output.begin(), output.end(), unknown_bit, std::uint8_t{0});
+
+    bool emit(bool final, const Sink& sink) {
+        if (buffer.empty() || (buffer.size() < interval_bits && !final)) return false;
+        Interval interval;
+        interval.first_stream_symbol = position;
+        interval.marker_recognized = recognized;
+        const auto count = std::min(buffer.size(), interval_bits);
+        for (std::size_t i = 0; i < interval_bits; ++i) {
+            const auto bit = i < count ? buffer[i] : unknown_bit;
+            const auto mask = static_cast<std::uint8_t>(1U << (7 - i % 8));
+            if (bit == unknown_bit) {
+                interval.erasures[i / 8] = 1;
+                interval.erasure_bits[i / 8] |= mask;
+            } else if (bit) interval.bytes[i / 8] |= mask;
+        }
+        consume(count, interval_bits);
+        need_marker = true;
+        sink(interval);
+        return true;
+    }
+
+    void drain(bool final, const Sink& sink) {
+        while (need_marker ? acquire(final) : emit(final, sink)) {}
+    }
+};
+
+Collector::Collector(std::uint64_t first_stream_symbol, std::size_t leading_missing_bits, bool timed_slots)
+    : impl_(std::make_unique<Impl>(first_stream_symbol, leading_missing_bits, timed_slots)) {}
+Collector::~Collector() = default;
+Collector::Collector(Collector&&) noexcept = default;
+Collector& Collector::operator=(Collector&&) noexcept = default;
+
+void Collector::push(std::span<const std::uint8_t> bits, const Sink& sink) {
+    if (!sink) throw Error("Byte-boundary collector requires an output consumer");
+    if (impl_->finished) throw Error("Byte-boundary stream already completed");
+    validate_bits(bits, bits.size(), true);
+    while (!bits.empty()) {
+        const auto target = impl_->need_marker ? marker_bits + maximum_slip_bits : interval_bits;
+        const auto count = std::min(bits.size(), target - impl_->buffer.size());
+        append(impl_->buffer, bits.first(count));
+        bits = bits.subspan(count);
+        impl_->drain(false, sink);
+    }
+}
+
+void Collector::finish(bool stream_complete, const Sink& sink) {
+    if (!sink) throw Error("Byte-boundary collector requires an output consumer");
+    if (!stream_complete || impl_->finished) return;
+    impl_->drain(true, sink);
+    impl_->buffer.clear();
+    impl_->finished = true;
+}
+
+std::size_t Collector::buffered_bits() const noexcept { return impl_->buffer.size(); }
+std::size_t Collector::working_bytes() const noexcept { return sizeof(Collector) + sizeof(Impl) + impl_->buffer.capacity(); }
+bool Collector::leading_marker_recognized() const noexcept { return impl_->leading_recognized; }
+
+Recovery recover_stream(std::span<const std::uint8_t> wire_bits, std::size_t limit,
+                        std::size_t leading_missing_bits, bool stream_complete) {
+    validate_bits(wire_bits, limit, true);
+    Collector collector(leading_missing_bits, leading_missing_bits);
+    Recovery result;
+    const auto emit = [&](const Interval& interval) {
+        if (result.bits.size() > limit || interval_bits > limit - result.bits.size())
+            throw Error("Byte-boundary recovered storage exceeds memory limit");
+        for (std::size_t i = 0; i < interval_bits; ++i) {
+            const auto mask = static_cast<std::uint8_t>(1U << (7 - i % 8));
+            result.bits.push_back(interval.erasure_bits[i / 8] & mask ? unknown_bit :
+                static_cast<std::uint8_t>((interval.bytes[i / 8] & mask) != 0));
+        }
+    };
+    collector.push(wire_bits, emit);
+    collector.finish(stream_complete, emit);
+    result.leading_marker_recognized = collector.leading_marker_recognized();
     return result;
 }
 
-Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit) {
-    return recover_packet(wire_bits, limit).bits;
+Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit, bool stream_complete) {
+    return recover_stream(wire_bits, limit, 0, stream_complete).bits;
 }
 }

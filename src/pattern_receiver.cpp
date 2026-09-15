@@ -107,7 +107,7 @@ struct PatternReceiver::Impl {
         std::uint64_t phase_lower=0,phase_upper=0;
         double total_score=0,penalty=0;
         double pending_score=0,confirmed_score=0;
-        std::size_t confirmed=0;
+        std::size_t confirmed=0,gap_slots=0;
         std::uint64_t confirmed_end=0;
         std::size_t frequency=0;
         bool admitted=false,established=false,pending_gap=false;
@@ -122,9 +122,8 @@ struct PatternReceiver::Impl {
         if(!c.pattern_symbols)throw Error("pattern receiver requires binary pattern transport");
         if(!std::isfinite(search.false_alarm_probability) || search.false_alarm_probability<=0 || search.false_alarm_probability>=1 ||
            !std::isfinite(search.retain_score) || search.retain_score<0 ||
-           !std::isfinite(search.max_gap_seconds) || search.max_gap_seconds<0 ||
            !search.candidate_limit || search.candidate_limit>65536 || !search.track_limit || search.track_limit>128 ||
-           !search.bit_limit || !search.initial_stream_symbols || search.initial_stream_symbols>64)
+           !search.bit_limit || !search.chunk_bits || !search.initial_stream_symbols || search.initial_stream_symbols>64)
             throw Error("invalid pattern search limits");
         if((search.start_offset_seconds&&!std::isfinite(*search.start_offset_seconds)) ||
            !std::isfinite(search.start_uncertainty_seconds) || search.start_uncertainty_seconds<0)
@@ -386,18 +385,48 @@ struct PatternReceiver::Impl {
         return {start*bin_samples,(start+length)*bin_samples,index,
             config.carrier_hz+search.frequency_offsets_hz[f],std::max(zero,one),std::min(zero,one),one>zero?1U:0U,active_stream_phase};
     }
-    void publish(Track& track,bool complete) {
-        if(!track.admitted)return;
-        track.burst.complete=complete;track.burst.score=track.confirmed_score;
-        if(complete) {
-            track.burst.bits.resize(track.confirmed);track.burst.end_sample=track.confirmed_end;
-            room_for_bits(track.burst.bits.capacity()>budget/3?budget:3*track.burst.bits.capacity());
-            latest=track.burst;
-            if(bursts.size()==search.track_limit)bursts.erase(bursts.begin());
-            bursts.push_back(track.burst);
-            if(completed.size()==search.track_limit)completed.erase(completed.begin());
-            completed.push_back({track.burst.first_sample,track.burst.end_sample,track.burst.frequency_hz});
-        }
+    void publish(Track& track,bool complete,bool flush=false) {
+        track.burst.score=track.confirmed_score;
+        if(!track.established)return;
+        const auto chunk=std::min(search.chunk_bits,search.bit_limit);
+        if(!complete && !flush && track.confirmed<chunk)return;
+        do {
+            const auto count=std::min(track.confirmed,chunk);
+            if(!count && !complete)break;
+            if(bursts.size()>=search.track_limit)throw Error("pattern output queue requires draining");
+            PatternBurst event;
+            event.first_sample=track.burst.first_sample;event.first_stream_symbol=track.burst.first_stream_symbol;
+            event.stream_first_sample=track.burst.stream_first_sample;event.stream_first_symbol=track.burst.stream_first_symbol;
+            event.frequency_hz=track.burst.frequency_hz;event.stream_phase_samples=track.burst.stream_phase_samples;
+            event.bits.assign(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
+            event.complete=complete && count==track.confirmed;
+            event.end_sample=count==track.confirmed?track.confirmed_end:
+                event.first_sample+count*code.symbol_samples();
+            event.score=track.confirmed_score;
+            room_for_bits(3*event.bits.capacity());latest=event;
+            if(count) {
+                if(completed.size()==search.track_limit)completed.erase(completed.begin());
+                completed.push_back({event.first_sample,event.end_sample,event.frequency_hz});
+            }
+            bursts.push_back(std::move(event));
+            track.burst.bits.erase(track.burst.bits.begin(),track.burst.bits.begin()+static_cast<std::ptrdiff_t>(count));
+            track.burst.first_stream_symbol+=count;track.burst.first_sample=bursts.back().end_sample;
+            track.confirmed-=count;
+            if(!track.confirmed)break;
+        } while(complete || flush || track.confirmed>=chunk);
+    }
+    void emit_gap(Track& track,std::uint64_t resumed_sample,std::uint64_t resumed_symbol) {
+        if(!track.gap_slots)return;
+        publish(track,false,true);
+        if(bursts.size()>=search.track_limit)throw Error("pattern output queue requires draining");
+        PatternBurst event;
+        event.first_sample=track.burst.first_sample;event.end_sample=resumed_sample;
+        event.first_stream_symbol=track.burst.first_stream_symbol;
+        event.stream_first_sample=track.burst.stream_first_sample;event.stream_first_symbol=track.burst.stream_first_symbol;
+        event.frequency_hz=track.burst.frequency_hz;event.score=track.confirmed_score;
+        event.stream_phase_samples=track.burst.stream_phase_samples;event.missing_slots=track.gap_slots;
+        bursts.push_back(std::move(event));track.gap_slots=0;
+        track.burst.first_sample=resumed_sample;track.burst.first_stream_symbol=resumed_symbol;
     }
     void append_bit(Bytes& bits,std::uint8_t bit) {
         if(bits.size()==search.bit_limit)throw Error("pattern burst exceeds bounded bit capacity");
@@ -406,16 +435,6 @@ struct PatternReceiver::Impl {
             room_for_bits(capacity);bits.reserve(capacity);
         }
         bits.push_back(bit);
-    }
-    void close_packet_before_gap(Track& track) {
-        if(!search.preserve_symbol_gaps || !search.packet_complete || !track.admitted || track.pending_gap ||
-           !search.packet_complete(track.burst,track.confirmed,config,search.packet_content_limit))return;
-        // A complete integrity-checked packet need not retain a subsequent
-        // pause for repair. This closes its buffer, without changing the
-        // independently acquired clock, phase or stream-symbol position.
-        publish(track,true);track.burst.bits.clear();track.burst.complete=false;
-        track.admitted=false;track.confirmed=0;
-        track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
     }
     void continue_tracks(std::stop_token stop,bool final=false) {
         for(auto it=tracks.begin();it!=tracks.end();) {
@@ -437,41 +456,30 @@ struct PatternReceiver::Impl {
                 }
                 remember(best);
                 const auto standalone=best.score>=threshold();
-                if(track.pending_gap && group_count>1) {
-                    // Unknown slots cannot choose between private schedules.
-                    // Keep this symbol available as an independent new start.
-                    publish(track,true);track.burst.bits.clear();track.burst.complete=false;
-                    track.admitted=false;track.confirmed=0;track.pending_gap=false;
-                    track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
-                }
                 ++track.unconfirmed_symbols;
-                const auto gap_expired=track.unconfirmed_symbols>=2 &&
-                    static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>
-                        static_cast<long double>(search.max_gap_seconds)*config.sample_rate;
+                const auto gap_expired=static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>=
+                    static_cast<long double>(pattern_absence_seconds)*config.sample_rate;
                 if(best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone) ||
                    (track.pending_gap && !standalone)) {
-                    close_packet_before_gap(track);
-                    if(search.preserve_symbol_gaps && track.admitted && group_count==1 && !gap_expired) {
-                        if(track.burst.bits.size()==search.bit_limit){publish(track,true);ended=true;break;}
-                        // Keep the clock slot, not this weak bit decision. A
-                        // later independent detection can confirm the extent,
-                        // but cannot add confidence to any obscured slot.
-                        if(!track.pending_gap)
-                            std::fill(track.burst.bits.begin()+static_cast<std::ptrdiff_t>(track.confirmed),
-                                      track.burst.bits.end(),missing_pattern_bit);
-                        append_bit(track.burst.bits,missing_pattern_bit);
+                    if(track.admitted && !gap_expired) {
+                        if(!track.pending_gap) {
+                            track.gap_slots=track.burst.bits.size()-track.confirmed;
+                            track.burst.bits.resize(track.confirmed);
+                        }
+                        if(track.gap_slots==std::numeric_limits<std::size_t>::max())throw Error("pattern missing-slot count overflow");
+                        ++track.gap_slots;
                         track.pending_gap=true;track.total_score=track.confirmed_score;
                         track.pending_score=track.penalty=0;
                         ++track.index;track.next+=length;
                         continue;
                     }
-                    publish(track,true);
+                    publish(track,gap_expired,true);
                     if(!track.established || gap_expired){ended=true;break;}
                     // A lost symbol closes this contiguous span, but timing
                     // and the private stream advance without requiring it to
                     // decode. Do not refine timing from an obscured pattern.
                     track.burst.bits.clear();track.burst.complete=false;
-                    track.admitted=false;track.confirmed=0;track.pending_gap=false;
+                    track.admitted=false;track.confirmed=0;track.pending_gap=false;track.gap_slots=0;
                     track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
                     ++track.index;track.next+=length;
                     continue;
@@ -484,18 +492,18 @@ struct PatternReceiver::Impl {
                     const auto score=track.pending_score+best.score;
                     const auto bound=score>n?score-n-n*std::log(score/n)-track.penalty-std::log(10.):0;
                     if(bound<threshold()) {
-                        close_packet_before_gap(track);
-                        if(search.preserve_symbol_gaps && track.admitted && group_count==1) {
-                            std::fill(track.burst.bits.begin()+static_cast<std::ptrdiff_t>(track.confirmed),
-                                      track.burst.bits.end(),missing_pattern_bit);
+                        if(track.admitted) {
+                            track.gap_slots=track.burst.bits.size()-track.confirmed;track.burst.bits.resize(track.confirmed);
+                            track.pending_gap=true;
                             track.total_score=track.confirmed_score;track.pending_score=track.penalty=0;
                         } else {
-                            publish(track,true);track.burst.bits.clear();
+                            publish(track,false,true);track.burst.bits.clear();
                             track.burst.complete=false;track.admitted=false;
                         }
                     }
                 }
                 if(standalone) {
+                    emit_gap(track,best.first_sample,best.stream_symbol);
                     track.phase_lower=selected.lower;track.phase_upper=selected.upper;
                     track.burst.stream_phase_samples=selected.lower;
                 }
@@ -505,8 +513,17 @@ struct PatternReceiver::Impl {
                     // that already established their own confidence.
                     track.burst.bits.clear();track.burst.first_sample=best.first_sample;
                     track.burst.first_stream_symbol=best.stream_symbol;
-                    track.total_score=track.pending_score=track.penalty=0;
-                    track.confirmed=0;track.confirmed_score=0;
+                    if(!track.admitted) {
+                        track.burst.stream_first_sample=best.first_sample;
+                        track.burst.stream_first_symbol=best.stream_symbol;
+                        track.total_score=track.pending_score=track.penalty=0;
+                        track.confirmed=0;track.confirmed_score=0;
+                    }
+                }
+                if(track.burst.bits.size()==search.bit_limit && track.admitted && !standalone) {
+                    track.gap_slots=track.burst.bits.size()-track.confirmed+1;track.burst.bits.resize(track.confirmed);
+                    track.pending_gap=true;track.pending_score=track.penalty=0;track.total_score=track.confirmed_score;
+                    ++track.index;track.next+=length;continue;
                 }
                 append_bit(track.burst.bits,static_cast<std::uint8_t>(best.bit));track.burst.end_sample=best.end_sample;
                 track.total_score+=best.score;track.pending_score+=best.score;track.penalty+=std::log(10.);
@@ -525,9 +542,9 @@ struct PatternReceiver::Impl {
                 ++track.index;
                 track.next=chosen+length;
                 publish(track,false);
-                if(gap_expired && track.unconfirmed_symbols){publish(track,true);ended=true;break;}
+                if(gap_expired && track.unconfirmed_symbols){publish(track,true,true);ended=true;break;}
             }
-            if(final && !ended) { publish(track,true);ended=true; }
+            if(final && !ended) { publish(track,false,true);ended=true; }
             if(ended)it=tracks.erase(it);else ++it;
         }
     }
@@ -549,7 +566,7 @@ struct PatternReceiver::Impl {
         for(auto it=tracks.begin();it!=tracks.end();) {
             const auto& track=*it;
             const auto margin=2*bin_samples;
-            if(same_frequency(track.burst.frequency_hz)&&item.first_sample+margin>=track.burst.first_sample && item.first_sample<=track.next*bin_samples+margin) {
+            if(same_frequency(track.burst.frequency_hz)&&item.first_sample+margin>=track.burst.stream_first_sample && item.first_sample<=track.next*bin_samples+margin) {
                 // A weak fresh noise candidate must not displace timing that
                 // already decoded a symbol and is crossing a bounded gap.
                 if(track.established && !track.admitted && item.score<threshold())return;
@@ -576,12 +593,12 @@ struct PatternReceiver::Impl {
                          item.stream_symbol==track.index+slots);
                     follows_gap=same_clock && same_index;
                 }
-                if(track.admitted && !follows_gap && track.confirmed<track.burst.bits.size() &&
+                if(track.admitted && !follows_gap && (track.pending_gap || track.confirmed<track.burst.bits.size()) &&
                    item.first_sample>=track.confirmed_end && item.score>=threshold()) {
                     // Confidence belongs only to the confirmed span. Weak
                     // pending extensions cannot veto an independently strong
                     // later start; finish the old span and consider this one.
-                    publish(*it,true);it=tracks.erase(it);continue;
+                    publish(*it,false,true);it=tracks.erase(it);continue;
                 }
                 if(track.admitted||track.total_score>=item.score)return;
                 it=tracks.erase(it);
@@ -598,6 +615,7 @@ struct PatternReceiver::Impl {
         Track track;append_bit(track.burst.bits,static_cast<std::uint8_t>(item.bit));
         track.burst.first_sample=item.first_sample;track.burst.end_sample=item.end_sample;track.burst.frequency_hz=item.frequency_hz;
         track.burst.first_stream_symbol=item.stream_symbol;track.index=item.stream_symbol+1;
+        track.burst.stream_first_sample=item.first_sample;track.burst.stream_first_symbol=item.stream_symbol;
         track.phase_lower=track.phase_upper=config.stream_phase_samples;
         if(search.search_stream_phases) {
             std::size_t group_count=0;
@@ -703,9 +721,8 @@ struct PatternReceiver::Impl {
         const auto* track=active_track();
         if(!track)return latest;
         PatternBurst result=track->burst;result.bits.resize(track->confirmed);result.end_sample=track->confirmed_end;
-        // The observed span ended at the gap, even while its clock and buffer
-        // remain available for a later packet-recovery extension.
-        result.complete=track->pending_gap;
+        // A provisional observation never claims the physical stream ended.
+        result.complete=false;
         return result;
     }
     std::size_t working_bytes()const {
@@ -752,6 +769,13 @@ struct PatternReceiver::Impl {
         search.bit_limit=limit;budget=bytes;
     }
 };
+std::uint64_t pattern_absence_samples(const Config& config) {
+    const auto symbol=symbol_sample_count(config);
+    const std::uint64_t target=pattern_absence_seconds*config.sample_rate;
+    const auto count=std::max<std::uint64_t>(1,target/symbol+(target%symbol!=0));
+    if(count>std::numeric_limits<std::uint64_t>::max()/symbol)throw Error("pattern absence duration overflow");
+    return count*symbol;
+}
 PatternReceiver::PatternReceiver(Config c,std::size_t bytes,PatternSearch search):impl_(std::make_unique<Impl>(c,bytes,std::move(search))){}
 PatternReceiver::~PatternReceiver()=default;
 PatternReceiver::PatternReceiver(PatternReceiver&&) noexcept=default;

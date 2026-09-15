@@ -109,12 +109,18 @@ inline void constellations(Node& parent,const Inspection& model) {
         parent.children.push_back(std::move(line));
     }
 }
-inline void codeword(Node& parent,const std::string& title,std::size_t data,std::size_t parity) {
+inline void codeword(Node& parent,const std::string& title,std::size_t data,std::size_t integrity,std::size_t parity) {
     paragraph(parent,title,12,Tone::text,true,8);
-    const auto total=data+parity;const float split=total?parent.width*static_cast<float>(data)/static_cast<float>(total):parent.width;
+    const auto total=data+integrity+parity;
     auto line=row(parent.width);line.height=40;line.bottom=14;
-    if(data) {auto n=text(std::to_string(data)+" data bytes",split,12,Tone::text,true);n.height=40;n.padding=8;n.fill=Fill::surface;n.border=true;line.children.push_back(std::move(n));}
-    if(parity) {auto n=text(std::to_string(parity)+" parity bytes",parent.width-split,12,Tone::text,true);n.height=40;n.padding=8;n.fill=Fill::parity;n.border=true;line.children.push_back(std::move(n));}
+    const auto block=[&](std::size_t bytes,const std::string& label,Fill fill) {
+        if(!bytes)return;
+        auto n=text(std::to_string(bytes)+label,parent.width*static_cast<float>(bytes)/static_cast<float>(total),12,Tone::text,true);
+        n.height=40;n.padding=8;n.fill=fill;n.border=true;line.children.push_back(std::move(n));
+    };
+    block(data," data-area bytes",Fill::surface);
+    block(integrity," HMAC bytes",Fill::alternate);
+    block(parity," parity bytes",Fill::parity);
     parent.children.push_back(std::move(line));
 }
 inline void pattern_preview(Node& parent,const inspection::PatternSpace& model,Page& page,std::size_t requested_first) {
@@ -218,19 +224,15 @@ inline Page build(const Inspection* model,bool flow,float width,std::size_t firs
         std::vector<const StructureSection*> physical,logical,coding;
         for(const auto& section:model->sections)(section.coding?coding:section.logical?logical:physical).push_back(&section);
         heading(root,"On-air sequence");paragraph(root,"Read left to right, then continue on the next row. Blocks are schematic, not proportional to airtime.");sections(root,physical);
-        if(!logical.empty()) {heading(root,"Packet before body interleaving");paragraph(root,"Logical field order inside the packet. Body coding and interleaving rearrange these bytes on air.");sections(root,logical);}
-        if(model->packet_layout) {
-            heading(root,"Reed-Solomon codewords");const auto& packet=*model->packet_layout;
-            codeword(root,"Protected bootstrap / one shortened RS codeword",packet.header_bytes,packet.header_parity_bytes);
-            if(packet.block_count) {
-                if(packet.block_count>1)codeword(root,std::to_string(packet.block_count-1)+" full body block(s)",packet.block_capacity,packet.full_block_parity);
-                codeword(root,"Final body block",packet.last_block_data,packet.last_block_parity);
-                paragraph(root,"Each row is systematic data followed by its own parity. Body rows transmit by columns, skipping cells absent from the shortened final row. The bootstrap is sent separately.");
-            } else paragraph(root,"Body FEC is Off: metadata, payload and integrity bytes transmit in order. Bootstrap protection remains active.");
+        if(!logical.empty()) {heading(root,"Source and interval fields");paragraph(root,"These fields are contained within the fixed coded intervals shown on air.");sections(root,logical);}
+        if(model->stream_layout) {
+            heading(root,"Fixed 128-byte coded interval");const auto& stream=*model->stream_layout;
+            codeword(root,"Every interval",stream.data_bytes_per_interval,stream.integrity_bytes_per_interval,stream.parity_bytes_per_interval);
+            paragraph(root,std::to_string(stream.intervals)+" interval(s), each with the same fixed positions. Systematic data comes first, followed by the HMAC when encryption is selected, then Reed-Solomon parity when enabled. A 192-bit marker precedes every interval; no terminal marker follows the final interval.");
         }
         for(const auto* section:coding)note(root,section->title,section->detail);
         heading(root,"Preamble and coding structure");note(root,"Preamble",model->preamble_description);note(root,"Payload symbols / chips",model->chip_description);
-        heading(root,"Current packet and modem parameters");
+        heading(root,"Current stream and modem parameters");
         const float name_width=std::min(250.0f,root.width/3);
         for(std::size_t i=0;i<model->fields.size();++i) {
             const auto& field=model->fields[i];auto line=row(root.width);line.fill=i%2==0?Fill::surface:Fill::alternate;line.padding=10;

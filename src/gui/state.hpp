@@ -1,6 +1,6 @@
 #pragma once
 
-#include "datapump/packet.hpp"
+#include "datapump/stream_codec.hpp"
 #include "utf8_policy.hpp"
 #include <chrono>
 #include <deque>
@@ -15,24 +15,24 @@ namespace datapump::gui {
 // groups but never pads, truncates or removes leading zero bits.
 Bytes parse_binary_bits(std::string_view text);
 
-// The UI inserts only successfully decoded packets. Diagnostic sample buffers
+// The UI inserts only successfully decoded streams. Diagnostic sample buffers
 // are displayed separately and are never retained for every received message.
 class Inbox {
 public:
     explicit Inbox(std::size_t capacity = default_memory_limit);
-    void put(DecodedPacket packet);
+    void put(StreamContent stream);
     void clear() noexcept;
-    const std::deque<DecodedPacket>& items() const noexcept { return items_; }
-    std::vector<const DecodedPacket*> file_items() const;
+    const std::deque<StreamContent>& items() const noexcept { return items_; }
+    std::vector<const StreamContent*> file_items() const;
     std::size_t size_bytes() const noexcept { return used_; }
 private:
     std::size_t capacity_;
     std::size_t used_ = 0;
-    std::deque<DecodedPacket> items_;
+    std::deque<StreamContent> items_;
 };
 
-// The nonce separation delay applies only to encrypted output sent to hardware.
-// Simulation and plain output still share the single active-transmission slot.
+// Every hardware transmission shares the six-second symbol-absence separation.
+// Simulation supplies its separation as actual sampled silence.
 class TransmissionPolicy {
 public:
     using Clock = std::chrono::steady_clock;
@@ -43,8 +43,8 @@ public:
                                          Clock::time_point now = Clock::now()) const noexcept;
 private:
     bool active_ = false;
-    bool active_encrypted_output_ = false;
-    Clock::time_point next_encrypted_{};
+    bool active_hardware_output_ = false;
+    Clock::time_point next_hardware_{};
 };
 
 struct PlotUpdate {
@@ -80,10 +80,10 @@ struct SignalLine {
     double frequency_hz = 0;
     std::string text;
     bool validated = false;
-    std::string packet_id;
+    std::string reception_id;
     bool text_message = true;
     std::optional<double> preamble_received_percent = std::nullopt;
-    std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
+    std::optional<StreamBitAccuracy> pre_fec_accuracy = std::nullopt;
     bool binary = false;
     bool complete = false;
     std::size_t received_bits = 0;
@@ -101,9 +101,9 @@ std::string signal_gap_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
 std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.
-// Verified packets have clipboard lookup identities. Complete raw binary
+// Verified streams have clipboard lookup identities. Complete raw binary
 // observations use a text/byte view when byte-aligned and an exact bit-string
-// path otherwise. Neither raw view has a packet/authentication ID.
+// path otherwise. Neither raw view has a stream/authentication ID.
 class Signals {
 public:
     void update(SignalLine line);

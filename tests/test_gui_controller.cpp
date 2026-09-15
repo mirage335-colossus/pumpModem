@@ -1,7 +1,6 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
-#include "datapump/compression.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -339,13 +338,13 @@ void repeatable_message_identity() {
     const auto stable_binary=controller.field(F::binary).text;
     const auto stable_revision=controller.revision();
     const auto stable_inspection=controller.inspection();
-    const auto stable_packet_bytes=controller.estimate()->packet_bytes;
+    const auto stable_coded_bytes=controller.estimate()->coded_bytes;
     for(const auto size:{BinaryEditor::payload_limit,BinaryEditor::payload_limit+1}) {
         controller.edit(F::message,std::string(size,'z'));
         check(controller.field(F::message).text==stable&&controller.field(F::binary).text==stable_binary&&
               controller.message_bytes()==Bytes(stable.begin(),stable.end())&&controller.revision()==stable_revision&&
               controller.inspection()==stable_inspection&&controller.estimate()&&
-              controller.estimate()->packet_bytes==stable_packet_bytes&&controller.enabled(ui::Command::transmit)&&
+              controller.estimate()->coded_bytes==stable_coded_bytes&&controller.enabled(ui::Command::transmit)&&
               controller.field(F::repeatable).checked,
               "Rejecting an oversized repeatable paste changed its committed text, binary, identifier or prepared estimate");
     }
@@ -502,7 +501,7 @@ void binary_editor_controls() {
           controller.field(F::message_label).text.find("escaped")!=std::string::npos,
           "Arbitrary binary bytes were lost or displayed as ordinary text");
     prepare(controller);
-    check(controller.inspection()->binary&&!controller.inspection()->packet_layout,
+    check(controller.inspection()->binary&&!controller.inspection()->stream_layout,
           "Short binary editing still selected packet framing");
     const auto expected_seconds=controller.estimate()->total_seconds;
     controller.start();controller.activate(C::transmit);controller.poll();
@@ -541,7 +540,7 @@ void three_bit_dispatch() {
     controller.edit(F::binary,"001");
     prepare(controller);
     const auto& inspection=*controller.inspection();
-    check(inspection.binary&&!inspection.packet_layout&&controller.field(F::binary).text=="001"&&
+    check(inspection.binary&&!inspection.stream_layout&&controller.field(F::binary).text=="001"&&
           controller.message_bytes().empty(),"Empty composer padded its three-bit raw draft");
     const auto expected=transfer::estimate_binary(Bytes{0,0,1},controller.settings().transfer);
     check(controller.estimate()->total_seconds==expected.total_seconds,
@@ -571,46 +570,31 @@ BitmapImage render(const plots::PlotSnapshot& source) {
     source.paint(full_bitmap_request(120, 120, false, true), [&](unsigned x, unsigned y, PixelBlock block) { image.blit(x, y, block); });
     return image;
 }
-void short_pattern_reception() {
+void fixed_text_reception() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});controller.edit(F::message,"e");prepare(controller);
-    const auto expected=compression::encode_short_bits(Bytes{'e'});
-    check(expected.size()==3 && controller.inspection()->pattern_space && !controller.inspection()->packet_layout,
-          "short-text fixture must transmit only three dictionary bits");
+    check(controller.inspection()->stream_layout && controller.estimate()->coded_bytes==128,
+          "one-byte message uses the single fixed coded interval");
     controller.start();controller.activate(C::transmit);
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
-    std::optional<std::size_t> text_index;
-    while(std::chrono::steady_clock::now()<deadline) {
-        controller.poll();
-        for(std::size_t i=0;i<controller.signals().lines().size();++i) {
-            if(controller.signals().copy_text(i)=="e")text_index=i;
-        }
-        if(text_index && controller.snapshot().transmission_finished && !controller.snapshot().simulation_replay)break;
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
+    while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    if(!text_index || !controller.snapshot().transmission_finished || controller.snapshot().simulation_replay) {
-        std::string detail="sampled short-text reception did not complete as decoded text; "+controller.snapshot().error;
-        for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
-        throw Error(detail);
-    }
-    check(controller.inbox().items().empty() && !controller.signals().lines()[*text_index].validated &&
-          controller.signals().lines()[*text_index].pattern_score.has_value(),"pattern-only text acquired a packet validation claim");
-    check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
-          !controller.signals().copy_bits(*text_index),
-          "Decoded short text retained a duplicate row for its three compressed transport bits");
-    controller.select(F::signals,std::to_string(controller.signals().lines()[*text_index].id));
-    check(controller.enabled(C::copy_signal),"complete pattern reception was blocked from copying");
+    check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==Bytes{'e'},
+          "fixed source reception preserves one-byte text");
+    std::optional<std::size_t> index;
+    for(std::size_t i=0;i<controller.signals().lines().size();++i)
+        if(controller.signals().lines()[i].validated)index=i;
+    check(index.has_value(),"completed source has a validated display row");
+    controller.select(F::signals,std::to_string(controller.signals().lines()[*index].id));
     controller.activate(C::copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value=="e",
-          "pattern reception clipboard changed the decoded text");
+    check(requests.size()==1 && requests.front().value=="e","copy uses exact decoded source bytes");
     controller.complete_service({requests.front().id,false,{},{}});
-    check(controller.enabled(C::paste_signal),"Decoded short text could not be pasted as a message");
     controller.activate(C::paste_signal);
-    check(controller.message_bytes()==Bytes{'e'} && controller.field(F::message).text=="e" &&
-          controller.field(F::binary).text==BinaryEditor(Bytes{'e'}).binary(),
-          "Pasting decoded short text inserted compressed transport bits instead of its message byte");
+    check(controller.message_bytes()==Bytes{'e'},"paste uses source bytes rather than coded data");
     controller.close();
 }
+
 void receive_pattern_text(Controller& controller,const std::string& expected) {
     controller.start();controller.activate(ui::Command::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
@@ -628,34 +612,14 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         throw Error(detail);
     }
 }
-void short_sentence_reception() {
-    using F=ui::Field;using C=ui::Command;
-    const std::string expected="quick brown fox";
-    const Bytes bytes(expected.begin(),expected.end());
-    const BinaryEditor original(bytes);
-    check(bytes.size()==15 && compression::encode_short_bits(bytes).size()%8!=0,
-          "Short sentence fixture must use a partial final byte of compressed transport bits");
-    Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
-    check(controller.inspection()->pattern_space && !controller.inspection()->packet_layout && !controller.inspection()->binary,
-          "Short sentence fixture did not select dictionary text transmission");
-    receive_pattern_text(controller,expected);
-    check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
-          controller.signals().copy_text(0)==expected && !controller.signals().lines().front().binary &&
-          !controller.signals().copy_bits(0),
-          "Simulating 'quick brown fox' retained duplicate bits and text rows");
-    controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
-    check(controller.enabled(C::copy_signal),"Received short sentence was blocked from copying");
-    controller.activate(C::copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value==expected,
-          "Copying the received short sentence changed the decoded message");
-    controller.complete_service({requests.front().id,false,{},{}});
-    check(controller.enabled(C::paste_signal),"Received short sentence could not be pasted as a message");
-    controller.activate(C::paste_signal);
-    check(controller.message_bytes()==bytes && controller.field(F::message).text==expected &&
-          controller.field(F::binary).text==original.binary(),
-          "Pasting the received short sentence did not restore its message bytes in the binary editor");
+void fixed_sentence_reception() {
+    using F=ui::Field;
+    Controller controller({true,true});controller.edit(F::message,"quick brown fox");prepare(controller);
+    check(controller.inspection()->stream_layout && !controller.inspection()->binary &&
+          controller.estimate()->wire_bits==1216,"short sentence has the same fixed interval as other sources");
     controller.close();
 }
+
 void short_raw_editor() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
@@ -663,15 +627,14 @@ void short_raw_editor() {
           !controller.enabled(C::paste_raw_signal),"Empty raw tab enabled a transmission or receive action");
     controller.edit(F::callsign,"N0CALL");controller.toggle(F::repeatable,true);
     controller.edit(F::short_bits,"0 1 0");prepare(controller);
-    check(controller.field(F::binary).text=="010"&&controller.field(F::message).text=="t"&&
+    check(controller.field(F::binary).text=="010"&&controller.field(F::message).text.empty()&&
           !controller.field(F::repeatable).checked&&controller.inspection()->binary&&
           controller.enabled(C::transmit_short_bits),"Short raw entry did not replace a long greeting with exact bits");
     check(controller.estimate()->total_seconds==transfer::estimate_binary(Bytes{0,1,0},controller.settings().transfer).total_seconds&&
-          controller.field(F::short_bits_detail).text.find("01110100")!=std::string::npos,
+          controller.field(F::short_bits_detail).text.find("exactly as entered")!=std::string::npos,
           "Raw tab did not distinguish three transmitted bits from the decoded t byte");
     const auto& reference=controller.field(F::compression_codes).text;
-    for(const auto entry:{"space 000","e 001","t 010","a 011","o 100","i 1010","n 1011","z 1111101111010"})
-        check(reference.find(entry)!=std::string::npos,"Compression reference omitted a fixed lowercase code");
+    check(reference.find("128-byte")!=std::string::npos,"Compression reference shows fixed interval source transport");
     for(const auto invalid:{"01010","01x",""}) {
         controller.edit(F::short_bits,invalid);controller.poll();
         check(controller.field(F::short_bits).text==invalid&&!controller.estimate()&&
@@ -686,8 +649,8 @@ void short_raw_editor() {
               "One- to four-bit raw input was padded, compressed, or rejected as an incomplete dictionary token");
     }
     controller.edit(F::message,"t");prepare(controller);
-    check(controller.field(F::short_bits).text=="010"&&!controller.inspection()->binary&&
-          controller.field(F::binary).text=="01110100"&&controller.enabled(C::transmit_short_bits),
+    check(controller.field(F::short_bits).text.empty()&&!controller.inspection()->binary&&
+          controller.field(F::binary).text=="01110100"&&!controller.enabled(C::transmit_short_bits),
           "Message text did not expose its lowercase code separately from byte bits");
     controller.edit(F::short_bits,"010");prepare(controller);
     check(controller.inspection()->binary&&controller.field(F::binary).text=="010",
@@ -735,12 +698,7 @@ void short_raw_reception() {
         controller.activate(C::copy_raw_signal);const auto requests=controller.take_services();
         check(requests.size()==1&&requests.front().value==raw,"Copy raw bits copied decoded text or padded byte bits");
         controller.complete_service({requests.front().id,false,{},{}});
-        if(std::string_view(raw)=="010") {
-            check(controller.signals().copy_text(*received)=="t","010 reception lost its decoded text view");
-            controller.activate(C::paste_signal);
-            check(controller.field(F::message).text=="t"&&controller.field(F::binary).text=="01110100"&&
-                  controller.field(F::short_bits).text=="010","Paste as message lost the distinction between text bytes and compression bits");
-        }
+        check(!controller.signals().copy_text(*received),"few raw bits have no legacy dictionary interpretation");
         controller.activate(C::paste_raw_signal);prepare(controller);
         check(controller.field(F::short_bits).text==raw&&controller.field(F::binary).text==raw&&
               controller.inspection()->binary&&controller.enabled(C::transmit_short_bits),
@@ -810,34 +768,18 @@ void escaped_signal_message_paste() {
     check(controller.enabled(C::transmit),"Paste as message retained the discarded draft's incomplete binary error");
     controller.close();
 }
-void byte_aligned_dictionary_reception() {
-    using F=ui::Field;using C=ui::Command;
-    check(compression::encode_short_bits(Bytes{'i','n'})==Bytes({1,0,1,0,1,0,1,1}),
-          "Aligned dictionary fixture must encode 'in' as exactly eight bits");
-    check(compression::encode_short_bits(Bytes{0,'e'}).size()==16 && BinaryEditor(Bytes{0,'e'}).text()=="\\x00e",
-          "Escaped dictionary fixture must encode a zero byte and e as exactly sixteen bits");
-    for(const auto& expected:{Bytes{'i','n'},Bytes{0,'e'}}) {
-        const BinaryEditor original(expected);
-        Controller controller({true,true});controller.edit(F::binary,original.binary());
-        controller.edit(F::message,original.text());prepare(controller);
-        check(!controller.inspection()->binary && controller.inspection()->pattern_space && !controller.inspection()->packet_layout,
-              "Aligned dictionary fixture did not select short-text pattern transmission");
-        receive_pattern_text(controller,original.text());
-        check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
-              signal_display_text(controller.signals().lines().front())==original.text() &&
-              controller.field(F::signals).records.front().cells.back().text==original.text() &&
-              controller.signals().copy_text(0)==original.text() && !controller.signals().lines().front().binary &&
-              !controller.signals().copy_bits(0),
-              "Aligned dictionary reception retained a raw-byte row or lost the decoded text's escaped representation");
-        controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
-        check(controller.enabled(C::paste_signal),"Decoded dictionary text could not be pasted as a message");
-        controller.activate(C::paste_signal);
-        check(controller.message_bytes()==expected && controller.field(F::message).text==original.text() &&
-              controller.field(F::binary).text==original.binary(),
-              "Pasting aligned dictionary text inserted compressed transport bits or escaped characters instead of decoded message bytes");
+void binary_source_representation() {
+    using F=ui::Field;
+    for(const auto& expected:{Bytes{'i','n'},Bytes{0,'e',0}}) {
+        Controller controller({true,true});const BinaryEditor editor(expected);
+        controller.edit(F::binary,editor.binary()); // Establish the byte editor's explicit escaped mode.
+        controller.edit(F::message,editor.text());prepare(controller);
+        check(controller.message_bytes()==expected && controller.inspection()->stream_layout &&
+              !controller.inspection()->binary,"all exact source bytes use fixed coding with selected codec");
         controller.close();
     }
 }
+
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
@@ -1004,8 +946,8 @@ int main(int argc,char** argv) {
         binary_editor_controls();
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
-        receive_target_controls();short_sentence_reception();short_pattern_reception();byte_aligned_pattern_reception();
-        escaped_signal_message_paste();byte_aligned_dictionary_reception();workspace_controls();
+        receive_target_controls();fixed_sentence_reception();fixed_text_reception();byte_aligned_pattern_reception();
+        escaped_signal_message_paste();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});

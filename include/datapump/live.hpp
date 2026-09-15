@@ -36,7 +36,7 @@ struct SignalUpdate {
     double frequency_hz = 0;
     std::string text;
     bool validated = false;
-    std::string packet_id;
+    std::string reception_id;
     double snr_db = 0;
     std::size_t received_bytes = 0;
     std::size_t expected_bytes = 0;
@@ -45,10 +45,10 @@ struct SignalUpdate {
     // Unknown until receiver evidence is available; never inferred from the
     // synthetic training prefix returned by blind bootstrap acquisition.
     std::optional<double> preamble_received_percent = std::nullopt;
-    // Available only after complete packet integrity/authentication checks.
-    std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
+    // Available only after physical completion and interval/source validation.
+    std::optional<StreamBitAccuracy> pre_fec_accuracy = std::nullopt;
     // Raw bits contain decoded observations and zero placeholders for timed
-    // gaps, without a packet checksum/MAC or error correction.
+    // gaps, without a source checksum/MAC or error correction.
     bool binary = false;
     bool complete = false;
     std::size_t received_bits = 0;
@@ -118,7 +118,7 @@ public:
     void update(const Settings& settings) { configure(settings); }
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
-    // the selected data key, with no packet framing, preamble or FEC. Raw
+    // the selected data key, with no interval coding, preamble or FEC. Raw
     // simulations pass sampled audio to ordinary blind acquisition. Without
     // raw discovery framing, no timing/length-assisted raw result is emitted.
     void transmit_bits(std::span<const std::uint8_t> bits);

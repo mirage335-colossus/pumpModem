@@ -22,8 +22,8 @@ void records() {
     check(rows.size()==1&&rows[0].id=="81"&&rows[0].cells.size()==5,"Structured signal row lost identity or a field");
     check(rows[0].cells[0].text=="1500 Hz"&&rows[0].cells[4].text==pending.text,"Frequency or literal UTF-8 message was lost");
     check(!rows[0].activatable&&rows[0].cells[4].tone==ui::TextTone::muted,"Pending prefix became copyable or appeared complete");
-    pending.validated=true;pending.packet_id="verified";pending.preamble_received_percent=97.5;
-    pending.pre_fec_accuracy=PacketBitAccuracy{100,98};signals.update(pending);
+    pending.validated=true;pending.reception_id="verified";pending.preamble_received_percent=97.5;
+    pending.pre_fec_accuracy=StreamBitAccuracy{100,98};signals.update(pending);
     rows=signal_records(signals);
     check(rows[0].activatable&&rows[0].cells[4].tone==ui::TextTone::normal,"Verified text did not become available");
     check(rows[0].cells[2].text==signal_preamble_label(pending)&&rows[0].cells[3].text==signal_data_label(pending),"Reception measurements diverged from common formatters");
@@ -50,7 +50,7 @@ void records() {
           "Raw gap placeholders must be disclosed beside the retained bits without overlapping their preview");
     pending.missing_symbols=3;signals.update(pending);rows=signal_records(signals);
     check(rows[0].cells.back().text=="3 missing bits filled with 0" &&
-          rows[0].cells[1].text=="verified file" && rows[0].cells[3].text==signal_data_label(pending),
+          rows[0].cells[1].text=="decoded bytes" && rows[0].cells[3].text==signal_data_label(pending),
           "Validated gap recovery must preserve verification and the existing pre-FEC metric");
     check(signal_gap_label(recovered).empty(),"An intact reception must not show a gap notice");
 
@@ -81,7 +81,7 @@ void records() {
     bytes.id=88;bytes.text=std::string(5000,'0');bytes.received_bits=bytes.expected_bits=5000;bytes.pattern_score.reset();
     signals.update(bytes);rows=signal_records(signals);
     check(!rows.back().activatable&&rows.back().cells[1].text=="text received"&&
-          rows.back().cells[3].text=="No checksum / FEC / prefix"&&rows.back().cells[4].text.starts_with("\\x00\\x00"),
+          rows.back().cells[3].text=="Raw observations / prefix"&&rows.back().cells[4].text.starts_with("\\x00\\x00"),
           "A truncated aligned result must show a text prefix without offering incomplete clipboard data");
     check(control(ui::Field::signals).follow_tail&&control(ui::Field::signals).activate_on_select,"Signal interaction policy is missing from the declaration");
 }
@@ -121,6 +121,8 @@ void control_bindings() {
     check(app.control(action).label==action.label&&app.control(action).enabled,"Action lost its fallback label or command availability");
     action.command=ui::Command::cancel;action.label="Stale cancel label";
     check(app.control(action).label=="Cancel TX"&&!app.control(action).enabled,"Action did not use the command's current label and eligibility");
+    app.edit(ui::Field::binary,"001"); // Explicit raw input disables FEC controls.
+    app.report_error("Shared status text");
     action.command=ui::Command::clear_received;action.field=ui::Field::fec;
     check(app.enabled(action.command)&&!app.control(action).enabled&&app.control(action).visible,"Disabled field did not restrict an otherwise enabled action");
     app.activate(action);
@@ -161,6 +163,7 @@ void expanded_preview() {
 }
 void menu_bindings() {
     Application app({.simulation=true});
+    app.edit(ui::Field::binary,"001");
     std::vector<ui::Control> declarations{
         {ui::Kind::action,ui::Field::payload_alphabet,ui::Command::open_keyfile},
         {ui::Kind::action,ui::Field::fec,ui::Command::open_keyfile},
@@ -253,6 +256,7 @@ void rate_carrier_declarations() {
 }
 void declared_submission() {
     Application app({.simulation=true});
+    app.edit(ui::Field::binary,"001");
     ui::Control editor{ui::Kind::text};editor.submit=ui::Command::clear_received;
     for(const auto field:{ui::Field::fec,ui::Field::payload_alphabet}) {
         editor.field=field;app.report_error("Inactive submit unchanged");
@@ -294,7 +298,8 @@ void declared_native_input() {
 
     const bool repeatable_before_gestures=app.field(ui::Field::repeatable).checked;
     app.toggle(control(ui::Field::repeatable),false);
-    check(!app.field(ui::Field::fec).enabled,"An empty draft did not provide a disabled FEC control for stale gesture checks");
+    app.edit(ui::Field::binary,"001");
+    check(!app.field(ui::Field::fec).enabled,"Explicit raw input did not disable FEC for stale gesture checks");
     app.report_error("Inactive native input unchanged");
     ui::Control gesture{ui::Kind::label};gesture.click=ui::Command::clear_received;
     for(const auto field:{ui::Field::fec,ui::Field::payload_alphabet}) {
@@ -309,6 +314,7 @@ void declared_native_input() {
     check(app.field(ui::Field::status).text=="Inactive native input unchanged","Unavailable action accepted a secondary gesture");
     gesture.kind=ui::Kind::label;app.gesture(gesture,gesture.click);
     check(app.field(ui::Field::status).text.find("cleared")!=std::string::npos,"Eligible generic gesture did not dispatch");
+    app.edit(ui::Field::message,"");
     app.toggle(control(ui::Field::repeatable),repeatable_before_gestures);
     app.close();app.report_error("Closing input unchanged");
     choice=control(ui::Field::send_key);toggle=control(ui::Field::repeatable);
@@ -430,11 +436,11 @@ void compression_declarations() {
                   "Compression reception selection must preserve exact-bit copy interaction");
         if(c.kind==ui::Kind::label&&c.field==ui::Field::count) {
             const std::string_view label=c.label;
-            explains_code|=label.find("010")!=label.npos&&label.find("01110100")!=label.npos&&
-                label.find("incomplete compression codes")!=label.npos;
+            explains_code|=label.find("010 stays exactly 010")!=label.npos&&
+                label.find("fixed 128-byte coding intervals")!=label.npos;
         }
     }
-    check(explains_code,"Compression page does not explain received t versus its byte representation");
+    check(explains_code,"Raw-bit page retained an implicit dictionary or omitted fixed interval behavior");
     for(const auto field:{ui::Field::short_bits,ui::Field::short_bits_detail,ui::Field::compression_codes,
                          ui::Field::received_raw_bits,ui::Field::signals,ui::Field::send_key,ui::Field::airtime})
         check(fields.contains(field),"Compression page lost a shared field binding");

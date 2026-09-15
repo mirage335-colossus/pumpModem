@@ -45,8 +45,8 @@ struct Config {
     std::optional<Crypto> data_key;
     std::size_t memory_limit = default_memory_limit;
 };
-// Duration of captured training independently recognized before the protected
-// packet bootstrap. This is evidence coverage, not a correlation percentage.
+// Duration of independently recognized training evidence. This is evidence
+// coverage, not a correlation percentage or a content-codec admission gate.
 struct PreambleReception {
     std::uint64_t expected_samples = 0;
     std::uint64_t observed_samples = 0;

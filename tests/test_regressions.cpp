@@ -23,7 +23,7 @@ Message payload() {
     result.filename = "pattern-regression.bin";
     result.callsign = "N0CALL";
     result.grid = "AA00aa";
-    for (std::size_t i = 0; i < result.id.size(); ++i) result.id[i] = static_cast<std::uint8_t>(i + 1);
+    for (std::size_t i = 0; i < result.local_id.size(); ++i) result.local_id[i] = static_cast<std::uint8_t>(i + 1);
     for (unsigned i = 0; i < 128; ++i) result.data.push_back(static_cast<std::uint8_t>((i * 73 + 19) & 255));
     return result;
 }
@@ -54,15 +54,13 @@ modem::ChannelConfig ideal_channel() {
     result.clock_error_ppm=0; result.phase_noise_degrees_per_sqrt_second=0;
     return result;
 }
-void same_packet(const transfer::Received& received, const Message& sent) {
-    check(received.packet.message.id == sent.id && received.packet.message.data == sent.data,
-          "modem regression changed received identity or bytes");
-    check(received.packet.message.kind == sent.kind && received.packet.message.filename == sent.filename,
-          "modem regression changed attachment metadata");
-    check(received.diagnostics.bit_rate > 0 && std::isfinite(received.diagnostics.snr_db),
-          "a validated packet must retain measured receiver diagnostics");
-    check(!received.diagnostics.waveform.empty() && !received.diagnostics.constellation.empty(),
-          "simulation must return measured signal diagnostics");
+void same_stream(const transfer::Received& received,const Message& sent) {
+    check(received.stream_complete && received.content_validated && received.content.message.data==sent.data,
+          "physical stream regression changed exact source bytes or missed six-second end");
+    check(received.content.message.filename=="received.bin" && received.content.message.callsign.empty() && received.content.message.grid.empty(),
+          "opaque source must not restore transmitted packet metadata");
+    check(received.diagnostics.bit_rate>0 && std::isfinite(received.diagnostics.snr_db),
+          "received source retains measured diagnostics");
 }
 void bounded_sampled_prefix(const Message& sent,const transfer::Options& value) {
     changing_pattern(value.modem);
@@ -113,7 +111,8 @@ void wideband_fractional_carrier_pcm_roundtrip() {
     channel.delay_samples = 137;
     channel.seed = 0x24000;
     samples = modem::simulate(samples, value.modem, channel);
-    same_packet(transfer::receive(samples, value), sent);
+    samples.resize(samples.size()+7*value.modem.sample_rate);
+    same_stream(transfer::receive(samples, value), sent);
 }
 void weak_auto_without_training() {
     const auto ordinary = tuning::resolve(2400, 40, tuning::PatternMode::auto_pattern, false);
@@ -133,27 +132,27 @@ void weak_auto_without_training() {
     check(slow.total_seconds > normal.total_seconds * 1000,
           "changing the weak-signal target must change transmitted timing");
     check(modem::training_sample_count(value.modem)==0 &&
-          std::abs(slow.total_seconds-slow.packet_seconds-
+          std::abs(slow.total_seconds-slow.coded_seconds-
             2.*modem::pattern_pulse_padding_samples(value.modem)/value.modem.sample_rate)<1e-9,
           "hour-long symbols add only finite filter tails, with no hardware settling");
     bounded_sampled_prefix(sent,value);
 }
 void obscured_training_pcm_roundtrip() {
     auto value = options(2400, tuning::PatternMode::pattern_16);
-    value.modem.spreading_factor = 128;
+    value.modem.spreading_factor = 16;
     changing_pattern(value.modem);
     value.modem.sample_rate = 8000;
-    value.fec = FecMode::off; // The mandatory protected bootstrap remains enabled.
+    value.fec = FecMode::rs20;
     auto sent = payload();
     sent.data = {'C', 'Q'};
     auto samples = transfer::transmit(sent, value);
     const auto training = static_cast<std::size_t>(modem::training_sample_count(value.modem));
     check(training % modem::symbol_sample_count(value.modem)==0 && samples.size() > training,
           "obscured-training fixture must contain rounded settling audio plus a real packet");
-    check(modem::symbol_seconds(value.modem) > .1,
+    check(modem::symbol_seconds(value.modem) > .01,
           "obscured-training fixture must exercise slow payload integration");
-    // Replace all training audio with independent noise. The protected packet
-    // bootstrap must acquire the following PCM without a usable training match.
+    // Replace all training audio with independent noise. The fixed alignment
+    // marker must acquire the following PCM without a usable training match.
     std::mt19937_64 random(0xb007);
     std::normal_distribution<float> noise(0, .7f);
     for (std::size_t i = 0; i < training; ++i) samples[i] = noise(random);
@@ -162,54 +161,20 @@ void obscured_training_pcm_roundtrip() {
     channel.delay_samples = 137;
     channel.seed = 0x5ec;
     samples = modem::simulate(samples, value.modem, channel);
-    same_packet(transfer::receive(samples, value), sent);
+    samples.resize(samples.size()+7*value.modem.sample_rate);
+    same_stream(transfer::receive(samples, value), sent);
 }
-void weak_channels_use_the_planned_integration() {
-    auto sent = payload();
-    sent.kind = MessageKind::text;
-    sent.filename.clear();
-    const std::string text = "e";
-    sent.data.assign(text.begin(), text.end());
-    // Extremely weak plans are checked above without pretending their very
-    // long integrations are instantaneous. Exercise actual acquisition at
-    // practical sampled durations here.
-    constexpr double target = 18;
-    auto value = options(2400, tuning::PatternMode::auto_pattern);
-    value.key = Crypto(Bytes(32, 0x59));
-    value.modem = tuning::resolve(2400, target, tuning::PatternMode::auto_keystream, true).config;
-    changing_pattern(transfer::seeded_config(value, value.timestamp));
-    value.fec = FecMode::rs60;
-    const auto estimate = transfer::estimate(sent, value);
-    check(estimate.memory_supported, "weak-channel integration must remain streaming-feasible");
-    auto channel = ideal_channel();
-    // Packet acquisition needs margin beyond the symbol-energy planning
-    // estimate; the shorter integration must still fail in this channel.
-    channel.snr_db = target + 3 - 10 * std::log10(static_cast<double>(value.modem.sample_rate) / 2);
-    auto short_integration = value;
-    short_integration.modem = tuning::resolve(2400, 40, tuning::PatternMode::auto_keystream, true).config;
-    changing_pattern(transfer::seeded_config(short_integration, short_integration.timestamp));
-    check(modem::symbol_seconds(value.modem) > modem::symbol_seconds(short_integration.modem),
-          "weak-channel plans must exercise longer integration");
-    bool short_rejected = false;
-    try { const auto received=transfer::simulate(sent, short_integration, channel);
-        short_rejected=received.raw_bits!=transfer::message_bits(sent,short_integration); }
-    catch (const Error&) { short_rejected = true; }
-    check(short_rejected, "the weak-channel fixture must require longer symbol integration");
-    for (const std::uint64_t seed : {1ULL, 17ULL}) {
-        channel.seed = seed;
-        try {
-            const auto received=transfer::simulate(sent,value,channel);
-            check(received.raw_bits==transfer::message_bits(sent,value) && received.packet.message.data==sent.data,
-                  "long integration must recover the exact three bits in the weak sampled channel");
-            check(!received.packet_validated && received.diagnostics.pattern_score.has_value(),
-                  "three-bit weak reception must rely on pattern evidence without packet validation");
-        }
-        catch (const Error& error) {
-            throw std::runtime_error("planned pattern integration at " + std::to_string(target) +
-                " dB-Hz, seed " + std::to_string(seed) + ": " + error.what());
-        }
-    }
+void keyed_sampled_roundtrip() {
+    auto value=options(2400,tuning::PatternMode::pattern_16);
+    value.modem.sample_rate=8000;value.modem.spreading_factor=8;value.modem.pulse_shaping=false;
+    value.key.emplace(Bytes(32,0x59));value.fec=FecMode::rs60;
+    auto sent=payload();sent.data.resize(44);auto channel=ideal_channel();
+    channel.snr_db=30;channel.delay_samples=137;channel.seed=0x1208;
+    const auto result=transfer::simulate(sent,value,channel);
+    same_stream(result,sent);
+    check(result.content.authenticated,"keyed fixed intervals must authenticate in sampled simulation");
 }
+
 }
 int main() {
     unsigned failures = 0;
@@ -218,7 +183,7 @@ int main() {
              std::pair{"wideband fractional-carrier PCM", &wideband_fractional_carrier_pcm_roundtrip},
              std::pair{"weak auto without training", &weak_auto_without_training},
              std::pair{"obscured training PCM", &obscured_training_pcm_roundtrip},
-             std::pair{"planned weak-channel integration", &weak_channels_use_the_planned_integration}}) {
+             std::pair{"keyed fixed-interval sampled source", &keyed_sampled_roundtrip}}) {
         try {
             test();
             std::cout << name << " passed\n";

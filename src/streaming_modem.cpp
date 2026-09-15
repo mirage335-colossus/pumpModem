@@ -135,16 +135,12 @@ StreamingReceiver& StreamingReceiver::operator=(StreamingReceiver&&) noexcept=de
 bool StreamingReceiver::synchronized()const{return impl_->pattern.synchronized();}
 bool StreamingReceiver::clock_windowed()const{return impl_->pattern.clock_windowed();}
 bool StreamingReceiver::acquiring()const{return impl_->pattern.acquiring();}
-Bytes StreamingReceiver::provisional_frame()const{return {};}
 Diagnostics StreamingReceiver::diagnostics()const{return impl_->pattern.diagnostics();}
 ConstellationBatch StreamingReceiver::take_payload_constellation(){return {impl_->pattern.take_chip_constellation(),0};}
 std::size_t StreamingReceiver::working_bytes()const{return sizeof(StreamingReceiver)+sizeof(Impl)+impl_->pattern.working_bytes();}
 void StreamingReceiver::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())throw Error("DSP workspace is smaller than retained receiver history");
     impl_->pattern.set_workspace_bytes(bytes-sizeof(Impl));impl_->workspace=bytes;
-}
-bool StreamingReceiver::frame_supported(std::size_t extent)const {
-    const auto used=working_bytes();return used<=impl_->workspace && extent<=(impl_->workspace-used)/8;
 }
 void StreamingReceiver::reset(){auto& s=*impl_;auto fresh=std::make_unique<Impl>(s.config,s.workspace,s.search);impl_=std::move(fresh);}
 Bytes StreamingReceiver::push_symbols(std::span<const SymbolObservation>,std::stop_token stop) {

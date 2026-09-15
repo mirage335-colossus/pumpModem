@@ -32,7 +32,7 @@ void unchanged_crypto_and_chip_vectors() {
           "pulse shaping must not change the frozen plaintext-to-ciphertext mapping");
     transfer::Options shaped;shaped.key=key;shaped.timestamp=epoch;shaped.modem.dsss=true;
     auto rectangular=shaped;rectangular.modem.pulse_shaping=false;
-    Message message;message.kind=MessageKind::text;message.data=plaintext;message.id[0]=1;
+    Message message;message.kind=MessageKind::text;message.data=plaintext;message.local_id[0]=1;
     const auto bits=transfer::message_wire_bits(message,shaped);
     check(bits==transfer::message_wire_bits(message,rectangular),
           "pulse shaping cannot change encrypted wire bits or their ordering");

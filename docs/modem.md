@@ -4,9 +4,10 @@ The default CLI and GUI transport carries one bit per independent pattern
 codeword. The pattern receiver discovers signal start, bit sequence and end
 from pattern evidence alone. It compares timing, carrier and keystream positions
 without a preamble, packet header, checksum or APSK residual lock condition.
-Short text (under 16 original bytes) uses the fixed bit-prefix dictionary with
-no byte padding, framing or FEC. Explicit raw drafts send exactly their 0/1 bits.
-Larger messages and attachments retain the packet codec after pattern recovery.
+Every ordinary source uses fixed 128-byte intervals with locally selected FEC
+and source encoding, plus HMAC only when keyed. The same format covers one-byte
+text and attachments. Explicit raw drafts send exactly their 0/1 bits without
+source or interval coding. See [protocol.md](protocol.md).
 
 Pattern transport is the only supported waveform. Explicit
 `Config::pattern_symbols = false` or multi-bit APSK profiles are rejected.
@@ -39,7 +40,7 @@ up once to an internal PCM sample; exact airtime estimates include this rounding
 Shaped transmissions also include the two finite filter tails described below;
 these add a fixed burst duration, without changing any payload-symbol duration.
 The nominal gross bit rate is selected bits per symbol divided by nominal symbol
-duration, before packet and training overhead. Audio conversion does not alter
+duration, before interval markers, integrity/parity and settling overhead. Audio conversion does not alter
 these modem settings or rates.
 
 ### Automatic-pattern hardware settling
@@ -326,62 +327,39 @@ in natural-log units derived from a white Gaussian model. It is not APSK
 point error, measured dB, a calibrated confidence percentage or authentication.
 Timing, carrier and keystream candidates are compared only using this pattern
 evidence. High individual evidence can admit a single symbol; weaker retained
-symbols can contribute to a chain. The low-level default ends the contiguous
-recovered span at a failed symbol. Established timing continues across
-missing symbols until at least two successive symbols have failed and their
-combined duration exceeds six seconds. Thus two missing hours-long symbols
-end a message; short symbols retain synchronization through a gap of up to
-six seconds. A sufficiently confident surviving symbol can start a new span
-without earlier symbols having decoded. Later seconds remain independently
-searchable after an old message ends.
-The timeout counts consecutive symbols that have not established sufficient
-evidence; merely retaining a weak candidate does not restart it. It is evaluated
-at complete symbol boundaries, so very long symbols can exceed six seconds
-before a decision is available. On expiry the active span ends and its bit
-allocation is released. Fixed acquisition scratch and bounded completed-message
-output remain available; silence cannot keep extending the expired message.
-Retained weak symbols can be admitted by their combined evidence. If that
-combined evidence remains insufficient when a confident symbol arrives, the
-receiver preserves the confirmed prefix and starts a new span at that symbol.
-No supplied bit count, packet length, known text or checksum admits a burst.
-Packet decoding and optional integrity checks use already admitted observations.
+symbols can contribute to a chain. Once admitted, a stream retains its symbol
+clock across missing slots. The only end rule is consecutive fully scored
+failed symbols whose received duration covers at least six seconds. One failed
+symbol suffices when its duration is six seconds or longer; shorter symbols
+must accumulate six seconds of consecutive failure. The duration is a fixed
+constant, not a profile setting. Long symbols are scored in full, without a
+partial-window timeout interrupting their integration.
 
-Live reception, capture decoding and transfer simulation enable
-`PatternSearch::preserve_symbol_gaps`. Within the same admitted timing track,
-unknown interior slots are retained until an independently confident symbol
-confirms their extent, subject to the same gap timeout. They provide no bit
-evidence, score or timing refinement, and cannot select an unresolved private
-stream schedule. Unsupported weak tails become unknown slots rather than
-borrowing a later symbol's confidence. Unconfirmed trailing slots are trimmed
-at silence, timeout, capacity exhaustion or the end of a capture.
+Unknown interior slots have no evidence, score or timing refinement and cannot
+select an unresolved private schedule. A later independently confident symbol
+confirms a surviving gap's extent. Unconfirmed trailing slots are trimmed on
+physical end. EOF, quota exhaustion, cancellation and replacement can interrupt
+processing and release resources but never emit a completed stream. Continued
+silence cannot extend an expired stream; later independent evidence can acquire
+a new one.
 
-The internal `missing_pattern_bit` value keeps those positions distinct from
-observed zeroes and ones without extra per-bit allocations. Transfer decoding
-decrypts known spans at their original stream positions, excludes unknowns from
-marker evidence, and fills the missing plaintext bits with zero for FEC. Only
-a recognized leading marker and complete packet integrity permit a gap-filled
-packet to validate. Such bits cannot become dictionary text. `Received::raw_bits`
-contains diagnostic zero placeholders; `Received::missing_symbols` counts them.
-This implementation preserves interior byte alignment and trims unconfirmed
-final symbols. A recoverable packet header could supply the expected endpoint
-for a separately bounded tail-padding attempt before RS decoding; that extension
-is not implemented yet. It would not extend the weak-symbol timeout or turn
-padding into received evidence. An actual discontinuity in the capture clock
-requires separate handling. The transmitted format and symbol acceptance
-thresholds are unchanged.
+The internal `missing_pattern_bit` retains unknown positions. Data unmasking
+uses original symbol addresses; the marker collector excludes unknowns from
+confidence and supplies byte-erasure masks to the fixed RS interval decoder.
+After physical completion, an incomplete final codeword can be filled with
+erasures at its known 128-byte extent, including missing final parity bits.
+Neither its bytes nor its parity have to be perfect. There is no header, length
+probe or arbitrary endpoint search. See [fixed intervals](protocol.md).
 
-Before retaining a new gap, the transfer layer checks whether the confirmed
-prefix is already a complete packet. A bounded marker/header probe rejects
-obvious incomplete prefixes; full SHA-256 or MAC validation is required before
-closing the packet buffer. This keeps successive complete packets separate
-even on the same timing grid, without changing the acquired clock or giving
-unobserved bits confidence. Raw streams have no packet integrity or explicit
-endpoint, so their gap timeout determines whether same-grid spans are joined.
-During a pending gap the provisional view marks the confirmed observed span
-complete, allowing prompt raw presentation. This presentation flag does not
-terminate the retained clock or reset its timeout. A later recovered extension can
-replace that view, and a validated packet upgrades any earlier short-text
-interpretation on the same signal.
+Immutable bit chunks drain continuously with a stable physical stream identity.
+Compact missing-run events avoid allocations proportional to a gap. Competing
+clock hypotheses cannot rewrite already delivered chunks. The collector keeps
+one interval and bounded marker overlap; corrected source areas enter a capped
+spool. Only physical completion permits source reconstruction/decompression.
+RS or MAC success never closes a stream, and source decoding never feeds back
+into physical acquisition. `Received::raw_bits` is a bounded diagnostic prefix;
+`missing_symbols` reports unknown placeholders and `observed_bits` the full slot
+count. Pending observations remain incomplete in both APIs and the GUI.
 
 The default frequency bank contains five offsets at 0, ±1/(4T), ±1/(2T),
 where T is symbol duration. The API permits an explicit bounded offset bank.
@@ -495,7 +473,7 @@ RMS_phase_change  = phase_noise_degrees_per_sqrt_second * sqrt(elapsed_seconds)
 Receiver samples include AWGN and the altered carrier, sample timing and phase
 trajectory. Sample-clock error can reduce the actual spreading correlation; no
 matched-despreading statistic is handed to the receiver. The default receiver
-must discover pattern symbols and signal boundaries from these samples; all packet interpretation follows acquired pattern bits. Finite carrier and
+must discover pattern symbols and signal boundaries from these samples; all interval correction follows acquired pattern bits. Finite carrier and
 timing coverage means an impaired signal can still fail acquisition or
 validation. Longer integration alone cannot repair oscillator coherence loss.
 Use `--clock-error-ppm 0 --phase-noise 0` with CLI `simulate` or `listen` when
@@ -522,9 +500,8 @@ channel, including its noise, carrier phase and spreading.
 After sampled computation completes, the GUI plays the entire timeline over
 three wall-clock seconds. Preparation does not wait for simulated airtime.
 Every new frame updates waveform and constellation and adds one waterfall row.
-Completed raw bits and short dictionary text are released at the three-second deadline;
-packet-validated text, file entries and pre-FEC accuracy use the same delivery
-point. Failed decoding supplies no recovered result. Prepared content cannot
+Raw bits whose physical end was observed are released at the three-second deadline;
+decoded source bytes and pre-FEC accuracy use the same delivery point. Failed decoding supplies no recovered result. Prepared content cannot
 be copied or saved before its presentation completes.
 
 If GUI polling skips frames, their fresh points are merged into the next
@@ -538,7 +515,7 @@ previews retain their fixed sizes. The reservation includes the prepared result'
 diagnostics and caption, plus the frames' plots, points and preview text. Smaller
 budgets reduce the frame count while retaining each frame's complete measured
 constellation. This bounded workspace is independent
-of simulated airtime; the prepared packet's content is charged to the separate
+of simulated airtime; the prepared source content is charged to the separate
 receive-content quota.
 
 Calls queued while simulation is still computing are presented consecutively,
@@ -551,8 +528,8 @@ stalled are counted as omitted. Due browser events and the final result are
 released in order; replay does not extend or place old points over live input.
 On completion or cancellation, waveform, waterfall and constellation all resume
 live input. Background simulated reception continues while replay is presented;
-the previous packet does not remain as a persistent constellation cloud.
-The packet is still decoded and validated; transmitted application bytes are not
+the previous stream does not remain as a persistent constellation cloud.
+The received source is still decoded and validated; transmitted application bytes are not
 inserted directly into the receive cache.
 
 Named presets interpret transmit power in dBm plus negative attenuation in dB:
@@ -581,8 +558,8 @@ The GUI's Binary editor is an alternative to its message/file source. It accepts
 transmit paths use `transfer::estimate_binary` and `transfer::binary_transmitter`.
 `Session::transmit_bits` queues the same bounded streaming transmitter for audio
 or the sampled simulation channel. Binary mode does not send callsign/grid
-metadata, an attachment, repeat requests, compression, modem training, a packet
-header, integrity tag or error correction. The separate hardware-settling prefix
+metadata, an attachment, repeat requests, compression, interval markers,
+integrity tags or error correction. The separate hardware-settling prefix
 uses the same rounded duration as other pattern transmissions.
 
 In default pattern mode, each bit occupies exactly one complete pattern symbol,
@@ -592,7 +569,7 @@ mask the actual data bits and seed independent pattern/DSSS streams. When a
 prefix is present, those same keys also mask its noise through the separate
 `preamble` CTR range; they add no transmitted data bits.
 
-Raw signals have no packet bootstrap or authentication. Simulation and audio
+Raw signals have no interval coding or authentication. Simulation and audio
 feed their waveform to the same blind pattern receiver, without transmitting
 or passing the bit count, start sample or carrier phase as decoder metadata.
 Pattern evidence discovers the bits and burst end. Completed raw bits can be
@@ -621,15 +598,16 @@ samples to PCM16. Clipping a loud noise waveform changes its SNR.
 Automatic `status-tx` sends one pattern symbol per supplied 0/1 bit through the
 same raw-bit transmitter. `status-rx` discovers the complete bit string through
 pattern evidence, then compares `--bits` afterward. JSON includes the exact raw
-bits/count, model score and `packet_validated: false`; a wrong comparison value
-does not alter acquisition. No status result authenticates the sender.
+bits/count, model score, physical `stream_complete` and `content_validated: false`.
+`known_bits_match` requires physical completion and every comparison bit to have
+been observed; a wrong comparison value does not alter acquisition. No status result authenticates the sender.
 
 ## Resource boundaries and verification
 
 `Options::content_limit` defaults to 256 MiB and limits application content.
-The GUI receive cache is independently bounded to 256 MiB. Packet coding scratch,
-framing/parity and copies have checked bounds derived from content size; this is
-not a hard cap on process RSS. `dsp_workspace_bytes` defaults to 50% of available
+The GUI receive cache is independently bounded to 256 MiB. Interval/parity
+scratch is fixed; source input and output have local quotas and LZMA2 has a
+separate allocator cap. These are not a hard cap on process RSS. `dsp_workspace_bytes` defaults to 50% of available
 RAM and budgets streaming sample queues, retained pattern-symbol recordings and
 DSP state independently of the content quota. The GUI dropdown offers 25%, 50%
 and 75%; it shows the resolved byte ceiling, which stays fixed until the choice
@@ -639,13 +617,13 @@ workspace grows with symbol length; its bounded clock-window fallback trades
 coverage and computation for duration-independent waveform storage. Unsupported
 clock-window coverage is rejected explicitly.
 
-`transfer::estimate` allocates encoded packet data, never an audio waveform. It
-reports content, full-packet and total durations, repeat eligibility, streaming
+`transfer::estimate` allocates encoded interval data, never an audio waveform. It
+reports source bytes, coded bytes, exact wire bits and payload/total durations, repeat eligibility, streaming
 `memory_supported`, and separate `batch_memory_supported`. The one-byte repeat
 exception does not waive content, workspace or numeric-range checks.
 
 The regression suite covers pattern-only acquisition through missing or obscured
-settling, exact raw bits, encrypted packets, independent sample clocks, bounded
+settling, exact raw bits, encrypted intervals, independent sample clocks, bounded
 long-symbol searches, cancellation and tone policy. Private-template tests check
 both quadratures, variable amplitude, key/epoch separation, absence of the old
 squared-carrier invariant, and energy-normalized receive evidence. They do not

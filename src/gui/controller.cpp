@@ -3,7 +3,6 @@
 #include "text_policy.hpp"
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
-#include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
 #include "datapump/tuning.hpp"
 #include <array>
@@ -28,18 +27,10 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
     return result;
 }
 std::string compression_reference() {
-    std::string result;
-    for(const auto group:{" etao","in","shrd","lucm","fwyp","bg","jk","qv","xz"}) {
-        if(!result.empty())result+='\n';
-        const auto first=static_cast<std::uint8_t>(group[0]);
-        result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
-        for(const char* byte=group;*byte;++byte) {
-            if(byte!=group)result+="   ";
-            result+=*byte==' '?"space":std::string(1,*byte);
-            result+=' ';result+=bit_text(compression::encode_short_bits(Bytes{static_cast<std::uint8_t>(*byte)}));
-        }
-    }
-    return result;
+    return "Messages use one agreed LZMA2 stream in fixed 128-byte coding intervals.\n"
+        "Raw bits are sent exactly as entered.\n"
+        "Reception ends only after six seconds without symbols.\n"
+        "Decompression starts after that end event.";
 }
 std::string path_text(const std::filesystem::path& path) { const auto s=path.u8string(); return {s.begin(),s.end()}; }
 std::filesystem::path path_from_text(std::string_view s) { return std::filesystem::path(std::u8string(s.begin(),s.end())); }
@@ -262,20 +253,15 @@ struct Controller::Impl {
         auto& text=f(UiField::short_bits).text;text.clear();
         if(composer.raw_bits()) {
             if(composer.raw_bits()->size()<=4)text=bit_text(*composer.raw_bits());
-        } else if(composer.bytes().size()==1) {
-            try { text=bit_text(compression::encode_short_bits(composer.bytes(),4)); }
-            catch(const Error&) {} // This byte has a longer dictionary code.
         }
     }
+
     void short_bits_changed() {
         const auto input=f(UiField::short_bits).text;
         try {
             const auto bits=parse_binary_bits(input);
             if(bits.size()>4)throw Error("Enter 1-4 bits; use Console for longer input.");
-            Bytes decoded;
-            try { decoded=compression::decode_short_bits(bits); }
-            catch(const Error&) {} // Incomplete dictionary tokens are valid raw drafts.
-            BinaryEditor next(std::move(decoded));next.edit_binary(input);
+            BinaryEditor next;next.edit_binary(input);
             composer=std::move(next);
             repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
             seeded_message.clear();sync_composer();f(UiField::short_bits).text=input;
@@ -288,15 +274,11 @@ struct Controller::Impl {
         auto& detail=f(UiField::short_bits_detail).text;
         if(attachment||file_loading)detail="Attachment selected. Choose Use text\nto enter a short raw pattern.";
         else if(!draft_error.empty())detail=draft_error;
-        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to 4 bits to replace the current draft.\nLeading zeros and incomplete dictionary codes are preserved.";
+        else if(f(UiField::short_bits).text.empty())detail="Enter 1 to 4 bits to replace the current draft.\nLeading zeros are preserved.";
         else {
             const auto bits=parse_binary_bits(f(UiField::short_bits).text);
             detail="Current draft: "+std::to_string(bits.size())+" payload bits, "+bit_text(bits)+".\n";
-            try {
-                const auto decoded=compression::decode_short_bits(bits);
-                detail+="Lowercase code: "+(decoded==Bytes{' '}?std::string("space"):"'"+std::string(decoded.begin(),decoded.end())+"'");
-                detail+=". Message byte: "+BinaryEditor(decoded).binary()+".";
-            } catch(const Error&) { detail+="No complete lowercase code; sent exactly as entered."; }
+            detail+="Sent exactly as entered, without text interpretation.";
         }
         auto& received=f(UiField::received_raw_bits).text;
         const auto index=selected_signal();
@@ -424,8 +406,8 @@ struct Controller::Impl {
         }
         dirty();
     }
-    const DecodedPacket* selected_file() const {
-        for(const auto& packet:inbox.items()) if(id_label(packet.message)==f(UiField::files).selected) return &packet;
+    const StreamContent* selected_file() const {
+        for(const auto& stream:inbox.items()) if(id_label(stream.message)==f(UiField::files).selected) return &stream;
         return nullptr;
     }
     std::optional<std::size_t> selected_signal() const {
@@ -459,8 +441,8 @@ struct Controller::Impl {
             if(!index)return false;
             if(signals.copy_bytes(*index))return true;
             const auto id=signals.copy_id(*index);
-            return id && std::any_of(inbox.items().begin(),inbox.items().end(),[&](const auto& packet) {
-                return id_label(packet.message)==*id && packet.message.data.size()<=BinaryEditor::payload_limit;
+            return id && std::any_of(inbox.items().begin(),inbox.items().end(),[&](const auto& stream) {
+                return id_label(stream.message)==*id && stream.message.data.size()<=BinaryEditor::payload_limit;
             });
         }
         case Command::pattern_first: case Command::pattern_previous: return pattern_first>0;
@@ -480,10 +462,9 @@ struct Controller::Impl {
         const auto repeatable_overhead=f(UiField::repeatable).checked||has_repeatable_prefix()?0:repeatable_prefix_size;
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
-        const auto size=attachment?attachment->size():composer.bytes().size();
         const bool raw=!attachment&&composer.raw_bits().has_value();
-        f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw&&(file_loading||size>=16);
-        f(UiField::fec).display_text=raw?"Off (raw bits)":!file_loading&&size<16?"Off (under 16 B)":"";
+        f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw;
+        f(UiField::fec).display_text=raw?"Off (raw bits)":"";
         short_bits_status();
     }
     void refresh_files() {
@@ -578,7 +559,7 @@ struct Controller::Impl {
             transmission<<"\nTransmission sections\n";
             for(const auto& section:inspection->sections) {
                 transmission<<"\n"<<section.title;
-                if(section.logical) transmission<<" [logical, before interleaving]";
+                if(section.logical) transmission<<" [logical, source data area]";
                 if(section.coding) transmission<<" [coding]";
                 if(section.bytes) transmission<<" | "<<*section.bytes<<" B";
                 if(section.symbols) transmission<<" | "<<*section.symbols<<" symbols";
@@ -596,41 +577,13 @@ struct Controller::Impl {
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
         plot_update.clear_waterfall=plot_update.clear_waterfall||changed.clear_waterfall;
-        const auto raw_pattern_match=[](const auto& signal,const auto& received) {
-            return signal.binary && signal.complete && signal.received_bits && !received.packet_validated &&
-                !received.packet.message.data.empty() && received.raw_bits.size()==signal.received_bits &&
-                signal.text.size()<=received.raw_bits.size() && received.diagnostics.pattern_score==signal.pattern_score &&
-                std::equal(signal.text.begin(),signal.text.end(),received.raw_bits.begin(),
-                    [](char text,std::uint8_t bit){return text==(bit?'1':'0');});
-        };
-        for(auto& received:next.received) {
-            if(received.packet_validated)inbox.put(std::move(received.packet));
-            else if(!received.packet.message.data.empty()) {
-                const auto source=std::find_if(next.signals.begin(),next.signals.end(),[&](const auto& signal){
-                    return raw_pattern_match(signal,received);
-                });
-                // Replace this reception's provisional bits with its decoded
-                // text, preserving its browser identity through completion.
-                SignalLine line;line.id=source==next.signals.end()?next_pattern_text_id--:source->id;
-                line.frequency_hz=settings.transfer.modem.carrier_hz;
-                line.text=std::string(received.packet.message.data.begin(),received.packet.message.data.end());
-                line.complete=true;line.pattern_score=received.diagnostics.pattern_score;
-                line.received_bits=received.raw_bits.size();
-                line.missing_symbols=received.missing_symbols;
-                if(received.raw_bits.size()<=4096)line.raw_bits=bit_text(received.raw_bits);
-                signals.update(std::move(line));
-            }
-        }
+        for(auto& received:next.received)
+            if(received.stream_complete && received.content_validated)inbox.put(std::move(received.content));
         if(!next.received.empty()) refresh_files();
         for(const auto& signal:next.signals) {
-            // Decoded text already has its own row. Its compressed transport
-            // bits need no second row, even when they end in a partial byte.
-            if(std::any_of(next.received.begin(),next.received.end(),[&](const auto& received){
-                return raw_pattern_match(signal,received);
-            }))continue;
-            const auto packet=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.packet_id; });
-            const bool text=packet!=inbox.items().end()&&packet->message.kind==MessageKind::text;
-            SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
+            const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.reception_id; });
+            const bool text=stream!=inbox.items().end()&&valid_clipboard_text(stream->message.data);
+            SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
             line.missing_symbols=signal.missing_symbols;
             signals.update(std::move(line));
         }
@@ -692,7 +645,7 @@ struct Controller::Impl {
         case Command::generate_keyfile: request(Purpose::generate_names,ui::ServiceKind::prompt,"Key entry names, separated by commas","Default"); break;
         case Command::show_key_folder: { const auto folder=std::filesystem::absolute(key_path).parent_path(); if(!std::filesystem::is_directory(folder)) throw Error("The keyfile folder is no longer available"); request(Purpose::folder,ui::ServiceKind::open_folder,"Show keyfile folder",folder_uri(folder)); break; }
         case Command::acknowledge_key_failure: key_failed=false; f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename()); notice("Current key selection retained."); break;
-        case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save verified received content",file->message.filename.empty()?"received.bin":file->message.filename,std::make_shared<const Bytes>(file->message.data)); break; }
+        case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save decoded source",file->message.filename.empty()?"received.bin":file->message.filename,std::make_shared<const Bytes>(file->message.data)); break; }
         case Command::copy_signal: {
             const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits",*raw);
             else if(const auto text=signals.copy_text(index))request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received text",*text);
@@ -701,7 +654,7 @@ struct Controller::Impl {
                 if(found==inbox.items().end()) throw Error("That received message has left the memory cache");
                 const auto& bytes=found->message.data;
                 if(found->message.kind!=MessageKind::text||!valid_clipboard_text(bytes)||bytes.size()>static_cast<std::size_t>(std::numeric_limits<int>::max())) throw Error("This message is a file; use Save selected");
-                request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy verified text",std::string(bytes.begin(),bytes.end()));
+                request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy decoded text",std::string(bytes.begin(),bytes.end()));
             } break;
         }
         case Command::copy_raw_signal: {
@@ -716,8 +669,8 @@ struct Controller::Impl {
             auto bytes=signals.copy_bytes(index);
             if(!bytes) {
                 const auto id=signals.copy_id(index);
-                const auto found=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& packet) {
-                    return id && id_label(packet.message)==*id;
+                const auto found=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& stream) {
+                    return id && id_label(stream.message)==*id;
                 });
                 if(found==inbox.items().end())throw Error("That received message has left the memory cache");
                 bytes=found->message.data;
