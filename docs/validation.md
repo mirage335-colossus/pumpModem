@@ -4,6 +4,33 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Transmission scope space reclamation — 15 September 2026
+
+Hidden scopes now collapse their entire 206-pixel area. The signal and file
+browsers move upward and gain 108 pixels, fitting two more full signal rows;
+all four plots gain the remaining 98 pixels. The display choice stays available.
+Showing Hex/Bits or starting transmission in auto-hide restores the scope;
+completion and None return the space to reception and plots on the same
+presentation update. Both native adapters consume the shared geometry.
+
+Both FLTK and Rev Release builds passed. All 23 shared GUI checks passed in
+58.29 seconds, including minimum/default/larger window bounds, exact space
+reclamation, dropdown transitions, retained control geometry, reception progress
+and adapter boundaries. Rev adapter conformance passed in 37.07 seconds after
+its expected-geometry helper was routed through the current application layout;
+the platform and both coordinate-scale checks also passed. The same helper
+correction preserves every FLTK geometry assertion. An isolated FLTK rerun
+passed the layout and QR focus checks, then reached the previously recorded
+Compression-page dictionary clipping failure at minimum size. Its earlier
+concurrent run had missed the QR focus assertion. Neither assertion was relaxed.
+
+Native FLTK and Rev windows were inspected at default and minimum sizes, with
+Hex, None and auto-hide transitions. The expanded browsers and plots reclaim
+the full area while preserving the dropdown. Actual simulated replay showed
+the scope in both adapters, then completion restored the expanded layout with
+the same received `e` row. Both GUI processes and the private display closed
+cleanly. `git diff --check` passed.
+
 ## Transmission scope auto-hide — 15 September 2026
 
 The Console scope dropdown now offers **None**, **Hex, auto-hide**, **Hex** and

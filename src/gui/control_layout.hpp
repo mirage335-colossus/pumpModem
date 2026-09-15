@@ -62,9 +62,10 @@ inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height)
 // All rectangles are absolute logical client coordinates. No adapter knows the
 // meaning of a slot or independently reserves space for application controls.
 inline ControlLayout control_layout(const Control& c,const FieldState& state,int width,int height,
-                                    std::span<const Control> controls=console_screen()) {
+                                    std::span<const Control> controls=console_screen(),
+                                    bool transmit_scope_visible=true) {
     if(c.surface)return control_content_layout(c,state,overlay_control_rect(c.placement,width,height));
-    const DesktopLayout desktop(width,height);
+    const DesktopLayout desktop(width,height,transmit_scope_visible);
     ControlLayout out;
     out.popup_upward=c.open_upward;
     out.frame=desktop[c.slot];

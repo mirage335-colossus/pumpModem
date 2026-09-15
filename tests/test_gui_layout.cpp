@@ -148,6 +148,55 @@ void supported_sizes() {
               "Mono routing must fit below its device without overlapping diagnostics or status");
     }
 }
+void hidden_scope_reclaims_space() {
+    for(const auto size:{Rect{0,0,min_width,min_height},Rect{0,0,default_width,default_height},
+                         Rect{0,0,1387,1001},Rect{0,0,1920,1080}}) {
+        const DesktopLayout visible(size.w,size.h,true),hidden(size.w,size.h,false);
+        const auto page=hidden[Slot::page];
+        for(std::size_t index=1;index<static_cast<std::size_t>(Slot::count);++index) {
+            const auto slot=static_cast<Slot>(index);
+            const auto rect=hidden[slot];
+            const bool collapsed=slot==Slot::transmit_scope||slot==Slot::transmit_scope_caption;
+            check(rect.w>0&&(collapsed?rect.h==0:rect.h>0)&&contains(size,rect),
+                  "Hiding the scope left reserved height, invalid geometry or an offscreen control");
+            if(persistent_slot(slot)||slot==Slot::tabs||slot==Slot::page||
+               (slot>=Slot::compression_explanation&&slot<=Slot::received_raw_bits))
+                check(rect==visible[slot],"Console scope visibility moved another page or persistent controls");
+        }
+        for(const auto slot:{Slot::message,Slot::binary,Slot::qr,Slot::transmit,Slot::cancel,Slot::transmit_scope_format})
+            check(hidden[slot]==visible[slot],"Scope reflow moved composition or its always-available display choice");
+        const auto signals=hidden[Slot::signals],files=hidden[Slot::files],save=hidden[Slot::save_file];
+        const auto format=hidden[Slot::transmit_scope_format];
+        check(format.y+format.h<=hidden[Slot::signal_label].y&&
+              signals.y==visible[Slot::signals].y-visible[Slot::transmit_scope].h&&
+              signals.h-visible[Slot::signals].h==2*54,
+              "Hidden preview space did not move reception upward and expose two more signal rows");
+        check(signals.y==files.y&&files.x==save.x&&files.w==save.w&&
+              files.y+files.h+7==save.y&&save.y+save.h==signals.y+signals.h&&
+              contains(signals,hidden[Slot::copy_signal])&&contains(signals,hidden[Slot::paste_signal]),
+              "Expanded reception history detached its file list or action footers");
+        for(const auto slot:{Slot::waterfall,Slot::waveform,Slot::constellation,Slot::pattern_scores}) {
+            const auto plot=hidden[slot],old=visible[slot];
+            check(contains(page,plot)&&plot.x==old.x&&plot.w==old.w&&
+                  plot.y>=signals.y+signals.h+23&&plot.y+plot.h==old.y+old.h&&
+                  plot.h>old.h&&plot.h-old.h+signals.h-visible[Slot::signals].h==visible[Slot::transmit_scope].h,
+                  "Plots did not consume the remaining hidden scope space within the Console viewport");
+        }
+        check(contains(hidden[Slot::waterfall],hidden[Slot::clear_waterfall]),
+              "Resized waterfall lost its native action footer");
+        for(const auto slot:{Slot::zoom_in,Slot::zoom_out,Slot::reset_zoom})
+            check(contains(hidden[Slot::waveform],hidden[slot]),"Resized waveform lost a zoom control");
+        std::array<Control,4> controls{Control{Kind::list},Control{Kind::choice},Control{Kind::list},Control{Kind::bitmap}};
+        controls[0].slot=Slot::transmit_scope;controls[1].slot=Slot::transmit_scope_format;
+        controls[2].slot=Slot::signals;controls[2].footer_height=24;
+        controls[3].slot=Slot::waterfall;controls[3].footer_height=24;
+        for(const auto& c:controls) {
+            const auto geometry=control_layout(c,{},size.w,size.h,controls,false);
+            check(geometry.frame==hidden[c.slot]&&contains(geometry.frame,geometry.widget),
+                  "Shared control placement ignored collapsed scope geometry");
+        }
+    }
+}
 void adapter_helpers() {
     const Rect rect{10, 20, 100, 80};
     check(rect.label_above() == Rect{10, 4, 100, 16}, "native field label geometry changed");
@@ -256,6 +305,7 @@ int main() {
         established_default();
         document_widths();
         supported_sizes();
+        hidden_scope_reclaims_space();
         adapter_helpers();
         relative_controls();
         declaration_identity();

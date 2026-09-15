@@ -116,7 +116,7 @@
             if(bindings[0].editor!=editor||bindings[0].label!=heading||bindings[1].bitmap!=bitmap||bindings[1].caption!=caption)
                 throw std::runtime_error("Rev shared layout update replaced existing native controls");
             for(auto& binding:bindings) {
-                const auto geometry=ui::control_layout(binding.control,state(binding.control),details.size.width,details.size.height,declarations);
+                const auto geometry=application.control_layout(binding.control,details.size.width,details.size.height,declarations);
                 if((binding.label->style->visibility==Visibility::Visible)!=(geometry.has_label&&ui::drawable(geometry.label)))
                     throw std::runtime_error("Rev failed to add or remove a shared heading after native construction");
                 if(binding.element->rect.x!=geometry.frame.x||binding.element->rect.y!=geometry.frame.y||
@@ -125,10 +125,10 @@
                 if(binding.element->style->border.width.val!=(geometry.border?1:0))
                     throw std::runtime_error("Rev retained a stale shared control border");
             }
-            const auto editor_geometry=ui::control_layout(controls[0],state(controls[0]),details.size.width,details.size.height,declarations);
+            const auto editor_geometry=application.control_layout(controls[0],details.size.width,details.size.height,declarations);
             if(editor->rect.h!=editor_geometry.widget.h||editor->style->text.size.val!=controls[0].font_size||heading->style->text.size.val!=controls[0].font_size)
                 throw std::runtime_error("Rev retained stale shared editor geometry or typography");
-            const auto bitmap_geometry=ui::control_layout(controls[1],state(controls[1]),details.size.width,details.size.height,declarations);
+            const auto bitmap_geometry=application.control_layout(controls[1],details.size.width,details.size.height,declarations);
             if(caption->style->zIndex!=(bitmap_geometry.caption_overlay?1:0))throw std::runtime_error("Rev retained a stale caption overlay layer");
         }
     }

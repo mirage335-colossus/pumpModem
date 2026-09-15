@@ -109,6 +109,61 @@ void transmission_scope_records() {
           "Cancelled generation lost its truthful capture status");
     app.close();
 }
+void transmission_scope_reflow() {
+    using F=ui::Field;using S=ui::Slot;
+    Application app({.simulation=true});
+    const auto& scope=control(F::transmit_scope);
+    const auto& caption=control(F::transmit_scope_caption);
+    const auto& format=control(F::transmit_scope_format);
+    const auto& signals=control(F::signals);
+    const auto capture_layout=[&](int width,int height) {
+        std::vector<ui::ControlLayout> result;
+        for(const auto& c:ui::console_screen())result.push_back(app.control_layout(c,width,height));
+        return result;
+    };
+    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
+                         ui::Rect{0,0,ui::default_width,ui::default_height},ui::Rect{0,0,1920,1080}}) {
+        check(app.field(F::transmit_scope_format).selected=="hex-auto-hide"&&!app.control(scope).visible,
+              "Idle Console did not start with the auto-hidden scope layout");
+        const auto hidden=capture_layout(size.w,size.h);
+        const auto hidden_signals=app.control_layout(signals,size.w,size.h);
+        const auto selector=app.control_layout(format,size.w,size.h);
+        check(app.control_layout(scope,size.w,size.h).frame.h==0&&
+              app.control_layout(caption,size.w,size.h).frame.h==0&&selector.widget.h>0,
+              "Application facade hid scope content while retaining its empty panel height");
+        app.edit(control(F::message),"e");
+        check(capture_layout(size.w,size.h)==hidden,
+              "An idle draft reopened the auto-hidden generation panel");
+        app.select(format,"hex");
+        const auto visible=capture_layout(size.w,size.h);
+        const auto visible_scope=app.control_layout(scope,size.w,size.h);
+        const auto visible_signals=app.control_layout(signals,size.w,size.h);
+        check(app.control(scope).visible&&visible_scope.widget.h>=11*17&&
+              hidden_signals.widget.h-visible_signals.widget.h==2*signals.list_row_height&&
+              hidden_signals.widget.y+visible_scope.frame.h==visible_signals.widget.y&&
+              app.control_layout(format,size.w,size.h)==selector,
+              "Manual Hex selection did not exchange signal history space for the scope through the facade");
+        for(const auto& c:ui::console_screen())if(c.slot==S::waterfall||c.slot==S::waveform||
+                                                c.slot==S::constellation||c.slot==S::pattern_scores) {
+            const auto shown=app.control_layout(c,size.w,size.h);
+            app.select(format,"none");
+            const auto collapsed=app.control_layout(c,size.w,size.h);
+            check(collapsed.widget.h>shown.widget.h&&
+                  collapsed.frame.y+collapsed.frame.h==shown.frame.y+shown.frame.h&&
+                  collapsed.frame.h-shown.frame.h+hidden_signals.frame.h-visible_signals.frame.h==visible_scope.frame.h,
+                  "Hiding the scope did not enlarge the actual plot content and reclaim its full height");
+            app.select(format,"hex");
+        }
+        app.select(format,"bits");
+        check(capture_layout(size.w,size.h)==visible,"Bits changed the visible preview's desktop allocation");
+        for(const auto* mode:{"none","hex-auto-hide"}) {
+            app.select(format,mode);
+            check(capture_layout(size.w,size.h)==hidden&&!app.control(scope).visible&&app.control(format).visible,
+                  "None or idle auto-hide did not immediately restore the expanded reception and plots");
+        }
+    }
+    app.close();
+}
 void records() {
     Signals signals;
     SignalLine pending;pending.id=81;pending.frequency_hz=1499.6;pending.text="pending \xc3\xa9";
@@ -702,6 +757,6 @@ void compression_declarations() {
 }
 }
 int main() {
-    try {transmission_scope_records();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

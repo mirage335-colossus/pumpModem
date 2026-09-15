@@ -188,6 +188,10 @@ only redraws the retained capture. The display choice offers **None**,
 Auto-hide shows the scope and its caption during transmission and simulation replay, then hides
 them on completion, cancellation or failure. None always hides them. The format
 choice remains available; Hex and Bits show the retained capture even while idle.
+Whenever the scope is hidden, its area collapses: the signal and file browsers
+move up and grow, fitting two more full signal entries, and all four plots grow
+to fill the remaining space. Showing the scope restores its aligned rows and
+the compact browsers and plots on the same presentation update.
 
 Source and compressed-source previews come from the encoding used for that
 transmission. Wire rows advance when payload symbol generation begins; pattern

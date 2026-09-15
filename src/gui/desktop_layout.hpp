@@ -49,7 +49,8 @@ struct DesktopLayout {
     Rect& operator[](Slot slot) { return slots[static_cast<std::size_t>(slot)]; }
     static constexpr int default_width = ui::default_width, default_height = ui::default_height;
     static constexpr int min_width = ui::min_width, min_height = ui::min_height;
-    explicit DesktopLayout(int width = default_width, int height = default_height) {
+    explicit DesktopLayout(int width = default_width, int height = default_height,
+                           bool transmit_scope_visible = true) {
         auto& out = *this;
         out[Slot::header] = {margin, 10, 220, 32};
         out[Slot::mode] = {235, 13, width - 420, 28};
@@ -90,12 +91,14 @@ struct DesktopLayout {
         out[Slot::cancel] = {540, buttons_y, 106, action_height};
         out[Slot::airtime] = {657, buttons_y, width - margin - 657, action_height};
 
-        out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,18};
+        out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,transmit_scope_visible?18:0};
         out[Slot::transmit_scope_format]={width-margin-136,buttons_y+31,136,18};
-        out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,206};
+        out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,transmit_scope_visible?206:0};
         const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
         constexpr int files_width = 252;
-        const int signal_height = 84+std::min(26,height_growth*26/80);
+        // Reclaim the hidden scope for two more full signal rows and taller
+        // plots. The format choice stays reachable above the received lists.
+        const int signal_height = 84+std::min(26,height_growth*26/80)+(transmit_scope_visible?0:108);
         out[Slot::signal_label] = {margin, signal_y - 23, width - files_width - 50, 21};
         out[Slot::file_label] = {width - margin - files_width, signal_y - 23, files_width, 21};
         out[Slot::signals] = {margin, signal_y, width - 2 * margin - files_width - 14, signal_height};

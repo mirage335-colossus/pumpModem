@@ -816,7 +816,7 @@ public:
             if(application.smoke_passed()&&binding.list&&binding.control.follow_tail&&!binding.list->at_tail())
                 throw std::runtime_error("Rev smoke: visible record tail lost after page changes: scroll="+std::to_string(binding.list->resolved.scroll.y)+" retained="+std::to_string(binding.list->scroll.position())+" content="+std::to_string(binding.list->layout.rect.h)+" height="+std::to_string(binding.list->height)+" inner="+std::to_string(binding.list->resolved.getInner(Axis::Vertical)));
             const auto& rect=binding.element->rect;
-            const auto frame=ui::control_layout(binding.control,state(binding.control),details.size.width,details.size.height,declarations).frame;
+            const auto frame=application.control_layout(binding.control,details.size.width,details.size.height,declarations).frame;
             if(rect.w<1||rect.h<=0||std::abs(rect.x-frame.x)>1||std::abs(rect.y-frame.y)>1||std::abs(rect.w-frame.w)>1||std::abs(rect.h-frame.h)>1)
                 throw std::runtime_error("Rev smoke: shared desktop placement mismatch for '"+std::string(binding.control.label)+
                     "' kind="+std::to_string(static_cast<int>(binding.control.kind))+" field="+std::to_string(static_cast<int>(binding.control.field))+

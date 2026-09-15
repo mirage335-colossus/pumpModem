@@ -841,8 +841,8 @@ void layout_lifecycle() {
     for(unsigned stage=0;stage<3;++stage) {
         datapump::gui::test::layout_lifecycle_stage(declarations,stage);
         const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
-        const auto text=ui::control_layout(declarations[0],app.application.field(declarations[0].field),window->w(),window->h(),declarations);
-        const auto image=ui::control_layout(declarations[1],{},window->w(),window->h(),declarations);
+        const auto text=app.application.control_layout(declarations[0],window->w(),window->h(),declarations);
+        const auto image=app.application.control_layout(declarations[1],window->w(),window->h(),declarations);
         require(heading->visible()==text.has_label&&bitmap_heading->visible()==image.has_label,
             "Native layout failed to add or remove a shared heading after construction");
         require(rect(editor->parent())==text.frame&&rect(editor)==text.widget&&rect(bitmap->parent())==image.frame&&rect(bitmap)==image.widget,

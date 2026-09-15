@@ -151,7 +151,8 @@ void Application::dispatch(ui::Command command,std::uint64_t surface) {
 void Application::navigate(ui::Page page) {if(accepts_surface(0))select_page(page);}
 ui::ControlLayout Application::control_layout(const ui::Control& declaration,int width,int height,
         std::span<const ui::Control> declarations) const {
-    return ui::control_layout(declaration,control(declaration).state,width,height,declarations);
+    return ui::control_layout(declaration,control(declaration).state,width,height,declarations,
+                              field(ui::Field::transmit_scope).visible);
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
     if(!accepts_surface(declaration.surface)||(!declaration.surface&&!declaration.persistent&&declaration.page!=page()))return false;
