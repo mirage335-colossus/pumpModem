@@ -193,10 +193,19 @@ bounded changed bits or one contiguous missing run while retaining an intact
 trailing anchor; the [marker evidence threshold](protocol.md#marker-evidence-threshold)
 accounts for all tested hypotheses under an independent-fair-bit model.
 This bound does not authenticate content or change SHA-256/HMAC validation.
-If acquisition reports up to 64 missing leading stream symbols, the existing
+If acquisition reports up to 80 missing leading stream symbols, the existing
 symbol index selects the Data positions and recovery checks the surviving
 initial marker suffix. The marker search never selects or trials those
 positions, and cannot repair a later loss of Data-stream alignment.
+
+An established pattern track can retain unknown interior symbol slots until a
+later confident observation confirms their extent. Data decryption processes
+the known spans at their original symbol addresses; a missing slot consumes
+its position without supplying a ciphertext decision. Marker matching excludes
+these unknowns from its evidence, then packet recovery fills their plaintext
+values with zero for FEC. A recovered packet still needs complete integrity or
+MAC validation. This preserves alignment across a detection gap; it does not
+recover from an unknown change in the capture clock or keystream origin.
 
 Reusing the same key, timestamp, purpose, domain and stream positions repeats
 CTR output. It can expose plaintext XORs and allow correlation between repeated

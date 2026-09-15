@@ -88,12 +88,12 @@ void leading_marker_recovery() {
           "leading marker recovery must not search beyond the fixed seven-bit neighborhood");
 }
 void partial_markers_and_confidence() {
-    check(byte_sync::maximum_marker_loss_bits == 64 && byte_sync::maximum_marker_errors == 8 &&
-          byte_sync::marker_tail_bits == 32 && byte_sync::false_match_bits == 100,
+    check(byte_sync::maximum_marker_loss_bits == 80 && byte_sync::maximum_marker_errors == 8 &&
+          byte_sync::marker_tail_bits == 32 && byte_sync::false_match_bits == 84,
           "partial marker limits and the conservative false-match floor changed");
     const auto original = random_bits(byte_sync::interval_bits * 2 + 136);
     const auto pristine = byte_sync::insert(original);
-    for (const auto lost : {1U, 7U, 16U, 32U, 64U}) {
+    for (const auto lost : {1U, 7U, 16U, 32U, 64U, 80U}) {
         for (const auto gap : {0U, 17U, 64U}) {
             for (const auto start : {std::size_t{0}, byte_sync::marker_bits + byte_sync::interval_bits}) {
                 const auto damaged = slip(pristine, start + gap, lost, false);
@@ -122,32 +122,40 @@ void partial_markers_and_confidence() {
     }
 
     const auto short_data = random_bits(17 * 8);
-    auto partial = slip(byte_sync::insert(short_data), 0, 64, false);
-    partial[3] ^= 1;
-    // n=128, e=1 gives ceil(log2 V)=8; H<2^17 and S=1 give
-    // 128-8-17 = 103 conservative evidence bits, exceeding the 100-bit floor.
+    auto partial = slip(byte_sync::insert(short_data), 0, 80, false);
+    partial[33] ^= 1;
+    // n=112, e=1 gives ceil(log2 V)=7; H<2^18 and S=1 give
+    // 112-7-18 = 87 conservative evidence bits, exceeding the 84-bit floor.
     const auto accepted = byte_sync::recover_packet(partial);
     check(accepted.leading_marker_recognized && accepted.bits == short_data,
-          "a 128-bit marker suffix with one error must meet the trial-adjusted confidence floor");
+          "a 112-bit marker suffix with one error must meet the trial-adjusted confidence floor");
     auto too_many_errors = partial;
-    too_many_errors[13] ^= 1;
+    too_many_errors[43] ^= 1;
     check(!byte_sync::recover_packet(too_many_errors).leading_marker_recognized,
-          "two errors in 128 surviving bits provide only 97 conservative bits and must not identify framing");
+          "two errors in 112 surviving bits provide only 81 conservative bits and must not identify framing");
     auto many_slots = partial;
     many_slots.resize(40000, 0);
     check(!byte_sync::recover_packet(many_slots).leading_marker_recognized,
           "the same partial evidence must be rejected when total slot trials exhaust its confidence margin");
-    auto known_suffix = slip(byte_sync::insert(short_data), 0, 64, false);
-    known_suffix[127] ^= 1;
-    const auto known = byte_sync::recover_packet(known_suffix, known_suffix.size(), 64);
+    auto four_errors = slip(byte_sync::insert(short_data), 0, 64, false);
+    for (const auto bit : {33U, 43U, 53U, 63U}) four_errors[bit] ^= 1;
+    const auto relaxed = byte_sync::recover_packet(four_errors);
+    check(relaxed.leading_marker_recognized && relaxed.bits == short_data,
+          "four errors in 128 surviving bits provide 86 conservative bits and must identify framing");
+    four_errors[73] ^= 1;
+    check(!byte_sync::recover_packet(four_errors).leading_marker_recognized,
+          "five errors in 128 surviving bits fall below the trial-adjusted confidence floor");
+    auto known_suffix = slip(byte_sync::insert(short_data), 0, 80, false);
+    known_suffix[111] ^= 1;
+    const auto known = byte_sync::recover_packet(known_suffix, known_suffix.size(), 80);
     check(known.leading_marker_recognized && known.bits == short_data &&
           !byte_sync::recover_packet(known_suffix).leading_marker_recognized,
           "an acquired endpoint may admit a trailing substitution that an inferred endpoint must reject");
 
-    auto missing_too_much = slip(byte_sync::insert(short_data), 0, 65, false);
+    auto missing_too_much = slip(byte_sync::insert(short_data), 0, 81, false);
     check(!byte_sync::recover_packet(missing_too_much).leading_marker_recognized,
-          "marker loss beyond the admitted 64-bit model must not identify framing");
-    rejects([&] { byte_sync::recover_packet(partial, partial.size(), 65); },
+          "marker loss beyond the admitted 80-bit model must not identify framing");
+    rejects([&] { byte_sync::recover_packet(partial, partial.size(), 81); },
             "known missing marker bits must respect the same loss bound");
 
     const auto marker = runtime_marker();
@@ -160,7 +168,7 @@ void partial_markers_and_confidence() {
     // Justify the exact-match fast path: no other endpoint in the complete
     // search neighborhood can have an exact partial tail anchor inside this
     // exact marker. Complete shifted markers also exceed the error budget.
-    for (int shift = -78; shift <= 14; ++shift) {
+    for (int shift = -94; shift <= 14; ++shift) {
         if (!shift) continue;
         unsigned conflicts = 0;
         for (int i = 160; i < 192; ++i)
@@ -200,6 +208,62 @@ void inserted_and_deleted_bits() {
                   "an intact exact-end marker still repairs a shorter or longer final full interval");
         }
     }
+}
+void erased_marker_and_data_slots() {
+    constexpr std::uint8_t unknown = 2;
+    const auto original = random_bits(byte_sync::interval_bits + 136);
+    auto erased = byte_sync::insert(original);
+    for (const auto start : {std::size_t{0}, byte_sync::marker_bits + byte_sync::interval_bits})
+        for (const auto bit : {0U, 7U, 47U, 96U, 113U, 157U, 177U, 191U})
+            erased[start + bit] = unknown;
+    auto expected = original;
+    erased[byte_sync::marker_bits + 13] = unknown;
+    expected[13] = 0;
+    erased[2 * byte_sync::marker_bits + byte_sync::interval_bits + 17] = unknown;
+    expected[byte_sync::interval_bits + 17] = 0;
+    const auto recovered = byte_sync::recover_packet(erased);
+    check(recovered.leading_marker_recognized && recovered.bits == expected,
+          "distributed erased marker slots must preserve framing and zero-fill data at its original positions");
+    check(byte_sync::recover(Bytes{unknown, 1}) == Bytes({0, 1}),
+          "an uninterpreted short tail must still convert unknown slots to zero");
+
+    // This marker has 102 one bits: erasing all its zeros leaves exactly the
+    // 84 evidence bits required after 18 trial bits for a single charged slot.
+    auto just_enough = runtime_marker();
+    for (auto& bit : just_enough) if (bit == 0) bit = unknown;
+    check(std::count(just_enough.begin(), just_enough.end(), 1) == 102 &&
+          byte_sync::recover_packet(just_enough).leading_marker_recognized,
+          "102 known matching marker bits must meet the 84-bit bound without evidence from erased zeros");
+    auto insufficient = just_enough;
+    *std::find(insufficient.begin(), insufficient.end(), 1) = unknown;
+    check(!byte_sync::recover_packet(insufficient).leading_marker_recognized,
+          "101 known bits must fail even when replacing unknowns with zero would closely match the marker");
+    check(!byte_sync::recover_packet(Bytes(byte_sync::marker_bits, unknown)).leading_marker_recognized,
+          "a wholly erased marker must never establish packet framing");
+    const auto marker = runtime_marker();
+    Bytes ambiguous(marker.size() + 1, unknown);
+    ambiguous.front() = marker.front();
+    ambiguous.back() = marker.back();
+    for (std::size_t i = 1; i < marker.size(); ++i)
+        if (marker[i] == marker[i - 1]) ambiguous[i] = marker[i];
+    rejects([&] { byte_sync::recover_packet(ambiguous); },
+            "erased conflicts must not permit two individually credible marker endpoints");
+    just_enough.resize(40000, 0);
+    check(!byte_sync::recover_packet(just_enough).leading_marker_recognized,
+          "erased marker evidence must still pay the full recovery-call slot penalty");
+
+    const auto short_data = random_bits(136);
+    auto partial = slip(byte_sync::insert(short_data), 0, 80, false);
+    partial[33] = partial[43] = unknown;
+    partial[53] ^= 1;
+    const auto inferred = byte_sync::recover_packet(partial);
+    check(inferred.leading_marker_recognized && inferred.bits == short_data,
+          "a deleted marker prefix may combine known mismatches and erased slots within its evidence budget");
+    partial[111] = unknown;
+    const auto acquired = byte_sync::recover_packet(partial, partial.size(), 80);
+    check(acquired.leading_marker_recognized && acquired.bits == short_data &&
+          !byte_sync::recover_packet(partial).leading_marker_recognized,
+          "an unknown trailing anchor bit requires an acquired endpoint rather than an inferred deletion");
 }
 void damaged_markers_and_deferred_recovery() {
     const auto original = random_bits(byte_sync::interval_bits * 3 + 40);
@@ -285,7 +349,7 @@ void truncation_and_resource_bounds() {
     rejects([&] { byte_sync::insert(Bytes{0, 1}); }, "insert must reject non-byte-aligned input");
     rejects([&] { byte_sync::encoded_size(7); }, "encoded size must reject non-byte-aligned input");
     rejects([&] { byte_sync::insert(Bytes{0, 1, 0, 1, 0, 1, 0, 2}); }, "insert must reject non-bit elements");
-    rejects([&] { byte_sync::recover(Bytes{0, 2, 1}); }, "recover must validate even a short uninterpreted tail");
+    rejects([&] { byte_sync::recover(Bytes{0, 3, 1}); }, "recover must reject invalid elements even in a short uninterpreted tail");
     const auto maximum_aligned = std::numeric_limits<std::size_t>::max() - 7;
     rejects([&] { byte_sync::encoded_size(maximum_aligned); }, "expanded size overflow must fail before allocation");
 }
@@ -418,7 +482,7 @@ void partial_periodic_markers_and_rs() {
     for (const bool keyed : {false, true}) for (const auto fec : {FecMode::off, FecMode::rs20, FecMode::rs60}) {
         const auto value = options(keyed, fec);
         const auto plaintext = byte_sync::insert(transfer::message_bits(message, value));
-        for (const auto lost : {1U, 32U, 64U}) {
+        for (const auto lost : {1U, 32U, 64U, 80U}) {
             auto damaged = plaintext;
             for (std::size_t bit = 0; bit < 8; ++bit)
                 damaged[byte_sync::marker_bits + byte_sync::interval_bits - 24 + bit] ^= 1;
@@ -465,6 +529,7 @@ int main() {
         leading_marker_recovery();
         partial_markers_and_confidence();
         inserted_and_deleted_bits();
+        erased_marker_and_data_slots();
         damaged_markers_and_deferred_recovery();
         embedded_markers_remain_data();
         truncation_and_resource_bounds();

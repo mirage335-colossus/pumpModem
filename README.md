@@ -79,9 +79,9 @@ transmissions encrypt every marker bit with the rest of the stream. After existi
 a narrow search at the burst origin and subsequent fixed intervals can
 restore byte alignment after a net shift of up to seven plaintext data bits.
 Recognition tolerates up to eight changed marker bits, or one contiguous loss
-of up to 64 marker bits when the final 32 bits remain intact. Acceptance requires
+of up to 80 marker bits when the final 32 bits remain intact. Acceptance requires
 a unique endpoint and an ideal independent-fair-bit false-match bound of at most
-`2^-100` for the complete recovery attempt; larger inputs and shorter surviving
+`2^-84` for the complete recovery attempt; larger inputs and shorter surviving
 markers allow fewer changed bits. This model is separate from measured channel
 performance and authentication. Recovery leaves damaged data to Reed–Solomon
 correction and whole-packet integrity. Pattern decoding remains
@@ -89,6 +89,10 @@ the sole source of timing and keystream alignment. Markers create no new packet
 parser entry points, and a recognized marker prevents a failed packet from
 being interpreted as dictionary text. The word is derived at runtime from a stored label to
 reduce accidental recognition in program/source transfers.
+Live/capture reception retains missing interior symbol slots on established
+timing and fills their plaintext bits with zero for packet correction. Later
+confident symbols must confirm the extent; trailing uncertainty is trimmed.
+Unknown slots add no marker evidence and cannot produce short dictionary text.
 Raw bits and text below 16 original bytes remain unchanged. Both pattern peers
 need the same current waveform and recovery convention; byte packet APIs
 retain their existing formats. Older packet transmissions without the initial

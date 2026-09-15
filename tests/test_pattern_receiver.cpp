@@ -288,6 +288,10 @@ void pending_tail_requires_joint_confidence() {
             check(result.bursts[0].first_stream_symbol==0 && result.bursts[0].end_sample==symbol &&
                   result.bursts[1].first_stream_symbol==2 && result.bursts[1].first_sample==2*symbol,
                   "independent confidence must preserve both surviving symbols and their original stream positions");
+            auto preserve=search;preserve.preserve_symbol_gaps=true;
+            const auto joined=receive(samples,c,chunks,preserve);
+            check(joined.bursts.size()==1 && joined.bursts.front().bits==Bytes({0,modem::missing_pattern_bit,0}),
+                  "packet gap preservation must replace an unsupported weak tail without borrowing later confidence");
         }
     }
 }
@@ -316,6 +320,22 @@ void unconfirmed_tail_cannot_veto_later_start() {
               "weak pending evidence must not extend the earlier confirmed span");
         check(later.bits==bits && later.first_sample==before && later.end_sample==before+3*symbol,
               "an admitted candidate's weak tail must not discard a stronger later signal's first symbol");
+    }
+}
+void timed_gap_cannot_veto_independent_start() {
+    auto c=config(64);c.pulse_shaping=false;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const auto start=4*symbol+symbol/3;
+    const Bytes later{0,0,1};auto samples=waveform(c,later,start,3*symbol,.73);
+    const auto earlier=waveform(c,{1,0},0,0,.37);
+    std::copy(earlier.begin(),earlier.end(),samples.begin());
+    modem::PatternSearch search;search.preserve_symbol_gaps=true;
+    for(const auto chunk:std::array<std::size_t,2>{37,samples.size()}) {
+        const std::array<std::size_t,1> chunks{chunk};
+        const auto result=receive(samples,c,chunks,search);
+        check(result.bursts.size()==2 && result.bursts.front().bits==Bytes({1,0}) &&
+              result.bursts.back().bits==later,
+              "an obscured retained clock must not veto a confident burst on independent timing");
     }
 }
 void noise_hidden_chips() {
@@ -406,6 +426,32 @@ void keyed_track_survives_missing_symbols() {
     const auto expired=receive(samples,c,chunks,short_gap);
     check(expired.bursts.size()==1 && expired.bursts.front().bits==before,
           "after two failed symbols exhaust the configured gap, old private tracking must expire");
+    modem::PatternSearch preserve;preserve.preserve_symbol_gaps=true;
+    auto expected=bits;std::fill(expected.begin()+4,expected.begin()+7,modem::missing_pattern_bit);
+    for(const auto chunk:std::array<std::size_t,2>{17,samples.size()}) {
+        const std::array<std::size_t,1> delivery{chunk};
+        const auto joined=receive(samples,c,delivery,preserve);
+        check(joined.bursts.size()==1 && joined.bursts.front().bits==expected &&
+              joined.bursts.front().first_stream_symbol==0,
+              "timed gaps must keep unknown interior slots and trim trailing silence across chunk sizes");
+    }
+    auto framed=preserve;framed.packet_content_limit=123;
+    framed.packet_complete=[](const modem::PatternBurst& burst,std::size_t confirmed,const modem::Config&,std::size_t limit) {
+        check(limit==123,"packet completion must receive the caller's actual content limit");
+        return burst.first_stream_symbol==0 && confirmed==4;
+    };
+    const auto separated=receive(samples,c,chunks,framed);
+    check(separated.bursts.size()==2 && separated.bursts[0].bits==before && separated.bursts[1].bits==after &&
+          separated.bursts[1].first_stream_symbol==7,
+          "closing a completed packet must preserve the tracked clock and stream position for later observations");
+    preserve.max_gap_seconds=0;
+    const auto bounded=receive(samples,c,chunks,preserve);
+    check(bounded.bursts.size()==1 && bounded.bursts.front().bits==before,
+          "gap preservation must expire at its configured bound without publishing unknown tails");
+    preserve.max_gap_seconds=6;preserve.bit_limit=5;
+    const auto limited=receive(samples,c,chunks,preserve);
+    check(limited.bursts.size()==1 && limited.bursts.front().bits==before,
+          "unknown slots must obey the bounded bit capacity without rejecting the confirmed prefix");
 }
 void independently_started_epoch_recovers_phase() {
     for(unsigned profile=0;profile<3;++profile) {
@@ -693,6 +739,7 @@ int main() {
     run("weak prefix confidence",weak_prefix_cannot_borrow_payload_confidence);
     run("pending tail joint confidence",pending_tail_requires_joint_confidence);
     run("unconfirmed tail and later start",unconfirmed_tail_cannot_veto_later_start);
+    run("timed gap and independent start",timed_gap_cannot_veto_independent_start);
     run("noise-hidden chip observations",noise_hidden_chips);run("wrong keys and finite noise captures",wrong_key_and_background);
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);

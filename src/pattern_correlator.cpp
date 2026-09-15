@@ -67,7 +67,7 @@ struct PatternCorrelator::Impl {
         double sum_score=0,pending_score=0,committed_score=0;
         std::size_t committed=0;
         std::uint64_t committed_end=0;
-        bool admitted=false;
+        bool admitted=false,pending_gaps=false;
     };
     std::vector<Hypothesis> hypotheses;
     // Only unresolved subsecond schedules need extra fits. Ordinary explicit
@@ -239,6 +239,28 @@ struct PatternCorrelator::Impl {
             accounted_bytes=accounted_bytes-weakest->bits.capacity()+result.bits.capacity();*weakest=std::move(result);
         } else {accounted_bytes+=result.bits.capacity();bursts.push_back(std::move(result));}
     }
+    void clear(Hypothesis& h) {
+        h.burst.bits.clear();h.burst.complete=false;h.admitted=h.pending_gaps=false;
+        h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+    }
+    void append(Hypothesis& h,std::uint8_t bit) {
+        require(h.burst.bits.size()<bit_limit,"pattern bit retention limit reached");
+        if(h.burst.bits.size()==h.burst.bits.capacity()) {
+            const auto capacity=h.burst.bits.capacity();const auto wanted=std::min(bit_limit,std::max<std::size_t>(1,capacity*2));
+            room_for(wanted);h.burst.bits.reserve(wanted);accounted_bytes+=h.burst.bits.capacity()-capacity;
+        }
+        h.burst.bits.push_back(bit);
+    }
+    void mark_pending_gaps(Hypothesis& h) {
+        if(!h.pending_gaps)
+            std::fill(h.burst.bits.begin()+static_cast<std::ptrdiff_t>(h.committed),h.burst.bits.end(),missing_pattern_bit);
+        h.sum_score=h.committed_score;h.pending_score=0;h.pending_gaps=true;
+    }
+    bool gap_expired(const Hypothesis& h,std::size_t additional=0) const {
+        const auto pending=static_cast<long double>(h.burst.bits.size()-h.committed)+additional;
+        const auto symbol=static_cast<long double>(code.symbol_samples())/h.rate;
+        return pending>=2 && pending*symbol>static_cast<long double>(search.max_gap_seconds)*config.sample_rate;
+    }
     void complete(Hypothesis& h,std::size_t hypothesis,std::uint64_t end) {
         std::size_t group_count=0;
         const auto groups=phase_groups(h,group_count);
@@ -256,6 +278,9 @@ struct PatternCorrelator::Impl {
         }
         remember(e);
         const auto standalone=e.score>=threshold();
+        // A timing placeholder cannot disambiguate an unresolved stream
+        // schedule. Resume that search from independently observed evidence.
+        if(h.pending_gaps && group_count!=1) {publish(h);clear(h);}
         const auto pending_count=h.burst.bits.size()-h.committed;
         const auto next_count=static_cast<double>(pending_count)+1;
         const auto next_score=h.pending_score+e.score;
@@ -264,48 +289,69 @@ struct PatternCorrelator::Impl {
         // Preserve a tail whose joint evidence justifies continuation. If it
         // does not, a confident current symbol must still start independently.
         // An unadmitted prefix cannot borrow that later symbol's confidence.
-        if(standalone && pending_count && (!h.admitted || next_chain<threshold())) {
-            publish(h);h.burst.bits.clear();h.burst.complete=false;h.admitted=false;
-            h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+        const auto reliable=e.score>=search.retain_score && e.score-e.alternative_score>=1 &&
+            (group_count==1 || standalone);
+        const auto can_preserve=search.preserve_symbol_gaps && h.admitted && group_count==1;
+        auto preserve_gap=can_preserve &&
+            (h.pending_gaps || !reliable || (standalone && pending_count && next_chain<threshold()));
+        // A weak retained tail can also enter gap mode when its ordinary
+        // evidence timeout fires before the rate-corrected timing timeout.
+        const auto convert_weak_tail=can_preserve && reliable && !standalone && next_chain<threshold() &&
+            next_count>=2 && static_cast<long double>(next_count)*code.symbol_samples()>
+                static_cast<long double>(search.max_gap_seconds)*config.sample_rate && !gap_expired(h,1);
+        if((preserve_gap || convert_weak_tail) && !h.pending_gaps && search.packet_complete &&
+           search.packet_complete(h.burst,h.committed,config,search.packet_content_limit)) {
+            // Packet validation only closes an already admitted buffer. The
+            // current observation still follows the ordinary evidence gates.
+            publish(h);clear(h);preserve_gap=false;
         }
-        if(h.burst.bits.size()==bit_limit && e.score>=search.retain_score)
-            throw Error("pattern bit retention limit reached");
-        // Weak evidence from different possible schedules cannot be added as
-        // though it supported one coherent stream. Resolve a split on the
-        // current symbol's own evidence before extending its bit chain.
-        if(e.score>=search.retain_score && e.score-e.alternative_score>=1 &&
-           (group_count==1 || standalone) && h.burst.bits.size()<bit_limit) {
-            if(standalone) {
-                h.phase_lower=groups[selected].lower;h.phase_upper=groups[selected].upper;
-                h.burst.stream_phase_samples=h.phase_lower;
-            }
-            if(h.burst.bits.empty()) {
-                h.burst.first_sample=h.observed_start;h.burst.first_stream_symbol=h.index;
-                h.burst.stream_phase_samples=h.phase_lower;
-                h.burst.frequency_hz=e.frequency_hz;h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
-            }
-            if(h.burst.bits.size()==h.burst.bits.capacity()) {
-                const auto capacity=h.burst.bits.capacity();const auto wanted=std::min(bit_limit,std::max<std::size_t>(1,capacity*2));
-                room_for(wanted);h.burst.bits.reserve(wanted);accounted_bytes+=h.burst.bits.capacity()-capacity;
-            }
-            h.burst.bits.push_back(static_cast<std::uint8_t>(e.bit));h.burst.end_sample=end;h.sum_score+=e.score;h.pending_score+=e.score;
-            const auto pending=h.burst.bits.size()-h.committed;
-            const auto n=static_cast<double>(pending);
-            const auto chain=h.pending_score>n?h.pending_score-n-n*std::log(h.pending_score/n)-n*std::log(2.):0;
-            if((n==1 && standalone) || chain>=threshold()) {
-                h.admitted=true;h.committed=h.burst.bits.size();h.committed_end=end;
-                h.committed_score=h.sum_score;h.pending_score=0;
-            } else if(pending>=2 && static_cast<long double>(pending)*code.symbol_samples()>
-                    static_cast<long double>(search.max_gap_seconds)*config.sample_rate) {
-                // Expire only this unconfirmed chain. The fixed clock
-                // hypotheses still examine later symbols independently.
-                publish(h);h.burst.bits.clear();h.burst.complete=false;h.admitted=false;
-                h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+        if(preserve_gap) {
+            // Retain only the admitted clock and symbol positions. Missing
+            // slots provide neither bit evidence nor confidence to the track.
+            if(h.burst.bits.size()==bit_limit && !(reliable && standalone)) {publish(h);clear(h);}
+            else {
+                mark_pending_gaps(h);
+                append(h,reliable && standalone?static_cast<std::uint8_t>(e.bit):missing_pattern_bit);
+                h.burst.end_sample=end;
+                if(reliable && standalone) {
+                    h.sum_score+=e.score;h.committed=h.burst.bits.size();h.committed_end=end;
+                    h.committed_score=h.sum_score;h.pending_gaps=false;
+                } else if(gap_expired(h)) {publish(h);clear(h);}
             }
             h.burst.score=h.committed_score;
         } else {
-            publish(h);h.burst.bits.clear();h.burst.complete=false;h.admitted=false;
-            h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+            if(standalone && pending_count && (!h.admitted || next_chain<threshold())) {publish(h);clear(h);}
+            if(h.burst.bits.size()==bit_limit && e.score>=search.retain_score)
+                throw Error("pattern bit retention limit reached");
+            // Weak evidence from different possible schedules cannot be added as
+            // though it supported one coherent stream. Resolve a split on the
+            // current symbol's own evidence before extending its bit chain.
+            if(reliable && h.burst.bits.size()<bit_limit) {
+                if(standalone) {
+                    h.phase_lower=groups[selected].lower;h.phase_upper=groups[selected].upper;
+                    h.burst.stream_phase_samples=h.phase_lower;
+                }
+                if(h.burst.bits.empty()) {
+                    h.burst.first_sample=h.observed_start;h.burst.first_stream_symbol=h.index;
+                    h.burst.stream_phase_samples=h.phase_lower;
+                    h.burst.frequency_hz=e.frequency_hz;h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
+                }
+                append(h,static_cast<std::uint8_t>(e.bit));h.burst.end_sample=end;h.sum_score+=e.score;h.pending_score+=e.score;
+                const auto pending=h.burst.bits.size()-h.committed;
+                const auto n=static_cast<double>(pending);
+                const auto chain=h.pending_score>n?h.pending_score-n-n*std::log(h.pending_score/n)-n*std::log(2.):0;
+                if((n==1 && standalone) || chain>=threshold()) {
+                    h.admitted=true;h.committed=h.burst.bits.size();h.committed_end=end;
+                    h.committed_score=h.sum_score;h.pending_score=0;
+                } else if(pending>=2 && static_cast<long double>(pending)*code.symbol_samples()>
+                        static_cast<long double>(search.max_gap_seconds)*config.sample_rate) {
+                    // Expire only this unconfirmed chain. The fixed clock
+                    // hypotheses still examine later symbols independently.
+                    if(search.preserve_symbol_gaps && h.admitted && group_count==1 && !gap_expired(h))mark_pending_gaps(h);
+                    else {publish(h);clear(h);}
+                }
+                h.burst.score=h.committed_score;
+            } else {publish(h);clear(h);}
         }
         h.fits={};
         for(std::size_t group=0;group<alternate_groups;++group)
@@ -415,7 +461,8 @@ PatternBurst PatternCorrelator::provisional()const {
     const auto& h=impl_->hypotheses;
     const auto best=std::max_element(h.begin(),h.end(),[](const auto& a,const auto& b){return (a.admitted?a.sum_score:-1)<(b.admitted?b.sum_score:-1);});
     if(best==h.end() || !best->admitted)return {};
-    auto result=best->burst;result.bits.resize(best->committed);result.end_sample=best->committed_end;return result;
+    auto result=best->burst;result.bits.resize(best->committed);result.end_sample=best->committed_end;
+    result.complete=best->pending_gaps;return result;
 }
 std::vector<PatternEvidence> PatternCorrelator::candidates()const{return impl_->history;}
 std::vector<PatternEvidence> PatternCorrelator::candidates(std::size_t limit)const{

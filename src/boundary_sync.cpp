@@ -9,11 +9,16 @@
 
 namespace datapump::boundary_sync {
 namespace {
-void validate_bits(std::span<const std::uint8_t> bits, std::size_t limit) {
+constexpr std::uint8_t unknown_bit = 2;
+
+void validate_bits(std::span<const std::uint8_t> bits, std::size_t limit,
+                   bool allow_unknown = false) {
     if (bits.size() > limit || bits.size() > Bytes{}.max_size())
         throw Error("Byte-boundary bit storage exceeds memory limit");
-    if (std::any_of(bits.begin(), bits.end(), [](auto bit) { return bit > 1; }))
-        throw Error("Byte-boundary input elements must be zero or one");
+    const auto maximum = allow_unknown ? unknown_bit : std::uint8_t{1};
+    if (std::any_of(bits.begin(), bits.end(), [maximum](auto bit) { return bit > maximum; }))
+        throw Error(allow_unknown ? "Byte-boundary input elements must be zero, one, or unknown (2)" :
+                                    "Byte-boundary input elements must be zero or one");
 }
 
 const std::array<std::uint8_t, marker_bits>& marker() {
@@ -49,7 +54,7 @@ constexpr std::size_t hypothesis_count() {
         paths += marker_bits - lost - marker_tail_bits + 1;
     return (2 * maximum_slip_bits + 1) * paths;
 }
-static_assert(hypothesis_count() == 123375);
+static_assert(hypothesis_count() == 144615);
 
 unsigned ceil_log2(std::uint64_t value) {
     return static_cast<unsigned>(std::bit_width(value - 1));
@@ -62,9 +67,9 @@ using Volumes = std::array<std::array<unsigned, maximum_marker_errors + 1>, mark
 const Volumes& mismatch_costs() {
     static const auto costs = [] {
         Volumes result{};
-        for (std::size_t n = minimum_marker_bits; n <= marker_bits; ++n) {
+        for (std::size_t n = 0; n <= marker_bits; ++n) {
             std::uint64_t choose = 1, volume = 1;
-            for (std::size_t e = 1; e <= maximum_marker_errors; ++e) {
+            for (std::size_t e = 1; e <= std::min(n, maximum_marker_errors); ++e) {
                 choose = choose * (n - e + 1) / e;
                 volume += choose;
                 result[n][e] = ceil_log2(volume);
@@ -85,8 +90,10 @@ struct Acceptance {
         const auto slots = 1 + input_bits / (interval_bits - maximum_slip_bits + minimum_marker_bits);
         const auto penalty = false_match_bits + ceil_log2(hypothesis_count()) + ceil_log2(slots);
         const auto& costs = mismatch_costs();
-        for (std::size_t n = minimum_marker_bits; n <= marker_bits; ++n)
-            for (std::size_t e = 0; e <= maximum_marker_errors; ++e)
+        // Marker geometry still occupies at least minimum_marker_bits slots,
+        // but erased slots contribute no independent bit observations.
+        for (std::size_t n = 0; n <= marker_bits; ++n)
+            for (std::size_t e = 0; e <= std::min(n, maximum_marker_errors); ++e)
                 if (penalty + costs[n][e] <= n) errors[n] = static_cast<int>(e);
     }
 };
@@ -128,27 +135,35 @@ std::optional<Match> match_marker(std::span<const std::uint8_t> bits,
     for (auto offset = first; offset <= last; ++offset) {
         const auto available = std::min(marker_bits, bits.size() - offset);
         const auto observed = bits.subspan(offset, available);
-        std::array<unsigned, marker_bits + 1> prefix{}, suffix{};
-        for (std::size_t i = 0; i < available; ++i)
-            prefix[i + 1] = prefix[i] + (observed[i] != expected[i]);
-        if (available == marker_bits && acceptance.errors[marker_bits] >= 0 &&
-            prefix[marker_bits] <= static_cast<unsigned>(acceptance.errors[marker_bits]))
+        std::array<unsigned, marker_bits + 1> prefix{}, suffix{}, known{};
+        for (std::size_t i = 0; i < available; ++i) {
+            const auto present = observed[i] != unknown_bit;
+            known[i + 1] = known[i] + present;
+            prefix[i + 1] = prefix[i] + (present && observed[i] != expected[i]);
+        }
+        const auto complete_observations = known[available];
+        if (available == marker_bits && acceptance.errors[complete_observations] >= 0 &&
+            prefix[marker_bits] <= static_cast<unsigned>(acceptance.errors[complete_observations]))
             consider(best, {offset, marker_bits,
-                static_cast<unsigned>(marker_bits) - costs[marker_bits][prefix[marker_bits]]});
+                complete_observations - costs[complete_observations][prefix[marker_bits]]});
         for (std::size_t lost = 1; lost <= maximum_marker_loss_bits; ++lost) {
-            const auto n = marker_bits - lost;
-            if (available < n || acceptance.errors[n] < 0) continue;
+            const auto length = marker_bits - lost;
+            if (available < length) continue;
+            const auto n = known[length];
+            if (acceptance.errors[n] < 0) continue;
             // Without an intact end anchor, a shortened marker prefix could
             // consume arbitrary payload bits. Do not infer a missing trailer.
+            // Unknown timed slots cannot satisfy this exact observed anchor.
             if (!std::equal(expected.end() - static_cast<std::ptrdiff_t>(marker_tail_bits), expected.end(),
-                            observed.begin() + static_cast<std::ptrdiff_t>(n - marker_tail_bits))) continue;
-            suffix[n] = 0;
-            for (auto i = n; i > 0; --i)
-                suffix[i - 1] = suffix[i] + (observed[i - 1] != expected[i - 1 + lost]);
-            for (std::size_t gap = 0; gap <= n - marker_tail_bits; ++gap) {
+                            observed.begin() + static_cast<std::ptrdiff_t>(length - marker_tail_bits))) continue;
+            suffix[length] = 0;
+            for (auto i = length; i > 0; --i)
+                suffix[i - 1] = suffix[i] +
+                    (observed[i - 1] != unknown_bit && observed[i - 1] != expected[i - 1 + lost]);
+            for (std::size_t gap = 0; gap <= length - marker_tail_bits; ++gap) {
                 const auto errors = prefix[gap] + suffix[gap];
                 if (errors <= static_cast<unsigned>(acceptance.errors[n]))
-                    consider(best, {offset, n, static_cast<unsigned>(n) - costs[n][errors]});
+                    consider(best, {offset, length, n - costs[n][errors]});
             }
         }
     }
@@ -157,13 +172,16 @@ std::optional<Match> match_marker(std::span<const std::uint8_t> bits,
 
 std::optional<Match> match_known_suffix(std::span<const std::uint8_t> bits,
                                        std::size_t missing, const Acceptance& acceptance) {
-    const auto n = marker_bits - missing;
-    if (bits.size() < n || acceptance.errors[n] < 0) return {};
+    const auto length = marker_bits - missing;
+    if (bits.size() < length) return {};
     const auto& expected = marker();
-    unsigned errors = 0;
-    for (std::size_t i = 0; i < n; ++i) errors += bits[i] != expected[i + missing];
-    if (errors > static_cast<unsigned>(acceptance.errors[n])) return {};
-    return Match{0, n, static_cast<unsigned>(n) - mismatch_costs()[n][errors]};
+    unsigned errors = 0, n = 0;
+    for (std::size_t i = 0; i < length; ++i) if (bits[i] != unknown_bit) {
+        ++n;
+        errors += bits[i] != expected[i + missing];
+    }
+    if (acceptance.errors[n] < 0 || errors > static_cast<unsigned>(acceptance.errors[n])) return {};
+    return Match{0, length, n - mismatch_costs()[n][errors]};
 }
 }
 
@@ -195,7 +213,7 @@ Bytes insert(std::span<const std::uint8_t> bits, std::size_t limit) {
 
 Recovery recover_packet(std::span<const std::uint8_t> wire_bits, std::size_t limit,
                         std::size_t leading_missing_bits) {
-    validate_bits(wire_bits, limit);
+    validate_bits(wire_bits, limit, true);
     if (leading_missing_bits > maximum_marker_loss_bits)
         throw Error("Missing leading marker exceeds recovery limit");
     const Acceptance acceptance(wire_bits.size());
@@ -210,6 +228,7 @@ Recovery recover_packet(std::span<const std::uint8_t> wire_bits, std::size_t lim
     const auto initial_length = marker_bits - leading_missing_bits;
     if (!initial && wire_bits.size() < initial_length) {
         append(output, wire_bits);
+        std::replace(output.begin(), output.end(), unknown_bit, std::uint8_t{0});
         return result;
     }
     std::size_t position = initial ? initial->offset + initial->length : initial_length;
@@ -229,6 +248,7 @@ Recovery recover_packet(std::span<const std::uint8_t> wire_bits, std::size_t lim
         }
     }
     append(output, wire_bits.subspan(position));
+    std::replace(output.begin(), output.end(), unknown_bit, std::uint8_t{0});
     return result;
 }
 

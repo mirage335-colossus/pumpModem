@@ -287,7 +287,19 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& input_option
     result.diagnostics.pattern_score=burst.score;
     result.diagnostics.sample_offset=static_cast<std::size_t>(burst.first_sample);
     result.raw_bits=std::move(burst.bits);result.packet_validated=false;
-    xor_binary_bits(result.raw_bits,context,static_cast<std::size_t>(burst.first_stream_symbol));
+    // Decrypt known spans at their original symbol positions. An unknown
+    // ciphertext bit has no known plaintext value: fill its slot with zero
+    // after decryption, without shifting any subsequent mask addresses.
+    const auto first_symbol=static_cast<std::size_t>(burst.first_stream_symbol);
+    if(result.raw_bits.size()>std::numeric_limits<std::size_t>::max()-first_symbol)
+        throw Error("received pattern stream extent exceeds bit address space");
+    std::size_t begin=0;
+    for(std::size_t i=0;i<=result.raw_bits.size();++i) {
+        if(i<result.raw_bits.size() && result.raw_bits[i]!=modem::missing_pattern_bit)continue;
+        xor_binary_bits(std::span(result.raw_bits).subspan(begin,i-begin),context,first_symbol+begin);
+        if(i<result.raw_bits.size())++result.missing_symbols;
+        begin=i+1;
+    }
     // Recovery has one fixed cadence anchored to this burst, never a search
     // for embedded packets. Decryption and its constellation-supplied stream
     // position are unchanged; only the decrypted byte grouping is recovered.
@@ -295,11 +307,14 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& input_option
     try { candidate=boundary_sync::recover_packet(result.raw_bits,pattern_bit_limit(options.content_limit),
                                                   static_cast<std::size_t>(burst.first_stream_symbol)); }
     catch(const Error&) {} // Invalid recovery leaves only raw evidence.
+    // The marker matcher excludes unknown slots from its evidence. Only now
+    // materialize diagnostic zeroes; recovered packet data uses the same fill.
+    std::replace(result.raw_bits.begin(),result.raw_bits.end(),modem::missing_pattern_bit,std::uint8_t{0});
     // Content grammar is interpreted only after pattern acquisition. A bad
     // packet never changes the winning signal timing or discards its raw bits.
     // A late burst may contain the first packet only when its surviving
     // leading marker supplies enough evidence for the original packet origin.
-    if(candidate && (!burst.first_stream_symbol || candidate->leading_marker_recognized) && candidate->bits.size()%8==0) {
+    if(candidate && ((!burst.first_stream_symbol && !result.missing_symbols) || candidate->leading_marker_recognized) && candidate->bits.size()%8==0) {
         Bytes bytes(candidate->bits.size()/8);
         for(std::size_t i=0;i<candidate->bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(candidate->bits[i]<<(7-i%8));
         try {
@@ -309,13 +324,56 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& input_option
             }
         } catch(const Error&) {}
     }
-    if((options.key && burst.first_stream_symbol) ||
+    if(result.missing_symbols || (options.key && burst.first_stream_symbol) ||
        (candidate && candidate->leading_marker_recognized) || result.raw_bits.size()>15*13)return result;
     try {
         auto decoded=compression::decode_short_bits(result.raw_bits,std::min<std::size_t>(15,options.content_limit));
         result.packet.message.data=std::move(decoded);
     } catch(const Error&) {} // Preserve uninterpreted or truncated raw bits.
     return result;
+}
+
+bool pattern_packet_complete(const modem::PatternBurst& burst,std::size_t confirmed_bits,
+                             const modem::Config& config,std::size_t content_limit) {
+    if(!content_limit || confirmed_bits>burst.bits.size() || burst.first_stream_symbol>boundary_sync::maximum_marker_loss_bits)
+        return false;
+    constexpr auto probe_limit=boundary_sync::marker_bits+boundary_sync::maximum_slip_bits+packet_prefix_size*8;
+    constexpr auto minimum=boundary_sync::marker_bits-boundary_sync::maximum_marker_loss_bits+packet_min_prefix_size*8;
+    if(confirmed_bits<minimum)return false;
+    try {
+        Options options;options.modem=config;options.modem.stream_phase_samples=burst.stream_phase_samples;
+        options.key=config.data_key;options.timestamp=config.stream_epoch;
+        // Full validation retains the actual receiver's content budget,
+        // including highly compressed packets. Partial probes stay fixed-size.
+        options.content_limit=content_limit;
+        if(confirmed_bits>pattern_bit_limit(content_limit))return false;
+        Bytes prefix(burst.bits.begin(),burst.bits.begin()+static_cast<std::ptrdiff_t>(std::min(confirmed_bits,probe_limit)));
+        auto context=options;context.content_limit=std::max(context.content_limit,prefix.size());
+        const auto first=static_cast<std::size_t>(burst.first_stream_symbol);
+        std::size_t begin=0;
+        for(std::size_t i=0;i<=prefix.size();++i) {
+            if(i<prefix.size() && prefix[i]!=modem::missing_pattern_bit)continue;
+            xor_binary_bits(std::span(prefix).subspan(begin,i-begin),context,first+begin);
+            begin=i+1;
+        }
+        const auto recovered=boundary_sync::recover_packet(prefix,prefix.size(),first);
+        if(!recovered.leading_marker_recognized)return false;
+        Bytes header(std::min(packet_prefix_size,recovered.bits.size()/8));
+        for(std::size_t i=0;i<header.size()*8;++i)
+            header[i/8]|=static_cast<std::uint8_t>(recovered.bits[i]<<(7-i%8));
+        const auto frame=packet_probe_frame_size(header,packet_budget(options));
+        if(!frame || *frame>std::numeric_limits<std::size_t>::max()/8)return false;
+        const auto marked=boundary_sync::encoded_size(*frame*8);
+        const auto leading=prefix.size()-recovered.bits.size();
+        const auto rest=marked-boundary_sync::marker_bits;
+        if(leading>std::numeric_limits<std::size_t>::max()-rest || confirmed_bits!=rest+leading)return false;
+
+        modem::PatternBurst complete;
+        complete.bits.assign(burst.bits.begin(),burst.bits.begin()+static_cast<std::ptrdiff_t>(confirmed_bits));
+        complete.first_sample=burst.first_sample;complete.first_stream_symbol=burst.first_stream_symbol;
+        complete.stream_phase_samples=burst.stream_phase_samples;complete.score=burst.score;complete.complete=true;
+        return interpret_pattern(std::move(complete),options,config.stream_epoch).packet_validated;
+    } catch(const Error&) { return false; }
 }
 
 void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,std::size_t bit_offset) {
@@ -402,6 +460,9 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
+        search.preserve_symbol_gaps=true;
+        search.packet_complete=pattern_packet_complete;
+        search.packet_content_limit=value.content_limit;
         search.search_stream_phases=options.key.has_value();
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);
@@ -444,6 +505,9 @@ Received simulate(const Message& message, const Options& input_options, const mo
             (static_cast<double>(modem::training_sample_count(profile))+
              static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
+        search.preserve_symbol_gaps=true;
+        search.packet_complete=pattern_packet_complete;
+        search.packet_content_limit=value.content_limit;
         search.search_stream_phases=options.key.has_value();
         search.start_uncertainty_seconds=options.search_seconds+1.;
         modem::PatternReceiver decoder(seeded_config(value,epoch),options.dsp_workspace_bytes,search);

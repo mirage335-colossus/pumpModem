@@ -352,7 +352,7 @@ std::string id_string(const Message& m) {
     std::ostringstream id;for(auto b:m.id) id<<std::hex<<std::setfill('0')<<std::setw(2)<<static_cast<unsigned>(b);return id.str();
 }
 void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
-            bool packet_validated=true,std::span<const std::uint8_t> raw_bits={}) {
+            bool packet_validated=true,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0) {
     const auto& m=packet.message;
     if(a.has("save")) {
         if(!packet_validated && m.data.empty() && !raw_bits.empty()) {
@@ -369,7 +369,8 @@ void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& 
           <<",\"data_base64\":\""<<base64_encode(m.data)<<"\",\"corrected_bytes\":"<<packet.corrected_bytes
           <<",\"timestamp\":"<<timestamp<<",\"raw_bits\":\"";
         for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
-        std::cout<<"\",\"raw_bit_count\":"<<raw_bits.size()<<",\"diagnostics\":{\"sample_offset\":"<<d.sample_offset
+        std::cout<<"\",\"raw_bit_count\":"<<raw_bits.size()<<",\"missing_symbols\":"<<missing_symbols
+          <<",\"diagnostics\":{\"sample_offset\":"<<d.sample_offset
           <<",\"correlation\":"<<d.preamble_correlation<<",\"snr_db\":";
         if(d.pattern_score || !std::isfinite(d.snr_db))std::cout<<"null";else std::cout<<d.snr_db;
         std::cout<<",\"pattern_score\":";
@@ -388,9 +389,11 @@ void report(const Args& a,const DecodedPacket& packet,const modem::Diagnostics& 
         } else if(stdout_terminal()) std::cout<<terminal_text(m.data);
         else std::cout.write(reinterpret_cast<const char*>(m.data.data()),static_cast<std::streamsize>(m.data.size()));
     }
+    if(missing_symbols && !a.has("json"))
+        std::cerr<<"Raw bits include "<<missing_symbols<<(missing_symbols==1?" zero placeholder for a missing symbol.\n":" zero placeholders for missing symbols.\n");
 }
 void report_received(const Args& a,const transfer::Received& received) {
-    report(a,received.packet,received.diagnostics,received.timestamp,received.packet_validated,received.raw_bits);
+    report(a,received.packet,received.diagnostics,received.timestamp,received.packet_validated,received.raw_bits,received.missing_symbols);
 }
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");
@@ -568,7 +571,8 @@ int main(int argc,char** argv) {
                 const auto result=transfer::receive(wav.samples,settings,progress);
                 std::cout<<"{\"authenticated\":false,\"packet_validated\":false,\"known_bits\":\""<<a.get("bits")<<"\",\"raw_bits\":\"";
                 for(auto bit:result.raw_bits)std::cout<<(bit?'1':'0');
-                std::cout<<"\",\"raw_bit_count\":"<<result.raw_bits.size()<<",\"known_bits_match\":"<<(result.raw_bits==plain?"true":"false")<<",\"pattern_score\":";
+                std::cout<<"\",\"raw_bit_count\":"<<result.raw_bits.size()<<",\"missing_symbols\":"<<result.missing_symbols
+                    <<",\"known_bits_match\":"<<(result.raw_bits==plain?"true":"false")<<",\"pattern_score\":";
                 if(result.diagnostics.pattern_score && std::isfinite(*result.diagnostics.pattern_score))std::cout<<*result.diagnostics.pattern_score;else std::cout<<"null";
                 std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
             }

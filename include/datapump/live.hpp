@@ -47,13 +47,14 @@ struct SignalUpdate {
     std::optional<double> preamble_received_percent = std::nullopt;
     // Available only after complete packet integrity/authentication checks.
     std::optional<PacketBitAccuracy> pre_fec_accuracy = std::nullopt;
-    // Raw bits are decoded observations, without a packet checksum/MAC or
-    // error correction. A completed result may contain channel bit errors.
+    // Raw bits contain decoded observations and zero placeholders for timed
+    // gaps, without a packet checksum/MAC or error correction.
     bool binary = false;
     bool complete = false;
     std::size_t received_bits = 0;
     std::size_t expected_bits = 0;
     std::optional<double> pattern_score = std::nullopt;
+    std::size_t missing_symbols = 0; // Unobserved slots filled with plaintext zero.
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {

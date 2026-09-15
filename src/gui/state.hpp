@@ -92,10 +92,12 @@ struct SignalLine {
     // Exact retained transport bits for decoded pattern text, independently
     // of its message bytes. Empty means the original bits are unavailable.
     std::string raw_bits;
+    std::size_t missing_symbols = 0;
 };
 bool signal_byte_aligned(const SignalLine& line);
 std::string signal_display_text(const SignalLine& line);
 std::string signal_status_label(const SignalLine& line);
+std::string signal_gap_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
 std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.

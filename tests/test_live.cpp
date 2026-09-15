@@ -1,5 +1,7 @@
 #include "datapump/live.hpp"
 #include "datapump/audio.hpp"
+#include "datapump/boundary_sync.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -869,7 +871,10 @@ void test_simulation_replay_and_live_constellation() {
     check(!cancelled_replay.simulation_replay && cancelled_replay.constellation_source == live::ConstellationSource::input,
           "cancel during replay immediately releases all retained constellation state");
     replay_milliseconds = next_started_at + 3000;
-    const auto after_cancel=wait_for(session,[&](const auto& snapshot){return snapshot.sequence>cancelled_replay.sequence;});
+    // Receiver evidence can advance the sequence before the next measured plot.
+    const auto after_cancel=wait_for(session,[&](const auto& snapshot){
+        return snapshot.sequence>cancelled_replay.sequence && !snapshot.constellation.empty();
+    });
     check(!after_cancel.constellation.empty() && after_cancel.constellation_source==live::ConstellationSource::input,
           "cancelled replay continues publishing measured input points without restoring old frames");
     check(after_cancel.signals.empty() && after_cancel.received.empty(),
@@ -1156,6 +1161,72 @@ void test_pattern_audio_publishes_confident_prefix() {
             return item.id==signal_id && item.binary && item.complete && item.text=="0110";
         });
     });
+    session.stop();
+}
+void test_pattern_audio_gap_upgrades_short_content() {
+    constexpr std::uint64_t epoch=1800000000;
+    auto value=settings();value.simulation=false;value.device="live-test-audio";
+    value.transfer.timestamp=epoch;value.transfer.search_seconds=0;value.transfer.fec=FecMode::rs20;
+    value.transfer.modem.spreading_factor=32;value.transfer.modem.pulse_shaping=false;
+    value.dsp_workspace_bytes=8*1024*1024;
+    Message sent;sent.data=Bytes(17,'Z');sent.id.fill(0x61);
+    const auto bits=transfer::message_wire_bits(sent,value.transfer);
+    std::size_t marker_prefix=0;Bytes short_content;
+    for(std::size_t count=16;count<=100;++count) {
+        try {short_content=compression::decode_short_bits(std::span(bits).first(count),15);}
+        catch(const Error&) {continue;}
+        if(!short_content.empty()){marker_prefix=count;break;}
+    }
+    check(marker_prefix && marker_prefix+2<boundary_sync::marker_bits,
+          "marker gap fixture needs a short dictionary interpretation before complete marker recognition");
+    const auto layout=packet_layout(encode_packet(sent,transfer::packet_options(value.transfer,epoch)));
+    const auto body=boundary_sync::marker_bits+(layout.header_bytes+layout.header_parity_bytes)*8;
+    const auto found=std::find(bits.begin()+static_cast<std::ptrdiff_t>(body),bits.end(),1);
+    check(found!=bits.end(),"body gap fixture must lose an actual plaintext one");
+    const auto body_gap=static_cast<std::size_t>(found-bits.begin());
+    const auto symbol=modem::symbol_sample_count(value.transfer.modem);
+    const auto settling=modem::training_sample_count(value.transfer.modem);
+    auto recording=transfer::transmit(sent,value.transfer);
+    recording.erase(recording.begin(),recording.begin()+static_cast<std::ptrdiff_t>(settling));
+    for(const auto gap:{marker_prefix,marker_prefix+1,body_gap})
+        std::fill(recording.begin()+static_cast<std::ptrdiff_t>(gap*symbol),
+                  recording.begin()+static_cast<std::ptrdiff_t>((gap+1)*symbol),0.F);
+    recording.resize(recording.size()+4*symbol);
+    const auto paused_at=(marker_prefix+2)*symbol;
+    live_test_audio::capture_samples=std::make_shared<const std::vector<float>>(std::move(recording));
+    live_test_audio::captured_samples=0;live_test_audio::capture_sample_limit=paused_at;
+    struct ResetCapture {
+        ~ResetCapture(){live_test_audio::capture_sample_limit=std::numeric_limits<std::uint64_t>::max();
+            live_test_audio::capture_samples.store({});}
+    } reset;
+    live::Session session([=]{return static_cast<double>(epoch);});session.start(value);
+    std::uint64_t signal_id=0;
+    const auto early=wait_for(session,[&](const auto& snapshot){
+        const auto candidate=std::find_if(snapshot.received.begin(),snapshot.received.end(),[&](const auto& item){
+            return !item.packet_validated && item.packet.message.data==short_content;
+        });
+        if(candidate==snapshot.received.end())return false;
+        const auto signal=std::find_if(snapshot.signals.begin(),snapshot.signals.end(),[&](const auto& item){
+            return item.binary && item.complete && !item.validated && item.received_bits==marker_prefix;
+        });
+        check(signal!=snapshot.signals.end(),"early short content must retain its completed raw signal row");
+        signal_id=signal->id;return true;
+    },5s);
+    check(live_test_audio::captured_samples>marker_prefix*symbol &&
+          live_test_audio::captured_samples<=paused_at && !early.received.front().packet_validated,
+          "early short content must be reported while capture is restricted to the marker gap");
+    live_test_audio::capture_sample_limit=std::numeric_limits<std::uint64_t>::max();
+    const auto completed=wait_for(session,[&](const auto& snapshot){
+        return std::any_of(snapshot.received.begin(),snapshot.received.end(),[&](const auto& item){
+            return item.packet_validated && item.packet.message.id==sent.id;
+        });
+    },10s);
+    const auto packet=std::find_if(completed.received.begin(),completed.received.end(),[](const auto& item){return item.packet_validated;});
+    check(packet->packet.message.data==sent.data && packet->missing_symbols==3 && packet->packet.corrected_bytes>0,
+          "later full packet validation must upgrade earlier short content and repair every timed body gap");
+    check(std::any_of(completed.signals.begin(),completed.signals.end(),[&](const auto& item){
+        return item.id==signal_id && item.validated && item.complete && item.missing_symbols==3;
+    }),"the repaired packet must replace the early raw candidate on the same live signal");
     session.stop();
 }
 void test_public_long_symbol_after_idle_window() {
@@ -1522,6 +1593,7 @@ int main(int argc, char** argv) {
         run("idle epoch refresh", test_encrypted_epoch_bank_refreshes_while_idle);
         run("noise epoch bounded retirement", test_noise_epochs_retire_with_bounded_workspace);
         run("pattern audio confident prefix", test_pattern_audio_publishes_confident_prefix);
+        run("pattern audio gap upgrades short content", test_pattern_audio_gap_upgrades_short_content);
         run("public long symbol after idle window", test_public_long_symbol_after_idle_window);
         run("pattern validated completion", test_pattern_packet_completion_keeps_validated_content);
         run("pattern epoch boundary", test_pattern_epoch_boundary);

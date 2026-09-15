@@ -326,8 +326,8 @@ in natural-log units derived from a white Gaussian model. It is not APSK
 point error, measured dB, a calibrated confidence percentage or authentication.
 Timing, carrier and keystream candidates are compared only using this pattern
 evidence. High individual evidence can admit a single symbol; weaker retained
-symbols can contribute to a chain. A failed symbol ends the contiguous recovered
-span without inserting a guessed bit. Established timing continues across
+symbols can contribute to a chain. The low-level default ends the contiguous
+recovered span at a failed symbol. Established timing continues across
 missing symbols until at least two successive symbols have failed and their
 combined duration exceeds six seconds. Thus two missing hours-long symbols
 end a message; short symbols retain synchronization through a gap of up to
@@ -338,7 +338,39 @@ Retained weak symbols can be admitted by their combined evidence. If that
 combined evidence remains insufficient when a confident symbol arrives, the
 receiver preserves the confirmed prefix and starts a new span at that symbol.
 No supplied bit count, packet length, known text or checksum admits a burst.
-Packet decoding and optional integrity checks occur after the burst is chosen.
+Packet decoding and optional integrity checks use already admitted observations.
+
+Live reception, capture decoding and transfer simulation enable
+`PatternSearch::preserve_symbol_gaps`. Within the same admitted timing track,
+unknown interior slots are retained until an independently confident symbol
+confirms their extent, subject to the same gap timeout. They provide no bit
+evidence, score or timing refinement, and cannot select an unresolved private
+stream schedule. Unsupported weak tails become unknown slots rather than
+borrowing a later symbol's confidence. Unconfirmed trailing slots are trimmed
+at silence, timeout, capacity exhaustion or the end of a capture.
+
+The internal `missing_pattern_bit` value keeps those positions distinct from
+observed zeroes and ones without extra per-bit allocations. Transfer decoding
+decrypts known spans at their original stream positions, excludes unknowns from
+marker evidence, and fills the missing plaintext bits with zero for FEC. Only
+a recognized leading marker and complete packet integrity permit a gap-filled
+packet to validate. Such bits cannot become dictionary text. `Received::raw_bits`
+contains diagnostic zero placeholders; `Received::missing_symbols` counts them.
+This preserves interior byte alignment; it cannot infer missing final symbols
+without a later confident endpoint, or repair an actual discontinuity in the
+capture clock. The transmitted format and symbol acceptance thresholds are unchanged.
+
+Before retaining a new gap, the transfer layer checks whether the confirmed
+prefix is already a complete packet. A bounded marker/header probe rejects
+obvious incomplete prefixes; full SHA-256 or MAC validation is required before
+closing the packet buffer. This keeps successive complete packets separate
+even on the same timing grid, without changing the acquired clock or giving
+unobserved bits confidence. Raw streams have no packet integrity or explicit
+endpoint, so their gap timeout determines whether same-grid spans are joined.
+During a pending gap the provisional view marks the confirmed observed span
+complete, allowing prompt raw presentation. A later recovered extension can
+replace that view, and a validated packet upgrades any earlier short-text
+interpretation on the same signal.
 
 The default frequency bank contains five offsets at 0, ±1/(4T), ±1/(2T),
 where T is symbol duration. The API permits an explicit bounded offset bank.

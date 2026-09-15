@@ -616,6 +616,7 @@ struct Controller::Impl {
                 line.text=std::string(received.packet.message.data.begin(),received.packet.message.data.end());
                 line.complete=true;line.pattern_score=received.diagnostics.pattern_score;
                 line.received_bits=received.raw_bits.size();
+                line.missing_symbols=received.missing_symbols;
                 if(received.raw_bits.size()<=4096)line.raw_bits=bit_text(received.raw_bits);
                 signals.update(std::move(line));
             }
@@ -629,7 +630,9 @@ struct Controller::Impl {
             }))continue;
             const auto packet=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.packet_id; });
             const bool text=packet!=inbox.items().end()&&packet->message.kind==MessageKind::text;
-            signals.update({signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score});
+            SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.packet_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
+            line.missing_symbols=signal.missing_symbols;
+            signals.update(std::move(line));
         }
         if(!next.signals.empty() || !next.received.empty()) refresh_signals();
         if(transmit_requested&&!next.transmitting&&next.transmission_finished) { transmit_requested=false; gate.finished(); }

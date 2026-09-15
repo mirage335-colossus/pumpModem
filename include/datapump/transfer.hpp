@@ -80,11 +80,19 @@ struct Received {
     DecodedPacket packet;
     modem::Diagnostics diagnostics;
     std::uint64_t timestamp = 0;
-    Bytes raw_bits{}; // Exact observed bits under the raw Data-mask convention.
+    // Observed Data-unmasked decisions, with plaintext zero placeholders in
+    // timed interior gaps. missing_symbols counts those unobserved slots.
+    Bytes raw_bits{};
+    std::size_t missing_symbols = 0;
     bool packet_validated = true;
 };
 Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t timestamp,
                            modem::Diagnostics = {});
+// Bounded header prefilter, followed by complete packet integrity validation
+// only at a plausible full extent. Used to avoid joining finished packets
+// across a later gap; it never chooses signal timing or accepts a partial frame.
+bool pattern_packet_complete(const modem::PatternBurst&, std::size_t confirmed_bits,
+                             const modem::Config&, std::size_t content_limit);
 using Progress = std::function<void(std::uint64_t)>;
 
 // Separate codec scratch from the amount of application content admitted.

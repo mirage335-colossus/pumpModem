@@ -391,6 +391,139 @@ void partial_leading_marker_waveform() {
               "partial-marker recognition must validate clear and private packets after actual PCM acquisition loses the first symbol");
     }
 }
+void missing_symbol_packet_waveform() {
+    Message message;message.data=Bytes(17,'Z');message.id.fill(0x61);
+    for(const bool keyed:{false,true})for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        auto value=options(keyed);value.compression=false;value.fec=fec;value.search_seconds=0;
+        value.modem=modem::Config{};value.modem.spreading_factor=32;
+        value.modem.scramble=keyed;value.modem.pulse_shaping=false;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(value.modem));
+        const auto payload_start=static_cast<std::size_t>(modem::training_sample_count(value.modem));
+        const auto layout=packet_layout(encode_packet(message,transfer::packet_options(value,value.timestamp)));
+        const auto wire=transfer::message_wire_bits(message,value);
+        auto plaintext=wire;transfer::xor_binary_bits(plaintext,value);
+        const auto first_one=[&](std::size_t first) {
+            const auto found=std::find(plaintext.begin()+static_cast<std::ptrdiff_t>(first),plaintext.end(),1);
+            check(found!=plaintext.end(),"gap fixture must erase an actual plaintext one");
+            return static_cast<std::size_t>(found-plaintext.begin());
+        };
+        const auto body=first_one(boundary_sync::marker_bits+(layout.header_bytes+layout.header_parity_bytes)*8);
+        const auto header=first_one(boundary_sync::marker_bits);
+        const auto marker=first_one(16);
+        check(wire.size()<boundary_sync::marker_bits+boundary_sync::interval_bits,
+              "gap fixture must exercise a compact packet with no periodic marker to rescue its body");
+        for(const auto gaps:{std::vector<std::size_t>{body},std::vector<std::size_t>{marker,header,body,body+1}}) {
+            auto samples=transfer::transmit(message,value);
+            for(const auto gap:gaps)
+                std::fill(samples.begin()+static_cast<std::ptrdiff_t>(payload_start+gap*symbol),
+                          samples.begin()+static_cast<std::ptrdiff_t>(payload_start+(gap+1)*symbol),0.F);
+            samples.resize(samples.size()+3*symbol);
+            auto expected=plaintext;for(const auto gap:gaps)expected[gap]=0;
+            const auto received=transfer::receive(samples,value);
+            check(received.raw_bits==expected && received.missing_symbols==gaps.size(),
+                  "blanked PCM symbols must become zero slots with every later decrypted bit still aligned");
+            check(received.packet_validated==(fec!=FecMode::off),
+                  "an erased plaintext one must require FEC to pass packet integrity");
+            if(fec!=FecMode::off) {
+                check(received.packet.message.data==message.data && received.packet.authenticated==keyed &&
+                      received.packet.corrected_bytes>0 && received.packet.pre_fec_accuracy &&
+                      received.packet.pre_fec_accuracy->corrected_data_bits>0,
+                      "public and keyed damaged PCM must exercise actual Reed-Solomon correction");
+            }
+        }
+    }
+    // Gap-filled short/raw streams have no integrity check to validate guesses.
+    modem::PatternBurst short_burst;short_burst.bits={0,modem::missing_pattern_bit,0};
+    const auto raw=transfer::interpret_pattern(short_burst,options(),options().timestamp);
+    check(raw.raw_bits==Bytes({0,0,0}) && raw.missing_symbols==1 && !raw.packet_validated && raw.packet.message.data.empty(),
+          "unknown raw slots must not manufacture dictionary text");
+}
+void completed_packet_gap_probe() {
+    Message message;message.data=Bytes(17,'Z');message.id.fill(0x61);
+    for(const bool keyed:{false,true}) {
+        auto value=options(keyed);value.compression=false;
+        const auto config=transfer::seeded_config(value,value.timestamp);
+        modem::PatternBurst burst;burst.bits=transfer::message_wire_bits(message,value);
+        const auto count=burst.bits.size();
+        check(transfer::pattern_packet_complete(burst,count,config,value.content_limit),
+              "completion probe must validate an exact public or keyed packet");
+        check(!transfer::pattern_packet_complete(burst,count-1,config,value.content_limit),
+              "completion probe must not turn a protected header into a partial packet completion");
+        const auto layout=packet_layout(encode_packet(message,transfer::packet_options(value,value.timestamp)));
+        const auto body=boundary_sync::marker_bits+(layout.header_bytes+layout.header_parity_bytes)*8;
+        burst.bits[body]=modem::missing_pattern_bit;
+        burst.bits.push_back(modem::missing_pattern_bit);
+        check(transfer::pattern_packet_complete(burst,count,config,value.content_limit) &&
+              !transfer::pattern_packet_complete(burst,count+1,config,value.content_limit),
+              "completion probe must repair earlier timed gaps and ignore only the explicitly unconfirmed tail");
+        burst.bits.resize(count);
+        for(std::size_t i=body;i<burst.bits.size();++i)burst.bits[i]=modem::missing_pattern_bit;
+        check(!transfer::pattern_packet_complete(burst,count,config,value.content_limit),
+              "a plausible protected header cannot close an uncorrectable packet");
+        burst.bits=transfer::message_wire_bits(message,value);
+        burst.bits.erase(burst.bits.begin(),burst.bits.begin()+64);burst.first_stream_symbol=64;
+        check(transfer::pattern_packet_complete(burst,burst.bits.size(),config,value.content_limit),
+              "completion probe must retain the acquired partial-marker and private-stream offsets");
+        if(keyed) {
+            auto wrong=config;wrong.data_key=Crypto(Bytes(32,0x99));
+            check(!transfer::pattern_packet_complete(burst,burst.bits.size(),wrong,value.content_limit),
+                  "completion probe must not accept a packet under the wrong Data/MAC key");
+        }
+    }
+    auto value=options();value.content_limit=message.data.size();
+    modem::PatternBurst limited;limited.bits=transfer::message_wire_bits(message,value);
+    check(transfer::pattern_packet_complete(limited,limited.bits.size(),transfer::seeded_config(value,value.timestamp),value.content_limit),
+          "completion probe must distinguish content-byte limits from unpacked marker/header storage");
+    message.data=Bytes(65536,'e');value.content_limit=message.data.size();
+    modem::PatternBurst compressed;compressed.bits=transfer::message_wire_bits(message,value);
+    check(compressed.bits.size()<message.data.size() &&
+          transfer::pattern_packet_complete(compressed,compressed.bits.size(),transfer::seeded_config(value,value.timestamp),value.content_limit),
+          "compressed packet completion must retain the receiver's actual decompression budget");
+}
+void completed_packets_do_not_join() {
+    auto value=options();value.compression=false;value.search_seconds=0;
+    value.modem=modem::Config{};value.modem.spreading_factor=32;value.modem.pulse_shaping=false;
+    Message first;first.data=Bytes(17,'Z');first.id.fill(0x61);
+    Message second=first;second.data=Bytes(17,'Q');second.id.fill(0x62);
+    const auto config=transfer::seeded_config(value,value.timestamp);
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(config));
+    const auto settling=static_cast<std::size_t>(modem::training_sample_count(config));
+    const auto layout=packet_layout(encode_packet(first,transfer::packet_options(value,value.timestamp)));
+    const auto bits=transfer::message_wire_bits(first,value);
+    const auto body=boundary_sync::marker_bits+(layout.header_bytes+layout.header_parity_bytes)*8;
+    const auto lost=static_cast<std::size_t>(std::find(bits.begin()+static_cast<std::ptrdiff_t>(body),bits.end(),1)-bits.begin());
+    for(const bool damaged:{false,true}) {
+        auto samples=transfer::transmit(first,value);
+        if(damaged)
+            std::fill(samples.begin()+static_cast<std::ptrdiff_t>(settling+lost*symbol),
+                      samples.begin()+static_cast<std::ptrdiff_t>(settling+(lost+1)*symbol),0.F);
+        const auto following=transfer::transmit(second,value);
+        samples.insert(samples.end(),following.begin(),following.end());samples.resize(samples.size()+4*symbol);
+        modem::PatternSearch search;search.preserve_symbol_gaps=true;
+        search.packet_complete=transfer::pattern_packet_complete;search.packet_content_limit=value.content_limit;
+        search.frequency_offsets_hz={0};search.initial_stream_symbols=1;
+        check(static_cast<double>(settling)/config.sample_rate<search.max_gap_seconds,
+              "consecutive packet fixture must resume on the same clock before the gap timeout");
+        modem::PatternReceiver receiver(config,value.dsp_workspace_bytes,search);
+        std::vector<modem::PatternBurst> bursts;
+        const auto drain=[&] {for(auto& burst:receiver.take_bursts())bursts.push_back(std::move(burst));};
+        for(std::size_t offset=0;offset<samples.size();) {
+            const auto count=std::min<std::size_t>(4096,samples.size()-offset);
+            receiver.push(std::span(samples).subspan(offset,count));offset+=count;drain();
+        }
+        receiver.finish();drain();
+        check(bursts.size()==2,"a fully validated packet must close before another packet on the same symbol clock");
+        for(std::size_t i=0;i<bursts.size();++i) {
+            const auto received=transfer::interpret_pattern(std::move(bursts[i]),value,value.timestamp);
+            check(received.packet_validated && received.packet.message.data==(i?second.data:first.data) &&
+                  received.missing_symbols==(damaged && !i?1U:0U),
+                  "same-clock packet separation must retain each exact frame and any earlier FEC repair");
+        }
+        const auto received=transfer::receive(samples,value);
+        check(received.packet_validated && (received.packet.message.data==first.data || received.packet.message.data==second.data),
+              "offline reception must return a complete packet instead of a joined unvalidated bitstream");
+    }
+}
 modem::ChannelConfig high_snr_channel(const transfer::Options& value) {
     modem::ChannelConfig channel;
     // Channel noise occupies Fs/2; the planner's target is C/N0 in one hertz.
@@ -536,4 +669,4 @@ void pattern_storage_limits() {
     }
 }
 }
-int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();leading_marker_and_exact_short_paths();partial_leading_marker_packets();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();partial_leading_marker_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();leading_marker_and_exact_short_paths();partial_leading_marker_packets();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();partial_leading_marker_waveform();missing_symbol_packet_waveform();completed_packet_gap_probe();completed_packets_do_not_join();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

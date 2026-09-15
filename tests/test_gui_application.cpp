@@ -42,6 +42,18 @@ void records() {
     check(rows.back().cells[2].text=="Pattern score 24.5" && rows.back().cells[2].text.find("dB")==std::string::npos,
           "pattern evidence must not be labeled as SNR");
 
+    bits.missing_symbols=1;signals.update(bits);rows=signal_records(signals);
+    const auto& gap_row=rows[1];
+    check(gap_row.cells.size()==6 && gap_row.cells.back().text=="1 missing bit filled with 0" &&
+          gap_row.cells[1].text=="binary received" && gap_row.cells[4].text=="001" &&
+          gap_row.cells[4].y+gap_row.cells[4].h<=gap_row.cells.back().y,
+          "Raw gap placeholders must be disclosed beside the retained bits without overlapping their preview");
+    pending.missing_symbols=3;signals.update(pending);rows=signal_records(signals);
+    check(rows[0].cells.back().text=="3 missing bits filled with 0" &&
+          rows[0].cells[1].text=="verified file" && rows[0].cells[3].text==signal_data_label(pending),
+          "Validated gap recovery must preserve verification and the existing pre-FEC metric");
+    check(signal_gap_label(recovered).empty(),"An intact reception must not show a gap notice");
+
     SignalLine bytes;bytes.id=84;bytes.binary=true;bytes.text_message=false;
     bytes.text="01001000";bytes.received_bits=8;bytes.expected_bits=32;
     signals.update(bytes);rows=signal_records(signals);

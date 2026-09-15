@@ -12,11 +12,17 @@ struct PatternEvidence {
     unsigned bit = 0;
     std::uint64_t stream_phase_samples = 0;
 };
+// Internal unknown-slot value; transfer interpretation replaces it with a
+// plaintext zero after advancing the Data mask through the same symbol slot.
+inline constexpr std::uint8_t missing_pattern_bit = 2;
 struct PatternBurst {
+    // 0/1 decisions, plus missing_pattern_bit when gap preservation is enabled.
     Bytes bits;
     std::uint64_t first_sample = 0, end_sample = 0;
     std::uint64_t first_stream_symbol = 0;
     double frequency_hz = 0, score = 0;
+    // A provisional view can mark the observed span complete at a pending
+    // gap while retaining its track for a later packet-recovery extension.
     bool complete = false;
     std::uint64_t stream_phase_samples = 0;
 };
@@ -27,9 +33,18 @@ struct PatternSearch {
     double false_alarm_probability = 1e-8;
     double retain_score = 5;
     // Preserve established timing across missing symbols until at least two
-    // symbols and more than this many seconds have failed. Failed symbols
-    // never become guessed payload bits; surviving spans retain their index.
+    // symbols and more than this many seconds have failed.
     double max_gap_seconds = 6;
+    // Retain unknown interior slots on established timing, confirmed only by
+    // a later independent symbol. Unconfirmed tails are always discarded.
+    // Consumers must handle missing_pattern_bit and validate packet integrity;
+    // the default returns separate contiguous spans of observed decisions.
+    bool preserve_symbol_gaps = false;
+    // Optional downstream completion check before preserving a new gap. Only
+    // the first confirmed_bits slots belong to the admitted prefix. A true
+    // result closes that verified packet without changing timing or scores.
+    bool (*packet_complete)(const PatternBurst&, std::size_t confirmed_bits, const Config&, std::size_t content_limit) = nullptr;
+    std::size_t packet_content_limit = 0;
     std::size_t candidate_limit = 2048, track_limit = 16, bit_limit = 1024 * 1024;
     // Independently try these first stream positions (0 through count-1).
     // This bounded local keystream search adds no transmitted metadata.

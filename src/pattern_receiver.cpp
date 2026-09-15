@@ -110,7 +110,7 @@ struct PatternReceiver::Impl {
         std::size_t confirmed=0;
         std::uint64_t confirmed_end=0;
         std::size_t frequency=0;
-        bool admitted=false,established=false;
+        bool admitted=false,established=false,pending_gap=false;
     };
     std::vector<Track> tracks;
     PatternBurst latest;
@@ -407,6 +407,16 @@ struct PatternReceiver::Impl {
         }
         bits.push_back(bit);
     }
+    void close_packet_before_gap(Track& track) {
+        if(!search.preserve_symbol_gaps || !search.packet_complete || !track.admitted || track.pending_gap ||
+           !search.packet_complete(track.burst,track.confirmed,config,search.packet_content_limit))return;
+        // A complete integrity-checked packet need not retain a subsequent
+        // pause for repair. This closes its buffer, without changing the
+        // independently acquired clock, phase or stream-symbol position.
+        publish(track,true);track.burst.bits.clear();track.burst.complete=false;
+        track.admitted=false;track.confirmed=0;
+        track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
+    }
     void continue_tracks(std::stop_token stop,bool final=false) {
         for(auto it=tracks.begin();it!=tracks.end();) {
             cancelled(stop);auto& track=*it;bool ended=false;
@@ -427,23 +437,46 @@ struct PatternReceiver::Impl {
                 }
                 remember(best);
                 const auto standalone=best.score>=threshold();
+                if(track.pending_gap && group_count>1) {
+                    // Unknown slots cannot choose between private schedules.
+                    // Keep this symbol available as an independent new start.
+                    publish(track,true);track.burst.bits.clear();track.burst.complete=false;
+                    track.admitted=false;track.confirmed=0;track.pending_gap=false;
+                    track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
+                }
                 ++track.unconfirmed_symbols;
                 const auto gap_expired=track.unconfirmed_symbols>=2 &&
                     static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>
                         static_cast<long double>(search.max_gap_seconds)*config.sample_rate;
-                if(best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone)) {
+                if(best.score<search.retain_score || best.score-best.alternative_score<1 || (group_count>1 && !standalone) ||
+                   (track.pending_gap && !standalone)) {
+                    close_packet_before_gap(track);
+                    if(search.preserve_symbol_gaps && track.admitted && group_count==1 && !gap_expired) {
+                        if(track.burst.bits.size()==search.bit_limit){publish(track,true);ended=true;break;}
+                        // Keep the clock slot, not this weak bit decision. A
+                        // later independent detection can confirm the extent,
+                        // but cannot add confidence to any obscured slot.
+                        if(!track.pending_gap)
+                            std::fill(track.burst.bits.begin()+static_cast<std::ptrdiff_t>(track.confirmed),
+                                      track.burst.bits.end(),missing_pattern_bit);
+                        append_bit(track.burst.bits,missing_pattern_bit);
+                        track.pending_gap=true;track.total_score=track.confirmed_score;
+                        track.pending_score=track.penalty=0;
+                        ++track.index;track.next+=length;
+                        continue;
+                    }
                     publish(track,true);
                     if(!track.established || gap_expired){ended=true;break;}
                     // A lost symbol closes this contiguous span, but timing
                     // and the private stream advance without requiring it to
                     // decode. Do not refine timing from an obscured pattern.
                     track.burst.bits.clear();track.burst.complete=false;
-                    track.admitted=false;track.confirmed=0;
+                    track.admitted=false;track.confirmed=0;track.pending_gap=false;
                     track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
                     ++track.index;track.next+=length;
                     continue;
                 }
-                if(standalone && track.confirmed<track.burst.bits.size()) {
+                if(standalone && !track.pending_gap && track.confirmed<track.burst.bits.size()) {
                     // Keep a pending tail when the combined evidence meets
                     // its own chain threshold. Standalone confidence alone
                     // must not confirm a tail whose joint bound still fails.
@@ -451,8 +484,15 @@ struct PatternReceiver::Impl {
                     const auto score=track.pending_score+best.score;
                     const auto bound=score>n?score-n-n*std::log(score/n)-track.penalty-std::log(10.):0;
                     if(bound<threshold()) {
-                        publish(track,true);track.burst.bits.clear();
-                        track.burst.complete=false;track.admitted=false;
+                        close_packet_before_gap(track);
+                        if(search.preserve_symbol_gaps && track.admitted && group_count==1) {
+                            std::fill(track.burst.bits.begin()+static_cast<std::ptrdiff_t>(track.confirmed),
+                                      track.burst.bits.end(),missing_pattern_bit);
+                            track.total_score=track.confirmed_score;track.pending_score=track.penalty=0;
+                        } else {
+                            publish(track,true);track.burst.bits.clear();
+                            track.burst.complete=false;track.admitted=false;
+                        }
                     }
                 }
                 if(standalone) {
@@ -478,6 +518,7 @@ struct PatternReceiver::Impl {
                 const auto bound=track.pending_score>count?track.pending_score-count-count*std::log(track.pending_score/count)-track.penalty:0;
                 if(bound>=threshold() || standalone) {
                     track.admitted=track.established=true;track.unconfirmed_symbols=0;
+                    track.pending_gap=false;
                     track.confirmed=track.burst.bits.size();track.confirmed_end=best.end_sample;
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
                 }
@@ -519,7 +560,23 @@ struct PatternReceiver::Impl {
                     // allow normal timing overlap between adjacent symbols.
                     it=tracks.erase(it);continue;
                 }
-                if(track.admitted && track.confirmed<track.burst.bits.size() &&
+                // A fresh candidate on the retained gap's clock can await
+                // normal continuation. Independently timed starts must still
+                // be allowed to replace an obscured old track.
+                bool follows_gap=false;
+                if(track.pending_gap) {
+                    const auto next=track.next*bin_samples,symbol=code.symbol_samples();
+                    const auto distance=next>item.first_sample?next-item.first_sample:item.first_sample-next;
+                    const auto slots=distance/symbol+(distance%symbol>symbol/2);
+                    const auto residual=distance%symbol;
+                    const auto same_clock=std::min(residual,symbol-residual)<=margin;
+                    const auto same_index=(!config.scramble && !config.dsss) ||
+                        (next>=item.first_sample && slots<=track.index && item.stream_symbol==track.index-slots) ||
+                        (next<item.first_sample && slots<=std::numeric_limits<std::uint64_t>::max()-track.index &&
+                         item.stream_symbol==track.index+slots);
+                    follows_gap=same_clock && same_index;
+                }
+                if(track.admitted && !follows_gap && track.confirmed<track.burst.bits.size() &&
                    item.first_sample>=track.confirmed_end && item.score>=threshold()) {
                     // Confidence belongs only to the confirmed span. Weak
                     // pending extensions cannot veto an independently strong
@@ -646,6 +703,9 @@ struct PatternReceiver::Impl {
         const auto* track=active_track();
         if(!track)return latest;
         PatternBurst result=track->burst;result.bits.resize(track->confirmed);result.end_sample=track->confirmed_end;
+        // The observed span ended at the gap, even while its clock and buffer
+        // remain available for a later packet-recovery extension.
+        result.complete=track->pending_gap;
         return result;
     }
     std::size_t working_bytes()const {

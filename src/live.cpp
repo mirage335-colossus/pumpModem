@@ -184,7 +184,7 @@ struct Session::Impl {
         std::uint64_t last_confident_end = 0;
         std::uint64_t reported_first = 0, reported_symbol = 0, reported_end = 0;
         std::size_t next_report_bits = 0;
-        bool reported_complete = false, content_reported = false;
+        bool reported_complete = false, content_reported = false, validated_content_reported = false;
         std::unique_ptr<modem::StreamingReceiver> modem;
     };
     struct Bank {
@@ -536,6 +536,9 @@ struct Session::Impl {
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
                     modem::PatternSearch search;
+                    search.preserve_symbol_gaps=true;
+                    search.packet_complete=transfer::pattern_packet_complete;
+                    search.packet_content_limit=value.content_limit;
                     search.compact_clock_search=compact;
                     search.search_stream_phases=key.has_value();
                     search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
@@ -685,7 +688,7 @@ struct Session::Impl {
                         if(same_span && receiver.reported_end==burst.end_sample &&
                            (receiver.reported_complete || !burst.complete))continue;
                         if(!same_span) {
-                            receiver.signal_id=0;receiver.content_reported=false;receiver.next_report_bits=0;
+                            receiver.signal_id=0;receiver.content_reported=receiver.validated_content_reported=false;receiver.next_report_bits=0;
                         }
                         // Keep every confidence observation above for lifetime
                         // accounting. Fast large prefixes need only geometric
@@ -718,13 +721,18 @@ struct Session::Impl {
                         SignalUpdate event;event.id=receiver.signal_id;event.frequency_hz=frequency;
                         event.text=std::move(bits);event.binary=true;event.complete=complete;event.received_bits=result.raw_bits.size();
                         event.expected_bits=0;event.pattern_score=score;
+                        event.missing_symbols=result.missing_symbols;
                         if(result.packet_validated) {
                             event.text=display_text(result.packet.message);event.binary=false;event.validated=true;
                             event.complete=true;
                             event.packet_id=packet_id(result.packet.message);event.pre_fec_accuracy=result.packet.pre_fec_accuracy;
                         }
                         add_signal(std::move(event),simulation_wave);
-                        if(!receiver.content_reported && (result.packet_validated || (complete && !result.packet.message.data.empty()))) {
+                        if((!receiver.content_reported || (result.packet_validated && !receiver.validated_content_reported)) &&
+                           (result.packet_validated || (complete && !result.packet.message.data.empty()))) {
+                            // A short unvalidated interpretation at an early
+                            // gap must not suppress a later repaired packet.
+                            const auto validated=result.packet_validated;
                             const auto bytes=result.packet.message.data.size();
                             if(simulation_wave) {
                                 simulation_wave->received.reset();staged_received_bytes=0;
@@ -732,6 +740,7 @@ struct Session::Impl {
                                 simulation_wave->received=std::move(result);
                             } else {admit_received(bytes,value.content_limit);current.received.push_back(std::move(result));}
                             receiver.content_reported=true;
+                            receiver.validated_content_reported=validated;
                         }
                     }
                     continue;
@@ -746,6 +755,9 @@ struct Session::Impl {
                     }
                     bank.limited=true;
                     modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
+                    search.preserve_symbol_gaps=true;
+                    search.packet_complete=transfer::pattern_packet_complete;
+                    search.packet_content_limit=value.content_limit;
                     search.compact_clock_search=receiver.options.key &&
                         modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
                     search.search_stream_phases=receiver.options.key.has_value();
@@ -761,7 +773,8 @@ struct Session::Impl {
                     receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),remaining,search);
                     receiver.admitted_at=current_epoch();
                     receiver.last_confident_at=0;receiver.last_confident_end=0;
-                    receiver.reported_end=0;receiver.reported_complete=false;receiver.content_reported=false;
+                    receiver.reported_end=0;receiver.reported_complete=false;
+                    receiver.content_reported=receiver.validated_content_reported=false;
                 }
                 receiver.signal_id = 0;
                 update_workspace();

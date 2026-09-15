@@ -46,8 +46,9 @@ encode short text, but those framed bytes are separate from the normal
 short-text transfer path.
 
 The receiver preserves detected bits independently of packet validity. Its
-`raw_bits` diagnostic retains the existing Data-stream decryption result of the
-exact observed bits, including any transport markers. It is distinct from the
+`raw_bits` diagnostic retains Data-stream decryption of the observed bits,
+including transport markers, with zero placeholders for missing interior
+symbol slots; `missing_symbols` counts those unobserved bits. It is distinct from the
 recovered logical packet candidate. A burst may subsequently validate as a
 compact packet; short raw bursts may provide a dictionary interpretation. Neither interpretation
 changes which waveform timing or pattern candidates were selected. Keyed raw
@@ -101,20 +102,27 @@ plaintext marker slots. Initial starts are searched at offsets 0 through 7 bits,
 and subsequent starts from -7 through +7 bits around each expected boundary.
 The rest of the payload is never searched. Exact matches take the fast path.
 Otherwise a complete 192-bit marker may have up to eight changed bits. A partial
-marker may have one contiguous run of 1 through 64 missing bits, including a
+marker may have one contiguous run of 1 through 80 missing bits, including a
 missing prefix, provided its final 32 bits survive and match exactly. The
 remaining observed bits may contain changes within the confidence budget below.
 Arbitrary distributed deletions and a missing marker suffix are outside this
 model: a surviving prefix alone cannot identify where packet data begins.
 
+Timed unknown symbol slots retain their positions through Data decryption and
+marker matching. They contribute neither matches nor mismatches: the evidence
+calculation uses only observed 0/1 bits. Distributed unknown slots therefore
+need no deletion-path search. They cannot satisfy the exact trailing anchor
+required when inferring a deleted marker run. Recovered data slots become
+plaintext zero placeholders before byte packing and Reed–Solomon correction.
+
 If pattern acquisition supplies a leading stream-symbol index from 1 through
-64, recovery compares the surviving initial marker suffix after the existing
+80, recovery compares the surviving initial marker suffix after the existing
 decryption at that index. This uses the same evidence threshold and does not
 try alternative crypto positions. In an unkeyed burst, the bounded deletion
 search can also infer a missing marker prefix without a known stream index.
 The acquired index fixes the known suffix's endpoint, so that comparison may
-spend its mismatch budget even in the final 32 bits. An inferred deletion
-still requires the exact trailing anchor.
+spend its mismatch budget or retain unknown slots even in the final 32 bits.
+An inferred deletion still requires the exact observed trailing anchor.
 
 Passing matches must identify a unique marker endpoint. Equivalent deletion
 paths ending at the same bit collapse to their strongest evidence; competing
@@ -129,8 +137,9 @@ uninterpreted.
 
 #### Marker evidence threshold
 
-The acceptance bound assumes independent fair input bits. For one fixed
-hypothesis with `n` observed marker bits and at most `e` mismatches, its
+The acceptance bound assumes the known input bits are independent and fair
+conditional on the unknown-slot positions. For one fixed hypothesis with `n`
+observed marker bits (excluding unknown slots) and at most `e` mismatches, its
 false-match probability is at most `V(n,e) / 2^n`, where
 `V(n,e) = sum(i=0..e, binom(n,i))`. This is the cumulative
 [binomial probability at p = 1/2](https://itl.nist.gov/div898/handbook/eda/section3/eda366i.htm).
@@ -138,17 +147,24 @@ The exact trailing anchor further restricts partial matches; the bound
 conservatively counts all mismatch positions anyway.
 
 All starts and deletion runs are charged to
-`H = 15 * (1 + sum(d=1..64, 193-d-32)) = 123375` hypotheses per slot.
-For `B` received bits, `S = 1 + floor(B / (2048-7+128))` bounds the number
+`H = 15 * (1 + sum(d=1..80, 193-d-32)) = 144615` hypotheses per slot.
+For `B` received slots including unknowns, `S = 1 + floor(B / (2048-7+112))` bounds the number
 of slots. Each candidate, with `e <= 8`, must satisfy
-`n - ceil(log2(S)) - ceil(log2(H)) - ceil(log2(V(n,e))) >= 100`.
+`n - ceil(log2(S)) - ceil(log2(H)) - ceil(log2(V(n,e))) >= 84`.
 These conservative rounded costs and the
 [union bound](https://math.iisc.ac.in/~gadgil/MA261/notes/chapter-8.html)
 limit the chance of any false marker acceptance in one recovery call to
-`2^-100` under that input model, accounting for all tested starts, deletion
+`2^-84` under that input model, accounting for all tested starts, deletion
 runs and mismatch patterns. Shorter surviving markers and larger inputs
 therefore permit fewer mismatches, or fail the threshold entirely. The two
 repeated words still constrain distinct observed bits under this model.
+For a short input with one charged slot, 112 surviving bits (80 missing) and
+one mismatch provide 87 evidence bits after trial costs; two mismatches
+provide only 81 and fail the threshold. With 128 surviving bits, up to four
+mismatches provide 86 evidence bits. These counts describe a fixed candidate;
+equivalent deletion paths can explain the same endpoint with fewer mismatches.
+With no mismatches and one charged slot, at least 102 known matching bits are
+required. Filling an unknown slot with zero never increases that evidence.
 This is an analytic random-input bound, not a measured channel error rate,
 a posterior probability that a boundary is correct, or an authentication
 claim. It supplies no statistical guarantee for deliberately constructed data.
@@ -169,7 +185,7 @@ bits remain available as diagnostics independently of either interpretation.
 
 This repairs byte alignment after a net shift of at most seven decoded plaintext
 data bits per searched slot, together with the bounded marker damage above.
-It cannot reconstruct a damaged data tail without a later recognized marker,
+Marker normalization cannot reconstruct a damaged data tail without a later recognized marker,
 whole missing blocks or an unknown absolute stream offset. Pattern constellation
 decoding remains the sole authority for timing
 and keystream alignment. Recovery never trials cryptographic offsets, resets
@@ -364,6 +380,15 @@ footer after the logical data. The bootstrap is separate from this interleave.
 Pre-FEC accuracy compares received and corrected systematic body bits, including
 encoded data, metadata and tag; bootstrap and parity do not enter its denominator.
 Only a completely verified packet supplies this statistic.
+
+Timed missing bits currently enter packet decoding as plaintext zeroes at
+their original positions. The RS decoder treats affected bytes as ordinary
+errors; it does not yet accept known erasure positions. This restores the byte
+grouping that a dropped bit would destroy, but does not increase the code's
+error budget. A missing bit whose transmitted value was zero needs no change.
+The reported missing-symbol count distinguishes those inferred slots from
+observed decisions. A 100% pre-FEC body accuracy can also coexist with repairs
+to header or parity bytes, which are excluded from that metric.
 
 ## Previews and resource limits
 

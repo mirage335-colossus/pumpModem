@@ -167,6 +167,10 @@ std::string signal_status_label(const SignalLine& line) {
     if(line.complete && line.pattern_score && !line.validated)return "text received";
     return line.validated?(line.text_message?"verified":"verified file"):"pending";
 }
+std::string signal_gap_label(const SignalLine& line) {
+    if(!line.missing_symbols)return {};
+    return std::to_string(line.missing_symbols)+(line.missing_symbols==1?" missing bit filled with 0":" missing bits filled with 0");
+}
 std::string signal_preamble_label(const SignalLine& line) {
     if(line.pattern_score && std::isfinite(*line.pattern_score)) {
         std::ostringstream text;text.imbue(std::locale::classic());

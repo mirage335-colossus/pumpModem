@@ -88,7 +88,8 @@ public:
     bool acquiring() const;
     // No packet interpretation occurs during acquisition; returns empty.
     Bytes provisional_frame() const;
-    // Exact pattern-supported bits, independent of packet interpretation.
+    // Pattern decisions, independent of packet interpretation. Opt-in gap
+    // preservation retains missing_pattern_bit at unknown interior positions.
     PatternBurst provisional_pattern() const;
     std::vector<PatternBurst> take_pattern_bursts();
     std::vector<PatternEvidence> pattern_candidates() const;

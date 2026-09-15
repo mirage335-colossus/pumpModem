@@ -44,11 +44,44 @@ class CommandTests(PumpCase):
                     "--time", EPOCH, "--search-seconds", "0", "--input", path).stdout)
                 self.assertEqual(received["raw_bits"], "001")
                 self.assertEqual(received["raw_bit_count"], 3)
+                self.assertEqual(received["missing_symbols"], 0)
                 self.assertEqual(received["known_bits_match"], matches)
                 self.assertFalse(received["packet_validated"])
                 self.assertFalse(received["authenticated"])
                 self.assertGreater(received["pattern_score"], 0)
                 self.assertEqual(received["pattern_score_units"], "model log evidence")
+
+    def test_missing_symbol_placeholders_are_disclosed(self):
+        bits = "1010011110100101"
+        options = (*AUDIO, "--spreading", "32", "--time", EPOCH)
+        with tempfile.TemporaryDirectory() as folder:
+            path = pathlib.Path(folder) / "missing-slots.wav"
+            self.run_pump("status-tx", "--bits", bits, "--output", path, *options)
+            plan = json.loads(self.run_pump("estimate", "--text", "e", *options).stdout)
+            with wave.open(str(path), "rb") as wav:
+                params = wav.getparams()
+                pcm = bytearray(wav.readframes(wav.getnframes()))
+            symbol = round(params.framerate / plan["bit_rate"])
+            hardware = (2 * params.framerate + symbol // 2) // symbol
+            padding = (params.nframes - (hardware + len(bits)) * symbol) // 2
+            width = params.sampwidth * params.nchannels
+            start = (hardware * symbol + padding + 6 * symbol) * width
+            pcm[start:start + 2 * symbol * width] = bytes(2 * symbol * width)
+            with wave.open(str(path), "wb") as wav:
+                wav.setparams(params)
+                wav.writeframes(pcm)
+            receive = ("rx", "--input", path, "--search-seconds", "0", *options)
+            decoded = json.loads(self.run_pump(*receive, "--json").stdout)
+            self.assertGreater(decoded["missing_symbols"], 0)
+            self.assertEqual(decoded["raw_bit_count"], len(bits))
+            self.assertFalse(decoded["packet_validated"])
+            self.assertEqual(decoded["data_base64"], "")
+            plain = self.run_pump(*receive)
+            self.assertEqual(plain.stdout, (decoded["raw_bits"] + "\n").encode())
+            self.assertIn(b"zero placeholder", plain.stderr)
+            status = json.loads(self.run_pump("status-rx", "--bits", bits,
+                "--input", path, "--search-seconds", "0", *options).stdout)
+            self.assertEqual(status["missing_symbols"], decoded["missing_symbols"])
 
     def test_receive_target_list_is_separate_from_transmit(self):
         baseline = json.loads(self.run_pump("estimate", "--text", "e").stdout)

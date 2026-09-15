@@ -4,6 +4,56 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Timed gaps before Reed–Solomon correction — 14 September 2026
+
+Live reception, capture decoding and transfer simulation now preserve unknown
+interior symbol slots on an admitted clock. Later independent evidence must
+confirm their extent; unknowns add no score, cannot choose a private schedule,
+and are trimmed from unconfirmed tails. Known bits retain their original Data
+stream addresses. Packet recovery fills unknown plaintext slots with zero and
+requires a recognized leading marker plus complete integrity validation.
+CLI output and GUI signal rows disclose the number of inferred zero slots.
+
+Twelve deterministic blanked-PCM cases cover public and encrypted compact
+17-byte packets, with gaps in the marker, header and body. All eight RS20/RS60
+cases recover the exact content with nonzero corrections; all four equivalent
+FEC-off cases fail integrity. Low-level checks cover chunk independence,
+gap expiry, bit/workspace limits, unsupported weak tails, independent later
+starts and ambiguous stream phases. A complete SHA/MAC-validated packet closes
+before a new gap; tests preserve two consecutive packets on the same clock,
+including a first packet already repaired after a missing symbol. Completion
+probes also check truncation, wrong keys, partial leading markers and highly
+compressed packets under the actual configured content budget.
+
+A live audio-adapter regression pauses capture inside a marker gap, observes
+the completed raw span and an early short-text interpretation, then resumes
+capture. The same signal row upgrades to the fully validated original packet
+with three missing slots and nonzero RS corrections. A cancellation regression
+waits for fresh measured plot points, since receiver evidence can advance the
+snapshot sequence before the next plot publication.
+
+Marker recovery now charges only observed bits to its `2^-84` ideal fair-bit
+false-match budget and permits up to 80 contiguous deleted marker bits. Tests
+cover distributed timed erasures, unknown trailing anchors, slot-trial costs,
+the 102-known-bit versus 101-known-bit threshold on short inputs, and rejection
+of competing marker endpoints. These are analytic-model checks, not empirical
+measurements of extremely rare false matches. Marker bytes and cadence,
+packet encoding, crypto streams and symbol evidence thresholds are unchanged.
+
+All **53 tests that do not require a display** passed across the Release batch
+and targeted runs, including the full live suite (121.66 seconds alone), all
+27 CLI cases, both receiver paths and GUI-model checks. The three native GUI
+interaction suites require an unavailable display. The native application
+built successfully and its display-free self-check passed.
+
+The four core suites (`boundary_sync`, `pattern_receiver`, `pattern_correlator`,
+`pattern_transfer`) passed ASan/UBSan. Focused runs against the rebuilt
+sanitized library also passed the packet-completion callback in both receiver
+paths and consecutive-packet regressions. After the final live changes, the
+audio-gap content-upgrade regression and complete correlator suite also passed
+against the rebuilt sanitized library. Both sanitizers halted on errors;
+leak detection was disabled. No sanitizer diagnostics were reported.
+
 ## Pulse shaping at unchanged payload rate — 14 September 2026
 
 Pattern profiles with at least 16 complete chip times now apply a 25% RRC
@@ -148,6 +198,11 @@ removal of that particular invariant; bandwidth, chip timing, capped amplitudes
 and burst edges remain, and no measured interception probability is established.
 
 ## Partial byte-boundary marker recognition — September 2026
+
+This section records the original 64-bit-loss, `2^-100` implementation and its
+validation. The current [marker evidence threshold](protocol.md#marker-evidence-threshold)
+permits up to 80 missing marker bits with a `2^-84` bound; the test results below
+predate that adjustment.
 
 Marker recognition now permits up to eight changed bits in a complete 192-bit
 marker. Partial recognition permits one contiguous loss of 1 through 64 bits,

@@ -58,20 +58,23 @@ Recovery runs on plaintext after the existing whole-stream Data decryption.
 The initial marker is searched at offsets 0 through 7 from the burst origin;
 subsequent markers are searched within seven bits of an expected boundary.
 Recognition permits up to eight changed bits in a complete marker, or one
-contiguous loss of up to 64 bits while retaining an exact final 32-bit anchor.
+contiguous loss of up to 80 bits while retaining an exact final 32-bit anchor.
 Every accepted hypothesis must pass a conservative independent-fair-bit
-false-match budget of at most `2^-100` over the complete recovery call,
+false-match budget of at most `2^-84` over the complete recovery call,
 including all slot, start, deletion and mismatch trials. Shorter surviving
 markers and larger inputs tighten the mismatch allowance. Different passing
 endpoints reject recovery. The [protocol evidence model](protocol.md#marker-evidence-threshold)
 defines this analytic bound; it is neither measured channel performance nor
 authentication and does not model deliberately constructed bytes.
+Timed unknown slots contribute no marker evidence and cannot satisfy an
+inferred endpoint's exact trailing anchor. The model assumes the remaining
+known bits are independent and fair conditional on the unknown-slot positions.
 
-An acquisition-supplied leading stream index of up to 64 may identify a missing
+An acquisition-supplied leading stream index of up to 80 may identify a missing
 initial marker prefix after ordinary Data decryption. Recovery still does not
-try crypto offsets. That supplied index fixes the suffix endpoint, so its
-mismatch budget may include trailing bits; inferred endpoints require the
-exact trailing anchor. An unrecognized damaged marker consumes its nominal slot
+try crypto offsets. That supplied index fixes the suffix endpoint, allowing
+trailing mismatches or unknown slots; inferred endpoints require the exact
+trailing anchor. An unrecognized damaged marker consumes its nominal slot
 when available. Before each periodic marker, the plaintext interval is trimmed
 or zero-filled to 256 bytes. Marker positions consume Data-stream positions
 and are stripped before deinterleaving and FEC.
