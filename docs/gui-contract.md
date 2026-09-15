@@ -52,6 +52,13 @@ the nominal timing parameter; it does not claim a measured spectral width.
 `140`, `120`, `100`, `80`, `60`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
 `-30` alongside the existing targets.
 
+Diagnostics show the gross modem bitrate followed by the **Shannon-Hartley
+limit**, the ideal Gaussian-noise channel capacity in bit/s. It uses the accepted
+TX target C/N0 and nominal Rate as bandwidth; RX targets and simulation noise do
+not select this estimate. It updates with accepted settings and retains the last
+valid value while a setting contains an invalid draft. The diagnostic tooltip
+explains the formula and distinguishes channel capacity from payload throughput.
+
 The **RX targets (dB-Hz)** comma-list initially matches the TX default, `60`.
 Changing TX SNR to a valid value replaces the RX list with that single matching
 target. The RX list can then be edited independently without changing TX SNR.

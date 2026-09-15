@@ -1,6 +1,7 @@
 """CLI integration for the fixed interval format and physical end gate."""
 import base64
 import json
+import math
 import pathlib
 import subprocess
 import sys
@@ -28,6 +29,20 @@ class StreamCLI(unittest.TestCase):
                 self.assertEqual(value['coded_bytes'],(3*size+7)//8 if size<=16 else 128)
                 self.assertEqual(value['wire_bits'],3*size if size<=16 else 1216)
                 self.assertNotIn('packet_bytes',value)
+    def test_shannon_capacity_estimate(self):
+        for bandwidth,target,expected in ((1000,30,1000), (2000,30,1169.9250014423124),
+                                          (1000,60,9967.226258835993), (30000000,-200,1.4426950408889634e-20)):
+            # Force a finite symbol at the weakest target, beyond automatic timing's range.
+            pattern=('--pattern','pattern-16') if target==-200 else ()
+            value=json.loads(self.run_pump('estimate','--text','e','--bw',bandwidth,
+                                          '--target-snr',target,*pattern).stdout)
+            self.assertTrue(math.isclose(value['shannon_capacity_bps'],expected,rel_tol=1e-12))
+            self.assertEqual(value['wire_bits'],3)
+            self.assertIn('bit_rate',value)
+        manual=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)
+        self.assertTrue(math.isclose(manual['shannon_capacity_bps'],9967.226258835993,rel_tol=1e-12))
+        extreme=json.loads(self.run_pump('estimate','--text','e','--bw','1000','--target-snr','1e308').stdout)
+        self.assertIsNone(extreme['shannon_capacity_bps'])
     def test_short_dictionary_text_received_with_exact_bits(self):
         source=b'e\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',

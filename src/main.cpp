@@ -555,11 +555,14 @@ int main(int argc,char** argv) {
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="estimate") {
             const auto result=transfer::estimate(message(a),settings);
+            const auto capacity=tuning::shannon_capacity_bps(c.bandwidth_hz,a.number("target-snr",60));
             std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
                 <<"{\"coded_bytes\":"<<result.coded_bytes<<",\"wire_bits\":"<<result.wire_bits<<",\"content_bytes\":"<<result.content_bytes
                 <<",\"coded_seconds\":"<<result.coded_seconds<<",\"content_seconds\":"<<result.content_seconds
                 <<",\"total_seconds\":"<<result.total_seconds<<",\"bit_rate\":"<<modem::bit_rate(c)
-                <<",\"spreading\":"<<c.spreading_factor
+                <<",\"shannon_capacity_bps\":";
+            if(std::isfinite(capacity))std::cout<<capacity;else std::cout<<"null";
+            std::cout<<",\"spreading\":"<<c.spreading_factor
                 <<",\"constellation_bits\":"<<c.constellation_bits
                 <<",\"sample_rate\":"<<c.sample_rate<<",\"carrier_hz\":"<<c.carrier_hz
                 <<",\"repeatable_allowed\":"<<(result.repeatable_allowed?"true":"false")

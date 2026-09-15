@@ -140,6 +140,17 @@ double recommended_carrier_hz(double bandwidth_hz) {
         throw Error("modem bandwidth must be 1..30000000 Hz");
     return std::max(1500.,.75*bandwidth_hz);
 }
+double shannon_capacity_bps(double bandwidth_hz,double target_snr_db_hz) {
+    if(!std::isfinite(bandwidth_hz) || bandwidth_hz<1 || bandwidth_hz>maximum_bandwidth_hz)
+        throw Error("modem bandwidth must be 1..30000000 Hz");
+    if(!std::isfinite(target_snr_db_hz))throw Error("target C/N0 must be finite dB-Hz");
+    const auto log_snr=target_snr_db_hz*(std::numbers::ln10/10)-std::log(bandwidth_hz);
+    // log1p preserves weak-signal capacity; the positive branch avoids
+    // overflowing the linear SNR when the finite dB-Hz target is very large.
+    const auto capacity_per_hz=log_snr>0?
+        log_snr+std::log1p(std::exp(-log_snr)):std::log1p(std::exp(log_snr));
+    return (bandwidth_hz/std::numbers::ln2)*capacity_per_hz;
+}
 namespace {
 Plan resolve_config(modem::Config config,double target_snr_db_hz,PatternMode mode,bool encryption) {
     // Check clock/rate before minimum_pattern_chips performs sample arithmetic.

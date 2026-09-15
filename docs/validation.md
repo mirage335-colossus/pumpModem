@@ -1784,3 +1784,26 @@ At equal received C/N0, translating the same 3,600 Hz rate waveform from a
 These software-channel checks preserve the existing planner's confidence
 expectations; they do not measure a physical radio/speaker passband or establish
 field sensitivity, BER or probability of intercept.
+
+### Shannon-Hartley capacity display (2026-09-15)
+
+Shared GUI diagnostics now place the ideal Shannon-Hartley channel capacity
+beside the gross modem bitrate. The calculation converts the accepted TX C/N0
+in dB-Hz to linear SNR in the selected nominal bandwidth. CLI `estimate` exposes
+the same calculation as `shannon_capacity_bps`. Very weak SNR uses `log1p` to
+preserve precision, and unrepresentable capacity displays as `Unavailable`
+(JSON `null`). Capacity is informational; modem planning, framing, payload
+airtime and physical completion are unchanged.
+
+The Release build and all 15 selected suites passed: `tuning`, `cli`,
+`compression_short`, `transfer`, `stream_codec`, `stream_receive`, `attachment`,
+`pattern_correlator`, `pattern_receiver`, `gui_application`, `gui_controller`,
+`gui_inspection`, `gui_binary_editor`, `gui_contract` and `gui_layout`.
+Independent numerical cases cover C/N0 conversion, bandwidth changes, weak and
+strong targets, and numeric overflow. Shared GUI checks cover setting updates,
+RX/simulation independence and preservation of the last accepted value during
+invalid edits. The 3,600 Hz / 60 dB-Hz CLI estimate reports 29,242.698314280708
+bit/s while short text `e` retains its three transmitted bits.
+
+This was a headless run; native window rendering and physical-link throughput
+were not measured. Both adapters consume the shared diagnostic presentation.

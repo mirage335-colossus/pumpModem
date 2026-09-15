@@ -40,6 +40,10 @@ struct Plan {
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
 inline constexpr double maximum_bandwidth_hz = 30000000;
+// Ideal AWGN Shannon-Hartley channel capacity in bits/s. The target is C/N0
+// in dB-Hz, so in-band linear SNR is 10^(target_snr_db_hz/10)/bandwidth_hz.
+// This theoretical ceiling is independent of modem framing and coding.
+double shannon_capacity_bps(double bandwidth_hz, double target_snr_db_hz);
 // Automatic real-PCM plans center narrow audio bands at 1500 Hz. Wider bands
 // retain the 0.75 * bandwidth carrier. The logical clock covers both the band
 // and carrier with four samples per hertz, keeping the nominal upper edge in

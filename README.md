@@ -133,6 +133,15 @@ list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `60`.
 
+Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
+selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel
+capacity: `B * log2(1 + 10^(C/N0_dBHz / 10) / B)` bit/s, with `B` in Hz. At the
+GUI defaults (3.6 kHz, 60 dB-Hz), it is about **29.2 kbit/s**. Actual payload
+throughput depends on the waveform and coding overhead. CLI `estimate` reports
+the same value as `shannon_capacity_bps`, using `--bw` and `--target-snr` (default
+60 dB-Hz, including manual modem profiles); values beyond the numeric range are
+reported as `null` (GUI: `Unavailable`).
+
 Simulation feeds the actual PCM receiver with independent carrier phase and
 sample offset and replays its presentation over three seconds. Signal progress
 remains separate from source content: decompression waits for the physical

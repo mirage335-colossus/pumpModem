@@ -113,7 +113,7 @@ struct Controller::Impl {
     std::size_t pattern_first=0,page_size=16;
     std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
     unsigned dsp_workspace_percent=50;
-    double zoom=1,channel_snr=0,cpu_percent=0;
+    double zoom=1,channel_snr=0,cpu_percent=0,shannon_capacity_bps=0;
     std::string draft_error,tuning_explanation;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
@@ -221,7 +221,9 @@ struct Controller::Impl {
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
             const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
             if(match_carrier)reset_carrier(rate);
-            const auto plan=tuning::resolve(rate,number(f(UiField::snr).text,"Target SNR"),mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
+            const auto target_snr=number(f(UiField::snr).text,"Target SNR");
+            const auto plan=tuning::resolve(rate,target_snr,mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
+            const auto capacity=tuning::shannon_capacity_bps(rate,target_snr);
             const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
             f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
@@ -245,6 +247,7 @@ struct Controller::Impl {
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             settings=std::move(next); settings_valid=true; target_supported=plan.target_supported; tuning_explanation=plan.explanation;
+            shannon_capacity_bps=capacity;
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
         } catch(...) { settings_valid=false; f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
@@ -628,7 +631,9 @@ struct Controller::Impl {
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
         std::ostringstream diagnostics;
-        diagnostics<<format_bit_rate(modem::bit_rate(settings.transfer.modem))<<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
+        diagnostics<<format_bit_rate(modem::bit_rate(settings.transfer.modem))
+            <<" | Shannon-Hartley limit "<<format_bit_rate(shannon_capacity_bps)
+            <<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
         else if(next.hardware_sample_rate) diagnostics<<" | Hardware "<<next.hardware_sample_rate/1000.0<<" kHz";
         diagnostics<<" | DSP "<<settings.transfer.modem.sample_rate<<" Hz | Carrier "<<std::defaultfloat<<std::setprecision(6)<<settings.transfer.modem.carrier_hz<<" Hz";

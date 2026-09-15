@@ -98,6 +98,34 @@ void rate_carrier_controls() {
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
           "Raising the carrier did not recover the selected tone profile");
 }
+void shannon_capacity_display() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    controller.start();
+    const auto expect_capacity=[&](std::string_view expected) {
+        controller.poll();
+        const auto& diagnostics=controller.field(F::diagnostics).text;
+        check(diagnostics.starts_with(format_bit_rate(modem::bit_rate(controller.settings().transfer.modem))+" | Shannon-Hartley limit "),
+              "The theoretical capacity must appear alongside the existing gross modem bitrate");
+        check(diagnostics.find(std::string("Shannon-Hartley limit ")+std::string(expected)+" |")!=std::string::npos,
+              "The Shannon-Hartley display does not match the accepted TX target and nominal bandwidth");
+    };
+    expect_capacity("29.2 kbit/s"); // Default: 3,600 Hz, 60 dB-Hz.
+    controller.edit(F::bandwidth,"1 kHz");controller.edit(F::snr,"30");
+    expect_capacity("1 kbit/s"); // C/N0 = 1,000 Hz, hence S/N = 1.
+    controller.edit(F::bandwidth,"2 kHz");
+    expect_capacity("1.17 kbit/s");
+    controller.edit(F::snr,"40");
+    expect_capacity("5.17 kbit/s");
+    controller.edit(F::receive_snr,"60,80");
+    controller.select(F::simulation,"3dBm -90dB");
+    expect_capacity("5.17 kbit/s");
+    controller.edit(F::snr,"unfinished");
+    expect_capacity("5.17 kbit/s"); // Invalid drafts preserve the active settings.
+    controller.edit(F::snr,"-60");
+    expect_capacity("1.44e-06 bit/s");
+    controller.close();
+}
 void mono_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
@@ -1102,6 +1130,7 @@ int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
         rate_carrier_controls();
+        shannon_capacity_display();
         mono_controls();
         tone_mode_controls();
         tone_key_controls();
