@@ -8,13 +8,12 @@ inline constexpr int default_width = 1180, default_height = 866;
 inline constexpr int min_width = 1030, min_height = 786;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
-inline constexpr int compose_height = 196, qr_size = 196;
 
 enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit,
-    cancel, airtime, signal_label, signals, copy_signal, paste_signal, file_label, files,
+    cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, signal_label, signals, copy_signal, paste_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
     constellation, pattern_scores_label, pattern_scores,
@@ -66,18 +65,24 @@ struct DesktopLayout {
         out[Slot::page] = {margin, 126, width - 2 * margin, height - 242};
 
         constexpr int compose_y = 152, binary_width = 220;
+        // Keep all ten generation rows visible, including native scrollbar
+        // space, at the minimum desktop size. Taller windows grow the editors
+        // and received history before allocating the remainder to the plots.
+        const int height_growth=std::max(0,height-min_height);
+        const int compose_height=50+std::min(28,height_growth*28/80),qr_size=compose_height;
         const int editor_width = width - 2 * margin - qr_size - binary_width - 28;
         const int binary_x = margin + editor_width + 14;
         constexpr int previous_width = 240;
         out[Slot::message_label] = {margin, 130, editor_width - previous_width - 8, 20};
         out[Slot::paste_previous] = {margin + editor_width - previous_width, 130, previous_width, 20};
-        out[Slot::binary_label] = {binary_x, 130, binary_width, 20};
+        const int qr_choice_width=std::max(78,qr_size);
+        out[Slot::binary_label] = {binary_x, 130, binary_width-(qr_choice_width-qr_size), 20};
         out[Slot::message] = {margin, compose_y, editor_width, compose_height};
         out[Slot::binary] = {binary_x, compose_y, binary_width, compose_height};
-        out[Slot::qr_brightness] = {width - margin - qr_size, 130, qr_size, 20};
+        out[Slot::qr_brightness] = {width - margin - qr_choice_width, 130, qr_choice_width, 20};
         out[Slot::qr] = {width - margin - qr_size, compose_y, qr_size, qr_size};
 
-        constexpr int buttons_y = compose_y + compose_height + 8;
+        const int buttons_y = compose_y + compose_height + 8;
         out[Slot::attach_file] = {margin, buttons_y, 169, action_height};
         out[Slot::use_text] = {194, buttons_y, 78, action_height};
         out[Slot::send_key] = {281, buttons_y, 129, action_height};
@@ -85,15 +90,19 @@ struct DesktopLayout {
         out[Slot::cancel] = {540, buttons_y, 106, action_height};
         out[Slot::airtime] = {657, buttons_y, width - margin - 657, action_height};
 
-        constexpr int signal_y = buttons_y + 56, files_width = 252;
-        const int signal_height = std::max(117, height - 710);
+        out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-92,18};
+        out[Slot::transmit_scope_format]={width-margin-84,buttons_y+31,84,18};
+        out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,206};
+        const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
+        constexpr int files_width = 252;
+        const int signal_height = 84+std::min(26,height_growth*26/80);
         out[Slot::signal_label] = {margin, signal_y - 23, width - files_width - 50, 21};
         out[Slot::file_label] = {width - margin - files_width, signal_y - 23, files_width, 21};
         out[Slot::signals] = {margin, signal_y, width - 2 * margin - files_width - 14, signal_height};
         out[Slot::files] = {width - margin - files_width, signal_y, files_width, signal_height - 36};
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
-        const int plots_y = signal_y + signal_height + 30, plot_height = height - plots_y - 138;
+        const int plots_y = signal_y + signal_height + 23, plot_height = height - plots_y - 124;
         const int plots_width = width - 2 * margin;
         const int waterfall_width = plots_width * 34 / 100;
         const int waveform_width = std::max(236, plots_width * 24 / 100);

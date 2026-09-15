@@ -13,12 +13,14 @@ void cancelled(std::stop_token stop) {if(stop.stop_requested())throw Error("mode
 
 struct StreamingTransmitter::Impl {
     std::unique_ptr<PatternTransmitter> pattern;
+    TransmitTrace trace;
+    std::uint64_t chips_per_symbol=1;
     std::vector<Complex> constellation;
     std::size_t constellation_begin=0,constellation_count=0,pending_count=0;
     std::uint64_t dropped=0;
     std::size_t initialize_constellation(const Config& config,std::size_t workspace) {
         const auto count=StreamingTransmitter::constellation_history_capacity(config);
-        const auto fixed=sizeof(StreamingTransmitter)+sizeof(Impl);
+        const auto fixed=sizeof(StreamingTransmitter)+sizeof(Impl)+trace.working_bytes();
         if(fixed>workspace || count>(workspace-fixed)/sizeof(Complex))
             throw Error("pattern transmitter workspace is too small");
         constellation.resize(count);
@@ -39,16 +41,29 @@ struct StreamingTransmitter::Impl {
         pattern=std::make_unique<PatternTransmitter>(std::move(bits),config,config.stream_epoch);
         if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
-    Impl(RawBits input,Config config,std::size_t workspace) {
+    Impl(RawBits input,Config config,std::size_t workspace,TransmitTrace capture):trace(std::move(capture)) {
         validate(config);
         if(input.bits.empty())throw Error("raw binary transmission requires at least one bit");
+        if(trace.active) {
+            trace.total_wire_bits=input.bits.size();trace.generated_bits=0;trace.generated_chips=0;trace.revision=1;
+            trace.tone=config.spreading_mode==SpreadingMode::tone;
+            trace.pattern_available=!trace.tone;trace.pattern_private=config.scramble;trace.dsss=config.dsss;
+            trace.wire_bits.assign(input.bits.begin(),input.bits.begin()+static_cast<std::ptrdiff_t>(
+                std::min(input.bits.size(),TransmitTrace::bit_limit)));
+        }
+        chips_per_symbol=pattern_chips_per_symbol(config);
         const auto remaining=initialize_constellation(config,workspace);
         if(input.bits.capacity()>remaining)throw Error("pattern transmitter workspace is too small");
         config.memory_limit=remaining;
-        pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch);
+        pattern=std::make_unique<PatternTransmitter>(std::move(input.bits),config,config.stream_epoch,0,true,trace.active);
         if(pattern->working_bytes()>remaining)throw Error("pattern transmitter workspace is too small");
     }
     void retain_constellation(Complex value) {
+        if(trace.active) {
+            ++trace.generated_chips;
+            trace.generated_bits=static_cast<std::size_t>((trace.generated_chips-1)/chips_per_symbol+1);
+            ++trace.revision;
+        }
         if(constellation_count==constellation.size()) {
             constellation_begin=(constellation_begin+1)%constellation.size();--constellation_count;
         }
@@ -69,7 +84,8 @@ std::size_t StreamingTransmitter::constellation_history_capacity(const Config& c
     return std::max(constellation_history_limit,static_cast<std::size_t>((samples/symbol)*chips+partial+1));
 }
 StreamingTransmitter::StreamingTransmitter(Bytes wire,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(wire),c,workspace)){}
-StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace):impl_(std::make_unique<Impl>(std::move(bits),c,workspace)){}
+StreamingTransmitter::StreamingTransmitter(RawBits bits,Config c,std::size_t workspace,TransmitTrace trace):
+    impl_(std::make_unique<Impl>(std::move(bits),c,workspace,std::move(trace))){}
 StreamingTransmitter::~StreamingTransmitter()=default;
 StreamingTransmitter::StreamingTransmitter(StreamingTransmitter&&) noexcept=default;
 StreamingTransmitter& StreamingTransmitter::operator=(StreamingTransmitter&&) noexcept=default;
@@ -77,7 +93,7 @@ bool StreamingTransmitter::finished()const{return impl_->pattern->finished();}
 std::uint64_t StreamingTransmitter::total_samples()const{return impl_->pattern->total_samples();}
 std::uint64_t StreamingTransmitter::samples_emitted()const{return impl_->pattern->samples_emitted();}
 std::size_t StreamingTransmitter::working_bytes()const{return sizeof(StreamingTransmitter)+sizeof(Impl)+
-    impl_->constellation.capacity()*sizeof(Complex)+impl_->pattern->working_bytes();}
+    impl_->constellation.capacity()*sizeof(Complex)+impl_->pattern->working_bytes()+impl_->trace.working_bytes();}
 std::vector<Complex> StreamingTransmitter::payload_constellation()const {
     const auto& s=*impl_;std::vector<Complex> result;result.reserve(s.constellation_count);
     for(std::size_t i=0;i<s.constellation_count;++i)result.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);
@@ -88,6 +104,14 @@ ConstellationBatch StreamingTransmitter::take_payload_constellation() {
     for(std::size_t i=s.constellation_count-s.pending_count;i<s.constellation_count;++i)
         result.points.push_back(s.constellation[(s.constellation_begin+i)%s.constellation.size()]);
     s.pending_count=0;s.dropped=0;return result;
+}
+TransmitTrace StreamingTransmitter::transmit_trace()const {
+    auto result=impl_->trace;
+    const auto count=std::min(result.generated_bits,TransmitTrace::bit_limit);
+    for(auto* bits:{&result.wire_plain_bits,&result.wire_bits,&result.data_key_bits})
+        if(bits->size()>count)bits->resize(count);
+    impl_->pattern->copy_transmit_trace(result,result.generated_chips);
+    return result;
 }
 std::size_t StreamingTransmitter::read(std::span<float> output,std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);

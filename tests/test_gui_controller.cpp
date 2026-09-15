@@ -1,6 +1,7 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
+#include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include <filesystem>
 #include <iostream>
@@ -718,12 +719,26 @@ void fixed_text_reception() {
 }
 
 void receive_pattern_text(Controller& controller,const std::string& expected) {
+    check(!controller.snapshot().transmit_trace.active,
+          "A prepared draft became an actual generation trace before transmission");
+    const auto expected_wire=controller.inspection()->binary?
+        parse_binary_bits(controller.field(ui::Field::binary).text):compression::encode_short_bits(controller.message_bytes());
     controller.start();controller.activate(ui::Command::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
     bool received=false;
+    bool generated_seen=false;
     std::size_t pending_count=0;
     while(std::chrono::steady_clock::now()<deadline) {
         controller.poll();
+        const auto& trace=controller.snapshot().transmit_trace;
+        check(controller.field(ui::Field::transmit_scope).records==transmit_scope_records(trace),
+              "A progress poll deferred generation scope updates or substituted estimated bytes");
+        if(trace.active&&!trace.wire_bits.empty()) {
+            generated_seen=true;
+            check(trace.wire_bits.size()<=expected_wire.size()&&
+                  std::equal(trace.wire_bits.begin(),trace.wire_bits.end(),expected_wire.begin()),
+                  "Unencrypted short scope lost an exact leading-zero or partial-byte wire prefix");
+        }
         pending_count+=check_pending_snapshot(controller);
         for(std::size_t i=0;i<controller.signals().lines().size();++i)
             received=received||controller.signals().copy_text(i)==expected;
@@ -736,6 +751,7 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         throw Error(detail);
     }
     check(pending_count>0,"Pattern text reception must expose pending bits before it becomes received text");
+    check(generated_seen,"Actual simulated generation never reached the Console scope");
 }
 void short_text_reception() {
     using F=ui::Field;
@@ -772,6 +788,18 @@ void three_bit_text_reception() {
     check(controller.signals().lines().size()==1 && controller.signals().copy_raw_bits(0)=="001" &&
           !controller.signals().lines().front().validated && controller.inbox().items().empty(),
           "Three-bit dictionary text must retain raw transport independently of its decoded character");
+    check(controller.snapshot().transmit_trace.wire_bits==Bytes({0,0,1})&&
+          controller.field(F::transmit_scope).records==transmit_scope_records(controller.snapshot().transmit_trace),
+          "Completed three-bit generation did not retain the exact diagnostic capture");
+    const auto retained=controller.field(F::transmit_scope).records;
+    controller.edit(F::message,"A different draft");prepare(controller);
+    check(controller.field(F::transmit_scope).records==retained,
+          "Editing the next draft replaced the previous actual generation capture");
+    const auto transmission_id=controller.snapshot().transmission_id;
+    controller.select(F::transmit_scope_format,"bits");
+    check(controller.field(F::transmit_scope).records==transmit_scope_records(controller.snapshot().transmit_trace,true)&&
+          controller.snapshot().transmission_id==transmission_id,
+          "Bit-detail selection regenerated the transmission or lost its actual retained prefix");
     controller.close();
 }
 

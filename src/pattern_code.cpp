@@ -26,6 +26,10 @@ void require(bool condition, const char* message) {
 void cancelled(std::stop_token stop) {
     if (stop.stop_requested()) throw Error("pattern operation cancelled");
 }
+struct NoiseTrace {
+    std::array<std::uint8_t,8> input{}, output{}, key{};
+    bool valid=false;
+};
 struct StreamCache {
     static constexpr std::size_t capacity = 512;
     Crypto key;
@@ -57,15 +61,23 @@ struct StreamCache {
         return ((byte(chip/8) >> (chip%8)) & 1U) ? -1 : 1;
     }
     std::complex<double> noise(std::uint64_t position, StreamCache* first = nullptr,
-                               StreamCache* second = nullptr, StreamCache* third = nullptr) {
+                               StreamCache* second = nullptr, StreamCache* third = nullptr,
+                               NoiseTrace* trace = nullptr) {
         require(position<=(std::numeric_limits<std::uint64_t>::max()-7)/8,"pattern noise coordinate overflow");
         const auto uniform=[&](std::uint64_t offset) {
             std::uint32_t value=0;
             for(unsigned i=0;i<4;++i) {
                 auto encoded=byte(offset+i);
-                if(first)encoded^=first->byte(offset+i);
+                const auto index=static_cast<std::size_t>(offset+i-position*8);
+                if(trace)trace->input[index]=encoded;
+                if(first) {
+                    const auto key_byte=first->byte(offset+i);
+                    encoded^=key_byte;
+                    if(trace)trace->key[index]=key_byte;
+                }
                 if(second)encoded^=second->byte(offset+i);
                 if(third)encoded^=third->byte(offset+i);
+                if(trace)trace->output[index]=encoded;
                 value=(value<<8)|encoded;
             }
             return (static_cast<double>(value)+.5)/4294967296.;
@@ -76,7 +88,9 @@ struct StreamCache {
         constexpr double maximum_radius=1.75;
         static const double normalization=std::sqrt(1-std::exp(-maximum_radius*maximum_radius));
         const auto radius=std::min(maximum_radius,std::sqrt(-std::log(uniform(position*8))));
-        return std::polar(radius/normalization,tau*uniform(position*8+4));
+        const auto result=std::polar(radius/normalization,tau*uniform(position*8+4));
+        if(trace)trace->valid=true;
+        return result;
     }
 };
 }
@@ -102,6 +116,13 @@ struct PatternCode::Impl {
         bool valid=false;
     };
     std::array<CachedChip,32> shaped_chips{};
+    struct TraceStorage {
+        std::array<NoiseTrace,TransmitTrace::byte_limit/8> symbol_starts{};
+        std::uint64_t first_chip=0;
+        bool capture=false;
+        ~TraceStorage() { OPENSSL_cleanse(symbol_starts.data(),sizeof(symbol_starts)); }
+    };
+    std::unique_ptr<TraceStorage> trace;
     Impl(Config value, std::uint64_t start_epoch): config(value), epoch(start_epoch),
         pattern(config.scramble ? std::span<const std::uint8_t>(config.spreading_seed) :
                                  std::span<const std::uint8_t>(public_seed),
@@ -136,7 +157,16 @@ struct PatternCode::Impl {
             // between the two candidate patterns used by blind acquisition.
             // Public rows use the same I/Q map and repeat at symbol boundaries
             // so acquisition needs no transmission-index hypothesis.
-            auto result = pattern.noise(position, config.dsss ? &dsss : nullptr);
+            NoiseTrace* captured=nullptr;
+            if(trace && trace->capture && absolute_chip>=trace->first_chip) {
+                const auto offset=absolute_chip-trace->first_chip;
+                const auto symbol_index=offset/chips;
+                if(offset%chips==0 && symbol_index<trace->symbol_starts.size()) {
+                    auto& entry=trace->symbol_starts[static_cast<std::size_t>(symbol_index)];
+                    if(!entry.valid)captured=&entry;
+                }
+            }
+            auto result = pattern.noise(position, config.dsss ? &dsss : nullptr,nullptr,nullptr,captured);
             if (bit) result *= bit_mask[static_cast<std::size_t>((absolute_chip % chips) % bit_mask.size())];
             return result;
         }
@@ -189,7 +219,29 @@ void PatternCode::set_stream_phase_samples(std::uint64_t phase_samples) {
 std::uint64_t PatternCode::chip_samples() const { return impl_->chip; }
 std::uint64_t PatternCode::chips_per_symbol() const { return impl_->chips; }
 std::uint64_t PatternCode::symbol_samples() const { return impl_->symbol; }
-std::size_t PatternCode::working_bytes() const { return sizeof(PatternCode) + sizeof(Impl); }
+std::size_t PatternCode::working_bytes() const {
+    return sizeof(PatternCode) + sizeof(Impl)+(impl_->trace?sizeof(Impl::TraceStorage):0);
+}
+void PatternCode::enable_transmit_trace(std::uint64_t first_chip) {
+    impl_->trace=std::make_unique<Impl::TraceStorage>();impl_->trace->first_chip=first_chip;
+}
+void PatternCode::capture_transmit_trace(bool enabled) {
+    if(impl_->trace)impl_->trace->capture=enabled;
+}
+void PatternCode::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
+    result.pattern_input.clear();result.pattern_output.clear();result.pattern_key.clear();result.dsss_key.clear();
+    if(!impl_->trace || impl_->config.spreading_mode!=SpreadingMode::pattern)return;
+    const auto begun_symbols=begun_chips?(begun_chips-1)/impl_->chips+1:0;
+    const auto count=std::min<std::uint64_t>(begun_symbols,impl_->trace->symbol_starts.size());
+    for(std::size_t i=0;i<count;++i) {
+        const auto& entry=impl_->trace->symbol_starts[i];
+        if(!entry.valid)break;
+        result.pattern_input.insert(result.pattern_input.end(),entry.input.begin(),entry.input.end());
+        result.pattern_output.insert(result.pattern_output.end(),entry.output.begin(),entry.output.end());
+        if(impl_->config.scramble)result.pattern_key.insert(result.pattern_key.end(),entry.input.begin(),entry.input.end());
+        if(impl_->config.dsss)result.dsss_key.insert(result.dsss_key.end(),entry.key.begin(),entry.key.end());
+    }
+}
 
 struct PatternTransmitter::Impl {
     Bytes bits;
@@ -205,8 +257,9 @@ struct PatternTransmitter::Impl {
     };
     std::array<SettlingChip,32> settling_chips{};
     std::array<SettlingChip,32> suppression_chips{};
-    Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise):
+    Impl(Bytes input, Config value, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise,bool trace):
         bits(std::move(input)), config(value), code(config, epoch), start(start_chip) {
+        if(trace)code.enable_transmit_trace(start);
         require(!bits.empty(), "pattern transmission requires at least one bit");
         require(std::all_of(bits.begin(), bits.end(), [](auto bit) { return bit <= 1; }),
                 "pattern input elements must be zero or one");
@@ -316,7 +369,12 @@ struct PatternTransmitter::Impl {
     }
     template<class Output, class Convert>
     std::size_t render(std::uint64_t& cursor, std::span<Output> output, Convert convert,
-                       std::stop_token stop, const ChipObserver& observer) {
+                       std::stop_token stop, const ChipObserver& observer,bool trace=false) {
+        struct CaptureGuard {
+            PatternCode& code;
+            CaptureGuard(PatternCode& value,bool enabled):code(value) { code.capture_transmit_trace(enabled); }
+            ~CaptureGuard() { code.capture_transmit_trace(false); }
+        } capture(code,trace);
         cancelled(stop);
         const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(output.size(), total - cursor));
         const auto angle = std::remainder(static_cast<long double>(cursor) * tau * config.carrier_hz / config.sample_rate,
@@ -386,17 +444,17 @@ struct PatternTransmitter::Impl {
     }
 };
 
-PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise):
-    impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip, surrounding_noise)) {}
+PatternTransmitter::PatternTransmitter(Bytes bits, Config config, std::uint64_t epoch, std::uint64_t start_chip, bool surrounding_noise,bool trace):
+    impl_(std::make_unique<Impl>(std::move(bits), config, epoch, start_chip, surrounding_noise,trace)) {}
 PatternTransmitter::~PatternTransmitter() = default;
 PatternTransmitter::PatternTransmitter(PatternTransmitter&&) noexcept = default;
 PatternTransmitter& PatternTransmitter::operator=(PatternTransmitter&&) noexcept = default;
 std::size_t PatternTransmitter::read(std::span<float> output, std::stop_token stop, const ChipObserver& observer) {
-    return impl_->render(impl_->position, output, [](auto value) { return static_cast<float>(value.real()); }, stop, observer);
+    return impl_->render(impl_->position, output, [](auto value) { return static_cast<float>(value.real()); }, stop, observer,true);
 }
 std::size_t PatternTransmitter::read_analytic(std::span<std::complex<double>> output, std::stop_token stop,
                                           const ChipObserver& observer) {
-    return impl_->render(impl_->position, output, [](auto value) { return value; }, stop, observer);
+    return impl_->render(impl_->position, output, [](auto value) { return value; }, stop, observer,true);
 }
 void PatternTransmitter::preview_last_analytic(std::span<std::complex<double>> output) const {
     require(output.size() <= analytic_preview_limit, "pattern preview exceeds its bounded sample limit");
@@ -415,6 +473,9 @@ std::size_t PatternTransmitter::working_bytes() const {
         ((impl_->settling?1U:0U)+(impl_->settling_data?1U:0U)+(impl_->settling_pattern?1U:0U)+
          (impl_->settling_dsss?1U:0U)+(impl_->suppression?1U:0U)+(impl_->suppression_data?1U:0U)+
          (impl_->suppression_pattern?1U:0U)+(impl_->suppression_dsss?1U:0U))*sizeof(StreamCache);
+}
+void PatternTransmitter::copy_transmit_trace(TransmitTrace& result,std::uint64_t begun_chips) const {
+    impl_->code.copy_transmit_trace(result,begun_chips);
 }
 
 } // namespace datapump::modem

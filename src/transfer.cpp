@@ -88,11 +88,19 @@ bool better_reception(const Received& candidate,const Received& current) {
     if(score!=prior)return score>prior;
     return candidate.stream_complete || !current.stream_complete;
 }
-Bytes encoded_intervals(const Message& message,const Options& options,StreamLayout* layout=nullptr) {
+Bytes encoded_intervals(const Message& message,const Options& options,StreamLayout* layout=nullptr,
+                        modem::TransmitTrace* trace=nullptr) {
     validate_message(message,options);
     const auto capacity=interval_data_bytes(options.fec,options.key.has_value());
     const auto application_source=attachment::encode(message,options.content_limit);
     auto source=encode_source(application_source,capacity,options.compression,source_storage_limit(options.content_limit));
+    if(trace) {
+        trace->compressed_available=true;
+        const auto count=std::min(source.size(),modem::TransmitTrace::byte_limit);
+        trace->compressed_bits.reserve(count*8);
+        for(std::size_t i=0;i<count;++i)for(unsigned bit=0;bit<8;++bit)
+            trace->compressed_bits.push_back((source[i]>>(7-bit))&1U);
+    }
     const auto count=source.size()/capacity;
     if(count>Bytes{}.max_size()/stream_interval_bytes)throw Error("encoded source exceeds address space");
     Bytes wire;wire.reserve(count*stream_interval_bytes);
@@ -116,6 +124,7 @@ Bytes byte_bits(std::span<const std::uint8_t> bytes) {
     for(auto byte:bytes)for(unsigned i=0;i<8;++i)bits.push_back((byte>>(7-i))&1);
     return bits;
 }
+void mask_binary_bits(std::span<std::uint8_t>,const Options&,std::size_t,modem::TransmitTrace*);
 }
 bool uses_raw_message(const Message& message) noexcept {
     return message.kind==MessageKind::text && !message.data.empty() && message.data.size()<=short_message_bytes;
@@ -202,8 +211,20 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits,const Options& input
     // PatternCode seeks through fixed stream caches; symbol duration must
     // not be charged as a retained chip array or sampled waveform.
     try {
+        // Message estimates share this binary probe. Reserve the largest
+        // possible prepared source prefix as well as the actual wire-prefix
+        // capacity, so trace instrumentation cannot make an admitted TX fail
+        // at a nearly full workspace. PatternTransmitter charges its optional
+        // fixed mapping-byte capture through working_bytes().
+        modem::TransmitTrace trace;trace.active=true;
+        trace.source.resize(modem::TransmitTrace::source_limit);
+        trace.compressed_bits.resize(modem::TransmitTrace::bit_limit);
+        const auto prefix=std::min(bits.size(),modem::TransmitTrace::bit_limit);
+        trace.wire_plain_bits.resize(prefix);
+        if(value.key)trace.data_key_bits.resize(prefix);
         modem::StreamingTransmitter probe(modem::RawBits{Bytes(bits.begin(),bits.end())},
-            seeded_config(value,value.timestamp),std::max(value.modem.memory_limit,value.dsp_workspace_bytes/4));
+            seeded_config(value,value.timestamp),std::max(value.modem.memory_limit,value.dsp_workspace_bytes/4),
+            std::move(trace));
         scratch=probe.working_bytes();
         result.memory_supported=scratch<=value.dsp_workspace_bytes/4;
     } catch(const Error&) { result.memory_supported=false; }
@@ -222,8 +243,10 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     const auto options=effective_options(input_options);
     const auto value=binary_options(bits,options);
     modem::RawBits raw{Bytes(bits.begin(),bits.end())};
-    xor_binary_bits(raw.bits,value);
-    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),value.dsp_workspace_bytes/4);
+    modem::TransmitTrace trace;trace.active=true;trace.raw=true;
+    mask_binary_bits(raw.bits,value,0,&trace);
+    return std::make_unique<modem::StreamingTransmitter>(std::move(raw),seeded_config(value,value.timestamp),
+        value.dsp_workspace_bytes/4,std::move(trace));
 }
 
 
@@ -241,17 +264,41 @@ Bytes message_wire_bits(const Message& message,const Options& input) {
 }
 std::unique_ptr<modem::StreamingTransmitter> message_transmitter(const Message& message,const Options& input) {
     const auto options=effective_options(input);
-    auto bits=message_wire_bits(message,options);
+    modem::TransmitTrace trace;trace.active=true;trace.short_text=uses_raw_message(message);
+    trace.source_available=message.kind==MessageKind::text;
+    if(trace.source_available)trace.source.assign(message.data.begin(),message.data.begin()+
+        static_cast<std::ptrdiff_t>(std::min(message.data.size(),modem::TransmitTrace::source_limit)));
+    Bytes bits;
+    if(trace.short_text) {
+        validate_message(message,options);
+        bits=compression::encode_short_bits(message.data,short_message_bits);
+        trace.compressed_available=true;
+        trace.compressed_bits.assign(bits.begin(),bits.begin()+static_cast<std::ptrdiff_t>(
+            std::min(bits.size(),modem::TransmitTrace::bit_limit)));
+    } else {
+        bits=boundary_sync::insert(byte_bits(encoded_intervals(message,options,nullptr,&trace)),
+            pattern_bit_limit(options.content_limit));
+    }
+    auto context=options;context.content_limit=std::max(context.content_limit,bits.size());
+    mask_binary_bits(bits,context,0,&trace);
     if(message.kind==MessageKind::text && message.repeatable && message.data.size()>options.repeat_policy.minimum_payload_bytes &&
        static_cast<double>(bits.size())*modem::symbol_seconds(options.modem)>options.repeat_policy.maximum_seconds)
         throw Error("repeatable content exceeds airtime limit");
     return std::make_unique<modem::StreamingTransmitter>(modem::RawBits{std::move(bits)},
-        seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4);
+        seeded_config(options,options.timestamp),options.dsp_workspace_bytes/4,std::move(trace));
 }
-void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,std::size_t bit_offset) {
+namespace {
+void mask_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,std::size_t bit_offset,
+                      modem::TransmitTrace* trace) {
     const auto options=effective_options(input_options);
     if(bits.empty())return;
     const auto value=binary_options(bits,options);
+    if(trace) {
+        trace->wire_plain_bits.assign(bits.begin(),bits.begin()+static_cast<std::ptrdiff_t>(
+            std::min(bits.size(),modem::TransmitTrace::bit_limit)));
+        trace->data_masked=value.key.has_value();
+        if(value.key)trace->data_key_bits.reserve(std::min(bits.size(),modem::TransmitTrace::bit_limit));
+    }
     if(bits.size()>std::numeric_limits<std::size_t>::max()-bit_offset)
         throw Error("raw binary data-stream offset overflow");
     if(value.key) {
@@ -272,10 +319,16 @@ void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,s
                 mask=value.key->stream(StreamPurpose::Data,address.epoch,begin,cache_size);
                 cached_epoch=address.epoch;cached_begin=begin;cached=true;
             }
-            bits[offset]^=static_cast<std::uint8_t>((mask[static_cast<std::size_t>(byte-begin)]>>(7-address.ordinal%8))&1);
+            const auto key_bit=static_cast<std::uint8_t>((mask[static_cast<std::size_t>(byte-begin)]>>(7-address.ordinal%8))&1);
+            bits[offset]^=key_bit;
+            if(trace && offset<modem::TransmitTrace::bit_limit)trace->data_key_bits.push_back(key_bit);
             ++offset;
         }
     }
+}
+}
+void xor_binary_bits(std::span<std::uint8_t> bits,const Options& options,std::size_t bit_offset) {
+    mask_binary_bits(bits,options,bit_offset,nullptr);
 }
 
 

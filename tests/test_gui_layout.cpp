@@ -20,13 +20,14 @@ void established_default() {
           "desktop default or minimum size changed");
     check(layout[Slot::tabs] == Rect{16, 94, 1148, 656}, "tab viewport moved");
     check(layout[Slot::page] == Rect{16, 126, 1148, 624}, "page viewport moved");
-    check(layout[Slot::message] == Rect{16, 152, 704, 196}, "message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{480, 130, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{734, 152, 220, 196}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{968, 152, 196, 196}, "QR preview moved");
-    check(layout[Slot::signals] == Rect{16, 412, 882, 156}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 412, 252, 120}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 598, 390, 130}, "waterfall size changed");
+    check(layout[Slot::message] == Rect{16, 152, 822, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{598, 130, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{852, 152, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1086, 152, 78, 78}, "QR preview moved");
+    check(layout[Slot::transmit_scope] == Rect{16, 289, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::signals] == Rect{16, 518, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 518, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 651, 390, 91}, "waterfall size changed");
     check(layout[Slot::device] == Rect{16, 774, 112, 27}, "persistent modem controls moved");
     check(layout[Slot::bandwidth] == Rect{138, 774, 93, 27} &&
           layout[Slot::carrier] == Rect{241, 774, 101, 27}, "Rate and Carrier editors lost their reserved widths");
@@ -62,6 +63,9 @@ void supported_sizes() {
               "composition row is misaligned");
         check(binary.x == message.x + message.w + 14 && qr.x == binary.x + binary.w + 14 &&
               qr.x + qr.w == size.w - margin, "composition gaps changed");
+        check(layout[Slot::qr_brightness].w>=78&&layout[Slot::binary_label].w>=192&&
+              layout[Slot::binary_label].x+layout[Slot::binary_label].w+14==layout[Slot::qr_brightness].x,
+              "Compact QR brightness choice clips its value or overlaps the binary heading");
         const auto message_label = layout[Slot::message_label], previous_message = layout[Slot::paste_previous];
         check(message_label.w >= 300 && message_label.x == message.x &&
               message_label.x + message_label.w + 8 == previous_message.x &&
@@ -69,6 +73,16 @@ void supported_sizes() {
               message_label.y == previous_message.y && previous_message.y + previous_message.h <= message.y,
               "previous-message action overlaps the heading or editor");
         const auto signals = layout[Slot::signals], files = layout[Slot::files], save = layout[Slot::save_file];
+        const auto scope=layout[Slot::transmit_scope],scope_caption=layout[Slot::transmit_scope_caption];
+        check(contains(layout[Slot::page],scope)&&scope.h>=11*17+19&&
+              layout[Slot::transmit].y+layout[Slot::transmit].h<=scope_caption.y&&
+              scope_caption.y+scope_caption.h<=scope.y&&scope.y+scope.h<=layout[Slot::signal_label].y&&
+              signals.h>=54+24+6&&message.h>=50,
+              "Generation rows, scrollbar, caption or pending reception no longer fit at supported sizes");
+        const auto scope_format=layout[Slot::transmit_scope_format];
+        check(scope_caption.x+scope_caption.w<scope_format.x&&scope_caption.y==scope_format.y&&
+              scope_format.y+scope_format.h<=scope.y&&contains(layout[Slot::page],scope_format),
+              "Scope display choice overlaps the capture caption or diagnostic rows");
         check(signals.y == files.y && files.x == signals.x + signals.w + 14 &&
               files.x == save.x && files.w == save.w && save.y == files.y + files.h + 7 &&
               save.y + save.h == signals.y + signals.h, "signals and files row is misaligned");
@@ -82,6 +96,9 @@ void supported_sizes() {
               pattern_scores.x + pattern_scores.w == size.w - margin &&
               constellation.w >= 190 && pattern_scores.w >= 190,
               "plot row is misaligned");
+        check(waterfall.h>=64&&waterfall.y>=signals.y+signals.h+23&&
+              waterfall.y+waterfall.h<=layout[Slot::page].y+layout[Slot::page].h,
+              "Generation scope displaced plots outside the Console page");
         check(contains(signals, layout[Slot::copy_signal]) && contains(signals, layout[Slot::paste_signal]) &&
               layout[Slot::copy_signal].x+layout[Slot::copy_signal].w<layout[Slot::paste_signal].x &&
               contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");

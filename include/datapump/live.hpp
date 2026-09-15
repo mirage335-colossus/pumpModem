@@ -76,6 +76,9 @@ struct Snapshot {
     ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;
+    // Bounded capture from the actual transmitter. Replay uses its matching
+    // generation frame; idle snapshots retain the last transmission capture.
+    modem::TransmitTrace transmit_trace;
     std::string status;
     std::string error;
     bool running = false;

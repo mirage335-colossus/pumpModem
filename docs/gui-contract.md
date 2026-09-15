@@ -172,6 +172,54 @@ absence establishes the end of reception.
 
 ## Behavior every adapter preserves
 
+### Console transmission scope
+
+The first tab includes ten aligned native-text diagnostic rows and an offset
+header. The scope captures the active transmitter, independently of the draft
+and its estimate. It retains at most 64 source bytes, 256 bits in each data
+lane and 32 bytes in each pattern lane. ASCII alphanumeric source characters
+keep their original positions; other source bytes display as dots. Empty cells
+remain placeholders, and incomplete data bytes show their exact bit prefixes.
+Hex view fits all 32 byte columns at minimum window width; Bits view adds
+aligned binary digits and horizontal scrolling. A partial byte in Hex view
+shows its bit count and the exact prefix beside the row label. Switching views
+only redraws the retained capture.
+
+Source and compressed-source previews come from the encoding used for that
+transmission. Wire rows advance when payload symbol generation begins; pattern
+rows sample the first chip of each of the first four generated payload symbols.
+Preview reconstruction, settling
+noise and suppression noise do not append payload evidence. Simulation replay
+uses the capture saved with each frame; the source generator may read ahead of
+the simulated receiver. The scope describes generation, not sound-card emission
+or a measurement of intercept probability. The last capture remains available
+after completion or cancellation and resets for the next transmission.
+
+Input, XOR keystream and resulting bytes sit in adjacent rows. The additional
+Wire Plaintext row exposes the complete pre-encryption framing input. The
+compressed-source and transmitted-wire offsets describe different stages.
+For interval sources, source coding/padding, authentication, FEC and the fixed
+markers intervene. **Every wire bit, including each marker, is Data-masked when
+encryption is enabled.** Transmitted Bytes therefore shows ciphertext from the
+final modem input, never a clear marker beside encrypted content. The exact
+short-dictionary and raw-bit endpoints remain unchanged.
+
+Pattern rows show the actual eight input bytes at each sampled symbol start,
+used to map circular I/Q amplitude and phase. Columns 00–07 belong to symbol 0,
+08–0F to symbol 1, 10–17 to symbol 2, and 18–1F to symbol 3. This makes repeated
+public template input visible beside the changing private input, without
+retaining a duration-sized pattern. A private Pattern stream replaces the public template;
+there is no public-template XOR keystream to display. Its replacement bytes
+appear in Pattern Bitstream. DSSS, when enabled, is XORed into those bytes to
+produce Transmitted Pattern Bitstream. The Pattern Keystream row explicitly
+identifies the absent XOR operation. FHSS is not applied by this transmitter
+and its row says so. These are local diagnostic values, not extra wire fields.
+The pattern-byte rows are marked as mapper inputs: payload-dependent pattern
+selection, pulse shaping and carrier modulation follow. The existing waveform
+and transmitted constellation display the generated signal from those stages.
+
+### Native interaction and presentation
+
 - Applying state is silent and preserves unchanged native widgets, focus, text
   cursor/selection, scroll and record identities. Removing or reordering records
   never transfers focus to a different record merely because it took an index.

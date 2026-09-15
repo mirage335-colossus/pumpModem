@@ -44,11 +44,14 @@ struct ReplayFrame {
     ConstellationSource source = ConstellationSource::input;
     double fraction = 0;
     std::uint64_t dropped = 0;
+    modem::TransmitTrace transmit_trace;
 };
+constexpr std::size_t trace_prefix_workspace = modem::TransmitTrace::source_limit +
+    4 * modem::TransmitTrace::bit_limit + 4 * modem::TransmitTrace::byte_limit;
 constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
     (replay_wave_samples + replay_bins) * sizeof(float) +
     pattern_score_limit * sizeof(std::complex<float>) +
-    sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64;
+    sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64 + trace_prefix_workspace;
 // One verified stream is moved into the receive-content cache at the deadline.
 // Its payload uses the content quota; its diagnostics and caption use DSP space.
 constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
@@ -80,7 +83,7 @@ std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(f
                                        pattern_score_limit * (4 * sizeof(std::complex<double>) + sizeof(modem::PatternEvidence)) +
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
                                        plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
-                                       replay_workspace(value); }
+                                       sizeof(modem::TransmitTrace) + trace_prefix_workspace + replay_workspace(value); }
 std::size_t audio_reserve(const Settings& value) {
     return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
 }
@@ -284,6 +287,7 @@ struct Session::Impl {
         current.transmission_finished = current.transmission_cancelled = false;
         if (!tx_busy) {
             current.transmission_fraction = current.transmission_seconds = 0;
+            current.transmit_trace = {};
             clear_replay();
         }
         pending_points = {}; replay_omitted = 0;
@@ -304,6 +308,11 @@ struct Session::Impl {
         const auto elapsed_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(std::min(elapsed, Clock::duration(replay_duration))).count();
         const auto due = finished ? replay_signals.size() : std::min(replay_signals.size(),
             static_cast<std::size_t>(static_cast<std::uint64_t>(elapsed_ns) * replay.size() / 3000000000ULL) + 1);
+        // Retain only the displayed generation frame if replay is cancelled.
+        // The CPU may already have generated the entire transmission.
+        const auto trace_index = finished ? replay.size() - 1 : std::min(replay.size() - 1,
+            static_cast<std::size_t>(static_cast<std::uint64_t>(elapsed_ns) * replay.size() / 3000000000ULL));
+        current.transmit_trace = replay[trace_index].transmit_trace;
         while (replay_signal_cursor < due) {
             auto& event = replay_signals[replay_signal_cursor++];
             if (event && !(finished && replay_verified && event->id==replay_verified->id))
@@ -344,6 +353,7 @@ struct Session::Impl {
             delivered_replay_frame = index;
         }
         const auto& frame = replay[index];
+        result.transmit_trace = frame.transmit_trace;
         result.simulation_replay = true; result.replay_frame_index = index; result.replay_frame_count = replay.size();
         result.simulation_sample_fraction = frame.fraction;
         result.waveform = frame.waveform; result.spectrum_db.assign(frame.spectrum.begin(), frame.spectrum.end());
@@ -465,6 +475,7 @@ struct Session::Impl {
         frame.dropped = bounded.dropped;
         frame.fraction = static_cast<double>(static_cast<long double>(wave.transmitted_samples) /
                                             wave.transmitter->total_samples());
+        frame.transmit_trace = wave.transmitter->transmit_trace();
         wave.replay.push_back(std::move(frame));
     }
     void enqueue_audio(std::span<const float> samples, std::uint64_t version) {
@@ -806,6 +817,7 @@ struct Session::Impl {
     void complete_tx(Prepared& wave, const std::string& error = {}) {
         std::lock_guard lock(mutex);
         if (wave.generation != generation || wave.serial != tx_serial) return;
+        if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
         if(!settings.simulation)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
             std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(settings.transfer.modem))/settings.transfer.modem.sample_rate+1.));
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
@@ -822,6 +834,7 @@ struct Session::Impl {
                 else for (const auto& event : replay_signals) if (event) { replay_signal_id = event->id; break; }
                 replay_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
+                current.transmit_trace = replay.front().transmit_trace;
                 current.replay_frame_count = replay.size();
                 current.status = wave.binary ? "Simulation; three seconds of raw binary signal" :
                     "Simulation; three seconds of sampled signal and reception";
@@ -833,6 +846,7 @@ struct Session::Impl {
     void progress(const Prepared& wave, const Settings& value) {
         std::lock_guard lock(mutex);
         if (generation != wave.generation || tx_serial != wave.serial) return;
+        current.transmit_trace = wave.transmitter->transmit_trace();
         current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
         current.transmission_fraction = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
@@ -1017,6 +1031,7 @@ struct Session::Impl {
                 transmission = std::move(queued.front()); queued.pop_front(); value = settings;
                 version = generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
                 current.transmission_id = serial;
+                current.transmit_trace = {};
                 clear_replay(); pending_points = {};
                 current.constellation.clear(); current.constellation_source = ConstellationSource::input;
                 current.constellation_dropped = 0;

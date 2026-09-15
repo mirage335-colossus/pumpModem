@@ -2,6 +2,8 @@
 #include "datapump/compression.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_code.hpp"
+#include "datapump/symbol_schedule.hpp"
 #include "../src/transmit_timing.hpp"
 #include <algorithm>
 #include <array>
@@ -221,5 +223,152 @@ void protection_and_cancellation() {
     rejects([&]{transfer::receive({},value,{},stop.get_token());},"cancelled reception stops");
     rejects([&]{transfer::simulate(sent,value,channel,{},stop.get_token());},"cancelled simulation stops");
 }
+void transmission_generation_trace() {
+    const auto advance=[](modem::StreamingTransmitter& tx,std::uint64_t end) {
+        std::array<float,317> samples{};
+        while(tx.samples_emitted()<end) {
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(samples.size(),end-tx.samples_emitted()));
+            check(tx.read(std::span(samples).first(count))==count,"trace fixture must reach requested sample");
+        }
+    };
+    constexpr std::array<std::uint8_t,32> public_seed{
+        'D','a','t','a','P','u','m','p','/','p','a','t','t','e','r','n',
+        '/','b','i','n','a','r','y','/','v','1',0,0,0,0,0,0};
+    for(bool encrypted:{false,true})for(bool shaped:{false,true}) {
+        auto value=options(encrypted);value.modem.dsss=encrypted;value.modem.pulse_shaping=shaped;
+        Message message;message.data={'e'};
+        auto tx=transfer::message_transmitter(message,value);
+        const auto initial=tx->transmit_trace();
+        check(initial.active && initial.short_text && initial.source==message.data &&
+              initial.compressed_bits==Bytes({0,0,1}) && initial.total_wire_bits==3,
+              "trace must retain actual short dictionary output and exact bit endpoint");
+        check(initial.wire_bits.empty() && initial.pattern_input.empty(),"construction cannot publish future payload generation");
+        std::array<float,2048> preview{};tx->preview_last(preview);
+        check(tx->transmit_trace().revision==initial.revision,"preview cannot populate generation trace");
+        const auto prefix=modem::training_sample_count(value.modem)+modem::pattern_pulse_padding_samples(value.modem);
+        advance(*tx,prefix);
+        check(tx->transmit_trace().wire_bits.empty() && tx->transmit_trace().pattern_input.empty(),
+              "settling and pulse-shaping lookahead cannot publish future payload chips");
+        advance(*tx,prefix+1);
+        const auto first=tx->transmit_trace();
+        check(first.generated_bits==1 && first.wire_bits.size()==1 && first.generated_chips==1 &&
+              first.pattern_input.size()==8 && first.pattern_output.size()==8,
+              "first generated chip exposes one exact wire bit and its actual eight mapping bytes");
+        tx->preview_last(preview);
+        const auto previewed=tx->transmit_trace();
+        check(previewed.revision==first.revision && previewed.pattern_output==first.pattern_output,
+              "waveform preview cannot alter the published actual trace");
+        const auto config=transfer::seeded_config(value,value.timestamp);
+        const auto seed=encrypted?config.spreading_seed:public_seed;
+        const auto expected_pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?value.timestamp:0,0,8);
+        check(first.pattern_input==expected_pattern,"pattern bytes must come from the selected actual public/private generator");
+        const auto expected_dsss=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,value.timestamp,0,8):Bytes{};
+        check(first.dsss_key==expected_dsss && first.pattern_key==(encrypted?expected_pattern:Bytes{}),
+              "private replacement and DSSS purposes must preserve their actual generation bytes");
+        for(std::size_t i=0;i<8;++i)check(first.pattern_output[i]==
+            static_cast<std::uint8_t>(first.pattern_input[i]^(encrypted?expected_dsss[i]:0)),
+            "mapped stream must equal its actual input XOR actual DSSS bytes");
+        advance(*tx,prefix+modem::pattern_chip_samples(config)+1);
+        check(tx->transmit_trace().generated_chips==2 && tx->transmit_trace().generated_bits==1 &&
+              tx->transmit_trace().pattern_input.size()==8,
+              "later chips within the same symbol cannot populate future symbol-start samples");
+        advance(*tx,prefix+modem::symbol_sample_count(value.modem)+1);
+        check(tx->transmit_trace().generated_bits==2 && tx->transmit_trace().wire_bits.size()==2 &&
+              tx->transmit_trace().pattern_input.size()==16 && first.wire_bits.size()==1,
+              "trace snapshots preserve partial prefixes and only begun symbol-start mapping groups");
+        advance(*tx,tx->total_samples());
+        const auto done=tx->transmit_trace();
+        check(done.generated_bits==3 && done.wire_bits.size()==3 && done.wire_plain_bits==Bytes({0,0,1}) &&
+              done.pattern_input.size()==24,"suppression cannot add payload bits or invented symbol-start mapping groups");
+        const auto chips=modem::pattern_chips_per_symbol(config);
+        for(std::size_t symbol=0;symbol<3;++symbol) {
+            const auto address=modem::symbol_stream_address(value.timestamp,config.stream_phase_samples,
+                symbol,modem::symbol_sample_count(config),config.sample_rate);
+            const auto position=encrypted?modem::symbol_stream_chip(address,chips,0):0;
+            const auto pattern=Crypto(seed).stream(StreamPurpose::Scrambler,encrypted?address.epoch:0,position*8,8);
+            const auto key=encrypted?Crypto(config.dsss_seed).stream(StreamPurpose::Dsss,address.epoch,position*8,8):Bytes(8,0);
+            for(std::size_t byte=0;byte<8;++byte) {
+                const auto index=symbol*8+byte;
+                check(done.pattern_input[index]==pattern[byte] && done.pattern_output[index]==(pattern[byte]^key[byte]),
+                      "each displayed group must be actual first-chip mapping bytes at its symbol's scheduled stream address");
+                if(encrypted)check(done.pattern_key[index]==pattern[byte] && done.dsss_key[index]==key[byte],
+                    "sampled private replacement and DSSS bytes must explain the exact mapper XOR");
+            }
+        }
+        check(std::equal(done.pattern_input.begin(),done.pattern_input.begin()+8,done.pattern_input.begin()+8)!=encrypted &&
+              std::equal(done.pattern_output.begin(),done.pattern_output.begin()+8,done.pattern_output.begin()+8)!=encrypted,
+              "sampled public symbol-start bytes must visibly repeat while keyed symbol-start bytes change");
+        for(std::size_t i=0;i<3;++i)check(done.wire_bits[i]==
+            static_cast<std::uint8_t>(done.wire_plain_bits[i]^(encrypted?done.data_key_bits[i]:0)),
+            "short raw endpoint must retain the actual Data XOR operands");
+        auto traced=transfer::message_transmitter(message,value);
+        modem::StreamingTransmitter reference(modem::RawBits{transfer::message_wire_bits(message,value)},config);
+        std::array<float,317> actual{},expected{};
+        while(const auto count=traced->read(actual))check(reference.read(expected)==count &&
+            std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(count),expected.begin()),
+            "actual trace capture must preserve public/private, DSSS and pulse-shaped waveform samples");
+    }
+    auto value=options(true);
+    Message message;message.data=Bytes(80,'a');
+    auto tx=transfer::message_transmitter(message,value);
+    const auto config=transfer::seeded_config(value,value.timestamp);
+    const auto plain=boundary_sync::insert(transfer::message_bits(message,value),transfer::pattern_bit_limit(value.content_limit));
+    auto expected=plain;
+    for(std::size_t i=0;i<expected.size();++i) {
+        const auto address=modem::symbol_stream_address(value.timestamp,value.modem.stream_phase_samples,
+            i,modem::symbol_sample_count(value.modem),value.modem.sample_rate);
+        const auto key=value.key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1);
+        expected[i]^=(key[0]>>(7-address.ordinal%8))&1U;
+    }
+    check(expected==transfer::message_wire_bits(message,value),
+          "every fixed marker, source, MAC and parity bit must receive Data encryption before the modem");
+    modem::StreamingTransmitter reference(modem::RawBits{expected},config);
+    std::array<float,317> actual{},other{};
+    while(const auto count=tx->read(actual))
+        check(reference.read(other)==count && std::equal(actual.begin(),actual.begin()+static_cast<std::ptrdiff_t>(count),other.begin()),
+              "trace collection must not change any final waveform sample");
+    const auto trace=tx->transmit_trace();
+    check(trace.source.size()==64 && trace.compressed_bits.size()==256 && trace.wire_bits.size()==256 &&
+          trace.wire_plain_bits.size()==256 && trace.data_key_bits.size()==256 && trace.pattern_input.size()==32 &&
+          trace.working_bytes()<=modem::TransmitTrace::dynamic_storage_limit,"all retained trace rows have fixed memory bounds");
+    check(std::equal(trace.wire_plain_bits.begin(),trace.wire_plain_bits.end(),plain.begin()) &&
+          std::equal(trace.wire_bits.begin(),trace.wire_bits.end(),expected.begin()),
+          "trace must display the actual encrypted marker prefix passed to the modem");
+    for(std::size_t i=0;i<trace.wire_bits.size();++i)
+        check(trace.wire_bits[i]==(trace.wire_plain_bits[i]^trace.data_key_bits[i]),
+              "fixed-interval trace must account for every actual Data XOR bit");
+    auto raw=transfer::binary_transmitter(Bytes{0,0,1,0,1},options());
+    advance(*raw,raw->total_samples());
+    const auto raw_trace=raw->transmit_trace();
+    check(raw_trace.raw && !raw_trace.source_available && !raw_trace.compressed_available &&
+          raw_trace.wire_bits==Bytes({0,0,1,0,1}) && raw_trace.data_key_bits.empty(),
+          "explicit raw trace preserves all leading and partial-byte bits without invented source rows");
+    value.modem.integration_seconds=4*3600;
+    auto slow=transfer::binary_transmitter(Bytes{0,0,1},value);
+    const auto memory=slow->working_bytes();advance(*slow,1);
+    check(slow->transmit_trace().wire_bits.size()==1 && slow->transmit_trace().pattern_input.size()==8,
+          "hours-long symbols expose their first generation bit without waiting for a byte or full symbol");
+    advance(*slow,317);
+    check(slow->transmit_trace().wire_bits.size()==1 && slow->working_bytes()==memory,
+          "slow bit generation cannot fabricate later bits or allocate duration-sized trace storage");
+    value.modem.spreading_mode=modem::SpreadingMode::tone;value.modem.integration_seconds=0;
+    auto tone=transfer::binary_transmitter(Bytes{0},value);advance(*tone,1);
+    check(tone->transmit_trace().tone && !tone->transmit_trace().pattern_available &&
+          tone->transmit_trace().pattern_input.empty() && tone->transmit_trace().data_key_bits.empty(),
+          "tone trace must report absent pattern bytes and effective encryption settings");
+    auto tight=options(true);const Bytes large_raw(65536,0);
+    modem::StreamingTransmitter untraced(modem::RawBits{large_raw},transfer::seeded_config(tight,tight.timestamp));
+    tight.dsp_workspace_bytes=4*untraced.working_bytes();
+    const auto rejected=transfer::estimate_binary(large_raw,tight);
+    check(!rejected.memory_supported,"workspace admission must include generation trace beyond the untraced modem state");
+    rejects([&]{transfer::binary_transmitter(large_raw,tight);},
+            "transmission trace must honor the configured workspace rather than silently exceed it");
+    tight.dsp_workspace_bytes+=4*(modem::TransmitTrace::dynamic_storage_limit+4096);
+    const auto admitted=transfer::estimate_binary(large_raw,tight);
+    auto fits=transfer::binary_transmitter(large_raw,tight);
+    check(admitted.memory_supported && fits->working_bytes()<=tight.dsp_workspace_bytes/4 &&
+          admitted.waveform_samples==rejected.waveform_samples && admitted.wire_bits==rejected.wire_bits,
+          "trace-aware memory admission must allow the actual bounded TX without changing airtime or wire geometry");
 }
-int main(){try{fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();transmission_generation_trace();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

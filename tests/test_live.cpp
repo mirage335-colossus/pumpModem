@@ -1,8 +1,11 @@
 #include "datapump/live.hpp"
+#include "datapump/symbol_schedule.hpp"
+#include <algorithm>
 #include <chrono>
 #include <atomic>
 #include <iostream>
 #include <thread>
+#include <tuple>
 using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
@@ -101,5 +104,136 @@ void short_keyed_stream_survives_epoch_refresh() {
     check(received,"epoch refresh discarded a short admitted keyed stream before six-second physical completion");
     session.stop();
 }
+bool same_capture(const modem::TransmitTrace& a,const modem::TransmitTrace& b) {
+    const auto fields=[](const auto& value) {
+        return std::tie(value.source,value.compressed_bits,value.wire_plain_bits,value.wire_bits,
+            value.data_key_bits,value.pattern_input,value.pattern_output,value.pattern_key,value.dsss_key,
+            value.active,value.raw,value.short_text,value.source_available,value.compressed_available,
+            value.data_masked,value.pattern_private,value.pattern_available,value.dsss,value.tone,
+            value.total_wire_bits,value.generated_bits,value.generated_chips,value.revision);
+    };
+    return fields(a)==fields(b);
 }
-int main(int argc,char** argv){try{if(argc==1)run();short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+template<class Predicate>
+live::Snapshot wait_for(live::Session& session,Predicate predicate) {
+    const auto deadline=std::chrono::steady_clock::now()+40s;
+    while(std::chrono::steady_clock::now()<deadline) {
+        auto snapshot=session.snapshot();
+        if(!snapshot.error.empty())throw Error(snapshot.error);
+        if(predicate(snapshot))return snapshot;
+        std::this_thread::sleep_for(1ms);
+    }
+    throw Error("timed out waiting for a transmission capture");
+}
+void transmit_capture_tracks_generation_and_replay() {
+    using Trace=modem::TransmitTrace;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({},[&] {
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();
+    value.transfer.modem.sample_rate=512;value.transfer.modem.carrier_hz=128;
+    value.transfer.modem.bandwidth_hz=128;value.transfer.modem.pulse_shaping=false;
+    value.transfer.modem.scramble=value.transfer.modem.dsss=true;
+    value.transfer.key.emplace(Bytes(32,0x67));
+    Message sent;
+    const std::string text="0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    sent.data.assign(text.begin(),text.end());
+    const auto wire=transfer::message_wire_bits(sent,value.transfer);
+    check(wire.size()>Trace::bit_limit,"capture fixture must cross the marker and retained bit boundary");
+    // Compute the Data bits directly at their symbol coordinates, independently
+    // of the trace and transfer::xor_binary_bits(). The first 192 masked bits
+    // cover the fixed marker, followed by the actual authenticated/FEC stream.
+    Bytes key(Trace::bit_limit),plain(Trace::bit_limit);
+    for(std::size_t i=0;i<key.size();++i) {
+        const auto address=modem::symbol_stream_address(value.transfer.timestamp,
+            value.transfer.modem.stream_phase_samples,i,modem::symbol_sample_count(value.transfer.modem),
+            value.transfer.modem.sample_rate);
+        const auto byte=value.transfer.key->stream(StreamPurpose::Data,address.epoch,address.ordinal/8,1).front();
+        key[i]=static_cast<std::uint8_t>((byte>>(7-address.ordinal%8))&1);
+        plain[i]=static_cast<std::uint8_t>(wire[i]^key[i]);
+    }
+    const auto check_prefix=[&](const Trace& trace) {
+        const auto count=std::min(Trace::bit_limit,trace.generated_bits);
+        check(trace.generated_bits<=trace.total_wire_bits && trace.total_wire_bits==wire.size(),
+              "capture payload count differs from the actual transmission");
+        check(trace.source.size()<=Trace::source_limit && trace.compressed_bits.size()<=Trace::bit_limit &&
+              trace.pattern_input.size()<=Trace::byte_limit && trace.pattern_output.size()<=Trace::byte_limit &&
+              trace.pattern_key.size()<=Trace::byte_limit && trace.dsss_key.size()<=Trace::byte_limit,
+              "live transmission capture exceeded its diagnostic bounds");
+        check(trace.wire_bits==Bytes(wire.begin(),wire.begin()+static_cast<std::ptrdiff_t>(count)) &&
+              trace.wire_plain_bits==Bytes(plain.begin(),plain.begin()+static_cast<std::ptrdiff_t>(count)) &&
+              trace.data_key_bits==Bytes(key.begin(),key.begin()+static_cast<std::ptrdiff_t>(count)),
+              "live capture omitted or shifted actual encrypted marker and coded payload bits");
+    };
+    session.start(value);session.transmit(sent);
+    const auto first=wait_for(session,[&](const auto& snapshot) {
+        check(snapshot.dsp_buffered_bytes<=value.dsp_workspace_bytes,"capture replay exceeded live workspace");
+        return snapshot.transmission_finished && snapshot.simulation_replay;
+    });
+    check(first.replay_frame_index==0 && first.transmit_trace.active &&
+          first.transmit_trace.generated_bits==0 && first.transmit_trace.generated_chips==0 &&
+          first.transmit_trace.wire_bits.empty() && first.transmit_trace.pattern_output.empty(),
+          "first replay frame exposed payload generated in a later frame");
+    check_prefix(first.transmit_trace);
+    check(same_capture(first.transmit_trace,session.snapshot().transmit_trace),
+          "repeated frozen replay poll exposed future transmission data");
+    replay_milliseconds=1500;
+    const auto middle=session.snapshot();
+    check(middle.simulation_replay && middle.replay_frame_index>0 &&
+          middle.transmit_trace.generated_bits>0 && middle.transmit_trace.generated_bits<wire.size(),
+          "middle replay frame must retain its own generated prefix");
+    check_prefix(middle.transmit_trace);
+    check(same_capture(middle.transmit_trace,session.snapshot().transmit_trace),
+          "repeated middle replay poll changed its transmission capture");
+    replay_milliseconds=2999;
+    const auto last=session.snapshot();const auto& trace=last.transmit_trace;
+    check(last.simulation_replay && last.replay_frame_index+1==last.replay_frame_count &&
+          trace.generated_bits==wire.size() && trace.wire_bits.size()==Trace::bit_limit,
+          "last replay frame did not expose the capped final generated prefix");
+    check_prefix(trace);
+    check(trace.source==Bytes(sent.data.begin(),sent.data.begin()+Trace::source_limit) &&
+          trace.compressed_available && trace.compressed_bits.size()==Trace::bit_limit &&
+          trace.data_masked && trace.pattern_private && trace.dsss &&
+          trace.pattern_output.size()==Trace::byte_limit && trace.pattern_key.size()==Trace::byte_limit &&
+          trace.dsss_key.size()==Trace::byte_limit && trace.pattern_input==trace.pattern_key,
+          "final capture lost source data or the actually enabled private mapper streams");
+    for(std::size_t i=0;i<trace.pattern_output.size();++i)
+        check(trace.pattern_output[i]==static_cast<std::uint8_t>(trace.pattern_input[i]^trace.dsss_key[i]),
+              "captured mapper input, DSSS stream and transmitted mapper bytes do not align");
+    replay_milliseconds=3000;
+    const auto finished=session.snapshot();
+    check(!finished.simulation_replay && same_capture(trace,finished.transmit_trace),
+          "returning to live input discarded or replaced the completed transmission capture");
+
+    // A partially generated four-hour symbol must remain reviewable on cancel.
+    // The source worker may be in flight when cancel returns, so later polls
+    // must not restore its retired serial or mutate the frozen capture.
+    value.transfer.modem.integration_seconds=4*60*60;
+    value.transfer.modem.scramble=value.transfer.modem.dsss=false;value.transfer.key.reset();
+    session.configure(value);session.transmit_bits(Bytes{0,0,1});
+    wait_for(session,[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
+    session.cancel_transmit();const auto cancelled=session.snapshot();
+    check(cancelled.transmission_cancelled && !cancelled.simulation_replay &&
+          cancelled.transmit_trace.active && cancelled.transmit_trace.generated_bits==1 &&
+          cancelled.transmit_trace.wire_bits==Bytes{0},
+          "cancellation lost the exact partial transmission capture");
+    wait_for(session,[&](const auto& snapshot) {
+        check(same_capture(cancelled.transmit_trace,snapshot.transmit_trace) && !snapshot.simulation_replay,
+              "cancelled generation published a late transmission capture");
+        return snapshot.samples_received>cancelled.samples_received;
+    });
+    session.transmit_bits(Bytes{1,0});
+    const auto replacement=session.snapshot();
+    check(!replacement.transmit_trace.active ||
+          (replacement.transmit_trace.raw && replacement.transmit_trace.total_wire_bits==2 &&
+           (replacement.transmit_trace.wire_bits.empty() || replacement.transmit_trace.wire_bits==Bytes{1})),
+          "new transmission retained the preceding cancelled capture");
+    const auto fresh=wait_for(session,[](const auto& snapshot) {return snapshot.transmit_trace.generated_bits>0;});
+    check(fresh.transmission_id!=cancelled.transmission_id && fresh.transmit_trace.total_wire_bits==2 &&
+          fresh.transmit_trace.generated_bits==1 && fresh.transmit_trace.wire_bits==Bytes{1},
+          "replacement transmission exposed bits from a retired generation");
+    session.cancel_transmit();session.stop();
+}
+}
+int main(int argc,char** argv){try{if(argc==1){run();transmit_capture_tracks_generation_and_replay();}short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -2,6 +2,7 @@
 #include "datapump/compression.hpp"
 #include "controller.hpp"
 #include "record_presentations.hpp"
+#include "transmit_scope.hpp"
 #include "text_policy.hpp"
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
@@ -152,6 +153,10 @@ struct Controller::Impl {
     std::optional<Clock::time_point> receive_targets_due;
     std::uint64_t next_pattern_text_id=std::numeric_limits<std::uint64_t>::max();
     explicit Impl(Options value):options(value) {
+        f(UiField::transmit_scope).records=transmit_scope_records({});
+        f(UiField::transmit_scope_caption).text=transmit_scope_caption({});
+        f(UiField::transmit_scope_format).options={{"hex","Hex"},{"bits","Bits"}};
+        f(UiField::transmit_scope_format).selected="hex";
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
         f(UiField::mono).checked=true;
         f(UiField::bandwidth).text="3.6 kHz";
@@ -607,6 +612,15 @@ struct Controller::Impl {
         }
     }
     void accept_snapshot(live::Snapshot next) {
+        // Scope changes follow generation itself, independently of plot cadence
+        // or draft estimation. A one-bit prefix reaches this same poll.
+        if(next.transmission_id!=snapshot.transmission_id ||
+           next.transmit_trace.active!=snapshot.transmit_trace.active ||
+           next.transmit_trace.revision!=snapshot.transmit_trace.revision)
+            f(UiField::transmit_scope).records=transmit_scope_records(next.transmit_trace,f(UiField::transmit_scope_format).selected=="bits");
+        const auto scope_status=next.simulation_replay?"replay":next.transmission_cancelled?"cancelled":
+            !next.error.empty()?"interrupted":next.transmitting?"generating":"complete";
+        f(UiField::transmit_scope_caption).text=transmit_scope_caption(next.transmit_trace,scope_status);
         const auto changed=plot_policy.observe(next.sequence,next.transmission_id,next.simulation_replay,next.replay_frame_index);
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
@@ -810,6 +824,8 @@ void Controller::select(UiField field,std::string id) {
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
         else if(field==UiField::simulation||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
+        else if(field==UiField::transmit_scope_format)
+            p.f(UiField::transmit_scope).records=transmit_scope_records(p.snapshot.transmit_trace,state.selected=="bits");
     } catch(const std::exception& e) { p.notice(e.what(),10); }
     p.controls();
 }

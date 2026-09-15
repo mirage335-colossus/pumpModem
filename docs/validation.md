@@ -4,6 +4,64 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Transmission generation scope — 15 September 2026
+
+The first Console tab now presents the requested nine diagnostic stages plus
+the actual framed Wire Plaintext input. Input, Data keystream and ciphertext
+are adjacent; the pattern input, DSSS keystream and mapper result are adjacent.
+Hex fits all 32 byte columns at minimum width. Bits adds aligned hexadecimal
+and exact binary digits with horizontal scrolling. Partial bytes remain exact,
+including the three-bit `001` dictionary encoding of `e`.
+
+The capture comes from the actual source encoder, Data XOR and waveform
+generator, independently of draft estimates. Data rows publish begun payload
+symbols. Pattern rows sample eight actual mapper bytes at the first chip of
+each of the first four symbols, exposing public repetition and changing private
+streams. Preview reconstruction and filter lookahead cannot publish future
+symbol starts. Each simulation replay frame owns its bounded capture; completion
+retains the final capture, cancellation freezes it, and a new transmission clears
+it. Transmitter admission and replay accounting include the diagnostic storage.
+
+Private Pattern replaces the public template, so the Pattern XOR row is null;
+the replacement bytes remain visible in Pattern Bitstream. Mapper inputs are
+labeled separately from subsequent payload-dependent I/Q selection, pulse
+shaping and carrier modulation. FHSS is not applied and is shown as unused.
+All interval markers, MAC and FEC bits remain inside Data encryption. No wire
+fields, padding, short-dictionary codes, receiver completion or pending-message
+rules changed.
+
+Validation:
+
+- Release builds passed for FLTK (`build`) and Rev (`build-rev`).
+- All 13 focused transport/live suites passed in 70.29 seconds, including
+  independent dictionary vectors, exact short/raw endpoints, fixed framing,
+  physical absence, sampled four-hour symbols and bounded live resources.
+- After refining pattern sampling, `transfer`, `pattern_code` and `live`
+  passed again, 3/3 in 13.74 seconds. New regressions independently check every
+  encrypted marker/interval bit, actual Data and DSSS XOR operands, public
+  repetition, private symbol addresses, exact traced/untraced PCM equality,
+  preview nonpublication, retention bounds and workspace admission.
+- The final shared GUI suite passed, 23/23 in 57.49 seconds. It includes
+  first-tab declarations, Hex/Bits layout, actual per-poll transmission data,
+  raw/escaped input, retained captures, pending reception and adapter boundaries.
+- FLTK native workflow and document conformance passed. Adapter conformance
+  reproduces the previously recorded Compression-page dictionary clipping at
+  minimum size; that reference and its regression are unchanged.
+- Rev native adapter, platform and 1x/2x coordinate conformance passed. Its
+  concurrent workflow run missed the final replay-fraction threshold
+  (`0.898306` against `0.9`); the unchanged workflow passed when run separately
+  in 249.58 seconds.
+- Final native FLTK screenshots were inspected at minimum and default sizes:
+  all ten stages, all 32 Hex columns, exact `001`, three repeated public
+  symbol-start groups, unused fourth-group placeholders and the full Dark
+  choice are visible. Bits retains the same rows with horizontal scrolling.
+- The final Rev native screenshot was inspected at default size with the same
+  captured source, exact partial bits and repeated public pattern groups.
+- `git diff --check` passed.
+
+These checks exercise generated samples and native presentation. They do not
+establish sound-card emission, physical-link operation or intercept probability.
+
 ## Mono transmit channel routing — 15 September 2026
 
 The shared console now has a persistent **Mono** checkbox below **Audio device**,

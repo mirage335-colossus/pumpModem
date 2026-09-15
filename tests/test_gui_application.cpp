@@ -1,6 +1,7 @@
 #include "application.hpp"
 #include "control_interactions.hpp"
 #include "record_presentations.hpp"
+#include "transmit_scope.hpp"
 #include "datapump/transfer.hpp"
 #include <array>
 #include <iostream>
@@ -14,6 +15,85 @@ void check(bool value,const char* message) { if(!value)throw Error(message); }
 const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
+}
+void transmission_scope_records() {
+    using F=ui::Field;
+    const auto& declaration=control(F::transmit_scope);
+    check(declaration.kind==ui::Kind::list&&declaration.page==ui::Page::console&&
+          !declaration.persistent&&!declaration.follow_tail&&declaration.list_row_height==17&&
+          declaration.activate_record==ui::Command::none,
+          "TX scope must be a shared first-tab native list without copy/completion actions");
+    Application app({.simulation=true});
+    const auto empty=app.field(F::transmit_scope).records;
+    check(empty.size()==11&&app.field(F::transmit_scope_caption).text.find("waiting for transmission")!=std::string::npos,
+          "Scope must expose all diagnostic rows before any real generation");
+    app.edit(control(F::message),"e");
+    check(app.field(F::transmit_scope).records==empty,"Draft edits populated a purported generation capture");
+    check(app.field(F::transmit_scope_format).selected=="hex"&&control(F::transmit_scope_format).kind==ui::Kind::choice,
+          "Scope must initially fit all captured bytes with a shared format choice");
+    app.select(control(F::transmit_scope_format),"bits");
+    check(app.field(F::transmit_scope).records==transmit_scope_records({},true),
+          "Bits selection did not redraw the retained scope through the shared facade");
+    app.select(control(F::transmit_scope_format),"hex");
+    check(app.field(F::transmit_scope).records==empty,"Scope format selection changed its source capture");
+    auto get=[](const auto& rows,std::string_view id)->const ui::Record& {
+        const auto found=std::find_if(rows.begin(),rows.end(),[&](const auto& row){return row.id==id;});
+        if(found==rows.end())throw Error("A generation scope stage disappeared");
+        return *found;
+    };
+    auto value=[](const ui::Record& row,int column)->ui::RecordCell {
+        const int x=transmit_scope::column_x+column*transmit_scope::column_width;
+        const auto found=std::find_if(row.cells.begin(),row.cells.end(),[&](const auto& cell){return cell.x==x;});
+        if(found==row.cells.end())throw Error("A generation scope byte column disappeared");
+        auto cell=*found;
+        const auto binary=std::find_if(row.cells.begin(),row.cells.end(),[&](const auto& candidate){return candidate.x==x+20;});
+        if(binary!=row.cells.end())cell.text+=" "+binary->text;
+        return cell;
+    };
+    modem::TransmitTrace trace;
+    trace.active=true;trace.short_text=true;trace.source_available=true;trace.compressed_available=true;
+    trace.source={'A',' ','9','\n',0xc3,0xa9};trace.compressed_bits={0,0,1};
+    trace.wire_plain_bits={0,0};trace.wire_bits={1,0};trace.data_key_bits={1,0};trace.data_masked=true;
+    trace.generated_bits=2;trace.total_wire_bits=3;
+    trace.pattern_available=true;trace.pattern_private=true;trace.dsss=true;
+    trace.pattern_input={0xa5,0x00};trace.pattern_key=trace.pattern_input;
+    trace.dsss_key={0x3c,0xff};trace.pattern_output={0x99,0xff};
+    const auto rows=transmit_scope_records(trace,true);
+    const auto compact=transmit_scope_records(trace);
+    check(get(compact,"tx-wire").cells.front().text.ends_with("[10]")&&
+          value(get(compact,"tx-wire"),0).text=="2b"&&
+          get(compact,"tx-pattern").cells.back().x+get(compact,"tx-pattern").cells.back().w<ui::min_width-2*ui::margin-4,
+          "Compact scope hid exact partial bits or forced full-byte columns beyond minimum width");
+    check(value(get(rows,"tx-source"),0).text=="A."&&value(get(rows,"tx-source"),1).text=="9."&&
+          value(get(rows,"tx-source"),2).text=="..",
+          "Alphanumeric projection skipped source offsets or exposed unsafe text");
+    check(value(get(rows,"tx-compressed"),0).text=="-- 001"&&value(get(rows,"tx-wire-plain"),0).text=="-- 00"&&
+          value(get(rows,"tx-data-key"),0).text=="-- 10"&&value(get(rows,"tx-wire"),0).text=="-- 10"&&
+          value(get(rows,"tx-wire"),1).text=="-- --------",
+          "Scope fabricated byte padding or showed ungenerated wire bits");
+    check(value(get(rows,"tx-pattern"),0).text=="A5 10100101"&&value(get(rows,"tx-dsss-key"),0).text=="3C 00111100"&&
+          value(get(rows,"tx-pattern-output"),0).text=="99 10011001"&&
+          value(get(rows,"tx-pattern-key"),0).text=="null (private replacement, no XOR mask)",
+          "Final mapper input, actual DSSS mixing or private replacement was misrepresented");
+    for(const auto& row:rows) {
+        check(!row.activatable&&row.cells.size()<=66,"Scope became activatable or exceeded its bounded native cells");
+        for(const auto& cell:row.cells)check(cell.h==17&&cell.y==0,"Diagnostic rows lost common vertical alignment");
+    }
+    check(rows[3].id=="tx-wire-plain"&&rows[4].id=="tx-data-key"&&rows[5].id=="tx-wire"&&
+          rows[7].id=="tx-pattern"&&rows[8].id=="tx-dsss-key"&&rows[9].id=="tx-pattern-output",
+          "Input, XOR key and output stages must remain adjacent for direct comparison");
+    trace.raw=true;trace.short_text=false;trace.source_available=false;trace.compressed_available=false;
+    trace.data_masked=false;trace.pattern_private=false;trace.pattern_available=false;trace.dsss=false;
+    const auto unused=transmit_scope_records(trace,true);
+    check(value(get(unused,"tx-source"),0).text.find("Unavailable")!=std::string::npos&&
+          value(get(unused,"tx-compressed"),0).text.find("Unused")!=std::string::npos&&
+          value(get(unused,"tx-data-key"),0).text.find("off")!=std::string::npos&&
+          value(get(unused,"tx-pattern"),0).text.find("Unavailable")!=std::string::npos&&
+          value(get(unused,"tx-fhss-key"),0).text.find("not implemented")!=std::string::npos,
+          "Unused or unavailable stages were presented as generated keystream bytes");
+    check(transmit_scope_caption(trace,"cancelled").find("cancelled")!=std::string::npos,
+          "Cancelled generation lost its truthful capture status");
+    app.close();
 }
 void records() {
     Signals signals;
@@ -608,6 +688,6 @@ void compression_declarations() {
 }
 }
 int main() {
-    try {records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

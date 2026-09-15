@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/modem.hpp"
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/transmit_trace.hpp"
 #include <functional>
 #include <memory>
 #include <optional>
@@ -35,7 +36,8 @@ public:
     // Both input forms include the rounded settling prefix and an exact
     // three-second suppression-noise tail, outside all payload symbol slots.
     StreamingTransmitter(Bytes wire, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
-    StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024);
+    StreamingTransmitter(RawBits bits, Config config, std::size_t workspace_bytes = 8 * 1024 * 1024,
+                         TransmitTrace trace = {});
     ~StreamingTransmitter();
     StreamingTransmitter(StreamingTransmitter&&) noexcept;
     StreamingTransmitter& operator=(StreamingTransmitter&&) noexcept;
@@ -57,6 +59,9 @@ public:
     // Each point is retained once, regardless of PCM block size or duration.
     std::vector<std::complex<double>> payload_constellation() const;
     ConstellationBatch take_payload_constellation();
+    // Actual generation prefix; previews do not advance it. Source preparation
+    // can be visible before read(), wire/chip rows require begun payload slots.
+    TransmitTrace transmit_trace() const;
     // Reconstruct the actual recent PCM, including spreading and carrier phase.
     // At most 2048 samples; any portion before the transmission is zero-filled.
     void preview_last(std::span<float> output) const;
