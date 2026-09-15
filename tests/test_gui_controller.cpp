@@ -253,6 +253,33 @@ void shannon_capacity_display() {
     expect_capacity("1.44e-06 bit/s");
     controller.close();
 }
+void profile_reference_display() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    const auto active=[&]() -> std::string {
+        std::string label;unsigned count=0;
+        for(const auto& row:controller.field(F::profile_reference).records)
+            for(const auto& cell:row.cells)if(cell.bold) {label=cell.text;++count;}
+        check(count==1,"Profile reference must highlight exactly one configured duration");
+        return label;
+    };
+    controller.edit(F::snr,"30");
+    check(active().find("128complex")!=std::string::npos&&active().find("14.06bit/s")!=std::string::npos,
+          "Reference did not show the actual 128-chip profile near the 30 dB-Hz transition");
+    const auto before=controller.field(F::profile_reference).records;
+    controller.edit(F::snr,"26");
+    check(active().find("512complex")!=std::string::npos&&
+          controller.field(F::profile_reference).records!=before,
+          "Reference did not follow the active integration step");
+    controller.edit(F::bandwidth,"1.2 kHz");
+    check(active().find("128complex")!=std::string::npos,
+          "Reference retained stale boundaries after the rate changed");
+    controller.select(F::pattern,"pattern-8");
+    check(controller.field(F::profile_reference).records.size()==1&&active().find("8complex")!=std::string::npos,
+          "Forced profiles must show their actual length instead of automatic boundaries");
+    controller.edit(F::snr,"unfinished");
+    check(controller.field(F::profile_reference).records.empty(),"Invalid settings retained an apparently current profile reference");
+}
 void mono_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
@@ -1311,6 +1338,7 @@ int main(int argc,char** argv) {
         datapump::gui::controller_self_check();
         rate_carrier_controls();
         shannon_capacity_display();
+        profile_reference_display();
         mono_controls();
         noise_transmission_controls();
         tone_mode_controls();

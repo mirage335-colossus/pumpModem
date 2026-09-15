@@ -131,6 +131,9 @@ if(BUILD_TESTING)
   target_include_directories(test_gui_controller PRIVATE src/gui)
   target_link_libraries(test_gui_controller PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_controller COMMAND test_gui_controller)
+  add_executable(test_profile_reference tests/test_profile_reference.cpp)
+  target_link_libraries(test_profile_reference PRIVATE datapump)
+  add_test(NAME gui_profile_reference COMMAND test_profile_reference)
   add_executable(test_gui_application tests/test_gui_application.cpp)
   target_link_libraries(test_gui_application PRIVATE datapump_gui_application datapump)
   add_test(NAME gui_application COMMAND test_gui_application)
@@ -183,7 +186,7 @@ if(BUILD_TESTING)
     endif()
   endif()
   set_tests_properties(gui_layout gui_contract gui_link_boundary gui_document_layout gui_interactions gui_services gui_bindings gui_record_reconciliation gui_document_presentation gui_chrome gui_inspection gui_pattern_space
-    gui_plots gui_bitmaps gui_inspection_page gui_binary_editor gui_controller gui_application gui_overlay gui_adapter_boundary gui_boundary_regression gui_native_policy
+    gui_plots gui_bitmaps gui_inspection_page gui_binary_editor gui_controller gui_profile_reference gui_application gui_overlay gui_adapter_boundary gui_boundary_regression gui_native_policy
     PROPERTIES LABELS "gui")
   if(UNIX)
     add_library(alsa_stub SHARED tests/alsa_stub.cpp)

@@ -13,7 +13,7 @@ enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
-    cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, signal_label, signals, copy_signal, paste_signal, file_label, files,
+    cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
     waveform, zoom_in, zoom_out, reset_zoom, constellation_label,
     constellation, pattern_scores_label, pattern_scores,
@@ -97,26 +97,31 @@ struct DesktopLayout {
         out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,transmit_scope_visible?206:0};
         const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
         constexpr int files_width = 252;
+        // A compact profile reference shares the height of reception history
+        // and plots. Keep the generated TX scope at its full diagnostic width.
+        constexpr int reference_width=280;
+        const int reception_x=margin+reference_width+12;
         // Reclaim the hidden scope for two more full signal rows and taller
         // plots. The format choice stays reachable above the received lists.
         const int signal_height = 84+std::min(26,height_growth*26/80)+(transmit_scope_visible?0:108);
-        out[Slot::signal_label] = {margin, signal_y - 23, width - files_width - 50, 21};
+        out[Slot::signal_label] = {reception_x, signal_y - 23, width - reception_x - files_width - 34, 21};
         out[Slot::file_label] = {width - margin - files_width, signal_y - 23, files_width, 21};
-        out[Slot::signals] = {margin, signal_y, width - 2 * margin - files_width - 14, signal_height};
+        out[Slot::signals] = {reception_x, signal_y, width - reception_x - margin - files_width - 14, signal_height};
         out[Slot::files] = {width - margin - files_width, signal_y, files_width, signal_height - 36};
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
         const int plots_y = signal_y + signal_height + 23, plot_height = height - plots_y - 124;
-        const int plots_width = width - 2 * margin;
-        const int waterfall_width = plots_width * 34 / 100;
-        const int waveform_width = std::max(236, plots_width * 24 / 100);
+        out[Slot::profile_reference] = {margin, signal_y, reference_width, plots_y + plot_height - signal_y};
+        const int plots_width = width - reception_x - margin;
+        const int waterfall_width = plots_width * 24 / 100;
+        const int waveform_width = std::max(240, plots_width * 24 / 100);
         const int constellation_width = (plots_width - waterfall_width - waveform_width - 36) / 2;
-        const int waveform_x = margin + waterfall_width + 12;
+        const int waveform_x = reception_x + waterfall_width + 12;
         const int constellation_x = waveform_x + waveform_width + 12;
         const int pattern_scores_x = constellation_x + constellation_width + 12;
         const int pattern_scores_width = width - margin - pattern_scores_x;
-        out[Slot::waterfall_label] = {margin, plots_y - 23, waterfall_width, 21};
-        out[Slot::waterfall] = {margin, plots_y, waterfall_width, plot_height};
+        out[Slot::waterfall_label] = {reception_x, plots_y - 23, waterfall_width, 21};
+        out[Slot::waterfall] = {reception_x, plots_y, waterfall_width, plot_height};
         out[Slot::waveform_label] = {waveform_x, plots_y - 23, waveform_width, 21};
         out[Slot::waveform] = {waveform_x, plots_y, waveform_width, plot_height};
         out[Slot::constellation_label] = {constellation_x, plots_y - 23, constellation_width, 21};

@@ -13,7 +13,7 @@ enum class Field {
     files, signals, mode, status, airtime, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
-    compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, count
+    compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference, count
 };
 enum class Command {
     none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,

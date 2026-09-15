@@ -3,6 +3,7 @@
 #include "controller.hpp"
 #include "record_presentations.hpp"
 #include "transmit_scope.hpp"
+#include "profile_reference.hpp"
 #include "text_policy.hpp"
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
@@ -221,6 +222,8 @@ struct Controller::Impl {
     void configure(bool match_receive_target=false,bool match_carrier=false) {
         receive_targets_due.reset();
         dirty();
+        f(UiField::profile_reference).records.clear();
+        f(UiField::profile_reference).selected.clear();
         try {
             live::Settings next;
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
@@ -232,6 +235,12 @@ struct Controller::Impl {
             const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
             f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
+            const auto reference=profile_reference::build(plan.config,target_snr,mode,encrypted());
+            for(std::size_t index=0;index<reference.rows.size();++index) {
+                const auto& row=reference.rows[index];
+                f(UiField::profile_reference).records.push_back({std::to_string(index),
+                    {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
+            }
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_targets_db_hz=targets.values;
             next.transfer.receive_pattern_mode=mode;

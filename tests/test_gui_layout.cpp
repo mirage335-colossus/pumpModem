@@ -25,9 +25,10 @@ void established_default() {
     check(layout[Slot::binary] == Rect{852, 152, 220, 78}, "binary editor moved");
     check(layout[Slot::qr] == Rect{1086, 152, 78, 78}, "QR preview moved");
     check(layout[Slot::transmit_scope] == Rect{16, 289, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::signals] == Rect{16, 518, 882, 110}, "received signals size changed");
+    check(layout[Slot::profile_reference] == Rect{16, 518, 280, 224}, "profile reference must span history and plots on the left");
+    check(layout[Slot::signals] == Rect{308, 518, 590, 110}, "received signals size changed");
     check(layout[Slot::files] == Rect{912, 518, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 651, 390, 91}, "waterfall size changed");
+    check(layout[Slot::waterfall] == Rect{308, 651, 205, 91}, "waterfall size changed");
     check(layout[Slot::device] == Rect{16, 774, 112, 27}, "persistent modem controls moved");
     check(layout[Slot::bandwidth] == Rect{138, 774, 93, 27} &&
           layout[Slot::carrier] == Rect{241, 774, 101, 27}, "Rate and Carrier editors lost their reserved widths");
@@ -94,8 +95,13 @@ void supported_sizes() {
               constellation.x == waveform.x + waveform.w + 12 &&
               pattern_scores.x == constellation.x + constellation.w + 12 &&
               pattern_scores.x + pattern_scores.w == size.w - margin &&
-              constellation.w >= 190 && pattern_scores.w >= 190,
+              constellation.w >= 130 && pattern_scores.w >= 130,
               "plot row is misaligned");
+        const auto reference=layout[Slot::profile_reference];
+        check(reference.x==margin&&reference.w==280&&reference.y==signals.y&&reference.h>=172&&
+              reference.x+reference.w+12==signals.x&&signals.x==waterfall.x&&
+              reference.y+reference.h==waterfall.y+waterfall.h&&contains(layout[Slot::page],reference),
+              "Profile reference must fit beside history and plots without covering received bits");
         check(waterfall.h>=64&&waterfall.y>=signals.y+signals.h+23&&
               waterfall.y+waterfall.h<=layout[Slot::page].y+layout[Slot::page].h,
               "Generation scope displaced plots outside the Console page");

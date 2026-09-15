@@ -95,7 +95,7 @@ public:
     const char* title(ui::Bitmap id) const {
         switch (id) {
         case ui::Bitmap::waveform: return replaying_ ? "Simulation replay / waveform" : "Live waveform";
-        case ui::Bitmap::waterfall: return replaying_ ? "Simulation replay / waterfall" : "Spectrum / amplitude waterfall";
+        case ui::Bitmap::waterfall: return replaying_ ? "Replay spectrum" : "Spectrum";
         case ui::Bitmap::constellation:
             return constellation_source_ == live::ConstellationSource::received ? "Received constellation" :
                 constellation_source_ == live::ConstellationSource::transmitted ? "Transmitted constellation" : "Receiver input I/Q";

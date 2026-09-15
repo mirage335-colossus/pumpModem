@@ -129,7 +129,7 @@ struct Smoke::Impl {
                     snapshot.simulation_sample_fraction<=1,"Simulation replay did not identify a chronological frame");
             require(controller.field(F::mode).text.starts_with("Simulation replay "),"Replay mode label did not identify displayed frames");
             if(bitmaps)require(std::string_view(bitmaps->title(B::waveform))=="Simulation replay / waveform"&&
-                    std::string_view(bitmaps->title(B::waterfall))=="Simulation replay / waterfall","Shared bitmap titles lost their replay source");
+                    std::string_view(bitmaps->title(B::waterfall))=="Replay spectrum","Shared bitmap titles lost their replay source");
             const bool beginning=!replay.active||replay.id!=snapshot.transmission_id;
             if(beginning) {
                 require(!replay.active||interrupted.contains(replay.id),"An active replay was replaced without an explicit new transmission");

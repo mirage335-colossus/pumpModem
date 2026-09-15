@@ -4,6 +4,36 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Automatic profile reference — 15 September 2026
+
+The Console now has a compact **Pattern steps** list on the left of reception
+history and scope plots. Rows show the C/N0 changeover, complex chips per raw
+bit, symbol duration and gross bitrate; the active profile is bold. Boundaries
+come from the existing tuner with the selected rate, carrier, clock and key
+geometry. Forced modes show their fixed profile, and extended integration shows
+the active duration. Thresholds are rounded for display and are not measured
+receive-confidence limits. The transmit-generation scope retains its full width.
+
+Both FLTK and Rev Release builds passed. The 13 focused compatibility and GUI
+tests passed in 70.86 seconds, including independent dictionary vectors, fixed
+intervals, physical completion, sampled four-hour symbols and pending prefixes.
+After the final presentation and forced-target fix, all 24 shared GUI checks
+passed in 65.38 seconds. New coverage pins the default 29.480625, 26.470325 and
+23.460025 dB-Hz transitions, actual clock/carrier/key floors, forced targets below
+the receive-list range, extended integration, active-row updates and minimum-size
+sidebar geometry. No transport or automatic selection rules changed.
+
+Native windows were captured and inspected at 1180 by 866 and 1030 by 786. FLTK
+was checked with the generation scope hidden and visible; Rev was inspected
+with it hidden, with both layouts covered by shared geometry tests. Compact row
+text fits beside the native scrollbar; plot headings and waveform action buttons
+remain visible. Rev adapter
+conformance and FLTK document conformance passed. FLTK adapter conformance reached
+the previously documented minimum-size Compression dictionary-label clipping
+failure; the unrelated label and its assertion were retained. Full native
+transmission workflows and physical audio links were not rerun for this display
+change. `git diff --check` passed.
+
 ## Continuous tuning transmission — 15 September 2026
 
 Both shared compose pages now provide **Transmit noise** and **Stop noise**.
