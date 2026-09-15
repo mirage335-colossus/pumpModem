@@ -341,6 +341,42 @@ void timed_gap_expiry() {
     check(bounded.size()==2 && bounded[0].bits==Bytes({1}) && bounded[1].bits==Bytes({1,0}),
           "gap expansion must stop at the bit limit without rejecting an exact-limit clean suffix");
 }
+void default_gap_expiry_releases_payload_workspace() {
+    auto c=config();c.integration_seconds=2;c.pulse_shaping=false;
+    constexpr std::size_t payload_start=375;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const Bytes prefix{1,0,1,0,0,1,1,0},suffix{0,1,1};
+    Bytes bits=prefix;bits.insert(bits.end(),4,0);bits.insert(bits.end(),suffix.begin(),suffix.end());
+    auto samples=waveform(bits,c,payload_start);
+    const auto gap_start=payload_start+prefix.size()*symbol;
+    std::fill_n(samples.begin()+static_cast<std::ptrdiff_t>(gap_start),4*symbol,0.F);
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.start_uncertainty_seconds=0;
+    search.frequency_offsets_hz={0};search.preserve_symbol_gaps=true;
+    modem::PatternCorrelator receiver(c,search,1024*1024);
+    const auto baseline=receiver.working_bytes();
+    receiver.push(std::span(samples).first(gap_start));
+    check(receiver.provisional().bits==prefix && receiver.working_bytes()>baseline,
+          "a confirmed prefix must allocate its bounded active payload buffer");
+    receiver.push(std::span(samples).subspan(gap_start,3*symbol));
+    check(receiver.synchronized() && receiver.provisional().bits==prefix && receiver.take_bursts().empty(),
+          "exactly six seconds of missing symbols must retain the established clock for recovery");
+    receiver.push(std::span(samples).subspan(gap_start+3*symbol,symbol));
+    check(!receiver.synchronized() && receiver.provisional().bits.empty(),
+          "the first failed symbol beyond six seconds must terminate the active message");
+    const auto ended=receiver.take_bursts();
+    check(ended.size()==1 && ended[0].bits==prefix && ended[0].complete && ended[0].end_sample==gap_start,
+          "gap termination must publish only the confirmed prefix without trailing placeholders");
+    check(receiver.working_bytes()==baseline,
+          "draining an expired message must reclaim its payload allocation from the correlator workspace");
+    receiver.push(std::span(samples).subspan(gap_start+4*symbol,suffix.size()*symbol));
+    const auto resumed=receiver.provisional();
+    check(resumed.bits==suffix && resumed.first_stream_symbol==prefix.size()+4,
+          "a terminated message must not block independent acquisition on the continuing clock");
+    receiver.finish();
+    const auto finished=receiver.take_bursts();
+    check(finished.size()==1 && finished[0].bits==suffix && receiver.working_bytes()==baseline,
+          "end of capture must publish the final message and reclaim its active payload allocation");
+}
 void timed_gaps_cannot_resolve_stream_phase() {
     auto transmitted=config();transmitted.integration_seconds=.3;transmitted.pulse_shaping=false;
     transmitted.stream_phase_samples=1200;
@@ -537,4 +573,4 @@ void bounded_hours_and_noise() {
     rejects([&]{cancelled.push(noise,stop.get_token());},"streaming long search must honor cancellation");
 }
 }
-int main(){try{sampled_bits_and_rates(true);sampled_bits_and_rates(false);late_clock_fragment();weak_prefix_does_not_borrow_confidence();shaped_raw_sample_evidence();shaped_partial_chips();majority_obscured_symbol_is_independent();completely_obscured_symbols_do_not_block_later_symbols();weak_tails_expire_without_blocking_independent_symbols();timed_gaps_preserve_admitted_clock_and_trim_silence();timed_gap_expiry();timed_gaps_cannot_resolve_stream_phase();complete_packet_closes_before_first_timed_gap();independent_epoch_recovers_fractional_symbol_phase(false);independent_epoch_recovers_fractional_symbol_phase(false,true);independent_epoch_recovers_fractional_symbol_phase(true);compact_clock_search_preserves_evidence_and_bounds();bounded_hours_and_noise();std::cout<<"Streaming clock-window pattern correlator tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{sampled_bits_and_rates(true);sampled_bits_and_rates(false);late_clock_fragment();weak_prefix_does_not_borrow_confidence();shaped_raw_sample_evidence();shaped_partial_chips();majority_obscured_symbol_is_independent();completely_obscured_symbols_do_not_block_later_symbols();weak_tails_expire_without_blocking_independent_symbols();timed_gaps_preserve_admitted_clock_and_trim_silence();timed_gap_expiry();default_gap_expiry_releases_payload_workspace();timed_gaps_cannot_resolve_stream_phase();complete_packet_closes_before_first_timed_gap();independent_epoch_recovers_fractional_symbol_phase(false);independent_epoch_recovers_fractional_symbol_phase(false,true);independent_epoch_recovers_fractional_symbol_phase(true);compact_clock_search_preserves_evidence_and_bounds();bounded_hours_and_noise();std::cout<<"Streaming clock-window pattern correlator tests passed\n";return 0;}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

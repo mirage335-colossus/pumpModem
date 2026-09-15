@@ -334,6 +334,12 @@ end a message; short symbols retain synchronization through a gap of up to
 six seconds. A sufficiently confident surviving symbol can start a new span
 without earlier symbols having decoded. Later seconds remain independently
 searchable after an old message ends.
+The timeout counts consecutive symbols that have not established sufficient
+evidence; merely retaining a weak candidate does not restart it. It is evaluated
+at complete symbol boundaries, so very long symbols can exceed six seconds
+before a decision is available. On expiry the active span ends and its bit
+allocation is released. Fixed acquisition scratch and bounded completed-message
+output remain available; silence cannot keep extending the expired message.
 Retained weak symbols can be admitted by their combined evidence. If that
 combined evidence remains insufficient when a confident symbol arrives, the
 receiver preserves the confirmed prefix and starts a new span at that symbol.
@@ -356,9 +362,13 @@ marker evidence, and fills the missing plaintext bits with zero for FEC. Only
 a recognized leading marker and complete packet integrity permit a gap-filled
 packet to validate. Such bits cannot become dictionary text. `Received::raw_bits`
 contains diagnostic zero placeholders; `Received::missing_symbols` counts them.
-This preserves interior byte alignment; it cannot infer missing final symbols
-without a later confident endpoint, or repair an actual discontinuity in the
-capture clock. The transmitted format and symbol acceptance thresholds are unchanged.
+This implementation preserves interior byte alignment and trims unconfirmed
+final symbols. A recoverable packet header could supply the expected endpoint
+for a separately bounded tail-padding attempt before RS decoding; that extension
+is not implemented yet. It would not extend the weak-symbol timeout or turn
+padding into received evidence. An actual discontinuity in the capture clock
+requires separate handling. The transmitted format and symbol acceptance
+thresholds are unchanged.
 
 Before retaining a new gap, the transfer layer checks whether the confirmed
 prefix is already a complete packet. A bounded marker/header probe rejects
@@ -368,7 +378,8 @@ even on the same timing grid, without changing the acquired clock or giving
 unobserved bits confidence. Raw streams have no packet integrity or explicit
 endpoint, so their gap timeout determines whether same-grid spans are joined.
 During a pending gap the provisional view marks the confirmed observed span
-complete, allowing prompt raw presentation. A later recovered extension can
+complete, allowing prompt raw presentation. This presentation flag does not
+terminate the retained clock or reset its timeout. A later recovered extension can
 replace that view, and a validated packet upgrades any earlier short-text
 interpretation on the same signal.
 

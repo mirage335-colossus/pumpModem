@@ -4,6 +4,28 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Weak-symbol timeout and payload memory — 14 September 2026
+
+The existing timeout remains six seconds of consecutive unconfirmed symbols,
+evaluated at complete symbol boundaries with a minimum of two failed symbols.
+A short gap preserves the admitted clock; exceeding that limit ends the active
+span and trims its unconfirmed tail. Packet length does not extend the timeout.
+
+The FFT receiver already releases expired tracks. The clock-window correlator
+now also releases terminated spans' bit-vector allocations, including at EOF,
+instead of retaining their empty capacity in the acquisition hypotheses.
+Fixed acquisition scratch and bounded completed-message output remain available.
+Regressions verify the default six-second boundary in both paths, no storage
+growth or repeated completion during continued silence, and exact restoration
+of the correlator's baseline workspace after draining completion. Independent
+later reception retains its correct stream position.
+
+Both full receiver suites passed in Release, and the full correlator suite
+passed ASan/UBSan with no diagnostics (`detect_leaks=0`, halt on errors).
+Focused live checks passed for long-symbol reception after idle, gap recovery
+upgrading earlier short content, and long-packet processing/cancellation. The
+application rebuilt successfully.
+
 ## Timed gaps before Reed–Solomon correction — 14 September 2026
 
 Live reception, capture decoding and transfer simulation now preserve unknown

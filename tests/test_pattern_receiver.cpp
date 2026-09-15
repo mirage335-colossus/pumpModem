@@ -453,6 +453,32 @@ void keyed_track_survives_missing_symbols() {
     check(limited.bursts.size()==1 && limited.bursts.front().bits==before,
           "unknown slots must obey the bounded bit capacity without rejecting the confirmed prefix");
 }
+void default_gap_timeout_ends_active_message() {
+    auto c=config(32,true);c.pulse_shaping=false;
+    c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=1;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const Bytes bits{1,0,1,1};constexpr std::size_t delay=17,workspace=1024*1024;
+    const auto end=delay+bits.size()*symbol;
+    const auto samples=waveform(c,bits,delay,12*c.sample_rate,.37);
+    modem::PatternSearch search;search.preserve_symbol_gaps=true;search.frequency_offsets_hz={0};
+    modem::PatternReceiver receiver(c,workspace,search);
+    check(!receiver.clock_windowed(),"gap timeout fixture must exercise the FFT path");
+    const auto at_limit=end+6*c.sample_rate;
+    receiver.push(std::span(samples).first(at_limit));
+    check(receiver.synchronized() && receiver.take_bursts().empty() && receiver.provisional().bits==bits,
+          "six seconds of missing slots must retain the active clock and confirmed prefix without publishing a final burst");
+    const auto expired_at=at_limit+2*symbol;
+    receiver.push(std::span(samples).subspan(at_limit,expired_at-at_limit));
+    check(!receiver.synchronized() && !receiver.acquiring(),
+          "continued missing symbols beyond six seconds must discard the active FFT track");
+    const auto completed=receiver.take_bursts();
+    check(completed.size()==1 && completed.front().complete && completed.front().bits==bits,
+          "gap timeout must publish the confirmed message once without its unobserved tail");
+    const auto idle_bytes=receiver.working_bytes();
+    receiver.push(std::span(samples).subspan(expired_at));
+    check(receiver.take_bursts().empty() && receiver.working_bytes()<=idle_bytes && idle_bytes<=workspace,
+          "continued silence must not grow message storage or republish the expired span");
+}
 void independently_started_epoch_recovers_phase() {
     for(unsigned profile=0;profile<3;++profile) {
         auto transmitter=config(128,true);transmitter.pulse_shaping=false;
@@ -744,6 +770,7 @@ int main() {
     run("multiple bursts",multiple_bursts);run("memory limits and cancellation",bounds_and_cancellation);
     run("fractional symbol timing",fractional_symbol_timing);run("keyed capture missing first symbol",keyed_capture_missing_first_symbol);
     run("private tracking across missing symbols",keyed_track_survives_missing_symbols);
+    run("default gap timeout ends active message",default_gap_timeout_ends_active_message);
     run("independent epoch phase acquisition",independently_started_epoch_recovers_phase);
     run("independent sampled crystal and phase",independent_sampled_channel);
     run("high-SNR sampled private and public patterns",high_snr_sampled_channel);

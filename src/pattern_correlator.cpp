@@ -240,7 +240,10 @@ struct PatternCorrelator::Impl {
         } else {accounted_bytes+=result.bits.capacity();bursts.push_back(std::move(result));}
     }
     void clear(Hypothesis& h) {
-        h.burst.bits.clear();h.burst.complete=false;h.admitted=h.pending_gaps=false;
+        // Keep the finite clock hypothesis, but release a terminated message's
+        // payload allocation so later hypotheses can use the same workspace.
+        accounted_bytes-=h.burst.bits.capacity();Bytes{}.swap(h.burst.bits);
+        h.burst.complete=false;h.admitted=h.pending_gaps=false;
         h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;
     }
     void append(Hypothesis& h,std::uint8_t bit) {
@@ -450,7 +453,7 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
 }
 void PatternCorrelator::finish(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)return;
-    for(auto& h:s.hypotheses) {s.publish(h);h.admitted=false;}
+    for(auto& h:s.hypotheses) {s.publish(h);s.clear(h);}
     s.finished=true;
 }
 std::vector<PatternBurst> PatternCorrelator::take_bursts(){
