@@ -733,7 +733,25 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         const auto& trace=controller.snapshot().transmit_trace;
         check(controller.field(ui::Field::transmit_scope).records==transmit_scope_records(trace),
               "A progress poll deferred generation scope updates or substituted estimated bytes");
+        const bool active=controller.snapshot().transmitting||controller.snapshot().simulation_replay;
+        check(controller.field(ui::Field::transmit_scope).visible==active&&
+              controller.field(ui::Field::transmit_scope_caption).visible==active,
+              "Auto-hide scope did not follow transmission and replay on the same progress poll");
         if(trace.active&&!trace.wire_bits.empty()) {
+            if(!generated_seen&&active) {
+                const auto transmission_id=controller.snapshot().transmission_id;
+                const auto captured=controller.field(ui::Field::transmit_scope).records;
+                controller.select(ui::Field::transmit_scope_format,"none");
+                check(!controller.field(ui::Field::transmit_scope).visible&&
+                      !controller.field(ui::Field::transmit_scope_caption).visible&&
+                      controller.field(ui::Field::transmit_scope_format).enabled,
+                      "None must hide an active preview while leaving the display choice available");
+                controller.select(ui::Field::transmit_scope_format,"hex-auto-hide");
+                check(controller.field(ui::Field::transmit_scope).visible&&
+                      controller.field(ui::Field::transmit_scope).records==captured&&
+                      controller.snapshot().transmission_id==transmission_id,
+                      "Changing preview visibility altered the active transmission or its captured data");
+            }
             generated_seen=true;
             check(trace.wire_bits.size()<=expected_wire.size()&&
                   std::equal(trace.wire_bits.begin(),trace.wire_bits.end(),expected_wire.begin()),
@@ -752,6 +770,9 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
     }
     check(pending_count>0,"Pattern text reception must expose pending bits before it becomes received text");
     check(generated_seen,"Actual simulated generation never reached the Console scope");
+    check(!controller.field(ui::Field::transmit_scope).visible&&
+          !controller.field(ui::Field::transmit_scope_caption).visible,
+          "Auto-hide left the completed transmission preview visible");
 }
 void short_text_reception() {
     using F=ui::Field;
@@ -798,6 +819,7 @@ void three_bit_text_reception() {
     const auto transmission_id=controller.snapshot().transmission_id;
     controller.select(F::transmit_scope_format,"bits");
     check(controller.field(F::transmit_scope).records==transmit_scope_records(controller.snapshot().transmit_trace,true)&&
+          controller.field(F::transmit_scope).visible&&controller.field(F::transmit_scope_caption).visible&&
           controller.snapshot().transmission_id==transmission_id,
           "Bit-detail selection regenerated the transmission or lost its actual retained prefix");
     controller.close();

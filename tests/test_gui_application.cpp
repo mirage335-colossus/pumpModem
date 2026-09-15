@@ -29,13 +29,27 @@ void transmission_scope_records() {
           "Scope must expose all diagnostic rows before any real generation");
     app.edit(control(F::message),"e");
     check(app.field(F::transmit_scope).records==empty,"Draft edits populated a purported generation capture");
-    check(app.field(F::transmit_scope_format).selected=="hex"&&control(F::transmit_scope_format).kind==ui::Kind::choice,
-          "Scope must initially fit all captured bytes with a shared format choice");
+    const auto& format=app.field(F::transmit_scope_format);
+    check(format.selected=="hex-auto-hide"&&format.options.size()==4&&
+          format.options[0].label=="None"&&format.options[1].label=="Hex, auto-hide"&&
+          format.options[2].label=="Hex"&&format.options[3].label=="Bits"&&
+          control(F::transmit_scope_format).kind==ui::Kind::choice&&
+          !app.control(declaration).visible&&!app.control(control(F::transmit_scope_caption)).visible&&
+          app.control(control(F::transmit_scope_format)).visible,
+          "Scope must default to hidden Hex auto-hide while leaving all display choices available");
     app.select(control(F::transmit_scope_format),"bits");
-    check(app.field(F::transmit_scope).records==transmit_scope_records({},true),
+    check(app.field(F::transmit_scope).records==transmit_scope_records({},true)&&
+          app.control(declaration).visible&&app.control(control(F::transmit_scope_caption)).visible,
           "Bits selection did not redraw the retained scope through the shared facade");
     app.select(control(F::transmit_scope_format),"hex");
-    check(app.field(F::transmit_scope).records==empty,"Scope format selection changed its source capture");
+    check(app.field(F::transmit_scope).records==empty&&app.control(declaration).visible,
+          "Hex selection changed its source capture or hid the manual preview");
+    for(const auto* mode:{"none","hex-auto-hide"}) {
+        app.select(control(F::transmit_scope_format),mode);
+        check(!app.control(declaration).visible&&!app.control(control(F::transmit_scope_caption)).visible&&
+              app.control(control(F::transmit_scope_format)).visible&&app.field(F::transmit_scope).records==empty,
+              "Hiding an idle scope removed its capture or its display choice");
+    }
     auto get=[](const auto& rows,std::string_view id)->const ui::Record& {
         const auto found=std::find_if(rows.begin(),rows.end(),[&](const auto& row){return row.id==id;});
         if(found==rows.end())throw Error("A generation scope stage disappeared");

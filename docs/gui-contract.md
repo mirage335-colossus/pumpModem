@@ -183,7 +183,11 @@ remain placeholders, and incomplete data bytes show their exact bit prefixes.
 Hex view fits all 32 byte columns at minimum window width; Bits view adds
 aligned binary digits and horizontal scrolling. A partial byte in Hex view
 shows its bit count and the exact prefix beside the row label. Switching views
-only redraws the retained capture.
+only redraws the retained capture. The display choice offers **None**,
+**Hex, auto-hide**, **Hex** and **Bits**, with **Hex, auto-hide** selected by default.
+Auto-hide shows the scope and its caption during transmission and simulation replay, then hides
+them on completion, cancellation or failure. None always hides them. The format
+choice remains available; Hex and Bits show the retained capture even while idle.
 
 Source and compressed-source previews come from the encoding used for that
 transmission. Wire rows advance when payload symbol generation begins; pattern

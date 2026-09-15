@@ -155,8 +155,8 @@ struct Controller::Impl {
     explicit Impl(Options value):options(value) {
         f(UiField::transmit_scope).records=transmit_scope_records({});
         f(UiField::transmit_scope_caption).text=transmit_scope_caption({});
-        f(UiField::transmit_scope_format).options={{"hex","Hex"},{"bits","Bits"}};
-        f(UiField::transmit_scope_format).selected="hex";
+        f(UiField::transmit_scope_format).options={{"none","None"},{"hex-auto-hide","Hex, auto-hide"},{"hex","Hex"},{"bits","Bits"}};
+        f(UiField::transmit_scope_format).selected="hex-auto-hide";
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
         f(UiField::mono).checked=true;
         f(UiField::bandwidth).text="3.6 kHz";
@@ -484,6 +484,10 @@ struct Controller::Impl {
         }
     }
     void controls() {
+        const auto& scope_mode=f(UiField::transmit_scope_format).selected;
+        const bool scope_visible=!closing&&(scope_mode=="hex"||scope_mode=="bits"||
+            (scope_mode=="hex-auto-hide"&&(snapshot.transmitting||snapshot.simulation_replay)));
+        f(UiField::transmit_scope).visible=f(UiField::transmit_scope_caption).visible=scope_visible;
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;

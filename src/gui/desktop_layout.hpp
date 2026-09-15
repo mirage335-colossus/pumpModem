@@ -90,8 +90,8 @@ struct DesktopLayout {
         out[Slot::cancel] = {540, buttons_y, 106, action_height};
         out[Slot::airtime] = {657, buttons_y, width - margin - 657, action_height};
 
-        out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-92,18};
-        out[Slot::transmit_scope_format]={width-margin-84,buttons_y+31,84,18};
+        out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,18};
+        out[Slot::transmit_scope_format]={width-margin-136,buttons_y+31,136,18};
         out[Slot::transmit_scope]={margin,buttons_y+51,width-2*margin,206};
         const int signal_y=out[Slot::transmit_scope].y+out[Slot::transmit_scope].h+23;
         constexpr int files_width = 252;

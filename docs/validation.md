@@ -4,6 +4,22 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Transmission scope auto-hide — 15 September 2026
+
+The Console scope dropdown now offers **None**, **Hex, auto-hide**, **Hex** and
+**Bits**. Hex, auto-hide is the default: the scope and caption appear during actual
+transmission snapshots and simulation replay, then hide when activity ends.
+None hides them throughout transmission. Manual Hex and Bits retain access to
+the capture while idle. The dropdown remains available and is wide enough for
+the new label; transport, capture data and surrounding control positions are
+unchanged.
+
+Both FLTK and Rev Release builds passed. All 23 shared GUI checks passed in
+57.73 seconds, covering the default and manual choices, visibility during
+generation/replay and after completion, retained captures, exact pending bits
+and shared layout/binding boundaries. `git diff --check` passed. Native display
+workflows were not rerun for this shared visibility change.
+
 ## Transmission generation scope — 15 September 2026
 
 The first Console tab now presents the requested nine diagnostic stages plus

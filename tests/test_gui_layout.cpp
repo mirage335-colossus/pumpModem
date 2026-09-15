@@ -80,7 +80,7 @@ void supported_sizes() {
               signals.h>=54+24+6&&message.h>=50,
               "Generation rows, scrollbar, caption or pending reception no longer fit at supported sizes");
         const auto scope_format=layout[Slot::transmit_scope_format];
-        check(scope_caption.x+scope_caption.w<scope_format.x&&scope_caption.y==scope_format.y&&
+        check(scope_format.w>=136&&scope_caption.x+scope_caption.w<scope_format.x&&scope_caption.y==scope_format.y&&
               scope_format.y+scope_format.h<=scope.y&&contains(layout[Slot::page],scope_format),
               "Scope display choice overlaps the capture caption or diagnostic rows");
         check(signals.y == files.y && files.x == signals.x + signals.w + 14 &&
