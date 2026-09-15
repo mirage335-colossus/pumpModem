@@ -71,7 +71,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.footer_height=24;control.wheel_up=Command::zoom_in;control.wheel_down=Command::zoom_out;
         control.double_click=Command::reset_zoom;control.help="Wheel zooms the time span. Double-click resets zoom.";
     }
-    if(slot==Slot::pattern_scores)control.help="Received P0 evidence on the horizontal axis and P1 evidence on the vertical axis. Candidates appear after complete pattern windows have enough evidence; long symbols take longer. Hardware audio input is paused during transmission. Scores use natural-log units; they are not measured SNR or calibrated probabilities.";
+    if(slot==Slot::pattern_scores) {
+        control.click=Command::clear_pattern_scores;
+        control.help="Click to clear pattern evidence. Evidence older than six seconds disappears. Received P0 evidence is on the horizontal axis and P1 evidence on the vertical axis. Candidates appear after complete pattern windows have enough evidence; long symbols take longer. Hardware audio input is paused during transmission. Scores use natural-log units; they are not measured SNR or calibrated probabilities.";
+    }
     if(slot==Slot::copy_signal||slot==Slot::clear_waterfall||slot==Slot::zoom_in||slot==Slot::zoom_out||slot==Slot::reset_zoom)control.font_size=11;
     return control;
 }

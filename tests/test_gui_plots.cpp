@@ -1,4 +1,5 @@
 #include "../src/gui/plot_data.hpp"
+#include "../src/gui/pattern_score_view.hpp"
 #include "datapump/streaming_modem.hpp"
 #include <cmath>
 #include <iostream>
@@ -7,6 +8,54 @@
 using namespace datapump;
 void check(bool condition, const char* message) { if (!condition) throw Error(message); }
 namespace {
+void pattern_evidence_retention() {
+    using Clock = gui::PatternScoreView::Clock;
+    using namespace std::chrono_literals;
+    const auto now = Clock::time_point{} + 24h;
+    live::Snapshot snapshot;
+    snapshot.pattern_scores = {{10, 1}, {20, 2}, {30, 3}};
+    snapshot.pattern_score_observations = {{1, now - 6s - 1ns}, {2, now - 6s}, {3, now - 1s}};
+    snapshot.pattern_score_observation_id = 3;
+    gui::PatternScoreView view;
+    check(view.scores(snapshot, now) == std::vector<std::complex<double>>{{20, 2}, {30, 3}},
+          "Pattern evidence must remain visible at exactly six seconds and disappear only when older");
+    check(view.scores(snapshot, now + 1ns) == std::vector<std::complex<double>>{{30, 3}},
+          "Pattern evidence must expire independently instead of retaining an old batch beside a newer point");
+    check(view.scores(snapshot, now + 5s) == std::vector<std::complex<double>>{{30, 3}} &&
+          view.scores(snapshot, now + 5s + 1ns).empty(),
+          "Polling an unchanged snapshot must not refresh the age of retained pattern evidence");
+    check(snapshot.pattern_scores.size() == 3 && snapshot.pattern_score_observations.front().id == 1 &&
+          snapshot.pattern_score_observations.back().observed_at == now - 1s,
+          "Display expiry must not remove or change the receiver's retained evidence");
+
+    snapshot.pattern_scores = {{40, 4}};
+    snapshot.pattern_score_observations = {{4, now}};
+    snapshot.pattern_score_observation_id = 7; // Other retained receiver hypotheses are currently hidden.
+    view.clear_through(snapshot.pattern_score_observation_id);
+    check(view.scores(snapshot, now).empty(), "Clearing the plot must hide current pattern evidence");
+    snapshot.pattern_score_observations = {{6, now}};
+    check(view.scores(snapshot, now + 1s).empty(),
+          "A retained receiver hypothesis must stay cleared if it is selected by a later snapshot");
+    snapshot.pattern_scores.push_back(snapshot.pattern_scores.front());
+    snapshot.pattern_score_observations.push_back({8, now + 1s});
+    snapshot.pattern_score_observation_id = 8;
+    view.clear_through(3);
+    check(view.scores(snapshot, now + 1s) == std::vector<std::complex<double>>{{40, 4}},
+          "A new observation with an identical score must appear without reviving previously cleared IDs");
+    check(snapshot.pattern_scores.size() == 2 && snapshot.pattern_score_observations.front().id == 6,
+          "Clearing the plot must leave the receiver's evidence intact");
+
+    // A long symbol first becomes a displayed observation when its full window
+    // has completed, even though the window started hours before that point.
+    const auto completed = now + 4h;
+    snapshot.pattern_scores = {{50, 5}};
+    snapshot.pattern_score_observations = {{9, completed}};
+    snapshot.pattern_score_observation_id = 9;
+    check(view.scores(snapshot, completed) == snapshot.pattern_scores &&
+          view.scores(snapshot, completed + 6s) == snapshot.pattern_scores &&
+          view.scores(snapshot, completed + 6s + 1ns).empty(),
+          "Fresh evidence from a completed long symbol must receive the same six-second display lifetime");
+}
 void sampled_waveform_reconstruction() {
     constexpr auto radius = gui::plots::waveform_kernel_radius;
     constexpr std::size_t first = 100, count = 65, width = 400;
@@ -67,6 +116,7 @@ void sampled_waveform_reconstruction() {
 }
 int main() {
     try {
+        pattern_evidence_retention();
         sampled_waveform_reconstruction();
         modem::Config config;
         config.sample_rate = 4800; config.carrier_hz = 900;

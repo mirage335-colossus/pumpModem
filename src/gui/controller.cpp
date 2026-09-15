@@ -767,6 +767,7 @@ struct Controller::Impl {
         case Command::zoom_out: zoom=std::min(256.,zoom*2); plot_update.update_plots=true; break;
         case Command::reset_zoom: zoom=1; plot_update.update_plots=true; break;
         case Command::clear_waterfall: plot_update.clear_waterfall=true; break;
+        case Command::clear_pattern_scores: plot_update.clear_pattern_scores_through=snapshot.pattern_score_observation_id; break;
         case Command::pattern_first: pattern_first=0; break;
         case Command::pattern_previous: pattern_first=pattern_first>page_size?pattern_first-page_size:0; break;
         case Command::pattern_next: pattern_first=std::min(last_pattern_page(),pattern_first+page_size); break;

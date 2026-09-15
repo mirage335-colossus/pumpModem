@@ -1980,3 +1980,28 @@ bit/s while short text `e` retains its three transmitted bits.
 
 This was a headless run; native window rendering and physical-link throughput
 were not measured. Both adapters consume the shared diagnostic presentation.
+
+### Pattern evidence reset and expiry (2026-09-15)
+
+Clicking the Console Pattern evidence plot now clears retained observations.
+Stable observation IDs prevent later polls or replay frames from restoring
+cleared evidence; new observations can still appear with identical scores.
+Each point expires when its presentation age exceeds six seconds, including
+during idle input. Evidence receives its timestamp after the complete pattern
+window is scored. Expired strong candidates cannot hide fresh evidence from
+another receiver. Replay preserves IDs and uses first scheduled frame times.
+This diagnostic bookkeeping is bounded and does not alter modem acquisition,
+wire formats, physical completion or pending reception updates.
+
+The Release build and all 20 selected suites passed: `compression_short`,
+`transfer`, `stream_codec`, `stream_receive`, `attachment`, `pattern_correlator`,
+`pattern_receiver`, `live`, `live_resources`, `gui_application`, `gui_controller`,
+`gui_inspection`, `gui_binary_editor`, `gui_plots`, `gui_bitmaps`,
+`gui_interactions`, `gui_contract`, `gui_adapter_boundary`,
+`gui_boundary_regression` and `gui_bindings`. Deterministic new cases cover
+the exact six-second boundary, separate observation ages, repeated polls,
+clear persistence, fresh identical scores, completed long-symbol evidence,
+receiver selection, replay timestamp preservation and bounded history.
+
+Validation was headless; native pointer/rendering checks and physical audio
+were not run. Both adapters use the existing shared bitmap click mechanism.

@@ -64,8 +64,14 @@ struct SignalUpdate {
     std::string raw_bits;
 };
 enum class ConstellationSource { input, transmitted, received };
+struct PatternScoreObservation {
+    std::uint64_t id = 0;
+    std::chrono::steady_clock::time_point observed_at{};
+    bool operator==(const PatternScoreObservation&) const = default;
+};
 struct Snapshot {
     static constexpr std::size_t pattern_score_limit = 128;
+    static constexpr auto pattern_score_lifetime = std::chrono::seconds(6);
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
@@ -73,6 +79,12 @@ struct Snapshot {
     // Retained receiver hypotheses, not probabilities: real = pattern 0
     // evidence, imaginary = pattern 1 evidence, both against noise.
     std::vector<std::complex<double>> pattern_scores;
+    // Stable identities and first-observed presentation times, parallel to
+    // pattern_scores. Repeated retained hypotheses do not refresh their age.
+    std::vector<PatternScoreObservation> pattern_score_observations;
+    // Highest observation allocated at this live/replay position, including
+    // candidates from receivers not selected for the displayed plot.
+    std::uint64_t pattern_score_observation_id = 0;
     ConstellationSource constellation_source = ConstellationSource::input;
     std::vector<SignalUpdate> signals;
     std::vector<transfer::Received> received;

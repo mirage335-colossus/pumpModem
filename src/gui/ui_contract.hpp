@@ -20,7 +20,7 @@ enum class Command {
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
-    transmit_short_bits, copy_raw_signal, paste_raw_signal
+    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,

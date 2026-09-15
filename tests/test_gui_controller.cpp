@@ -1284,6 +1284,10 @@ void bitmap_source_checks() {
           sources.caption(ui::Bitmap::pattern_scores, 240).find("waiting") != std::string::npos &&
           std::string_view(patterns->help).find("Hardware audio input is paused during transmission") != std::string_view::npos,
           "Console pattern plot did not explain complete-window evidence and paused reception during hardware TX");
+    check(patterns->click == ui::Command::clear_pattern_scores &&
+          std::string_view(patterns->help).find("Click to clear") != std::string_view::npos &&
+          std::string_view(patterns->help).find("older than six seconds") != std::string_view::npos,
+          "Pattern evidence must declare its click-to-clear action and six-second retention in the shared GUI");
     const auto original = sources.get(ui::Bitmap::qr);
     const auto empty = render(original);
     check(empty.pixels()[0] == 32 && empty.pixels()[1] == 0 && empty.pixels()[2] == 0,
@@ -1304,6 +1308,19 @@ void bitmap_source_checks() {
     controller.activate(ui::Command::clear_waterfall);
     check(sources.update(controller) == std::vector{ui::Bitmap::waterfall}, "Clear waterfall did not target only its named source");
     check(sources.update(controller).empty(), "Bitmap mapping consumed one-shot invalidation more than once");
+    const auto before_clear_version = sources.version(ui::Bitmap::pattern_scores);
+    const auto before_clear_revision = controller.revision();
+    const auto before_clear_samples = controller.snapshot().samples_received;
+    const auto before_clear_message = controller.message_bytes();
+    controller.activate(patterns->click);
+    check(sources.update(controller) == std::vector{ui::Bitmap::pattern_scores} &&
+          sources.version(ui::Bitmap::pattern_scores) == before_clear_version + 1 &&
+          sources.caption(ui::Bitmap::pattern_scores).find("waiting") != std::string::npos,
+          "Clicking pattern evidence must clear and invalidate only its named plot, including an empty plot");
+    check(sources.update(controller).empty(), "Pattern evidence clear invalidation must be consumed exactly once");
+    check(controller.revision() == before_clear_revision &&
+          controller.snapshot().samples_received == before_clear_samples && controller.message_bytes() == before_clear_message,
+          "Clearing pattern evidence must not reconfigure reception or change the draft");
     controller.edit(ui::Field::message, std::string(501, 'a'));
     sources.update(controller);
     check(sources.caption(ui::Bitmap::qr).find("500") != std::string::npos,

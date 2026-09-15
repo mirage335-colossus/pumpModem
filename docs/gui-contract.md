@@ -402,6 +402,15 @@ inside an adapter. Changing QR brightness affects only that bitmap and never
 changes modem state. Monochrome and color are shared presentation preferences;
 unsupported targets retain the grayscale path.
 
+Clicking the Console **Pattern evidence** plot clears its retained points.
+Each observation disappears after six seconds, including while input is idle;
+polling the same candidate does not refresh its age. New observations can appear
+after a clear, even when their scores match an earlier point. The age starts
+when a completed pattern window produces evidence, so a long symbol retains
+its full scoring duration. Replay uses each observation's first scheduled frame
+as its presentation time. Clearing and expiry affect diagnostic display only;
+they do not reset acquisition, discard pending bits or complete a reception.
+
 ## Platform services and lifecycle
 
 Commands request `open_file`, `save_file`, `prompt`, `clipboard` or `open_folder`

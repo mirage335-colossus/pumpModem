@@ -1,5 +1,6 @@
 #include "datapump/live.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "../src/live_pattern_scores.hpp"
 #include <algorithm>
 #include <chrono>
 #include <atomic>
@@ -10,6 +11,59 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace {
 void check(bool value,const char* text){if(!value)throw Error(text);}
+void pattern_score_observation_lifetime() {
+    using History=live::detail::PatternScoreHistory;
+    using Clock=std::chrono::steady_clock;
+    const auto origin=Clock::time_point{};
+    std::uint64_t next_id=0;
+    const auto allocate=[&]{return ++next_id;};
+    History history;
+    modem::PatternEvidence candidate{0,4ULL*60*60*8000,0,1500,80,1,0,0};
+    // A four-hour symbol has no diagnostic age before its completed window.
+    history.update({},origin,allocate);
+    check(history.entries().empty(),"unfinished long pattern generated plot evidence");
+    const auto completed=origin+4h;
+    history.update(std::span(&candidate,1),completed,allocate);
+    const auto original=history.entries().front().observation;
+    check(original.id==1 && original.observed_at==completed &&
+          !History::expired(original,completed+6s) && History::expired(original,completed+6s+1ns),
+          "pattern plot lifetime must start at completed evidence and expire only after six seconds");
+    history.update(std::span(&candidate,1),completed+30s,allocate);
+    check(history.entries().front().observation==original && history.best_score(completed+30s)<0 && next_id==1,
+          "retained candidates refreshed their plot lifetime or observation identity");
+    auto fresh=candidate;fresh.first_sample=fresh.end_sample;fresh.end_sample+=8000;++fresh.stream_symbol;
+    const std::array candidates{candidate,fresh};
+    history.update(candidates,completed+30s,allocate);
+    check(history.entries()[0].observation==original && history.entries()[1].observation.id!=original.id &&
+          history.entries()[1].observation.observed_at==completed+30s,
+          "fresh equal-valued pattern scores did not retain their independent observation identity");
+    History strongest,weaker;
+    strongest.update(std::span(&candidate,1),origin,allocate);
+    fresh.score=10;weaker.update(std::span(&fresh,1),origin+5s,allocate);
+    check(strongest.best_score(origin+6s+1ns)<weaker.best_score(origin+6s+1ns),
+          "expired strongest receiver hid fresh weaker plot evidence");
+    strongest.update(std::span(&candidate,1),origin+7s,allocate);
+    check(strongest.best_score(origin+7s)<0,
+          "switching back to retained receiver evidence revived an expired observation");
+    std::vector<modem::PatternEvidence> many(live::Snapshot::pattern_score_limit+5,candidate);
+    for(std::size_t i=0;i<many.size();++i)many[i].stream_symbol=i;
+    history.update(many,completed+40s,allocate);
+    check(history.entries().size()==live::Snapshot::pattern_score_limit &&
+          history.entries().front().candidate.stream_symbol==5,
+          "plot observation bookkeeping exceeded the retained candidate bound");
+
+    struct Frame {std::vector<live::PatternScoreObservation> pattern_score_observations;};
+    std::vector<Frame> frames(4);
+    frames[1].pattern_score_observations={{101,origin}};
+    frames[2].pattern_score_observations={{102,origin}};
+    frames[3].pattern_score_observations={{101,origin},{102,origin}};
+    live::detail::rebase_pattern_score_observations(frames,origin+20s,3s);
+    check(frames[1].pattern_score_observations[0].observed_at==origin+20750ms &&
+          frames[2].pattern_score_observations[0].observed_at==origin+21500ms &&
+          frames[3].pattern_score_observations[0]==frames[1].pattern_score_observations[0] &&
+          frames[3].pattern_score_observations[1]==frames[2].pattern_score_observations[0],
+          "replay refreshed evidence age or exposed its CPU-generation timestamp");
+}
 live::Settings settings() {
     live::Settings value;value.simulation=true;value.simulation_snr_db=30;
     value.simulation_clock_error_ppm=0;value.simulation_phase_noise_degrees_per_sqrt_second=0;
@@ -302,4 +356,13 @@ void continuous_noise_lifecycle() {
     }
 }
 }
-int main(int argc,char** argv){try{if(argc==1){run();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(int argc,char** argv) {
+    try {
+        pattern_score_observation_lifetime();
+        if(argc>1 && std::string_view(argv[1])=="--pattern-scores") {
+            std::cout<<"pattern score observation lifetime passed\n";return 0;
+        }
+        if(argc==1){run();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}
+        short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";
+    } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
+}

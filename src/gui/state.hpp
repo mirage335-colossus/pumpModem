@@ -51,6 +51,7 @@ struct PlotUpdate {
     bool update_plots = false;
     bool append_waterfall = false;
     bool clear_waterfall = false;
+    std::optional<std::uint64_t> clear_pattern_scores_through;
 };
 // Each chronological replay frame is displayed once. Repeated UI polls do not
 // append duplicate spectrum rows, and a new replay starts a fresh waterfall.
