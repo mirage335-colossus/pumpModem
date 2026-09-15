@@ -149,6 +149,75 @@ void leading_marker_and_exact_short_paths() {
               "raw bits beyond 16 bytes and a periodic interval must retain their exact unframed length");
     }
 }
+void partial_leading_marker_packets() {
+    const auto interpret=[](Bytes bits,std::size_t missing,const transfer::Options& value) {
+        modem::PatternBurst burst;burst.bits=std::move(bits);burst.first_stream_symbol=missing;
+        burst.complete=true;burst.score=45;
+        return transfer::interpret_pattern(std::move(burst),value,value.timestamp);
+    };
+    for(const bool keyed:{false,true})for(const auto kind:{MessageKind::text,MessageKind::file}) {
+        Message message;message.kind=kind;message.id.fill(0x59);message.data.resize(48);
+        for(std::size_t i=0;i<message.data.size();++i)message.data[i]=static_cast<std::uint8_t>(i*37+11);
+        if(kind==MessageKind::file)message.filename="fragment.bin";
+        for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+            auto value=options(keyed);value.fec=fec;value.compression=false;
+            const auto packet=encode_packet(message,transfer::packet_options(value,value.timestamp));
+            const auto layout=packet_layout(packet);
+            check(layout.block_count<=1 && layout.payload_bytes==message.data.size(),
+                  "partial-marker damage fixture must have one systematic body block and an uncompressed payload");
+            const auto logical=transfer::message_bits(message,value);
+            const auto marked=boundary_sync::insert(logical);
+            const auto wire=transfer::message_wire_bits(message,value);
+            const auto payload_bit=boundary_sync::marker_bits+
+                8*(layout.header_bytes+layout.header_parity_bytes+layout.metadata_bytes+5);
+            for(const std::size_t missing:{1U,7U,16U,32U,64U})for(const bool damaged:{false,true}) {
+                auto fragment=wire,expected_raw=marked;
+                if(damaged)for(std::size_t bit=0;bit<8;++bit) {
+                    fragment[payload_bit+bit]^=1;expected_raw[payload_bit+bit]^=1;
+                }
+                fragment.erase(fragment.begin(),fragment.begin()+static_cast<std::ptrdiff_t>(missing));
+                expected_raw.erase(expected_raw.begin(),expected_raw.begin()+static_cast<std::ptrdiff_t>(missing));
+                const auto received=interpret(std::move(fragment),missing,value);
+                check(received.raw_bits==expected_raw,
+                      "late marker recognition must retain the constellation-supplied Data offset and exact raw evidence");
+                if(damaged && fec==FecMode::off) {
+                    check(!received.packet_validated && received.packet.message.data.empty(),
+                          "a partial marker cannot validate damaged packet content without error correction");
+                } else {
+                    check(received.packet_validated && received.packet.authenticated==keyed &&
+                          received.packet.message.kind==kind && received.packet.message.data==message.data &&
+                          received.packet.message.filename==message.filename,
+                          "surviving leading-marker evidence must recover text and file packets with the original authentication policy");
+                    check(damaged?received.packet.corrected_bytes>0:received.packet.corrected_bytes==0,
+                          "partial-marker removal must precede RS and consume no payload correction budget");
+                }
+            }
+            constexpr std::size_t missing=64;
+            Bytes fragment(wire.begin()+missing,wire.end());
+            if(keyed) {
+                auto wrong_key=value;wrong_key.key.emplace(Bytes(32,0x7b));
+                check(!interpret(fragment,missing,wrong_key).packet_validated,
+                      "partial public-marker evidence must not bypass a wrong private key");
+                check(!interpret(fragment,missing-1,value).packet_validated,
+                      "partial-marker recovery must never replace the constellation-supplied keystream offset");
+            }
+            // The observed tail still identifies packet framing even when too
+            // little of the packet survives to parse its protected header.
+            fragment.resize(boundary_sync::marker_bits-missing+3);
+            const auto truncated=interpret(fragment,missing,value);
+            const auto recovery=boundary_sync::recover_packet(truncated.raw_bits,default_memory_limit,missing);
+            check(recovery.leading_marker_recognized && !truncated.packet_validated &&
+                  truncated.packet.message.data.empty() && truncated.raw_bits.size()==fragment.size(),
+                  "a recognized partial marker followed by a truncated packet must remain raw evidence rather than dictionary text");
+
+            Bytes unmarked(boundary_sync::marker_bits-missing,0);
+            unmarked.insert(unmarked.end(),logical.begin(),logical.end());
+            transfer::xor_binary_bits(unmarked,value,missing);
+            check(!interpret(std::move(unmarked),missing,value).packet_validated,
+                  "a late burst needs recognized leading-marker evidence before any packet grammar is accepted");
+        }
+    }
+}
 void public_late_symbol_interpretation() {
     const auto value=options();Message text;text.data={'e'};
     modem::PatternBurst burst;burst.bits=transfer::message_bits(text,value);
@@ -292,6 +361,35 @@ transfer::Options high_snr_options(bool keyed) {
     value.automatic_receive_profiles=true;
     value.receive_targets_db_hz={80};
     return value;
+}
+void partial_leading_marker_waveform() {
+    Message message;message.data=Bytes(17,'Z');message.id.fill(0x61);
+    for(const bool keyed:{false,true}) {
+        auto value=high_snr_options(keyed);value.compression=false;value.fec=FecMode::off;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(value.modem));
+        auto samples=transfer::transmit(message,value);
+        const auto missing_samples=static_cast<std::size_t>(modem::training_sample_count(value.modem)+
+            modem::pattern_pulse_padding_samples(value.modem))+symbol;
+        samples.erase(samples.begin(),samples.begin()+static_cast<std::ptrdiff_t>(missing_samples));
+        samples.resize(samples.size()+2*symbol);
+        // Acquisition sees only PCM after the lead-in and first marker symbol
+        // were lost. No source bit count or first-symbol index is supplied.
+        modem::PatternReceiver receiver(transfer::seeded_config(value,value.timestamp),value.dsp_workspace_bytes);
+        for(std::size_t offset=0;offset<samples.size();) {
+            const auto count=std::min<std::size_t>(4096,samples.size()-offset);
+            receiver.push(std::span(samples).subspan(offset,count));offset+=count;
+        }
+        receiver.finish();auto bursts=receiver.take_bursts();
+        check(!bursts.empty(),"a capture missing the first marker symbol must still acquire the surviving PCM");
+        auto best=std::max_element(bursts.begin(),bursts.end(),[](const auto& a,const auto& b){return a.score<b.score;});
+        if(keyed)check(best->first_stream_symbol==1,
+                       "real keyed PCM acquisition must retain the missing marker symbol's Data-stream position");
+        auto expected=boundary_sync::insert(transfer::message_bits(message,value));expected.erase(expected.begin());
+        const auto received=transfer::interpret_pattern(std::move(*best),value,value.timestamp,receiver.diagnostics());
+        check(received.raw_bits==expected && received.packet_validated && received.packet.authenticated==keyed &&
+              received.packet.message.data==message.data,
+              "partial-marker recognition must validate clear and private packets after actual PCM acquisition loses the first symbol");
+    }
 }
 modem::ChannelConfig high_snr_channel(const transfer::Options& value) {
     modem::ChannelConfig channel;
@@ -438,4 +536,4 @@ void pattern_storage_limits() {
     }
 }
 }
-int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();leading_marker_and_exact_short_paths();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();leading_marker_and_exact_short_paths();partial_leading_marker_packets();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();partial_leading_marker_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

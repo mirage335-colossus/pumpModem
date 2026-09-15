@@ -97,17 +97,61 @@ full block. Markers contain no lengths, types, addresses, commands or authentica
 
 After pattern acquisition and the existing whole-stream Data decryption,
 recovery starts at the existing burst origin and examines only the expected
-plaintext marker slots. It accepts an exact match of both 96-bit copies at
-offsets from 0 through 7 bits for the initial marker, removing any preceding
-bits with that marker. A damaged initial marker consumes the nominal 192-bit
-slot when available, preserving an otherwise aligned packet. Subsequent
-markers are searched from -7 through +7 bits around each expected boundary.
-It does not search the rest of the payload for markers. For a matched periodic
-slot, the preceding plaintext interval is normalized to 2,048 bits: retain its prefix,
-trim extra tail bits or zero-fill a missing tail. This preserves the next block's
-byte boundary while leaving the affected region to FEC and whole-packet integrity.
-A corrupt or absent exact marker consumes the nominal 192-bit slot when that
-slot is available; a later intact marker can still restore alignment.
+plaintext marker slots. Initial starts are searched at offsets 0 through 7 bits,
+and subsequent starts from -7 through +7 bits around each expected boundary.
+The rest of the payload is never searched. Exact matches take the fast path.
+Otherwise a complete 192-bit marker may have up to eight changed bits. A partial
+marker may have one contiguous run of 1 through 64 missing bits, including a
+missing prefix, provided its final 32 bits survive and match exactly. The
+remaining observed bits may contain changes within the confidence budget below.
+Arbitrary distributed deletions and a missing marker suffix are outside this
+model: a surviving prefix alone cannot identify where packet data begins.
+
+If pattern acquisition supplies a leading stream-symbol index from 1 through
+64, recovery compares the surviving initial marker suffix after the existing
+decryption at that index. This uses the same evidence threshold and does not
+try alternative crypto positions. In an unkeyed burst, the bounded deletion
+search can also infer a missing marker prefix without a known stream index.
+The acquired index fixes the known suffix's endpoint, so that comparison may
+spend its mismatch budget even in the final 32 bits. An inferred deletion
+still requires the exact trailing anchor.
+
+Passing matches must identify a unique marker endpoint. Equivalent deletion
+paths ending at the same bit collapse to their strongest evidence; competing
+endpoints reject recovery. For a matched periodic slot, the preceding plaintext
+interval is normalized to 2,048 bits: retain its prefix, trim extra tail bits or
+zero-fill a missing tail. Different starts sharing an endpoint can leave the
+last few preceding data bits uncertain, so the affected region still depends
+on FEC and whole-packet integrity. A damaged unrecognized marker consumes its
+nominal slot when available, preserving an otherwise aligned packet; a later
+recognized marker can restore alignment. Incomplete unrecognized slots remain
+uninterpreted.
+
+#### Marker evidence threshold
+
+The acceptance bound assumes independent fair input bits. For one fixed
+hypothesis with `n` observed marker bits and at most `e` mismatches, its
+false-match probability is at most `V(n,e) / 2^n`, where
+`V(n,e) = sum(i=0..e, binom(n,i))`. This is the cumulative
+[binomial probability at p = 1/2](https://itl.nist.gov/div898/handbook/eda/section3/eda366i.htm).
+The exact trailing anchor further restricts partial matches; the bound
+conservatively counts all mismatch positions anyway.
+
+All starts and deletion runs are charged to
+`H = 15 * (1 + sum(d=1..64, 193-d-32)) = 123375` hypotheses per slot.
+For `B` received bits, `S = 1 + floor(B / (2048-7+128))` bounds the number
+of slots. Each candidate, with `e <= 8`, must satisfy
+`n - ceil(log2(S)) - ceil(log2(H)) - ceil(log2(V(n,e))) >= 100`.
+These conservative rounded costs and the
+[union bound](https://math.iisc.ac.in/~gadgil/MA261/notes/chapter-8.html)
+limit the chance of any false marker acceptance in one recovery call to
+`2^-100` under that input model, accounting for all tested starts, deletion
+runs and mismatch patterns. Shorter surviving markers and larger inputs
+therefore permit fewer mismatches, or fail the threshold entirely. The two
+repeated words still constrain distinct observed bits under this model.
+This is an analytic random-input bound, not a measured channel error rate,
+a posterior probability that a boundary is correct, or an authentication
+claim. It supplies no statistical guarantee for deliberately constructed data.
 
 Marker matching and removal operate after the existing Data-stream decryption,
 before body deinterleaving, Reed–Solomon correction and final integrity checks.
@@ -117,18 +161,22 @@ origin whose declared extent must equal the complete recovered byte extent.
 Failed validation does not trigger a second attempt on the unstripped stream
 or a fallback to older packets without the initial marker.
 Short dictionary interpretation is limited to 195 acquired bits (15 maximally
-escaped bytes), so a long failed packet cannot fall back to dictionary text.
-Acquired raw bits remain available as diagnostics.
+escaped bytes). A recognized complete or partial marker also prevents
+dictionary fallback when packet validation fails, including a short damaged
+packet. A marker supplies framing evidence; validated packet metadata still
+determines whether the content is text, a file or a screenshot. Acquired raw
+bits remain available as diagnostics independently of either interpretation.
 
 This repairs byte alignment after a net shift of at most seven decoded plaintext
-bits per searched slot, not arbitrary lost spans. It cannot reconstruct a damaged
-tail without a later marker, whole missing blocks or an unknown absolute stream
-offset. Pattern constellation decoding remains the sole authority for timing
+data bits per searched slot, together with the bounded marker damage above.
+It cannot reconstruct a damaged data tail without a later recognized marker,
+whole missing blocks or an unknown absolute stream offset. Pattern constellation
+decoding remains the sole authority for timing
 and keystream alignment. Recovery never trials cryptographic offsets, resets
 counters or reseeds streams; it cannot restore Data-stream, Scrambler or DSSS
 alignment. Subsequent bits must still be acquired and decrypted correctly in
 the same burst. There is no improvement to waveform acquisition or carrier/clock
-tracking. An intact marker does not authenticate content: the complete packet must still
+tracking. A recognized marker does not authenticate content: the complete packet must still
 pass SHA-256 or keyed HMAC-SHA256 before validated content is released.
 
 ### Compact bootstrap

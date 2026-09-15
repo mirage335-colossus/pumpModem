@@ -87,6 +87,95 @@ void leading_marker_recovery() {
     check(beyond_window.size() == original.size() + extra && beyond_window != original,
           "leading marker recovery must not search beyond the fixed seven-bit neighborhood");
 }
+void partial_markers_and_confidence() {
+    check(byte_sync::maximum_marker_loss_bits == 64 && byte_sync::maximum_marker_errors == 8 &&
+          byte_sync::marker_tail_bits == 32 && byte_sync::false_match_bits == 100,
+          "partial marker limits and the conservative false-match floor changed");
+    const auto original = random_bits(byte_sync::interval_bits * 2 + 136);
+    const auto pristine = byte_sync::insert(original);
+    for (const auto lost : {1U, 7U, 16U, 32U, 64U}) {
+        for (const auto gap : {0U, 17U, 64U}) {
+            for (const auto start : {std::size_t{0}, byte_sync::marker_bits + byte_sync::interval_bits}) {
+                const auto damaged = slip(pristine, start + gap, lost, false);
+                const auto recovered = byte_sync::recover_packet(damaged);
+                check(recovered.leading_marker_recognized, "partial marker framing evidence must be retained");
+                if (start == 0) {
+                    check(recovered.bits == original, "partial initial marker recovery must preserve the complete packet");
+                } else {
+                    check(equal_suffix(recovered.bits, original, byte_sync::interval_bits) &&
+                          std::equal(recovered.bits.begin(), recovered.bits.begin() +
+                              static_cast<std::ptrdiff_t>(byte_sync::interval_bits - byte_sync::maximum_slip_bits), original.begin()),
+                          "partial periodic markers must preserve the next boundary and all but the preceding uncertain tail");
+                }
+            }
+        }
+    }
+    for (const auto errors : {1U, 4U, 8U}) {
+        auto damaged = pristine;
+        for (std::size_t i = 0; i < errors; ++i) {
+            damaged[i * 23] ^= 1;
+            damaged[byte_sync::marker_bits + byte_sync::interval_bits + i * 23] ^= 1;
+        }
+        const auto recovered = byte_sync::recover_packet(damaged);
+        check(recovered.leading_marker_recognized && recovered.bits == original,
+              "statistically admitted substitutions in both markers must not consume payload FEC capacity");
+    }
+
+    const auto short_data = random_bits(17 * 8);
+    auto partial = slip(byte_sync::insert(short_data), 0, 64, false);
+    partial[3] ^= 1;
+    // n=128, e=1 gives ceil(log2 V)=8; H<2^17 and S=1 give
+    // 128-8-17 = 103 conservative evidence bits, exceeding the 100-bit floor.
+    const auto accepted = byte_sync::recover_packet(partial);
+    check(accepted.leading_marker_recognized && accepted.bits == short_data,
+          "a 128-bit marker suffix with one error must meet the trial-adjusted confidence floor");
+    auto too_many_errors = partial;
+    too_many_errors[13] ^= 1;
+    check(!byte_sync::recover_packet(too_many_errors).leading_marker_recognized,
+          "two errors in 128 surviving bits provide only 97 conservative bits and must not identify framing");
+    auto many_slots = partial;
+    many_slots.resize(40000, 0);
+    check(!byte_sync::recover_packet(many_slots).leading_marker_recognized,
+          "the same partial evidence must be rejected when total slot trials exhaust its confidence margin");
+    auto known_suffix = slip(byte_sync::insert(short_data), 0, 64, false);
+    known_suffix[127] ^= 1;
+    const auto known = byte_sync::recover_packet(known_suffix, known_suffix.size(), 64);
+    check(known.leading_marker_recognized && known.bits == short_data &&
+          !byte_sync::recover_packet(known_suffix).leading_marker_recognized,
+          "an acquired endpoint may admit a trailing substitution that an inferred endpoint must reject");
+
+    auto missing_too_much = slip(byte_sync::insert(short_data), 0, 65, false);
+    check(!byte_sync::recover_packet(missing_too_much).leading_marker_recognized,
+          "marker loss beyond the admitted 64-bit model must not identify framing");
+    rejects([&] { byte_sync::recover_packet(partial, partial.size(), 65); },
+            "known missing marker bits must respect the same loss bound");
+
+    const auto marker = runtime_marker();
+    Bytes misplaced(80, 0);
+    misplaced.insert(misplaced.end(), marker.begin() + 32, marker.end());
+    misplaced.insert(misplaced.end(), short_data.begin(), short_data.end());
+    check(!byte_sync::recover_packet(misplaced).leading_marker_recognized,
+          "partial marker matching must not scan arbitrary payload offsets for packet origins");
+
+    // Justify the exact-match fast path: no other endpoint in the complete
+    // search neighborhood can have an exact partial tail anchor inside this
+    // exact marker. Complete shifted markers also exceed the error budget.
+    for (int shift = -78; shift <= 14; ++shift) {
+        if (!shift) continue;
+        unsigned conflicts = 0;
+        for (int i = 160; i < 192; ++i)
+            if (i + shift >= 0 && i + shift < 192)
+                conflicts += marker[static_cast<std::size_t>(i)] != marker[static_cast<std::size_t>(i + shift)];
+        check(conflicts > 0, "an exact marker must exclude every different partial endpoint anchor");
+        if (shift < -14) continue;
+        conflicts = 0;
+        for (int i = 0; i < 192; ++i)
+            if (i + shift >= 0 && i + shift < 192)
+                conflicts += marker[static_cast<std::size_t>(i)] != marker[static_cast<std::size_t>(i + shift)];
+        check(conflicts > byte_sync::maximum_marker_errors,
+              "an exact marker must exclude a different complete marker endpoint");
+    }
+}
 void inserted_and_deleted_bits() {
     const auto original = random_bits(byte_sync::interval_bits * 3 + 40);
     const auto pristine = byte_sync::insert(original);
@@ -162,12 +251,12 @@ void embedded_markers_remain_data() {
           "recovery must never scan farther for marker-shaped content or recursively reinterpret its output");
     const auto original = random_bits(byte_sync::interval_bits * 3 + 128);
     for (const bool addition : {false, true}) {
-        const auto beyond_window = byte_sync::maximum_slip_bits + 1;
+        const auto beyond_window = byte_sync::maximum_slip_bits + byte_sync::maximum_marker_loss_bits + 1;
         const auto recovered = byte_sync::recover(slip(byte_sync::insert(original),
             byte_sync::marker_bits + byte_sync::interval_bits - 24, beyond_window, addition));
         const auto expected_size = addition ? original.size() + beyond_window : original.size() - beyond_window;
         check(recovered.size() == expected_size,
-              "a marker outside the fixed seven-bit neighborhood must not expand the search or silently align data");
+              "a marker beyond both the fixed start window and partial-loss allowance must not expand recovery");
     }
 }
 void truncation_and_resource_bounds() {
@@ -324,6 +413,30 @@ void packet_fec_and_crypto_integration() {
         }
     }
 }
+void partial_periodic_markers_and_rs() {
+    const auto message = file_message();
+    for (const bool keyed : {false, true}) for (const auto fec : {FecMode::off, FecMode::rs20, FecMode::rs60}) {
+        const auto value = options(keyed, fec);
+        const auto plaintext = byte_sync::insert(transfer::message_bits(message, value));
+        for (const auto lost : {1U, 32U, 64U}) {
+            auto damaged = plaintext;
+            for (std::size_t bit = 0; bit < 8; ++bit)
+                damaged[byte_sync::marker_bits + byte_sync::interval_bits - 24 + bit] ^= 1;
+            damaged = slip(std::move(damaged), byte_sync::marker_bits + byte_sync::interval_bits + 17, lost, false);
+            // This transform runs after ordinary aligned decryption. It must
+            // not claim to repair unknown ciphertext stream positions.
+            const auto packet_bytes = packed_bits(byte_sync::recover(damaged));
+            if (fec == FecMode::off) {
+                rejects([&] { decode_packet(packet_bytes, transfer::packet_options(value, value.timestamp)); },
+                        "partial marker recognition alone must not validate a damaged payload byte");
+            } else {
+                const auto packet = decode_packet(packet_bytes, transfer::packet_options(value, value.timestamp));
+                check(packet.message.data == message.data && packet.authenticated == keyed && packet.corrected_bytes > 0,
+                      "partial periodic marker removal must precede RS correction and retain whole-packet authentication");
+            }
+        }
+    }
+}
 void nested_packets_remain_opaque() {
     const auto inner = file_message(700);
     const auto plain_options = options(false, FecMode::off);
@@ -350,11 +463,13 @@ int main() {
     try {
         roundtrip_and_exact_boundaries();
         leading_marker_recovery();
+        partial_markers_and_confidence();
         inserted_and_deleted_bits();
         damaged_markers_and_deferred_recovery();
         embedded_markers_remain_data();
         truncation_and_resource_bounds();
         packet_fec_and_crypto_integration();
+        partial_periodic_markers_and_rs();
         nested_packets_remain_opaque();
         std::cout << "byte-boundary synchronization tests passed\n";
         return 0;

@@ -188,7 +188,15 @@ of their 96-bit recovery word and repeat that marker after every complete 256
 encoded bytes, before Data encryption. Every marker, header, integrity and FEC
 bit is therefore masked. Recovery runs only after
 ordinary Data decryption and never changes a crypto offset, resets a counter,
-or creates another packet parser entry point.
+or creates another packet parser entry point. It can accept a marker with
+bounded changed bits or one contiguous missing run while retaining an intact
+trailing anchor; the [marker evidence threshold](protocol.md#marker-evidence-threshold)
+accounts for all tested hypotheses under an independent-fair-bit model.
+This bound does not authenticate content or change SHA-256/HMAC validation.
+If acquisition reports up to 64 missing leading stream symbols, the existing
+symbol index selects the Data positions and recovery checks the surviving
+initial marker suffix. The marker search never selects or trials those
+positions, and cannot repair a later loss of Data-stream alignment.
 
 Reusing the same key, timestamp, purpose, domain and stream positions repeats
 CTR output. It can expose plaintext XORs and allow correlation between repeated

@@ -2,7 +2,9 @@
 #include <openssl/evp.h>
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <limits>
+#include <optional>
 #include <string_view>
 
 namespace datapump::boundary_sync {
@@ -39,6 +41,130 @@ const std::array<std::uint8_t, marker_bits>& marker() {
 void append(Bytes& output, std::span<const std::uint8_t> bits) {
     output.insert(output.end(), bits.begin(), bits.end());
 }
+
+constexpr auto minimum_marker_bits = marker_bits - maximum_marker_loss_bits;
+constexpr std::size_t hypothesis_count() {
+    std::size_t paths = 1; // Complete marker, including substitutions.
+    for (std::size_t lost = 1; lost <= maximum_marker_loss_bits; ++lost)
+        paths += marker_bits - lost - marker_tail_bits + 1;
+    return (2 * maximum_slip_bits + 1) * paths;
+}
+static_assert(hypothesis_count() == 123375);
+
+unsigned ceil_log2(std::uint64_t value) {
+    return static_cast<unsigned>(std::bit_width(value - 1));
+}
+
+// For n observed iid fair bits, at most e mismatches occupy
+// V(n,e) = sum(i=0..e) C(n,i) of the 2^n possible strings. Exact integer
+// arithmetic covers n<=192 and e<=8, including intermediate products.
+using Volumes = std::array<std::array<unsigned, maximum_marker_errors + 1>, marker_bits + 1>;
+const Volumes& mismatch_costs() {
+    static const auto costs = [] {
+        Volumes result{};
+        for (std::size_t n = minimum_marker_bits; n <= marker_bits; ++n) {
+            std::uint64_t choose = 1, volume = 1;
+            for (std::size_t e = 1; e <= maximum_marker_errors; ++e) {
+                choose = choose * (n - e + 1) / e;
+                volume += choose;
+                result[n][e] = ceil_log2(volume);
+            }
+        }
+        return result;
+    }();
+    return costs;
+}
+
+struct Acceptance {
+    std::array<int, marker_bits + 1> errors{};
+    explicit Acceptance(std::size_t input_bits) {
+        errors.fill(-1);
+        // A recovered periodic slot advances at least this many input bits.
+        // The first false match under the iid null must occur on the nominal
+        // cadence (no previous accepted match); this also bounds that cadence.
+        const auto slots = 1 + input_bits / (interval_bits - maximum_slip_bits + minimum_marker_bits);
+        const auto penalty = false_match_bits + ceil_log2(hypothesis_count()) + ceil_log2(slots);
+        const auto& costs = mismatch_costs();
+        for (std::size_t n = minimum_marker_bits; n <= marker_bits; ++n)
+            for (std::size_t e = 0; e <= maximum_marker_errors; ++e)
+                if (penalty + costs[n][e] <= n) errors[n] = static_cast<int>(e);
+    }
+};
+
+struct Match {
+    std::size_t offset, length;
+    unsigned evidence_bits;
+};
+
+void consider(std::optional<Match>& best, const Match& candidate) {
+    if (best && best->offset + best->length != candidate.offset + candidate.length)
+        throw Error("Ambiguous byte-boundary marker endpoint");
+    // Equivalent deletion paths need not locate the missing bits uniquely.
+    // Preserve the strongest evidence for normalizing the preceding interval.
+    if (!best || candidate.evidence_bits > best->evidence_bits ||
+        (candidate.evidence_bits == best->evidence_bits && candidate.length > best->length))
+        best = candidate;
+}
+
+std::optional<Match> match_marker(std::span<const std::uint8_t> bits,
+                                  std::size_t first, std::size_t last,
+                                  const Acceptance& acceptance) {
+    if (bits.size() < minimum_marker_bits || first > bits.size() - minimum_marker_bits)
+        return {};
+    last = std::min(last, bits.size() - minimum_marker_bits);
+    const auto& expected = marker();
+    std::optional<Match> best;
+    // Keep the common pristine path inexpensive. The fixed marker's endpoint
+    // geometry (pinned by tests) excludes relaxed competing endpoints when a
+    // full exact marker exists. Still reject two exact ends defensively.
+    for (auto offset = first; offset <= last; ++offset) {
+        if (bits.size() - offset >= marker_bits && acceptance.errors[marker_bits] >= 0 &&
+            std::equal(expected.begin(), expected.end(), bits.begin() + static_cast<std::ptrdiff_t>(offset)))
+            consider(best, {offset, marker_bits, static_cast<unsigned>(marker_bits)});
+    }
+    if (best) return best;
+
+    const auto& costs = mismatch_costs();
+    for (auto offset = first; offset <= last; ++offset) {
+        const auto available = std::min(marker_bits, bits.size() - offset);
+        const auto observed = bits.subspan(offset, available);
+        std::array<unsigned, marker_bits + 1> prefix{}, suffix{};
+        for (std::size_t i = 0; i < available; ++i)
+            prefix[i + 1] = prefix[i] + (observed[i] != expected[i]);
+        if (available == marker_bits && acceptance.errors[marker_bits] >= 0 &&
+            prefix[marker_bits] <= static_cast<unsigned>(acceptance.errors[marker_bits]))
+            consider(best, {offset, marker_bits,
+                static_cast<unsigned>(marker_bits) - costs[marker_bits][prefix[marker_bits]]});
+        for (std::size_t lost = 1; lost <= maximum_marker_loss_bits; ++lost) {
+            const auto n = marker_bits - lost;
+            if (available < n || acceptance.errors[n] < 0) continue;
+            // Without an intact end anchor, a shortened marker prefix could
+            // consume arbitrary payload bits. Do not infer a missing trailer.
+            if (!std::equal(expected.end() - static_cast<std::ptrdiff_t>(marker_tail_bits), expected.end(),
+                            observed.begin() + static_cast<std::ptrdiff_t>(n - marker_tail_bits))) continue;
+            suffix[n] = 0;
+            for (auto i = n; i > 0; --i)
+                suffix[i - 1] = suffix[i] + (observed[i - 1] != expected[i - 1 + lost]);
+            for (std::size_t gap = 0; gap <= n - marker_tail_bits; ++gap) {
+                const auto errors = prefix[gap] + suffix[gap];
+                if (errors <= static_cast<unsigned>(acceptance.errors[n]))
+                    consider(best, {offset, n, static_cast<unsigned>(n) - costs[n][errors]});
+            }
+        }
+    }
+    return best;
+}
+
+std::optional<Match> match_known_suffix(std::span<const std::uint8_t> bits,
+                                       std::size_t missing, const Acceptance& acceptance) {
+    const auto n = marker_bits - missing;
+    if (bits.size() < n || acceptance.errors[n] < 0) return {};
+    const auto& expected = marker();
+    unsigned errors = 0;
+    for (std::size_t i = 0; i < n; ++i) errors += bits[i] != expected[i + missing];
+    if (errors > static_cast<unsigned>(acceptance.errors[n])) return {};
+    return Match{0, n, static_cast<unsigned>(n) - mismatch_costs()[n][errors]};
+}
 }
 
 std::size_t encoded_size(std::size_t data_bits) {
@@ -67,45 +193,35 @@ Bytes insert(std::span<const std::uint8_t> bits, std::size_t limit) {
     return output;
 }
 
-Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit) {
+Recovery recover_packet(std::span<const std::uint8_t> wire_bits, std::size_t limit,
+                        std::size_t leading_missing_bits) {
     validate_bits(wire_bits, limit);
-    if (wire_bits.size() < marker_bits) return Bytes(wire_bits.begin(), wire_bits.end());
-    Bytes output;
+    if (leading_missing_bits > maximum_marker_loss_bits)
+        throw Error("Missing leading marker exceeds recovery limit");
+    const Acceptance acceptance(wire_bits.size());
+    const auto initial = leading_missing_bits ? match_known_suffix(wire_bits, leading_missing_bits, acceptance) :
+        match_marker(wire_bits, 0, maximum_slip_bits, acceptance);
+    Recovery result;
+    result.leading_marker_recognized = initial.has_value();
+    auto& output = result.bits;
     // Every recognized or damaged full slot removes more bits than the
     // maximum zero fill can add, so output never exceeds the input bound.
     output.reserve(wire_bits.size());
-    // The leading slot belongs to framing even if damaged. Search only the
-    // bounded burst-origin neighborhood; marker-shaped content cannot select
-    // a new packet origin. An incomplete slot remains uninterpreted.
-    std::size_t position = marker_bits;
-    const auto& expected = marker();
-    const auto last_initial = std::min(maximum_slip_bits, wire_bits.size() - marker_bits);
-    bool found_initial = false;
-    for (std::size_t offset = 0; offset <= last_initial; ++offset) {
-        if (!std::equal(expected.begin(), expected.end(), wire_bits.begin() + static_cast<std::ptrdiff_t>(offset))) continue;
-        if (found_initial) throw Error("Ambiguous byte-boundary marker");
-        found_initial = true;
-        position = offset + marker_bits;
+    const auto initial_length = marker_bits - leading_missing_bits;
+    if (!initial && wire_bits.size() < initial_length) {
+        append(output, wire_bits);
+        return result;
     }
+    std::size_t position = initial ? initial->offset + initial->length : initial_length;
     constexpr auto first_candidate = interval_bits - maximum_slip_bits;
-    while (wire_bits.size() - position >= first_candidate + marker_bits) {
+    while (wire_bits.size() - position >= first_candidate + minimum_marker_bits) {
         const auto remaining = wire_bits.subspan(position);
-        const auto last_candidate = std::min(interval_bits + maximum_slip_bits,
-                                             remaining.size() - marker_bits);
-        bool found = false;
-        std::size_t marker_offset = 0;
-        for (auto offset = first_candidate; offset <= last_candidate; ++offset) {
-            const auto candidate = remaining.subspan(offset, marker_bits);
-            if (!std::equal(expected.begin(), expected.end(), candidate.begin())) continue;
-            if (found) throw Error("Ambiguous byte-boundary marker");
-            found = true;
-            marker_offset = offset;
-        }
-        if (found) {
-            const auto kept = std::min(interval_bits, marker_offset);
+        const auto matched = match_marker(remaining, first_candidate, interval_bits + maximum_slip_bits, acceptance);
+        if (matched) {
+            const auto kept = std::min(interval_bits, matched->offset);
             append(output, remaining.first(kept));
             output.insert(output.end(), interval_bits - kept, 0);
-            position += marker_offset + marker_bits;
+            position += matched->offset + matched->length;
         } else {
             if (remaining.size() < interval_bits + marker_bits) break;
             append(output, remaining.first(interval_bits));
@@ -113,6 +229,10 @@ Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit) {
         }
     }
     append(output, wire_bits.subspan(position));
-    return output;
+    return result;
+}
+
+Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit) {
+    return recover_packet(wire_bits, limit).bits;
 }
 }

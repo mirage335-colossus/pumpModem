@@ -8,6 +8,10 @@ namespace datapump::boundary_sync {
 inline constexpr std::size_t interval_bits = 2048;
 inline constexpr std::size_t marker_bits = 192;
 inline constexpr std::size_t maximum_slip_bits = 7;
+inline constexpr std::size_t maximum_marker_loss_bits = 64;
+inline constexpr std::size_t maximum_marker_errors = 8;
+inline constexpr std::size_t marker_tail_bits = 32;
+inline constexpr unsigned false_match_bits = 100;
 
 // Packet streams begin with a marker. Each complete data interval gets another
 // marker, including an exact final interval. Raw bits and short dictionary text
@@ -17,14 +21,26 @@ std::size_t encoded_size(std::size_t data_bits);
 Bytes insert(std::span<const std::uint8_t> bits,
              std::size_t limit = default_memory_limit);
 
-// Inspect the initial marker at offsets 0..maximum_slip_bits, then only the
-// fixed neighborhood of each expected periodic marker. A unique exact leading
-// pair discards extra preceding bits. A periodic pair restores the logical
-// interval length by trimming surplus trailing bits
-// or appending zero placeholders. It cannot reconstruct missing data. Damaged
-// full marker slots are consumed at their nominal position; incomplete slots
-// and the final partial data interval remain unchanged. This operation never
-// recognizes a packet, starts another record, or authenticates its output.
+struct Recovery {
+    Bytes bits;
+    bool leading_marker_recognized = false;
+};
+
+// Match only the burst origin and fixed periodic neighborhoods. Besides exact
+// markers, accept bounded substitutions or one contiguous marker deletion with
+// an intact trailing anchor. The iid fair-bit false-match union bound across
+// this call must be <= 2^-false_match_bits; this is not a channel calibration
+// or authentication. Distinct plausible endpoints are rejected. Recovery trims
+// or zero-fills the preceding interval; packet FEC/integrity remain downstream.
+// Unrecognized complete slots retain nominal removal. A recognized leading
+// marker identifies packet framing even when subsequent packet validation fails.
+// leading_missing_bits comes only from the acquired stream position, never a
+// trial decryption offset, and fixes the surviving initial suffix's endpoint.
+// That known endpoint permits substitutions even in its trailing anchor.
+Recovery recover_packet(std::span<const std::uint8_t> wire_bits,
+                        std::size_t limit = default_memory_limit,
+                        std::size_t leading_missing_bits = 0);
+// Convenience wrapper for callers that only need the recovered packet bits.
 Bytes recover(std::span<const std::uint8_t> wire_bits,
               std::size_t limit = default_memory_limit);
 }

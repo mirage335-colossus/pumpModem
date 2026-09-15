@@ -147,6 +147,48 @@ mixing, exact bit counts and noise-only/wrong-key rejection. This validates
 removal of that particular invariant; bandwidth, chip timing, capped amplitudes
 and burst edges remain, and no measured interception probability is established.
 
+## Partial byte-boundary marker recognition — September 2026
+
+Marker recognition now permits up to eight changed bits in a complete 192-bit
+marker. Partial recognition permits one contiguous loss of 1 through 64 bits,
+including a missing prefix, while preserving an exact final 32-bit anchor.
+The acquired leading stream-symbol index can identify a lost initial prefix
+after ordinary decryption; unkeyed input can also infer that prefix through the
+bounded deletion search. Different passing endpoints reject recovery, while
+equivalent paths sharing an endpoint use the strongest evidence. Starts remain
+restricted to offsets 0 through 7 initially and -7 through +7 periodically.
+Recovery still precedes deinterleaving, Reed–Solomon correction and packet
+integrity checks. Recognized marker evidence suppresses dictionary fallback
+for an invalid packet, and the acquired raw bits remain available.
+When an acquired index fixes the surviving suffix's endpoint, its mismatch
+budget also permits errors in the final 32 bits; inferred endpoints require
+the exact trailing anchor.
+
+The [analytic acceptance model](protocol.md#marker-evidence-threshold) charges
+all searched slots, starts, deletion runs and mismatch patterns to a `2^-100`
+false-match bound per recovery call under independent fair input bits. The
+allowed mismatches decrease as surviving markers shorten or inputs grow.
+This is a calculated model bound; software tests do not measure events at that
+probability or establish a channel error rate. Distributed missing marker bits,
+lost marker trailers, lost crypto alignment and whole missing data blocks
+remain outside this recovery model. Packet integrity and authentication retain
+their existing checks, and the wire marker, cadence and overhead are unchanged.
+
+The validation results in the older byte-boundary section below predate this
+partial-marker implementation and do not establish its test status.
+
+For this implementation, the rebuilt Release `boundary_sync`,
+`pattern_transfer`, `transfer`, and `gui_inspection` suites passed. Coverage
+includes missing leading/interior marker runs, flipped bits, confidence-budget
+rejection, text/file identification, and payload-byte errors with FEC off,
+RS20, and RS60. Clear and keyed PCM captures with the first marker symbol
+removed were acquired and decoded; the keyed receiver independently retained
+the correct stream-symbol index. The boundary suite also passed ASan/UBSan
+with halt-on-error enabled and leak detection disabled for the sandbox.
+All 26 CLI tests passed. The Release executable and 183 source/document files
+passed the runtime-marker storage scan at every bit phase; `git diff --check`
+also passed.
+
 Older entries below record their earlier implementation and test state; their
 legacy waveform behavior and timing benchmarks do not describe this build.
 

@@ -55,12 +55,26 @@ Raw bits and short dictionary text have neither packet integrity nor recovery
 markers. Byte packet APIs retain their existing formats.
 
 Recovery runs on plaintext after the existing whole-stream Data decryption.
-Both repeated 96-bit words must match exactly. The initial marker is searched
-at offsets 0 through 7 from the burst origin; subsequent markers are searched
-within seven bits of an expected boundary. A damaged initial marker consumes
-its nominal 192-bit slot when available. Before each periodic marker, the
-plaintext interval is trimmed or zero-filled to 256 bytes. Marker positions
-consume Data-stream positions and are stripped before deinterleaving and FEC.
+The initial marker is searched at offsets 0 through 7 from the burst origin;
+subsequent markers are searched within seven bits of an expected boundary.
+Recognition permits up to eight changed bits in a complete marker, or one
+contiguous loss of up to 64 bits while retaining an exact final 32-bit anchor.
+Every accepted hypothesis must pass a conservative independent-fair-bit
+false-match budget of at most `2^-100` over the complete recovery call,
+including all slot, start, deletion and mismatch trials. Shorter surviving
+markers and larger inputs tighten the mismatch allowance. Different passing
+endpoints reject recovery. The [protocol evidence model](protocol.md#marker-evidence-threshold)
+defines this analytic bound; it is neither measured channel performance nor
+authentication and does not model deliberately constructed bytes.
+
+An acquisition-supplied leading stream index of up to 64 may identify a missing
+initial marker prefix after ordinary Data decryption. Recovery still does not
+try crypto offsets. That supplied index fixes the suffix endpoint, so its
+mismatch budget may include trailing bits; inferred endpoints require the
+exact trailing anchor. An unrecognized damaged marker consumes its nominal slot
+when available. Before each periodic marker, the plaintext interval is trimmed
+or zero-filled to 256 bytes. Marker positions consume Data-stream positions
+and are stripped before deinterleaving and FEC.
 Thus every transmitted marker bit is ciphertext when
 encryption is enabled. Recovery changes only downstream byte grouping; it does
 not select crypto offsets, reset counters or reseed streams. The marker supplies
@@ -69,15 +83,20 @@ burst is eligible for a single packet parse
 from its original beginning, with exact whole-extent validation. Failure never
 triggers inner-packet scanning, an unstripped-stream retry or fallback to older
 packets without the initial marker. Short dictionary interpretation is bounded
-to 195 acquired bits, so a long failed packet cannot
-become dictionary text. Raw diagnostics remain available independently.
+to 195 acquired bits. A recognized complete or partial marker suppresses
+dictionary fallback even for a short failed packet. Packet metadata determines
+the validated content type; marker acceptance alone never releases packet
+content. Raw diagnostics remain available independently.
 
 The marker is derived at runtime from a stored label rather than embedded as
 literal wire bytes. This reduces self-recognition in program/source transfers,
 but cannot exclude accidental or deliberate collisions in arbitrary content.
 The fixed cadence and narrow search window bound a collision's effect to the
 candidate data; they do not authenticate it. Missing bits can still cause
-corruption or rejection, and FEC can repair only errors within its capacity.
+corruption or rejection: distributed missing marker bits and lost marker
+trailers are outside the recovery model, and FEC can repair only errors within
+its capacity. The alignment marker cannot repair lost cryptographic stream
+alignment or replace missing packet data.
 Only a complete SHA-256/HMAC check releases validated packet content. Neither
 markers nor FEC prove a received file harmless or prevent host vulnerabilities.
 

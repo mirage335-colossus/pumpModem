@@ -288,18 +288,20 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& input_option
     result.diagnostics.sample_offset=static_cast<std::size_t>(burst.first_sample);
     result.raw_bits=std::move(burst.bits);result.packet_validated=false;
     xor_binary_bits(result.raw_bits,context,static_cast<std::size_t>(burst.first_stream_symbol));
-    if(options.key && burst.first_stream_symbol)return result;
     // Recovery has one fixed cadence anchored to this burst, never a search
     // for embedded packets. Decryption and its constellation-supplied stream
     // position are unchanged; only the decrypted byte grouping is recovered.
-    std::optional<Bytes> candidate;
-    try { candidate=boundary_sync::recover(result.raw_bits,pattern_bit_limit(options.content_limit)); }
+    std::optional<boundary_sync::Recovery> candidate;
+    try { candidate=boundary_sync::recover_packet(result.raw_bits,pattern_bit_limit(options.content_limit),
+                                                  static_cast<std::size_t>(burst.first_stream_symbol)); }
     catch(const Error&) {} // Invalid recovery leaves only raw evidence.
     // Content grammar is interpreted only after pattern acquisition. A bad
     // packet never changes the winning signal timing or discards its raw bits.
-    if(candidate && candidate->size()%8==0) {
-        Bytes bytes(candidate->size()/8);
-        for(std::size_t i=0;i<candidate->size();++i)bytes[i/8]|=static_cast<std::uint8_t>((*candidate)[i]<<(7-i%8));
+    // A late burst may contain the first packet only when its surviving
+    // leading marker supplies enough evidence for the original packet origin.
+    if(candidate && (!burst.first_stream_symbol || candidate->leading_marker_recognized) && candidate->bits.size()%8==0) {
+        Bytes bytes(candidate->bits.size()/8);
+        for(std::size_t i=0;i<candidate->bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(candidate->bits[i]<<(7-i%8));
         try {
             auto packet=decode_packet(bytes,packet_options(options,timestamp),packet_budget(options));
             if(packet.consumed_bytes==bytes.size() && packet.message.data.size()<=options.content_limit) {
@@ -307,7 +309,8 @@ Received interpret_pattern(modem::PatternBurst burst,const Options& input_option
             }
         } catch(const Error&) {}
     }
-    if(result.raw_bits.size()>15*13)return result;
+    if((options.key && burst.first_stream_symbol) ||
+       (candidate && candidate->leading_marker_recognized) || result.raw_bits.size()>15*13)return result;
     try {
         auto decoded=compression::decode_short_bits(result.raw_bits,std::min<std::size_t>(15,options.content_limit));
         result.packet.message.data=std::move(decoded);
