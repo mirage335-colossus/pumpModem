@@ -15,8 +15,8 @@ at fractional bandwidths or custom clocks; the 12 kHz/48 kHz plan is aligned.
 Private profiles whose carrier permits compact orthogonal receive bins reserve
 at least 32 chips; boundary-bit probes did not support 16 chips on that path.
 Other profiles outside the bounded 256-sample exact-fit range retain 64 chips.
-At 12 kHz the following rates exclude packet coding,
-byte-boundary recovery words and the approximately two-second hardware prefix:
+At 12 kHz the following rates exclude source and interval coding, alignment
+markers, the rounded hardware-settling prefix, filter tails and suppression noise:
 
 | Target C/N0 | In-band SNR | Chips/bit | Gross bit/s |
 | ---: | ---: | ---: | ---: |
@@ -38,7 +38,9 @@ The transmitter's circular I/Q mapping, private amplitude distribution, chip
 cadence for eligible shortened profiles, purpose-separated keys, absolute keystream addressing, Data encryption
 and prefix counter separation are unchanged. A shorter symbol still consumes
 fresh private chips. Raw and dictionary messages retain exact bit counts;
-packet authentication and boundary recovery still follow pattern acquisition.
+keyed interval authentication and boundary recovery still follow pattern acquisition.
+The [development contract](development.md) requires preserving these paths and
+per-bit pending reception through future throughput work.
 
 Private symbols of at most 256 samples with nonorthogonal carrier bins now use
 the existing exact two-real-basis sample fit used by short public patterns.
@@ -108,7 +110,7 @@ can be enabled. The present receiver has exactly two templates, binary search
 penalties, one-bit stream offsets and one-bit continuation records. A denser
 alphabet must account for every label in acquisition and chain confidence,
 preserve stream offsets and exact final bits, and fit its timing/key/epoch
-search into practical CPU and memory budgets. Byte-aligned packet-only profiles
+search into practical CPU and memory budgets. Byte-aligned interval-only profiles
 with 2, 4 or 8 bits per codeword are one possible route that avoids tail padding;
 raw and short dictionary profiles could retain binary codewords. The additional
 profile search would itself need confidence accounting. No such profile is
@@ -138,8 +140,10 @@ receiver, and estimates one-MiB streaming airtime without allocating its PCM.
 A one-MiB estimate is not a completed one-MiB reception experiment.
 
 The full-size test also checks the unpacked-bit storage limit separately from
-packed packet-codec workspace. Boundary words expand the bit stream by up to
-9.375%; applying a packed-byte allowance directly to those 0/1 elements could
+packed interval-codec workspace. Each 1,024 coded bits gains a 192-bit marker,
+giving 1,216 transmitted bits per interval: 18.75% marker overhead relative to
+coded bits, separate from source fill, FEC and keyed HMAC. Applying a packed-byte
+allowance directly to those 0/1 elements could
 reject a file at its advertised content quota. Transmit, recovery, batch receive
 and live receiver banks now share the checked bit-capacity calculation. Content
 admission and actual DSP allocation ceilings remain separate and unchanged.

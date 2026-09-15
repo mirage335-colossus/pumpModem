@@ -4,6 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Message preservation contract and regressions — 15 September 2026
+
+This change updates documentation and tests only. Runtime sources, protocol
+constants, GUI implementation and build configuration are unchanged.
+[Development requirements](development.md), also linked from root `AGENTS.md`,
+now explicitly protect 1–16-byte dictionary text, exact binary messages, fixed
+intervals, physical-absence completion and per-bit pending progress when each
+bit may take hours. Current summaries now distinguish short dictionary content
+from interval sources, describe all four GUI tabs and use the fixed format's
+18.75% marker overhead relative to coded bits.
+
+New regressions cover:
+
+- `stream_receive`: malformed validity cells and LZMA2 chunk lengths remain
+  uninterpreted through successive fixed intervals until physical completion,
+  under a small local content quota. Underfilled intervals permit continuation
+  and preserve leading/trailing zero bytes. Both checks cover all FEC profiles.
+- `gui_application`: every pending prefix through dictionary, byte and interval
+  boundaries updates one stable row without an expected length, premature
+  decoding or completed-message actions. Missing-slot placeholders retain their
+  visible notice.
+- `gui_controller`: actual simulation progress snapshots match the displayed
+  pending row on the same poll, across raw, dictionary and interval messages;
+  copy/paste actions remain disabled while pending.
+
+Existing regressions also ran for independent historical dictionary vectors,
+the inclusive 16/17-byte split across key/FEC/compression settings, and generated
+PCM containing three four-hour symbols. The latter verifies individual bit
+drains and requires a complete absent four-hour symbol to finish reception.
+
+Validation:
+
+- `cmake --build build --parallel 2`: Release build passed, including FLTK.
+- `ctest --test-dir build --output-on-failure -LE native_gui -j 2`: initially
+  54/55 passed in 136.02 seconds, including all 23 headless GUI checks. The sole
+  failure reproduced in the unchanged `attachment` test: its interval-quota
+  fixture still used 16-byte text, which now correctly takes the short path.
+- That fixture now uses 17-byte text and explicitly checks interval selection;
+  its original quota rejection and nonpublication assertions are unchanged.
+  Rebuilt `test_attachment`; focused CTest passed (1/1). All 55 headless tests
+  therefore passed across the full run and this corrected-fixture rerun.
+- `git diff --check` and links in the new contributor documents passed.
+
+No native-window conformance or workflow run was performed: this environment has
+no Xvfb/display server. Shared GUI tests and the native executable's headless
+self-check passed; they do not establish native rendering or a physical link.
+
 ## Short-message GUI and inclusive 16-byte limit — 15 September 2026
 
 The short dictionary now includes 16 source bytes. Shared transfer constants

@@ -98,6 +98,43 @@ void records() {
           "A truncated aligned result must show a text prefix without offering incomplete clipboard data");
     check(control(ui::Field::signals).follow_tail&&control(ui::Field::signals).activate_on_select,"Signal interaction policy is missing from the declaration");
 }
+void progressive_pending_records() {
+    // Feed one accepted bit at a time, independent of modem speed or wall time.
+    // A dictionary token, an aligned byte and a full interval are still only
+    // observations until the receiver explicitly reports physical completion.
+    for(const auto& bits:{std::string("001"),std::string("0100100001101001"),
+                         std::string("1111101110001110101101011011011111011010110001111001100101001110011011"),
+                         std::string(1216,'0')}) {
+        Signals signals;
+        SignalLine pending;pending.id=91;pending.frequency_hz=1500;pending.binary=true;
+        pending.pattern_score=24.5; // Confidence in observed symbols is not completion.
+        for(std::size_t count=1;count<=bits.size();++count) {
+            pending.text=bits.substr(0,count);pending.received_bits=count;
+            signals.update(pending);
+            const auto rows=signal_records(signals);
+            check(rows.size()==1&&rows.front().id=="91"&&rows.front().cells[4].text==pending.text&&
+                  rows.front().cells[1].text=="binary pending"&&rows.front().cells[4].tone==ui::TextTone::muted&&
+                  !rows.front().activatable,
+                  "Each pending bit must remain visible in the same row across dictionary, byte and interval boundaries");
+            check(signals.lines().front().received_bits==count&&signals.lines().front().expected_bits==0&&
+                  !signals.lines().front().complete&&!signals.lines().front().validated&&
+                  !signals.copy_bits(0)&&!signals.copy_raw_bits(0)&&!signals.copy_bytes(0)&&
+                  !signals.copy_text(0)&&!signals.copy_id(0),
+                  "Pending observations must not require a known length or become decoded/copyable at a convenient bit boundary");
+        }
+    }
+
+    Signals gaps;
+    SignalLine pending;pending.id=92;pending.frequency_hz=1500;pending.binary=true;
+    pending.text="1";pending.received_bits=1;gaps.update(pending);
+    pending.text="10";pending.received_bits=2;pending.missing_symbols=1;gaps.update(pending);
+    pending.text="101";pending.received_bits=3;gaps.update(pending);
+    const auto rows=signal_records(gaps);
+    check(rows.size()==1&&rows.front().cells[4].text=="101"&&
+          rows.front().cells.back().text=="1 missing bit filled with 0"&&
+          rows.front().cells[1].text=="binary pending"&&!rows.front().activatable,
+          "A missing timed slot must retain its position and visible zero-placeholder notice while subsequent bits arrive");
+}
 void presentation() {
     Application app({.simulation=true});
     for(const auto field:{ui::Field::message,ui::Field::binary}) {
@@ -543,6 +580,6 @@ void compression_declarations() {
 }
 }
 int main() {
-    try {records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

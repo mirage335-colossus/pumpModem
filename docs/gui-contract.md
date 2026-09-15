@@ -149,6 +149,12 @@ The transmission layout uses the same short-message limit as the transmitter
 and receiver, including the 16-byte endpoint. Dictionary bytes are never rounded
 up to transmitted whole bytes merely for display.
 
+This incremental pending view and the short/raw compose paths are
+[development requirements](development.md), including when a symbol takes hours
+or longer. GUI refactoring must preserve the next-poll update for each accepted
+bit and must not interpret source content or mark a row complete before physical
+absence establishes the end of reception.
+
 ## Behavior every adapter preserves
 
 - Applying state is silent and preserves unchanged native widgets, focus, text

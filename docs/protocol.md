@@ -8,6 +8,10 @@ Both peers select the same waveform, FEC, source codec and key locally. There is
 Existing keyfiles remain usable. The fixed short dictionary retains its original
 bit codes; the interval transport is incompatible with the previous packets.
 
+These are compatibility requirements for ongoing development, including the
+short paths and per-bit pending view. See the
+[preservation contract and regression coverage](development.md).
+
 ## Fixed wire geometry
 
 Nonempty text of up to 16 source bytes uses the [exact raw-bit path](#exact-raw-bit-path).

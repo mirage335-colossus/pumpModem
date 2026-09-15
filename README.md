@@ -21,6 +21,11 @@ interval after each alignment marker, with no packet header, received length,
 or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
 the same local source/FEC profile. Short text uses the fixed bit dictionary.
 
+**Development requirement:** preserve tiny dictionary/raw-bit messages, fixed
+intervals and per-bit pending reception. Each bit may cost hours or longer;
+neither added framing nor waiting for a whole message is harmless. See the
+[message behavior contract and regression checks](docs/development.md).
+
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
 The receiver still acquires from pattern evidence alone, with template-energy
@@ -81,7 +86,8 @@ Marker recognition uses bounded fixed-cadence searches and a conservative `2^-84
 random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
-The desktop has **Console**, **Modem flow**, and **Transmission layout** tabs.
+The desktop has **Console**, **Modem flow**, **Transmission layout**, and
+**Compression / raw bits** tabs.
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots
@@ -456,6 +462,10 @@ that exceed that workspace. Corrected source intervals drain to a quota-limited 
 physical completion; it is separate from the application receive cache.
 
 ## Development and portability
+
+Start with the [message behavior preservation contract](docs/development.md).
+It records the required short-text/binary paths, physical-end boundary and
+pending GUI behavior, with focused regression commands.
 
 ```sh
 cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DDATAPUMP_SANITIZERS=ON

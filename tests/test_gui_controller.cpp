@@ -26,6 +26,33 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+std::size_t check_pending_snapshot(Controller& controller) {
+    using F=ui::Field;using C=ui::Command;
+    // A poll can consume several updates for the same acquisition. Its newest
+    // accepted prefix must already be visible when that poll returns.
+    std::set<std::uint64_t> checked;
+    std::size_t pending_count=0;
+    const auto& updates=controller.snapshot().signals;
+    for(auto update=updates.rbegin();update!=updates.rend();++update) {
+        if(!checked.insert(update->id).second||update->complete||update->validated||update->text.empty())continue;
+        ++pending_count;
+        const auto& lines=controller.signals().lines();
+        const auto line=std::find_if(lines.begin(),lines.end(),[&](const auto& value){return value.id==update->id;});
+        const auto& rows=controller.field(F::signals).records;
+        const auto row=std::find_if(rows.begin(),rows.end(),[&](const auto& value){return value.id==std::to_string(update->id);});
+        check(line!=lines.end()&&row!=rows.end(),"An accepted incoming prefix was withheld from the GUI until completion");
+        check(update->binary&&line->binary&&!line->complete&&!line->validated&&
+              line->received_bits==update->received_bits&&line->expected_bits==update->expected_bits&&
+              line->text==update->text&&row->cells[4].text==update->text&&
+              row->cells[1].text=="binary pending"&&row->cells[4].tone==ui::TextTone::muted&&!row->activatable,
+              "The same controller poll must show the latest pending bits without byte batching or premature source/dictionary decoding");
+        controller.select(F::signals,row->id);
+        check(!controller.enabled(C::copy_signal)&&!controller.enabled(C::copy_raw_signal)&&
+              !controller.enabled(C::paste_signal)&&!controller.enabled(C::paste_raw_signal),
+              "Selecting visible pending bits must not enable completed-message actions");
+    }
+    return pending_count;
+}
 void rate_carrier_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
@@ -582,9 +609,12 @@ void fixed_text_reception() {
           "17-byte message uses the single fixed coded interval");
     controller.start();controller.activate(C::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(25);
+    std::size_t pending_count=0;
     while(controller.inbox().items().empty() && std::chrono::steady_clock::now()<deadline) {
-        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        controller.poll();pending_count+=check_pending_snapshot(controller);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+    check(pending_count>0,"Fixed interval reception must publish pending bits before source validation and completion");
     check(controller.inbox().items().size()==1 && controller.inbox().items().front().message.data==Bytes(expected.begin(),expected.end()),
           "fixed source reception preserves text");
     check(controller.inbox().file_items().empty(),"Ordinary source text became a received file");
@@ -605,8 +635,10 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
     controller.start();controller.activate(ui::Command::transmit);
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
     bool received=false;
+    std::size_t pending_count=0;
     while(std::chrono::steady_clock::now()<deadline) {
         controller.poll();
+        pending_count+=check_pending_snapshot(controller);
         for(std::size_t i=0;i<controller.signals().lines().size();++i)
             received=received||controller.signals().copy_text(i)==expected;
         if(received && controller.snapshot().transmission_finished && !controller.snapshot().simulation_replay)break;
@@ -617,6 +649,7 @@ void receive_pattern_text(Controller& controller,const std::string& expected) {
         for(const auto& line:controller.signals().lines())detail+=" ["+signal_status_label(line)+": "+line.text+"]";
         throw Error(detail);
     }
+    check(pending_count>0,"Pattern text reception must expose pending bits before it becomes received text");
 }
 void short_text_reception() {
     using F=ui::Field;
@@ -735,8 +768,10 @@ void short_raw_reception() {
         controller.start();controller.activate(C::transmit_short_bits);
         const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
         std::optional<std::size_t> received;
+        std::size_t pending_count=0;
         while(std::chrono::steady_clock::now()<deadline) {
             controller.poll();
+            pending_count+=check_pending_snapshot(controller);
             for(std::size_t i=0;i<controller.signals().lines().size();++i)
                 if(controller.signals().copy_raw_bits(i)==raw)received=i;
             if(controller.snapshot().simulation_replay)
@@ -744,6 +779,7 @@ void short_raw_reception() {
             if(received&&controller.snapshot().transmission_finished&&!controller.snapshot().simulation_replay)break;
             std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
+        check(pending_count>0,"Short raw reception must display incoming bits before physical completion");
         check(received.has_value(),"Simulated short raw pattern did not retain its exact received bits");
         controller.select(F::signals,std::to_string(controller.signals().lines()[*received].id));
         check(controller.enabled(C::copy_raw_signal)&&controller.enabled(C::paste_raw_signal)&&

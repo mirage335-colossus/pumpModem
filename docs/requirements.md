@@ -3,7 +3,10 @@
 This matrix records version 0.7.2 behavior and its limits. It is not acceptance of
 all performance and hardware claims in the original design. Audio peers need
 matching waveform settings. Automatic profiles now use binary pattern transport;
-all byte content uses the fixed 128-byte interval format, and existing keyfiles remain usable.
+nonempty text of up to 16 source bytes uses the fixed short dictionary, while
+longer text and all attachments use fixed 128-byte intervals. Existing keyfiles
+remain usable. These paths and per-bit pending reception are
+[development requirements](development.md).
 [Test execution results](validation.md) distinguish measured results from design
 and source-level checks.
 
@@ -43,7 +46,7 @@ and source-level checks.
 | QR Level L | Vendored encoder, UTF-8 ECI, up to 500 Unicode scalars; compose preview and SVG/PBM CLI output. Independent decoding history is recorded in validation results. |
 | Pattern/scrambler constellation | Modem flow shows two one-bit codeword rows with duration-weighted distances and energy-normalized timing comparisons. Long symbols show at most a 16,384-chip illustrative prefix. Private illustrations reset to public example keys and epoch, never actual streams. Tone distances are chip-center approximations. No diagram calibrates reception confidence. |
 | Pattern acquisition | Soft pattern-versus-noise fits alone admit symbols and refine timing; neither APSK residual, preamble, checksum nor source validity locks the automatic receiver. Shaped templates retain the independent raw sample/bin noise accounting and actual template energy/Gram terms; neighbor tails and crest-limiter error are model mismatch. Strong individual symbols can establish a burst; weaker compatible candidates can accumulate chain evidence. Pending continuations must supply their own evidence before extending a confirmed prefix. Finite FFT or clock-window search retains bounded candidates and sufficient statistics. Noise-model scores and search corrections are not calibrated false-alarm probabilities for arbitrary real interference or proofs of LPI. |
-| Modem and stream inspection tabs | Console, Modem flow and Transmission layout show one-bit patterns, settling, fixed interval data/HMAC/parity positions and local source-codec capacity. No packet/header/dictionary view remains. Counts derive from the actual stream encoder and fixed geometry. |
+| Modem and stream inspection tabs | Console, Modem flow, Transmission layout and Compression / raw bits show one-bit patterns, settling, fixed interval data/HMAC/parity positions and local source-codec capacity. Short text shows its fixed dictionary bits with exact counts and an editable raw-bit preview. No packet/header view remains. Counts derive from the actual stream encoder and fixed geometry. |
 | Explicit exclusions | No asymmetric key exchange, built-in repeater, routable address, rapid Doppler tracking, SDR/FHSS or IC-7100 control. No legal classification claim. |
 
 Acceptance of sensitivity, capacity, RF compliance, adversarial security or

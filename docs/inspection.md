@@ -1,7 +1,7 @@
 # Modem and transmission inspection
 
 The native desktop keeps shared key, metadata and modem controls visible above
-and below three tabs. **Console** contains composition, the signal browser,
+and below four tabs. **Console** contains composition, the signal browser,
 received files and live plots. Switching tabs leaves the receiver and current
 three-second simulation replay running.
 
@@ -112,7 +112,16 @@ selection clears and disables encryption, and its inspection reports that it
 provides no LPI protection. Private pattern examples use public illustration
 seeds; actual private streams never appear in configuration illustrations.
 
-For a draft no longer than 16 bytes, editing the binary field selects an exact
+**Compression / raw bits** shows the full fixed dictionary encoding for text of
+1–16 source bytes, including the 16-byte endpoint, and previews the expected text.
+Its editor accepts up to 208 exact bits, including leading zeros and incomplete
+tokens. Editing it selects explicit raw transmission; editing Message returns to
+text encoding. Dictionary preview in the composer does not enable pre-end source
+decoding of a pending reception. These paths and the incremental pending view are
+[development requirements](development.md).
+
+The separate **Console Binary** field has a 128-bit limit. For a draft no longer
+than 16 bytes, editing this binary field selects an exact
 raw draft of up to 128 bits. A partial final byte is valid and adds no padding;
 complete bytes also refresh the separate text/byte view. Editing text returns
 to ordinary text encoding. For longer messages, the binary field continues to

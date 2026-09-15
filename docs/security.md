@@ -59,7 +59,7 @@ codec end markers are not evidence of physical completion. They cannot bypass
 the application source-decoder gate. Reception may be interrupted and buffers
 released while its status remains incomplete.
 
-Compressed mode is exactly one raw LZMA2 source with a fixed 4 MiB dictionary and
+For interval-coded sources, compressed mode is exactly one raw LZMA2 source with a fixed 4 MiB dictionary and
 less than one fixed data area's trailing zero fill. It transmits no original
 length. A bounded spool retains corrected compressed areas until physical end;
 only then may the application decompress. No compressed previews or speculative

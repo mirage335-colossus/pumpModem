@@ -1,6 +1,14 @@
 # Plan: fixed-interval data stream without packets or transmitted lengths
 
-**Status:** implemented. [protocol.md](protocol.md) describes the fixed-interval format and [validation.md](validation.md#fixed-interval-migration--september-2026) records the checks. The code-path audit and staged recommendations below document the pre-migration checkout.
+**Status:** historical migration plan; the fixed-interval transport is implemented.
+[protocol.md](protocol.md) describes current behavior and
+[validation.md](validation.md#earlier-fixed-interval-migration--september-2026)
+records the migration checks. The code-path audit and staged recommendations
+below describe the pre-migration checkout, not current development requirements.
+The fixed short dictionary was subsequently restored and extended to **1–16
+source bytes inclusive**; explicit raw bits and per-bit pending reception are
+also required. Preserve these alongside longer fixed-interval messages under
+the [development contract](development.md).
 **Reviewed:** 14 September 2026, checkout `7c63c5e`.
 
 ## 1. Recommendation and scope

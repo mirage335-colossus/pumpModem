@@ -59,10 +59,13 @@ void completed_source_only() {
 void rejected_source_is_not_published() {
     for(const bool compressed:{false,true})for(const bool file:{false,true}) {
         transfer::Options sender;sender.timestamp=1800000000;sender.search_seconds=0;
-        sender.compression=compressed;sender.content_limit=file?3:16;
+        sender.compression=compressed;sender.content_limit=file?3:17;
         Message sent;sent.data={0,255,0};
-        if(!file)sent.data.resize(16,0);
+        // Text through 16 bytes uses the optional raw dictionary interpretation;
+        // this fixture exercises rejection by the fixed-interval source decoder.
+        if(!file)sent.data.resize(17,0);
         if(file){sent.kind=MessageKind::file;sent.filename="oversized.bin";}
+        check(!transfer::uses_raw_message(sent),"source quota rejection fixture must use fixed intervals");
         const auto wire=transfer::message_wire_bits(sent,sender);
         auto value=sender;value.content_limit=2;
         transfer::StreamReceiver receiver(value,value.timestamp);modem::PatternBurst burst;

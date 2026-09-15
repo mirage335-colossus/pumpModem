@@ -29,6 +29,13 @@ modem::PatternBurst chunk(std::span<const std::uint8_t> bits,std::uint64_t first
     result.first_sample=identity+first*128;result.end_sample=result.first_sample+bits.size()*128;
     result.complete=complete;result.stream_phase_samples=phase;result.score=100;return result;
 }
+Bytes public_interval_wire(std::span<const std::uint8_t> area,FecMode fec) {
+    const auto coded=encode_interval(area,IntervalOptions{fec,{},{}});
+    Bytes bits;bits.reserve(coded.size()*8);
+    for(auto byte:coded)for(unsigned shift=8;shift>0;--shift)
+        bits.push_back(static_cast<std::uint8_t>((byte>>(shift-1))&1U));
+    return boundary_sync::insert(bits);
+}
 void arbitrary_content_limits() {
     for(const auto limit:{1U,2U,15U,16U,17U,63U,100U})for(const bool compressed:{false,true}) {
         auto value=options();value.content_limit=limit;value.compression=compressed;
@@ -88,6 +95,59 @@ void refined_phase_and_post_end_gate() {
     const auto complete=receiver.push(chunk({},wire.size(),100,true,64));
     check(complete.content_validated && complete.content.authenticated && complete.content.message.data==sent.data,
           "later precise phase information must control decryption and interval authentication");
+}
+void source_headers_are_opaque_until_physical_end() {
+    for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(const bool compressed:{false,true}) {
+        auto value=options();value.fec=fec;value.compression=compressed;value.content_limit=17;
+        const auto area=interval_data_bytes(fec,false);
+        Bytes source(area);
+        if(compressed) {
+            // A raw LZMA2 uncompressed chunk claims 65,536 source bytes. Its
+            // received length fields must not control the live receiver.
+            source[0]=0x01;source[1]=0xff;source[2]=0xff;
+        } else {
+            // Nonzero payload in an absent validity cell is invalid source,
+            // but still belongs to an ordinary fixed-width coding interval.
+            source[0]=0x01;
+        }
+        const auto wire=public_interval_wire(source,fec);
+        check(wire.size()==1216,"source bytes cannot change the fixed 192-bit marker and 1024-bit interval");
+        auto quota=std::make_shared<transfer::ReceiveStorageQuota>(transfer::ReceiveStorageQuota{area*2,0});
+        transfer::StreamReceiver receiver(value,value.timestamp,quota);
+        for(std::size_t i=0;i<2;++i) {
+            const auto pending=receiver.push(chunk(wire,i*wire.size()));
+            check(pending.error.empty() && !pending.stream_complete && !pending.content_validated &&
+                  pending.content.message.data.empty() && pending.content.consumed_bytes==(i+1)*128 &&
+                  pending.observed_bits==(i+1)*1216 && quota->used==(i+1)*area,
+                  "source lengths and invalid source cells must neither be parsed nor end reception before physical absence");
+        }
+        const auto complete=receiver.push(chunk({},wire.size()*2,100,true));
+        check(complete.stream_complete && !complete.content_validated && !complete.error.empty() &&
+              complete.content.message.data.empty() && quota->used==0,
+              "source interpretation must reject malformed content only after physical completion and release its spool");
+    }
+}
+void underfilled_interval_does_not_end_reception() {
+    const Bytes first{0,0xff,0},second{0,0,0x80,0};
+    auto expected=first;expected.insert(expected.end(),second.begin(),second.end());
+    for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60}) {
+        auto value=options();value.fec=fec;
+        const auto area=interval_data_bytes(fec,false);
+        const auto first_wire=public_interval_wire(encode_source(first,area,false),fec);
+        const auto second_wire=public_interval_wire(encode_source(second,area,false),fec);
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        const auto pending=receiver.push(chunk(first_wire,0));
+        check(pending.error.empty() && pending.content.consumed_bytes==128 && !pending.stream_complete &&
+              !pending.content_validated && pending.content.message.data.empty(),
+              "absent validity cells in an accepted underfilled interval are not a physical stream end");
+        const auto continued=receiver.push(chunk(second_wire,first_wire.size()));
+        check(continued.error.empty() && continued.content.consumed_bytes==256 && !continued.stream_complete &&
+              !continued.content_validated && continued.content.message.data.empty(),
+              "the next interval must remain receivable after padding in the previous interval");
+        const auto complete=receiver.push(chunk({},first_wire.size()+second_wire.size(),100,true));
+        check(complete.stream_complete && complete.content_validated && complete.content.message.data==expected,
+              "physical completion must retain both underfilled intervals including their leading and trailing zero bytes");
+    }
 }
 void final_parity_statistics() {
     const auto value=options();const auto sent=message(17);auto wire=transfer::message_wire_bits(sent,value);
@@ -220,7 +280,8 @@ void dictionary_interpretation_is_bounded_and_post_end() {
 }
 }
 int main() {
-    try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();final_parity_statistics();
+    try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();
+         source_headers_are_opaque_until_physical_end();underfilled_interval_does_not_end_reception();final_parity_statistics();
          shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
