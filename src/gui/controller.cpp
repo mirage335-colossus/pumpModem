@@ -1,4 +1,5 @@
 #include "datapump/attachment.hpp"
+#include "datapump/compression.hpp"
 #include "controller.hpp"
 #include "record_presentations.hpp"
 #include "text_policy.hpp"
@@ -28,12 +29,23 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
     return result;
 }
 std::string compression_reference() {
-    return "Text messages of 16 bytes or more and attachments of every size use one agreed LZMA2 stream in fixed 128-byte coding intervals.\n"
-        "Shorter nonempty text messages send their bytes as raw bits without coding.\n"
-        "Raw bits are sent exactly as entered.\n"
-        "Reception ends only after six seconds without symbols.\n"
-        "Decompression starts after that end event.";
+    std::string result="Nonempty text below 16 bytes uses the fixed short-text dictionary, with no framing, FEC or padding.\n";
+    for(const auto group:{" etao","in","shrd","lucm","fwyp","bg","jk","qv","xz"}) {
+        const auto first=static_cast<std::uint8_t>(group[0]);
+        result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
+        for(const char* byte=group;*byte;++byte) {
+            if(byte!=group)result+="   ";
+            result+=*byte==' '?"space":std::string(1,*byte);
+            result+=' ';result+=bit_text(compression::encode_short_bits(Bytes{static_cast<std::uint8_t>(*byte)}));
+        }
+        result+='\n';
+    }
+    result+="Other bytes use a 13-bit literal escape. Explicit raw bits are sent exactly as entered.\n"
+        "Text of 16 bytes or more and attachments of every size use fixed 128-byte coding intervals.\n"
+        "Both source decoders wait for the physical six-second symbol-search ending rule.";
+    return result;
 }
+
 std::string path_text(const std::filesystem::path& path) { const auto s=path.u8string(); return {s.begin(),s.end()}; }
 std::filesystem::path path_from_text(std::string_view s) { return std::filesystem::path(std::u8string(s.begin(),s.end())); }
 double number(const std::string& text,const char* name) {
@@ -256,6 +268,9 @@ struct Controller::Impl {
         auto& text=f(UiField::short_bits).text;text.clear();
         if(composer.raw_bits()) {
             if(composer.raw_bits()->size()<=4)text=bit_text(*composer.raw_bits());
+        } else if(composer.bytes().size()==1) {
+            try { text=bit_text(compression::encode_short_bits(composer.bytes(),4)); }
+            catch(const Error&) {} // This byte has a longer dictionary code.
         }
     }
 
@@ -264,7 +279,10 @@ struct Controller::Impl {
         try {
             const auto bits=parse_binary_bits(input);
             if(bits.size()>4)throw Error("Enter 1-4 bits; use Console for longer input.");
-            BinaryEditor next;next.edit_binary(input);
+            Bytes decoded;
+            try { decoded=compression::decode_short_bits(bits,15); }
+            catch(const Error&) {} // An incomplete dictionary code remains a valid raw draft.
+            BinaryEditor next(std::move(decoded));next.edit_binary(input);
             composer=std::move(next);
             repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
             seeded_message.clear();sync_composer();f(UiField::short_bits).text=input;
@@ -281,7 +299,12 @@ struct Controller::Impl {
         else {
             const auto bits=parse_binary_bits(f(UiField::short_bits).text);
             detail="Current draft: "+std::to_string(bits.size())+" payload bits, "+bit_text(bits)+".\n";
-            detail+="Sent exactly as entered, without text interpretation.";
+            try {
+                const auto decoded=compression::decode_short_bits(bits,15);
+                detail+="Dictionary preview: "+(decoded==Bytes{' '}?std::string("space"):"'"+BinaryEditor(decoded).text()+"'");
+                detail+=". Message byte: "+BinaryEditor(decoded).binary()+".";
+            } catch(const Error&) { detail+="No complete dictionary code."; }
+            detail+=" Sent exactly as entered.";
         }
         auto& received=f(UiField::received_raw_bits).text;
         const auto index=selected_signal();
@@ -468,7 +491,7 @@ struct Controller::Impl {
         const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<16;
         const bool raw=!attachment&&(composer.raw_bits().has_value()||short_message);
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw;
-        f(UiField::fec).display_text=short_message?"Off (short raw message)":raw?"Off (raw bits)":"";
+        f(UiField::fec).display_text=short_message?"Off (short dictionary)":raw?"Off (raw bits)":"";
         short_bits_status();
     }
     void refresh_files() {
@@ -591,8 +614,10 @@ struct Controller::Impl {
         if(!next.received.empty()) refresh_files();
         for(const auto& signal:next.signals) {
             const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.reception_id; });
-            const bool text=stream!=inbox.items().end()&&stream->message.kind==MessageKind::text;
+            const bool short_text=signal.complete&&!signal.validated&&!signal.binary&&!signal.raw_bits.empty();
+            const bool text=short_text||(stream!=inbox.items().end()&&stream->message.kind==MessageKind::text);
             SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
+            line.raw_bits=signal.raw_bits;
             line.missing_symbols=signal.missing_symbols;line.fec_stats=signal.fec_stats;
             signals.update(std::move(line));
         }

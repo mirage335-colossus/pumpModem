@@ -5,8 +5,8 @@ There are no packets, received integer lengths, variable modem headers, packet
 IDs, repeat flags, bootstrap CRCs, or whole-stream integrity footers. An optional
 attachment prefix is ordinary source content interpreted by the application.
 Both peers select the same waveform, FEC, source codec and key locally. There is no over-air negotiation or old-packet fallback.
-Existing keyfiles remain usable; the new byte transport is incompatible with
-the previous compact packet and short-dictionary formats.
+Existing keyfiles remain usable. The fixed short dictionary retains its original
+bit codes; the interval transport is incompatible with the previous packets.
 
 ## Fixed wire geometry
 
@@ -58,8 +58,8 @@ reconstructed byte, so parity-only and missing-zero repairs remain visible.
 ## Source bytes and compression
 
 For interval-coded sources, the application selects one source convention locally.
-Short raw text bypasses both conventions. There is no dictionary fallback or
-compression flag on air.
+Short text uses the fixed dictionary described below and bypasses both interval
+conventions. There is no compression flag on air.
 
 ### Compressed source (default)
 
@@ -220,18 +220,32 @@ without claiming observed silence or invoking decompression.
 
 ## Exact raw-bit path
 
-Nonempty text shorter than 16 source bytes automatically sends those bytes as
-MSB-first raw bits. This threshold counts bytes, including visible convenience
-text, not characters. Attachments always use intervals. Explicit binary/status
-input preserves leading zeros and non-byte bit counts independently of this
-text threshold: `001` is exactly three payload symbols, with no byte padding.
+Nonempty text shorter than 16 source bytes automatically uses the fixed short
+dictionary. This threshold counts bytes, including visible convenience text,
+not characters or encoded bits. Attachments always use intervals. Explicit
+binary/status input bypasses the dictionary and preserves leading zeros and
+non-byte bit counts: `001` is exactly three payload symbols, with no byte padding.
 The 16-byte threshold is a transmit choice only. It does not impose a received
 bit count or end a reception at 128 bits.
 
-Both raw paths have no byte intervals, source codec, marker, transmitted length,
-FEC or MAC. Optional Data masking still uses the normal symbol schedule and adds
-no bits. The selected FEC preset is retained for later interval-coded drafts but
-is ineffective for raw transmission. There is no automatic short-text dictionary.
+The dictionary is a fixed prefix code over source bytes; it transmits no table,
+identifier or original size. Both peers use these original codes:
+
+| Source bytes | Codes | Bits per byte |
+|---|---|---:|
+| Space, `e`, `t`, `a`, `o` | `000`, `001`, `010`, `011`, `100` | 3 |
+| `i`, `n` | `1010`, `1011` | 4 |
+| `s h r d l u c m f w y p b g` | Consecutive codes `110000` through `111101` | 6 |
+| Every other byte | `11111` followed by its eight MSB-first literal bits | 13 |
+
+Text `e` therefore sends exactly `001`. No padding or terminator follows its
+last token. All short text uses this dictionary, including when the local
+interval compression option is off or literal escapes expand the input. There
+is no ambiguous raw-byte fallback. At most 15 decoded bytes occupy 195 bits.
+
+Both unmarked paths have no byte intervals, marker, transmitted length, FEC or
+MAC. Optional Data masking uses the normal symbol schedule and adds no bits.
+The selected FEC preset is retained for later interval-coded drafts.
 
 Every newly accepted symbol is available on the next receiver progress poll;
 there is no byte, marker or 1,024-bit prerequisite. Pending rows retain leading
@@ -242,6 +256,18 @@ missed symbol ends reception; six seconds inside an unfinished long symbol does
 not. Completion never waits for a byte boundary, marker, parity or source codec.
 The existing settling/filter/suppression waveforms carry no additional bits.
 
+Only after physical completion may the application interpret an unmarked short
+stream with this dictionary. It requires complete canonical tokens, no unknown
+symbol slots, at most 195 observed bits and at most 15 decoded bytes under the
+local content quota. Recognized interval markers and failed interval sources do
+not fall back to this decoder. Invalid/truncated tokens retain raw bits without
+inventing missing bits or releasing a partial decoded prefix.
+
+With no mode marker, an explicit raw sequence can also spell dictionary text.
+The application retains the exact bits alongside any completed interpretation;
+`001` can be displayed as `e` while still copying as exactly `001`. Dictionary
+decoding is not validation or authentication and cannot create an attachment.
+
 ## API and memory boundary
 
 `stream_codec.hpp` contains fixed interval/source APIs and generic `fec` routines.
@@ -249,7 +275,8 @@ The existing settling/filter/suppression waveforms carry no additional bits.
 Attachment names use the bounded source-text convention above.
 `transfer::StreamReceiver` consumes drainable physical chunks and gates the source
 codec on true completion. `encode_packet`, `decode_packet`, header probes,
-`pack`/`unpack`, original-size decoders and short-dictionary codecs are removed.
+`pack`/`unpack` and original-size decoders are removed. The short dictionary has
+only exact-bit encode/decode APIs, with no packed padding or length field.
 
 Physical candidates, marker overlap, one coded interval, erasure masks and RS
 scratch are bounded. Corrected source bytes use a capped spool until completion;

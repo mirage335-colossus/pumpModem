@@ -52,7 +52,7 @@ constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
 // One verified stream is moved into the receive-content cache at the deadline.
 // Its payload uses the content quota; its diagnostics and caption use DSP space.
 constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
-    sizeof(SignalUpdate) + replay_text_limit + 64 + minimum_constellation_limit * sizeof(std::complex<double>);
+    sizeof(SignalUpdate) + 2*replay_text_limit + 64 + minimum_constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {
     return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
         replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value.transfer.modem) * sizeof(std::complex<float>))) : 0;
@@ -606,7 +606,7 @@ struct Session::Impl {
     }
     void append_signal(SignalUpdate event) {
         if (current.signals.size() == maximum_events) {
-            const auto completed = [](const auto& item) { return item.validated || (item.binary && item.complete); };
+            const auto completed = [](const auto& item) { return item.validated || item.complete; };
             const auto pending = std::find_if(current.signals.begin(), current.signals.end(),
                                              [&](const auto& item) { return !completed(item); });
             if (pending == current.signals.end() && !completed(event)) return;
@@ -618,7 +618,7 @@ struct Session::Impl {
         event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
         if (!wave) { append_signal(std::move(event)); return; }
         event.text = std::string(event.text.data(), std::min(event.text.size(), replay_text_limit));
-        if (event.validated || (event.binary && event.complete)) { wave->verified = std::move(event); return; }
+        if (event.validated || event.complete) { wave->verified = std::move(event); return; }
         // One most recent pending observation per presentation interval.
         // Floor quantization keeps even a late observation visible for the last
         // interval before validation; a stalled UI never extends the deadline.
@@ -719,8 +719,13 @@ struct Session::Impl {
                                 event.text=display_text(result.content.message);event.binary=false;event.validated=true;
                                 event.reception_id=reception_id(result.content.message);event.pre_fec_accuracy=result.content.pre_fec_accuracy;event.fec_stats=result.content.fec_stats;
                             }
+                            if(result.short_text_decoded) {
+                                event.raw_bits=std::move(event.text);
+                                event.text.assign(result.content.message.data.begin(),result.content.message.data.end());
+                                event.binary=false;
+                            }
                             add_signal(std::move(event),simulation_wave);
-                            if(result.content_validated && !display.content_reported) {
+                            if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
                                 const auto bytes=result.content.message.data.size();
                                 if(simulation_wave) {
                                     simulation_wave->received.reset();staged_received_bytes=0;

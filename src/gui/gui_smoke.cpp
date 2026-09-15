@@ -441,9 +441,9 @@ struct Smoke::Impl {
             controller.select(F::key,"none");controller.edit(F::message,"e");phase=Phase::tiny;break;
         case Phase::tiny:
             if(!controller.estimate())break;
-            require(!controller.inspection()->stream_layout&&controller.estimate()->wire_bits==8&&
+            require(!controller.inspection()->stream_layout&&controller.estimate()->wire_bits==3&&
                     controller.field(F::fec).selected=="rs20"&&!controller.field(F::fec).enabled&&
-                    controller.field(F::fec).display_text=="Off (short raw message)",
+                    controller.field(F::fec).display_text=="Off (short dictionary)",
                     "Short text did not bypass fixed-interval coding while retaining the FEC selection");
             controller.edit(F::message,message);phase=Phase::long_text;break;
         case Phase::long_text:

@@ -11,8 +11,8 @@ patterns. Their cards show content-bit encoding, optional private Data masking,
 pattern selection, hardware settling, audio or sampled simulation, and reception
 by pattern evidence. Text of at least 16 source bytes, files and screenshots use
 fixed 128-byte coded intervals, with one alignment marker before each interval.
-Nonempty text below 16 bytes and explicit raw bits bypass the source and interval
-codecs. The separate settling
+Nonempty text below 16 bytes uses the fixed short dictionary, bypassing interval
+codecs. Explicit raw bits bypass both. The separate settling
 waveform helps external hardware prepare and is never an acquisition condition.
 Active, disabled and unavailable stages have
 different labels. Configured symbols here are distinct from Console measurements.
@@ -94,12 +94,13 @@ RS60 reserves 48. Encryption additionally reserves 32 bytes for HMAC-SHA256
 inside the protected data area. Public mode has no message digest. One marker
 precedes each interval, including the first; there is no terminal marker or
 transmitted length. The layout reports actual source, coded and marker bit
-counts. A one-byte text draft sends eight raw bits; a one-byte attachment still
-occupies an interval and marker. Raw text reports no source, integrity or parity
-overhead and effective FEC Off, while retaining the chosen longer-message preset.
+counts. Text `e` sends three dictionary bits; a one-byte attachment still occupies
+an interval and marker. Short text reports dictionary compression and effective
+FEC Off, retaining the chosen longer-message preset. Byte-size estimates round
+storage upward without adding transmitted padding bits.
 See [protocol](protocol.md) for exact geometry and correction limits.
 
-Compression uses raw LZMA2 with a fixed dictionary, even when encoding makes
+Interval compression uses raw LZMA2 with a fixed dictionary, even when encoding makes
 the source larger. Decompression runs only after physical symbol absence has
 completed the stream. The local uncompressed setting uses validity-plus-byte
 cells to preserve exact binary contents, including trailing zero bytes.

@@ -63,8 +63,8 @@ Estimate estimate_binary(std::span<const std::uint8_t> bits, const Options& opti
 // MSB-first bits with the symbol-start epoch/local Data position; no tag is added.
 std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
     std::span<const std::uint8_t> bits, const Options& options);
-// Nonempty text shorter than 16 source bytes sends exactly its MSB-first bits,
-// without a source codec, alignment markers, padding, parity or authentication.
+// Nonempty text shorter than 16 source bytes uses the fixed short dictionary's
+// exact bits, without alignment markers, padding, parity or authentication.
 // Files/screenshots and longer text use fixed 128-byte coded intervals.
 bool uses_raw_message(const Message&) noexcept;
 Bytes message_bits(const Message&, const Options&);
@@ -84,6 +84,9 @@ struct Received {
     Bytes raw_bits; // Bounded diagnostic prefix, not the retained stream.
     std::size_t observed_bits = 0, missing_symbols = 0;
     bool stream_complete = false, content_validated = false;
+    // Complete fixed-dictionary interpretation of an unmarked short stream.
+    // This is neither interval validation nor authentication; raw bits remain.
+    bool short_text_decoded = false;
     std::string error;
 };
 // Consumes immutable bounded physical chunks. Only a physical complete event
@@ -117,6 +120,8 @@ std::size_t source_storage_limit(std::size_t content_limit);
 std::size_t pattern_bit_limit(std::size_t content_limit);
 
 modem::Config seeded_config(const Options& options, std::uint64_t timestamp);
+// Packed convenience form; rejects partial bytes instead of adding padding.
+// Use message_wire_bits/message_transmitter for exact short dictionary streams.
 Bytes transmission_wire(const Message& message, const Options& options);
 std::vector<float> transmit(const Message& message, const Options& options,
                             std::stop_token stop = {});

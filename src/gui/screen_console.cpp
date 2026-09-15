@@ -119,9 +119,9 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,
-            "Raw bits use no source compression or FEC. A 3-bit value 010 stays exactly 010.\n"
-            "Ordinary text uses fixed 128-byte coding intervals with the selected FEC.\n"
-            "Send 1-4 exact bits below. Console Binary accepts up to 128 exact bits."}, Slot::compression_explanation),
+            "Text below 16 bytes uses the fixed dictionary with no marker, FEC or padding.\n"
+            "Longer text uses fixed 128-byte coding intervals. Explicit raw bits stay exactly as entered.\n"
+            "Send 1-4 bits below; Console Binary accepts up to 128 bits. Codes show their dictionary text."}, Slot::compression_explanation),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,1,"Exact raw bits (1-4)"}, Slot::short_bits_label),
         placed({Kind::text,Field::short_bits,Command::none,Bitmap::none,Page::compression,1,"",1,false,128}, Slot::short_bits),
         placed({Kind::label,Field::short_bits_detail,Command::none,Bitmap::none,Page::compression,2,""}, Slot::short_bits_detail),

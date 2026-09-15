@@ -1,4 +1,5 @@
 #include "datapump/transfer.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/boundary_sync.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "../src/transmit_timing.hpp"
@@ -60,12 +61,12 @@ void fixed_pipeline_and_local_metadata() {
     auto tiny=sample(1);const auto value=options();
     check(transfer::message_wire_bits(tiny,value).size()==1216,"tiny attachment must retain its fixed format and filename");
 }
-void short_text_is_exact_raw_bits() {
+void short_text_uses_exact_dictionary_bits() {
     for(const auto length:{1U,3U,15U,16U})for(bool encrypted:{false,true})
         for(auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(bool compressed:{false,true}) {
         auto value=options(encrypted);value.fec=fec;value.compression=compressed;value.content_limit=length;
         auto sent=sample(length);sent.kind=MessageKind::text;
-        Bytes plain;for(auto byte:sent.data)for(unsigned bit=0;bit<8;++bit)plain.push_back((byte>>(7-bit))&1);
+        const auto plain=compression::encode_short_bits(sent.data);
         StreamLayout layout;layout.intervals=99;
         const auto estimate=transfer::estimate(sent,value,&layout);
         const auto wire=transfer::message_wire_bits(sent,value);
@@ -76,12 +77,12 @@ void short_text_is_exact_raw_bits() {
             continue;
         }
         check(transfer::uses_raw_message(sent) && transfer::message_bits(sent,value)==plain &&
-              wire.size()==length*8 && estimate.wire_bits==length*8 && estimate.coded_bytes==length,
-              "short text preserves every source bit without markers, byte padding or a codec");
-        check(!layout.intervals && !layout.compressed && !layout.authenticated && layout.fec==FecMode::off &&
-              layout.source_bytes==length && layout.encoded_source_bytes==length && layout.wire_bytes==length &&
+              wire.size()==plain.size() && estimate.wire_bits==plain.size() && estimate.coded_bytes==(plain.size()+7)/8,
+              "short text preserves its exact dictionary endpoint without markers or byte padding");
+        check(!layout.intervals && layout.compressed && !layout.authenticated && layout.fec==FecMode::off &&
+              layout.source_bytes==length && layout.encoded_source_bytes==(plain.size()+7)/8 && layout.wire_bytes==(plain.size()+7)/8 &&
               !layout.parity_bytes_per_interval && !layout.integrity_bytes_per_interval,
-              "short text layout must expose zero FEC, MAC and source-codec overhead");
+              "short text layout must expose dictionary compression without FEC or MAC");
         auto masking=value;masking.content_limit=plain.size();auto expected=plain;transfer::xor_binary_bits(expected,masking);
         check(wire==expected,"selected key may mask short data but adds no tag or framing");
         auto actual=transfer::message_transmitter(sent,value);
@@ -90,13 +91,18 @@ void short_text_is_exact_raw_bits() {
               "short text uses exactly the raw-bit waveform duration");
         const auto received=consume(wire,value,true,1);
         check(received.stream_complete && received.raw_bits==plain && received.observed_bits==plain.size() &&
-              !received.content_validated && !received.content.authenticated && received.content.message.data.empty(),
-              "raw text remains exact received bits without inventing validated content");
+              !received.content_validated && !received.content.authenticated && received.short_text_decoded &&
+              received.content.message.data==sent.data && received.content.message.filename.empty(),
+              "short dictionary text must decode after physical end while retaining exact bits without validation or attachment claims");
         sent.data.push_back(0);
         rejects([&]{transfer::message_wire_bits(sent,value);},"raw text still obeys the source byte quota");
     }
     Message empty;
     check(!transfer::uses_raw_message(empty),"empty input must not create an empty raw transmission");
+    Message letter;letter.data={'e'};
+    check(transfer::message_wire_bits(letter,options())==Bytes({0,0,1}) &&
+          transfer::estimate(letter,options()).wire_bits==3,"historical e dictionary entry must use exactly three symbols");
+    rejects([&]{transfer::transmission_wire(letter,options());},"packed byte API must reject a partial dictionary byte without padding or writing out of bounds");
 }
 void keys_and_unknown_slots() {
     const auto sent=sample(230);
@@ -193,4 +199,4 @@ void protection_and_cancellation() {
     rejects([&]{transfer::simulate(sent,value,channel,{},stop.get_token());},"cancelled simulation stops");
 }
 }
-int main(){try{fixed_pipeline_and_local_metadata();short_text_is_exact_raw_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{fixed_pipeline_and_local_metadata();short_text_uses_exact_dictionary_bits();keys_and_unknown_slots();content_limits_and_streaming_storage();exact_raw_masking_and_scheduling();protection_and_cancellation();std::cout<<"stream transfer passed\n";}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

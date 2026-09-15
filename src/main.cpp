@@ -369,16 +369,17 @@ void report_fec_region(const FecRegionStats& stats) {
         <<",\"erased_bytes\":"<<stats.erased_bytes<<",\"repaired_bytes\":"<<stats.repaired_bytes<<'}';
 }
 void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
-            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={}) {
+            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false) {
     const auto& m=stream.message;
     if(a.has("save")) {
-        if(!stream_complete || !content_validated)
+        if(!stream_complete || !(content_validated || short_text_decoded))
             throw Error("No complete decoded source to save; use --json for reception diagnostics");
         write_new_file(a.get("save"),m.data);
     }
     if(a.has("json")) {
         std::cout<<"{\"validated\":"<<(content_validated?"true":"false")<<",\"content_validated\":"<<(content_validated?"true":"false")
           <<",\"stream_complete\":"<<(stream_complete?"true":"false")
+          <<",\"short_text_decoded\":"<<(short_text_decoded?"true":"false")
           <<",\"authenticated\":"<<(content_validated&&stream.authenticated?"true":"false")
           <<",\"id\":\""<<id_string(m)<<"\",\"kind\":\""<<(m.kind==MessageKind::text?"text":m.kind==MessageKind::file?"file":"screenshot")
           <<"\",\"filename\":\""<<json_escape(m.filename)<<"\",\"callsign\":\""<<json_escape(m.callsign)
@@ -422,7 +423,7 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
         std::cerr<<"Raw bits include "<<missing_symbols<<(missing_symbols==1?" zero placeholder for a missing symbol.\n":" zero placeholders for missing symbols.\n");
 }
 void report_received(const Args& a,const transfer::Received& received) {
-    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error);
+    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded);
 }
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");

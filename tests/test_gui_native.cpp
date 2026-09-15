@@ -21,7 +21,8 @@ void retained_raw_bits() {
     signals.update(decoded);
     check(signals.copy_raw_bits(0)=="010" && signals.copy_text(0)=="t" &&
           signals.copy_bytes(0)==Bytes{'t'} && !signals.copy_bits(0) && !signals.copy_id(0));
-    check(signals.lines()[0].raw_bits=="010" && !signals.copy_raw_bits(1));
+    check(signals.lines()[0].raw_bits=="010" && !signals.copy_raw_bits(1) &&
+          gui::signal_data_label(signals.lines()[0])=="No checksum / FEC");
 
     const auto unavailable=[&](gui::SignalLine line) {
         signals.clear();signals.update(std::move(line));check(!signals.copy_raw_bits(0));

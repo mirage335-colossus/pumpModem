@@ -1,6 +1,7 @@
 #include "../src/gui/gui_smoke.hpp"
 #include "../src/gui/bitmap_sources.hpp"
 #include "../src/gui/binary_editor.hpp"
+#include "datapump/compression.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -620,18 +621,33 @@ void short_text_reception() {
     using F=ui::Field;
     Controller controller({true,true});controller.edit(F::message,"quick brown fox");prepare(controller);
     check(!controller.inspection()->stream_layout && !controller.inspection()->binary &&
-          controller.estimate()->wire_bits==120 && !controller.field(F::fec).enabled &&
-          controller.field(F::fec).selected=="rs20" && controller.field(F::fec).display_text=="Off (short raw message)",
-          "15-byte text must use raw bytes and retain the selected FEC for later longer messages");
+          controller.estimate()->wire_bits==compression::encode_short_bits(Bytes{'q','u','i','c','k',' ','b','r','o','w','n',' ','f','o','x'}).size() && !controller.field(F::fec).enabled &&
+          controller.field(F::fec).selected=="rs20" && controller.field(F::fec).display_text=="Off (short dictionary)",
+          "15-byte text must use exact dictionary bits and retain the selected FEC for later longer messages");
     receive_pattern_text(controller,"quick brown fox");
     check(controller.inbox().items().empty() && controller.signals().lines().size()==1 &&
           !controller.signals().lines().front().validated,
           "short raw text must be copyable without acquiring coded validation or an attachment");
+    const auto& received=controller.signals().lines().front();
+    check(!received.raw_bits.empty() && signal_data_label(received)=="No checksum / FEC" &&
+          !controller.signals().copy_id(0),"Dictionary decoding must retain exact bits without claiming validation");
     controller.edit(F::message,"quick brown fox!");prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->wire_bits==1216 &&
           controller.field(F::fec).enabled && controller.field(F::fec).selected=="rs20" &&
           controller.field(F::fec).display_text.empty(),
           "16-byte text must restore selected fixed interval coding");
+    controller.close();
+}
+
+void three_bit_text_reception() {
+    using F=ui::Field;
+    Controller controller({true,true});controller.edit(F::message,"e");prepare(controller);
+    check(controller.estimate()->wire_bits==3 && !controller.inspection()->binary &&
+          controller.field(F::short_bits).text=="001", "Text e must transmit exactly three dictionary bits");
+    receive_pattern_text(controller,"e");
+    check(controller.signals().lines().size()==1 && controller.signals().copy_raw_bits(0)=="001" &&
+          !controller.signals().lines().front().validated && controller.inbox().items().empty(),
+          "Three-bit dictionary text must retain raw transport independently of its decoded character");
     controller.close();
 }
 
@@ -642,14 +658,16 @@ void short_raw_editor() {
           !controller.enabled(C::paste_raw_signal),"Empty raw tab enabled a transmission or receive action");
     controller.edit(F::callsign,"N0CALL");controller.toggle(F::repeatable,true);
     controller.edit(F::short_bits,"0 1 0");prepare(controller);
-    check(controller.field(F::binary).text=="010"&&controller.field(F::message).text.empty()&&
+    check(controller.field(F::binary).text=="010"&&controller.field(F::message).text=="t"&&
           !controller.field(F::repeatable).checked&&controller.inspection()->binary&&
           controller.enabled(C::transmit_short_bits),"Short raw entry did not replace a long greeting with exact bits");
     check(controller.estimate()->total_seconds==transfer::estimate_binary(Bytes{0,1,0},controller.settings().transfer).total_seconds&&
           controller.field(F::short_bits_detail).text.find("exactly as entered")!=std::string::npos,
           "Raw tab did not distinguish three transmitted bits from the decoded t byte");
     const auto& reference=controller.field(F::compression_codes).text;
-    check(reference.find("128-byte")!=std::string::npos,"Compression reference shows fixed interval source transport");
+    check(reference.find("128-byte")!=std::string::npos && reference.find("e 001")!=std::string::npos &&
+          reference.find("t 010")!=std::string::npos && reference.find("space 000")!=std::string::npos,
+          "Compression reference must show the fixed dictionary and long source transport");
     for(const auto invalid:{"01010","01x",""}) {
         controller.edit(F::short_bits,invalid);controller.poll();
         check(controller.field(F::short_bits).text==invalid&&!controller.estimate()&&
@@ -664,8 +682,8 @@ void short_raw_editor() {
               "One- to four-bit raw input was padded, compressed, or rejected as an incomplete dictionary token");
     }
     controller.edit(F::message,"t");prepare(controller);
-    check(controller.field(F::short_bits).text.empty()&&!controller.inspection()->binary&&
-          controller.field(F::binary).text=="01110100"&&!controller.enabled(C::transmit_short_bits),
+    check(controller.field(F::short_bits).text=="010"&&!controller.inspection()->binary&&
+          controller.field(F::binary).text=="01110100"&&controller.enabled(C::transmit_short_bits),
           "Message text did not expose its lowercase code separately from byte bits");
     controller.edit(F::short_bits,"010");prepare(controller);
     check(controller.inspection()->binary&&controller.field(F::binary).text=="010",
@@ -713,7 +731,11 @@ void short_raw_reception() {
         controller.activate(C::copy_raw_signal);const auto requests=controller.take_services();
         check(requests.size()==1&&requests.front().value==raw,"Copy raw bits copied decoded text or padded byte bits");
         controller.complete_service({requests.front().id,false,{},{}});
-        check(!controller.signals().copy_text(*received),"few raw bits have no legacy dictionary interpretation");
+        if(std::string_view(raw)=="010") {
+            check(controller.signals().copy_text(*received)=="t" && !controller.signals().copy_id(*received) &&
+                  controller.signals().lines().size()==1 && controller.inbox().items().empty(),
+                  "Complete dictionary token must replace its pending row with unvalidated text and retain exact bits");
+        } else check(!controller.signals().copy_text(*received),"Incomplete dictionary token must remain raw bits");
         controller.activate(C::paste_raw_signal);prepare(controller);
         check(controller.field(F::short_bits).text==raw&&controller.field(F::binary).text==raw&&
               controller.inspection()->binary&&controller.enabled(C::transmit_short_bits),
@@ -790,8 +812,8 @@ void binary_source_representation() {
         controller.edit(F::binary,editor.binary()); // Establish the byte editor's explicit escaped mode.
         controller.edit(F::message,editor.text());prepare(controller);
         check(controller.message_bytes()==expected && !controller.inspection()->stream_layout &&
-              !controller.inspection()->binary && controller.estimate()->wire_bits==expected.size()*8,
-              "short exact source bytes must bypass fixed coding and preserve trailing zeros");
+              !controller.inspection()->binary && controller.estimate()->wire_bits==compression::encode_short_bits(expected).size(),
+              "short dictionary must preserve exact source bytes and trailing zeros");
         if(expected.front()==0) {
             receive_pattern_text(controller,editor.text());
             check(controller.inbox().items().empty(),"Short raw binary source became an attachment or validated source");
@@ -973,7 +995,7 @@ int main(int argc,char** argv) {
         binary_editor_controls();
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
-        receive_target_controls();short_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
+        receive_target_controls();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

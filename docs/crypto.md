@@ -228,8 +228,9 @@ parity bits. Reception reverses this order and verifies the tag after RS.
 Public intervals contain no content digest, checksum or MAC. Raw bits bypass
 markers, the source codec, FEC and MAC altogether, even when Data encryption is
 selected. Pattern evidence and successful public RS correction provide no
-cryptographic authentication or replay protection. There is no dictionary-coded
-short-text wire format, packet parser, transmitted metadata or length field.
+cryptographic authentication or replay protection. The fixed short-text
+dictionary adds no authentication, transmitted metadata or length field. There
+is no packet parser. Short dictionary interpretation runs only after physical end.
 
 Marker recovery runs after Data decryption and cannot change a crypto offset or
 reset a counter. Its [evidence threshold](protocol.md#marker-evidence-threshold)

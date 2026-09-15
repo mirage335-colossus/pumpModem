@@ -119,7 +119,7 @@ eligibility, options and records. Options have IDs, literal labels and enabled
 flags. `display_text` optionally shows an effective value without replacing a
 saved selection or disabling an otherwise enabled choice. For example, the
 selected Reed-Solomon preset remains saved
-while a tiny message reports `Off (short raw message)`.
+while a tiny message reports `Off (short dictionary)`.
 
 A record has a stable ID, enabled/activation eligibility and ordered native text
 cells. Cells carry literal text, relative logical rectangles, font size, semantic
@@ -130,7 +130,8 @@ quality and message text. Pattern-only rows show model log evidence rather than
 dB or a calibrated confidence percentage. Complete discovered raw bits can be
 copied without interval validation; provisional prefixes and file rows cannot.
 Each newly accepted raw symbol updates the pending row without waiting for a
-complete byte or coding interval. There is no short dictionary decoder. Whole raw
+complete byte or coding interval. Eligible completed short streams show their
+dictionary interpretation while retaining the exact raw bits. Whole raw
 bytes use the editor's lossless escaped-byte representation, and a partial
 final byte uses an exact-bit record. **Paste as message** loads text/byte records
 into the composer without interpreting their display escapes as literal

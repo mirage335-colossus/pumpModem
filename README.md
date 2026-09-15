@@ -18,8 +18,8 @@ The transport sends one bit per pattern symbol. Pattern evidence alone admits
 timing, carrier and keystream candidates. Nonempty text below 16 source bytes and
 explicit bit drafts use raw transmission. Longer byte streams use a fixed 128-byte coding
 interval after each alignment marker, with no packet header, received length,
-or metadata parser. Legacy APSK, packet APIs and dictionary
-fallbacks have been removed; peers must use the same local source/FEC profile.
+or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
+the same local source/FEC profile. Short text uses the fixed bit dictionary.
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
@@ -54,8 +54,8 @@ The model score is evidence for comparing pattern hypotheses;
 it is not a calibrated false-alarm probability, measured SNR, authentication or
 a demonstration of extreme weak-signal performance.
 
-Nonempty text shorter than 16 source bytes sends its exact MSB-first byte bits,
-with no marker, source codec, padding, FEC or MAC. Explicit Binary/status input
+Nonempty text shorter than 16 source bytes uses the fixed short dictionary,
+with no marker, padding, FEC or MAC: `e` sends exactly `001`. Explicit Binary/status input
 also supports individual bits: `001` sends exactly three payload symbols.
 Text of at least 16 bytes and attachments use the fixed interval format. Each 192-bit
 alignment marker precedes 128 coded bytes, for 1,216 symbols per interval. RS20
@@ -64,7 +64,7 @@ encrypted intervals reserve 32 systematic bytes for HMAC-SHA256. Public interval
 have no digest or checksum. Missing timed bits retain erasure positions so RS can
 repair interior losses and a missing final coded bit without shifting later bytes.
 
-The default source codec always emits raw LZMA2 with a fixed 4 MiB dictionary,
+For interval-coded sources, the default codec emits raw LZMA2 with a fixed 4 MiB dictionary,
 including incompressible input, then pads the final data area with zeros.
 It transmits no original size. Corrected bytes enter a bounded spool; decompression
 runs only after iterative search establishes the physical stream end. A locally
@@ -72,7 +72,7 @@ selected uncompressed profile uses fixed validity/byte cells to preserve exact
 bytes and trailing zeros. The bundled compression library needs no runtime download.
 
 Explicit Binary/status input still sends exact raw bits, including leading zeros
-and non-byte lengths, without markers, FEC, MAC or an automatic dictionary. The
+and non-byte lengths, without markers, FEC, MAC or dictionary encoding. The
 approximately two-second settling waveform and pulse tails carry no payload.
 Accepted bits appear incrementally while reception is pending; they do not wait
 for a complete byte or interval. The six-second whole-symbol absence rule is
@@ -257,8 +257,8 @@ an attachment is selected, both message draft views are inactive; Use text
 restores the synchronized draft.
 
 The raw-bit controls preserve exact short patterns, including leading zeros and
-incomplete bytes. Raw reception is not automatically interpreted as dictionary
-text. Select a reception to copy its retained raw bits or load a short pattern for
+incomplete bytes. After physical completion, eligible short receptions also show
+their fixed-dictionary text interpretation. Select a reception to copy its retained raw bits or load a short pattern for
 sending again. **Paste as message** loads decoded source bytes into the message
 editor; Console Binary supports longer raw drafts up to 128 bits.
 

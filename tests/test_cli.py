@@ -21,23 +21,47 @@ class StreamCLI(unittest.TestCase):
         self.assertNotIn(b'pack/unpack',helptext)
         for command in ('pack','unpack'):
             self.run_pump(command,'--text','x',ok=False)
-    def test_short_text_raw_threshold(self):
+    def test_short_text_dictionary_threshold(self):
         for size in (1,15,16):
             for fec in ('off','20','60'):
                 value=json.loads(self.run_pump('estimate','--text','e'*size,'--fec',fec,*AUDIO).stdout)
-                self.assertEqual(value['coded_bytes'],size if size<16 else 128)
-                self.assertEqual(value['wire_bits'],8*size if size<16 else 1216)
+                self.assertEqual(value['coded_bytes'],(3*size+7)//8 if size<16 else 128)
+                self.assertEqual(value['wire_bits'],3*size if size<16 else 1216)
                 self.assertNotIn('packet_bytes',value)
-    def test_short_text_received_as_exact_raw_bits(self):
+    def test_short_dictionary_text_received_with_exact_bits(self):
         source=b'e\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',
             '--clock-error-ppm','0','--phase-noise','0',*AUDIO,data=source).stdout)
         self.assertTrue(value['stream_complete'])
         self.assertFalse(value['content_validated'])
         self.assertFalse(value['authenticated'])
-        self.assertEqual(value['raw_bits'],''.join(f'{byte:08b}' for byte in source))
-        self.assertEqual(value['raw_bit_count'],len(source)*8)
+        self.assertTrue(value['short_text_decoded'])
+        self.assertEqual(base64.b64decode(value['data_base64']),source)
+        self.assertEqual(value['raw_bits'],'001'+'11111'+'00000000')
+        self.assertEqual(value['raw_bit_count'],16)
         self.assertEqual(value['filename'],'')
+    def test_three_bit_dictionary_text_and_physical_end(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=pathlib.Path(directory)/'letter.wav'
+            self.run_pump('tx','--text','e','--output',path,*AUDIO)
+            value=json.loads(self.run_pump('rx','--input',path,'--json',*AUDIO).stdout)
+            self.assertTrue(value['stream_complete'])
+            self.assertTrue(value['short_text_decoded'])
+            self.assertFalse(value['content_validated'])
+            self.assertEqual(value['raw_bits'],'001')
+            self.assertEqual(base64.b64decode(value['data_base64']),b'e')
+            output=pathlib.Path(directory)/'letter.txt'
+            self.run_pump('rx','--input',path,'--save',output,*AUDIO)
+            self.assertEqual(output.read_bytes(),b'e')
+            with wave.open(str(path),'rb') as f:
+                params=f.getparams();pcm=f.readframes(f.getnframes())
+            trim=6*params.framerate*params.sampwidth*params.nchannels
+            with wave.open(str(path),'wb') as f:
+                f.setparams(params);f.writeframes(pcm[:-trim])
+            pending=json.loads(self.run_pump('rx','--input',path,'--json',*AUDIO).stdout)
+            self.assertFalse(pending['stream_complete'])
+            self.assertFalse(pending['short_text_decoded'])
+            self.assertEqual(pending['data_base64'],'')
     def test_sampled_stream_roundtrip(self):
         source=b'fixed intervals\x00\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',

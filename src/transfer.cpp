@@ -1,4 +1,5 @@
 #include "datapump/attachment.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/channel.hpp"
@@ -156,9 +157,10 @@ Estimate estimate(const Message& message,const Options& input,StreamLayout* layo
     Bytes bits;std::size_t coded_bytes;
     if(uses_raw_message(message)) {
         validate_message(message,options);
-        bits=byte_bits(message.data);coded_bytes=message.data.size();
+        bits=compression::encode_short_bits(message.data,15*13);coded_bytes=(bits.size()+7)/8;
         if(layout) {
-            *layout={};layout->source_bytes=layout->encoded_source_bytes=layout->wire_bytes=coded_bytes;
+            *layout={};layout->compressed=true;layout->source_bytes=message.data.size();
+            layout->encoded_source_bytes=layout->wire_bytes=coded_bytes;
         }
     } else {
         const auto coded=encoded_intervals(message,options,layout);coded_bytes=coded.size();
@@ -227,7 +229,7 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
 
 Bytes message_bits(const Message& message,const Options& input) {
     const auto options=effective_options(input);
-    if(uses_raw_message(message)) {validate_message(message,options);return byte_bits(message.data);}
+    if(uses_raw_message(message)) {validate_message(message,options);return compression::encode_short_bits(message.data,15*13);}
     return byte_bits(encoded_intervals(message,options));
 }
 Bytes message_wire_bits(const Message& message,const Options& input) {
@@ -278,7 +280,9 @@ void xor_binary_bits(std::span<std::uint8_t> bits,const Options& input_options,s
 
 
 Bytes transmission_wire(const Message& message,const Options& options) {
-    const auto bits=message_wire_bits(message,options);Bytes bytes(bits.size()/8);
+    const auto bits=message_wire_bits(message,options);
+    if(bits.size()%8)throw Error("non-byte-aligned stream requires message_wire_bits or message_transmitter");
+    Bytes bytes(bits.size()/8);
     for(std::size_t i=0;i<bits.size();++i)bytes[i/8]|=static_cast<std::uint8_t>(bits[i]<<(7-i%8));
     return bytes;
 }
@@ -427,6 +431,19 @@ struct StreamReceiver::Impl {
                 state.result.content.message=std::move(message);
                 state.result.content_validated=true;
             } catch(const Error& error){fail(state,error.what());}
+        }
+        // The fixed short dictionary is a bounded application interpretation,
+        // never a framing or confidence test. It consumes the exact physical
+        // endpoint and cannot pad an unfinished token or a missing symbol.
+        if(burst.complete && !state.failed && !state.seen_marker &&
+           !state.collector.leading_marker_recognized() && !state.result.missing_symbols &&
+           !(options.key && burst.stream_first_symbol) && !state.result.raw_bits.empty() &&
+           state.result.observed_bits==state.result.raw_bits.size() && state.result.observed_bits<=15*13) {
+            try {
+                state.result.content.message.data=compression::decode_short_bits(
+                    state.result.raw_bits,std::min<std::size_t>(15,options.content_limit));
+                state.result.short_text_decoded=true;
+            } catch(const Error&) {} // Keep exact raw bits when no complete interpretation fits.
         }
         if(burst.complete) {
             auto result=std::move(state.result);quota->used-=state.stored;states.erase(it);return result;

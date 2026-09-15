@@ -1,5 +1,6 @@
 #include "../src/gui/inspection_model.hpp"
 #include "datapump/tuning.hpp"
+#include "datapump/compression.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <cmath>
 #include <iostream>
@@ -130,11 +131,11 @@ void raw_and_short_sources() {
         request.message.kind=kind;request.message.filename="sample.bin";request.message.data=Bytes(static_cast<std::size_t>(size),'e');
         const auto source=gui::inspect(request);
         if(kind==MessageKind::text && size<16) {
-            check(!source.binary && !source.stream_layout && source.estimate.coded_bytes==static_cast<std::size_t>(size) &&
-                  source.estimate.wire_bits==static_cast<std::size_t>(size)*8 &&
-                  field(source,"Meaningful bits")==std::to_string(size*8) && field(source,"FEC")=="Off" &&
+            check(!source.binary && !source.stream_layout && source.estimate.coded_bytes==static_cast<std::size_t>((size*3+7)/8) &&
+                  source.estimate.wire_bits==static_cast<std::size_t>(size)*3 &&
+                  field(source,"Meaningful bits")==std::to_string(size*3) && field(source,"FEC")=="Off" &&
                   field(source,"Integrity")=="None" && field(source,"Byte-boundary recovery")=="0 bits",
-                  "short text must transmit exact raw source bytes with no interval overhead");
+                  "short text must transmit exact dictionary bits with no interval overhead");
             check_airtime(source);
         } else check(source.stream_layout && source.stream_layout->intervals==1 && source.estimate.coded_bytes==128 &&
               source.estimate.wire_bits==1216 && field(source,"Meaningful bits")=="1024" &&
@@ -146,15 +147,16 @@ void raw_and_short_sources() {
         request.options.fec=fec;request.options.compression=true;
         if(keyed)request.options.key.emplace(Bytes(32,0x37));else request.options.key.reset();
         const auto tiny=gui::inspect(request);
-        check(!tiny.stream_layout && tiny.estimate.wire_bits==8 && field(tiny,"FEC")=="Off" &&
-              field(tiny,"Integrity")=="None" && field(tiny,"Compression")=="Off (short raw message)" &&
+        check(!tiny.stream_layout && tiny.estimate.wire_bits==3 && field(tiny,"FEC")=="Off" &&
+              field(tiny,"Integrity")=="None" && field(tiny,"Compression")=="Fixed short-text dictionary" &&
               field(tiny,"Data encryption")==std::string(keyed?"On":"Off"),
               "short raw message inspection must bypass codec options while retaining selected encryption");
     }
     request.options.key.reset();request.options.fec=FecMode::off;request.options.compression=false;
     request.options.modem.integration_seconds=3600;
     const auto slow=gui::inspect(request);
-    check(field(slow,"Hardware settling")=="0 s / 0 symbol durations" && section(slow,"Pulse tails").symbols==0 &&
+    check(slow.estimate.wire_bits==3 && slow.estimate.coded_seconds==10800 &&
+          field(slow,"Meaningful bits")=="3" && field(slow,"Hardware settling")=="0 s / 0 symbol durations" && section(slow,"Pulse tails").symbols==0 &&
           std::abs(slow.estimate.total_seconds-slow.estimate.coded_seconds-pulse_seconds-2.)<1e-8,
           "hour-long pattern inspection must retain pulse tails separately from its zero hardware prefix");
     request.options.modem.integration_seconds=0;request.message.data=Bytes(400,'e');

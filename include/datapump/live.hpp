@@ -56,6 +56,9 @@ struct SignalUpdate {
     std::optional<double> pattern_score = std::nullopt;
     std::size_t missing_symbols = 0; // Unobserved symbol slots.
     StreamFecStats fec_stats;
+    // Exact transport bits retained when a completed short dictionary stream
+    // is presented as text; absent for pending observations and interval data.
+    std::string raw_bits;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct Snapshot {

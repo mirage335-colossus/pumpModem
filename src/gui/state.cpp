@@ -199,6 +199,7 @@ std::string signal_preamble_label(const SignalLine& line) {
     return text.str();
 }
 std::string signal_data_label(const SignalLine& line) {
+    if(line.complete&&!line.validated&&!line.binary&&!line.raw_bits.empty())return "No checksum / FEC";
     if (line.binary || (line.pattern_score && line.complete && !line.validated))
         return line.received_bits>line.text.size()?"Raw observations / prefix":"Raw observations";
     if (!line.validated) return "Data pre-FEC pending";

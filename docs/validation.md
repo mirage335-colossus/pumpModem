@@ -4,16 +4,52 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
-## Short raw messages and incremental symbols — 15 September 2026
+## Fixed short dictionary restored — 15 September 2026
+
+Text of 1–15 source bytes again uses the original fixed dictionary. The exact-bit
+encoder and decoder are restored without the former packed/length APIs or packet
+parser. Text `e` sends `001`; an explicit Binary draft still transmits exactly
+the entered bits. No marker, padding, length, FEC or MAC is added to either path.
+
+Dictionary interpretation requires physical completion, complete canonical
+tokens, no missing symbols, no recognized interval marker, at most 195 received
+bits and at most 15 decoded bytes under the content quota. Pending observations
+remain exact bits. CLI and GUI retain those bits alongside the completed text,
+with no interval-validation or authentication claim and no received attachment.
+
+Regression coverage pins the historical codebook and all 256 source bytes,
+every token truncation boundary, canonical escapes, quotas, the 15/16-byte
+threshold, optional encryption, exact airtime and the unchanged physical end
+gate. The packed convenience API rejects partial bytes; it cannot silently
+pad a dictionary stream or index beyond its packed buffer.
+
+Validation passed:
+
+- Release CLI and native GUI builds.
+- All 14 affected headless suites: short compression, transfer, stream receive,
+  regressions, CLI, attachment, pattern transfer, live, live resources, audio
+  rates, GUI inspection, GUI controller, GUI application and native policy.
+- The full shared GUI workflow, run serially, in about 108 seconds under its
+  existing 300-second timeout.
+- ASan/UBSan runs for short compression, transfer and stream receive, without
+  diagnostics; `git diff --check` is clean.
+
+The GUI checks exercised shared headless workflows, not native window rendering
+or a physical speaker/microphone link.
+
+## Earlier raw-message restoration — 15 September 2026
+
+This entry describes the intermediate literal-byte behavior in `a495328`;
+the dictionary restoration above supersedes that encoding choice.
 
 Commit `4dd23c5` removed the automatic under-16-byte text bypass along with the
 old packet/dictionary codecs. Explicit Binary/status transmission survived, but
 the drainable receiver buffered fewer than 1,024 accepted bits until stream end.
 That delayed pending presentation for precisely the few-bit, very slow use case.
 
-Nonempty text of 1–15 source bytes now sends its exact MSB-first byte bits,
-without markers, compression, padding, FEC or MAC. The old dictionary stays
-removed: text `e` is eight bits, while explicit Binary `001` is three bits.
+Nonempty text of 1–15 source bytes then sent its exact MSB-first byte bits,
+without markers, compression, padding, FEC or MAC. The dictionary was still
+removed: text `e` was eight bits, while explicit Binary `001` was three bits.
 Text of at least 16 bytes and all attachments retain fixed coding intervals.
 The threshold affects transmission only and never ends a reception.
 
@@ -80,16 +116,18 @@ native workflow. It covers generated production keys, the formerly lost short
 keyed raw message, attachment filename and exact saved bytes, ordinary message
 copying, replay replacement/cancellation and fixed FEC for short source text.
 
-## Fixed-interval migration — September 2026
+## Earlier fixed-interval migration — September 2026
 
-The current implementation uses the fixed-interval format in [protocol.md](protocol.md).
+This entry records the initial migration; the short-dictionary restoration above
+supersedes its removal of short-text encoding. Longer messages and attachments
+use the fixed-interval format in [protocol.md](protocol.md).
 Its only end rule is six seconds covered by consecutive fully scored failed
 symbols; one failed symbol suffices at durations of six seconds or longer.
-The old packet parser, early completion callbacks, transmitted lengths and
-short-text dictionary are removed. FEC/MAC outcomes and codec ends cannot release
+The migration removed the old packet parser, early completion callbacks,
+transmitted lengths and short-text dictionary. FEC/MAC outcomes and codec ends cannot release
 content before physical completion. EOF and resource limits remain interruptions.
 
-Current regression coverage includes fixed geometry and local metadata, RS errors
+Migration regression coverage includes fixed geometry and local metadata, RS errors
 and erasures in data and parity, missing final bits, keyed address/phase recovery,
 marker loss and attempt budgets, bounded source spooling, shared quotas, real
 quiet capture tails, exact binary source recovery and cancellation. The receiver,

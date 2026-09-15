@@ -64,7 +64,8 @@ void same_stream(const transfer::Received& received,const Message& sent) {
 }
 void bounded_sampled_prefix(const Message& sent,const transfer::Options& value) {
     changing_pattern(value.modem);
-    modem::StreamingTransmitter source(transfer::transmission_wire(sent,value),value.modem);
+    modem::StreamingTransmitter source(modem::RawBits{transfer::message_wire_bits(sent,value)},
+        transfer::seeded_config(value,value.timestamp));
     modem::SampledSimulationChannel channel(value.modem,ideal_channel());
     std::array<float,2048> samples{};
     // A long waveform remains streamable, but unsynchronized simulation must

@@ -1,4 +1,6 @@
 #include "datapump/transfer.hpp"
+#include "datapump/compression.hpp"
+#include "datapump/boundary_sync.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include <algorithm>
@@ -34,8 +36,10 @@ void arbitrary_content_limits() {
         check(wire.size()<=transfer::pattern_bit_limit(limit),"arbitrary local byte limits must remain bounded");
         transfer::StreamReceiver receiver(value,value.timestamp);
         const auto received=receiver.push(chunk(wire,0,100,true));
-        if(limit<16)check(wire.size()==limit*8 && received.raw_bits==wire && !received.content_validated && received.stream_complete,
-                         "short text within a small local content limit must retain exact raw bits");
+        if(limit<16)check(wire==compression::encode_short_bits(sent.data) && received.raw_bits==wire &&
+                         !received.content_validated && received.stream_complete && received.short_text_decoded &&
+                         received.content.message.data==sent.data,
+                         "short dictionary text within a small local content limit must preserve its bytes and exact bits");
         else check(wire.size()%1216==0 && received.content_validated && received.content.message.data==sent.data,
                    "interval text within a small local content limit must roundtrip its advertised capacity");
     }
@@ -176,13 +180,44 @@ void few_bits_remain_visible_until_physical_end() {
         const auto complete=receiver.push(chunk({},3,100,true));
         check(complete.stream_complete && complete.raw_bits==bits && complete.observed_bits==3 &&
               !complete.missing_symbols && !complete.content_validated && !complete.content.authenticated &&
-              !complete.content.consumed_bytes && complete.content.message.data.empty() && maximum<65536,
-              "physical completion retains all three raw bits with no invented padding, source decode or duration-sized storage");
+              !complete.content.consumed_bytes && complete.short_text_decoded && complete.content.message.data==Bytes{'e'} && maximum<65536,
+              "physical completion retains all three raw bits and its dictionary interpretation with no padding or duration-sized storage");
     }
+}
+void dictionary_interpretation_is_bounded_and_post_end() {
+    auto value=options();
+    const Bytes source{'e','i'};const auto bits=compression::encode_short_bits(source);
+    auto decode=[&](Bytes received,bool complete=true) {
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        return receiver.push(chunk(received,0,100,complete));
+    };
+    const auto pending=decode(bits,false);
+    check(!pending.short_text_decoded && pending.content.message.data.empty() && pending.raw_bits==bits,
+          "complete dictionary tokens must not release source text before physical end");
+    const auto complete=decode(bits);
+    check(complete.short_text_decoded && complete.content.message.data==source && !complete.content_validated,
+          "exact complete short dictionary endpoint should be readable without claiming validation");
+    auto truncated=bits;truncated.pop_back();
+    check(!decode(truncated).short_text_decoded && decode(truncated).raw_bits==truncated,
+          "truncated dictionary token must retain exact bits without padding or releasing a decoded prefix");
+    auto missing=bits;missing.front()=modem::missing_pattern_bit;
+    check(!decode(missing).short_text_decoded && decode(missing).missing_symbols==1,
+          "unknown placeholders must never be interpreted as dictionary characters");
+    check(!decode(compression::encode_short_bits(Bytes(16,'e'))).short_text_decoded,
+          "raw reception must not expand beyond the 15-byte short dictionary limit");
+    check(!decode(Bytes(196,0)).short_text_decoded,
+          "a long raw diagnostic prefix must not be reconsidered as a tiny dictionary message");
+    const auto marker=boundary_sync::insert(Bytes(1024,0));
+    check(!decode(Bytes(marker.begin(),marker.begin()+192)).short_text_decoded,
+          "a recognized alignment marker without data cannot fall back to the short dictionary");
+    value.content_limit=1;
+    const auto limited=decode(bits);
+    check(!limited.short_text_decoded && limited.content.message.data.empty() && limited.raw_bits==bits,
+          "dictionary expansion beyond the application quota must publish only raw diagnostics");
 }
 }
 int main() {
     try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();final_parity_statistics();
-         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();std::cout<<"stream receive integration passed\n";}
+         shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

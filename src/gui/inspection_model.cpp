@@ -44,9 +44,9 @@ Inspection inspect(const InspectionRequest& request) {
     const auto suppression_seconds=result.estimate.coded_seconds>0?
         static_cast<double>(modem::suppression_sample_count(config))/config.sample_rate:0.;
     const auto transmitted=result.estimate.wire_bits;
-    const auto meaningful=result.binary?transmitted:layout.wire_bytes*8;
+    const auto meaningful=raw?transmitted:layout.wire_bytes*8;
     const auto recovery=transmitted-meaningful;
-    result.title=raw?"Raw bit pattern transmission":"Fixed-interval byte stream";
+    result.title=result.binary?"Raw bit pattern transmission":short_message?"Short dictionary text transmission":"Fixed-interval byte stream";
     result.summary=count(transmitted)+" transmitted bits use one binary pattern each and "+number(result.estimate.total_seconds)+" seconds on air.";
     result.preamble_description="Hardware settling sends independent noise-like chips for two seconds rounded to the nearest whole data-symbol duration: "+
         count(hardware_symbols)+" symbol durations / "+number(hardware_seconds)+" seconds. Symbols longer than four seconds need no prefix. The receiver acquires timing and keystream synchronization from pattern evidence. Six seconds of iterative search without adequate pattern evidence is the sole stream ending rule.";
@@ -56,7 +56,7 @@ Inspection inspect(const InspectionRequest& request) {
         "Public tone patterns are for unencrypted communication and local experiments. Tone modes disable Data encryption, Scrambler and DSSS and do not provide Low-Probability-of-Intercept protection.":
         "Each meaningful bit selects one of two distinguishable internal patterns. The nominal chip duration follows the selected rate. Private patterns use variable-amplitude circular I/Q noise; Scrambler and DSSS use separate purposes and advancing stream addresses.";
     if(pulse_samples)result.chip_description+=" Smooth pulse shaping keeps the chip rate unchanged and adds short tails at the burst edges. Pattern evidence remains the sole source of timing confidence.";
-    result.fields={{"Source",result.binary?"Raw bits":short_message?"Short message / raw bytes":"Byte stream"},
+    result.fields={{"Source",result.binary?"Raw bits":short_message?"Short dictionary text":"Byte stream"},
         {"Rate",number(config.bandwidth_hz)+" Hz"},{"TX target C/N0",number(request.target_snr)+" dB-Hz"},
         {"Internal sample rate",count(config.sample_rate)+" samples/s"},{"Carrier",number(config.carrier_hz)+" Hz"},
         {"Pattern symbols","2 distinguishable patterns / 1 meaningful bit each"},
@@ -71,7 +71,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Stream end","Six seconds of iterative search without adequate pattern evidence"},
         {"Acquisition evidence","Received pattern evidence versus noise; I/Q plots are diagnostic only"}};
     const std::string source_encoding=result.binary?"Raw bits are used exactly as supplied, preserving leading zeros.":short_message?
-        "Messages shorter than 16 bytes send their source bytes directly as MSB-first bits. No marker, compression, validity cells, digest, parity or padding is added.":options.compression?
+        "Messages shorter than 16 bytes use the fixed short-text dictionary. Each bit is sent directly, with no marker, validity cells, digest, parity or padding.":options.compression?
         "Selected raw LZMA2 compression produces source bytes for fixed data areas. Zero padding fills the final area. Decompression runs only after the physical six-second stream end.":
         "Fixed 9-bit cells contain a validity bit and eight source bits. Unused cells are zero. This preserves arbitrary bytes, including trailing zeros, without a transmitted length or an end token.";
     const std::string encoding=raw?source_encoding:
@@ -82,7 +82,7 @@ Inspection inspect(const InspectionRequest& request) {
     if(recovery)result.sections.push_back({"Byte-boundary recovery", "Two copies of a 96-bit alignment word precede each 128-byte coded interval. Encryption masks markers along with coded data. The last interval has no following marker.",{},recovery,static_cast<double>(recovery)*symbol_seconds});
     if(suppression_seconds)result.sections.push_back({"Echo suppression", "Exactly two seconds of independent noise after the payload and pulse tail suppress weaker echoes. This segment does not mark or determine stream completion.",{},0,suppression_seconds});
     if(raw)result.fields.insert(result.fields.end(),{{"Integrity","None"},{"FEC","Off"},
-        {"Compression",short_message?"Off (short raw message)":"Off (raw bits)"},{"Byte-boundary recovery","0 bits"},
+        {"Compression",short_message?"Fixed short-text dictionary":"Off (raw bits)"},{"Byte-boundary recovery","0 bits"},
         {"Transmitted bits",count(transmitted)}});
     else {
         result.stream_layout=layout;
@@ -110,7 +110,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Timed symbols","Preserve missing timed slots as unknown bits. Six seconds of iterative search without adequate pattern evidence is the sole stream ending rule. Input interruption leaves the stream incomplete."},
         {"Byte-boundary recovery",raw?"Show each accepted bit immediately as pending, retaining its raw bit position.":"After decryption, recover markers and collect 128-byte coded intervals incrementally. Unknown slots retain erasure masks. Loss of up to 80 marker bits requires an intact trailing anchor and a unique endpoint. The ideal random-bit false-match bound is at most 2^-84 across all marker search trials; unknown bits supply no evidence. Pattern acquisition controls timing and keystream alignment.",raw?InspectionState::off:InspectionState::active},
         {"Interval correction and integrity",raw?"Raw bits have no interval correction.":keyed?"Correct Reed-Solomon errors and erasures, then verify the interval's position-bound HMAC-SHA256. Authentication covers each received interval; it does not prove whole-stream completeness.":"Correct Reed-Solomon errors and erasures. Unencrypted intervals carry no digest or authentication tag.",raw?InspectionState::off:InspectionState::active},
-        {"Source interpretation",raw?"Present each accepted bit as pending. Complete the raw reception only after the physical six-second search rule; then show complete bytes as text.":options.compression?"Retain recovered compressed areas. Run raw LZMA2 decompression only after the observed six-second physical stream end.":"Read valid byte cells from each recovered interval. Unused cells do not end the physical stream."}}});
+        {"Source interpretation",raw?"Present each accepted bit as pending. After the physical six-second search rule ends reception, decode complete short dictionary codes; retain the exact raw bits independently. Incomplete codes remain raw bits.":options.compression?"Retain recovered compressed areas. Run raw LZMA2 decompression only after the observed six-second physical stream end.":"Read valid byte cells from each recovered interval. Unused cells do not end the physical stream."}}});
     return result;
 }
 }

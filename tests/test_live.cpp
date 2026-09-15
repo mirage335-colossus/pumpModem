@@ -42,19 +42,25 @@ void run() {
     }
     check(received,"fixed interval simulation completed");
     session.transmit_bits(Bytes{0,0,1});
-    bool raw=false;
+    bool raw=false,decoded_short=false;
     const auto raw_deadline=std::chrono::steady_clock::now()+20s;
     while(std::chrono::steady_clock::now()<raw_deadline) {
         auto snapshot=session.snapshot();
-        for(const auto& signal:snapshot.signals)if(signal.binary && signal.complete) {
+        for(const auto& signal:snapshot.signals)if(signal.complete) {
             check(!signal.validated,"raw bits cannot become validated text");
-            if(signal.text=="001")raw=true;
+            if(signal.raw_bits=="001" && signal.text=="e" && !signal.binary)raw=true;
         }
-        check(snapshot.received.empty(),"raw input has no source codec fallback");
-        if(raw)break;
+        for(const auto& item:snapshot.received) {
+            check(item.stream_complete && item.short_text_decoded && !item.content_validated &&
+                  !item.content.authenticated && item.content.message.data==Bytes{'e'} &&
+                  item.raw_bits==Bytes({0,0,1}) && item.content.message.filename.empty(),
+                  "short dictionary interpretation must retain raw bits and cannot create a validated source or file");
+            decoded_short=true;
+        }
+        if(raw && decoded_short)break;
         std::this_thread::sleep_for(5ms);
     }
-    check(raw,"raw bits retain leading zeros through the same physical end rule");
+    check(raw && decoded_short,"three raw bits must retain their exact form alongside completed dictionary text");
     Message large;large.data.resize(4096,0x5b);session.transmit(large);session.cancel_transmit();
     const auto cancel_end=std::chrono::steady_clock::now()+200ms;
     while(std::chrono::steady_clock::now()<cancel_end) {
@@ -90,7 +96,8 @@ void short_keyed_stream_survives_epoch_refresh() {
     check(jumped && computed,"short keyed epoch-refresh fixture did not cross the pending physical-end window");
     replay_milliseconds=3000;bool received=false;
     for(const auto& signal:session.snapshot().signals)
-        received=received || (signal.binary && signal.complete && signal.text==expected && !signal.validated);
+        received=received || (signal.complete && !signal.validated &&
+            (signal.binary?signal.text:signal.raw_bits)==expected);
     check(received,"epoch refresh discarded a short admitted keyed stream before six-second physical completion");
     session.stop();
 }
