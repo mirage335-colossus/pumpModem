@@ -70,12 +70,13 @@ compression and optional FEC downstream of pattern acquisition. No dictionary
 identifier is transmitted. The compression library is built statically from
 vendored source; no runtime download is required.
 
-Compact packets on the pattern transport add a repeated 96-bit recovery word
-after each complete 256 encoded bytes, with or without encryption and FEC.
-The 24-byte insertion costs 9.375% per full block and adds nothing below 256
-encoded bytes. Markers are inserted before encryption, so keyed transmissions
-encrypt every marker bit with the rest of the stream. After existing decryption,
-a narrow fixed-cadence search can
+Compact packets on the pattern transport begin with a 24-byte marker containing
+two copies of a 96-bit recovery word, then repeat that marker after each complete
+256 encoded bytes, with or without encryption and FEC. This adds 24 bytes at the
+start plus 9.375% per full block. Text of at least 16 original bytes and all
+attachments use this framing. Markers are inserted before encryption, so keyed
+transmissions encrypt every marker bit with the rest of the stream. After existing decryption,
+a narrow search at the burst origin and subsequent fixed intervals can
 restore byte alignment after a net shift of up to seven plaintext bits, leaving
 the damaged region to FEC and whole-packet integrity. Pattern decoding remains
 the sole source of timing and keystream alignment. Markers create no new packet
@@ -83,7 +84,8 @@ parser entry points. The word is derived at runtime from a stored label to
 reduce accidental recognition in program/source transfers.
 Raw bits and text below 16 original bytes remain unchanged. Both pattern peers
 need the same current waveform and recovery convention; byte packet APIs
-retain their existing formats. See
+retain their existing formats. Older packet transmissions without the initial
+marker are not retried. See
 [byte-boundary recovery](docs/protocol.md#periodic-byte-boundary-recovery).
 
 The desktop has **Console**, **Modem flow**, and **Transmission layout** tabs.

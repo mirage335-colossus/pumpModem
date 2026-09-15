@@ -44,7 +44,7 @@ Encrypted compact-packet processing on the pattern transport is:
 
 ```
 protected bootstrap || interleaved RS(metadata || content || HMAC)
-  -> fixed recovery marker after every 256 encoded bytes
+  -> fixed recovery marker initially and after every 256 encoded bytes
   -> Data-stream AES-256-CTR over every bit, including markers
   -> configured pattern mapping and Scrambler/DSSS layers
 ```
@@ -55,17 +55,21 @@ Raw bits and short dictionary text have neither packet integrity nor recovery
 markers. Byte packet APIs retain their existing formats.
 
 Recovery runs on plaintext after the existing whole-stream Data decryption.
-Both repeated 96-bit words must match exactly within seven bits of an expected
-boundary. The preceding plaintext interval is trimmed or zero-filled to 256
-bytes. Marker positions consume Data-stream positions and are stripped before
-deinterleaving and FEC. Thus every transmitted marker bit is ciphertext when
+Both repeated 96-bit words must match exactly. The initial marker is searched
+at offsets 0 through 7 from the burst origin; subsequent markers are searched
+within seven bits of an expected boundary. A damaged initial marker consumes
+its nominal 192-bit slot when available. Before each periodic marker, the
+plaintext interval is trimmed or zero-filled to 256 bytes. Marker positions
+consume Data-stream positions and are stripped before deinterleaving and FEC.
+Thus every transmitted marker bit is ciphertext when
 encryption is enabled. Recovery changes only downstream byte grouping; it does
 not select crypto offsets, reset counters or reseed streams. The marker supplies
 no data length, command, packet identity or new parser entry point. A recovered
 burst is eligible for a single packet parse
 from its original beginning, with exact whole-extent validation. Failure never
-triggers inner-packet scanning or an unstripped-stream retry. Short dictionary
-interpretation is bounded to 195 acquired bits, so a long failed packet cannot
+triggers inner-packet scanning, an unstripped-stream retry or fallback to older
+packets without the initial marker. Short dictionary interpretation is bounded
+to 195 acquired bits, so a long failed packet cannot
 become dictionary text. Raw diagnostics remain available independently.
 
 The marker is derived at runtime from a stored label rather than embedded as

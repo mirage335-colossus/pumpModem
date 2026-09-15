@@ -43,10 +43,10 @@ void append(Bytes& output, std::span<const std::uint8_t> bits) {
 
 std::size_t encoded_size(std::size_t data_bits) {
     if (data_bits % 8 != 0) throw Error("Byte-boundary input must be byte aligned");
-    const auto intervals = data_bits / interval_bits;
-    if (intervals > (std::numeric_limits<std::size_t>::max() - data_bits) / marker_bits)
+    const auto markers = 1 + data_bits / interval_bits;
+    if (markers > (std::numeric_limits<std::size_t>::max() - data_bits) / marker_bits)
         throw Error("Byte-boundary encoded size overflow");
-    return data_bits + intervals * marker_bits;
+    return data_bits + markers * marker_bits;
 }
 
 Bytes insert(std::span<const std::uint8_t> bits, std::size_t limit) {
@@ -56,6 +56,7 @@ Bytes insert(std::span<const std::uint8_t> bits, std::size_t limit) {
         throw Error("Byte-boundary encoded storage exceeds memory limit");
     Bytes output;
     output.reserve(size);
+    append(output, marker());
     std::size_t position = 0;
     while (bits.size() - position >= interval_bits) {
         append(output, bits.subspan(position, interval_bits));
@@ -68,11 +69,24 @@ Bytes insert(std::span<const std::uint8_t> bits, std::size_t limit) {
 
 Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit) {
     validate_bits(wire_bits, limit);
+    if (wire_bits.size() < marker_bits) return Bytes(wire_bits.begin(), wire_bits.end());
     Bytes output;
     // Every recognized or damaged full slot removes more bits than the
     // maximum zero fill can add, so output never exceeds the input bound.
     output.reserve(wire_bits.size());
-    std::size_t position = 0;
+    // The leading slot belongs to framing even if damaged. Search only the
+    // bounded burst-origin neighborhood; marker-shaped content cannot select
+    // a new packet origin. An incomplete slot remains uninterpreted.
+    std::size_t position = marker_bits;
+    const auto& expected = marker();
+    const auto last_initial = std::min(maximum_slip_bits, wire_bits.size() - marker_bits);
+    bool found_initial = false;
+    for (std::size_t offset = 0; offset <= last_initial; ++offset) {
+        if (!std::equal(expected.begin(), expected.end(), wire_bits.begin() + static_cast<std::ptrdiff_t>(offset))) continue;
+        if (found_initial) throw Error("Ambiguous byte-boundary marker");
+        found_initial = true;
+        position = offset + marker_bits;
+    }
     constexpr auto first_candidate = interval_bits - maximum_slip_bits;
     while (wire_bits.size() - position >= first_candidate + marker_bits) {
         const auto remaining = wire_bits.subspan(position);
@@ -80,7 +94,6 @@ Bytes recover(std::span<const std::uint8_t> wire_bits, std::size_t limit) {
                                              remaining.size() - marker_bits);
         bool found = false;
         std::size_t marker_offset = 0;
-        const auto& expected = marker();
         for (auto offset = first_candidate; offset <= last_candidate; ++offset) {
             const auto candidate = remaining.subspan(offset, marker_bits);
             if (!std::equal(expected.begin(), expected.end(), candidate.begin())) continue;

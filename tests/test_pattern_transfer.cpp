@@ -1,4 +1,5 @@
 #include "datapump/transfer.hpp"
+#include "datapump/boundary_sync.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/tuning.hpp"
@@ -83,8 +84,9 @@ void short_raw_interpretation() {
 }
 void packet_downstream() {
     auto value=options();value.fec=FecMode::off;Message message;message.data=Bytes(16,'e');
-    const auto bits=transfer::message_bits(message,value);
-    check(bits.size()%8==0 && bits.size()>128,"long content retains optional packet grammar");
+    const auto logical_bits=transfer::message_bits(message,value);
+    check(logical_bits.size()%8==0 && logical_bits.size()>128,"long content retains optional packet grammar");
+    const auto bits=transfer::message_wire_bits(message,value);
     auto burst=modem::PatternBurst{};burst.bits=bits;burst.complete=true;
     auto decoded=transfer::interpret_pattern(burst,value,value.timestamp);
     check(decoded.packet_validated && decoded.packet.message.data==message.data,"packet parsing remains downstream of acquired bits");
@@ -99,6 +101,53 @@ void packet_downstream() {
     bool rejected=false;
     try{(void)transfer::message_transmitter(message,value);}catch(const Error&){rejected=true;}
     check(rejected,"pattern transmission retains the sender's repeatable airtime policy");
+}
+void leading_marker_and_exact_short_paths() {
+    const auto marker=boundary_sync::insert(Bytes{});
+    check(marker.size()==boundary_sync::marker_bits,"a compact packet begins with one complete boundary marker");
+    for(const bool keyed:{false,true}) {
+        auto value=options(keyed);value.fec=FecMode::off;value.compression=false;
+        for(const auto kind:{MessageKind::text,MessageKind::file,MessageKind::screenshot}) {
+            for(const std::size_t size:{0U,1U,15U,16U,17U}) {
+                if(kind==MessageKind::text && size<16)continue;
+                Message message;message.kind=kind;message.data=Bytes(size,'Z');message.id.fill(0x5c);
+                if(kind!=MessageKind::text)message.filename=kind==MessageKind::file?"fixture.bin":"fixture.png";
+                const auto logical=transfer::message_bits(message,value);
+                const auto wire=transfer::message_wire_bits(message,value);
+                auto plaintext=wire;transfer::xor_binary_bits(plaintext,value);
+                check(logical.size()<boundary_sync::interval_bits && plaintext.size()==logical.size()+marker.size(),
+                      "16-byte text and even empty attachments add the initial marker below the first periodic interval");
+                check(std::equal(marker.begin(),marker.end(),plaintext.begin()) &&
+                      std::equal(logical.begin(),logical.end(),plaintext.begin()+static_cast<std::ptrdiff_t>(marker.size())),
+                      "the initial boundary marker must precede the complete packet before the whole-stream data mask");
+                modem::PatternBurst burst;burst.bits=wire;burst.complete=true;
+                const auto received=transfer::interpret_pattern(std::move(burst),value,value.timestamp);
+                check(received.packet_validated && received.packet.authenticated==keyed &&
+                      received.packet.message.kind==kind && received.packet.message.data==message.data &&
+                      received.packet.message.filename==message.filename && received.raw_bits==plaintext,
+                      "initial-marker recovery must retain packet content, attachment type and raw decrypted evidence");
+            }
+        }
+        for(const std::size_t size:{0U,1U,14U,15U}) {
+            Message message;message.data=Bytes(size,'Z');
+            const auto logical=transfer::message_bits(message,value);
+            const auto wire=transfer::message_wire_bits(message,value);
+            auto plaintext=wire;transfer::xor_binary_bits(plaintext,value);
+            check(logical.size()==size*13 && plaintext==logical,
+                  "short escaped dictionary text must keep its exact length without an initial marker");
+            modem::PatternBurst burst;burst.bits=wire;burst.complete=true;
+            const auto received=transfer::interpret_pattern(std::move(burst),value,value.timestamp);
+            check(!received.packet_validated && !received.packet.authenticated && received.raw_bits==logical &&
+                  received.packet.message.data==message.data,
+                  "195-bit dictionary text must decode from original raw bits even when a marker-sized candidate is stripped");
+        }
+        const Bytes raw(boundary_sync::interval_bits+9,0);
+        const auto expected_samples=modem::training_sample_count(value.modem)+
+            2*modem::pattern_pulse_padding_samples(value.modem)+raw.size()*modem::symbol_sample_count(value.modem);
+        check(transfer::estimate_binary(raw,value).waveform_samples==expected_samples &&
+              transfer::binary_transmitter(raw,value)->total_samples()==expected_samples,
+              "raw bits beyond 16 bytes and a periodic interval must retain their exact unframed length");
+    }
 }
 void public_late_symbol_interpretation() {
     const auto value=options();Message text;text.data={'e'};
@@ -389,4 +438,4 @@ void pattern_storage_limits() {
     }
 }
 }
-int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{data_symbol_schedule_seeks();data_symbol_schedule_rebase();exact_short_text();raw_bits();short_raw_interpretation();packet_downstream();leading_marker_and_exact_short_paths();public_late_symbol_interpretation();long_symbol_estimate();private_workspace_estimate();marked_packet_waveform();high_snr_short_patterns();high_snr_marked_file();centered_radio_packet();high_snr_large_file_estimate();pattern_storage_limits();std::cout<<"pattern transfer tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

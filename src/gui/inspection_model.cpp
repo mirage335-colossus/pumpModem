@@ -72,11 +72,11 @@ Inspection inspect(const InspectionRequest& request) {
         {"Acquisition evidence","Received pattern evidence versus noise; I/Q plots are diagnostic only"}};
     const std::string encoding=result.binary?"Raw bits are used exactly as supplied, preserving leading zeros.":
         short_text?"The built-in short-text dictionary produces a self-delimiting bit string. No byte padding, packet header, checksum, integrity tag or FEC is added.":
-        "The byte-oriented packet codec supplies the content bitstream. Two copies of a 96-bit alignment word follow every 256 encoded bytes, then optional encryption masks every bit including the alignment words. Packet parsing and optional error correction follow pattern acquisition, decryption and byte-boundary recovery.";
+        "The byte-oriented packet codec supplies the content bitstream. A 192-bit marker containing two copies of a 96-bit alignment word begins the packet transmission and follows every 256 encoded bytes, then optional encryption masks every bit including the markers. Packet parsing and optional error correction follow pattern acquisition, decryption and byte-boundary recovery.";
     if(hardware_samples)result.sections.push_back({"Hardware settling", "Independent noise-like chips let audio gain control and gating settle. They convey no data bits and use no payload keystream positions.",{},hardware_symbols,hardware_seconds});
     if(pulse_samples)result.sections.push_back({"Pulse tails", "Smooth pulse edges add this combined time at the beginning and end of the burst. They add no payload bits or acquisition evidence.",{},0,pulse_seconds});
     result.sections.push_back({"Meaningful pattern symbols",encoding,{},meaningful,static_cast<double>(meaningful)*symbol_seconds});
-    if(recovery)result.sections.push_back({"Byte-boundary recovery", "Alignment words are interspersed at fixed byte intervals and encrypted with the content when a key is selected.",{},recovery,static_cast<double>(recovery)*symbol_seconds});
+    if(recovery)result.sections.push_back({"Byte-boundary recovery", "A repeated alignment word begins the packet transmission and follows each complete 256 encoded bytes. These markers are encrypted with the content when a key is selected.",{},recovery,static_cast<double>(recovery)*symbol_seconds});
     if(short_text || result.binary)result.fields.insert(result.fields.end(),{{"Packet header","0 bits"},{"Checksum / integrity tag","0 bits"},{"FEC","Off"},
         {"Compression",short_text?"Built-in short-text dictionary":"Off (raw bits)"}});
     else {
@@ -84,13 +84,13 @@ Inspection inspect(const InspectionRequest& request) {
         result.fields.insert(result.fields.end(),{{"Encoded packet",count(layout.wire_bytes)+" bytes"},{"Compression",compression_description(layout,options)},
             {"Body FEC",fec_name(layout.fec)},
             {"Integrity",keyed?"32-byte epoch-bound HMAC-SHA256":"32-byte SHA-256"},
-            {"Byte-boundary recovery",count(recovery)+" bits; 192 bits per complete 256 encoded bytes"},
+            {"Byte-boundary recovery",count(recovery)+" bits; 192 initial bits + 192 per complete 256 encoded bytes"},
             {"Transmitted bits",count(transmitted)}});
     }
     result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
     result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
         {"Content bits",encoding},
-        {"Byte-boundary recovery",short_text || result.binary?"No recovery bits added.":"Insert the repeated alignment word after each complete 256 encoded bytes, before the private data mask.",short_text || result.binary?InspectionState::off:InspectionState::active},
+        {"Byte-boundary recovery",short_text || result.binary?"No recovery bits added.":"Insert the repeated alignment word before the packet and after each complete 256 encoded bytes, before the private data mask.",short_text || result.binary?InspectionState::off:InspectionState::active},
         {"Private data stream",keyed?"Mask the entire bitstream, including alignment words, with the selected epoch's independent data keystream.":"No private data mask selected.",keyed?InspectionState::active:InspectionState::off},
         {"Pattern selection",result.chip_description},
         {request.simulation?"Sampled channel":"Audio output",request.simulation?"Transmit sampled PCM through independent clock, frequency, phase-noise and additive-noise simulation.":"Generate PCM at the internal clock and resample to the selected audio output."}}});
@@ -98,7 +98,7 @@ Inspection inspect(const InspectionRequest& request) {
         {"Pattern versus noise","Accumulate soft pattern evidence. Refine timing and frequency using that score; I/Q plots show diagnostic measurements."},
         {"Candidate history","Keep compact scored symbol candidates and useful chain state within the DSP workspace limit; release old waveform history."},
         {"Meaningful bits","Emit pattern-supported bits with exact length; signal end is inferred from subsequent absence of adequate pattern evidence."},
-        {"Byte-boundary recovery",short_text || result.binary?"Raw bits and short dictionary text retain their exact bit lengths.":"After the existing decryption step, recognize alignment words near fixed periodic boundaries and restore byte grouping before FEC. Constellation timing and keystream alignment remain unchanged; alignment words never start a new message parser.",short_text || result.binary?InspectionState::off:InspectionState::active},
+        {"Byte-boundary recovery",short_text || result.binary?"Raw bits and short dictionary text retain their exact bit lengths.":"After the existing decryption step, recognize the initial alignment word and subsequent words near fixed periodic boundaries, then restore byte grouping before FEC. Constellation timing and keystream alignment remain unchanged; alignment words never start a new message parser.",short_text || result.binary?InspectionState::off:InspectionState::active},
         {"Content interpretation",short_text?"Decode the predefined dictionary from the recovered bit string.":result.binary?"Present the recovered raw bits.":"Decode the optional packet and error correction after symbol acquisition."}}});
     return result;
 }

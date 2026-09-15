@@ -26,7 +26,7 @@ Bytes random_bits(std::size_t count) {
 }
 Bytes runtime_marker() {
     const auto wire = byte_sync::insert(Bytes(byte_sync::interval_bits));
-    return Bytes(wire.begin() + static_cast<std::ptrdiff_t>(byte_sync::interval_bits), wire.end());
+    return Bytes(wire.begin(), wire.begin() + static_cast<std::ptrdiff_t>(byte_sync::marker_bits));
 }
 bool equal_suffix(const Bytes& actual, const Bytes& expected, std::size_t start) {
     return actual.size() == expected.size() &&
@@ -54,15 +54,38 @@ void roundtrip_and_exact_boundaries() {
     for (const auto bytes : {0U, 1U, 15U, 16U, 17U, 255U, 256U, 257U,
                             511U, 512U, 513U, 4096U}) {
         const auto original = random_bits(bytes * 8);
-        const auto expected_size = original.size() + (bytes / 256) * byte_sync::marker_bits;
+        const auto expected_size = original.size() + (1 + bytes / 256) * byte_sync::marker_bits;
         check(byte_sync::encoded_size(original.size()) == expected_size, "exact encoded size near a cadence boundary");
         const auto wire = byte_sync::insert(original, expected_size);
         check(wire.size() == expected_size, "marker count includes an exact final full interval");
+        check(std::equal(marker.begin(), marker.end(), wire.begin()),
+              "every compact packet stream must begin with the byte-boundary marker");
         check(byte_sync::recover(wire, wire.size()) == original, "pristine roundtrip within exact storage caps");
         if (bytes && bytes % 256 == 0)
             check(std::equal(marker.begin(), marker.end(), wire.end() - static_cast<std::ptrdiff_t>(marker.size())),
                   "an exact final full interval must retain its recovery marker");
     }
+}
+void leading_marker_recovery() {
+    for (const auto bytes : {17U, 255U, 256U, 513U}) {
+        const auto original = random_bits(bytes * 8);
+        const auto pristine = byte_sync::insert(original);
+        for (std::size_t count = 1; count <= byte_sync::maximum_slip_bits; ++count)
+            check(byte_sync::recover(slip(pristine, 0, count, true)) == original,
+                  "the leading marker must restore the first byte after bounded extra leading bits");
+        for (const auto bit : {0U, 11U, 95U, 96U, 191U}) {
+            auto damaged = pristine;
+            damaged[bit] ^= 1;
+            check(byte_sync::recover(damaged) == original,
+                  "an aligned damaged leading marker must leave every packet byte intact");
+        }
+    }
+    const auto original = random_bits(17 * 8);
+    const auto pristine = byte_sync::insert(original);
+    const auto extra = byte_sync::maximum_slip_bits + 1;
+    const auto beyond_window = byte_sync::recover(slip(pristine, 0, extra, true));
+    check(beyond_window.size() == original.size() + extra && beyond_window != original,
+          "leading marker recovery must not search beyond the fixed seven-bit neighborhood");
 }
 void inserted_and_deleted_bits() {
     const auto original = random_bits(byte_sync::interval_bits * 3 + 40);
@@ -70,7 +93,7 @@ void inserted_and_deleted_bits() {
     for (std::size_t count = 1; count <= byte_sync::maximum_slip_bits; ++count) {
         for (const bool addition : {false, true}) {
             for (const auto position : {std::size_t{0}, std::size_t{101}, byte_sync::interval_bits - 24}) {
-                const auto damaged = slip(pristine, position, count, addition);
+                const auto damaged = slip(pristine, byte_sync::marker_bits + position, count, addition);
                 const auto recovered = byte_sync::recover(damaged);
                 check(equal_suffix(recovered, original, byte_sync::interval_bits),
                       "an intact marker must restore every subsequent byte after a bounded bit slip");
@@ -83,7 +106,7 @@ void inserted_and_deleted_bits() {
                           "deleted bits must be represented by bounded trailing zero placeholders");
             }
             const auto exact = random_bits(byte_sync::interval_bits);
-            const auto recovered = byte_sync::recover(slip(byte_sync::insert(exact), byte_sync::interval_bits - 24, count, addition));
+            const auto recovered = byte_sync::recover(slip(byte_sync::insert(exact), byte_sync::marker_bits + byte_sync::interval_bits - 24, count, addition));
             check(recovered.size() == exact.size(),
                   "an intact exact-end marker still repairs a shorter or longer final full interval");
         }
@@ -94,15 +117,15 @@ void damaged_markers_and_deferred_recovery() {
     const auto pristine = byte_sync::insert(original);
     for (const auto bit : {0U, 11U, 95U, 96U, 191U}) {
         auto damaged = pristine;
-        damaged[byte_sync::interval_bits + bit] ^= 1;
+        damaged[byte_sync::marker_bits + byte_sync::interval_bits + bit] ^= 1;
         check(byte_sync::recover(damaged) == original,
               "a damaged full marker is stripped at its nominal position without changing intact data");
     }
     for (std::size_t count = 1; count <= byte_sync::maximum_slip_bits; ++count) {
         for (const bool addition : {false, true}) {
-            auto damaged = slip(pristine, byte_sync::interval_bits - 24, count, addition);
+            auto damaged = slip(pristine, byte_sync::marker_bits + byte_sync::interval_bits - 24, count, addition);
             const auto first_marker = addition ? byte_sync::interval_bits + count : byte_sync::interval_bits - count;
-            damaged[first_marker + 3] ^= 1;
+            damaged[byte_sync::marker_bits + first_marker + 3] ^= 1;
             const auto recovered = byte_sync::recover(damaged);
             check(equal_suffix(recovered, original, byte_sync::interval_bits * 2),
                   "a slip followed by a damaged marker must recover at the next complete exact pair");
@@ -128,7 +151,7 @@ void embedded_markers_remain_data() {
                                (byte_sync::interval_bits + byte_sync::marker_bits) * 2 + 93})
         std::copy(marker.begin(), marker.end(), input.begin() + static_cast<std::ptrdiff_t>(position));
     Bytes expected;
-    std::size_t position = 0;
+    std::size_t position = byte_sync::marker_bits;
     while (input.size() - position >= byte_sync::interval_bits + byte_sync::marker_bits) {
         expected.insert(expected.end(), input.begin() + static_cast<std::ptrdiff_t>(position),
                         input.begin() + static_cast<std::ptrdiff_t>(position + byte_sync::interval_bits));
@@ -141,7 +164,7 @@ void embedded_markers_remain_data() {
     for (const bool addition : {false, true}) {
         const auto beyond_window = byte_sync::maximum_slip_bits + 1;
         const auto recovered = byte_sync::recover(slip(byte_sync::insert(original),
-            byte_sync::interval_bits - 24, beyond_window, addition));
+            byte_sync::marker_bits + byte_sync::interval_bits - 24, beyond_window, addition));
         const auto expected_size = addition ? original.size() + beyond_window : original.size() - beyond_window;
         check(recovered.size() == expected_size,
               "a marker outside the fixed seven-bit neighborhood must not expand the search or silently align data");
@@ -150,15 +173,20 @@ void embedded_markers_remain_data() {
 void truncation_and_resource_bounds() {
     const auto original = random_bits(byte_sync::interval_bits * 2);
     const auto pristine = byte_sync::insert(original);
+    for (const auto length : {std::size_t{0}, std::size_t{1}, byte_sync::marker_bits / 2, byte_sync::marker_bits - 1}) {
+        const Bytes partial(pristine.begin(), pristine.begin() + static_cast<std::ptrdiff_t>(length));
+        check(byte_sync::recover(partial) == partial, "an incomplete leading marker must remain uninterpreted");
+    }
     for (const auto length : {std::size_t{0}, std::size_t{1}, byte_sync::interval_bits - 1,
                              byte_sync::interval_bits, byte_sync::interval_bits + 1,
                              byte_sync::interval_bits + byte_sync::marker_bits / 2,
                              byte_sync::interval_bits + byte_sync::marker_bits - 1}) {
-        const Bytes partial(pristine.begin(), pristine.begin() + static_cast<std::ptrdiff_t>(length));
-        check(byte_sync::recover(partial) == partial, "an incomplete first marker slot must remain uninterpreted");
+        const Bytes partial(pristine.begin(), pristine.begin() + static_cast<std::ptrdiff_t>(byte_sync::marker_bits + length));
+        const Bytes expected(partial.begin() + static_cast<std::ptrdiff_t>(byte_sync::marker_bits), partial.end());
+        check(byte_sync::recover(partial) == expected, "an incomplete first periodic slot must remain uninterpreted after stripping the leading marker");
     }
     for (const auto tail_bits : {std::size_t{1}, std::size_t{7}, std::size_t{19}, byte_sync::interval_bits - 1}) {
-        const auto length = byte_sync::interval_bits + byte_sync::marker_bits + tail_bits;
+        const auto length = byte_sync::interval_bits + 2 * byte_sync::marker_bits + tail_bits;
         const Bytes partial(pristine.begin(), pristine.begin() + static_cast<std::ptrdiff_t>(length));
         const Bytes expected(original.begin(), original.begin() + static_cast<std::ptrdiff_t>(byte_sync::interval_bits + tail_bits));
         check(byte_sync::recover(partial) == expected, "a partial final data interval retains its exact meaningful bits");
@@ -229,7 +257,9 @@ void packet_fec_and_crypto_integration() {
               "streaming transmission must use the same complete marked bit count as its airtime estimate");
         if (keyed) {
             const auto marker = runtime_marker();
-            check(!std::equal(marker.begin(), marker.end(), wire.begin() + static_cast<std::ptrdiff_t>(byte_sync::interval_bits)),
+            check(!std::equal(marker.begin(), marker.end(), wire.begin()),
+                  "the leading marker must also be masked by the existing data stream");
+            check(!std::equal(marker.begin(), marker.end(), wire.begin() + static_cast<std::ptrdiff_t>(byte_sync::marker_bits + byte_sync::interval_bits)),
                   "a keyed transmission must not expose the public plaintext marker");
             auto decrypted = wire;
             transfer::xor_binary_bits(decrypted, value);
@@ -242,7 +272,7 @@ void packet_fec_and_crypto_integration() {
               "synchronized packet roundtrip must retain full integrity and optional authentication");
         for (std::size_t count = 1; count <= byte_sync::maximum_slip_bits; ++count) {
             for (const bool addition : {false, true}) {
-                const auto slipped = slip(wire, byte_sync::interval_bits - 24, count, addition);
+                const auto slipped = slip(wire, byte_sync::marker_bits + byte_sync::interval_bits - 24, count, addition);
                 const auto received = interpret(slipped, value);
                 if (keyed || fec == FecMode::off) {
                     check(!received.packet_validated,
@@ -258,7 +288,7 @@ void packet_fec_and_crypto_integration() {
                     auto decrypted = wire;
                     transfer::xor_binary_bits(decrypted, value);
                     const auto repaired = packed_bits(byte_sync::recover(slip(std::move(decrypted),
-                        byte_sync::interval_bits - 24, count, addition)));
+                        byte_sync::marker_bits + byte_sync::interval_bits - 24, count, addition)));
                     if (fec == FecMode::off) {
                         rejects([&] { decode_packet(repaired, transfer::packet_options(value, value.timestamp)); },
                                 "post-decryption byte alignment alone must not validate corrupted content");
@@ -270,13 +300,15 @@ void packet_fec_and_crypto_integration() {
                 }
             }
         }
-        auto damaged_marker = wire;
-        damaged_marker[byte_sync::interval_bits + 95] ^= 1;
-        const auto intact_payload = interpret(std::move(damaged_marker), value);
-        check(intact_payload.packet_validated && intact_payload.packet.message.data == message.data,
-              "an otherwise aligned damaged marker must not consume the packet's FEC budget");
+        for (const auto marker_position : {std::size_t{0}, byte_sync::marker_bits + byte_sync::interval_bits}) {
+            auto damaged_marker = wire;
+            damaged_marker[marker_position + 95] ^= 1;
+            const auto intact_payload = interpret(std::move(damaged_marker), value);
+            check(intact_payload.packet_validated && intact_payload.packet.message.data == message.data,
+                  "an otherwise aligned damaged marker must not consume the packet's FEC budget");
+        }
         auto unrecoverable = wire;
-        for (std::size_t i = 0; i < byte_sync::interval_bits; ++i) unrecoverable[i] ^= 1;
+        for (std::size_t i = 0; i < byte_sync::interval_bits; ++i) unrecoverable[byte_sync::marker_bits + i] ^= 1;
         check(!interpret(std::move(unrecoverable), value).packet_validated,
               "damage beyond the protected packet budget must remain unvalidated after resynchronization");
         if (keyed) {
@@ -307,7 +339,7 @@ void nested_packets_remain_opaque() {
         check(received.packet_validated && received.packet.message.data == outer.data &&
               received.packet.message.data != inner.data,
               "valid encoded packets and marker-bearing wire content inside an outer file must remain opaque bytes");
-        for (std::size_t i = 0; i < 32; ++i) wire[i] ^= 1;
+        for (std::size_t i = 0; i < 32; ++i) wire[byte_sync::marker_bits + i] ^= 1;
         const auto damaged = interpret(std::move(wire), value);
         check(!damaged.packet_validated && damaged.packet.message.data != inner.data,
               "outer packet damage must never trigger a search for a valid nested packet");
@@ -317,6 +349,7 @@ void nested_packets_remain_opaque() {
 int main() {
     try {
         roundtrip_and_exact_boundaries();
+        leading_marker_recovery();
         inserted_and_deleted_bits();
         damaged_markers_and_deferred_recovery();
         embedded_markers_remain_data();

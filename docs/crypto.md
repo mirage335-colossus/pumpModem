@@ -183,9 +183,10 @@ content and local epoch context before FEC and whole-stream encryption.
 
 Raw bits and dictionary-coded short text carry no MAC or checksum. Their
 pattern evidence supplies neither cryptographic authentication nor replay
-protection. Compact packets insert their repeated 96-bit recovery word after
-every complete 256 encoded bytes, before Data encryption. Every marker,
-header, integrity and FEC bit is therefore masked. Recovery runs only after
+protection. Compact packets begin with a 24-byte marker containing two copies
+of their 96-bit recovery word and repeat that marker after every complete 256
+encoded bytes, before Data encryption. Every marker, header, integrity and FEC
+bit is therefore masked. Recovery runs only after
 ordinary Data decryption and never changes a crypto offset, resets a counter,
 or creates another packet parser entry point.
 

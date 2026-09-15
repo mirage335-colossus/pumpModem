@@ -90,7 +90,7 @@ void pattern_roundtrip(bool keyed,double bandwidth=1200) {
     check(raw.raw_bits==bits,"automatic pattern acquisition must preserve leading zeros and exact count across audio cards");
     if(!keyed) {
         Message message;message.kind=MessageKind::file;message.filename="sample.bin";message.data=Bytes(16,0x5c);message.id.fill(0x5c);
-        const auto expected=transfer::message_bits(message,options);
+        const auto expected=transfer::message_wire_bits(message,options);
         const auto packet=transfer::receive(cross_cards(transfer::transmit(message,options)),options);
         check(packet.raw_bits==expected && packet.packet_validated && packet.packet.message.data==message.data &&
               packet.packet.message.filename==message.filename,

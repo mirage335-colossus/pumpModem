@@ -36,6 +36,9 @@ void packet_layout() {
         check(result.packet_layout && result.packet_layout->wire_bytes==wire.size(),"numeric packet layout missing");
         check(result.packet_layout->fec==fec,"packet inspection must follow effective error correction");
         check(field(result,"Meaningful bits")==std::to_string(wire.size()*8),"encoded packet bit count is not exact");
+        check(wire.size()<256 && section(result,"Byte-boundary recovery").symbols==192 &&
+              field(result,"Transmitted bits")==std::to_string(wire.size()*8+192),
+              "short encoded packets must include the initial marker with every FEC mode");
         check(field(result,"Symbol padding")=="0 bits","pattern transport must never pad a final symbol");
         check(field(result,"Compression").find("Fixed byte prefix")!=std::string::npos,"actual selected fixed byte compression missing");
         double duration=0;for(const auto& section:result.sections)duration+=section.duration_seconds.value_or(0);
@@ -125,12 +128,34 @@ void binary_pattern_transport() {
           std::abs(slow.estimate.total_seconds-slow.estimate.packet_seconds-pulse_seconds)<1e-9,
           "hour-long pattern inspection must retain pulse tails separately from its zero hardware prefix");
     request.options.modem.integration_seconds=0;request.options.compression=false;
+    request.options.fec=FecMode::off;
+    request.message.data=Bytes(15,'e');
+    const auto fifteen=gui::inspect(request);
+    check(!fifteen.packet_layout && fifteen.sections.size()==3 &&
+          field(fifteen,"Meaningful bits")=="45",
+          "15-byte text must retain its exact dictionary bits without an initial marker");
+    request.message.data=Bytes(16,'e');
+    const auto sixteen=gui::inspect(request);
+    check(sixteen.packet_layout && sixteen.packet_layout->wire_bytes<256 &&
+          section(sixteen,"Byte-boundary recovery").symbols==192 &&
+          sixteen.estimate.packet_bytes==sixteen.packet_layout->wire_bytes+24,
+          "16-byte text must account for the initial marker even below the periodic interval");
+    request.message.kind=MessageKind::file;request.message.filename="small.bin";request.message.data=Bytes{'e'};
+    const auto attachment=gui::inspect(request);
+    check(attachment.packet_layout && section(attachment,"Byte-boundary recovery").symbols==192 &&
+          attachment.estimate.packet_bytes==attachment.packet_layout->wire_bytes+24,
+          "one-byte attachments must account for the initial marker");
+    request.message.kind=MessageKind::text;request.message.filename.clear();
     request.message.data=Bytes(400,'e');
     const auto marked=gui::inspect(request);
     check(marked.packet_layout &&
           field(marked,"Meaningful bits")==std::to_string(marked.packet_layout->wire_bytes*8) &&
           field(marked,"Transmitted bits")==std::to_string(marked.estimate.packet_bytes*8),
           "pattern inspection must distinguish logical content bits from encrypted recovery overhead");
+    check(marked.packet_layout->wire_bytes>=256 && marked.packet_layout->wire_bytes<512 &&
+          section(marked,"Byte-boundary recovery").symbols==384 &&
+          marked.estimate.packet_bytes==marked.packet_layout->wire_bytes+48,
+          "packet inspection must count both the initial marker and the periodic marker");
     double duration=0;for(const auto& section:marked.sections)duration+=section.duration_seconds.value_or(0);
     check(std::abs(duration-marked.estimate.total_seconds)<1e-9,
           "separate recovery and content sections must account for complete transmission airtime");

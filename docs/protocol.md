@@ -10,9 +10,9 @@ keyfiles remain compatible. Receiving a file never executes it.
 The automatic waveform is incompatible with the previous automatic APSK
 waveform. Both peers must use the current pattern transport. Legacy APSK has been removed;
 the receiver does not negotiate compatibility over air.
-Pattern peers also require the periodic recovery convention for compact packets
-of at least 256 encoded bytes. There is no automatic retry of their earlier,
-unstripped representation after a recovery candidate fails validation.
+Pattern peers also require the initial and periodic recovery convention for all
+compact packets. There is no automatic retry of their earlier representation
+without the initial marker after a recovery candidate fails validation.
 
 ## Raw bits and short text
 
@@ -38,8 +38,8 @@ uninterpretable input remains available as raw bits. For example, the byte
 `e` is its three-bit dictionary code, rather than a framed one-byte message.
 
 Text of at least 16 source bytes, files and screenshots use the compact
-packet codec below, with periodic byte-boundary recovery on the pattern
-transport. Files and screenshots retain that representation even
+packet codec below, with initial and periodic byte-boundary recovery on the
+pattern transport. Files and screenshots retain that representation even
 when their payload is below 16 bytes; the application does not invent an
 untransmitted file type or filename from raw bits. Direct packet APIs can also
 encode short text, but those framed bytes are separate from the normal
@@ -58,8 +58,8 @@ tag is silently added to them.
 
 The packet contains a **variable compact bootstrap**, then the optionally
 Reed–Solomon-coded and interleaved body. Automatic binary pattern modulation
-sends each wire bit, including the periodic recovery markers described below,
-as a separate pattern symbol, without symbol padding. The same hardware-settling
+sends each wire bit, including the initial and periodic recovery markers
+described below, as a separate pattern symbol, without symbol padding. The same hardware-settling
 prefix described above can precede it; it is separate from the packet and
 supplies no modem training.
 
@@ -70,10 +70,11 @@ transport byte-boundary recovery markers.
 ### Periodic byte-boundary recovery
 
 For compact packets on the pattern transport, the sender inserts a fixed
-24-byte marker after every complete 256 bytes of the encoded packet, counting
-the protected bootstrap, interleaved body and parity. This includes a final
-block of exactly 256 bytes. A shorter encoded packet adds no marker. The rule
-applies with or without encryption and FEC; the 16-original-byte FEC threshold
+24-byte marker before the encoded packet and after every complete 256 bytes of
+that packet, counting the protected bootstrap, interleaved body and parity.
+This includes a final block of exactly 256 bytes. A shorter encoded packet has
+only the initial marker. The rule applies with or without encryption and FEC;
+the 16-original-byte FEC threshold
 does not change this encoded-byte cadence. Exact raw-bit and short dictionary
 transmissions bypass it.
 
@@ -91,15 +92,18 @@ Data-stream mask to the entire result, including every marker bit. Markers
 consume Data-stream positions, and all transmitted bits then pass through the
 configured pattern mapping and Scrambler/DSSS layers. Keyed transmission never
 places an unencrypted recovery marker on the wire. With `N` encoded bytes,
-overhead is `24 * floor(N / 256)` bytes, or 9.375% per full block. Markers contain
-no lengths, types, addresses, commands or authentication.
+overhead is `24 * (1 + floor(N / 256))` bytes: 24 bytes initially plus 9.375% per
+full block. Markers contain no lengths, types, addresses, commands or authentication.
 
 After pattern acquisition and the existing whole-stream Data decryption,
 recovery starts at the existing burst origin and examines only the expected
 plaintext marker slots. It accepts an exact match of both 96-bit copies at
-offsets from -7 through +7 bits around each expected boundary.
-It does not search the rest of the payload for markers. For a matched slot, the
-preceding plaintext interval is normalized to 2,048 bits: retain its prefix,
+offsets from 0 through 7 bits for the initial marker, removing any preceding
+bits with that marker. A damaged initial marker consumes the nominal 192-bit
+slot when available, preserving an otherwise aligned packet. Subsequent
+markers are searched from -7 through +7 bits around each expected boundary.
+It does not search the rest of the payload for markers. For a matched periodic
+slot, the preceding plaintext interval is normalized to 2,048 bits: retain its prefix,
 trim extra tail bits or zero-fill a missing tail. This preserves the next block's
 byte boundary while leaving the affected region to FEC and whole-packet integrity.
 A corrupt or absent exact marker consumes the nominal 192-bit slot when that
@@ -110,7 +114,8 @@ before body deinterleaving, Reed–Solomon correction and final integrity checks
 A marker never starts a packet parser or a nested message. The recovered
 candidate permits a single compact packet at the burst
 origin whose declared extent must equal the complete recovered byte extent.
-Failed validation does not trigger a second attempt on the unstripped stream.
+Failed validation does not trigger a second attempt on the unstripped stream
+or a fallback to older packets without the initial marker.
 Short dictionary interpretation is limited to 195 acquired bits (15 maximally
 escaped bytes), so a long failed packet cannot fall back to dictionary text.
 Acquired raw bits remain available as diagnostics.
@@ -142,8 +147,8 @@ Bits 2–3 select content kind: 0 text, 1 file, 2 screenshot; 3 is invalid.
 Bit 4 indicates compressed payload, bit 5 keyed authentication and bit 6 a
 repeat request. Bit 7 is zero. There is no format-version byte, compression
 algorithm selector, dictionary identifier, transmitted codebook, tag-length
-field, packet-start magic or duplicate payload-length field. The periodic
-transport marker above is outside the packet codec. Original content below
+field, packet-start magic or duplicate payload-length field. The initial and
+periodic transport markers above are outside the packet codec. Original content below
 16 bytes forces FEC Off for both header and body, regardless of the requested
 mode. This threshold concerns original bytes, including UTF-8 byte counts,
 and applies to files as well as text. It does not depend on compressed size or
@@ -332,5 +337,5 @@ coding policy for this numeric baseline. Fixed training, header and metadata cos
 are excluded; growth of the variable original-length field and its parity is
 part of the incremental encoded cost. At most two seconds of incremental content, or at most one
 original payload byte, is allowed by the default policy. Packet sizes and time
-estimates reflect actual compression, FEC, periodic transport recovery overhead
-where applicable and the single packet symbol boundary.
+estimates reflect actual compression, FEC, initial and periodic transport
+recovery overhead where applicable and the single packet symbol boundary.

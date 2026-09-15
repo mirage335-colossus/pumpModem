@@ -66,7 +66,7 @@ std::unique_ptr<modem::StreamingTransmitter> binary_transmitter(
 // Pattern transport: short text uses the fixed dictionary's exact bits;
 // larger messages/files use packet bytes as a downstream content grammar.
 Bytes message_bits(const Message&, const Options&);
-// Intentional pattern transmission: insert periodic byte-boundary recovery
+// Intentional pattern transmission: insert leading and periodic byte-boundary recovery
 // bits for compact messages/files, then Data-mask the entire bitstream.
 // Raw binary and short dictionary text carry no recovery markers.
 Bytes message_wire_bits(const Message&, const Options&);
@@ -90,7 +90,7 @@ using Progress = std::function<void(std::uint64_t)>;
 // Separate codec scratch from the amount of application content admitted.
 // Covers the largest supported RS overhead, temporary copies and metadata.
 std::size_t packet_workspace_limit(std::size_t content_limit);
-// Capacity for unpacked 0/1 elements, including periodic recovery words.
+// Capacity for unpacked 0/1 elements, including leading and periodic recovery words.
 // Checked separately from packed codec bytes; actual TX/RX allocations must
 // still fit their independently configured DSP workspace.
 std::size_t pattern_bit_limit(std::size_t content_limit);

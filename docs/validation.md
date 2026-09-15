@@ -153,32 +153,50 @@ legacy waveform behavior and timing benchmarks do not describe this build.
 ## Periodic byte-boundary recovery — September 2026
 
 Compact-packet pattern transport now inserts two copies of a runtime-derived
-96-bit word after every complete 256 encoded bytes, then encrypts the complete
-wire sequence, including markers, when a key is selected. Recovery runs after
+96-bit word before the encoded packet and after every complete 256 encoded
+bytes, then encrypts the complete wire sequence, including markers, when a key
+is selected. Recovery runs after
 pattern acquisition and the unchanged whole-stream Data decryption. It matches
 plaintext markers, normalizes plaintext intervals and removes markers before
-deinterleaving, FEC and whole-packet integrity. Each marker search is restricted
-to seven bits either side of its expected slot, and normalization retains a
-damaged interval's prefix while trimming or zero-filling its tail. A recovered candidate permits one packet
+deinterleaving, FEC and whole-packet integrity. The initial marker search uses
+offsets 0 through 7 from the burst origin; a damaged initial marker consumes
+its nominal 192-bit slot when available. Each periodic marker search is
+restricted to seven bits either side of its expected slot, and normalization
+retains a damaged interval's prefix while trimming or zero-filling its tail.
+A recovered candidate permits one packet
 at the existing burst origin, with exact extent and no inner-packet search or
-retry of unstripped bytes. Exact raw bits and short dictionary transmissions,
-manual APSK and byte packet APIs retain their existing formats.
+retry of unstripped bytes or older packets without the initial marker. Exact
+raw bits, text below 16 original bytes and byte packet APIs retain their
+existing formats. Text of at least 16 bytes and every attachment use the initial
+marker, including when the encoded packet is shorter than 256 bytes. Marker
+overhead for `N` encoded bytes is `24 * (1 + floor(N / 256))` bytes.
 
-Relevant checks are boundary sizes including an exact final 256-byte block;
+Relevant checks are the 15/16-byte text threshold, short attachments, encoded
+packets below 256 bytes and an exact final 256-byte block;
 FEC-off and keyed/unkeyed round trips; inserted, deleted and changed plaintext
 bits; damaged markers followed by intact markers; and rejection of nested or
 trailing packet candidates. Source/executable scanning checks that even one
 96-bit marker word is absent at every bit offset. Such a scan cannot guarantee its absence
 from arbitrary transferred data or runtime memory dumps.
 
-The six focused Release suites passed: `boundary_sync`, `crypto`,
-`pattern_transfer`, `transfer`, `live`, and `gui_inspection`. `boundary_sync`,
+Before the initial marker was added, the six focused Release suites passed:
+`boundary_sync`, `crypto`, `pattern_transfer`, `transfer`, `live`, and
+`gui_inspection`. `boundary_sync`,
 `crypto`, and `pattern_transfer` also passed with ASan/UBSan; LeakSanitizer was
 disabled for that run. The pattern suite includes clear and encrypted PCM
 round trips crossing a marker through the unchanged constellation decoder.
 The optimized Release `pump` executable and 180 source/document files passed
 the runtime-derived marker scan at all eight bit phases. `git diff --check`
 also passed. These results describe the focused suites, not a full-suite run.
+
+With the initial marker added, the five focused Release suites passed:
+`boundary_sync`, `pattern_transfer`, `transfer`, `audio_rates`, and
+`gui_inspection`. They cover the leading marker, bounded leading-bit recovery,
+damaged aligned markers, encrypted packets, short dictionary/raw-bit bypass,
+transmission estimates and audio sample-rate conversion.
+All 26 CLI tests passed. The Release executable and 183 source/document files
+also passed the runtime-marker storage scan at every bit phase, and
+`git diff --check` passed.
 
 These are transport-bit and software integration checks. They do not establish
 recovery from whole missing blocks, an unknown absolute stream offset, lost
