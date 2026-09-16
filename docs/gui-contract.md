@@ -58,20 +58,26 @@ only the current rate's default carrier. A manually entered carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
-**TX SNR (dB-Hz)** defaults to `32`; its presets include
-`140`, `120`, `100`, `80`, `60`, `32`, `20`, `-10`, `-16`, `-20`, `-23`, `-26` and
-`-30` alongside the existing targets.
+Two editable **target SNR (dB-Hz)** dropdowns select transmit planning:
+**Short ≤16 B** defaults to `32` for nonempty text of 1–16 source bytes inclusive
+and explicit raw bits; **Long / file** defaults to `55` for longer text, empty
+byte sources and every attachment. Both offer the same presets, including `32`
+and `55`. The boundary counts source bytes, including UTF-8 and visible prefixes,
+not displayed characters or dictionary bits. Draft edits select the corresponding
+plan for estimates, inspection and transmission without restarting reception or
+replacing its pending data. Noise transmission uses the short target.
 
 Diagnostics show the gross modem bitrate followed by the **Shannon-Hartley
 limit**, the ideal Gaussian-noise channel capacity in bit/s. It uses the accepted
-TX target C/N0 and nominal Rate as bandwidth; RX targets and simulation noise do
+draft's TX target C/N0 and nominal Rate as bandwidth; RX targets and simulation noise do
 not select this estimate. It updates with accepted settings and retains the last
 valid value while a setting contains an invalid draft. The diagnostic tooltip
 explains the formula and distinguishes channel capacity from payload throughput.
 
-The **RX targets (dB-Hz)** comma-list initially matches the TX default, `32`.
-Changing TX SNR to a valid value replaces the RX list with that single matching
-target. The RX list can then be edited independently without changing TX SNR.
+The **RX targets (dB-Hz)** comma-list initially matches both TX defaults, `32, 55`.
+Changing either TX SNR to a valid value replaces the RX list with both targets,
+deduplicated when equal. The RX list can then be edited independently without
+changing either TX SNR.
 It trims and deduplicates valid entries, and resets the entire list to `32` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive

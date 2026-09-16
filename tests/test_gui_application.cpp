@@ -547,6 +547,48 @@ void rate_carrier_declarations() {
         }
     }
 }
+void target_snr_declarations() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& short_target=control(F::snr);const auto& long_target=control(F::long_snr);
+    check(short_target.kind==ui::Kind::text && long_target.kind==ui::Kind::text &&
+          short_target.persistent && long_target.persistent &&
+          app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" &&
+          app.field(F::receive_snr).text=="32, 55",
+          "Both independent TX targets must be persistent editable dropdowns with matching default reception");
+    const auto& short_options=app.field(F::snr).options;
+    const auto& long_options=app.field(F::long_snr).options;
+    check(short_options.size()==long_options.size() &&
+          std::equal(short_options.begin(),short_options.end(),long_options.begin(),
+              [](const auto& a,const auto& b){return a.id==b.id&&a.label==b.label;}) &&
+          std::any_of(long_options.begin(),long_options.end(),[](const auto& option){return option.id=="55";}),
+          "Target dropdowns must share presets including the long-message default of 55");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);
+        check(app.control(short_target).visible && app.control(long_target).visible &&
+              app.control(short_target).enabled && app.control(long_target).enabled,
+              "A target dropdown disappeared on another application page");
+        app.preset(short_target,"20");app.preset(long_target,"55");
+        check(app.field(F::snr).text=="20" && app.field(F::long_snr).text=="55" &&
+              app.field(F::receive_snr).text=="20, 55",
+              "Native target preset callbacks changed the other dropdown or failed to update reception");
+        app.edit(short_target,"31.5");app.edit(long_target,"54.5");
+        check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5" &&
+              app.field(F::receive_snr).text=="31.5, 54.5",
+              "Target dropdowns lost their independent custom-value editing");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto a=ui::control_layout(short_target,app.field(F::snr),size.w,size.h);
+            const auto b=ui::control_layout(long_target,app.field(F::long_snr),size.w,size.h);
+            check(a.has_suggestions && b.has_suggestions && a.widget.w>=40 && b.widget.w>=40 &&
+                  (a.frame.x+a.frame.w<=b.frame.x || b.frame.x+b.frame.w<=a.frame.x ||
+                   a.frame.y+a.frame.h<=b.frame.y || b.frame.y+b.frame.h<=a.frame.y),
+                  "Target dropdown editors, labels or suggestion buttons overlap");
+        }
+    }
+    app.close();app.edit(long_target,"80");app.preset(short_target,"80");
+    check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5",
+          "Stale target callbacks changed a closing application");
+}
 void mono_declaration() {
     Application app({.simulation=true});
     const auto& mono=control(ui::Field::mono);
@@ -748,7 +790,7 @@ void typed_short_text_inspection() {
     Application app({}); // Production defaults; no audio session is needed to inspect a draft.
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
-          app.field(F::snr).text=="32" && app.field(F::receive_snr).text=="32" &&
+          app.field(F::snr).text=="32" && app.field(F::long_snr).text=="55" && app.field(F::receive_snr).text=="32, 55" &&
           app.field(F::pattern).selected=="auto-pattern" && app.field(F::fec).selected=="rs60" &&
           !app.field(F::repeatable).checked,"Production defaults changed the short message fixture");
     const auto await_layout=[&] {
@@ -908,6 +950,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

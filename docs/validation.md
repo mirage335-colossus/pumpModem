@@ -2373,3 +2373,45 @@ audio performance claims.
 The Release build and all 18 compatibility suites listed in the preceding
 entry passed with the comprehensive search and the final paired marker-benefit
 regressions. Validation was headless; no new physical audio test was performed.
+
+### Separate short and long GUI SNR targets (2026-09-16)
+
+The shared GUI now has editable short and long target dropdowns, defaulting to
+32 and 55 dB-Hz. Short text remains 1–16 source bytes inclusive; exact raw bits
+use that same target. Longer text, empty byte sources and every attachment use
+the long target. RX starts with both targets. Draft transitions update estimates,
+inspection and diagnostics without replacing the running receiver bank.
+Actual transmission selects its locally configured waveform before generation;
+framing, short dictionary endpoints and observed-absence completion are unchanged.
+
+The Release build and all 37 selected compatibility/shared GUI suites passed,
+including every suite in the development contract. The final controller run also
+passed added UTF-8, escaped-byte, incomplete-draft, raw-bit, 16/17-byte and tiny
+attachment cases. A sampled live regression sends both profiles sequentially
+through one independent receiver bank and checks exact wire bits, airtime,
+decoded content and the uninterrupted sample clock. Final layout, application,
+contract and adapter-boundary checks passed after presentation adjustments.
+
+FLTK adapter/document conformance and Rev adapter/platform/1x/2x coordinate
+conformance passed on private X displays. Rev screenshots at default and minimum
+sizes verified complete target labels and dropdown buttons. The shared layout
+adds a settings row while preserving the composition/history/plot areas; the
+dictionary reference wraps into shorter rows. Rev's Clang build also required
+moving an existing deduced-return helper above its first use, with no behavior
+change.
+
+The standard 300-second full native workflow timed out in phase 15 on both
+backends. A diagnostic run showed steadily advancing generated samples; an
+original single-target 32 dB-Hz comparison also progressed slowly. No workflow
+assertions or repository timeout settings were relaxed. The production workflow
+was rerun with its supported 600-second command-line allowance.
+FLTK completed the full unchanged workflow successfully in 473.511 seconds,
+including keys, text, files, binary editing, cancellation, retained saves, live
+plots and page switching.
+Rev's extended run failed after 200.830 seconds in phase 11: the last observed
+replay fraction was 0.830509, below the existing 0.9 assertion, despite 11 changing
+frames and pending reception. This matches the native late-poll/replay-frame
+sensitivity already described in the Rev backend notes; review found no selected
+transmit-configuration mismatch. The log alone does not distinguish rendering
+delay from host contention. Native workflow coverage is therefore not a clean
+pass for Rev. No new physical audio or Windows validation was performed.

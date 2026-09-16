@@ -11,6 +11,11 @@
 namespace datapump::live {
 struct Settings {
     transfer::Options transfer;
+    // Optional transmit geometry for fixed-interval text and attachments.
+    // Short text (1–16 source bytes), explicit bits and tuning noise use the
+    // base modem. Both share its sample rate, carrier and bandwidth; selecting
+    // a message path never replaces the independently running receiver bank.
+    std::optional<modem::Config> long_message_modem;
     std::string device = "default";
     // Right channel on stereo output, sole channel on mono output. When off,
     // send the same signal to both stereo channels.

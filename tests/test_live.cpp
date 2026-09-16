@@ -184,6 +184,74 @@ live::Snapshot wait_for(live::Session& session,Predicate predicate) {
     }
     throw Error("timed out waiting for a transmission capture");
 }
+void separate_short_and_long_transmit_profiles() {
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({},[&] {
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();
+    value.transfer.modem=tuning::resolve(3600,32,tuning::PatternMode::auto_pattern,false).config;
+    value.long_message_modem=tuning::resolve(3600,55,tuning::PatternMode::auto_pattern,false).config;
+    value.transfer.automatic_receive_profiles=true;
+    value.transfer.receive_targets_db_hz={32,55};
+    check(modem::symbol_sample_count(value.transfer.modem)!=modem::symbol_sample_count(*value.long_message_modem),
+          "short and long transmission fixture requires distinct symbol durations");
+    session.start(value);
+    std::uint64_t previous_samples=0,previous_transmission=0;
+    const auto finish=[&](const transfer::Estimate& estimate,const Bytes& expected_bits,bool short_text) {
+        const auto computed=wait_for(session,[](const auto& snapshot) {
+            return snapshot.transmission_finished && snapshot.simulation_replay;
+        });
+        check(computed.samples_received>previous_samples && computed.transmission_id>previous_transmission,
+              "message profile selection reset the continuously running receiver clock");
+        check(std::abs(computed.transmission_seconds-estimate.total_seconds)<1e-9,
+              "selected message profile was not used for actual sampled transmission duration");
+        check(computed.dsp_buffered_bytes<=value.dsp_workspace_bytes,
+              "two transmit profiles exceeded the aggregate DSP workspace");
+        previous_samples=computed.samples_received;previous_transmission=computed.transmission_id;
+        replay_milliseconds+=3000;
+        const auto completed=session.snapshot();
+        check(completed.transmit_trace.short_text==short_text &&
+              completed.transmit_trace.total_wire_bits==expected_bits.size() &&
+              completed.transmit_trace.wire_bits==Bytes(expected_bits.begin(),
+                  expected_bits.begin()+std::min(expected_bits.size(),modem::TransmitTrace::bit_limit)),
+              "message profile selection changed exact transmitted bits or source path");
+        return completed;
+    };
+    for(const std::string text:{"quick brown fox ","quick brown fox e"}) {
+        Message message;message.data.assign(text.begin(),text.end());
+        auto options=value.transfer;
+        const bool short_text=text.size()<=transfer::short_message_bytes;
+        if(!short_text)options.modem=*value.long_message_modem;
+        const auto expected=transfer::estimate(message,options);
+        const auto bits=transfer::message_wire_bits(message,options);
+        session.transmit(message);
+        const auto completed=finish(expected,bits,short_text);
+        check(completed.received.size()==1 && completed.received.front().content.message.data==message.data &&
+              completed.received.front().stream_complete && completed.received.front().short_text_decoded==short_text,
+              "independent receiver failed sequential short and long transmission profiles");
+    }
+    for(bool attachment:{false,true}) {
+        Message message;
+        if(attachment) {message.kind=MessageKind::file;message.filename="one.bin";message.data={0x41};}
+        auto options=value.transfer;options.modem=*value.long_message_modem;
+        const auto expected=transfer::estimate(message,options);
+        const auto bits=transfer::message_wire_bits(message,options);
+        session.transmit(message);
+        const auto completed=finish(expected,bits,false);
+        check(completed.received.size()==1 && completed.received.front().content.message.data==message.data &&
+              completed.received.front().content.message.kind==message.kind &&
+              completed.received.front().content_validated,
+              "empty text or tiny attachment did not retain its long interval profile");
+    }
+    const Bytes raw{0,0,1};
+    session.transmit_bits(raw);
+    const auto completed=finish(transfer::estimate_binary(raw,value.transfer),raw,false);
+    check(std::any_of(completed.signals.begin(),completed.signals.end(),[](const auto& signal) {
+        return signal.complete && signal.raw_bits=="001" && signal.text=="e";
+    }),"explicit binary bits did not retain the short profile and exact raw endpoint");
+    session.stop();
+}
 void background_recovery_lifecycle() {
     using transfer::RecoveryState;
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -466,7 +534,10 @@ int main(int argc,char** argv) {
         if(argc>1 && std::string_view(argv[1])=="--recovery") {
             background_recovery_lifecycle();std::cout<<"background recovery lifecycle passed\n";return 0;
         }
-        if(argc==1){run();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}
+        if(argc>1 && std::string_view(argv[1])=="--transmit-profiles") {
+            separate_short_and_long_transmit_profiles();std::cout<<"separate transmit profiles passed\n";return 0;
+        }
+        if(argc==1){run();separate_short_and_long_transmit_profiles();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}
         short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

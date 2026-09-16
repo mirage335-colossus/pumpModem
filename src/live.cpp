@@ -41,6 +41,10 @@ std::size_t constellation_limit(const modem::Config& config) {
     return std::max({minimum_constellation_limit, detail::SignalWindow::constellation_capacity(config),
                      modem::StreamingTransmitter::constellation_history_capacity(config)});
 }
+std::size_t constellation_limit(const Settings& settings) {
+    return std::max(constellation_limit(settings.transfer.modem), settings.long_message_modem ?
+        constellation_limit(*settings.long_message_modem) : std::size_t{});
+}
 constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
 constexpr auto replay_duration = std::chrono::seconds(3);
 constexpr std::size_t replay_text_limit = 4096;
@@ -67,7 +71,7 @@ constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
     sizeof(SignalUpdate) + 2*replay_text_limit + 64 + reception_alias_bytes + minimum_constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {
     return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
-        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value.transfer.modem) * sizeof(std::complex<float>))) : 0;
+        replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value) * sizeof(std::complex<float>))) : 0;
 }
 double epoch_now() {
     return std::chrono::duration<double>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -87,7 +91,7 @@ std::string display_text(const Message& message) {
 }
 constexpr std::size_t minimum_workspace = 512 * 1024;
 std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(float) + sizeof(double)) +
-                                       constellation_limit(value.transfer.modem) * 3 * sizeof(std::complex<double>) +
+                                       constellation_limit(value) * 3 * sizeof(std::complex<double>) +
                                        detail::SignalWindow::sample_capacity(value.transfer.modem) * 2 * sizeof(float) +
                                        pattern_score_limit * (4 * (sizeof(std::complex<double>) + sizeof(PatternScoreObservation)) + sizeof(modem::PatternEvidence)) +
                                        sizeof(detail::PatternScoreHistory) +
@@ -132,6 +136,20 @@ Settings normalized(Settings value) {
             value.transfer.receive_pattern_mode = tuning::PatternMode::auto_tone;
     } else if (value.transfer.key) value.transfer.modem.scramble = true;
     modem::validate(value.transfer.modem);
+    if (value.long_message_modem) {
+        auto& longer = *value.long_message_modem;
+        const auto& base = value.transfer.modem;
+        if (longer.sample_rate != base.sample_rate || longer.carrier_hz != base.carrier_hz ||
+            longer.bandwidth_hz != base.bandwidth_hz || longer.spreading_mode != base.spreading_mode)
+            throw Error("short and long transmit profiles must share sample rate, carrier, bandwidth and spreading mode");
+        if (longer.spreading_mode == modem::SpreadingMode::tone) {
+            longer.data_key.reset(); longer.scramble = longer.dsss = false;
+            longer.spreading_seed.fill(0); longer.dsss_seed.fill(0);
+        } else if (value.transfer.key) longer.scramble = true;
+        modem::validate(longer);
+        if ((longer.scramble || longer.dsss) && !value.transfer.key && value.receive_keys.empty())
+            throw Error("encrypted spreading requires a loaded key");
+    }
     if (!value.simulation && value.transfer.modem.bandwidth_hz > 192000)
         throw Error("This bandwidth requires an SDR frontend; this build supports audio hardware and simulation. Enable simulation for the selected band.");
     if (!value.content_limit) throw Error("received content cache must have a positive capacity");
@@ -171,6 +189,7 @@ void append_points(modem::ConstellationBatch& target, modem::ConstellationBatch 
 
 struct Session::Impl {
     struct Prepared {
+        modem::Config modem;
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
         std::function<void(Prepared&)> prepare_hardware;
         std::optional<std::uint64_t> protected_epoch;
@@ -361,7 +380,7 @@ struct Session::Impl {
         if (batch.points.empty() && !batch.dropped) return;
         if (pending_source != source_kind) pending_points = {};
         pending_source = source_kind;
-        append_points(pending_points, std::move(batch), constellation_limit(settings.transfer.modem));
+        append_points(pending_points, std::move(batch), constellation_limit(settings));
     }
     void advance_replay(Clock::time_point now) {
         if (replay.empty()) return;
@@ -433,7 +452,7 @@ struct Session::Impl {
             if (replay[i].source != frame.source) { visible = {}; continue; }
             modem::ConstellationBatch points; points.dropped = replay[i].dropped;
             for (const auto point : replay[i].constellation) points.points.emplace_back(point.real(), point.imag());
-            append_points(visible, std::move(points), constellation_limit(settings.transfer.modem));
+            append_points(visible, std::move(points), constellation_limit(settings));
         }
         result.constellation = std::move(visible.points); result.constellation_dropped = visible.dropped;
         // Each frame already contains a bounded history; replacing it keeps
@@ -1159,7 +1178,7 @@ struct Session::Impl {
         if (wave.generation != generation || wave.serial != tx_serial) return;
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
         if(!settings.simulation && !wave.noise)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(settings.transfer.modem))/settings.transfer.modem.sample_rate+1.));
+            std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.));
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
         current.transmitting_noise = false;
         current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
@@ -1175,7 +1194,7 @@ struct Session::Impl {
                 replay_verified = std::move(wave.verified); replay_received = std::move(wave.received);
                 if (replay_verified) replay_signal_id = replay_verified->id;
                 else for (const auto& event : replay_signals) if (event) { replay_signal_id = event->id; break; }
-                replay_bin_hz = static_cast<double>(settings.transfer.modem.sample_rate) / (plot_size / 4);
+                replay_bin_hz = static_cast<double>(wave.modem.sample_rate) / (plot_size / 4);
                 replay_started = replay_clock(); current.simulation_replay = true;
                 detail::rebase_pattern_score_observations(replay, replay_started, replay_duration);
                 current.transmit_trace = replay.front().transmit_trace;
@@ -1191,13 +1210,13 @@ struct Session::Impl {
         std::lock_guard lock(mutex);
         if (generation != wave.generation || tx_serial != wave.serial) return;
         current.transmit_trace = wave.transmitter->transmit_trace();
-        current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / value.transfer.modem.sample_rate;
+        current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / wave.modem.sample_rate;
         current.transmission_fraction = wave.noise ? 0 : static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
     }
-    void retain_emitted_epoch(const Prepared& wave, const Settings& value) {
+    void retain_emitted_epoch(const Prepared& wave) {
         if(!wave.protected_epoch)return;
-        const auto& config=value.transfer.modem;
+        const auto& config=wave.modem;
         const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
         const auto end=wave.transmitter->total_samples()-modem::pattern_pulse_padding_samples(config)-modem::suppression_sample_count(config);
         const auto emitted=std::min(end,wave.transmitter->samples_emitted());
@@ -1244,6 +1263,7 @@ struct Session::Impl {
                 capture_stop = std::stop_source{}; capture_token = capture_stop.get_token();
             }
             try {
+                const auto& transmit_modem = wave ? wave->modem : value.transfer.modem;
                 if (value.simulation) {
                     // The receiving computer runs continuously. TX control can
                     // start a waveform, but cannot reset, seed or align RX.
@@ -1267,7 +1287,7 @@ struct Session::Impl {
                         account(count, version); progress(*wave, value);
                         plot_window.push(input_samples);
                         feed_samples(*simulation_bank,input_samples,value,version,wave->stop);
-                        publish(plot_window,value.transfer.modem,version,last_plot,false,
+                        publish(plot_window,transmit_modem,version,last_plot,false,
                             wave->transmitter.get(),wave->serial);
                         const auto deadline = block_start + std::chrono::duration_cast<Clock::duration>(
                             std::chrono::duration<double>(static_cast<double>(count) / value.transfer.modem.sample_rate));
@@ -1282,7 +1302,7 @@ struct Session::Impl {
                         // receiver before any newly transmitted samples arrive.
                         if (wave->replay.empty()) {
                             wave->pattern_score_observation_id = pattern_score_observation_id.load(std::memory_order_relaxed);
-                            collect_replay(*wave, value.transfer.modem, plot_window);
+                            collect_replay(*wave, transmit_modem, plot_window);
                         }
                         std::size_t count = 0;
                         if (!wave->tail_started) {
@@ -1294,7 +1314,7 @@ struct Session::Impl {
                             wave->transmitted_samples = simulation_channel->transmitted_samples();
                             if (!count) {
                                 wave->tail_started = true;
-                                wave->tail_remaining = modem::pattern_absence_samples(value.transfer.modem)+value.transfer.modem.sample_rate+2*modem::pattern_pulse_padding_samples(value.transfer.modem);
+                                wave->tail_remaining = modem::pattern_absence_samples(transmit_modem)+transmit_modem.sample_rate+2*modem::pattern_pulse_padding_samples(transmit_modem);
                             }
                         }
                         if (wave->tail_started && wave->tail_remaining) {
@@ -1306,19 +1326,19 @@ struct Session::Impl {
                         account(count, version); progress(*wave, value);
                         plot_window.push(input_samples);
                         feed_samples(*simulation_bank,input_samples,value,version,wave->stop,wave.get());
-                        publish(plot_window, value.transfer.modem, version, last_plot, false,
+                        publish(plot_window, transmit_modem, version, last_plot, false,
                                 nullptr, wave->serial, &wave->pattern_scores, &wave->pattern_score_observations,
                                 wave->pattern_score_observation_id);
                         if (!wave->tail_started && wave->replay.size() < wave->replay_count &&
                             wave->replay.size()+1 < wave->replay_count &&
                             wave->transmitted_samples >= replay_target(*wave))
-                            collect_replay(*wave, value.transfer.modem, plot_window);
+                            collect_replay(*wave, transmit_modem, plot_window);
                         if (wave->tail_started && !wave->tail_remaining) {
                             // Short pattern bursts can be scored only after
                             // trailing samples complete a receiver window.
                             // Reserve their final replay frame for that evidence.
                             if (wave->replay.size() < wave->replay_count)
-                                collect_replay(*wave, value.transfer.modem, plot_window);
+                                collect_replay(*wave, transmit_modem, plot_window);
                             complete_tx(*wave); wave.reset();
                         }
                         std::this_thread::yield();
@@ -1346,16 +1366,16 @@ struct Session::Impl {
                     bool mono;
                     { std::lock_guard lock(mutex); mono = settings.mono; }
                     discontinuity();
-                    audio::playback(value.transfer.modem.sample_rate, value.device, [&](std::span<float> output) {
+                    audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
                         const auto before=wave->transmitter->samples_emitted();
                         const auto count = wave->transmitter->read(output, wave->stop);
-                        retain_emitted_epoch(*wave,value);
+                        retain_emitted_epoch(*wave);
                         account(count, version);
                         plot_window.push(output.first(count));
-                        const auto payload_start=modem::training_sample_count(value.transfer.modem)+
-                            modem::pattern_pulse_padding_samples(value.transfer.modem);
+                        const auto payload_start=modem::training_sample_count(transmit_modem)+
+                            modem::pattern_pulse_padding_samples(transmit_modem);
                         const auto first_payload=before<=payload_start && wave->transmitter->samples_emitted()>payload_start;
-                        publish(plot_window, value.transfer.modem, version, last_plot,
+                        publish(plot_window, transmit_modem, version, last_plot,
                                 first_payload || wave->transmitter->finished(), wave->transmitter.get(), wave->serial);
                         // Publish the first actual payload chips before progress
                         // can describe a post-settling constellation to the UI.
@@ -1418,10 +1438,14 @@ struct Session::Impl {
                     "Preparing fixed-interval stream";
             }
             try {
+                if (const auto* message = std::get_if<Message>(&transmission);
+                    message && value.long_message_modem && !transfer::uses_raw_message(*message))
+                    value.transfer.modem = *value.long_message_modem;
                 if (std::holds_alternative<modem::Noise>(transmission)) {
                     // Ephemeral streams need no saved-key epoch scheduling,
                     // source encoding, receiver-bank key or message replay.
                     auto prepared = std::make_shared<Prepared>();
+                    prepared->modem = value.transfer.modem;
                     prepared->generation = version; prepared->serial = serial;
                     prepared->stop = token; prepared->noise = true;
                     prepared->transmitter = std::make_unique<modem::StreamingTransmitter>(
@@ -1461,6 +1485,7 @@ struct Session::Impl {
                     }
                 }
                 auto prepared = std::make_shared<Prepared>();
+                prepared->modem = value.transfer.modem;
                 prepared->generation = version; prepared->serial = serial; prepared->stop = token;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
                 if (scheduled_hardware) {

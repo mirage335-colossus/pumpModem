@@ -310,8 +310,9 @@ void rate_carrier_controls() {
     Controller controller({true,true});
     check(controller.field(F::bandwidth).text=="3.6 kHz" && controller.field(F::carrier).text=="1.5 kHz" &&
           controller.settings().transfer.modem.bandwidth_hz==3600 && controller.settings().transfer.modem.carrier_hz==1500 &&
-          controller.field(F::snr).text=="32" && controller.settings().transfer.fec==FecMode::rs60,
-          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz audio carrier, 32 dB-Hz target and 60% FEC");
+          controller.field(F::snr).text=="32" && controller.field(F::long_snr).text=="55" &&
+          controller.settings().transfer.fec==FecMode::rs60,
+          "GUI defaults must use the 3.6 kHz rate, 1.5 kHz carrier, 32/55 dB-Hz targets and 60% FEC");
     controller.edit(F::carrier,"1650 Hz");
     check(controller.settings().transfer.modem.carrier_hz==1650,
           "A custom audio carrier did not reach the modem configuration");
@@ -353,6 +354,7 @@ void rate_carrier_controls() {
 void shannon_capacity_display() {
     using F=ui::Field;
     Controller controller({true,true});
+    controller.edit(F::message,"e");
     controller.start();
     const auto expect_capacity=[&](std::string_view expected) {
         controller.poll();
@@ -381,6 +383,7 @@ void shannon_capacity_display() {
 void profile_reference_display() {
     using F=ui::Field;
     Controller controller({true,true});
+    controller.edit(F::message,"e");
     const auto active=[&]() -> std::string {
         std::string label;unsigned count=0;
         for(const auto& row:controller.field(F::profile_reference).records)
@@ -1308,8 +1311,8 @@ void binary_source_representation() {
 void receive_target_controls() {
     using F=ui::Field;
     Controller controller({true,true});
-    check(controller.field(F::receive_snr).text=="32" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{32} &&
-          controller.settings().transfer.automatic_receive_profiles,"automatic receive targets must default to the TX target of 32");
+    check(controller.field(F::receive_snr).text=="32, 55" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>({32,55}) &&
+          controller.settings().transfer.automatic_receive_profiles,"automatic reception must cover both default TX targets");
     const auto tx=controller.settings().transfer.modem;
     controller.edit(F::receive_snr,"40,");
     controller.poll();
@@ -1326,20 +1329,33 @@ void receive_target_controls() {
           "bandwidth changes must preserve custom receive targets");
     controller.edit(F::receive_snr,"20,");
     controller.edit(F::snr,"-23");
-    check(controller.field(F::receive_snr).text=="-23" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
-          "changing TX SNR must immediately replace pending receive edits with the matching target");
+    check(controller.field(F::receive_snr).text=="-23, 55" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+          "changing short TX SNR must immediately replace pending receive edits with both matching targets");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
+    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
           "a pending receive edit must not overwrite the target selected by TX SNR");
     controller.edit(F::snr,"-");
-    check(controller.field(F::receive_snr).text=="-23" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>{-23},
+    check(controller.field(F::receive_snr).text=="-23, 55" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
           "an incomplete TX SNR edit must preserve the last valid receive target");
     controller.edit(F::snr,"80");
+    check(controller.field(F::receive_snr).text=="80, 55" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({80,55}),
+          "correcting TX SNR must restore matching receive targets");
+    controller.edit(F::receive_snr,"20,");controller.edit(F::long_snr,"40");
+    check(controller.field(F::receive_snr).text=="80, 40" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({80,40}) &&
+          controller.field(F::snr).text=="80",
+          "changing long TX SNR must replace pending receive edits and preserve the independent short target");
+    controller.edit(F::long_snr,"-");
+    check(controller.field(F::receive_snr).text=="80, 40" &&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({80,40}),
+          "an incomplete long TX target must preserve the last valid receive list");
+    controller.edit(F::long_snr,"80");
     check(controller.field(F::receive_snr).text=="80" &&
           controller.settings().transfer.receive_targets_db_hz==std::vector<double>{80},
-          "correcting TX SNR must restore matching receive targets");
+          "equal short and long targets must share one receive target");
     controller.edit(F::receive_snr,"40, wrong");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
     check(controller.field(F::receive_snr).text=="32" && controller.settings().transfer.receive_targets_db_hz==std::vector<double>{32},
@@ -1350,6 +1366,108 @@ void receive_target_controls() {
     const auto found=std::find_if(controls.begin(),controls.end(),[](const auto& control){return control.field==F::receive_snr;});
     check(found!=controls.end() && found->persistent && found->kind==ui::Kind::text,
           "receive targets must be an editable persistent text field");
+}
+void message_target_selection() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    controller.start();
+    const auto inspect_value=[&](std::string_view name) {
+        const auto& fields=controller.inspection()->fields;
+        const auto found=std::find_if(fields.begin(),fields.end(),[&](const auto& field){return field.name==name;});
+        check(found!=fields.end(),"Transmission inspection omitted its target or symbol duration");
+        return found->value;
+    };
+    const auto expect=[&](double target,bool stream,bool binary) {
+        prepare(controller);
+        const auto& inspection=*controller.inspection();
+        check(std::stod(inspect_value("TX target C/N0"))==target &&
+              inspection.stream_layout.has_value()==stream && inspection.binary==binary,
+              "Draft source selected the wrong TX target or changed its existing wire path");
+        auto options=controller.settings().transfer;
+        options.modem=tuning::resolve(3600,target,tuning::PatternMode::auto_pattern,false,1500).config;
+        const auto expected=transfer::estimate_binary(Bytes(inspection.estimate.wire_bits,0),options);
+        check(inspection.estimate.total_seconds==expected.total_seconds &&
+              controller.estimate()->coded_seconds==expected.coded_seconds &&
+              controller.estimate()->total_seconds==expected.total_seconds,
+              "Prepared inspection and airtime did not use the selected target's symbol timing");
+        controller.poll();
+        check(controller.field(F::diagnostics).text.starts_with(format_bit_rate(modem::bit_rate(options.modem))+" | Shannon-Hartley limit "+
+              format_bit_rate(tuning::shannon_capacity_bps(3600,target))+" |"),
+              "Draft diagnostics did not follow the selected target and modem geometry");
+    };
+    expect(55,true,false); // Empty text keeps the byte-stream path.
+    controller.edit(F::message,"e");expect(32,false,false);
+    check(controller.estimate()->wire_bits==3,"Short-target selection changed the exact e dictionary code");
+    controller.edit(F::message,"quick brown fox ");expect(32,false,false);
+    check(controller.message_bytes().size()==16 && controller.estimate()->wire_bits==98,
+          "The inclusive 16-byte boundary lost its exact short dictionary endpoint");
+    controller.edit(F::message,"quick brown fox!!");expect(55,true,false);
+    check(controller.message_bytes().size()==17 && controller.estimate()->wire_bits==1216,
+          "The 17-byte boundary changed fixed marker and coded-interval geometry");
+    const std::string utf8="\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9";
+    controller.edit(F::message,utf8);expect(32,false,false);
+    check(controller.message_bytes().size()==16,"UTF-8 target fixture did not contain sixteen source bytes");
+    controller.edit(F::message,utf8+"e");expect(55,true,false);
+    controller.edit(F::message,"e");controller.edit(F::binary,std::string(128,'0'));
+    std::string escaped16;for(unsigned i=0;i<16;++i)escaped16+="\\x00";
+    controller.edit(F::message,escaped16);expect(32,false,false);
+    check(controller.message_bytes()==Bytes(16,0) && controller.field(F::message).text.size()==64,
+          "Escaped source fixture did not distinguish source bytes from visible editor characters");
+    controller.edit(F::message,escaped16+"\\x00");expect(55,true,false);
+    controller.edit(F::message,"\\x0");controller.poll();
+    check(!controller.estimate() && controller.message_bytes()==Bytes(17,0) && controller.settings().long_message_modem &&
+          controller.field(F::diagnostics).text.starts_with(format_bit_rate(modem::bit_rate(*controller.settings().long_message_modem))+" |"),
+          "An incomplete escaped draft changed the target selected by its last committed source bytes");
+    controller.edit(F::message,"e");controller.edit(F::binary,"001");expect(32,false,true);
+    check(controller.estimate()->wire_bits==3,"Raw target selection padded leading zeros or partial bytes");
+    controller.edit(F::short_bits,std::string(3*(transfer::short_message_bytes+1),'0'));expect(32,false,true);
+    check(controller.estimate()->wire_bits==3*(transfer::short_message_bytes+1),
+          "Raw target selection classified decoded text size instead of explicit bit input");
+    controller.edit(F::snr,"26");controller.edit(F::long_snr,"40");
+    controller.edit(F::message,"e");expect(26,false,false);
+    const auto short_airtime=controller.estimate()->total_seconds;
+    controller.edit(F::long_snr,"55");expect(26,false,false);
+    check(controller.estimate()->total_seconds==short_airtime,"Changing the long target altered short-message airtime");
+    controller.edit(F::long_snr,"40");controller.edit(F::message,std::string(17,'e'));expect(40,true,false);
+    const auto long_airtime=controller.estimate()->total_seconds;
+    controller.edit(F::snr,"32");expect(40,true,false);
+    check(controller.estimate()->total_seconds==long_airtime,"Changing the short target altered long-message airtime");
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while(controller.snapshot().samples_received<controller.settings().transfer.modem.sample_rate/5 &&
+          std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.snapshot().samples_received>0,"Target-switch fixture did not start continuous reception");
+    controller.plot_update();
+    auto samples=controller.snapshot().samples_received;
+    auto seconds=controller.snapshot().virtual_seconds;
+    const auto receive_targets=controller.settings().transfer.receive_targets_db_hz;
+    const auto uninterrupted=[&] {
+        controller.poll();
+        check(controller.snapshot().running && controller.snapshot().samples_received>=samples &&
+              controller.snapshot().virtual_seconds>=seconds && !controller.plot_update().clear_waterfall &&
+              controller.settings().transfer.receive_targets_db_hz==receive_targets,
+              "A draft target transition restarted reception, cleared plots or replaced receive targets");
+        samples=controller.snapshot().samples_received;seconds=controller.snapshot().virtual_seconds;
+    };
+    controller.edit(F::message,"e");expect(32,false,false);uninterrupted();
+    controller.edit(F::message,std::string(17,'e'));expect(40,true,false);uninterrupted();
+    controller.edit(F::message,"e");controller.edit(F::binary,"001");expect(32,false,true);uninterrupted();
+    controller.edit(F::message,"e");
+    struct TemporaryAttachment {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-target-attachment-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~TemporaryAttachment(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    write_new_file(fixture.path.string(),Bytes{'e'});
+    controller.activate(C::attach_file);const auto requests=controller.take_services();
+    check(requests.size()==1,"Target fixture did not request its attachment chooser");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    expect(40,true,false);uninterrupted();
+    check(controller.enabled(C::use_text),"One-byte attachment did not keep its attachment source type");
+    controller.activate(C::use_text);expect(32,false,false);uninterrupted();
+    check(controller.message_bytes()==Bytes{'e'},"Use text did not restore the preserved short source");
+    controller.close();
 }
 void workspace_controls() {
     Controller controller({true, true});
@@ -1499,7 +1617,7 @@ int main(int argc,char** argv) {
         binary_editor_controls();
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
-        receive_target_controls();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
+        receive_target_controls();message_target_selection();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
         escaped_signal_message_paste();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {

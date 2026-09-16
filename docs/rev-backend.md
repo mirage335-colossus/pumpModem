@@ -41,7 +41,7 @@ selection on the modem host. Existing files are never overwritten.
 application bindings, shared desktop slots and grouped command menus.
 `desktop_layout.hpp` supplies the same logical geometry to FLTK and Rev, including
 the persistent header/identity row and modem/status footer around the tab viewport.
-The shared default is 1180 by 866 logical pixels and the minimum is 1030 by 786.
+The shared default is 1180 by 909 logical pixels and the minimum is 1030 by 829.
 Rev maps controls to Text, Button, Checkbox, Dropdown and Box elements. Lists and
 tabs compose those elements. FLTK uses the same declarations and shared
 application lifecycle with its own native widgets. `controller.cpp` owns drafts, validation, eligibility, exact binary
@@ -128,7 +128,7 @@ Mesa 25.0.7) in a private X11 virtual display. Before the shared desktop and ric
 inspection layout changes, a full smoke workflow followed by a 20-second hold
 at 1180 by 960 took 31 seconds wall time and 74 seconds user CPU time. This is a
 historical measurement of the earlier layout, not a benchmark of the current
-1180 by 866 desktop. The initial 25 Hz paint path used 211 seconds; skipping
+1180 by 909 desktop. The initial 25 Hz paint path used 211 seconds; skipping
 invisible rectangles and reusing glyph geometry reduced that to 161 seconds, and separating
 presentation cadence reduced it to 74. Modem polling and plot-history capture
 remain at 25 Hz while state/plot presentation runs at 10 Hz; native input can

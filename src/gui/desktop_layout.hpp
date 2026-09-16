@@ -4,8 +4,8 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 866;
-inline constexpr int min_width = 1030, min_height = 786;
+inline constexpr int default_width = 1180, default_height = 909;
+inline constexpr int min_width = 1030, min_height = 829;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
@@ -20,7 +20,7 @@ enum class Slot {
     compression_explanation, short_bits_label, short_bits, short_bits_detail, compression_codes,
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
-    device, mono, bandwidth, carrier, snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -28,7 +28,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::header: case Slot::mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
-    case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::receive_snr: case Slot::pattern:
+    case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
     default: return false;
     }
@@ -62,8 +62,8 @@ struct DesktopLayout {
         out[Slot::key_actions] = {560, 62, 92, field_height};
         out[Slot::key_path] = {660, 62, std::max(90, width - 926), field_height};
         out[Slot::key] = {width - 248, 62, 232, field_height};
-        out[Slot::tabs] = {margin, 94, width - 2 * margin, height - 210};
-        out[Slot::page] = {margin, 126, width - 2 * margin, height - 242};
+        out[Slot::tabs] = {margin, 94, width - 2 * margin, height - 253};
+        out[Slot::page] = {margin, 126, width - 2 * margin, height - 285};
 
         constexpr int compose_y = 152, binary_width = 220;
         // Keep all ten generation rows visible, including native scrollbar
@@ -107,7 +107,7 @@ struct DesktopLayout {
         out[Slot::files] = {width - margin - files_width, signal_y, files_width, signal_height - 36};
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
-        const int plots_y = signal_y + signal_height + 23, plot_height = height - plots_y - 124;
+        const int plots_y = signal_y + signal_height + 23, plot_height = height - plots_y - 167;
         // Keep the scrollable profile reference inline with the plots at the
         // right edge, leaving reception history its full width.
         constexpr int reference_width=280;
@@ -168,26 +168,28 @@ struct DesktopLayout {
         out[Slot::raw_recovery_actions] = {margin + 350, raw_actions_y, 150, action_height};
         out[Slot::received_raw_bits] = {margin, raw_detail_y, compression_width, 52};
 
-        // Keep all eight settings on one persistent row. Reserve the full
-        // 13-pixel label widths; narrow windows reduce gaps before editors.
-        const int controls_y = height - 92, extra = std::max(0, width - min_width);
-        const int control_gap = std::min(10, 2 + extra / 7);
-        const int field_growth = extra - 7 * (control_gap - 2);
-        const int device_width = 112, bandwidth_width = 82 + field_growth * 12 / 100;
-        const int carrier_width = 90 + field_growth * 12 / 100;
-        const int snr_width = 130, receive_snr_width = 166 + field_growth * 15 / 100;
-        const int pattern_width = 130 + field_growth * 25 / 100, fec_width = 148 + field_growth * 20 / 100;
+        // Two persistent rows keep both target labels readable at the minimum
+        // width without reducing the composition, reception or plot areas.
+        const int controls_y = height - 135, extra = std::max(0, width - min_width);
+        constexpr int control_gap = 10;
+        const int device_width = 190 + extra * 20 / 100, bandwidth_width = 112 + extra * 10 / 100;
+        const int carrier_width = 120 + extra * 10 / 100;
+        const int pattern_width = 180 + extra * 20 / 100, fec_width = 180 + extra * 20 / 100;
         int x = margin;
         out[Slot::device] = {x, controls_y, device_width, field_height}; x += device_width + control_gap;
         out[Slot::bandwidth] = {x, controls_y, bandwidth_width, field_height}; x += bandwidth_width + control_gap;
         out[Slot::carrier] = {x, controls_y, carrier_width, field_height}; x += carrier_width + control_gap;
-        out[Slot::snr] = {x, controls_y, snr_width, field_height}; x += snr_width + control_gap;
-        out[Slot::receive_snr] = {x, controls_y, receive_snr_width, field_height}; x += receive_snr_width + control_gap;
         out[Slot::pattern] = {x, controls_y, pattern_width, field_height}; x += pattern_width + control_gap;
         out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
-        // Audio routing sits directly below its device without narrowing the
-        // modem editors or their labels at the minimum desktop width.
+        constexpr int snr_width = 260;
+        const int targets_y = height - 92;
+        out[Slot::snr] = {margin, targets_y, snr_width, field_height};
+        out[Slot::long_snr] = {margin + snr_width + control_gap, targets_y, snr_width, field_height};
+        const int receive_x = margin + 2 * (snr_width + control_gap);
+        out[Slot::receive_snr] = {receive_x, targets_y, width - margin - receive_x, field_height};
+        // Audio routing and diagnostics sit below the modem settings without
+        // narrowing the editors or their labels at the minimum desktop width.
         out[Slot::mono] = {margin, height - 56, 74, 22};
         out[Slot::diagnostics] = {margin + 82, height - 56, width - 2 * margin - 82, 22};
         out[Slot::status] = {margin, height - 31, width - 2 * margin, 24};

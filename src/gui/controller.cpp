@@ -32,7 +32,7 @@ std::string bit_text(std::span<const std::uint8_t> bits) {
 }
 std::string compression_reference() {
     std::string result="Fixed dictionary (up to "+std::to_string(transfer::short_message_bytes)+" source bytes)\n";
-    for(const auto group:{" etao","in","shrdluc","mfwypbg"}) {
+    for(const auto group:{" etao","in","shrd","luc","mfwy","pbg"}) {
         const auto first=static_cast<std::uint8_t>(group[0]);
         result+=std::to_string(compression::encode_short_bits(Bytes{first}).size())+" bits:  ";
         for(const char* byte=group;*byte;++byte) {
@@ -116,6 +116,9 @@ struct Controller::Impl {
     std::size_t dsp_workspace_bytes=runtime::dsp_workspace_budget();
     unsigned dsp_workspace_percent=50;
     double zoom=1,channel_snr=0,cpu_percent=0,shannon_capacity_bps=0;
+    std::optional<tuning::Plan> short_plan,long_plan;
+    double short_target=32,long_target=55;
+    std::optional<bool> displayed_short_target;
     std::string draft_error,tuning_explanation;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
@@ -163,8 +166,10 @@ struct Controller::Impl {
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
-        f(UiField::snr).text="32"; for(const auto* s:{"140","120","100","80","60","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(UiField::snr).options.push_back({s,s});
-        f(UiField::receive_snr).text=f(UiField::snr).text;
+        f(UiField::snr).text="32"; f(UiField::long_snr).text="55";
+        for(const auto id:{UiField::snr,UiField::long_snr})
+            for(const auto* s:{"140","120","100","80","60","55","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(id).options.push_back({s,s});
+        f(UiField::receive_snr).text="32, 55";
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
         f(UiField::simulation).selected=std::string(presets[(options.simulation||options.smoke)?std::min<std::size_t>(2,presets.size()-1):0].name);
@@ -199,7 +204,36 @@ struct Controller::Impl {
         return value;
     }
     void notice(std::string text,double seconds=4) { f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
+    bool short_draft() const {
+        return !attachment && (composer.raw_bits().has_value() ||
+            (!composer.bytes().empty() && composer.bytes().size()<=transfer::short_message_bytes));
+    }
+    const modem::Config& transmit_config() const {
+        return !short_draft() && settings.long_message_modem ? *settings.long_message_modem : settings.transfer.modem;
+    }
+    void refresh_transmit_target() {
+        if(!short_plan || !long_plan)return;
+        const bool short_message=short_draft();
+        if(displayed_short_target==short_message)return;
+        displayed_short_target=short_message;
+        const auto& plan=short_message?*short_plan:*long_plan;
+        const auto target=short_message?short_target:long_target;
+        target_supported=plan.target_supported; tuning_explanation=plan.explanation;
+        shannon_capacity_bps=tuning::shannon_capacity_bps(plan.config.bandwidth_hz,target);
+        const auto reference=profile_reference::build(plan.config,target,
+            settings.transfer.receive_pattern_mode,encrypted());
+        auto& field=f(UiField::profile_reference);
+        field.records.clear(); field.selected.clear();
+        for(std::size_t index=0;index<reference.rows.size();++index) {
+            const auto& row=reference.rows[index];
+            field.records.push_back({std::to_string(index),
+                {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
+        }
+    }
     void dirty() {
+        // Only the draft's transmit presentation changes here. Reconfiguring
+        // live reception would discard a pending symbol when crossing 16 bytes.
+        refresh_transmit_target();
         ++revision; estimate.reset(); inspection.reset(); estimate_requested=Clock::now(); pattern_first=0;
         f(UiField::airtime).text="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
         f(UiField::flow_detail).text.clear(); f(UiField::transmission_detail).text.clear();
@@ -229,18 +263,16 @@ struct Controller::Impl {
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
             const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
             if(match_carrier)reset_carrier(rate);
-            const auto target_snr=number(f(UiField::snr).text,"Target SNR");
-            const auto plan=tuning::resolve(rate,target_snr,mode,encrypted(),frequency(f(UiField::carrier).text,"Carrier"));
-            const auto capacity=tuning::shannon_capacity_bps(rate,target_snr);
-            const auto targets=tuning::parse_receive_targets(f(match_receive_target?UiField::snr:UiField::receive_snr).text);
+            const auto short_snr=number(f(UiField::snr).text,"Short target SNR");
+            const auto long_snr=number(f(UiField::long_snr).text,"Long target SNR");
+            const auto carrier=frequency(f(UiField::carrier).text,"Carrier");
+            const auto plan=tuning::resolve(rate,short_snr,mode,encrypted(),carrier);
+            const auto longer_plan=tuning::resolve(rate,long_snr,mode,encrypted(),carrier);
+            const auto targets=tuning::parse_receive_targets(match_receive_target?
+                f(UiField::snr).text+", "+f(UiField::long_snr).text:f(UiField::receive_snr).text);
             f(UiField::receive_snr).text=targets.canonical;
             next.transfer.modem=plan.config; next.transfer.timestamp=0;
-            const auto reference=profile_reference::build(plan.config,target_snr,mode,encrypted());
-            for(std::size_t index=0;index<reference.rows.size();++index) {
-                const auto& row=reference.rows[index];
-                f(UiField::profile_reference).records.push_back({std::to_string(index),
-                    {{row.label,5,1,-5,16,10,row.active?ui::TextTone::data:ui::TextTone::muted,row.active}}});
-            }
+            next.long_message_modem=longer_plan.config;
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_targets_db_hz=targets.values;
             next.transfer.receive_pattern_mode=mode;
@@ -260,8 +292,9 @@ struct Controller::Impl {
             next.content_limit=default_memory_limit; next.dsp_workspace_bytes=dsp_workspace_bytes;
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
-            settings=std::move(next); settings_valid=true; target_supported=plan.target_supported; tuning_explanation=plan.explanation;
-            shannon_capacity_bps=capacity;
+            settings=std::move(next); settings_valid=true;
+            short_plan=plan; long_plan=longer_plan; short_target=short_snr; long_target=long_snr;
+            displayed_short_target.reset(); refresh_transmit_target();
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
         } catch(...) { settings_valid=false; f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
@@ -509,7 +542,7 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -566,8 +599,9 @@ struct Controller::Impl {
         } else if(settings_valid&&!estimate&&estimated_revision!=revision&&Clock::now()-estimate_requested>=std::chrono::milliseconds(120)) {
             result.kind=PrepKind::estimate; result.revision=revision; InspectionRequest request;
             request.message=message(); request.options=settings.transfer;
+            request.options.modem=transmit_config();
             if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
-            request.requested_pattern=f(UiField::pattern).selected; request.target_snr=number(f(UiField::snr).text,"Target SNR"); request.simulation=settings.simulation; request.device=settings.device;
+            request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
             start_worker([request=std::move(request)](Prepared& value,std::stop_token) { value.inspection=std::make_shared<const Inspection>(inspect(request)); },std::move(result));
         }
     }
@@ -665,7 +699,7 @@ struct Controller::Impl {
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }
         std::ostringstream diagnostics;
-        diagnostics<<format_bit_rate(modem::bit_rate(settings.transfer.modem))
+        diagnostics<<format_bit_rate(modem::bit_rate(transmit_config()))
             <<" | Shannon-Hartley limit "<<format_bit_rate(shannon_capacity_bps)
             <<" | "<<next.samples_received<<" input samples | CPU "<<std::fixed<<std::setprecision(1)<<cpu_percent<<"%";
         if(next.simulation) diagnostics<<" | Channel SNR "<<channel_snr<<" dB / media "<<seconds_text(next.virtual_seconds);
@@ -837,7 +871,7 @@ void Controller::edit(UiField field,std::string text) {
         if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
         else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
-        else if(field==UiField::snr) p.configure(true);
+        else if(field==UiField::snr||field==UiField::long_snr) p.configure(true);
         else if(field==UiField::bandwidth) p.configure(false,true);
         else if(field==UiField::device||field==UiField::carrier) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
