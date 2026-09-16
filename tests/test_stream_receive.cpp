@@ -6,6 +6,8 @@
 #include <algorithm>
 #include <iostream>
 #include <stdexcept>
+#include <string_view>
+#include <vector>
 using namespace datapump;
 namespace {
 void check(bool value,const char* message) {if(!value)throw std::runtime_error(message);}
@@ -162,6 +164,313 @@ void final_parity_statistics() {
           !complete.content.pre_fec_accuracy->missing_data_bits && !complete.content.pre_fec_accuracy->corrected_data_bits,
           "physical completion must expose the final parity erasure repair beside unchanged data accuracy");
 }
+Bytes late_acquisition_fixture() {
+    // Exact live-audio capture: 44 surviving marker bits and 1,023 coded bits.
+    // Keep this independent received vector, including its absent last bit.
+    constexpr std::string_view text=
+        "00011111101011101010101000001111100001000000000000010000000000110110011101000110"
+        "10000110010100100000011100010111010101101001011000110110101100100000011000100111"
+        "00100110111101110111011011100010000001100110011011110111100000100000011010100111"
+        "01010110110101110000011100110010000001101111011101100110010101110010001000000111"
+        "01000110100001100101001000000110110001100001011110100111100100100000011001000110"
+        "11110110011100100000011011000110111101110010011001010110110100100000011010010111"
+        "00000111001101110101011011010000000000000000000000000000000000000000000000000000"
+        "00000000000000000000000000000000000000000000000000000000000000000000000000000000"
+        "00000000000000000000000000000000000000000000100010111101011101111011010001111001"
+        "11110001101001110000001100011001001111011110110101011100001100111111010100101111"
+        "01101011010000001000110001000011001001010011101001110111101010000010001001100000"
+        "00100011001001100100110110100111001110000100111011010001001001001011001011101101"
+        "00100110011000110110111111111001101101110010000100001110101110100111101101100111"
+        "110110101000111001101111100";
+    Bytes result;result.reserve(text.size());
+    for(const auto bit:text)result.push_back(static_cast<std::uint8_t>(bit-'0'));
+    return result;
+}
+void late_acquisition_recovers_only_after_physical_end() {
+    const auto bits=late_acquisition_fixture();
+    check(bits.size()==1067,"the independent late acquisition vector must retain its exact 1,067-bit endpoint");
+    const std::string expected="the quick brown fox jumps over the lazy dog lorem ipsum";
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    transfer::StreamReceiver receiver(value,value.timestamp);
+    Bytes prefix;std::array<std::uint8_t,16> identity{};
+    for(std::size_t i=0;i<bits.size();++i) {
+        prefix.push_back(bits[i]);
+        const auto pending=receiver.push(chunk(std::span(bits).subspan(i,1),i));
+        if(!i)identity=pending.content.message.local_id;
+        check(pending.raw_bits==prefix && pending.observed_bits==i+1 && !pending.missing_symbols &&
+              pending.content.message.local_id==identity && !pending.stream_complete && !pending.content_validated &&
+              !pending.short_text_decoded && pending.content.message.data.empty(),
+              "late marker recovery must preserve every pending bit and identity without exposing decoded text");
+    }
+    const auto complete=receiver.push(chunk({},bits.size(),100,true));
+    check(complete.stream_complete && complete.content_validated && !complete.content.authenticated &&
+          !complete.short_text_decoded && complete.content.message.data==Bytes(expected.begin(),expected.end()) &&
+          complete.content.message.local_id==identity && complete.error.empty(),
+          "physical completion must recover the captured text from the short marker suffix and local RS60 evidence");
+    check(complete.raw_bits==bits && complete.observed_bits==bits.size() && !complete.missing_symbols &&
+          complete.content.consumed_bytes==128 && complete.content.pre_fec_accuracy &&
+          complete.content.pre_fec_accuracy->received_data_bits==640 &&
+          !complete.content.pre_fec_accuracy->missing_data_bits && !complete.content.pre_fec_accuracy->corrected_data_bits &&
+          complete.content.fec_stats.parity.received_bits==383 && complete.content.fec_stats.parity.missing_bits==1 &&
+          !complete.content.fec_stats.parity.corrected_bits && complete.content.fec_stats.parity.erased_bytes==1 &&
+          complete.content.fec_stats.parity.repaired_bytes==1,
+          "late recovery must repair the final parity bit without adding invented marker bits to raw diagnostics");
+}
+void markerless_acquisition_recovers_only_after_physical_end() {
+    const auto capture=late_acquisition_fixture();
+    const Bytes bits(capture.begin()+44,capture.end());
+    check(bits.size()==1023,"removing the surviving marker must leave the exact 1,023 received coded bits");
+    const std::string expected="the quick brown fox jumps over the lazy dog lorem ipsum";
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    transfer::StreamReceiver receiver(value,value.timestamp);
+    Bytes prefix;std::array<std::uint8_t,16> identity{};
+    for(std::size_t i=0;i<bits.size();++i) {
+        prefix.push_back(bits[i]);
+        const auto pending=receiver.push(chunk(std::span(bits).subspan(i,1),i));
+        if(!i)identity=pending.content.message.local_id;
+        check(pending.raw_bits==prefix && pending.observed_bits==i+1 && !pending.missing_symbols &&
+              pending.content.message.local_id==identity && !pending.stream_complete && !pending.content_validated &&
+              !pending.short_text_decoded && !pending.content.consumed_bytes && pending.content.message.data.empty(),
+              "markerless RS search must expose every pending bit without choosing a boundary or releasing source text");
+    }
+    const auto complete=receiver.push(chunk({},bits.size(),100,true));
+    check(complete.stream_complete && complete.content_validated && !complete.content.authenticated &&
+          complete.content.message.data==Bytes(expected.begin(),expected.end()) && complete.raw_bits==bits &&
+          complete.observed_bits==bits.size() && complete.content.message.local_id==identity && complete.error.empty() &&
+          complete.content.consumed_bytes==128 && complete.content.fec_stats.parity.missing_bits==1 &&
+          complete.content.fec_stats.parity.repaired_bytes==1 && !complete.content.fec_stats.data.corrected_bits,
+          "physical completion must recover the independent live capture with its entire marker absent");
+}
+void damaged_marker_and_all_bit_phases() {
+    const auto capture=late_acquisition_fixture();
+    const std::string expected="the quick brown fox jumps over the lazy dog lorem ipsum";
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    auto check_recovery=[&](const Bytes& bits) {
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        const auto result=receiver.push(chunk(bits,0,100,true));
+        check(result.stream_complete && result.content_validated && !result.content.authenticated &&
+              result.content.message.data==Bytes(expected.begin(),expected.end()) && result.raw_bits==bits &&
+              result.observed_bits==bits.size() && result.content.consumed_bytes==128 &&
+              result.content.fec_stats.parity.missing_bits==1 && result.content.fec_stats.parity.repaired_bytes==1,
+              "RS boundary search must recover the live coded word despite damaged marker bits and any leading bit phase");
+    };
+    auto damaged_suffix=capture;damaged_suffix[43]^=1;
+    check_recovery(damaged_suffix); // No exact suffix of even one bit survives.
+    const Bytes coded(capture.begin()+44,capture.end());
+    for(std::size_t phase=0;phase<=boundary_sync::maximum_slip_bits;++phase) {
+        Bytes markerless(phase);
+        for(std::size_t i=0;i<phase;++i)markerless[i]=static_cast<std::uint8_t>((0x53U>>i)&1U);
+        markerless.insert(markerless.end(),coded.begin(),coded.end());
+        check_recovery(markerless);
+        Bytes damaged_marker(markerless.begin(),markerless.begin()+static_cast<std::ptrdiff_t>(phase));
+        damaged_marker.insert(damaged_marker.end(),boundary_sync::marker_bits,0);
+        damaged_marker.insert(damaged_marker.end(),coded.begin(),coded.end());
+        check_recovery(damaged_marker);
+    }
+}
+void markerless_rs_ambiguity_is_rejected() {
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    // Independently show that successful RS correction cannot by itself choose
+    // a boundary: the observed zeros support several differently aligned words.
+    auto verify_boundary=[&](std::size_t bit_count,std::size_t endpoint) {
+        Bytes coded(stream_interval_bytes),masks(stream_interval_bytes);
+        std::vector<std::size_t> erasures;
+        const auto count=bit_count-endpoint;
+        for(std::size_t i=count;i<boundary_sync::interval_bits;++i) {
+            if(!masks[i/8])erasures.push_back(i/8);
+            masks[i/8]|=static_cast<std::uint8_t>(1U<<(7-i%8));
+        }
+        const auto decoded=decode_interval(coded,IntervalOptions{FecMode::rs60,{},{}},erasures,masks);
+        check(decoded.data==Bytes(80,0) && decoded.erased_bytes==erasures.size(),
+              "multiple offsets in an all-zero reception must independently satisfy the configured RS60 equations");
+    };
+    for(const auto endpoint:{0U,1U,7U,192U})verify_boundary(1024,endpoint);
+    // At the maximum retained length, only offset 199 fits a whole word in
+    // the accepted boundary window. Offset 200 is still a credible competitor.
+    verify_boundary(1223,199);verify_boundary(1223,200);
+    for(const auto size:{1024U,1223U})for(const bool compressed:{false,true}) {
+        value.compression=compressed;const Bytes bits(size,0);
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        const auto result=receiver.push(chunk(bits,0,100,true));
+        check(result.stream_complete && !result.content_validated && !result.short_text_decoded &&
+              !result.content.consumed_bytes && result.content.message.data.empty() && result.raw_bits==bits &&
+              result.observed_bits==bits.size(),
+              "multiple credible RS boundaries must remain undecoded even when their corrected source bytes agree");
+    }
+}
+void late_acquisition_rejects_unsupported_evidence() {
+    const auto bits=late_acquisition_fixture();
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    auto rejected=[&](const Bytes& received,const transfer::Options& local) {
+        transfer::StreamReceiver receiver(local,local.timestamp);
+        const auto result=receiver.push(chunk(received,0,100,true));
+        check(result.stream_complete && !result.content_validated && !result.short_text_decoded &&
+              result.content.message.data.empty() && result.observed_bits==received.size(),
+              "insufficient alignment evidence or incompatible local settings must retain an undecoded physical reception");
+        return result;
+    };
+    auto no_fec=value;no_fec.fec=FecMode::off;
+    const auto uncoded=rejected(bits,no_fec);
+    check(!uncoded.content.consumed_bytes,"late marker recovery requires configured error correction");
+    const auto full_uncoded=transfer::message_wire_bits(message(55),no_fec);
+    const Bytes late_uncoded(full_uncoded.begin()+148,full_uncoded.end());
+    check(!rejected(late_uncoded,no_fec).content.consumed_bytes,
+          "even a complete valid unprotected source needs enough marker evidence to establish alignment");
+    auto wrong_fec=value;wrong_fec.fec=FecMode::rs20;
+    rejected(bits,wrong_fec);
+    auto wrong_codec=value;wrong_codec.compression=false;
+    rejected(bits,wrong_codec);
+    // The entire valid LZMA2 data area remains, but its missing parity cannot
+    // provide alignment evidence merely because the source codec could end.
+    const Bytes no_parity(bits.begin(),bits.begin()+44+640);
+    const auto incomplete=rejected(no_parity,value);
+    check(!incomplete.content.consumed_bytes && incomplete.raw_bits==no_parity,
+          "valid source bytes without sufficient parity evidence cannot establish a late interval");
+    const Bytes markerless_no_parity(bits.begin()+44,bits.begin()+44+640);
+    check(!rejected(markerless_no_parity,value).content.consumed_bytes,
+          "a wholly absent marker and parity cannot be replaced with a successfully parsed source codec");
+    const Bytes weak_parity(bits.begin(),bits.begin()+44+91*8);
+    check(!rejected(weak_parity,value).content.consumed_bytes,
+          "37 algebraically repairable tail erasures still leave too little evidence for a 44-bit marker suffix");
+    auto unknown=bits;unknown[44+17]=modem::missing_pattern_bit;
+    const auto missing=rejected(unknown,value);
+    check(missing.missing_symbols==1 && !missing.content.consumed_bytes,
+          "the bounded late acquisition fallback must not treat unknown slots as received marker or FEC evidence");
+    auto unknown_marker=bits;unknown_marker[0]=modem::missing_pattern_bit;
+    check(rejected(unknown_marker,value).missing_symbols==1,
+          "timed unknown slots in the leading marker must disable speculative RS alignment even when its codeword is intact");
+    Bytes too_long(1224-1023,0);too_long.insert(too_long.end(),bits.begin()+44,bits.end());
+    check(!rejected(too_long,value).content.consumed_bytes,
+          "a capture exceeding one fixed interval plus the marker search neighborhood must remain outside bounded RS recovery");
+    Bytes random(bits.size());std::uint32_t random_state=0x6197ad34;
+    for(auto& bit:random) {
+        random_state^=random_state<<13;random_state^=random_state>>17;random_state^=random_state<<5;
+        bit=static_cast<std::uint8_t>(random_state&1U);
+    }
+    const auto unmarked=rejected(random,value);
+    check(unmarked.raw_bits==random && !unmarked.content.consumed_bytes,
+          "unmarked data cannot become a validated interval through speculative source interpretation");
+}
+void late_acquisition_preserves_error_correction() {
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    const std::string expected="the quick brown fox jumps over the lazy dog lorem ipsum";
+    for(const auto errors:{1U,2U}) {
+        auto bits=late_acquisition_fixture();bits[44+10*8]^=1;
+        if(errors==2)bits[44+82*8]^=1;
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        const auto result=receiver.push(chunk(bits,0,100,true));
+        check(result.content_validated && result.content.message.data==Bytes(expected.begin(),expected.end()) &&
+              result.raw_bits==bits && result.content.corrected_bytes==errors+1 &&
+              result.content.fec_stats.data.corrected_bits==1 &&
+              result.content.fec_stats.parity.corrected_bits==errors-1 &&
+              result.content.fec_stats.parity.missing_bits==1,
+              "strong late marker and RS60 evidence must retain correction of known data/parity errors and the absent final bit");
+    }
+    for(const auto errors:{18U,19U}) {
+        auto bits=late_acquisition_fixture();
+        for(std::size_t i=0;i<errors;++i)bits[44+i*8]^=1;
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        const auto result=receiver.push(chunk(bits,0,100,true));
+        if(errors==18) {
+            check(result.content_validated && result.content.message.data==Bytes(expected.begin(),expected.end()) &&
+                  result.raw_bits==bits && result.content.fec_stats.data.corrected_bits==18 &&
+                  result.content.fec_stats.parity.missing_bits==1,
+                  "18 known-byte errors and one final erasure retain sufficient evidence for late marker recovery");
+            const Bytes markerless(bits.begin()+44,bits.end());
+            Bytes coded(128),masks(128);masks.back()=1;
+            for(std::size_t i=0;i<markerless.size();++i)
+                coded[i/8]|=static_cast<std::uint8_t>(markerless[i]<<(7-i%8));
+            const std::array<std::size_t,1> erasures{127};
+            const auto repaired=decode_interval(coded,IntervalOptions{FecMode::rs60,{},{}},erasures,masks);
+            check(decode_source(repaired.data,80,true)==Bytes(expected.begin(),expected.end()) &&
+                  repaired.fec_stats.data.corrected_bits==18 && repaired.fec_stats.parity.missing_bits==1,
+                  "the same 18-error codeword remains algebraically correctable after removing all 44 surviving marker bits");
+            transfer::StreamReceiver without_marker(value,value.timestamp);
+            const auto insufficient=without_marker.push(chunk(markerless,0,200,true));
+            check(insufficient.stream_complete && !insufficient.content_validated &&
+                  !insufficient.content.consumed_bytes && !insufficient.short_text_decoded &&
+                  insufficient.content.message.data.empty() && insufficient.raw_bits==markerless &&
+                  insufficient.observed_bits==markerless.size(),
+                  "the existing marker adds necessary alignment evidence when 18 corrected bytes leave RS alone insufficient");
+        } else {
+            Bytes coded(128),masks(128);masks.back()=1;
+            for(std::size_t i=44;i<bits.size();++i)
+                coded[(i-44)/8]|=static_cast<std::uint8_t>(bits[i]<<(7-(i-44)%8));
+            const std::array<std::size_t,1> erasures{127};
+            const auto repaired=decode_interval(coded,IntervalOptions{FecMode::rs60,{},{}},erasures,masks);
+            check(decode_source(repaired.data,80,true)==Bytes(expected.begin(),expected.end()) &&
+                  repaired.fec_stats.data.corrected_bits==19 && repaired.fec_stats.parity.missing_bits==1,
+                  "19 known-byte errors remain algebraically correctable under the configured RS60 profile");
+            check(result.stream_complete && !result.content_validated && !result.content.consumed_bytes &&
+                  result.content.message.data.empty() && result.raw_bits==bits,
+                  "algebraic correction with 19 known-byte errors must not bypass the stricter late-alignment evidence bound");
+        }
+    }
+}
+void marker_preserves_recovery_when_all_parity_is_absent() {
+    const auto capture=late_acquisition_fixture();
+    const Bytes source_bits(capture.begin()+44,capture.begin()+44+640);
+    const std::string expected="the quick brown fox jumps over the lazy dog lorem ipsum";
+    auto value=options();value.fec=FecMode::rs60;value.compression=true;
+    auto marked=boundary_sync::insert(Bytes(boundary_sync::interval_bits));
+    marked.resize(boundary_sync::marker_bits);
+    marked.insert(marked.end(),source_bits.begin(),source_bits.end());
+    transfer::StreamReceiver with_marker(value,value.timestamp);
+    const auto pending=with_marker.push(chunk(marked,0));
+    check(!pending.stream_complete && !pending.content_validated && pending.content.message.data.empty() &&
+          pending.raw_bits==marked,
+          "a recognized marker and complete source area must remain pending while all parity bits are absent");
+    const auto complete=with_marker.push(chunk({},marked.size(),100,true));
+    check(complete.stream_complete && complete.content_validated && !complete.content.authenticated &&
+          complete.content.message.data==Bytes(expected.begin(),expected.end()) && complete.raw_bits==marked &&
+          complete.content.consumed_bytes==128 && complete.content.fec_stats.parity.missing_bits==384 &&
+          complete.content.fec_stats.parity.erased_bytes==48 && complete.content.fec_stats.parity.repaired_bytes==48 &&
+          !complete.content.fec_stats.data.corrected_bits,
+          "the existing full marker must permit recovery of all 48 absent parity bytes after physical completion");
+    Bytes coded(128),masks(128);std::vector<std::size_t> erasures;
+    for(std::size_t i=0;i<source_bits.size();++i)
+        coded[i/8]|=static_cast<std::uint8_t>(source_bits[i]<<(7-i%8));
+    for(std::size_t i=80;i<128;++i) {masks[i]=0xff;erasures.push_back(i);}
+    const auto repaired=decode_interval(coded,IntervalOptions{FecMode::rs60,{},{}},erasures,masks);
+    check(decode_source(repaired.data,80,true)==Bytes(expected.begin(),expected.end()) &&
+          repaired.fec_stats.parity.missing_bits==384 && repaired.erased_bytes==48,
+          "RS can reconstruct every absent parity byte from a known source boundary without providing alignment evidence");
+    transfer::StreamReceiver without_marker(value,value.timestamp);
+    const auto unmarked=without_marker.push(chunk(source_bits,0,200,true));
+    check(unmarked.stream_complete && !unmarked.content_validated && !unmarked.short_text_decoded &&
+          !unmarked.content.consumed_bytes && unmarked.content.message.data.empty() && unmarked.raw_bits==source_bits &&
+          unmarked.observed_bits==source_bits.size(),
+          "the identical source area without marker or observed parity cannot establish a credible interval boundary");
+}
+void late_acquisition_authenticates_actual_coordinates() {
+    auto value=options(true);value.fec=FecMode::rs60;value.compression=true;
+    const auto sent=message(17);const auto wire=transfer::message_wire_bits(sent,value);
+    check(wire.size()==1216,"the keyed late-acquisition fixture must occupy one fixed interval");
+    for(const auto cut:{148U,192U}) {
+        const Bytes acquired(wire.begin()+cut,wire.end()-1);
+        auto plain=acquired;transfer::xor_binary_bits(plain,value,cut);
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        auto pending_burst=chunk(acquired,cut);pending_burst.stream_first_symbol=cut;
+        const auto pending=receiver.push(std::move(pending_burst));
+        check(pending.raw_bits==plain && !pending.stream_complete && !pending.content_validated &&
+              !pending.content.authenticated && pending.content.message.data.empty(),
+              "keyed late acquisition must unmask at its acquired coordinate and keep authentication pending");
+        auto end=chunk({},cut+acquired.size(),100,true);end.stream_first_symbol=cut;
+        const auto complete=receiver.push(std::move(end));
+        check(complete.content_validated && complete.content.authenticated && complete.content.message.data==sent.data &&
+              complete.raw_bits==plain && complete.content.fec_stats.parity.missing_bits==1,
+              "keyed recovery with a partial or wholly absent marker must authenticate the actual coded-symbol address");
+        // Remask the same plaintext for a shifted acquisition. This preserves
+        // the valid RS word after unmasking, isolating HMAC address checking.
+        auto shifted=plain;transfer::xor_binary_bits(shifted,value,cut+1);
+        transfer::StreamReceiver wrong_address(value,value.timestamp);
+        auto shifted_burst=chunk(shifted,cut+1,200,true);shifted_burst.stream_first_symbol=cut+1;
+        const auto rejected=wrong_address.push(std::move(shifted_burst));
+        check(rejected.stream_complete && rejected.raw_bits==plain && !rejected.content_validated &&
+              !rejected.content.authenticated && !rejected.content.consumed_bytes && rejected.content.message.data.empty(),
+              "a valid RS word with a partial or wholly absent marker must fail HMAC at the wrong keyed address");
+    }
+}
 void shared_quota_cleanup_and_identity() {
     auto value=options();value.fec=FecMode::off;
     const auto wire=transfer::message_wire_bits(message(17),value);
@@ -282,6 +591,11 @@ void dictionary_interpretation_is_bounded_and_post_end() {
 int main() {
     try {arbitrary_content_limits();timed_acquisition_coordinates();refined_phase_and_post_end_gate();
          source_headers_are_opaque_until_physical_end();underfilled_interval_does_not_end_reception();final_parity_statistics();
+         late_acquisition_recovers_only_after_physical_end();late_acquisition_rejects_unsupported_evidence();
+         markerless_acquisition_recovers_only_after_physical_end();damaged_marker_and_all_bit_phases();
+         markerless_rs_ambiguity_is_rejected();
+         late_acquisition_preserves_error_correction();late_acquisition_authenticates_actual_coordinates();
+         marker_preserves_recovery_when_all_parity_is_absent();
          shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

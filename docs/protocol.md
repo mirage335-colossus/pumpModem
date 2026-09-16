@@ -160,6 +160,43 @@ slots to be supplied as erasures after physical completion. This allows RS to
 repair a missing final parity bit without a packet length or byte-alignment gate.
 An entirely unobserved interval is not manufactured from a marker alone.
 
+### Post-end recovery of a missing or damaged leading marker
+
+If no marker was established, physical completion permits one additional bounded
+search for a single received interval. The complete raw input must still fit in
+the retained diagnostic prefix and contain no timed unknown slots. This search
+cannot replace an established or failed interval reconstruction, recover a
+discarded prefix, or concatenate separated intervals.
+
+The search tries every possible coded start at received offsets 0–199. These
+200 positions cover one 192-bit marker plus the existing seven-bit slip allowance;
+this is the supported leading-marker geometry, not a computational budget. All
+remaining received bits must fit within one fixed 1,024-bit coded interval, with
+at least one coded bit observed. The complete capture therefore contains at most
+1,223 bits. Inputs within the short-message bit limit remain on their existing
+path. Only the unobserved final coded slots become erasures.
+
+At each start, the longest exact marker suffix immediately preceding it supplies
+optional evidence, from zero to 192 bits. There is no minimum suffix requirement:
+RS can establish alignment without any marker bits. The locally selected RS
+profile must repair the interval and supply the evidence described below; FEC Off
+is ineligible. Keyed intervals must also pass their normal HMAC check using the
+actual received symbol address. Missing marker bits never advance the acquired
+clock or reset Data masking.
+
+The search also tests the remaining retained start positions using the same
+evidence threshold solely to detect ambiguity. Positions beyond offset 199 can
+veto recovery but cannot become accepted starts. This prevents the supported
+geometry's edge from concealing competing alignments in structured data, such
+as an all-zero codeword. Any different credible coded start rejects recovery,
+even if its source bytes agree. Equivalent suffix hypotheses may share a start.
+Only a unique candidate within the supported geometry is committed, reusing its
+already corrected interval rather than running RS a second time. The normal
+source-decoding and attachment-interpretation path then runs under its existing
+quotas. No source codec, readable text, occupancy value, or transmitted length
+supplies alignment evidence. This recovery neither ends reception nor adds
+transmitted bits, and public RS recovery remains unauthenticated.
+
 ### Marker evidence threshold
 
 For `n` observed independent fair bits and at most `e` mismatches, the fixed
@@ -169,6 +206,36 @@ receives at most `2^-84/(j*(j+1))` false-match budget; these budgets sum to at m
 `2^-84` across an indefinitely drained collector. Chunk boundaries add no trials.
 Integer-rounded penalties conservatively enforce this bound, so later attempts
 or fewer surviving observations can reduce the permitted mismatch count.
+
+The post-end search requires at least 144 combined evidence bits per hypothesis.
+For an exact suffix with `n` observed marker bits (including `n=0`), `p` RS parity
+bytes, `v` erased coded bytes and `e` corrected fully observed bytes, its
+conservative evidence count is:
+
+```text
+n + 8*(p-v) - 15*e - ceil(log2(e+1))
+```
+
+For each codeword, the radius-`e` byte-error neighborhood has at most
+`sum(i=0..e, C(128-v,i)*255^i) <= (e+1)*2^(15*e)` members. Projecting away the
+`v` erased bytes therefore bounds random RS acceptance by that volume times
+`2^(-8*(p-v))`. The calculation discards even the observed bits inside an erased
+byte. Exact marker observations are disjoint from coded observations, so their
+evidence adds. Charging all 200 eligible starts and all 193 possible suffix
+lengths gives at most `200*193 = 38,600` hypotheses. Each is bounded by `2^-144`,
+giving a total post-end false-match bound below `2^-128`. The additional starts
+tested only for ambiguity can reject candidates, so they cannot increase this
+false-accept bound. Successful HMAC checking supplies no extra credit in this
+calculation.
+
+The additional search preserves the existing aggregate `2^-84` bound without
+changing ordinary marker acceptance. The collector rounds its 144,615 trials
+up to `2^18`, and its rounded attempt weights satisfy
+`sum(j=1..infinity, 2^(-ceil(log2(j))-ceil(log2(j+1)))) = 5/6`. Thus ordinary
+marker attempts together use at most
+`(144615/2^18)*(5/6)*2^-84 < 2^-85`. Adding the single post-end search's
+`2^-128` budget still leaves the combined bound below `2^-84` per collector.
+
 This is an analytic random-input model, not channel calibration, a posterior
 probability, authentication, or protection against deliberately constructed data.
 

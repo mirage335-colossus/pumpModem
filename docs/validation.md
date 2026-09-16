@@ -2248,3 +2248,81 @@ Actual shared-renderer output was visually inspected at 241-by-221 pixels for
 noise/clicks, signals at varied noise levels and combined clouds from both
 receivers. These are headless sampled fixtures, not native windows or physical
 audio measurements.
+
+### Recovery after late marker acquisition (2026-09-16)
+
+An operator's live-audio RS60 capture contained 1,067 bits: the exact final
+44 bits of the first alignment marker and 1,023 coded bits. It lacked 148
+leading marker bits and the last parity bit. Independent RS60 checking found
+no errors in the observed coded bits and restored the final bit to one.
+Post-end raw LZMA2 decoding recovered the exact 55-byte source
+`the quick brown fox jumps over the lazy dog lorem ipsum`.
+
+A receiver probe compiled against the prior `transfer.cpp` left this exact
+capture undecoded even after a supplied physical-end event. The same probe
+against the updated implementation recovered the source. The initial bounded
+fallback required a unique short marker suffix backed by sufficient fixed RS
+evidence, after physical completion only; the broader search below supersedes
+that suffix requirement. It preserves the configured source,
+FEC and key settings, actual symbol addresses, diagnostic bit prefix, storage
+quotas and ordinary marker detector. The protocol documents the combined
+false-match bound; no source-format success supplies alignment evidence.
+
+The independent capture regression checks every pending bit and its stable
+identity, the exact recovered source and final-parity repair statistics.
+Additional cases cover known data/parity errors, insufficient parity evidence,
+timed unknown slots, unmarked input, incompatible local profiles and keyed
+authentication at the correct and incorrect acquired coordinates. An
+18-byte-error case is accepted; a 19-byte-error case remains algebraically
+correctable but fails the stricter alignment evidence requirement.
+
+The Release build and all 18 selected suites passed: `live_profiles`,
+`live_receptions`, `live`, `live_resources`, `compression_short`, `transfer`,
+`stream_codec`, `stream_receive`, `attachment`, `pattern_correlator`,
+`pattern_receiver`, `gui_application`, `gui_controller`, `gui_inspection`,
+`gui_binary_editor`, `cli`, `boundary_sync` and `boundary_marker_storage`.
+The final expanded `stream_receive` suite also passed independently.
+
+Validation uses the supplied received bits and generated fixtures. The original
+audio recording was unavailable, so these checks do not establish why physical
+acquisition missed the leading marker or reproduce a new hardware audio test.
+
+### Comprehensive RS-assisted alignment and marker benefit (2026-09-16)
+
+The post-end fallback now tests every leading coded start allowed by one marker
+plus the seven-bit slip neighborhood, including an entirely absent marker.
+Matching marker suffix bits add evidence without gating RS attempts. A unique
+winner must meet the 144-bit candidate threshold, including correction and
+erasure penalties; 38,600 charged hypotheses retain the fallback's below
+`2^-128` random-input bound. Later retained starts can veto a winner but cannot
+be accepted, preventing the search boundary from hiding shifted codewords.
+The accepted decoded interval enters the existing statistics/quota/spool path
+without a second RS decode. Physical completion and source interpretation
+remain separate gates, and no transmitted bits were added or removed.
+
+Generated variants recover the original capture with all 44 surviving marker
+bits removed, a damaged marker tail, and a completely damaged 192-bit marker
+at all eight supported leading bit phases. Tests reject ambiguous all-zero
+words, including a 1,223-bit case where only one candidate falls inside the
+accepted-start range, and preserve correct keyed addresses, pending prefixes,
+unknown-slot rejection, local source settings and the capture-size bound.
+
+Paired checks establish why the transmitted marker remains useful. With all
+48 parity bytes absent but all 80 source-area bytes observed, the full marker
+still permits recovery of the exact 55-byte text. Removing the marker leaves
+RS with no parity evidence to establish alignment. A separate paired 18-error
+case also passes with its 44 marker bits and fails without them under the
+current conservative evidence calculation; that precise error cutoff is not
+an information-theoretic RS limit.
+
+Temporary Release probes performed five end-to-end receiver calls per variant.
+The original, markerless and 18-error captures averaged approximately 8–10 ms
+per call on this host. Both intact-codeword variants decoded in every call;
+the 18-error variant decoded only with its marker evidence. The all-parity-
+absent pair likewise decoded only with its full marker. These timings include
+post-end source handling and are illustrative host measurements, not hardware
+audio performance claims.
+
+The Release build and all 18 compatibility suites listed in the preceding
+entry passed with the comprehensive search and the final paired marker-benefit
+regressions. Validation was headless; no new physical audio test was performed.

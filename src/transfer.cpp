@@ -7,6 +7,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include <algorithm>
 #include <array>
+#include <bit>
 #include <cmath>
 #include <cstdio>
 #include <limits>
@@ -72,6 +73,67 @@ IntervalOptions interval_options(const Options& options,std::uint64_t first_symb
         };
     }
     return result;
+}
+// Post-physical-end boundary search for a single interval. Marker observations
+// add evidence, but are not required to try RS. Source syntax supplies none.
+std::optional<DecodedInterval> recover_interval_alignment(
+        std::span<const std::uint8_t> bits,const Options& options,std::uint64_t first_symbol) {
+    // Cover an absent, partial or damaged leading marker and the existing slip
+    // allowance. This is one-interval geometry, not a CPU-work limit.
+    constexpr auto maximum_endpoint=boundary_sync::marker_bits+boundary_sync::maximum_slip_bits;
+    constexpr auto trials=(maximum_endpoint+1)*(boundary_sync::marker_bits+1);
+    static_assert(trials==38600);
+    // Charge every endpoint and exact-suffix length, including no marker at all.
+    // At most 38,600 hypotheses preserve the separate <=2^-128 match budget.
+    constexpr auto required_evidence=128+std::bit_width(trials-1);
+    const auto parity=interval_parity_bytes(options.fec);
+    if(!parity || bits.size()<=short_message_bits ||
+       bits.size()>maximum_endpoint+boundary_sync::interval_bits)return {};
+    // Derive the public word at runtime, just as the normal collector does.
+    auto marker=boundary_sync::insert(Bytes(boundary_sync::interval_bits));
+    marker.resize(boundary_sync::marker_bits);
+    std::optional<DecodedInterval> accepted;
+    // Later endpoints can veto a candidate but cannot be accepted: otherwise
+    // the geometry bound itself could hide a competing shifted RS codeword.
+    for(std::size_t endpoint=0;endpoint<bits.size();++endpoint) {
+        const auto count=bits.size()-endpoint;
+        if(count>boundary_sync::interval_bits)continue;
+        std::size_t evidence=0;
+        while(evidence<std::min(endpoint,boundary_sync::marker_bits) &&
+              bits[endpoint-evidence-1]==marker[boundary_sync::marker_bits-evidence-1])++evidence;
+        boundary_sync::Interval candidate;
+        std::array<std::size_t,stream_interval_bytes> erasures{};
+        std::size_t erased=0;
+        for(std::size_t i=0;i<boundary_sync::interval_bits;++i) {
+            const auto mask=static_cast<std::uint8_t>(1U<<(7-i%8));
+            if(i<count)candidate.bytes[i/8]|=static_cast<std::uint8_t>(bits[endpoint+i]*mask);
+            else {
+                if(!candidate.erasures[i/8])erasures[erased++]=i/8;
+                candidate.erasures[i/8]=1;candidate.erasure_bits[i/8]|=mask;
+            }
+        }
+        if(erased>parity || evidence+8*(parity-erased)<required_evidence)continue;
+        if(endpoint>std::numeric_limits<std::uint64_t>::max()-first_symbol)continue;
+        candidate.first_stream_symbol=first_symbol+endpoint;
+        try {
+            auto decoded=decode_interval(candidate.bytes,
+                interval_options(options,candidate.first_stream_symbol),
+                std::span(erasures).first(erased),candidate.erasure_bits);
+            const auto& stats=decoded.fec_stats;
+            const auto errors=stats.data.repaired_bytes-stats.data.erased_bytes+
+                stats.integrity.repaired_bytes-stats.integrity.erased_bytes+
+                stats.parity.repaired_bytes-stats.parity.erased_bytes;
+            // Discard all observations within erased bytes. For e errors in
+            // the others, sum C(128-v,i)*255^i <= (e+1)*2^(15e).
+            // The fixed RS parity contributes 8*(p-v) constraint bits; the
+            // exact marker suffix supplies disjoint evidence. This deliberately
+            // stricter test does not equate RS success with authentication.
+            if(evidence+8*(parity-erased)<required_evidence+15*errors+std::bit_width(errors))continue;
+            if(accepted || endpoint>maximum_endpoint)return {};
+            accepted=std::move(decoded);
+        } catch(const Error&) {continue;}
+    }
+    return accepted;
 }
 bool better_reception(const Received& candidate,const Received& current) {
     if(candidate.content_validated!=current.content_validated)return candidate.content_validated;
@@ -349,7 +411,7 @@ struct StreamReceiver::Impl {
         Received result;
         std::uint64_t next_symbol=0;
         std::size_t stored=0;
-        bool failed=false,seen_marker=false;
+        bool failed=false,aligned=false;
         State(const Options& value,const modem::PatternBurst& burst)
             :collector(burst.first_stream_symbol,0,true),options(value),next_symbol(burst.first_stream_symbol) {
             options.modem.stream_phase_samples=burst.stream_phase_samples;
@@ -374,40 +436,43 @@ struct StreamReceiver::Impl {
         state.failed=true;state.result.error=error;
         quota->used-=state.stored;state.stored=0;state.spool.reset();
     }
+    void accept_interval(State& state,const DecodedInterval& decoded) {
+        auto& content=state.result.content;
+        content.corrected_bytes+=decoded.corrected_bytes;content.consumed_bytes+=stream_interval_bytes;
+        content.authenticated=decoded.authenticated;
+        if(!content.pre_fec_accuracy && content.consumed_bytes==stream_interval_bytes)
+            content.pre_fec_accuracy=StreamBitAccuracy{};
+        if(content.pre_fec_accuracy && decoded.pre_fec_accuracy) {
+            content.pre_fec_accuracy->received_data_bits+=decoded.pre_fec_accuracy->received_data_bits;
+            content.pre_fec_accuracy->corrected_data_bits+=decoded.pre_fec_accuracy->corrected_data_bits;
+            content.pre_fec_accuracy->missing_data_bits+=decoded.pre_fec_accuracy->missing_data_bits;
+        } else content.pre_fec_accuracy.reset();
+        const auto accumulate=[](FecRegionStats& total,const FecRegionStats& part) {
+            total.received_bits+=part.received_bits;total.corrected_bits+=part.corrected_bits;
+            total.missing_bits+=part.missing_bits;total.corrected_bytes+=part.corrected_bytes;
+            total.erased_bytes+=part.erased_bytes;total.repaired_bytes+=part.repaired_bytes;
+        };
+        accumulate(content.fec_stats.data,decoded.fec_stats.data);
+        accumulate(content.fec_stats.integrity,decoded.fec_stats.integrity);
+        accumulate(content.fec_stats.parity,decoded.fec_stats.parity);
+        if(state.failed)return;
+        const auto limit=quota->limit;
+        if(quota->used>limit || decoded.data.size()>limit-quota->used){fail(state,"received source storage quota exhausted");return;}
+        if(!state.spool)state.spool.reset(std::tmpfile());
+        if(!state.spool || std::fwrite(decoded.data.data(),1,decoded.data.size(),state.spool.get())!=decoded.data.size()) {
+            fail(state,"cannot store received source");return;
+        }
+        state.stored+=decoded.data.size();quota->used+=decoded.data.size();
+    }
     void interval(State& state,const boundary_sync::Interval& interval) {
-        state.seen_marker|=interval.marker_recognized;
-        if(!state.seen_marker){fail(state,"alignment marker not established");return;}
+        state.aligned|=interval.marker_recognized;
+        if(!state.aligned){fail(state,"alignment marker not established");return;}
         try {
             std::array<std::size_t,stream_interval_bytes> erasures{};std::size_t count=0;
             for(std::size_t i=0;i<interval.erasures.size();++i)if(interval.erasures[i])erasures[count++]=i;
-            auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol),
+            const auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol),
                 std::span(erasures).first(count),interval.erasure_bits);
-            auto& content=state.result.content;
-            content.corrected_bytes+=decoded.corrected_bytes;content.consumed_bytes+=stream_interval_bytes;
-            content.authenticated=decoded.authenticated;
-            if(!content.pre_fec_accuracy && content.consumed_bytes==stream_interval_bytes)
-                content.pre_fec_accuracy=StreamBitAccuracy{};
-            if(content.pre_fec_accuracy && decoded.pre_fec_accuracy) {
-                content.pre_fec_accuracy->received_data_bits+=decoded.pre_fec_accuracy->received_data_bits;
-                content.pre_fec_accuracy->corrected_data_bits+=decoded.pre_fec_accuracy->corrected_data_bits;
-                content.pre_fec_accuracy->missing_data_bits+=decoded.pre_fec_accuracy->missing_data_bits;
-            } else content.pre_fec_accuracy.reset();
-            const auto accumulate=[](FecRegionStats& total,const FecRegionStats& part) {
-                total.received_bits+=part.received_bits;total.corrected_bits+=part.corrected_bits;
-                total.missing_bits+=part.missing_bits;total.corrected_bytes+=part.corrected_bytes;
-                total.erased_bytes+=part.erased_bytes;total.repaired_bytes+=part.repaired_bytes;
-            };
-            accumulate(content.fec_stats.data,decoded.fec_stats.data);
-            accumulate(content.fec_stats.integrity,decoded.fec_stats.integrity);
-            accumulate(content.fec_stats.parity,decoded.fec_stats.parity);
-            if(state.failed)return;
-            const auto limit=quota->limit;
-            if(quota->used>limit || decoded.data.size()>limit-quota->used){fail(state,"received source storage quota exhausted");return;}
-            if(!state.spool)state.spool.reset(std::tmpfile());
-            if(!state.spool || std::fwrite(decoded.data.data(),1,decoded.data.size(),state.spool.get())!=decoded.data.size()) {
-                fail(state,"cannot store received source");return;
-            }
-            state.stored+=decoded.data.size();quota->used+=decoded.data.size();
+            accept_interval(state,decoded);
         } catch(const Error& error) {fail(state,error.what());}
     }
     Received push(modem::PatternBurst burst,modem::Diagnostics diagnostics) {
@@ -468,8 +533,20 @@ struct StreamReceiver::Impl {
             } catch(const Error& error){fail(state,error.what());}
         }
         state.result.stream_complete=burst.complete;
+        // This fallback uses only the existing complete diagnostic prefix.
+        // Never turn its zero placeholders into observations, retry failed
+        // intervals, or let a codeword manufacture the physical end event.
+        if(burst.complete && !state.failed && !state.aligned &&
+           !state.collector.leading_marker_recognized() && !state.result.missing_symbols &&
+           state.result.observed_bits==state.result.raw_bits.size()) {
+            if(const auto recovered=recover_interval_alignment(state.result.raw_bits,state.options,
+                    state.next_symbol-state.result.observed_bits)) {
+                state.aligned=true;
+                accept_interval(state,*recovered);
+            }
+        }
         // The sole decompression gate. No EOF, size, codeword or MAC can enter it.
-        if(burst.complete && !state.failed && state.seen_marker && state.stored) {
+        if(burst.complete && !state.failed && state.aligned && state.stored) {
             try {
                 Bytes source(state.stored);
                 if(std::fflush(state.spool.get()) || std::fseek(state.spool.get(),0,SEEK_SET) ||
@@ -488,7 +565,7 @@ struct StreamReceiver::Impl {
         // The fixed short dictionary is a bounded application interpretation,
         // never a framing or confidence test. It consumes the exact physical
         // endpoint and cannot pad an unfinished token or a missing symbol.
-        if(burst.complete && !state.failed && !state.seen_marker &&
+        if(burst.complete && !state.failed && !state.aligned &&
            !state.collector.leading_marker_recognized() && !state.result.missing_symbols &&
            !(options.key && burst.stream_first_symbol) && !state.result.raw_bits.empty() &&
            state.result.observed_bits==state.result.raw_bits.size() && state.result.observed_bits<=short_message_bits) {

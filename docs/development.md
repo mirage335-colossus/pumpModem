@@ -58,6 +58,19 @@ An unresolved interval must not disappear so its neighbors become apparently
 contiguous source input. Keep scratch, spooling and diagnostic retention bounded
 without making total message length or symbol airtime a buffering prerequisite.
 
+Preserve the bounded post-end recovery for a missing or damaged leading marker:
+only a fully retained single interval with no timed unknown slots is eligible.
+Search every coded start within the first 200 positions using sufficient RS
+evidence; a matching marker suffix adds evidence but is never required. These
+positions follow the one-marker geometry and existing seven-bit slip allowance,
+not a computational budget. Check later retained positions for competing credible
+alignments as well; they can veto recovery but cannot become accepted starts.
+Use the configured FEC/key and actual symbol positions; keep the existing
+aggregate marker false-match bound. Commit only the unique corrected candidate,
+then interpret its source. Source syntax cannot select alignment, and public
+correction cannot claim authentication. This fallback must neither run before
+physical completion nor replace established or failed interval sources.
+
 ## Pending reception is part of the feature
 
 Every newly accepted symbol must reach the next receiver progress poll. The
@@ -89,7 +102,7 @@ and decoder could otherwise change the codebook together without a test failing.
 | --- | --- |
 | Original dictionary codes, every byte, canonical escapes, exact/truncated endpoints | `compression_short` |
 | Inclusive 16/17-byte split, FEC/compression/key combinations, exact airtime and raw bits | `transfer`, `stream_receive` |
-| Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
+| Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, bounded post-end RS alignment search and ambiguity rejection, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
 | Actual sampled four-hour symbols draining one bit at a time with bounded memory; absence vs EOF and partial silence | `pattern_correlator`; complementary FFT reception checks in `pattern_receiver` |
 | Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
 | Pending prefixes and row identity, completed copy behavior, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
