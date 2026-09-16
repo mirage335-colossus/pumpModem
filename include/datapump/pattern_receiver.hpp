@@ -82,6 +82,10 @@ struct PatternSearch {
     std::optional<double> start_offset_seconds;
     double start_uncertainty_seconds = 0;
     std::vector<double> clock_errors_ppm{0};
+    // Scoring workers: zero uses all but one CPU available to this process
+    // (at least one). One selects serial scoring. Search coverage and ordered
+    // admission are unchanged; spare workspace bounds parallel scratch.
+    std::size_t worker_threads = 0;
 };
 // Whole-symbol sampled absence needed by the fixed six-second policy.
 // Callers add their finite acquisition/lookahead margin when generating tails.

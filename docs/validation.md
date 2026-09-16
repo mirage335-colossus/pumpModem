@@ -2454,3 +2454,42 @@ history. Rev's carrier popup visibly offered 1.5 kHz and 1.8 kHz. FLTK adapter
 and document conformance passed, as did Rev adapter, platform and 1×/2×
 coordinate conformance. Full native transmission
 workflows, physical audio and Windows were not rerun for these shared UI fixes.
+
+### Parallel iterative pattern search (2026-09-16)
+
+FFT hypothesis scoring and clock-window fit accumulation now share persistent
+workers, with all but one available CPU selected by default (11 on this host).
+Mutable pattern caches are private to workers; trial counting, peak ties,
+admission, missing slots and physical completion retain the original order.
+Scratch is charged to the configured workspace only while processing. Exact
+idle-memory comparisons also cover cache eviction, so scratch cannot displace
+other key/epoch searches from the live receiver bank. No transmit format,
+source interpretation or pending-bit presentation rule changed.
+
+New serial/parallel comparisons check exact scores, candidate order, thresholds,
+every pending/provisional event, diagnostics and constellation points across
+public/private patterns, clock phases, rate/frequency banks, ties, noise, missing
+slots, physical absence and workspace reductions. The existing template-cache
+assertions and compact four-hour bounds remain unchanged. Executor coverage
+checks every index exactly once, simultaneous workers including the automatic
+default, reuse, nested/concurrent callers, and joining all work before reporting
+the earliest indexed exception. Additional executor stress passed 60 runs across
+one-, two- and twelve-CPU affinity masks.
+
+The Release build, including FLTK, succeeded. All 17 development-contract suites
+plus `search_parallel` passed with `ctest --test-dir build --output-on-failure
+-j 2` and the contract's test-name filter extended for `search_parallel`
+(18/18, 194.42 seconds). ThreadSanitizer passed the executor
+and both receivers' focused parallel comparisons with executor, scorers,
+PatternCode, Crypto and test sources instrumented; unrelated archive objects and
+external dependencies were not instrumented. ASan/UBSan passed the correlator's
+eight exact-comparison configurations and compact-memory regression. Leak checks
+were disabled for that run because sandbox ptrace prevents LeakSanitizer from
+operating. Native display workflows, physical audio and Windows were not rerun.
+
+Final five-second generated-noise benchmarks measured 1.77–1.88x speedup over
+one-worker scoring on the 12-logical-CPU Ryzen 5 PRO 5650U host. At 12 kHz
+bandwidth and an 80 dB-Hz target, thirteen keyed epochs improved from 0.71x to
+1.25x real-time processing. The one-epoch case improved from 8.81x to 16.55x.
+Commands and the additional 1.2 kHz measurement are recorded in
+[throughput](throughput.md#cpu-and-live-throughput).

@@ -75,25 +75,43 @@ key, epoch and profile. The optional caches are accounted for and discarded
 before they would reduce payload capacity or prevent a workspace reduction.
 Regression tests compare cached and uncached hypotheses and scores exactly.
 
-A wide key/epoch bank can still fall behind real time on a single CPU thread;
-the fourfold gross-rate improvement is not a measured fourfold live transfer
-improvement. The benchmark below measures generated noise through the ordinary
-streaming receiver with one epoch or thirteen epochs. Run it without other
-CPU-heavy jobs. It excludes audio-device behavior, and live startup may require
-additional epoch coverage for the settling interval.
+Iterative pattern scoring uses a shared persistent worker pool, defaulting to
+all but one CPU available to the process (at least one, respecting Linux CPU
+affinity). FFT hypotheses and clock-window fit accumulation run concurrently;
+trial counting, tie-breaking, admission and physical completion retain their
+original order. Each worker has private mutable template state. Parallel scratch
+is charged to the receiver workspace and released before it would displace
+payload storage or prevent a workspace reduction. Scratch is retained only
+during processing, preserving idle receiver-bank capacity. Available independent
+hypotheses and spare workspace can limit simultaneous workers. `PatternSearch::worker_threads = 1`
+selects serial scoring for comparisons; zero selects the automatic default.
+
+A wide key/epoch bank can still fall behind real time. The benchmark below
+measures generated noise through the ordinary streaming receiver with one epoch
+or thirteen epochs. Its final optional argument selects scoring workers. Run it
+without other CPU-heavy jobs. It excludes audio-device behavior, and live startup
+may require additional epoch coverage for the settling interval.
 
 ```sh
 cmake --build build --target benchmark_receiver
-./build/benchmark_receiver 12000 80 0
-./build/benchmark_receiver 12000 80 6
+./build/benchmark_receiver 12000 80 0 1
+./build/benchmark_receiver 12000 80 0 0
+./build/benchmark_receiver 12000 80 6 1
+./build/benchmark_receiver 12000 80 6 0
 ```
 
-On this development host, a Release run after the final changes processed
-26.5813 media seconds in 5.00029 wall seconds with one keyed epoch (5.32x real
-time), and 3.84 media seconds in 5.00022 wall seconds with thirteen epochs
-(0.77x real time). Thus this host cannot sustain that broad search bank in
-real time at the new rate. These generated-noise measurements are CPU results,
-not successful file-transfer or interception tests.
+On the 12-logical-CPU Ryzen 5 PRO 5650U development host, Release measurements
+on 2026-09-16 used five-second runs after warm-up:
+
+| Bandwidth / C/N0 target | Keyed epochs | One worker | Automatic (11 workers) | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| 12,000 Hz / 80 dB-Hz | 1 | 8.81x real time | 16.55x real time | 1.88x |
+| 12,000 Hz / 80 dB-Hz | 13 | 0.71x real time | 1.25x real time | 1.77x |
+| 1,200 Hz / 40 dB-Hz | 1 | 56.11x real time | 102.53x real time | 1.83x |
+
+The thirteen-epoch case exceeded real-time throughput with automatic workers in
+this run. These generated-noise measurements are CPU results, not successful
+file-transfer or interception tests; speedup depends on profile and hardware.
 
 ## Higher information density
 

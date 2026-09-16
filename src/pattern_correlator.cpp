@@ -2,6 +2,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
+#include "search_parallel.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -52,6 +53,9 @@ struct PatternCorrelator::Impl {
     Config config;
     PatternSearch search;
     PatternCode code;
+    // Mutable keystream/chip caches belong to one scoring worker. Completions
+    // still run in hypothesis order on the caller after these workers finish.
+    std::vector<PatternCode> worker_codes;
     std::size_t budget=0,bit_limit=0,accounted_bytes=0;
     std::uint64_t sample=0,trials=0;
     std::uint64_t phase_step=1;
@@ -177,6 +181,18 @@ struct PatternCorrelator::Impl {
         accounted_bytes=working_bytes();
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"clock-search state exceeds DSP workspace");
     }
+    void prepare_workers() {
+        if(!worker_codes.empty())return;
+        const auto concurrency=std::min(hypotheses.size(),detail::search_concurrency(search.worker_threads));
+        const auto workers=std::min(concurrency,(budget-sizeof(PatternCorrelator)-accounted_bytes)/code.working_bytes());
+        if(workers>1) {
+            std::vector<PatternCode> prepared;prepared.reserve(workers);
+            for(std::size_t worker=0;worker<workers;++worker)prepared.emplace_back(config,config.stream_epoch);
+            worker_codes=std::move(prepared);
+            accounted_bytes=working_bytes();
+            require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"parallel pattern caches exceed DSP workspace");
+        }
+    }
     std::size_t working_bytes() const {
         auto value=sizeof(Impl)+code.working_bytes()+hypotheses.capacity()*sizeof(Hypothesis)+banks.capacity()*sizeof(Bank)+
             emissions.capacity()*sizeof(Emission)+
@@ -187,9 +203,21 @@ struct PatternCorrelator::Impl {
         for(const auto& h:hypotheses)value+=h.burst.bits.capacity();
         for(const auto& burst:bursts)value+=burst.bits.capacity();
         for(const auto& bank:banks)value+=bank.prefix.capacity()*sizeof(Projection);
+        value+=worker_bytes();
         return value;
     }
-    void room_for(std::size_t extra) const {
+    std::size_t worker_bytes() const {
+        auto bytes=worker_codes.capacity()*sizeof(PatternCode);
+        for(const auto& worker:worker_codes)bytes+=worker.working_bytes()-sizeof(PatternCode);
+        return bytes;
+    }
+    void drop_workers() {
+        accounted_bytes-=worker_bytes();
+        std::vector<PatternCode>().swap(worker_codes);
+    }
+    void room_for(std::size_t extra) {
+        if(!worker_codes.empty() && (sizeof(PatternCorrelator)+accounted_bytes>budget ||
+                extra>budget-sizeof(PatternCorrelator)-accounted_bytes))drop_workers();
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget && extra<=budget-sizeof(PatternCorrelator)-accounted_bytes,
                 "pattern evidence exceeds DSP workspace");
     }
@@ -452,6 +480,65 @@ struct PatternCorrelator::Impl {
             alternate_fits[hypothesis*alternate_groups+group]={};
         require(h.index<std::numeric_limits<std::uint64_t>::max(),"pattern stream symbol counter overflow");++h.index;
     }
+    std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
+        if(h.origin>static_cast<long double>(sample))
+            return static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(h.origin)));
+        return sample;
+    }
+    std::uint64_t accumulate(Hypothesis& h,std::size_t hypothesis,std::uint64_t cursor,
+                             std::uint64_t end,PatternCode& pattern) {
+        const auto symbol_start=h.origin+static_cast<long double>(h.index)*code.symbol_samples()/h.rate;
+        const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+        const auto segment_end=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
+        std::size_t group_count=0;
+        const auto groups=phase_groups(h,group_count);
+        if(!h.fits[0].count)h.observed_start=cursor;
+        for(std::size_t group=0;group<group_count;++group) {
+            pattern.set_stream_phase_samples(groups[group].lower);
+            auto& fit=fits(h,hypothesis,group);
+            auto observed=cursor;
+            while(observed<segment_end) {
+                const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*h.rate);
+                if(shaped) {
+                    require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
+                            "pattern chip coordinate overflow");
+                    const auto first_chip=h.index*code.chips_per_symbol();
+                    const auto left=static_cast<std::size_t>(observed-sample);
+                    const auto& bank=banks[h.frequency];
+                    const auto projection=bank.prefix[left+1]-bank.prefix[left];
+                    // Each alternative schedule fits the same disjoint
+                    // raw observations. Its score never borrows samples
+                    // or evidence from another possible schedule.
+                    for(unsigned bit=0;bit<2;++bit) {
+                        const auto phase=pattern.shaped_value(first_chip,bit,static_cast<double>(within));
+                        fit[bit].add(projection,phase,1);
+                    }
+                    ++observed;continue;
+                }
+                const auto local=static_cast<std::uint64_t>(std::floor(within/code.chip_samples()));
+                require(h.index<=(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol(),"pattern chip coordinate overflow");
+                const auto chip=h.index*code.chips_per_symbol()+local;
+                const auto fraction=std::clamp(static_cast<double>(within/code.chip_samples()-local),0.,std::nextafter(1.,0.));
+                const auto chip_end=symbol_start+(static_cast<long double>(local)+1)*code.chip_samples()/h.rate;
+                const auto boundary=std::min(static_cast<long double>(segment_end),std::ceil(std::min(chip_end,symbol_end)));
+                const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
+                const auto left=static_cast<std::size_t>(observed-sample),right=static_cast<std::size_t>(until-sample);
+                for(unsigned bit=0;bit<2;++bit) {
+                    const auto bank_index=config.spreading_mode==SpreadingMode::tone?(h.rate_index*search.frequency_offsets_hz.size()+h.frequency)*2+bit:h.frequency;
+                    const auto& bank=banks[bank_index];
+                    auto phase=pattern.value(chip,bit,fraction);
+                    if(config.spreading_mode==SpreadingMode::tone) {
+                        const auto tone=bank.frequency-config.carrier_hz-search.frequency_offsets_hz[h.frequency];
+                        phase*=std::polar(1.,-static_cast<double>(std::remainder(static_cast<long double>(observed)*tau*tone/config.sample_rate,static_cast<long double>(tau))));
+                    }
+                    const auto projection=bank.prefix[right]-bank.prefix[left];
+                    fit[bit].add(projection,phase,right-left);
+                }
+                observed=until;
+            }
+        }
+        return segment_end;
+    }
     void process(std::span<const float> input,std::stop_token stop) {
         for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.prefix[0]={};
@@ -464,63 +551,31 @@ struct PatternCorrelator::Impl {
             }
         }
         const auto end=sample+input.size();
+        const auto parallel=worker_codes.size()>1;
+        if(parallel)detail::parallel_search(hypotheses.size(),worker_codes.size(),[&](std::size_t worker,std::size_t hypothesis) {
+            cancelled(stop);auto& h=hypotheses[hypothesis];
+            const auto cursor=initial_cursor(h,end);
+            const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+            if(cursor<end && static_cast<long double>(cursor)<symbol_end)
+                accumulate(h,hypothesis,cursor,end,worker_codes[worker]);
+        });
         for(std::size_t hypothesis=0;hypothesis<hypotheses.size();++hypothesis) {
             auto& h=hypotheses[hypothesis];
-            cancelled(stop);auto cursor=sample;
-            if(h.origin>static_cast<long double>(cursor))cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(h.origin)));
+            cancelled(stop);auto cursor=initial_cursor(h,end);
+            // Only independent fit accumulation was moved ahead. Trial counts,
+            // phase selection, peer ownership and every publication retain the
+            // original serial hypothesis/complete-symbol order.
+            if(parallel && cursor<end) {
+                const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
+                if(static_cast<long double>(cursor)<symbol_end) {
+                    cursor=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
+                    if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
+                }
+            }
             while(cursor<end) {
-                const auto symbol_start=h.origin+static_cast<long double>(h.index)*code.symbol_samples()/h.rate;
                 const auto symbol_end=h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate;
                 if(static_cast<long double>(cursor)>=symbol_end) { complete(h,hypothesis,cursor);continue; }
-                const auto segment_end=static_cast<std::uint64_t>(std::min(static_cast<long double>(end),std::ceil(symbol_end)));
-                std::size_t group_count=0;
-                const auto groups=phase_groups(h,group_count);
-                if(!h.fits[0].count)h.observed_start=cursor;
-                for(std::size_t group=0;group<group_count;++group) {
-                    code.set_stream_phase_samples(groups[group].lower);
-                    auto& fit=fits(h,hypothesis,group);
-                    auto observed=cursor;
-                    while(observed<segment_end) {
-                        const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*h.rate);
-                        if(shaped) {
-                            require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
-                                    "pattern chip coordinate overflow");
-                            const auto first_chip=h.index*code.chips_per_symbol();
-                            const auto left=static_cast<std::size_t>(observed-sample);
-                            const auto& bank=banks[h.frequency];
-                            const auto projection=bank.prefix[left+1]-bank.prefix[left];
-                            // Each alternative schedule fits the same disjoint
-                            // raw observations. Its score never borrows samples
-                            // or evidence from another possible schedule.
-                            for(unsigned bit=0;bit<2;++bit) {
-                                const auto phase=code.shaped_value(first_chip,bit,static_cast<double>(within));
-                                fit[bit].add(projection,phase,1);
-                            }
-                            ++observed;continue;
-                        }
-                        const auto local=static_cast<std::uint64_t>(std::floor(within/code.chip_samples()));
-                        require(h.index<=(std::numeric_limits<std::uint64_t>::max()-local)/code.chips_per_symbol(),"pattern chip coordinate overflow");
-                        const auto chip=h.index*code.chips_per_symbol()+local;
-                        const auto fraction=std::clamp(static_cast<double>(within/code.chip_samples()-local),0.,std::nextafter(1.,0.));
-                        const auto chip_end=symbol_start+(static_cast<long double>(local)+1)*code.chip_samples()/h.rate;
-                        const auto boundary=std::min(static_cast<long double>(segment_end),std::ceil(std::min(chip_end,symbol_end)));
-                        const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
-                        const auto left=static_cast<std::size_t>(observed-sample),right=static_cast<std::size_t>(until-sample);
-                        for(unsigned bit=0;bit<2;++bit) {
-                            const auto bank_index=config.spreading_mode==SpreadingMode::tone?(h.rate_index*search.frequency_offsets_hz.size()+h.frequency)*2+bit:h.frequency;
-                            const auto& bank=banks[bank_index];
-                            auto phase=code.value(chip,bit,fraction);
-                            if(config.spreading_mode==SpreadingMode::tone) {
-                                const auto tone=bank.frequency-config.carrier_hz-search.frequency_offsets_hz[h.frequency];
-                                phase*=std::polar(1.,-static_cast<double>(std::remainder(static_cast<long double>(observed)*tau*tone/config.sample_rate,static_cast<long double>(tau))));
-                            }
-                            const auto projection=bank.prefix[right]-bank.prefix[left];
-                            fit[bit].add(projection,phase,right-left);
-                        }
-                        observed=until;
-                    }
-                }
-                cursor=segment_end;
+                cursor=accumulate(h,hypothesis,cursor,end,code);
                 if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
             }
         }
@@ -542,6 +597,13 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
     auto& s=*impl_;cancelled(stop);require(!s.finished,"pattern capture already finished");
     require(samples.size()<=std::numeric_limits<std::uint64_t>::max()-s.sample,"pattern sample counter overflow");
     for(auto value:samples)require(std::isfinite(value),"nonfinite pattern sample");
+    // Idle epochs keep their original footprint so parallel scratch cannot
+    // displace other clock/key hypotheses from a shared receiver bank.
+    struct ReleaseWorkers {
+        Impl& state;
+        ~ReleaseWorkers() {state.drop_workers();}
+    } release{s};
+    if(!samples.empty())s.prepare_workers();
     for(std::size_t offset=0;offset<samples.size();offset+=std::min(s.block_samples,samples.size()-offset))
         s.process(samples.subspan(offset,std::min(s.block_samples,samples.size()-offset)),stop);
 }
@@ -581,6 +643,7 @@ bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of
 bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
+    if(bytes<working_bytes())impl_->drop_workers();
     require(bytes>=working_bytes(),"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
 Diagnostics PatternCorrelator::diagnostics()const {

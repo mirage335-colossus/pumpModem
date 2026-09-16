@@ -12,6 +12,7 @@
 #include <numeric>
 #include <random>
 #include <string>
+#include <tuple>
 
 using namespace datapump;
 namespace {
@@ -95,6 +96,153 @@ const modem::PatternBurst& exact(const Reception& result,const Bytes& bits) {
         throw Error("detected bits differ from exact payload: "+observed);
     }
     return result.bursts.front();
+}
+bool same_burst(const modem::PatternBurst& a,const modem::PatternBurst& b) {
+    return std::tie(a.bits,a.first_sample,a.end_sample,a.first_stream_symbol,a.frequency_hz,a.score,
+                    a.complete,a.stream_phase_samples,a.stream_first_sample,a.stream_first_symbol,
+                    a.missing_slots,a.support_samples)==
+           std::tie(b.bits,b.first_sample,b.end_sample,b.first_stream_symbol,b.frequency_hz,b.score,
+                    b.complete,b.stream_phase_samples,b.stream_first_sample,b.stream_first_symbol,
+                    b.missing_slots,b.support_samples);
+}
+bool same_evidence(const modem::PatternEvidence& a,const modem::PatternEvidence& b) {
+    return std::tie(a.first_sample,a.end_sample,a.stream_symbol,a.frequency_hz,a.score,a.alternative_score,
+                    a.bit,a.stream_phase_samples,a.admission_threshold)==
+           std::tie(b.first_sample,b.end_sample,b.stream_symbol,b.frequency_hz,b.score,b.alternative_score,
+                    b.bit,b.stream_phase_samples,b.admission_threshold);
+}
+struct ComparedProgress {
+    Bytes bits;
+    std::size_t pending_polls=0,complete_events=0,candidates=0;
+    std::size_t completed_at=0;
+};
+ComparedProgress compare_parallel_progress(const std::vector<float>& samples,const modem::Config& c,
+                                          modem::PatternSearch search,unsigned workers,bool shrink=false) {
+    constexpr std::size_t workspace=2*1024*1024,reduced=256*1024;
+    search.candidate_limit=31;search.track_limit=4;search.bit_limit=128;
+    search.worker_threads=1;modem::PatternReceiver serial(c,workspace,search);
+    search.worker_threads=workers;modem::PatternReceiver parallel(c,workspace,search);
+    ComparedProgress result;
+    std::size_t budget=workspace;
+    const auto poll=[&](std::size_t position) {
+        check(serial.working_bytes()<=budget && parallel.working_bytes()<=budget,
+              "parallel search exceeded the current workspace ceiling");
+        if(serial.working_bytes()!=parallel.working_bytes())
+            throw Error("worker count changed idle memory available to competing receive searches at "+
+                        std::to_string(position)+" samples (serial "+std::to_string(serial.working_bytes())+
+                        ", parallel "+std::to_string(parallel.working_bytes())+", "+std::to_string(workers)+
+                        " workers, "+std::to_string(c.spreading_factor)+" chips, "+std::to_string(c.sample_rate)+
+                        " Hz, private "+std::to_string(c.scramble)+", phase bank "+std::to_string(search.search_stream_phases)+")");
+        check(serial.acquiring()==parallel.acquiring() && serial.synchronized()==parallel.synchronized() &&
+              serial.clock_windowed()==parallel.clock_windowed(),
+              "worker count changed search status at a progress poll");
+        check(same_burst(serial.provisional(),parallel.provisional()),
+              "worker count changed an exact provisional prefix or its evidence");
+        for(const auto limit:{search.candidate_limit,std::size_t{3}}) {
+            const auto a=serial.candidates(limit),b=parallel.candidates(limit);
+            check(a.size()==b.size() && std::equal(a.begin(),a.end(),b.begin(),same_evidence),
+                  "worker count changed ordered candidate fields or admission thresholds");
+            result.candidates=std::max(result.candidates,a.size());
+        }
+        const auto a=serial.diagnostics(),b=parallel.diagnostics();
+        check(std::tie(a.sample_offset,a.preamble_correlation,a.snr_db,a.bit_rate,a.constellation,a.waveform,a.pattern_score)==
+              std::tie(b.sample_offset,b.preamble_correlation,b.snr_db,b.bit_rate,b.constellation,b.waveform,b.pattern_score) &&
+              a.preamble_reception.has_value()==b.preamble_reception.has_value(),
+              "worker count changed diagnostic values at a progress poll");
+        if(a.preamble_reception) {
+            const auto& x=*a.preamble_reception;const auto& y=*b.preamble_reception;
+            check(std::tie(x.expected_samples,x.observed_samples,x.matched_samples)==
+                  std::tie(y.expected_samples,y.observed_samples,y.matched_samples),
+                  "worker count changed observed preamble coverage");
+        }
+        const auto first=serial.take_bursts(),second=parallel.take_bursts();
+        check(first.size()==second.size() && std::equal(first.begin(),first.end(),second.begin(),same_burst),
+              "worker count delayed a pending bit or changed a burst event");
+        for(const auto& event:first) {
+            result.bits.insert(result.bits.end(),event.bits.begin(),event.bits.end());
+            result.bits.insert(result.bits.end(),event.missing_slots,modem::missing_pattern_bit);
+            if(!event.complete && (!event.bits.empty() || event.missing_slots))++result.pending_polls;
+            if(event.complete){++result.complete_events;result.completed_at=position;}
+        }
+        check(serial.take_chip_constellation()==parallel.take_chip_constellation(),
+              "worker count changed drainable chip points at a progress poll");
+    };
+    poll(0);
+    constexpr std::array<std::size_t,5> chunks{1,137,19,503,71};
+    for(std::size_t position=0,chunk=0;position<samples.size();++chunk) {
+        const auto count=std::min(chunks[chunk%chunks.size()],samples.size()-position);
+        const auto block=std::span(samples).subspan(position,count);
+        serial.push(block);parallel.push(block);position+=count;
+        poll(position);
+        if(shrink && budget==workspace && position>samples.size()/3) {
+            serial.set_workspace_bytes(reduced);parallel.set_workspace_bytes(reduced);budget=reduced;
+            poll(position);
+        }
+    }
+    serial.finish();parallel.finish();poll(samples.size());
+    serial.finish();parallel.finish();poll(samples.size());
+    return result;
+}
+void parallel_search_exact_progress() {
+    for(const unsigned workers:{3U,0U}) {
+        for(const bool keyed:{false,true}) {
+            const auto c=config(64,keyed);const auto symbol=modem::symbol_sample_count(c);
+            const auto step=.25*c.sample_rate/static_cast<double>(symbol);
+            modem::PatternSearch search;
+            // Duplicate offsets produce exact score ties. Search order must
+            // still select the same start/stream address and evidence record.
+            search.frequency_offsets_hz={0,0,-step,step,-step};
+            const auto result=compare_parallel_progress(waveform(c,{0,0,1},137,3*symbol,.73,.03),
+                                                        c,search,workers,true);
+            check(result.bits==Bytes({0,0,1}) && result.pending_polls>0 && result.candidates>0,
+                  "parallel comparison must exercise leading zeros, partial bytes and pending evidence");
+            check(result.complete_events==0,"parallel search treated EOF as physical completion");
+            std::vector<float> quiet(4*symbol);
+            search.retain_score=0;
+            const auto tied=compare_parallel_progress(quiet,c,search,workers);
+            check(tied.bits.empty() && tied.complete_events==0,
+                  "parallel tied background manufactured payload or completion");
+            std::mt19937_64 random(731);std::normal_distribution<float> noise;
+            for(auto& sample:quiet)sample=noise(random);
+            const auto background=compare_parallel_progress(quiet,c,search,workers);
+            check(background.bits.empty(),"parallel noise-only comparison admitted a payload");
+        }
+        auto short_private=config(16,true);short_private.dsss=true;short_private.dsss_seed[11]=139;
+        short_private.sample_rate=48000;short_private.bandwidth_hz=12000;short_private.carrier_hz=9000;
+        const auto short_symbol=modem::symbol_sample_count(short_private);
+        const auto short_result=compare_parallel_progress(waveform(short_private,{0,0,1},137,3*short_symbol,.31,.001),
+                                                          short_private,{},workers,true);
+        check(short_result.bits==Bytes({0,0,1}),"parallel sample-resolution private fit lost exact short bits");
+
+        for(const bool split_initial_phases:{false,true}) {
+            auto phase=config(split_initial_phases?128:16,true);phase.pulse_shaping=false;
+            if(split_initial_phases)phase.integration_seconds=.7;
+            else {phase.sample_rate=8000;phase.bandwidth_hz=1000;}
+            const auto symbol=modem::symbol_sample_count(phase);
+            const auto step=std::gcd(symbol,static_cast<std::uint64_t>(phase.sample_rate));
+            phase.stream_phase_samples=(std::min(symbol,static_cast<std::uint64_t>(phase.sample_rate))-1)/step*step;
+            Bytes bits{0,0,1,0,1,1,0,1,0,1,1,0,1,0,0,1};const auto block=bits;
+            if(!split_initial_phases)for(unsigned i=0;i<2;++i)bits.insert(bits.end(),block.begin(),block.end());
+            const auto samples=waveform(phase,bits,137,3*symbol,.37,.01);phase.stream_phase_samples=0;
+            modem::PatternSearch search;search.search_stream_phases=true;
+            const auto phased=compare_parallel_progress(samples,phase,search,workers);
+            check(phased.bits==bits,"parallel phase bank changed timestamp-dependent private bits");
+        }
+    }
+}
+void parallel_search_physical_absence() {
+    auto c=config(32,true);c.pulse_shaping=false;
+    c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=1;
+    const Bytes bits{0,0,1};const auto symbol=modem::symbol_sample_count(c);
+    constexpr std::size_t delay=17;
+    const auto samples=waveform(c,bits,delay,12*c.sample_rate,.37);
+    for(const unsigned workers:{3U,0U}) {
+        const auto result=compare_parallel_progress(samples,c,{},workers,true);
+        check(result.bits==bits && result.pending_polls>=2 && result.complete_events==1,
+              "parallel search must expose pending partial bytes and exactly one physical completion");
+        check(result.completed_at>=delay+bits.size()*symbol+modem::pattern_absence_samples(c),
+              "parallel search completed before six seconds of fully scored absence");
+    }
 }
 void exact_blind_bits() {
     constexpr std::array<std::size_t,6> chunks{1,7,131,19,503,47};
@@ -807,6 +955,8 @@ int main(int argc,char** argv) {
     run("shared projection and workspace updates",shared_projection_and_workspace_update);
     run("short pattern shared projection phase",short_pattern_shared_projection_phase);
     run("short template cache workspace and exact equivalence",short_template_cache_workspace);
+    run("parallel search exact progress",parallel_search_exact_progress);
+    run("parallel search physical absence",parallel_search_physical_absence);
     run("bounded long clock-window fallback",long_clock_window_fallback);
     run("hardware settling remains outside payload",hardware_settling_is_not_payload);
     return failures?1:0;

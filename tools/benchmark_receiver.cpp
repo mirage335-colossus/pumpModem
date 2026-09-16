@@ -2,6 +2,7 @@
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "../src/search_parallel.hpp"
 #include <charconv>
 #include <chrono>
 #include <cmath>
@@ -33,10 +34,11 @@ template<class Number> Number argument(std::string_view text,const char* name) {
 int main(int argc, char** argv) {
     using namespace datapump;
     try {
-        if(argc>4)throw Error("usage: benchmark_receiver [bandwidth_hz [target_cn0_db_hz [epoch_radius]]]");
+        if(argc>5)throw Error("usage: benchmark_receiver [bandwidth_hz [target_cn0_db_hz [epoch_radius [worker_threads]]]]");
         const auto bandwidth=argc>1?argument<double>(argv[1],"bandwidth_hz"):1200.;
         const auto target=argc>2?argument<double>(argv[2],"target_cn0_db_hz"):40.;
         const auto radius=argc>3?argument<unsigned>(argv[3],"epoch_radius"):6U;
+        const auto workers=argc>4?argument<unsigned>(argv[4],"worker_threads"):0U;
         if(!std::isfinite(target) || target < -200 || target > 200)
             throw Error("target_cn0_db_hz must be finite and within -200..200");
         if(radius>32)throw Error("epoch_radius must be within 0..32");
@@ -49,6 +51,7 @@ int main(int argc, char** argv) {
         for (int offset = -static_cast<int>(radius); offset <= static_cast<int>(radius); ++offset) {
             const auto epoch = static_cast<std::uint64_t>(static_cast<std::int64_t>(options.timestamp) + offset);
             modem::PatternSearch search;
+            search.worker_threads=workers;
             search.start_offset_seconds=static_cast<double>(offset)+
                 (static_cast<double>(modem::training_sample_count(options.modem))+
                  static_cast<double>(modem::pattern_pulse_padding_samples(options.modem)))/options.modem.sample_rate;
@@ -79,6 +82,8 @@ int main(int argc, char** argv) {
                   << options.modem.bandwidth_hz << " Hz bandwidth, " << target << " dB-Hz C/N0 target, "
                   << options.modem.spreading_factor << " chips, " << options.modem.constellation_bits << " bits/symbol, "
                   << bank.size() << " keyed epochs (radius " << radius << "), " << options.modem.sample_rate << " Hz generated PCM: "
+                  << modem::detail::search_concurrency(workers) << " available search workers (requested "
+                  << workers << (workers?", explicit":", default all but one CPU") << "), "
                   << std::setprecision(6) << media << " media seconds / "
                   << wall << " wall seconds = " << media / wall << "x real time\n";
     } catch (const std::exception& error) {
