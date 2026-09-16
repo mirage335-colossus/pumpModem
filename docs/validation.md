@@ -2493,3 +2493,54 @@ bandwidth and an 80 dB-Hz target, thirteen keyed epochs improved from 0.71x to
 1.25x real-time processing. The one-epoch case improved from 8.81x to 16.55x.
 Commands and the additional 1.2 kHz measurement are recorded in
 [throughput](throughput.md#cpu-and-live-throughput).
+
+### Search scheduling and simulation processing (2026-09-16)
+
+FFT scoring now queues several hypotheses per worker, sharing each worker's
+private transform and pattern state while retaining separate ordered results.
+Immutable FFT stage constants replace repeated identical calculations. Serial
+tracking reuses exact template and carrier phase values in existing acquisition
+buffers. No search hypotheses, arithmetic reductions, admission order, idle
+receiver footprint, wire format or physical-completion rules changed.
+
+An independent temporary probe linked the previous committed receiver and the
+final receiver against the same remaining library objects. All 5,933,472 bytes
+of its per-poll traces matched exactly across three fixtures at one, three and
+automatic workers. Fixtures cover split stream phases without optional caches,
+short private nonorthogonal sample fits with phase/carrier hypotheses, and
+midstream optional-cache eviction. Comparisons include pending prefixes, bursts,
+candidate evidence, thresholds, status, idle memory, diagnostics, constellation
+samples and repeated EOF handling. A separate old/new FFT probe found exact
+equality for power-of-two transforms from 4 through 65,536 in both directions.
+Executor tests also passed under one-, two-, four- and twelve-CPU affinity masks.
+
+The new `benchmark_simulation` target exercises the actual live session,
+including sampled channel generation, receiver-bank processing and replay
+preparation. It verifies exact bits, zero missing symbols and observed-absence
+completion, and excludes only the fixed three-second presentation replay.
+Instrumentation attributed about 99% of the original simulation's processing
+time to reception and under 1% to waveform/channel generation. The worker limit
+therefore does not imply full CPU utilization; ordered tracking and admission
+remain serial, and short scoring jobs incur synchronization overhead.
+
+The Release build, including FLTK and both benchmark targets, succeeded. All
+17 development-contract suites plus `search_parallel` passed (18/18, 162.98
+seconds). ThreadSanitizer passed exact parallel progress, physical absence and
+cache/workspace equivalence with the executor, both scorers, PatternCode,
+Crypto and tests instrumented; remaining archive objects and dependencies were
+uninstrumented. ASan/UBSan passed exact progress, physical absence, cache
+equivalence and shared-projection/workspace checks with the FFT receiver and
+tests instrumented; other objects were uninstrumented and leak checks were
+disabled for the sandbox restriction. The new simulation benchmark additionally
+verified exact one-bit and three-bit receptions with one and four CPUs available,
+selecting one and three workers respectively. Native display workflows, physical
+audio and Windows were not rerun.
+
+Final uncontended simulation pairs, with run order reversed, measured
+17.5172/17.3937 seconds for the previous committed receiver and
+14.6487/14.6905 seconds for the updated receiver. This is about 16% less processing
+time at 12 kHz, an 80 dB-Hz target, thirteen keyed epochs and 64 exact raw bits.
+The corresponding generated-noise benchmark improved from 1.25429x to 1.57008x
+real time, about 25% greater throughput. Both receiver versions used 11 workers
+and the same remaining library objects. Commands, CPU-utilization observations
+and measurement limits are in [throughput](throughput.md#cpu-and-live-throughput).

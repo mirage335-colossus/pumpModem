@@ -76,8 +76,11 @@ before they would reduce payload capacity or prevent a workspace reduction.
 Regression tests compare cached and uncached hypotheses and scores exactly.
 
 Iterative pattern scoring uses a shared persistent worker pool, defaulting to
-all but one CPU available to the process (at least one, respecting Linux CPU
-affinity). FFT hypotheses and clock-window fit accumulation run concurrently;
+all but one logical CPU available to the process (at least one, respecting Linux
+CPU affinity). This is calculated on each computer: 8 available logical CPUs
+select 7 workers, 16 select 15, and 1 selects 1. Other platforms use the C++
+runtime's hardware-concurrency count. FFT hypotheses and clock-window fit
+accumulation run concurrently;
 trial counting, tie-breaking, admission and physical completion retain their
 original order. Each worker has private mutable template state. Parallel scratch
 is charged to the receiver workspace and released before it would displace
@@ -85,6 +88,13 @@ payload storage or prevent a workspace reduction. Scratch is retained only
 during processing, preserving idle receiver-bank capacity. Available independent
 hypotheses and spare workspace can limit simultaneous workers. `PatternSearch::worker_threads = 1`
 selects serial scoring for comparisons; zero selects the automatic default.
+The worker count is a concurrency limit, not a promise that every worker stays
+busy. Ordered admission, short batches and synchronization limit scaling.
+FFT batches now queue several hypotheses per worker while reusing each worker's
+transform buffer and private pattern state; only results awaiting ordered
+collection need separate storage. Tracking refinements also reuse exact template
+and carrier phase values, using acquisition scratch buffers between transforms
+without increasing receiver memory even when optional caches are unavailable.
 
 A wide key/epoch bank can still fall behind real time. The benchmark below
 measures generated noise through the ordinary streaming receiver with one epoch
@@ -100,8 +110,9 @@ cmake --build build --target benchmark_receiver
 ./build/benchmark_receiver 12000 80 6 0
 ```
 
-On the 12-logical-CPU Ryzen 5 PRO 5650U development host, Release measurements
-on 2026-09-16 used five-second runs after warm-up:
+For the initial parallel implementation, Release measurements on the
+12-logical-CPU Ryzen 5 PRO 5650U development host on 2026-09-16 used five-second
+runs after warm-up:
 
 | Bandwidth / C/N0 target | Keyed epochs | One worker | Automatic (11 workers) | Speedup |
 | --- | ---: | ---: | ---: | ---: |
@@ -112,6 +123,43 @@ on 2026-09-16 used five-second runs after warm-up:
 The thirteen-epoch case exceeded real-time throughput with automatic workers in
 this run. These generated-noise measurements are CPU results, not successful
 file-transfer or interception tests; speedup depends on profile and hardware.
+
+The separate simulation benchmark runs the actual live session's sampled
+channel, receiver bank, progress and replay preparation, with no audio device
+or native window. It checks exact received bits, zero missing symbols and
+physical completion. A controlled presentation clock excludes the fixed
+three-second replay from the processing measurement. Arguments select bandwidth,
+target C/N0, epoch radius and raw-bit count; workers use the automatic default.
+
+```sh
+cmake --build build --target benchmark_simulation
+./build/benchmark_simulation 12000 80 6 64
+```
+
+After the scheduling and tracking improvements, two final paired simulation
+runs on the same host compared the previous committed receiver with the updated
+receiver, linked against the same remaining library objects. Both used 11
+automatic workers, 12 kHz bandwidth, an 80 dB-Hz target, thirteen keyed epochs
+and 64 raw bits. The run order was reversed for the second pair.
+
+| Simulation CPU processing | Previous receiver | Updated receiver |
+| --- | ---: | ---: |
+| First pair | 17.5172 s | 14.6487 s |
+| Reversed pair | 17.3937 s | 14.6905 s |
+| Mean | 17.4555 s | 14.6696 s |
+
+That is about 16% less processing time, or 19% greater throughput, over the
+previous parallel implementation. Each run processed 12.3663 seconds of sampled
+media and verified exact physical completion. Total process CPU time divided by
+wall time averaged about 3.0 busy logical CPUs before and 3.2 afterward. This
+shows the remaining serial-work and scheduling limits despite the 11-worker
+ceiling; it is not an elevenfold scaling claim. Other development runs varied
+with scheduling and host conditions, so use paired runs on the target computer.
+
+A final paired generated-noise run at the same bandwidth, target and thirteen
+epochs improved from 1.25429x to 1.57008x real time, about 25% more throughput
+than the previous parallel receiver. Both used the automatic 11-worker limit
+and the five-second measurement interval above.
 
 ## Higher information density
 
