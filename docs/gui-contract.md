@@ -54,7 +54,8 @@ The persistent **Rate** field defaults to `3.6 kHz`, with `18 kHz` also
 available as a preset. The adjacent editable **Carrier** dropdown defaults to
 `1.5 kHz`. Changing Rate resets Carrier to `1.5 kHz` for `3.6 kHz`, otherwise
 to the existing `max(1500, 0.75 × rate)` Hz recommendation. The dropdown offers
-only the current rate's default carrier. A manually entered carrier override
+the current rate's default carrier and its center frequency (half the rate),
+including `1.8 kHz` for `3.6 kHz`. A manually entered carrier override
 persists until the next rate change. Both fields configure transmit planning,
 receive profiles, live audio, simulation and inspection together. Rate remains
 the nominal timing parameter; it does not claim a measured spectral width.
@@ -422,6 +423,11 @@ provides titles/captions/error-overlay tone without any source-specific decision
 inside an adapter. Changing QR brightness affects only that bitmap and never
 changes modem state. Monochrome and color are shared presentation preferences;
 unsupported targets retain the grayscale path.
+
+Live waterfall history retains at most 160 rows. Short plots show the newest
+rows one per backing pixel; taller plots scale that bounded history to fill the
+available height. Startup history remains bottom-aligned with blank space for
+unobserved rows. Resizing does not clear or add measurements.
 
 The Console **Pattern evidence** plot places received P0 log scores on the
 horizontal axis and P1 log scores on the vertical axis. It preserves the spread

@@ -197,6 +197,45 @@ void measured_plots() {
     const auto compressed = render(retained, full_bitmap_request(1, 1));
     check(red(compressed, 0, 0) == 255, "narrow waterfall lost a peak between output columns");
 }
+void waterfall_resize() {
+    plots::SpectrumHistory history;
+    for (unsigned row = 0; row < 160; ++row)
+        history.push(std::vector<double>{-80. + row / 2., -100., 0.}, 20);
+    const auto source = PlotSnapshot::waterfall(history);
+    const auto original = render(source, full_bitmap_request(3, 160));
+    for (const unsigned height : {161U, 320U, 479U}) {
+        const auto enlarged = render(source, full_bitmap_request(9, height));
+        for (unsigned y = 0; y < height; ++y) for (unsigned x = 0; x < 9; ++x)
+            check(red(enlarged, x, y) == red(original, x / 3, y * 160 / height),
+                  "enlarged waterfall must scale its retained history across the full plot");
+    }
+    const auto smaller = render(source, full_bitmap_request(3, 80));
+    for (unsigned y = 0; y < 80; ++y) for (unsigned x = 0; x < 3; ++x)
+        check(red(smaller, x, y) == red(original, x, y + 80),
+              "smaller live waterfall must preserve its latest rows and time order");
+    check(render(source, full_bitmap_request(3, 160)).pixels() == original.pixels(),
+          "resizing waterfall changed its retained snapshot");
+
+    history.clear();
+    for (unsigned row = 0; row < 40; ++row)
+        history.push(std::vector<double>{-80. + row, 0.}, 20);
+    const auto partial = PlotSnapshot::waterfall(history);
+    const auto partial_original = render(partial, full_bitmap_request(2, 160));
+    const auto partial_enlarged = render(partial, full_bitmap_request(6, 321));
+    for (unsigned y = 0; y < 321; ++y) for (unsigned x = 0; x < 6; ++x)
+        check(red(partial_enlarged, x, y) == red(partial_original, x / 3, y * 160 / 321),
+              "partial waterfall history must keep its bottom alignment when enlarged");
+    check(red(partial_enlarged, 0, 240) == 0 && red(partial_enlarged, 0, 241) != 0 &&
+          red(partial_enlarged, 0, 320) == red(partial_original, 0, 159),
+          "enlarged waterfall invented history or lost the newest row");
+    const auto overview = render(PlotSnapshot::waterfall(history, true), full_bitmap_request(2, 320));
+    check(red(overview, 0, 0) == red(partial_original, 0, 120) &&
+          red(overview, 0, 319) == red(partial_original, 0, 159),
+          "overview waterfall must continue fitting all available rows");
+    const auto empty = render(PlotSnapshot::waterfall({}), full_bitmap_request(6, 321));
+    check(std::all_of(empty.pixels().begin(), empty.pixels().end(), [](auto value) { return value == 0; }),
+          "empty enlarged waterfall must remain blank");
+}
 void qr_and_patterns() {
     const auto code = encode_qr("Backend-independent QR");
     const auto side = static_cast<unsigned>((code.size() + 8) * 2);
@@ -460,7 +499,7 @@ void sampled_pattern_score_clouds() {
 }
 int main() {
     try {
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); waterfall_resize(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

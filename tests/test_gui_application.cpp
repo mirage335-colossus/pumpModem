@@ -523,20 +523,25 @@ void rate_carrier_declarations() {
     const auto& rate=control(F::bandwidth);const auto& carrier=control(F::carrier);
     check(std::string_view(rate.label)=="Rate" && std::string_view(carrier.label)=="Carrier" &&
           rate.kind==ui::Kind::text && carrier.kind==ui::Kind::text && rate.persistent && carrier.persistent &&
-          carrier.open_upward && app.field(carrier.field).options.size()==1 &&
-          app.field(carrier.field).options.front().id=="1.5 kHz",
+          carrier.open_upward && app.field(carrier.field).options.size()==2 &&
+          app.field(carrier.field).options.front().id=="1.5 kHz" &&
+          app.field(carrier.field).options.back().id=="1.8 kHz",
           "Rate and Carrier must be shared persistent editable dropdowns");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);app.preset(rate,"2.4 kHz");
-        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==1 &&
-              app.field(F::carrier).options.front().id=="1.8 kHz",
-              "Rate preset did not offer only its default Carrier on every page");
+        check(app.field(F::carrier).text=="1.8 kHz" && app.field(F::carrier).options.size()==2 &&
+              app.field(F::carrier).options.front().id=="1.8 kHz" && app.field(F::carrier).options.back().id=="1.2 kHz",
+              "Rate preset did not offer its default and center Carrier on every page");
+        app.preset(carrier,"1.2 kHz");
+        check(app.field(F::carrier).text=="1.2 kHz","Center Carrier preset did not use the shared edit path");
         app.edit(carrier,"2150 Hz");
         check(app.field(F::carrier).text=="2150 Hz","Carrier dropdown did not accept a custom frequency");
         app.preset(carrier,"1.8 kHz");
         check(app.field(F::carrier).text=="1.8 kHz","Default Carrier preset did not use the shared edit path");
         app.preset(rate,"3.6 kHz");
         check(app.field(F::carrier).text=="1.5 kHz","HF rate preset did not restore its recommended carrier");
+        app.preset(carrier,"1.8 kHz");
+        check(app.field(F::carrier).text=="1.8 kHz","HF rate center Carrier was not selectable on every page");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto rate_geometry=ui::control_layout(rate,app.field(rate.field),size.w,size.h);
             const auto carrier_geometry=ui::control_layout(carrier,app.field(carrier.field),size.w,size.h);

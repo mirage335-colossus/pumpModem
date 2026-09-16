@@ -70,7 +70,11 @@ struct DesktopLayout {
         // space, at the minimum desktop size. Taller windows grow the editors
         // and received history before allocating the remainder to the plots.
         const int height_growth=std::max(0,height-min_height);
-        const int compose_height=50+std::min(28,height_growth*28/80),qr_size=compose_height;
+        const int compose_height=50+std::min(28,height_growth*28/80);
+        // Span the editor and action rows so even the minimum window gives
+        // the smallest QR codes three pixels per module with their quiet zone.
+        // Limit growth in narrow windows to preserve room for the airtime.
+        const int qr_size=std::min(compose_height+8+action_height,87+std::max(0,width-min_width));
         const int editor_width = width - 2 * margin - qr_size - binary_width - 28;
         const int binary_x = margin + editor_width + 14;
         constexpr int previous_width = 240;
@@ -84,13 +88,13 @@ struct DesktopLayout {
         out[Slot::qr] = {width - margin - qr_size, compose_y, qr_size, qr_size};
 
         const int buttons_y = compose_y + compose_height + 8;
-        out[Slot::attach_file] = {margin, buttons_y, 169, action_height};
-        out[Slot::use_text] = {194, buttons_y, 78, action_height};
-        out[Slot::send_key] = {281, buttons_y, 129, action_height};
-        out[Slot::transmit] = {419, buttons_y, 112, action_height};
-        out[Slot::transmit_noise] = {540, buttons_y, 130, action_height};
-        out[Slot::cancel] = {679, buttons_y, 106, action_height};
-        out[Slot::airtime] = {796, buttons_y, width - margin - 796, action_height};
+        out[Slot::attach_file] = {margin, buttons_y, 96, action_height};
+        out[Slot::use_text] = {121, buttons_y, 74, action_height};
+        out[Slot::send_key] = {204, buttons_y, 129, action_height};
+        out[Slot::transmit] = {342, buttons_y, 94, action_height};
+        out[Slot::transmit_noise] = {445, buttons_y, 130, action_height};
+        out[Slot::cancel] = {584, buttons_y, 100, action_height};
+        out[Slot::airtime] = {695, buttons_y, out[Slot::qr].x - 14 - 695, action_height};
 
         out[Slot::transmit_scope_caption]={margin,buttons_y+31,width-2*margin-144,transmit_scope_visible?18:0};
         out[Slot::transmit_scope_format]={width-margin-136,buttons_y+31,136,18};

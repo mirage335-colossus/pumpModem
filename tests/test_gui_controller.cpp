@@ -313,6 +313,28 @@ void rate_carrier_controls() {
           controller.field(F::snr).text=="32" && controller.field(F::long_snr).text=="55" &&
           controller.settings().transfer.fec==FecMode::rs60,
           "GUI defaults must use the 3.6 kHz rate, 1.5 kHz carrier, 32/55 dB-Hz targets and 60% FEC");
+    struct CarrierPreset { const char* rate; const char* recommended; const char* center; double center_hz; };
+    constexpr CarrierPreset presets[]={
+        {"1 Hz","1.5 kHz","0.5 Hz",.5},{"100 Hz","1.5 kHz","50 Hz",50},
+        {"1.2 kHz","1.5 kHz","600 Hz",600},{"2.4 kHz","1.8 kHz","1.2 kHz",1200},
+        {"3.6 kHz","1.5 kHz","1.8 kHz",1800},{"12 kHz","9 kHz","6 kHz",6000},
+        {"18 kHz","13.5 kHz","9 kHz",9000},{"24 kHz","18 kHz","12 kHz",12000},
+        {"1 MHz","750 kHz","500 kHz",500000},{"30 MHz","22.5 MHz","15 MHz",15000000}};
+    for(const auto& preset:presets) {
+        controller.edit(F::bandwidth,preset.rate);
+        const auto& carrier=controller.field(F::carrier);
+        check(carrier.text==preset.recommended && carrier.options.size()==2 &&
+              carrier.options[0].id==preset.recommended && carrier.options[1].id==preset.center,
+              "Rate presets must keep the recommended carrier first and offer the center frequency");
+        controller.edit(F::carrier,preset.center);
+        check(controller.settings().transfer.modem.carrier_hz==preset.center_hz,
+              "A center carrier suggestion did not reach the modem configuration");
+    }
+    controller.edit(F::bandwidth,"3 kHz");
+    check(controller.field(F::carrier).options.size()==2 && controller.field(F::carrier).options.front().id=="2.25 kHz" &&
+          controller.field(F::carrier).options.back().id=="1.5 kHz",
+          "A manually entered Rate must offer its recommended and center carriers");
+    controller.edit(F::bandwidth,"3.6 kHz");
     controller.edit(F::carrier,"1650 Hz");
     check(controller.settings().transfer.modem.carrier_hz==1650,
           "A custom audio carrier did not reach the modem configuration");

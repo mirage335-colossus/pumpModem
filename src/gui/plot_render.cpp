@@ -281,9 +281,15 @@ void PlotSnapshot::paint(const BitmapRequest& request, const BitmapSink& sink, b
             });
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
             const auto& history = data.history.rows();
+            // Keep the recent one-row-per-pixel view in short plots. Beyond
+            // retention capacity, scale that same time window to the available
+            // height instead of leaving history in a fixed strip at the bottom.
+            // Missing startup history stays blank at the top at the same scale.
+            const auto visible_rows = std::min<std::size_t>(request.height, SpectrumHistory::capacity);
             rows(request, sink, color, [&](unsigned x, unsigned y) {
                 const auto source = data.overview ? static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * history.size() / request.height) :
-                    static_cast<std::ptrdiff_t>(history.size()) - height + static_cast<int>(y);
+                    static_cast<std::ptrdiff_t>(history.size()) - static_cast<std::ptrdiff_t>(visible_rows) +
+                    static_cast<std::ptrdiff_t>(static_cast<std::size_t>(y) * visible_rows / request.height);
                 if (source < 0 || static_cast<std::size_t>(source) >= history.size()) return gray(0);
                 const auto& row = history[static_cast<std::size_t>(source)];
                 const auto first = static_cast<std::size_t>(x) * row.size() / request.width;

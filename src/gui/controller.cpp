@@ -252,6 +252,8 @@ struct Controller::Impl {
         auto& carrier=f(UiField::carrier);
         carrier.text=frequency_text(recommended_gui_carrier(rate));
         carrier.options={{carrier.text,carrier.text}};
+        const auto center=frequency_text(rate/2);
+        if(center!=carrier.text)carrier.options.push_back({center,center});
     }
     void configure(bool match_receive_target=false,bool match_carrier=false) {
         receive_targets_due.reset();

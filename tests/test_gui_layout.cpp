@@ -20,10 +20,10 @@ void established_default() {
           "desktop default or minimum size changed");
     check(layout[Slot::tabs] == Rect{16, 94, 1148, 656}, "tab viewport moved");
     check(layout[Slot::page] == Rect{16, 126, 1148, 624}, "page viewport moved");
-    check(layout[Slot::message] == Rect{16, 152, 822, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{598, 130, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{852, 152, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1086, 152, 78, 78}, "QR preview moved");
+    check(layout[Slot::message] == Rect{16, 152, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 130, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 152, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 152, 115, 115}, "QR preview must span the editor and action rows");
     check(layout[Slot::transmit_scope] == Rect{16, 289, 1148, 206}, "generation scope size changed");
     check(layout[Slot::profile_reference] == Rect{884, 651, 280, 91}, "profile reference must share the plot row at the right edge");
     check(layout[Slot::signals] == Rect{16, 518, 882, 110}, "received signals size changed");
@@ -47,7 +47,8 @@ void document_widths() {
         "Small native viewports ignored the shared minimum document content width");
 }
 void supported_sizes() {
-    for (const auto size : {Rect{0, 0, min_width, min_height},
+    for (const auto size : {Rect{0, 0, min_width, min_height}, Rect{0, 0, min_width, default_height},
+                            Rect{0, 0, min_width, 1200}, Rect{0, 0, 1920, min_height},
                             Rect{0, 0, default_width, default_height},
                             Rect{0, 0, 1387, 1001}, Rect{0, 0, 1920, 1080}}) {
         const DesktopLayout layout(size.w, size.h);
@@ -63,10 +64,21 @@ void supported_sizes() {
         }
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
-              message.h == binary.h && binary.h == qr.h && qr.w == qr.h,
+              message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&
+              qr.h > message.h && qr.y + qr.h <= layout[Slot::transmit].y + layout[Slot::transmit].h,
               "composition row is misaligned");
         check(binary.x == message.x + message.w + 14 && qr.x == binary.x + binary.w + 14 &&
               qr.x + qr.w == size.w - margin, "composition gaps changed");
+        auto previous_action=layout[Slot::attach_file];
+        for(const auto slot:{Slot::use_text,Slot::send_key,Slot::transmit,Slot::transmit_noise,Slot::cancel,Slot::airtime}) {
+            const auto action=layout[slot];
+            check(action.y==previous_action.y&&action.h==previous_action.h&&
+                  action.x>=previous_action.x+previous_action.w+9&&action.x+action.w<=qr.x-14,
+                  "Larger QR overlaps compose actions or airtime");
+            previous_action=action;
+        }
+        check(layout[Slot::airtime].w>=218&&qr.y+qr.h<=layout[Slot::transmit_scope_caption].y,
+              "Larger QR clips the airtime or overlaps the generation scope heading");
         check(layout[Slot::qr_brightness].w>=78&&layout[Slot::binary_label].w>=192&&
               layout[Slot::binary_label].x+layout[Slot::binary_label].w+14==layout[Slot::qr_brightness].x,
               "Compact QR brightness choice clips its value or overlaps the binary heading");

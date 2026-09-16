@@ -2415,3 +2415,42 @@ sensitivity already described in the Rev backend notes; review found no selected
 transmit-configuration mismatch. The log alone does not distinguish rendering
 delay from host contention. Native workflow coverage is therefore not a clean
 pass for Rev. No new physical audio or Windows validation was performed.
+
+### Carrier centers, QR preview size and waterfall resizing (2026-09-16)
+
+Every Rate now offers its half-rate center carrier alongside the unchanged
+recommended default, including 1.8 kHz for 3.6 kHz. Shared controller/application
+coverage checks all ten presets, custom rates, selection on every page and
+continued manual overrides.
+
+The QR preview spans the composition and action rows, growing from 78 to 115
+logical pixels at the default size and from 50 to 87 at the minimum. Width-aware
+growth preserves airtime space in tall, narrow windows. Existing editor heights,
+generation rows, received history and plot geometry remain unchanged. Layout
+checks cover minimum/default, tall/narrow and short/wide windows and prevent
+overlap with controls or captions; QR expansion and integer module rendering
+remain unchanged.
+
+Live waterfall rows previously occupied one backing pixel each even when the
+plot exceeded the 160-row retention bound. Taller plots now scale that bounded
+history to the available height, with missing startup history still blank and
+bottom-aligned. Smaller plots retain the recent-row behavior. Pixel regressions
+cover full/partial/empty histories, odd heights, horizontal scaling, shrinking
+back and the unchanged overview mode; the enlarged-history case failed before
+the renderer fix. No modem framing, symbol timing, source interpretation or
+pending-reception behavior changed.
+
+Release builds succeeded for FLTK and Rev. All development-contract suites
+passed, and the final shared GUI run passed all 24 tests, including the QR,
+layout, bitmap, overlay and application regressions. An earlier application
+test used an intermediate layout build; rebuilding the final layout resolved
+its button-width assertion without changing that assertion.
+
+Native screenshots on a private 96-DPI X display checked both backends at
+1180×909, 1030×829, 1030×1200 and 1920×1440, then restored the default size and
+expanded the QR. The final minimum-width airtime and action labels fit, the
+larger QR remained square, and the waterfall retained and scaled its observed
+history. Rev's carrier popup visibly offered 1.5 kHz and 1.8 kHz. FLTK adapter
+and document conformance passed, as did Rev adapter, platform and 1×/2×
+coordinate conformance. Full native transmission
+workflows, physical audio and Windows were not rerun for these shared UI fixes.
