@@ -90,9 +90,14 @@ hypotheses and spare workspace can limit simultaneous workers. `PatternSearch::w
 selects serial scoring for comparisons; zero selects the automatic default.
 The worker count is a concurrency limit, not a promise that every worker stays
 busy. Ordered admission, short batches and synchronization limit scaling.
-FFT batches now queue several hypotheses per worker while reusing each worker's
-transform buffer and private pattern state; only results awaiting ordered
-collection need separate storage. Tracking refinements also reuse exact template
+FFT batch capacity follows the search bank and spare memory independently of
+CPU worker count, while reusing each worker's transform buffer and private
+pattern state; only jobs and results awaiting ordered collection need separate
+storage. Long-symbol correlation groups original blocks between possible
+symbol completions and exposes bounded numerical tiles of up to 65,536 lanes.
+The [compute interfaces and GPU port requirements](search-compute.md) describe
+these CPU implementations and the work still required for device execution.
+Tracking refinements also reuse exact template
 and carrier phase values, using acquisition scratch buffers between transforms
 without increasing receiver memory even when optional caches are unavailable.
 

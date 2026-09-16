@@ -3,6 +3,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "search_parallel.hpp"
+#include "pattern_correlator_batch.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -17,32 +18,8 @@ constexpr double tau = 2 * std::numbers::pi;
 constexpr std::size_t block_size = 128;
 void require(bool condition, const char* message) { if (!condition) throw Error(message); }
 void cancelled(std::stop_token stop) { if (stop.stop_requested()) throw Error("pattern correlation cancelled"); }
-struct Projection {
-    double xc=0,xs=0,cc=0,ss=0,cs=0,energy=0;
-    Projection operator-(const Projection& b) const {
-        return {xc-b.xc,xs-b.xs,cc-b.cc,ss-b.ss,cs-b.cs,energy-b.energy};
-    }
-};
-struct Fit : Projection {
-    std::uint64_t count=0;
-    void add(const Projection& p, Complex phase, std::size_t n) {
-        const auto a=phase.real(),b=phase.imag();
-        xc+=a*p.xc-b*p.xs;xs+=b*p.xc+a*p.xs;
-        cc+=a*a*p.cc+b*b*p.ss-2*a*b*p.cs;
-        ss+=b*b*p.cc+a*a*p.ss+2*a*b*p.cs;
-        cs+=a*b*(p.cc-p.ss)+(a*a-b*b)*p.cs;
-        energy+=p.energy;count+=n;
-    }
-    double score() const {
-        const auto determinant=cc*ss-cs*cs;
-        if(count<=2 || energy<=1e-30 || determinant<=1e-12*std::max(1.,cc*ss))return 0;
-        const auto explained=(ss*xc*xc+cc*xs*xs-2*cs*xc*xs)/determinant;
-        const auto fraction=std::clamp(explained/energy,0.,1.-1e-15);
-        // Two fitted real carrier bases in N independent real Gaussian samples:
-        // R² ~ Beta(1,(N-2)/2). This includes the exact quadrature Gram matrix.
-        return -.5*static_cast<double>(count-2)*std::log1p(-fraction);
-    }
-};
+using Projection=detail::CorrelationProjection;
+using Fit=detail::CorrelationFit;
 struct Bank {
     double frequency=0;
     std::vector<Projection> prefix;
@@ -539,6 +516,109 @@ struct PatternCorrelator::Impl {
         }
         return segment_end;
     }
+    void record_point(const Projection& measured) {
+        const Complex point{measured.xc,measured.xs};
+        const auto delta=std::abs(previous_point)>1e-20?point*std::conj(previous_point)/std::abs(previous_point):point;
+        if(point_count==points.size()){point_begin=(point_begin+1)%points.size();--point_count;}
+        points[(point_begin+point_count++)%points.size()]=delta;previous_point=point;
+    }
+    std::size_t process_batch(std::span<const float> input,std::stop_token stop) {
+        // Preserve the scalar path as a reference, and never collect samples
+        // across a caller's progress poll. Small/tight-workspace pushes retain
+        // the original one-block path. No completion is allowed in this batch.
+        if(worker_codes.size()<2 || input.size()<=block_samples)return 0;
+        constexpr std::size_t max_blocks=64,max_lanes=65536;
+        using Lane=detail::CorrelationLane;
+        using Block=detail::CorrelationBlock;
+        const auto retained=sizeof(PatternCorrelator)+working_bytes();
+        if(retained>=budget)return 0;
+        const auto spare=budget-retained;
+        const auto per_block=banks.size()*(block_samples+1)*sizeof(Projection)+sizeof(Block);
+        const auto frequencies_bytes=banks.size()*sizeof(double);
+        const auto minimum_lanes=std::min<std::size_t>(64,hypotheses.size());
+        const auto minimum_bytes=frequencies_bytes+minimum_lanes*sizeof(Lane);
+        if(spare<=minimum_bytes || (spare-minimum_bytes)/per_block<2)return 0;
+        const auto block_capacity=std::min(max_blocks,(spare-minimum_bytes)/per_block);
+        const auto proposed=std::min(input.size(),block_capacity*block_samples);
+        auto boundary=std::numeric_limits<long double>::infinity();
+        for(const auto& h:hypotheses) {
+            const auto end=std::ceil(h.origin+(static_cast<long double>(h.index)+1)*code.symbol_samples()/h.rate);
+            boundary=std::min(boundary,end);
+        }
+        std::size_t consumed=0,block_count=0;
+        while(consumed<proposed) {
+            const auto count=std::min(block_samples,proposed-consumed);
+            if(static_cast<long double>(sample+consumed+count)>=boundary)break;
+            consumed+=count;++block_count;
+        }
+        if(block_count<2)return 0;
+        const auto projection_count=block_count*banks.size()*(block_samples+1);
+        const auto fixed_bytes=projection_count*sizeof(Projection)+block_count*sizeof(Block)+frequencies_bytes;
+        const auto lane_capacity=std::min({max_lanes,hypotheses.size(),(spare-fixed_bytes)/sizeof(Lane)});
+        // Exact-size temporary arrays make the peak reservation independent of
+        // vector growth policy. They disappear before ordered completion can
+        // grow payloads; idle footprints and receiver-bank admission stay intact.
+        auto projections=std::make_unique<Projection[]>(projection_count);
+        auto blocks=std::make_unique<Block[]>(block_count);
+        auto frequencies=std::make_unique<double[]>(banks.size());
+        auto lanes=std::make_unique<Lane[]>(lane_capacity);
+        for(std::size_t f=0;f<banks.size();++f)frequencies[f]=banks[f].frequency;
+        std::size_t offset=0,row_offset=0;
+        for(std::size_t b=0;b<block_count;++b) {
+            cancelled(stop);
+            const auto count=std::min(block_samples,consumed-offset);
+            blocks[b]={sample+offset,count,row_offset};
+            for(std::size_t f=0;f<banks.size();++f) {
+                auto prefix=std::span(projections.get()+row_offset+f*(count+1),count+1);
+                prefix[0]={};
+                auto oscillator=std::polar(1.,static_cast<double>(std::remainder(static_cast<long double>(sample+offset)*tau*
+                    banks[f].frequency/config.sample_rate,static_cast<long double>(tau))));
+                const auto step=std::polar(1.,tau*banks[f].frequency/config.sample_rate);
+                for(std::size_t i=0;i<count;++i) {
+                    const auto c=oscillator.real(),s=oscillator.imag(),x=static_cast<double>(input[offset+i]);
+                    auto p=prefix[i];p.xc+=x*c;p.xs+=x*s;p.cc+=c*c;p.ss+=s*s;p.cs+=c*s;p.energy+=x*x;
+                    prefix[i+1]=p;oscillator*=step;
+                }
+            }
+            row_offset+=banks.size()*(count+1);offset+=count;
+        }
+        detail::CorrelationBatch batch{
+            {config.stream_epoch,code.symbol_samples(),code.chip_samples(),code.chips_per_symbol(),phase_step,
+             config.sample_rate,search.frequency_offsets_hz.size(),config.carrier_hz,shaped,
+             config.spreading_mode==SpreadingMode::tone,
+             {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
+              config.spreading_seed,config.dsss_seed}},
+            {blocks.get(),block_count},{projections.get(),row_offset},{frequencies.get(),banks.size()},search.frequency_offsets_hz};
+        // Numeric tiles contain no PatternBurst, heap-owned input, or references
+        // to peer admission state. Device implementations can operate on these
+        // same indexed lanes without creating one host thread per hypothesis.
+        for(std::size_t first=0;first<hypotheses.size();) {
+            const auto count=std::min(lane_capacity,hypotheses.size()-first);
+            for(std::size_t i=0;i<count;++i) {
+                const auto& h=hypotheses[first+i];auto& lane=lanes[i];
+                lane.origin=h.origin;lane.rate=h.rate;lane.index=h.index;lane.observed_start=h.observed_start;
+                lane.phase_lower=h.phase_lower;lane.phase_upper=h.phase_upper;
+                lane.frequency=h.frequency;lane.rate_index=h.rate_index;lane.fits[0]=h.fits;
+                for(std::size_t group=0;group<alternate_groups;++group)
+                    lane.fits[group+1]=alternate_fits[(first+i)*alternate_groups+group];
+            }
+            detail::accumulate_correlator_cpu(batch,{lanes.get(),count},worker_codes,stop);
+            for(std::size_t i=0;i<count;++i) {
+                auto& h=hypotheses[first+i];const auto& lane=lanes[i];
+                h.observed_start=lane.observed_start;h.fits=lane.fits[0];
+                for(std::size_t group=0;group<alternate_groups;++group)
+                    alternate_fits[(first+i)*alternate_groups+group]=lane.fits[group+1];
+            }
+            first+=count;
+        }
+        for(std::size_t b=0;b<block_count;++b)
+            record_point(projections[blocks[b].projection_offset+blocks[b].count]);
+        const auto& last=blocks[block_count-1];
+        for(std::size_t f=0;f<banks.size();++f)
+            std::copy_n(projections.get()+last.projection_offset+f*(last.count+1),last.count+1,banks[f].prefix.begin());
+        sample+=consumed;
+        return consumed;
+    }
     void process(std::span<const float> input,std::stop_token stop) {
         for(std::size_t b=0;b<banks.size();++b) {
             cancelled(stop);auto& bank=banks[b];bank.prefix[0]={};
@@ -579,11 +659,7 @@ struct PatternCorrelator::Impl {
                 if(static_cast<long double>(cursor)>=symbol_end)complete(h,hypothesis,cursor);
             }
         }
-        const auto& measured=banks.front().prefix[input.size()];
-        const Complex point{measured.xc,measured.xs};
-        const auto delta=std::abs(previous_point)>1e-20?point*std::conj(previous_point)/std::abs(previous_point):point;
-        if(point_count==points.size()){point_begin=(point_begin+1)%points.size();--point_count;}
-        points[(point_begin+point_count++)%points.size()]=delta;previous_point=point;
+        record_point(banks.front().prefix[input.size()]);
         sample=end;
         room_for(0);
     }
@@ -604,8 +680,14 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         ~ReleaseWorkers() {state.drop_workers();}
     } release{s};
     if(!samples.empty())s.prepare_workers();
-    for(std::size_t offset=0;offset<samples.size();offset+=std::min(s.block_samples,samples.size()-offset))
-        s.process(samples.subspan(offset,std::min(s.block_samples,samples.size()-offset)),stop);
+    for(std::size_t offset=0;offset<samples.size();) {
+        auto count=s.process_batch(samples.subspan(offset),stop);
+        if(!count) {
+            count=std::min(s.block_samples,samples.size()-offset);
+            s.process(samples.subspan(offset,count),stop);
+        }
+        offset+=count;
+    }
 }
 void PatternCorrelator::finish(std::stop_token stop) {
     auto& s=*impl_;cancelled(stop);if(s.finished)return;

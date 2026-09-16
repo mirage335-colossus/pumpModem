@@ -6,6 +6,7 @@
 #include <exception>
 #include <limits>
 #include <mutex>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -37,16 +38,19 @@ private:
     bool previous_;
 };
 
-void serial_search(std::size_t count,
-                   const std::function<void(std::size_t, std::size_t)>& work) {
+using RangeWork = std::function<void(std::size_t, std::size_t, std::size_t)>;
+
+void serial_search_ranges(std::size_t count, std::size_t grain, const RangeWork& work) {
     ExecutionScope scope;
     std::exception_ptr error;
-    for (std::size_t index = 0; index < count; ++index) {
+    for (std::size_t begin = 0; begin < count;) {
+        const auto end = begin + std::min(grain, count - begin);
         try {
-            work(0, index);
+            work(0, begin, end);
         } catch (...) {
             if (!error) error = std::current_exception();
         }
+        begin = end;
     }
     if (error) std::rethrow_exception(error);
 }
@@ -62,13 +66,13 @@ public:
         for (auto& worker : workers_) worker.join();
     }
 
-    void run(std::size_t count, std::size_t concurrency,
-             const std::function<void(std::size_t, std::size_t)>& work) {
+    void run(std::size_t count, std::size_t concurrency, std::size_t grain,
+             const RangeWork& work) {
         // Include serial submissions in admission so unrelated searches cannot
         // each recruit a full set of workers or compete with an admitted batch.
         std::unique_lock admission(submission_mutex_);
         if (concurrency == 1) {
-            serial_search(count, work);
+            serial_search_ranges(count, grain, work);
             return;
         }
         ensure_workers(concurrency - 1);
@@ -76,6 +80,7 @@ public:
             std::lock_guard lock(state_mutex_);
             work_ = &work;
             count_ = count;
+            grain_ = grain;
             concurrency_ = concurrency;
             remaining_ = concurrency - 1;
             next_.store(0, std::memory_order_relaxed);
@@ -125,16 +130,20 @@ private:
     void execute(std::size_t slot) {
         ExecutionScope scope;
         for (;;) {
-            auto index = next_.load(std::memory_order_relaxed);
+            auto begin = next_.load(std::memory_order_relaxed);
+            std::size_t end;
             do {
-                if (index >= count_) return;
-            } while (!next_.compare_exchange_weak(index, index + 1, std::memory_order_relaxed));
+                if (begin >= count_) return;
+                // Subtract before adding: neither count nor grain needs space
+                // for an extra sentinel, including when either is SIZE_MAX.
+                end = begin + std::min(grain_, count_ - begin);
+            } while (!next_.compare_exchange_weak(begin, end, std::memory_order_relaxed));
             try {
-                (*work_)(slot, index);
+                (*work_)(slot, begin, end);
             } catch (...) {
                 std::lock_guard lock(error_mutex_);
-                if (index < error_index_) {
-                    error_index_ = index;
+                if (begin < error_index_) {
+                    error_index_ = begin;
                     error_ = std::current_exception();
                 }
             }
@@ -147,8 +156,9 @@ private:
     std::condition_variable changed_;
     std::condition_variable finished_;
     std::vector<std::thread> workers_;
-    const std::function<void(std::size_t, std::size_t)>* work_ = nullptr;
+    const RangeWork* work_ = nullptr;
     std::size_t count_ = 0;
+    std::size_t grain_ = 1;
     std::size_t concurrency_ = 0;
     std::size_t remaining_ = 0;
     std::size_t generation_ = 0;
@@ -168,13 +178,21 @@ std::size_t search_concurrency(std::size_t requested) {
 
 void parallel_search(std::size_t count, std::size_t concurrency,
                      const std::function<void(std::size_t, std::size_t)>& work) {
+    parallel_search_ranges(count, concurrency, 1,
+        [&work](std::size_t worker, std::size_t begin, std::size_t) { work(worker, begin); });
+}
+
+void parallel_search_ranges(std::size_t count, std::size_t concurrency,
+                            std::size_t grain, const RangeWork& work) {
+    if (grain == 0) throw std::invalid_argument("search range grain must be nonzero");
     if (count == 0) return;
     if (executing_search) {
-        serial_search(count, work);
+        serial_search_ranges(count, grain, work);
         return;
     }
+    const auto ranges = count / grain + static_cast<std::size_t>(count % grain != 0);
     static SearchPool pool;
-    pool.run(count, std::min(count, search_concurrency(concurrency)), work);
+    pool.run(count, std::min(ranges, search_concurrency(concurrency)), grain, work);
 }
 
 } // namespace datapump::modem::detail

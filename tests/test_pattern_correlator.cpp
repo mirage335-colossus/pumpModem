@@ -783,6 +783,82 @@ void parallel_search_preserves_every_poll() {
         check(reduced.candidates().empty() && reduced.take_bursts().empty(),"cancelled clock scoring published observations");
     }
 }
+void parallel_long_tiles_preserve_boundaries() {
+    const auto burst_fields=[](const modem::PatternBurst& b) {
+        return std::tie(b.bits,b.first_sample,b.end_sample,b.first_stream_symbol,b.frequency_hz,b.score,
+            b.complete,b.stream_phase_samples,b.stream_first_sample,b.stream_first_symbol,b.missing_slots,b.support_samples);
+    };
+    const auto evidence_fields=[](const modem::PatternEvidence& e) {
+        return std::tie(e.first_sample,e.end_sample,e.stream_symbol,e.frequency_hz,e.score,e.alternative_score,
+            e.bit,e.stream_phase_samples,e.admission_threshold);
+    };
+    // These pushes contain dozens of unchanged 32/128-sample projection
+    // blocks before any decision can become available. One worker retains
+    // the scalar block order and is the independent arithmetic reference.
+    for(const bool compact:{false,true})for(const unsigned mode:{0U,1U,2U})for(const bool tight:{false,true}) {
+        auto c=config();c.sample_rate=256;c.bandwidth_hz=64;c.carrier_hz=64;c.integration_seconds=8.125;
+        c.pulse_shaping=mode==1;c.stream_phase_samples=32;
+        if(mode==2){c.spreading_mode=modem::SpreadingMode::tone;c.scramble=false;c.dsss=false;}
+        constexpr std::size_t delay=16,workspace=4*1024*1024;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+        const auto first=delay+static_cast<std::size_t>(modem::pattern_pulse_padding_samples(c));
+        auto samples=waveform({0,0,1},c,delay);
+        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(first)/c.sample_rate;
+        search.start_uncertainty_seconds=.03;search.frequency_offsets_hz={0,-.01,.01};
+        search.clock_errors_ppm={-100,0,100};search.search_stream_phases=true;
+        search.compact_clock_search=compact;search.candidate_limit=128;search.bit_limit=16;
+        search.worker_threads=1;modem::PatternCorrelator scalar(c,search,workspace);
+        search.worker_threads=4;modem::PatternCorrelator tiled(c,search,workspace);
+        // Spare bytes cover short pending prefixes but cannot hold even two
+        // PatternCode caches. Optional batching must fall back without changing
+        // coverage, retention limits, admission or physical completion.
+        const auto budget=tight?std::max(scalar.working_bytes(),tiled.working_bytes())+512:workspace;
+        scalar.set_workspace_bytes(budget);tiled.set_workspace_bytes(budget);
+        bool accepted=false,completed=false;
+        const auto compare=[&] {
+            check(burst_fields(scalar.provisional())==burst_fields(tiled.provisional()),
+                  "long correlation tile changed provisional fields or exact scores");
+            check(scalar.acquiring()==tiled.acquiring() && scalar.synchronized()==tiled.synchronized(),
+                  "long correlation tile changed acquisition state at a poll");
+            const auto a=scalar.candidates(),b=tiled.candidates();
+            check(a.size()==b.size(),"long correlation tile changed retained evidence count");
+            for(std::size_t i=0;i<a.size();++i)
+                check(evidence_fields(a[i])==evidence_fields(b[i]),
+                      "long correlation tile changed evidence order, arithmetic or trial thresholds");
+            const auto x=scalar.diagnostics(),y=tiled.diagnostics();
+            check(x.sample_offset==y.sample_offset && x.bit_rate==y.bit_rate && x.pattern_score==y.pattern_score,
+                  "long correlation tile changed diagnostics");
+            check(scalar.take_chip_constellation()==tiled.take_chip_constellation(),
+                  "long correlation tile changed original-block constellation points");
+            const auto left=scalar.take_bursts(),right=tiled.take_bursts();
+            check(left.size()==right.size(),"long correlation tile changed pending event count");
+            for(std::size_t i=0;i<left.size();++i) {
+                check(burst_fields(left[i])==burst_fields(right[i]),
+                      "long correlation tile changed pending bits or event order");
+                accepted|=!left[i].bits.empty();completed|=left[i].complete;
+            }
+            check(scalar.working_bytes()<=budget && tiled.working_bytes()<=budget,
+                  "long correlation tile exceeded its workspace ceiling");
+        };
+        std::size_t position=0;
+        const auto push_until=[&](std::size_t end) {
+            while(position<end) {
+                const auto count=std::min<std::size_t>(4096,end-position);
+                const auto input=std::span(samples).subspan(position,count);
+                scalar.push(input);tiled.push(input);position+=count;compare();
+            }
+        };
+        // Poll on each side of an exact nominal symbol endpoint, including
+        // the first block whose fully observed absence may finish the stream.
+        for(std::size_t index=1;index<=4;++index) {
+            const auto end=first+index*symbol;
+            push_until(end-1);push_until(end);push_until(end+1);
+        }
+        push_until(samples.size());
+        check(accepted && completed,"long correlation tile fixture must admit bits and physically complete");
+        scalar.finish();tiled.finish();compare();
+    }
+}
 }
 int main(int argc,char** argv) {
     unsigned failures=0;
@@ -815,6 +891,7 @@ int main(int argc,char** argv) {
     run("compact_clock_search_preserves_evidence_and_bounds",compact_clock_search_preserves_evidence_and_bounds);
     run("bounded_hours_and_noise",bounded_hours_and_noise);
     run("parallel_search_preserves_every_poll",parallel_search_preserves_every_poll);
+    run("parallel_long_tiles_preserve_boundaries",parallel_long_tiles_preserve_boundaries);
     run("independent_epoch",[]{independent_epoch_recovers_fractional_symbol_phase(false);independent_epoch_recovers_fractional_symbol_phase(false,true);independent_epoch_recovers_fractional_symbol_phase(true);});
     return failures?1:0;
 }

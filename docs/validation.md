@@ -4,6 +4,68 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Numerical search batches for GPU preparation — 16 September 2026
+
+FFT acquisition and long-symbol fit accumulation now have typed numerical batch
+interfaces with CPU reference backends. Logical work scales independently of CPU
+worker scratch. FFT batches can cover the available search bank; long-symbol
+batches cover up to 64 original blocks and 65,536 lanes, reduced as necessary by
+workspace and the next possible symbol completion. Host admission, trial order,
+physical completion and next-poll publication remain in their original order.
+No GPU runtime or kernel is enabled; [search-compute](search-compute.md) records
+the interfaces and remaining device work.
+
+The full Release build passed, including the native FLTK executable. All 20
+selected headless suites passed in 187.71 seconds: the 17 suites listed in the
+[development contract](development.md), plus `search_parallel`,
+`pattern_fft_batch` and `pattern_correlator_batch`. After rebuilding, all four
+final focused suites (`pattern_receiver`, both batch suites and
+`search_parallel`) passed in 57.31 seconds, covering the optional FFT capacity
+guard and completed batch fixtures. Independent wire vectors and existing memory assertions were not
+changed. No native adapter or message presentation code changed.
+
+New coverage includes 100,003 executor jobs and overflow-safe sparse ranges
+spanning `SIZE_MAX`, 16,387 FFT jobs with varied tiling and reversed execution
+order, and 10,019 correlator lanes with exact one/multiple-worker results.
+Additional cases exercise phase alternatives, private templates, pulse shaping,
+tones, malformed extents, cancellation and workspace reuse. Twelve receiver
+cases compare every progress poll around symbol and physical-absence boundaries
+with roomy and tight workspace. An independent executable built from the prior
+committed correlator (`a8978b3`) matched all 336 per-poll digests from the updated
+implementation byte-for-byte, including scores, coordinates, bit events and
+constellation output, with cropped negative and future origins.
+
+Focused AddressSanitizer/UndefinedBehaviorSanitizer and ThreadSanitizer runs
+passed for the executor, both numerical backends, FFT exact-progress and
+physical-absence cases, and the new correlator coordinator boundary cases.
+Relevant test, backend, coordinator, executor, PatternCode and crypto source
+objects were instrumented; other archive dependencies and external libraries
+were not. AddressSanitizer leak detection was disabled in this environment.
+These checks establish sampled CPU behavior and shared GUI policy, not native
+window rendering, physical weak-signal detection or device numerical accuracy.
+
+Paired Release timings used the new `benchmark_correlator` tool on the Ryzen 5
+PRO 5650U host (6 physical cores, 12 logical CPUs). Each run used the same 11,265
+hypotheses, approximately 631-second symbols and 2,048 deterministic noise
+samples: `1200 -10 11 2048 .25 1`. The baseline replaced the search/receiver
+objects with the committed versions and linked the same remaining library and
+benchmark objects. The run order was reversed for the second pair.
+
+| Partial-symbol CPU workload | Committed, 11 workers | Batched, 11 workers |
+| --- | ---: | ---: |
+| First pair | 2.6663 s | 2.5038 s |
+| Reversed pair | 2.4219 s | 2.3056 s |
+| Mean | 2.5441 s | 2.4047 s |
+
+The updated path used about 10.6 logical CPUs on average and retained the same
+5,425,312 idle bytes. Two updated one-worker runs took 9.7087 and 8.3535 seconds
+(9.0311-second mean), about 3.76 times the parallel mean for this workload. The
+batch refactor itself reduced the paired mean by about 5.5%; it is preparation
+for wider device execution, not a claim of GPU-like CPU scaling. FFT timing
+smoke checks had substantial host variance and support no reliable additional
+speedup claim. These partial-symbol generated-noise timings do not measure
+successful reception or detection probability. No GPU was available for tests.
+
 ## Exhaustive post-reception hard-bit recovery — 16 September 2026
 
 Unresolved interval receptions now retain a separate bounded hard-bit capture

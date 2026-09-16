@@ -17,4 +17,15 @@ std::size_t search_concurrency(std::size_t requested = 0);
 void parallel_search(std::size_t count, std::size_t concurrency,
                      const std::function<void(std::size_t worker, std::size_t index)>& work);
 
+// Visit contiguous logical ranges [begin, end), each with at most grain indices.
+// Grain must be nonzero. Logical count is independent of the bounded CPU worker
+// slots: this allocates no per-index or per-range state, even for SIZE_MAX count.
+// The pool, caller participation and nested-call rules are shared with the
+// per-index API above. Each range is invoked exactly once and every invocation
+// finishes before return; a throwing callback may leave its own range unfinished.
+// After joining, rethrow the exception from the lowest failing range begin.
+void parallel_search_ranges(
+    std::size_t count, std::size_t concurrency, std::size_t grain,
+    const std::function<void(std::size_t worker, std::size_t begin, std::size_t end)>& work);
+
 } // namespace datapump::modem::detail
