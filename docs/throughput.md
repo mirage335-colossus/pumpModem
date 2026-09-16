@@ -90,6 +90,13 @@ hypotheses and spare workspace can limit simultaneous workers. `PatternSearch::w
 selects serial scoring for comparisons; zero selects the automatic default.
 The worker count is a concurrency limit, not a promise that every worker stays
 busy. Ordered admission, short batches and synchronization limit scaling.
+Small clock-search banks now use smaller scheduling groups to expose enough
+work to the selected workers. For example, the ordinary unencrypted 1 Hz search
+with a seven-second start uncertainty has 15 origins, five frequencies and one
+clock-rate hypothesis: 75 lanes. Fixed groups of 16 limited it to five runnable
+jobs, even on a machine configured for 11 workers. Adaptive grouping uses single
+lanes in that case while retaining groups of up to 16 for large banks. This
+changes scheduling only; every hypothesis keeps its original arithmetic.
 FFT batch capacity follows the search bank and spare memory independently of
 CPU worker count, while reusing each worker's transform buffer and private
 pattern state; only jobs and results awaiting ordered collection need separate

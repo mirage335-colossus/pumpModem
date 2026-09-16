@@ -134,9 +134,12 @@ void accumulate_correlator_cpu(const CorrelationBatch& batch,std::span<Correlati
         require(first || block.sample==previous_end,"correlation blocks are not contiguous");
         first=false;previous_end=block.sample+block.count;
     }
-    // Claim contiguous ranges, amortizing scheduling across neighboring lanes.
-    // This is a CPU policy only; logical lane identity never depends on it.
-    parallel_search_ranges(lanes.size(),workers.size(),16,[&](std::size_t worker,std::size_t begin,std::size_t end) {
+    // Keep enough independent ranges to balance narrow banks and origins
+    // whose observations have not started yet. Large banks still amortize
+    // dispatch across up to sixteen neighboring lanes. This is CPU scheduling
+    // only; logical lane identity and each lane's arithmetic stay unchanged.
+    const auto grain=std::max<std::size_t>(1,std::min<std::size_t>(16,lanes.size()/workers.size()/16));
+    parallel_search_ranges(lanes.size(),workers.size(),grain,[&](std::size_t worker,std::size_t begin,std::size_t end) {
         for(auto i=begin;i<end;++i)accumulate_lane(batch,lanes[i],workers[worker],stop);
     });
 }

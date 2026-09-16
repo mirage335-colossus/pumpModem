@@ -21,6 +21,13 @@ available logical CPU, with at least one. Available work and workspace can lower
 the actual concurrency. GPU execution would map these logical indices to its
 own grid independently of that CPU setting.
 
+CPU correlation chooses its range grain from both lane count and worker count,
+targeting at least 16 ranges per worker when enough lanes exist, capped at 16
+lanes per range. Small banks therefore retain enough independently schedulable
+work, including when only some start-time hypotheses have become active. The
+normal public 1 Hz bank has 75 lanes; its previous fixed grain of 16 exposed only
+five parallel jobs despite an 11-worker limit.
+
 FFT job capacity now depends on the search bank and spare workspace, rather
 than a small multiple of the CPU count. Each CPU worker retains only one
 transform buffer and, when required, one mutable pattern cache. Jobs have

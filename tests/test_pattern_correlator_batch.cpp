@@ -25,13 +25,18 @@ struct Fixture {
     std::vector<CorrelationProjection> projections;
     std::vector<double> frequencies,offsets{0,1.5};
 
-    explicit Fixture(bool shaped=false,bool tone=false,bool keyed=false) {
+    explicit Fixture(bool shaped=false,bool tone=false,bool keyed=false,double bandwidth=1200) {
+        config.bandwidth_hz=bandwidth;
         config.pulse_shaping=shaped;
         config.spreading_mode=tone?SpreadingMode::tone:SpreadingMode::pattern;
         config.scramble=config.dsss=keyed;
         config.stream_epoch=8731;
         config.spreading_seed[2]=37;config.dsss_seed[3]=53;
         PatternCode pattern(config,config.stream_epoch);
+        if(bandwidth==1) {
+            const auto step=.25*config.sample_rate/static_cast<double>(pattern.symbol_samples());
+            offsets={0,-step,step,-2*step,2*step};
+        }
         geometry={config.stream_epoch,pattern.symbol_samples(),pattern.chip_samples(),
                   pattern.chips_per_symbol(),1,config.sample_rate,offsets.size(),
                   config.carrier_hz,shaped,tone,
@@ -141,6 +146,33 @@ void phase_groups_and_observed_start() {
     }
 }
 
+void narrow_bank_with_future_origins() {
+    Fixture fixture(true,false,false,1.);
+    auto original=fixture.lanes(75);
+    for(std::size_t i=0;i<original.size();++i) {
+        auto& lane=original[i];
+        lane.index=0;lane.phase_lower=lane.phase_upper=0;lane.frequency=i/15;
+        lane.rate=1;
+        // The one-hertz clock bank straddles the current sample. Contiguous
+        // groups have very different amounts of work while origins activate.
+        lane.origin=-7.L*fixture.config.sample_rate+static_cast<long double>(i%15)*6000;
+    }
+    auto serial=original,parallel=original,tiled=original;
+    auto one=fixture.workers(1),eleven=fixture.workers(11);
+    accumulate_correlator_cpu(fixture.batch(),serial,one,{});
+    accumulate_correlator_cpu(fixture.batch(),parallel,eleven,{});
+    for(std::size_t first=0;first<tiled.size();first+=7) {
+        const auto count=std::min<std::size_t>(7,tiled.size()-first);
+        accumulate_correlator_cpu(fixture.batch(),std::span(tiled).subspan(first,count),eleven,{});
+    }
+    same_lanes(serial,parallel);same_lanes(serial,tiled);
+    for(std::size_t i=0;i<parallel.size();++i) {
+        const auto count=original[i].origin>8?1U:9U;
+        check(parallel[i].fits[0][0].count==count && parallel[i].fits[0][1].count==count,
+              "narrow-bank scheduling must neither omit active samples nor score future origins");
+    }
+}
+
 void invalid_batches_and_cancellation() {
     Fixture fixture;
     auto workers=fixture.workers(3);
@@ -232,6 +264,7 @@ int main() {
         exact_workers_and_tiles(true,false,true,129);
         exact_workers_and_tiles(false,true,false,129);
         phase_groups_and_observed_start();
+        narrow_bank_with_future_origins();
         invalid_batches_and_cancellation();
         std::cout<<"pattern_correlator_batch ok\n";
         return 0;

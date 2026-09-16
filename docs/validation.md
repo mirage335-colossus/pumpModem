@@ -4,6 +4,56 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Narrow-band simulation scheduling — 16 September 2026
+
+A reported 37% CPU utilization in a public 1 Hz simulation exposed a scheduling
+limit in the numerical correlator. The live receiver uses the default single
+clock-rate hypothesis, not the three-rate bank in the earlier standalone
+benchmark. At a 6 kHz sample clock, a two-second chip and seven-second start
+uncertainty produce 15 origins across five frequencies: 75 lanes. Fixed groups
+of 16 gave the executor only five runnable jobs, regardless of its 11-worker
+setting. Correlation now chooses smaller groups for small banks, retaining the
+previous maximum grain for large banks. No hypothesis or arithmetic changes.
+
+A bounded actual `live::Session` reproduction used 1 Hz, the default 1,500 Hz
+carrier, a -30 dB-Hz TX target, public/no-key operation, RX targets `-30,55`, a
+six-second epoch search setting, 2,600 MiB workspace, and the +3 dBm/-170 dB link
+preset. The harness waited for at least 30 seconds of sampled media, then
+measured ten seconds of processing and cancelled. The two versions linked the
+same library except for the correlator batch object; the second pair reversed
+their order. Both selected 11 workers from 12 available logical CPUs.
+
+| Actual simulation processing | Fixed grain of 16 | Adaptive grain |
+| --- | ---: | ---: |
+| First pair, simulated seconds per wall second | 10.6367 | 14.8282 |
+| Reversed pair, simulated seconds per wall second | 10.7666 | 14.7070 |
+| Mean | 10.7017 | 14.7676 |
+| Mean busy logical CPUs | 3.8780 | 6.6286 |
+| Mean CPU utilization across 12 logical CPUs | 32.3% | 55.2% |
+
+This is approximately 38.0% higher throughput, or 27.5% less time for the same
+sampled-media workload. Neither run reported errors, and reported DSP workspace
+was unchanged at 684,584,464 bytes. An additional instrumented run attributed
+9.11 of 10.01 wall seconds to correlation batch execution and 0.51 seconds to
+the sampled channel, including 0.34 seconds of transmitter rendering. FFT
+scoring did not run in that measurement window. The numerical backend still
+has synchronization and worker-idle time; this change does not establish full
+CPU utilization or a general speedup for other configurations.
+
+The -30 target has approximately 17.5-hour symbols. These bounded measurements
+cover partial-symbol simulation throughput, not a completed decode or detection
+probability. A new 75-lane regression compares exact one/eleven-worker and
+seven-lane tiled results with active and future origins. The existing wire,
+physical-end, progress and memory checks remain intact.
+
+The Release build, including `build/datapump-gui`, and all 20 selected contract,
+executor and numerical batch suites passed; the suites took 214.99 seconds.
+The updated correlator batch suite also passed AddressSanitizer/UBSan and
+ThreadSanitizer with the test, backend, executor, PatternCode and crypto objects
+instrumented. Other archive/external dependencies were uninstrumented and
+AddressSanitizer leak detection was disabled. `git diff --check` passed. Native
+window rendering and a complete 17.5-hour-symbol decode were not exercised.
+
 ## Numerical search batches for GPU preparation — 16 September 2026
 
 FFT acquisition and long-symbol fit accumulation now have typed numerical batch
