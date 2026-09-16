@@ -55,6 +55,33 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['raw_bits'],'001'+'11111'+'00000000')
         self.assertEqual(value['raw_bit_count'],16)
         self.assertEqual(value['filename'],'')
+    def test_live_json_reception_identity(self):
+        result=self.run_pump('listen','--text','quick brown','--json','--seconds','8',
+            '--simulation','3dBm -90dB','--bw','3600','--pattern','auto-pattern',
+            '--target-snr','32','--receive-targets','55,32','--time','1800000000',
+            '--search-seconds','0','--clock-error-ppm','0','--phase-noise','0')
+        events=[json.loads(line) for line in result.stdout.splitlines()]
+        pending=[event for event in events if event.get('event')=='raw_bits' and not event['complete']]
+        completed=[event for event in events if event.get('stream_complete')]
+        self.assertTrue(pending,'Live JSON lost the pending raw-bit events')
+        self.assertEqual(len(completed),1,'Competing profiles emitted duplicate completed payloads')
+        payload=completed[0]
+        self.assertEqual(base64.b64decode(payload['data_base64']),b'quick brown')
+        updates=[event for event in events if event.get('event')=='reception_update']
+        self.assertTrue(updates,'Completed interpretation did not publish its live reception identity')
+        self.assertEqual(updates[-1]['reception_id'],payload['id'])
+        self.assertEqual(updates[-1]['signal_id'],payload['signal_id'])
+        self.assertEqual(updates[-1]['revision'],payload['revision'])
+        revisions={}
+        for event in events:
+            if 'signal_id' not in event:
+                continue
+            self.assertIsInstance(event['revision'],int)
+            self.assertIsInstance(event['superseded_ids'],list)
+            self.assertGreaterEqual(event['revision'],revisions.get(event['signal_id'],0))
+            revisions[event['signal_id']]=event['revision']
+        self.assertTrue(any(event['signal_id']==payload['signal_id'] for event in pending),
+                        'Pending raw bits and completed payload have unrelated identities')
     def test_automatic_profile_short_text_and_binary_dictionary(self):
         defaults=('--bw','3600','--pattern','auto-pattern',
                   '--time','1800000000','--search-seconds','0')

@@ -5,11 +5,13 @@
 #include <chrono>
 #include <deque>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <span>
 #include <string>
 #include <vector>
 
+namespace datapump::live { struct Snapshot; }
 namespace datapump::gui {
 // Each returned byte is one exact bit, in entry order. Whitespace separates
 // groups but never pads, truncates or removes leading zero bits.
@@ -19,8 +21,12 @@ Bytes parse_binary_bits(std::string_view text);
 // are displayed separately and are never retained for every received message.
 class Inbox {
 public:
+    struct ReceptionIdentity { std::uint64_t signal_id=0, revision=0; };
     explicit Inbox(std::size_t capacity = default_memory_limit);
-    void put(StreamContent stream);
+    void put(StreamContent stream, std::optional<ReceptionIdentity> identity = {});
+    void erase(std::string_view reception_id);
+    std::vector<std::string> erase_signal(std::uint64_t signal_id);
+    std::optional<std::uint64_t> revision(std::uint64_t signal_id) const;
     void clear() noexcept;
     const std::deque<StreamContent>& items() const noexcept { return items_; }
     std::vector<const StreamContent*> file_items() const;
@@ -29,6 +35,9 @@ private:
     std::size_t capacity_;
     std::size_t used_ = 0;
     std::deque<StreamContent> items_;
+    // Ownership lives as long as the cached source, independently of the
+    // shorter visible row history, and shares the cache's item bound.
+    std::map<std::array<std::uint8_t,16>,ReceptionIdentity> identities_;
 };
 
 // Every hardware transmission shares the six-second symbol-absence separation.
@@ -95,6 +104,9 @@ struct SignalLine {
     std::string raw_bits;
     std::size_t missing_symbols = 0;
     StreamFecStats fec_stats;
+    // A stronger competing receive profile may replace even a completed
+    // interpretation while retaining this reception's row identity.
+    std::uint64_t revision = 0;
 };
 bool signal_byte_aligned(const SignalLine& line);
 std::string signal_display_text(const SignalLine& line);
@@ -109,8 +121,10 @@ std::string signal_data_label(const SignalLine& line);
 // path otherwise. Neither raw view has a stream/authentication ID.
 class Signals {
 public:
-    void update(SignalLine line);
-    void clear() noexcept { lines_.clear(); }
+    bool update(SignalLine line);
+    // Merged row identities stay retired within the bounded display history.
+    void erase(std::uint64_t id);
+    void clear() noexcept { lines_.clear(); retired_ids_.clear(); }
     const std::deque<SignalLine>& lines() const noexcept { return lines_; }
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
@@ -119,7 +133,12 @@ public:
     std::optional<Bytes> copy_bytes(std::size_t index) const;
 private:
     std::deque<SignalLine> lines_;
+    std::deque<std::uint64_t> retired_ids_;
 };
+
+// Apply a receiver poll atomically: retract superseded content before adding
+// newly completed sources and publishing their final row interpretations.
+void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot);
 
 std::string id_label(const Message& message);
 std::string display_label(std::string_view text);

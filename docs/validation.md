@@ -4,6 +4,78 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## RX target combinations and revised interpretations — 15 September 2026
+
+The receive-bank fix now covers differing automatic chip floors, integration
+durations, keyed patterns, target ordering and late long-symbol observations.
+This supersedes the completed-prefix limitation in the earlier entry below.
+Stronger accepted observations revise the original reception identity, including
+completed-to-pending transitions, and retire any overlapping fragment identities.
+Obsolete cached content is removed before replacement publication. Shared GUI
+consumers withdraw copy/save eligibility and reject stale revisions and retired
+IDs. Local content identity remains stable across revisions and never enters the
+wire. Neither native GUI adapter changes.
+Live CLI JSON also exposes the revision and retired identities on raw-bit and
+completed-content events, with `reception_update` events for decoded rows.
+Plaintext output and explicitly saved files remain append-only/local outputs;
+they cannot retroactively retract bytes already consumed outside the receiver.
+
+Native log-evidence values are not comparable across exact-sample, compact-bin
+and long correlator paths. Clean sampled probes found a short false prefix with
+score 893 competing with a correct full stream scoring 293. Arbitration now caps
+each accepted symbol's evidence at its known media duration, accumulates that
+support independently of output chunking, and excludes missing positions. Capping
+each symbol also prevents excess confidence in an initial exact fit from lending
+support to a later partial fit. The native diagnostic scores, admission gates,
+physical-absence rule, source interpretation timing and transmitted bits stay
+unchanged. This is a bounded selection heuristic, not a false-alarm guarantee.
+
+Pending disjoint hypotheses must follow the longer symbol clock within the
+earlier observation's absence window. Completed history still requires actual
+sample overlap. Weak observations cannot enlarge the winning span or join two
+stronger independent receptions. History, retired aliases, replay storage and
+GUI rows remain bounded; the history and event storage count toward DSP quotas.
+
+The expanded sampled test matrix exercises every ordering of `55,62,72` and
+`20,26,32`, all three transmit profiles, one-bit and three-bit inputs, noisy mixed
+profiles, keyed reception with an unrelated receive key, tone-mode one-bit input,
+and reversed pairs/triples containing 32-second symbols. Existing `55,32`
+short-text, exact raw-bit, fixed-interval and consecutive-transmission fixtures
+remain. The helper and GUI regressions additionally cover multi-fragment merges,
+stale events, obsolete attachments, copy/save revocation, independent frequencies
+and keys, independent later transmissions, alias limits and hours-long progress.
+There are 76 live scenarios containing 81 physical transmissions, plus two
+generated waveforms for the tone identity check. The additional separation case
+starts a short transmission after seven seconds of silence while the previous
+32-second profile still awaits its full absent symbol; both receptions retain
+their own exact bits and identity. Native support regressions vary PCM and
+decision chunk sizes and confirm that gaps and terminal events add no support.
+GUI cache ownership survives the shorter row history, so revisions can also
+withdraw obsolete attachments after their displayed rows have been evicted.
+The initial metadata implementation exceeded one existing long-search workspace
+fixture. Reusing already stored committed scores and endpoints removed the
+redundant state; the original 1/16/32 MiB checks pass with their full search
+coverage and budgets unchanged.
+
+Tone mode has a wire ambiguity: two consecutive zero tones at target `55` and
+one zero tone at `32` produce identical sampled PCM. A regression preserves that
+independent observation; no target-selection rule can recover the originating bit
+count from identical waveforms. A separate exploratory `001` tone probe also
+found the existing single-profile receiver can abandon its first timing track
+for a later independently timed start without completing the earlier track.
+The multi-profile regression uses a single tone bit; this native tone tracking
+limitation is not fixed by the arbitration change.
+
+The Release build passed. All 16 focused suites passed in 190.22 seconds:
+`live_profiles`, `live_receptions`, `live`, `live_resources`, `compression_short`,
+`transfer`, `stream_codec`, `stream_receive`, `attachment`, `pattern_correlator`,
+`pattern_receiver`, `gui_application`, `gui_controller`, `gui_inspection`,
+`gui_binary_editor` and `cli`. The separate native GUI policy test also passed.
+The full rebuild reported the existing `std::filesystem::u8path` deprecation in
+unchanged `src/gui/application.cpp`. `git diff --check` passed. These are headless
+sampled-audio and shared GUI checks; physical audio links and native window
+rendering were not exercised.
+
 ## Competing RX target profiles — 15 September 2026
 
 RX targets `55,32` and `32,55` now arbitrate overlapping pattern observations

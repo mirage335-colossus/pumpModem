@@ -4,6 +4,7 @@
 #include "datapump/runtime.hpp"
 #include "datapump/streaming_modem.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_code.hpp"
 #include "datapump/symbol_schedule.hpp"
 #include "signal_view.hpp"
 #include "live_pattern_scores.hpp"
@@ -41,6 +42,7 @@ std::size_t constellation_limit(const modem::Config& config) {
 constexpr std::size_t pattern_score_limit = Snapshot::pattern_score_limit;
 constexpr auto replay_duration = std::chrono::seconds(3);
 constexpr std::size_t replay_text_limit = 4096;
+constexpr std::size_t reception_alias_bytes = detail::ReceptionHistory::capacity * sizeof(std::uint64_t);
 struct ReplayFrame {
     std::vector<float> waveform, spectrum;
     std::vector<std::complex<float>> constellation, pattern_scores;
@@ -56,11 +58,11 @@ constexpr std::size_t trace_prefix_workspace = modem::TransmitTrace::source_limi
 constexpr std::size_t replay_frame_base = sizeof(ReplayFrame) +
     (replay_wave_samples + replay_bins) * sizeof(float) +
     pattern_score_limit * (sizeof(std::complex<float>) + sizeof(PatternScoreObservation)) +
-    sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64 + trace_prefix_workspace;
+    sizeof(std::optional<SignalUpdate>) + replay_text_limit + 64 + reception_alias_bytes + trace_prefix_workspace;
 // One verified stream is moved into the receive-content cache at the deadline.
 // Its payload uses the content quota; its diagnostics and caption use DSP space.
 constexpr std::size_t replay_result_workspace = sizeof(transfer::Received) +
-    sizeof(SignalUpdate) + 2*replay_text_limit + 64 + minimum_constellation_limit * sizeof(std::complex<double>);
+    sizeof(SignalUpdate) + 2*replay_text_limit + 64 + reception_alias_bytes + minimum_constellation_limit * sizeof(std::complex<double>);
 std::size_t replay_workspace(const Settings& value) {
     return value.simulation ? std::min(value.dsp_workspace_bytes / 8,
         replay_result_workspace + replay_frames * (replay_frame_base + constellation_limit(value.transfer.modem) * sizeof(std::complex<float>))) : 0;
@@ -89,7 +91,8 @@ std::size_t plot_workspace(const Settings& value) { return plot_size * (sizeof(f
                                        sizeof(detail::PatternScoreHistory) +
                                        sizeof(detail::SignalWindow) + modem::SampledSimulationChannel::workspace_bound +
                                        plot_size * (sizeof(float)+sizeof(std::complex<double>)) +
-                                       sizeof(modem::TransmitTrace) + trace_prefix_workspace + replay_workspace(value); }
+                                       sizeof(modem::TransmitTrace) + trace_prefix_workspace + replay_workspace(value) +
+                                       maximum_events * reception_alias_bytes; }
 std::size_t audio_reserve(const Settings& value) {
     return value.simulation ? 0 : std::min<std::size_t>(5 * 1024 * 1024, value.dsp_workspace_bytes / 8);
 }
@@ -195,7 +198,10 @@ struct Session::Impl {
         std::uint64_t last_confident_end = 0;
         std::uint64_t sample_origin = 0, family = 0;
         detail::PatternScoreHistory pattern_score_history;
-        struct Presentation { std::uint64_t candidate_id=0; bool content_reported=false; };
+        struct Presentation {
+            std::uint64_t candidate_id=0, signal_id=0, published_revision=0;
+            bool content_reported=false;
+        };
         // Candidate chunks may interleave. Keep each physical identity until
         // its actual completion, with the same bound as the content collector.
         std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;
@@ -233,6 +239,7 @@ struct Session::Impl {
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
     std::uint64_t last_pattern_transmit_epoch = 0;
+    std::array<std::uint8_t,16> reception_namespace{};
     std::atomic<std::uint64_t> pattern_score_observation_id{0};
     bool tx_busy = false;
     Clock::time_point next_hardware_send{};
@@ -262,6 +269,9 @@ struct Session::Impl {
         : epoch_clock(clock ? std::move(clock) : EpochClock(epoch_now)),
           replay_clock(presentation_clock ? std::move(presentation_clock) : ReplayClock(Clock::now)) {
         (void)current_epoch();
+        // Local cache identity only: this namespace never enters the wire.
+        std::random_device random;
+        for(auto& byte:reception_namespace)byte=static_cast<std::uint8_t>(random());
         source = std::jthread([this](std::stop_token stop) { source_loop(stop); });
         encoder = std::jthread([this](std::stop_token stop) { encode_loop(stop); });
         decoder = std::jthread([this](std::stop_token stop) { decode_loop(stop); });
@@ -658,6 +668,44 @@ struct Session::Impl {
         }
         current.signals.push_back(std::move(event));
     }
+    std::array<std::uint8_t,16> content_identity(std::uint64_t signal_id) const {
+        auto id=reception_namespace;
+        for(std::size_t i=0;i<8;++i)id[8+i]^=static_cast<std::uint8_t>(signal_id>>(8*i));
+        return id;
+    }
+    void discard_obsolete(const SignalUpdate& replacement,Prepared* wave) {
+        const auto merged=[&](std::uint64_t id) {
+            return std::find(replacement.superseded_ids.begin(),replacement.superseded_ids.end(),id)!=
+                replacement.superseded_ids.end();
+        };
+        const auto stale=[&](const SignalUpdate& event) {
+            return merged(event.id) || (event.id==replacement.id && event.revision<replacement.revision);
+        };
+        const auto old_content=[&](const transfer::Received& result) {
+            const auto& id=result.content.message.local_id;
+            return id==content_identity(replacement.id) ||
+                std::any_of(replacement.superseded_ids.begin(),replacement.superseded_ids.end(),
+                    [&](auto signal_id){return id==content_identity(signal_id);});
+        };
+        std::erase_if(current.signals,stale);
+        std::erase_if(current.received,[&](const auto& result) {
+            if(!old_content(result))return false;
+            received_bytes-=result.content.message.data.size();return true;
+        });
+        // A slower profile may produce stronger evidence while an earlier
+        // simulated interpretation is still queued for presentation.
+        for(auto& event:replay_signals)if(event && stale(*event))event.reset();
+        if(replay_verified && stale(*replay_verified))replay_verified.reset();
+        if(replay_received && old_content(*replay_received)) {
+            replay_received.reset();staged_received_bytes=0;
+        }
+        if(wave) {
+            if(wave->verified && stale(*wave->verified))wave->verified.reset();
+            if(wave->received && old_content(*wave->received)) {
+                wave->received.reset();staged_received_bytes=0;
+            }
+        }
+    }
     void add_signal(SignalUpdate event, Prepared* wave = nullptr) {
         event.sequence = next_event++; event.virtual_seconds = current.virtual_seconds;
         if (!wave) { append_signal(std::move(event)); return; }
@@ -688,16 +736,20 @@ struct Session::Impl {
         received_bytes += bytes;
     }
     static detail::ReceptionHistory::Candidate reception_candidate(
-        const Receiver& receiver,const modem::PatternBurst& burst,std::uint64_t id) {
+        const Receiver& receiver,const modem::PatternBurst& burst,const Receiver::Presentation& display) {
         detail::ReceptionHistory::Candidate candidate;
-        candidate.id=id;candidate.family=receiver.family;
+        candidate.id=display.candidate_id;candidate.family=receiver.family;
+        candidate.signal_id=display.signal_id;
         candidate.first=receiver.sample_origin+burst.stream_first_sample;
         candidate.end=receiver.sample_origin+burst.end_sample;
         candidate.frequency=burst.frequency_hz;
         candidate.frequency_tolerance=static_cast<double>(receiver.options.modem.sample_rate)/
             static_cast<double>(modem::symbol_sample_count(receiver.options.modem));
         candidate.absence_samples=modem::pattern_absence_samples(receiver.options.modem);
-        candidate.score=burst.score;candidate.complete=burst.complete;
+        candidate.symbol_samples=modem::symbol_sample_count(receiver.options.modem);
+        candidate.timing_tolerance=modem::pattern_chip_samples(receiver.options.modem);
+        candidate.score=burst.support_samples;
+        candidate.complete=burst.complete;
         return candidate;
     }
     template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
@@ -757,7 +809,7 @@ struct Session::Impl {
                             auto presentation=receiver.presentations.find(physical_id);
                             if(presentation==receiver.presentations.end())continue;
                             auto& display=presentation->second;
-                            const auto candidate=reception_candidate(receiver,burst,display.candidate_id);
+                            const auto candidate=reception_candidate(receiver,burst,display);
                             auto result=receiver.content->push(std::move(burst),receiver.modem->diagnostics());
                             update_workspace();
                             if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
@@ -768,8 +820,12 @@ struct Session::Impl {
                             const auto complete=result.stream_complete;
                             const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
                             bank.limited|=decision.limited;
+                            display.signal_id=decision.signal_id;
                             if(decision.selected) {
                                 SignalUpdate event;event.id=decision.signal_id;event.frequency_hz=frequency;
+                                event.revision=decision.revision;
+                                event.superseded_ids.assign(decision.superseded_ids.begin(),decision.superseded_ids.end());
+                                result.content.message.local_id=content_identity(event.id);
                                 event.text=std::move(bits);event.binary=true;event.complete=result.stream_complete;
                                 event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
                                 if(result.content_validated) {
@@ -780,6 +836,11 @@ struct Session::Impl {
                                     event.raw_bits=std::move(event.text);
                                     event.text.assign(result.content.message.data.begin(),result.content.message.data.end());
                                     event.binary=false;
+                                    event.reception_id=reception_id(result.content.message);
+                                }
+                                if(display.published_revision!=decision.revision) {
+                                    discard_obsolete(event,simulation_wave);
+                                    display.published_revision=decision.revision;
                                 }
                                 add_signal(std::move(event),simulation_wave);
                                 if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
@@ -846,12 +907,13 @@ struct Session::Impl {
                         if(presentation==receiver.presentations.end()) {
                             if(receiver.presentations.size()>=16){bank.limited=true;continue;}
                             presentation=receiver.presentations.emplace(physical_id,
-                                Receiver::Presentation{bank.next_candidate++,false}).first;
+                                Receiver::Presentation{bank.next_candidate++}).first;
                         }
-                        auto candidate=reception_candidate(receiver,burst,presentation->second.candidate_id);
+                        auto candidate=reception_candidate(receiver,burst,presentation->second);
                         candidate.complete=false;
                         const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
                         bank.limited|=decision.limited;
+                        presentation->second.signal_id=decision.signal_id;
                     }
                     bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
                 }

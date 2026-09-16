@@ -6,6 +6,9 @@
 #include <atomic>
 #include <chrono>
 #include <iostream>
+#include <map>
+#include <optional>
+#include <random>
 #include <set>
 #include <thread>
 
@@ -31,24 +34,50 @@ constexpr std::uint64_t epoch = 1800000000;
 struct Waveform {
     std::vector<float> samples;
     std::string text, bits;
-    std::size_t payload_end = 0;
+    std::size_t payload_end = 0, transmit_end = 0;
     std::uint32_t rate = 0;
-    bool interval = false;
+    std::size_t symbol_samples = 0;
+    bool interval = false, binary = false, ambiguous_tone = false;
 };
 
-Waveform waveform(double target, std::string text, bool binary = false) {
+struct Configuration {
+    double bandwidth = 3600;
+    std::optional<double> carrier;
+    tuning::PatternMode mode = tuning::PatternMode::auto_pattern;
+    float noise_sigma = 0;
+    bool keyed = false;
+};
+
+modem::Config modem_config(double target, const Configuration& configuration) {
+    return tuning::resolve(configuration.bandwidth, target, configuration.mode, configuration.keyed,
+                           configuration.carrier).config;
+}
+
+Waveform waveform(double target, std::string text, bool binary = false,
+                  const Configuration& configuration = {}) {
     transfer::Options options;
-    options.modem = tuning::resolve(3600, target, tuning::PatternMode::auto_pattern, false).config;
+    options.modem = modem_config(target, configuration);
     options.timestamp = epoch;
     options.search_seconds = 0;
+    if (configuration.keyed) options.key.emplace(Bytes(32, 0x67));
     Message message;
     message.data.assign(text.begin(), text.end());
-    const auto bits = transfer::message_wire_bits(message, options);
+    auto bits = transfer::message_wire_bits(message, options);
+    if (configuration.keyed) transfer::xor_binary_bits(bits, options);
+    if (binary) {
+        bits.clear();
+        for (char digit : text) {
+            check(digit == '0' || digit == '1', "invalid explicit binary fixture");
+            bits.push_back(static_cast<std::uint8_t>(digit - '0'));
+        }
+    }
     Waveform result;
-    result.text = text;
-    result.interval = !transfer::uses_raw_message(message);
+    result.text = binary && text == "001" ? "e" : text;
+    result.interval = !binary && !transfer::uses_raw_message(message);
+    result.binary = binary && text != "001";
+    result.ambiguous_tone = tuning::tone_mode(configuration.mode);
     for (auto bit : bits) result.bits.push_back(bit ? '1' : '0');
-    if (!result.interval)
+    if (!result.interval && !binary)
         check(result.bits == (text == "e" ? "001" : "110001001110100110100100"),
               "short dictionary fixture changed its independent wire vector");
     if (binary) {
@@ -57,25 +86,38 @@ Waveform waveform(double target, std::string text, bool binary = false) {
         for (std::size_t offset = 0; offset < result.samples.size();)
             offset += transmitter->read(std::span(result.samples).subspan(offset));
     } else result.samples = transfer::transmit(message, options);
+    result.transmit_end = result.samples.size();
     result.rate = options.modem.sample_rate;
+    result.symbol_samples = modem::symbol_sample_count(options.modem);
     result.payload_end = modem::training_sample_count(options.modem) +
         modem::pattern_pulse_padding_samples(options.modem) + bits.size() * modem::symbol_sample_count(options.modem);
-    // The modulator already emits its suppression tail. Pad to eight seconds
-    // after payload so every fully scored six-second absence can be reported.
-    result.samples.resize(result.payload_end + 8 * result.rate);
+    // The modulator already emits its suppression tail. Include complete
+    // absent symbols and the FFT search lookahead, including for long symbols.
+    const auto absent_symbols = (6 * result.rate + result.symbol_samples - 1) / result.symbol_samples;
+    result.samples.resize(result.payload_end + absent_symbols * result.symbol_samples +
+                          std::max<std::size_t>(2 * result.rate, 2 * result.symbol_samples));
+    if (configuration.noise_sigma) {
+        std::mt19937 random(714);
+        std::normal_distribution<float> noise(0, configuration.noise_sigma);
+        for (auto& sample : result.samples) sample += noise(random);
+    }
     return result;
 }
 
-live::Settings settings(std::vector<double> targets) {
+live::Settings settings(std::vector<double> targets, const Configuration& configuration = {}) {
     live::Settings value;
     value.simulation = false;
     value.device = "controlled profile capture";
-    value.transfer.modem = tuning::resolve(3600, 55, tuning::PatternMode::auto_pattern, false).config;
+    value.transfer.modem = modem_config(55, configuration);
     value.transfer.timestamp = epoch;
     value.transfer.search_seconds = 0;
     value.transfer.automatic_receive_profiles = true;
     value.transfer.receive_targets_db_hz = std::move(targets);
-    value.transfer.receive_pattern_mode = tuning::PatternMode::auto_pattern;
+    value.transfer.receive_pattern_mode = configuration.mode;
+    if (configuration.keyed) {
+        value.transfer.key.emplace(Bytes(32, 0x67));
+        value.receive_keys.emplace_back(Bytes(32, 0x68));
+    }
     value.content_limit = value.transfer.content_limit = 1024 * 1024;
     value.dsp_workspace_bytes = value.transfer.dsp_workspace_bytes = 32 * 1024 * 1024;
     return value;
@@ -84,7 +126,57 @@ live::Settings settings(std::vector<double> targets) {
 struct Observations {
     std::set<std::uint64_t> ids;
     std::set<std::string> prefixes;
+    std::map<std::uint64_t, live::SignalUpdate> rows;
+    std::map<std::uint64_t, std::uint64_t> revisions;
+    std::map<std::string, transfer::Received> content;
     std::size_t complete = 0, received = 0;
+    bool allow_revisions = false;
+
+    void check_final(const Waveform& expected) const {
+        check(rows.size() == 1, "one physical transmission retained multiple effective signal rows");
+        const auto& signal = rows.begin()->second;
+        check(!ids.empty() && signal.id == *ids.begin(),
+              "stronger profile abandoned the original reception identity");
+        if (expected.ambiguous_tone) {
+            // Equal consecutive tones carry no observable symbol boundary.
+            // Check coherent presentation, without inventing a profile flag
+            // or an originating bit count absent from these waveforms.
+            check(signal.complete && !signal.validated && signal.received_bits && !signal.missing_symbols,
+                  "ambiguous tone reception did not retain one completed unvalidated interpretation");
+            const auto& bits = signal.binary ? signal.text : signal.raw_bits;
+            check(bits.size() == signal.received_bits && bits.find_first_not_of("01") == std::string::npos,
+                  "tone interpretation lost its exact observed raw bits");
+            check(content.size() == (signal.binary ? 0 : 1),
+                  "ambiguous tone reception retained duplicate content");
+            if (!content.empty()) {
+                const auto& result = content.begin()->second;
+                check(result.stream_complete && result.short_text_decoded && !result.content_validated &&
+                      !result.content.authenticated && result.observed_bits == signal.received_bits,
+                      "ambiguous tone result disagrees with its one completed row");
+            }
+            return;
+        }
+        check(signal.complete && signal.binary == expected.binary &&
+              signal.validated == expected.interval && signal.text == expected.text &&
+              signal.raw_bits == (expected.interval || expected.binary ? std::string{} : expected.bits) &&
+              signal.received_bits == expected.bits.size() && signal.missing_symbols == 0,
+              "winning profile completed with bogus text or incorrect transport metadata");
+        check(content.size() == (expected.binary ? 0 : 1),
+              "one transmission retained an incorrect number of effective received items");
+        if (!content.empty()) check_received(content.begin()->second, expected);
+    }
+
+    static void check_received(const transfer::Received& result, const Waveform& expected) {
+        check(result.stream_complete && result.short_text_decoded == !expected.interval &&
+              result.content_validated == expected.interval &&
+              !result.content.authenticated && result.observed_bits == expected.bits.size() && result.missing_symbols == 0,
+              "completed profile result lost its source validation or public-stream semantics");
+        check(std::string(result.content.message.data.begin(), result.content.message.data.end()) == expected.text,
+              "a secondary profile published bogus received content");
+        std::string raw;
+        for (auto bit : result.raw_bits) raw.push_back(bit ? '1' : '0');
+        check(raw == expected.bits.substr(0, 4096), "completed profile result changed exact transport bits");
+    }
 
     void inspect(const live::Snapshot& snapshot, const Waveform& expected,
                  std::size_t sample_origin, bool before_absence) {
@@ -95,33 +187,46 @@ struct Observations {
               "profile bank exceeded its DSP workspace");
         for (const auto& signal : snapshot.signals) {
             ids.insert(signal.id);
-            check(ids.size() == 1, "one physical transmission created multiple live signal IDs");
+            if (!allow_revisions)
+                check(ids.size() == 1, "one physical transmission created multiple live signal IDs");
+            const auto prior = rows.find(signal.id);
+            if (signal.revision < revisions[signal.id]) continue;
+            revisions[signal.id] = signal.revision;
+            for (const auto superseded : signal.superseded_ids) {
+                revisions[superseded] = std::max(revisions[superseded], signal.revision);
+                const auto obsolete = rows.find(superseded);
+                if (obsolete != rows.end()) content.erase(obsolete->second.reception_id);
+                rows.erase(superseded);
+            }
+            if (prior != rows.end() && signal.revision > prior->second.revision)
+                content.erase(prior->second.reception_id);
+            rows[signal.id] = signal;
             if (!signal.complete) {
                 check(signal.binary && !signal.validated && signal.raw_bits.empty(),
                       "pending profile observation acquired completed text semantics");
                 prefixes.insert(signal.text);
                 continue;
             }
-            check(!before_absence && snapshot.samples_received >= sample_origin + expected.payload_end + 6 * expected.rate,
-                  "profile observation completed before six seconds of physical absence");
+            if (!allow_revisions)
+                check(!before_absence && snapshot.samples_received >= sample_origin + expected.payload_end + 6 * expected.rate,
+                      "profile observation completed before six seconds of physical absence");
             ++complete;
-            check(!signal.binary && signal.validated == expected.interval && signal.text == expected.text &&
-                  signal.raw_bits == (expected.interval ? std::string{} : expected.bits) &&
+            if (!allow_revisions && !expected.ambiguous_tone) check(signal.binary == expected.binary && signal.validated == expected.interval && signal.text == expected.text &&
+                  signal.raw_bits == (expected.interval || expected.binary ? std::string{} : expected.bits) &&
                   signal.received_bits == expected.bits.size() && signal.missing_symbols == 0,
                   "winning profile completed with bogus text or incorrect transport metadata");
         }
         for (const auto& result : snapshot.received) {
-            check(!before_absence, "source content was interpreted before physical absence");
+            if (!allow_revisions) check(!before_absence, "source content was interpreted before physical absence");
             ++received;
-            check(result.stream_complete && result.short_text_decoded == !expected.interval &&
-                  result.content_validated == expected.interval &&
-                  !result.content.authenticated && result.observed_bits == expected.bits.size() && result.missing_symbols == 0,
-                  "completed profile result lost its source validation or public-stream semantics");
-            check(std::string(result.content.message.data.begin(), result.content.message.data.end()) == expected.text,
-                  "a secondary profile published bogus received content");
-            std::string raw;
-            for (auto bit : result.raw_bits) raw.push_back(bit ? '1' : '0');
-            check(raw == expected.bits.substr(0, 4096), "completed profile result changed exact transport bits");
+            std::string id;
+            constexpr char digits[] = "0123456789abcdef";
+            for (auto byte : result.content.message.local_id) {
+                id += digits[byte >> 4];
+                id += digits[byte & 15];
+            }
+            content[id] = result;
+            if (!allow_revisions && !expected.ambiguous_tone) check_received(result, expected);
         }
     }
 };
@@ -147,23 +252,45 @@ void receive_wave(live::Session& session, CaptureScript& capture, const Waveform
                   std::size_t origin, Observations& observed) {
     advance(session, capture, origin + expected.payload_end + 5 * expected.rate,
             observed, expected, origin, true);
-    check(!observed.ids.empty() && observed.complete == 0 && observed.received == 0,
+    check(!observed.ids.empty() && (observed.allow_revisions || (observed.complete == 0 && observed.received == 0)),
           "profile bank hid pending data or completed without physical absence");
-    check(observed.prefixes.contains(expected.bits.substr(0, 4096)), "exact transport prefix was hidden until physical completion");
+    if (expected.symbol_samples > 6 * expected.rate) {
+        // More than six seconds of silence is insufficient while the absent
+        // symbol itself still has not been observed through its endpoint. The
+        // FFT's lookahead can consume most of that window before admitting the
+        // last payload bit, so assert its prefix after that work is available.
+        advance(session, capture, origin + expected.payload_end + expected.symbol_samples - 1,
+                observed, expected, origin, true);
+        check(observed.rows.size() == 1 && !observed.rows.begin()->second.complete,
+              "long profile completed before a full absent symbol was scored");
+        for (std::size_t count = 1; count <= expected.bits.size(); ++count)
+            check(observed.prefixes.contains(expected.bits.substr(0, count)),
+                  "a long-profile accepted bit was hidden behind later message progress");
+    }
+    if (!expected.ambiguous_tone)
+        check(observed.prefixes.contains(expected.bits.substr(0, 4096)), "exact transport prefix was hidden until physical completion");
+    check(observed.rows.size() == 1 && !observed.rows.begin()->second.complete &&
+          (expected.ambiguous_tone || observed.rows.begin()->second.text == expected.bits.substr(0, 4096)),
+          "stronger admitted profile did not replace competing hypotheses in the pending row");
     advance(session, capture, origin + expected.samples.size(), observed, expected, origin, false);
-    check(observed.ids.size() == 1 && observed.complete == 1 && observed.received == 1,
-          "one transmission must produce exactly one completed signal and one received item");
+    if (!observed.allow_revisions)
+        check(observed.ids.size() == 1 && observed.complete == 1 &&
+              observed.received == (observed.rows.begin()->second.binary ? 0 : 1),
+              "one transmission must produce exactly one completed signal and one received item when decodable");
+    observed.check_final(expected);
 }
 
-void run_case(const std::vector<double>& targets, double target, const std::string& text, bool binary) {
-    const auto expected = waveform(target, text, binary);
+void run_case(const std::vector<double>& targets, double target, const std::string& text, bool binary,
+              const Configuration& configuration = {}, bool allow_revisions = false) {
+    const auto expected = waveform(target, text, binary, configuration);
     CaptureScript capture;
     capture.samples = expected.samples;
     capture.rate = expected.rate;
     capture_script = &capture;
     live::Session session([] { return static_cast<double>(epoch); });
-    session.start(settings(targets));
+    session.start(settings(targets, configuration));
     Observations observed;
+    observed.allow_revisions = allow_revisions;
     receive_wave(session, capture, expected, 0, observed);
     session.stop();
 }
@@ -183,6 +310,54 @@ void sequential_profiles(const std::vector<double>& targets, double first_target
     check(first_observed.ids != second_observed.ids, "profile arbitration merged separate physical transmissions");
     session.stop();
 }
+
+void separated_long_and_short() {
+    Configuration configuration;
+    configuration.bandwidth = 16;
+    configuration.carrier = 16;
+    const auto first = waveform(5, "0", true, configuration);
+    const auto second = waveform(55, "001", true, configuration);
+    // The first receiver must finish an entire 32-second absent symbol. A
+    // different sender may already start after seven seconds of actual silence;
+    // its independent clock must not be absorbed by that pending absence wait.
+    const auto second_origin = first.transmit_end + 7 * first.rate;
+    CaptureScript capture;
+    capture.samples = first.samples;
+    capture.samples.resize(std::max(capture.samples.size(), second_origin + second.samples.size()));
+    std::copy(second.samples.begin(), second.samples.end(), capture.samples.begin() + second_origin);
+    capture.rate = first.rate;
+    capture_script = &capture;
+    live::Session session([] { return static_cast<double>(epoch); });
+    session.start(settings({55, 5}, configuration));
+    Observations observed;
+    observed.allow_revisions = true;
+    advance(session, capture, second_origin + second.payload_end + 5 * second.rate,
+            observed, first, 0, false);
+    check(observed.content.empty() &&
+          std::any_of(observed.rows.begin(), observed.rows.end(), [](const auto& row) {
+              return !row.second.complete && row.second.text == "001";
+          }), "independent short transmission completed before physical absence or lost its exact pending prefix");
+    advance(session, capture, first.payload_end + first.symbol_samples - 1,
+            observed, first, 0, false);
+    const auto long_row = std::find_if(observed.rows.begin(), observed.rows.end(), [](const auto& row) {
+        return !row.second.complete && row.second.binary && row.second.text == "0" && row.second.received_bits == 1;
+    });
+    const auto short_row = std::find_if(observed.rows.begin(), observed.rows.end(), [](const auto& row) {
+        return row.second.complete && !row.second.binary && row.second.text == "e" && row.second.raw_bits == "001";
+    });
+    check(observed.rows.size() == 2 && long_row != observed.rows.end() && short_row != observed.rows.end(),
+          "long pending absence merged an independent short transmission or completed before a full absent symbol");
+    const auto long_id = long_row->first, short_id = short_row->first;
+    advance(session, capture, capture.samples.size(), observed, first, 0, false);
+    check(observed.rows.size() == 2 && observed.rows.contains(long_id) && observed.rows.contains(short_id) &&
+          observed.rows.at(long_id).complete && observed.rows.at(long_id).binary &&
+          observed.rows.at(long_id).text == "0" && observed.rows.at(long_id).received_bits == 1 &&
+          observed.rows.at(short_id).complete && observed.rows.at(short_id).raw_bits == "001" &&
+          observed.content.size() == 1,
+          "separate long and short physical transmissions lost their distinct completed identities");
+    Observations::check_received(observed.content.begin()->second, second);
+    session.stop();
+}
 }
 
 // These definitions deliberately replace audio.cpp in this statically linked
@@ -198,7 +373,7 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
     if (on_format) on_format({rate, rate, static_cast<double>(rate) / 2, 0});
     while (!stop.stop_requested()) {
         const auto begin = script.delivered.load();
-        const auto end = std::min(script.released.load(), begin + std::max<std::uint32_t>(1, rate / 100));
+        const auto end = std::min(script.released.load(), begin + std::max<std::uint32_t>(8, rate / 50));
         if (end > begin) {
             if (!on_chunk(std::span(script.samples).subspan(begin, end - begin))) return;
             script.delivered = end;
@@ -214,17 +389,20 @@ void playback(std::uint32_t, const std::string&, const PlaybackCallback&, std::s
               StreamFormatCallback, bool) { throw Error("profile fixture unexpectedly played audio"); }
 }
 
-int main() {
+int main(int argc, char** argv) {
     std::string context;
     try {
-        for (const auto& targets : {std::vector<double>{55, 32}, std::vector<double>{32, 55}}) {
+        const std::string suite = argc > 1 ? argv[1] : "all";
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long",
+              "unknown profile test suite");
+        if (suite == "all" || suite == "original") for (const auto& targets : {std::vector<double>{55, 32}, std::vector<double>{32, 55}}) {
             for (const double target : {55., 32.}) {
                 const auto profiles = "RX " + std::to_string(targets[0]) + "," + std::to_string(targets[1]) +
                     " TX " + std::to_string(target);
                 context = profiles + " text e";
                 run_case(targets, target, "e", false);
                 context = profiles + " binary 001";
-                run_case(targets, target, "e", true);
+                run_case(targets, target, "001", true);
                 context = profiles + " text hello";
                 run_case(targets, target, "hello", false);
                 context = profiles + " fixed interval text";
@@ -234,6 +412,70 @@ int main() {
             sequential_profiles(targets, 55, 32);
             context = "sequential TX 32 then 55, first RX " + std::to_string(targets[0]);
             sequential_profiles(targets, 32, 55);
+        }
+        if (suite == "all" || suite == "matrix") {
+            for (auto targets : {std::vector<double>{55, 62, 72}, std::vector<double>{20, 26, 32}}) {
+                std::set<std::uint64_t> durations;
+                for (auto target : targets)
+                    durations.insert(modem::symbol_sample_count(modem_config(target, {})));
+                check(durations.size() == targets.size(), "profile matrix lost its distinct symbol geometries");
+                // Different automatic chip floors and integration durations;
+                // every permutation must choose evidence, never bank order.
+                do {
+                    for (double target : targets) {
+                        context = "permuted RX " + std::to_string(targets[0]) + "," +
+                            std::to_string(targets[1]) + "," + std::to_string(targets[2]) +
+                            " TX " + std::to_string(target) + " binary 001";
+                        run_case(targets, target, "001", true);
+                    }
+                } while (std::next_permutation(targets.begin(), targets.end()));
+                for (double target : targets) {
+                    context = "three-profile TX " + std::to_string(target) + " binary 0";
+                    run_case(targets, target, "0", true);
+                }
+            }
+            Configuration noisy;
+            noisy.noise_sigma = .005f;
+            for (double target : {55., 26., 20.}) {
+                context = "mixed noisy RX 55,26,20 TX " + std::to_string(target);
+                run_case({55, 26, 20}, target, "001", true, noisy);
+            }
+            Configuration tone;
+            tone.mode = tuning::PatternMode::auto_tone;
+            const auto double_tone = waveform(55, "00", true, tone);
+            const auto single_tone = waveform(32, "0", true, tone);
+            const auto physical_end = double_tone.payload_end + 3 * double_tone.rate;
+            check(double_tone.bits == "00" && single_tone.bits == "0" &&
+                  double_tone.payload_end == single_tone.payload_end &&
+                  std::equal(double_tone.samples.begin(), double_tone.samples.begin() + physical_end,
+                             single_tone.samples.begin()),
+                  "unframed repeated-tone fixture no longer demonstrates identical PCM across symbol durations");
+            for (double target : {55., 26., 20.}) {
+                context = "tone RX 20,55,26 TX " + std::to_string(target) + " binary 0";
+                run_case({20, 55, 26}, target, "0", true, tone);
+            }
+            Configuration keyed;
+            keyed.keyed = true;
+            for (double target : {55., 32., 26.}) {
+                context = "keyed RX 32,26,55 with an unrelated receive key, TX " + std::to_string(target);
+                run_case({32, 26, 55}, target, "001", true, keyed);
+            }
+        }
+        if (suite == "all" || suite == "long") {
+            Configuration long_symbols;
+            long_symbols.bandwidth = 16;
+            long_symbols.carrier = 16;
+            check(modem_config(5, long_symbols).sample_rate == 64 &&
+                  modem::symbol_seconds(modem_config(5, long_symbols)) > 6,
+                  "long fixture no longer exercises a full absent symbol beyond six seconds");
+            for (const auto& targets : {std::vector<double>{55, 5}, std::vector<double>{5, 55},
+                                       std::vector<double>{55, 20, 5}, std::vector<double>{5, 20, 55}}) {
+                context = "long RX first " + std::to_string(targets.front()) +
+                    " count " + std::to_string(targets.size()) + " TX 5 binary 001";
+                run_case(targets, 5, "001", true, long_symbols, true);
+            }
+            context = "off-clock short transmission during long-profile absence wait";
+            separated_long_and_short();
         }
         std::cout << "live receive profile arbitration passed\n";
     } catch (const std::exception& error) {

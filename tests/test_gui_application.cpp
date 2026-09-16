@@ -284,6 +284,44 @@ void progressive_pending_records() {
           rows.front().cells[1].text=="binary pending"&&!rows.front().activatable,
           "A missing timed slot must retain its position and visible zero-placeholder notice while subsequent bits arrive");
 }
+void revised_reception_records() {
+    for(const int kind:{0,1,2,3}) {
+        Signals signals;
+        SignalLine completed;completed.id=93;completed.revision=4;completed.frequency_hz=1500;
+        completed.complete=true;completed.pattern_score=24.5;completed.received_bits=3;
+        completed.binary=kind==0;completed.validated=kind>=2;completed.text_message=kind!=3;
+        completed.text=kind==0?"001":kind==3?"attachment.bin":"e";
+        completed.raw_bits=kind==1?"001":"";
+        completed.reception_id=kind>=2?"completed-source":"";
+        signals.update(completed);
+        check(signals.lines().size()==1&&signals.lines().front().complete,
+              "Revision fixture did not begin as a completed reception");
+
+        SignalLine stronger;stronger.id=completed.id;stronger.revision=5;stronger.frequency_hz=1500;
+        stronger.binary=true;stronger.pattern_score=31;stronger.text="00";stronger.received_bits=2;
+        signals.update(stronger);
+        const auto pending=signal_records(signals);
+        check(pending.size()==1&&pending.front().id=="93"&&pending.front().cells[1].text=="binary pending"&&
+              pending.front().cells[4].text=="00"&&!pending.front().activatable&&
+              signals.lines().front().revision==5&&!signals.lines().front().validated&&
+              !signals.copy_id(0)&&!signals.copy_bits(0)&&!signals.copy_raw_bits(0)&&!signals.copy_text(0),
+              "A stronger profile must retract completed raw, dictionary, text and attachment presentation in the same pending row");
+        signals.update(completed);
+        check(!signals.lines().front().complete&&signals.lines().front().text=="00"&&
+              signals.lines().front().revision==5,
+              "A stale completed revision replaced the stronger profile's pending prefix");
+        stronger.complete=true;stronger.text="001";stronger.received_bits=3;
+        signals.update(stronger);
+        check(signal_records(signals).size()==1&&signal_records(signals).front().activatable&&
+              signals.copy_raw_bits(0)=="001",
+              "Completion of a replacement profile must reuse its pending row and restore exact-bit copying");
+        stronger.complete=false;signals.update(stronger);
+        check(signals.lines().front().complete,
+              "Within one profile revision completed observations lost their existing pending-update protection");
+        signals.erase(completed.id);signals.update(completed);
+        check(signals.lines().empty(),"A delayed superseded row was restored after its identity was merged");
+    }
+}
 void presentation() {
     Application app({.simulation=true});
     for(const auto field:{ui::Field::message,ui::Field::binary}) {
@@ -811,6 +849,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

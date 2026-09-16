@@ -63,9 +63,10 @@ struct PatternCorrelator::Impl {
         std::uint64_t index=0,observed_start=0,phase_lower=0,phase_upper=0;
         std::size_t frequency=0,rate_index=0;
         std::array<Fit,2> fits{};
-        std::uint64_t last_found=0;
         PatternBurst burst;
-        double sum_score=0,pending_score=0,committed_score=0;
+        // The burst stores committed score/support; only tentative totals need
+        // separate accumulators. Its committed endpoint is also the last find.
+        double sum_score=0,pending_score=0,sum_support=0;
         std::size_t committed=0,gap_slots=0;
         std::uint64_t committed_end=0;
         bool admitted=false,pending_gaps=false;
@@ -243,7 +244,7 @@ struct PatternCorrelator::Impl {
             (candidate.burst.stream_first_symbol<owner->burst.stream_first_symbol ||
              (candidate.burst.stream_first_symbol==owner->burst.stream_first_symbol && candidate.sum_score>owner->sum_score)))owner=&candidate;
         Emission emission{owner,owner->burst.stream_first_symbol,owner->burst.first_stream_symbol,
-            owner->origin,owner->burst.frequency_hz,owner->burst.frequency_hz,owner->committed_score,false};
+            owner->origin,owner->burst.frequency_hz,owner->burst.frequency_hz,owner->burst.score,false};
         if(emissions.size()==search.track_limit) {
             const auto reusable=std::find_if(emissions.begin(),emissions.end(),[](const auto& item){return item.ended;});
             require(reusable!=emissions.end(),"pattern output stream quota exhausted");*reusable=emission;return *reusable;
@@ -262,13 +263,13 @@ struct PatternCorrelator::Impl {
             if(difference>code.symbol_samples() || std::abs(candidate.origin-owner.origin)>=code.symbol_samples()/3.L ||
                std::abs(candidate.burst.frequency_hz-owner.burst.frequency_hz)>
                     config.sample_rate/static_cast<double>(code.symbol_samples()))continue;
-            if(candidate.committed_score>best->committed_score)best=&candidate;
+            if(candidate.burst.score>best->burst.score)best=&candidate;
         }
         // Nearby clocks may retire in a different order at the terminal
         // absence observation. Their retirement must not revert an already
         // stronger accumulated carrier estimate to the startup hypothesis.
-        if(best->committed_score>=stream.carrier_score) {
-            stream.carrier_score=best->committed_score;stream.reported_frequency=best->burst.frequency_hz;
+        if(best->burst.score>=stream.carrier_score) {
+            stream.carrier_score=best->burst.score;stream.reported_frequency=best->burst.frequency_hz;
         }
         return stream.reported_frequency;
     }
@@ -296,7 +297,8 @@ struct PatternCorrelator::Impl {
             result.complete=complete && count==h.committed;
             result.end_sample=count==h.committed?h.committed_end:
                 result.first_sample+static_cast<std::uint64_t>(count*code.symbol_samples()/h.rate);
-            result.score=h.committed_score;
+            result.score=h.burst.score;
+            result.support_samples=h.burst.support_samples;
             const auto duplicate=std::find_if(bursts.begin(),bursts.end(),[&](const auto& prior) {
                 const auto delta=prior.first_sample>result.first_sample?prior.first_sample-result.first_sample:result.first_sample-prior.first_sample;
                 return prior.first_stream_symbol==result.first_stream_symbol && prior.complete==result.complete &&
@@ -323,7 +325,8 @@ struct PatternCorrelator::Impl {
         // payload allocation so later hypotheses can use the same workspace.
         accounted_bytes-=h.burst.bits.capacity();Bytes{}.swap(h.burst.bits);
         h.burst.complete=false;h.admitted=h.pending_gaps=false;
-        h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;h.gap_slots=0;
+        h.sum_score=h.pending_score=h.burst.score=0;h.committed=0;h.gap_slots=0;
+        h.sum_support=h.burst.support_samples=0;
     }
     void append(Hypothesis& h,std::uint8_t bit) {
         require(h.burst.bits.size()<bit_limit,"pattern bit retention limit reached");
@@ -337,7 +340,8 @@ struct PatternCorrelator::Impl {
         if(!h.pending_gaps) {
             h.gap_slots=h.burst.bits.size()-h.committed;h.burst.bits.resize(h.committed);
         }
-        h.sum_score=h.committed_score;h.pending_score=0;h.pending_gaps=true;
+        h.sum_score=h.burst.score;h.pending_score=0;h.pending_gaps=true;
+        h.sum_support=h.burst.support_samples;
     }
     void emit_gap(Hypothesis& h,std::uint64_t resumed_sample) {
         if(!h.gap_slots)return;
@@ -351,7 +355,8 @@ struct PatternCorrelator::Impl {
         event.first_sample=h.burst.first_sample;event.end_sample=resumed_sample;
         event.first_stream_symbol=h.burst.first_stream_symbol;
         event.stream_first_sample=h.burst.stream_first_sample;event.stream_first_symbol=h.burst.stream_first_symbol;
-        event.frequency_hz=carrier_estimate(h,stream);event.score=h.committed_score;
+        event.frequency_hz=carrier_estimate(h,stream);event.score=h.burst.score;
+        event.support_samples=h.burst.support_samples;
         event.stream_phase_samples=h.burst.stream_phase_samples;event.missing_slots=h.gap_slots;
         bursts.push_back(std::move(event));h.gap_slots=0;
         h.burst.first_sample=resumed_sample;h.burst.first_stream_symbol=h.index;stream.last_symbol=h.index;
@@ -372,6 +377,8 @@ struct PatternCorrelator::Impl {
             }
         }
         remember(e);
+        const auto symbol_support=pattern_symbol_support(
+            static_cast<double>(fits(h,hypothesis,selected)[e.bit].count),e.score,code.chip_samples());
         const auto standalone=e.score>=threshold();
         // Unknown slots never select a private phase. Keep the existing clock
         // until an independently confident later symbol resolves the schedule.
@@ -398,11 +405,11 @@ struct PatternCorrelator::Impl {
                 h.burst.stream_phase_samples=h.phase_lower;
                 emit_gap(h,h.observed_start);append(h,static_cast<std::uint8_t>(e.bit));
                 h.sum_score+=e.score;h.committed=h.burst.bits.size();h.committed_end=end;
-                h.committed_score=h.sum_score;h.pending_gaps=false;h.last_found=end;
+                h.sum_support+=symbol_support;h.burst.support_samples=h.sum_support;
+                h.burst.score=h.sum_score;h.pending_gaps=false;
             } else {
                 require(h.gap_slots<std::numeric_limits<std::size_t>::max(),"pattern missing-slot count overflow");++h.gap_slots;
             }
-            h.burst.score=h.committed_score;
         } else {
             if(standalone && pending_count && (!h.admitted || next_chain<threshold())) {publish(h);clear(h);}
             if(h.burst.bits.size()==bit_limit && e.score>=search.retain_score)
@@ -420,22 +427,24 @@ struct PatternCorrelator::Impl {
                     h.burst.first_sample=h.observed_start;h.burst.first_stream_symbol=h.index;
                     h.burst.stream_phase_samples=h.phase_lower;
                     h.burst.frequency_hz=e.frequency_hz;
-                    if(!h.admitted){h.sum_score=h.pending_score=h.committed_score=0;h.committed=0;h.gap_slots=0;}
+                    if(!h.admitted){h.sum_score=h.pending_score=h.burst.score=0;h.committed=0;h.gap_slots=0;
+                        h.sum_support=h.burst.support_samples=0;}
                 }
                 append(h,static_cast<std::uint8_t>(e.bit));h.burst.end_sample=end;h.sum_score+=e.score;h.pending_score+=e.score;
+                h.sum_support+=symbol_support;
                 const auto pending=h.burst.bits.size()-h.committed;
                 const auto n=static_cast<double>(pending);
                 const auto chain=h.pending_score>n?h.pending_score-n-n*std::log(h.pending_score/n)-n*std::log(2.):0;
                 if((n==1 && standalone) || chain>=threshold()) {
                     h.admitted=true;h.committed=h.burst.bits.size();h.committed_end=end;
-                    h.committed_score=h.sum_score;h.pending_score=0;h.last_found=end;
+                    h.burst.score=h.sum_score;h.pending_score=0;
+                    h.burst.support_samples=h.sum_support;
                 }
-                h.burst.score=h.committed_score;
                 if(!h.admitted && static_cast<long double>(pending)*code.symbol_samples()/h.rate>=
                     static_cast<long double>(pattern_absence_seconds)*config.sample_rate)clear(h);
             } else {publish(h);clear(h);}
         }
-        if(h.admitted && static_cast<long double>(end-h.last_found)>=
+        if(h.admitted && static_cast<long double>(end-h.committed_end)>=
             static_cast<long double>(pattern_absence_seconds)*config.sample_rate) {publish(h,true);clear(h);}
         else publish(h,false,false);
         h.fits={};

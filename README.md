@@ -442,6 +442,15 @@ string does not steer acquisition. Its JSON reports exact bits, a model score
 and `content_validated: false`. Manual sample-rate/carrier overrides use the same
 pattern transport.
 
+Live `listen --json` events carry `signal_id`, `revision` and `superseded_ids`.
+Keep the latest revision for each signal, clear its prior interpretation when
+the revision increases, and remove identities listed in `superseded_ids`.
+A slower receive profile may revise a completed short interpretation back to
+pending; it completes only after that profile observes physical absence.
+`reception_update` events describe decoded interpretations, and their
+`reception_id` matches the completed payload's `id`. These are local presentation
+identities, not transmitted framing or authentication.
+
 The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
 defaulting to 32 (32 dB/1Hz). Large messages and attachments default to 60%

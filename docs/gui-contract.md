@@ -77,12 +77,20 @@ invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
 profiles hold the selected rate, carrier and pattern/tone mode fixed.
 Competing profiles for the same received signal share one pending row. Stronger
-pattern evidence may revise that row's provisional bits; only the selected
-profile's observed physical end can complete it. A delayed weaker profile does
-not create another received message.
+supported pattern evidence may revise that row's bits; only the selected
+profile's observed physical end can complete it. Native correlation scores from
+different DSP paths are not directly comparable, so arbitration caps their
+support at the duration of known, admitted symbols. Missing positions add no
+support. A delayed weaker profile does not create another received message.
 If a much longer symbol first becomes admissible after a shorter interpretation
-has already completed, stronger new evidence starts a new pending reception.
-Completed rows stay completed, and the later accepted bits remain visible.
+has already completed, stronger overlapping evidence revises the original row
+back to pending. Its obsolete content and copy/save eligibility are withdrawn.
+When that evidence spans previously separate fragments, their rows and cached
+content are retired under the oldest reception identity. Revision numbers keep
+delayed old events from restoring an obsolete interpretation. Completed history
+requires actual sample overlap; pending disjoint fragments must also follow the
+longer symbol clock within the earlier reception's absence window. Unscored
+long-symbol silence alone cannot join a later independently timed transmission.
 
 | Vocabulary | Meaning |
 | --- | --- |

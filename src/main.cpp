@@ -369,8 +369,14 @@ void report_fec_region(const FecRegionStats& stats) {
         <<",\"missing_bits\":"<<stats.missing_bits<<",\"corrected_bytes\":"<<stats.corrected_bytes
         <<",\"erased_bytes\":"<<stats.erased_bytes<<",\"repaired_bytes\":"<<stats.repaired_bytes<<'}';
 }
+void report_signal_identity(const live::SignalUpdate& signal) {
+    std::cout<<",\"signal_id\":"<<signal.id<<",\"revision\":"<<signal.revision<<",\"superseded_ids\":[";
+    for(std::size_t i=0;i<signal.superseded_ids.size();++i)
+        std::cout<<(i?",":"")<<signal.superseded_ids[i];
+    std::cout<<']';
+}
 void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
-            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false) {
+            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false,const live::SignalUpdate* signal=nullptr) {
     const auto& m=stream.message;
     if(a.has("save")) {
         if(!stream_complete || !(content_validated || short_text_decoded))
@@ -405,7 +411,9 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
         for(std::size_t i=0;i<d.waveform.size();++i) std::cout<<(i?",":"")<<d.waveform[i];
         std::cout<<"],\"constellation\":[";
         for(std::size_t i=0;i<d.constellation.size();++i) std::cout<<(i?",":"")<<'['<<d.constellation[i].real()<<','<<d.constellation[i].imag()<<']';
-        std::cout<<"]}}\n";
+        std::cout<<"]}";
+        if(signal)report_signal_identity(*signal);
+        std::cout<<"}\n";
     } else if(!a.has("save")) {
         if(!content_validated && m.data.empty() && !raw_bits.empty()) {
             for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
@@ -423,8 +431,8 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
     if(missing_symbols && !a.has("json"))
         std::cerr<<"Raw bits include "<<missing_symbols<<(missing_symbols==1?" zero placeholder for a missing symbol.\n":" zero placeholders for missing symbols.\n");
 }
-void report_received(const Args& a,const transfer::Received& received) {
-    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded);
+void report_received(const Args& a,const transfer::Received& received,const live::SignalUpdate* signal=nullptr) {
+    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded,signal);
 }
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");
@@ -486,17 +494,34 @@ void listen(const Args& a,const transfer::Options& options) {
             for(const auto& signal:snapshot.signals) if(!signal.binary && !signal.validated && !signal.complete) {
                 const Bytes text(signal.text.begin(),signal.text.end());
                 std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
-                    <<",\"data_base64\":\""<<base64_encode(text)<<"\"}\n";
+                    <<",\"data_base64\":\""<<base64_encode(text)<<'"';
+                report_signal_identity(signal);std::cout<<"}\n";
             }
         }
-        if(a.has("json"))for(const auto& signal:snapshot.signals)if(signal.binary) {
-            std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false,\"signal_id\":"<<signal.id
-                <<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
-                <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
-            if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
-            std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
+        if(a.has("json"))for(const auto& signal:snapshot.signals) {
+            if(signal.binary) {
+                std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false";
+                report_signal_identity(signal);
+                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
+                    <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
+                if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
+                std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
+            } else {
+                // Every profile revision is observable without --progress,
+                // including retractions of previously completed interpretations.
+                std::cout<<"{\"event\":\"reception_update\"";report_signal_identity(signal);
+                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")
+                    <<",\"content_validated\":"<<(signal.validated?"true":"false")
+                    <<",\"reception_id\":\""<<json_escape(signal.reception_id)<<"\"}\n";
+            }
         }
-        for(const auto& received:snapshot.received) report_received(a,received);
+        for(const auto& received:snapshot.received) {
+            const auto reception_id=id_string(received.content.message);
+            const auto signal=std::find_if(snapshot.signals.rbegin(),snapshot.signals.rend(),[&](const auto& event) {
+                return event.complete&&event.reception_id==reception_id;
+            });
+            report_received(a,received,signal==snapshot.signals.rend()?nullptr:&*signal);
+        }
         std::cout.flush();
         if(!snapshot.running && !snapshot.error.empty()) throw Error(snapshot.error);
         if(seconds>0 && std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()>=seconds) break;

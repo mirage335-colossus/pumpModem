@@ -64,6 +64,7 @@ Reception receive(const std::vector<float>& samples,const modem::Config& c,
                result.bursts.back().first_stream_symbol+result.bursts.back().bits.size()==burst.first_stream_symbol) {
                 auto& prior=result.bursts.back();prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
                 prior.complete=burst.complete;prior.end_sample=burst.end_sample;prior.score=burst.score;prior.stream_phase_samples=burst.stream_phase_samples;
+                prior.support_samples=burst.support_samples;
                 prior.frequency_hz=burst.frequency_hz;
             } else result.bursts.push_back(std::move(burst));
         }
@@ -254,7 +255,9 @@ void changing_chunks_and_late_start() {
     const std::array<std::size_t,1> whole{samples.size()};const std::array<std::size_t,5> changing{17,1,233,3,1024};
     const auto a=receive(samples,c,whole),b=receive(samples,c,changing);
     const auto& first=exact(a,{0,0,1});const auto& second=exact(b,{0,0,1});
-    check(first.first_sample==second.first_sample && first.end_sample==second.end_sample && first.score==second.score,
+    check(first.first_sample==second.first_sample && first.end_sample==second.end_sample && first.score==second.score &&
+          first.support_samples==second.support_samples && first.support_samples>0 &&
+          first.support_samples<=3*static_cast<double>(symbol),
           "PCM push chunk boundaries changed acquisition evidence");
 }
 void carrier_evidence_recovers_after_distorted_start() {
@@ -685,7 +688,8 @@ void short_template_cache_workspace() {
               actual.front().first_sample==expected.front().first_sample &&
               actual.front().end_sample==expected.front().end_sample &&
               actual.front().frequency_hz==expected.front().frequency_hz &&
-              actual.front().score==expected.front().score,
+              actual.front().score==expected.front().score &&
+              actual.front().support_samples==expected.front().support_samples,
               "cache availability or eviction changed exact pattern decisions or confidence");
         const auto a=cached.candidates(),b=receiver->candidates();
         check(a.size()==b.size(),"cache availability changed retained search coverage");

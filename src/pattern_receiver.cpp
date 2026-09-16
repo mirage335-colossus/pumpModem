@@ -107,6 +107,7 @@ struct PatternReceiver::Impl {
         std::uint64_t phase_lower=0,phase_upper=0;
         double total_score=0,penalty=0;
         double pending_score=0,confirmed_score=0;
+        double total_support=0,confirmed_support=0;
         std::array<double,65> frequency_scores{};
         std::size_t confirmed=0,gap_slots=0;
         std::uint64_t confirmed_end=0;
@@ -389,6 +390,7 @@ struct PatternReceiver::Impl {
     }
     void publish(Track& track,bool complete,bool flush=false,bool draining=false) {
         track.burst.score=track.confirmed_score;
+        track.burst.support_samples=track.confirmed_support;
         if(!track.established)return;
         const auto chunk=std::min(search.chunk_bits,search.bit_limit);
         if(!complete && !flush && track.confirmed<chunk)return;
@@ -406,6 +408,7 @@ struct PatternReceiver::Impl {
             event.end_sample=count==track.confirmed?track.confirmed_end:
                 event.first_sample+count*code.symbol_samples();
             event.score=track.confirmed_score;
+            event.support_samples=track.confirmed_support;
             room_for_bits(3*event.bits.capacity());latest=event;
             if(count) {
                 if(completed.size()==search.track_limit)completed.erase(completed.begin());
@@ -427,6 +430,7 @@ struct PatternReceiver::Impl {
         event.first_stream_symbol=track.burst.first_stream_symbol;
         event.stream_first_sample=track.burst.stream_first_sample;event.stream_first_symbol=track.burst.stream_first_symbol;
         event.frequency_hz=track.burst.frequency_hz;event.score=track.confirmed_score;
+        event.support_samples=track.confirmed_support;
         event.stream_phase_samples=track.burst.stream_phase_samples;event.missing_slots=track.gap_slots;
         bursts.push_back(std::move(event));track.gap_slots=0;
         track.burst.first_sample=resumed_sample;track.burst.first_stream_symbol=resumed_symbol;
@@ -474,6 +478,10 @@ struct PatternReceiver::Impl {
                     if(fit.score>best.score){best=fit;selected_frequency=f;}
                 }
                 remember(best);
+                const auto observed_begin=std::max(best.first_sample,track.burst.end_sample);
+                const auto symbol_support=pattern_symbol_support(
+                    static_cast<double>(best.end_sample>observed_begin?best.end_sample-observed_begin:0),
+                    best.score,code.chip_samples());
                 const auto standalone=best.score>=threshold();
                 ++track.unconfirmed_symbols;
                 const auto gap_expired=static_cast<long double>(track.unconfirmed_symbols)*code.symbol_samples()>=
@@ -488,6 +496,7 @@ struct PatternReceiver::Impl {
                         if(track.gap_slots==std::numeric_limits<std::size_t>::max())throw Error("pattern missing-slot count overflow");
                         ++track.gap_slots;
                         track.pending_gap=true;track.total_score=track.confirmed_score;
+                        track.total_support=track.confirmed_support;
                         track.pending_score=track.penalty=0;
                         ++track.index;track.next+=length;
                         continue;
@@ -500,6 +509,7 @@ struct PatternReceiver::Impl {
                     track.burst.bits.clear();track.burst.complete=false;
                     track.admitted=false;track.confirmed=0;track.pending_gap=false;track.gap_slots=0;
                     track.total_score=track.pending_score=track.confirmed_score=track.penalty=0;
+                    track.total_support=track.confirmed_support=0;
                     ++track.index;track.next+=length;
                     continue;
                 }
@@ -515,6 +525,7 @@ struct PatternReceiver::Impl {
                             track.gap_slots=track.burst.bits.size()-track.confirmed;track.burst.bits.resize(track.confirmed);
                             track.pending_gap=true;
                             track.total_score=track.confirmed_score;track.pending_score=track.penalty=0;
+                            track.total_support=track.confirmed_support;
                         } else {
                             publish(track,false,true);track.burst.bits.clear();
                             track.burst.complete=false;track.admitted=false;
@@ -538,15 +549,18 @@ struct PatternReceiver::Impl {
                         track.total_score=track.pending_score=track.penalty=0;
                         track.frequency_scores.fill(0);
                         track.confirmed=0;track.confirmed_score=0;
+                        track.total_support=track.confirmed_support=0;
                     }
                 }
                 if(track.burst.bits.size()==search.bit_limit && track.admitted && !standalone) {
                     track.gap_slots=track.burst.bits.size()-track.confirmed+1;track.burst.bits.resize(track.confirmed);
                     track.pending_gap=true;track.pending_score=track.penalty=0;track.total_score=track.confirmed_score;
+                    track.total_support=track.confirmed_support;
                     ++track.index;track.next+=length;continue;
                 }
                 append_bit(track.burst.bits,static_cast<std::uint8_t>(best.bit));track.burst.end_sample=best.end_sample;
                 track.total_score+=best.score;track.pending_score+=best.score;track.penalty+=std::log(10.);
+                track.total_support+=symbol_support;
                 const auto count=static_cast<double>(track.burst.bits.size()-track.confirmed);
                 // Chernoff bound for the sum of independent Exp(1) null scores,
                 // with a union penalty for bit/timing alternatives. Overlapping
@@ -564,6 +578,7 @@ struct PatternReceiver::Impl {
                     track.pending_gap=false;
                     track.confirmed=track.burst.bits.size();track.confirmed_end=best.end_sample;
                     track.confirmed_score=track.total_score;track.pending_score=0;track.penalty=0;
+                    track.confirmed_support=track.total_support;
                 }
                 ++track.index;
                 track.next=chosen+length;
@@ -652,9 +667,11 @@ struct PatternReceiver::Impl {
         }
         track.burst.stream_phase_samples=track.phase_lower;
         track.next=item.end_sample/bin_samples;track.frequency=f;track.total_score=item.score;track.penalty=std::log(2.);
+        track.total_support=pattern_symbol_support(static_cast<double>(item.end_sample-item.first_sample),item.score,code.chip_samples());
         track.frequency_scores[f]=item.score;
         track.admitted=track.established=item.score>=threshold();
-        if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;}
+        if(track.admitted){track.confirmed=1;track.confirmed_end=item.end_sample;track.confirmed_score=item.score;track.penalty=0;
+            track.confirmed_support=track.total_support;}
         else track.pending_score=item.score;
         tracks.push_back(std::move(track));publish(tracks.back(),false);
     }

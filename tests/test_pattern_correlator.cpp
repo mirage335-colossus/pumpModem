@@ -66,6 +66,7 @@ std::vector<modem::PatternBurst> capture(const std::vector<float>& samples,const
             if(match!=result.end()) {
                 auto& prior=*match;prior.bits.insert(prior.bits.end(),burst.bits.begin(),burst.bits.end());
                 prior.complete=burst.complete;prior.end_sample=burst.end_sample;prior.score=burst.score;prior.stream_phase_samples=burst.stream_phase_samples;
+                prior.support_samples=burst.support_samples;
                 prior.frequency_hz=burst.frequency_hz;
             } else result.push_back(std::move(burst));
         }
@@ -172,6 +173,29 @@ void set_symbol_evidence(std::vector<float>& samples,const modem::Config& c,std:
     const auto alternative=direct_score(std::span(samples).subspan(start,count),code,c,start,index,1-bit);
     check(std::abs(actual-target)<.01 && actual-alternative>1,
           "weak-symbol fixture must retain a clear bit preference at its intended evidence level");
+}
+void per_symbol_support_does_not_borrow_strong_prefix_evidence() {
+    auto c=config();c.integration_seconds=.2;c.pulse_shaping=false;
+    constexpr std::size_t start=375;
+    const auto symbol=modem::symbol_sample_count(c),chip=modem::pattern_chip_samples(c);
+    auto samples=waveform({1,0},c,start);
+    set_symbol_evidence(samples,c,start,0,1,500,537);
+    set_symbol_evidence(samples,c,start,1,0,56,541);
+    modem::PatternSearch search;search.start_offset_seconds=.0625;search.frequency_offsets_hz={0};
+    double previous=-1;
+    for(const std::size_t chunk:{37U,113U})for(const std::size_t decisions:{1U,1024U}) {
+        search.chunk_bits=decisions;
+        const auto result=capture(samples,c,search,chunk);
+        const auto& observed=best(result);
+        check(observed.bits==Bytes({1,0}),"per-symbol support fixture changed independently admitted bits");
+        const auto expected=static_cast<double>(symbol)+56*static_cast<double>(chip);
+        check(std::abs(observed.score-556)<.05 && std::abs(observed.support_samples-expected)<.5 &&
+              observed.support_samples+100<static_cast<double>(2*symbol),
+              "strong-symbol evidence was lent to the next weak symbol's arbitration support");
+        if(previous>=0)check(std::abs(previous-observed.support_samples)<1e-6,
+              "PCM or drain chunk boundaries changed cumulative per-symbol support");
+        previous=observed.support_samples;
+    }
 }
 void stronger_significance_rejects_marginal_symbol() {
     auto c=config();c.integration_seconds=.1;c.pulse_shaping=false;
@@ -424,6 +448,7 @@ void drainable_chunks_and_compact_gaps() {
         modem::PatternReceiver receiver(c,workspace,search);
         check(receiver.clock_windowed()==clock_window,"chunk fixture selected the wrong physical receiver path");
         Bytes observed;std::size_t terminals=0,runs=0;std::optional<std::pair<std::uint64_t,std::uint64_t>> identity;
+        double support=0;
         const auto drain=[&] {
             for(const auto& event:receiver.take_bursts()) {
                 const auto current=std::pair{event.stream_first_sample,event.stream_first_symbol};
@@ -431,6 +456,10 @@ void drainable_chunks_and_compact_gaps() {
                 check(current==*identity,"draining or a short gap changed the established stream identity");
                 check(event.first_stream_symbol==observed.size(),"drained decisions lost their original symbol coordinates");
                 check(event.bits.size()<=16 && !(event.missing_slots && !event.bits.empty()),"chunk/run storage is not bounded and disjoint");
+                check(event.support_samples>=support,"drained confirmed support decreased within one physical stream");
+                if(event.missing_slots || event.bits.empty())
+                    check(event.support_samples==support,"unknown slots or physical absence added arbitration support");
+                support=event.support_samples;
                 observed.insert(observed.end(),event.bits.begin(),event.bits.end());
                 observed.insert(observed.end(),event.missing_slots,modem::missing_pattern_bit);
                 runs+=event.missing_slots!=0;
@@ -446,6 +475,8 @@ void drainable_chunks_and_compact_gaps() {
         receiver.finish();drain();
         std::fill(bits.begin()+64,bits.begin()+264,modem::missing_pattern_bit);
         check(observed==bits && terminals==1 && runs==1,"bounded chunks did not preserve the compact gap and unique six-second terminal event");
+        check(support>0 && support<=128*static_cast<double>(symbol),
+              "unknown positions were counted as known media support");
     }
 }
 void output_pressure_never_claims_stream_end() {
@@ -693,6 +724,7 @@ int main(int argc,char** argv) {
     run("sampled_plain",[]{sampled_bits_and_rates(false);});
     run("late_clock_fragment",late_clock_fragment);
     run("weak_prefix_does_not_borrow_confidence",weak_prefix_does_not_borrow_confidence);
+    run("per_symbol_support",per_symbol_support_does_not_borrow_strong_prefix_evidence);
     run("stronger_significance_rejects_marginal_symbol",stronger_significance_rejects_marginal_symbol);
     run("overlapping_carrier_hypotheses_emit_one_stream",overlapping_carrier_hypotheses_emit_one_stream);
     run("shaped_raw_sample_evidence",shaped_raw_sample_evidence);

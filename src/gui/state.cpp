@@ -1,9 +1,12 @@
 #include "state.hpp"
 #include "binary_editor.hpp"
+#include "datapump/live.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iomanip>
 #include <locale>
+#include <map>
+#include <set>
 #include <sstream>
 
 namespace datapump::gui {
@@ -24,24 +27,52 @@ Bytes parse_binary_bits(std::string_view text) {
 Inbox::Inbox(std::size_t capacity) : capacity_(capacity) {
     if (!capacity) throw Error("Receive cache capacity must be positive");
 }
-void Inbox::put(StreamContent stream) {
+void Inbox::put(StreamContent stream, std::optional<ReceptionIdentity> identity) {
     if (stream.message.data.size() > capacity_) throw Error("Received message exceeds the cache capacity");
     auto existing = std::find_if(items_.begin(), items_.end(), [&](const auto& item) {
         return item.message.local_id == stream.message.local_id;
     });
     if (existing != items_.end()) {
         used_ -= existing->message.data.size();
+        identities_.erase(existing->message.local_id);
         items_.erase(existing);
     }
     while (!items_.empty() &&
            (stream.message.data.size() > capacity_ - used_ || items_.size() >= 4096)) {
         used_ -= items_.front().message.data.size();
+        identities_.erase(items_.front().message.local_id);
         items_.pop_front();
     }
     used_ += stream.message.data.size();
+    if(identity)identities_[stream.message.local_id]=*identity;
     items_.push_back(std::move(stream));
 }
-void Inbox::clear() noexcept { items_.clear(); used_ = 0; }
+void Inbox::clear() noexcept { items_.clear(); identities_.clear(); used_ = 0; }
+void Inbox::erase(std::string_view reception_id) {
+    const auto found=std::find_if(items_.begin(),items_.end(),[&](const auto& item) {
+        return id_label(item.message)==reception_id;
+    });
+    if(found==items_.end())return;
+    used_-=found->message.data.size();
+    identities_.erase(found->message.local_id);
+    items_.erase(found);
+}
+std::vector<std::string> Inbox::erase_signal(std::uint64_t signal_id) {
+    std::vector<std::string> erased;
+    for(auto item=items_.begin();item!=items_.end();) {
+        const auto identity=identities_.find(item->message.local_id);
+        if(identity==identities_.end() || identity->second.signal_id!=signal_id) {++item;continue;}
+        erased.push_back(id_label(item->message));
+        used_-=item->message.data.size();identities_.erase(identity);item=items_.erase(item);
+    }
+    return erased;
+}
+std::optional<std::uint64_t> Inbox::revision(std::uint64_t signal_id) const {
+    std::optional<std::uint64_t> revision;
+    for(const auto& [id,identity]:identities_)
+        if(identity.signal_id==signal_id && (!revision || identity.revision>*revision))revision=identity.revision;
+    return revision;
+}
 std::vector<const StreamContent*> Inbox::file_items() const {
     std::vector<const StreamContent*> files;
     for (const auto& stream : items_) {
@@ -215,7 +246,8 @@ std::string signal_data_label(const SignalLine& line) {
     return text.str();
 }
 
-void Signals::update(SignalLine line) {
+bool Signals::update(SignalLine line) {
+    if(std::find(retired_ids_.begin(),retired_ids_.end(),line.id)!=retired_ids_.end())return false;
     if (line.binary) {
         line.validated=false; line.reception_id.clear(); line.text_message=false;
         line.preamble_received_percent.reset(); line.pre_fec_accuracy.reset();line.fec_stats={};
@@ -226,12 +258,91 @@ void Signals::update(SignalLine line) {
     if (line.text.size()>4096) line.text.resize(4096);
     const auto found=std::find_if(lines_.begin(),lines_.end(),[&](const auto& item) { return item.id==line.id; });
     if (found!=lines_.end()) {
-        if ((found->validated && !line.validated) || ((found->binary || found->pattern_score) && found->complete && !line.complete)) return;
+        if(line.revision<found->revision)return false;
+        if(line.revision==found->revision && ((found->validated && !line.validated) ||
+            ((found->binary || found->pattern_score) && found->complete && !line.complete)))return false;
         *found=std::move(line);
     } else {
         if (lines_.size()>=64) lines_.pop_front();
         lines_.push_back(std::move(line));
     }
+    return true;
+}
+void Signals::erase(std::uint64_t id) {
+    std::erase_if(lines_,[&](const auto& line){return line.id==id;});
+    if(std::find(retired_ids_.begin(),retired_ids_.end(),id)!=retired_ids_.end())return;
+    if(retired_ids_.size()>=64)retired_ids_.pop_front();
+    retired_ids_.push_back(id);
+}
+void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) {
+    if(snapshot.signals.empty() && snapshot.received.empty())return;
+    Signals staged=signals;
+    std::set<std::string> referenced_receptions;
+    std::map<std::uint64_t,const live::SignalUpdate*> accepted;
+    const auto retract=[&](const std::string& reception_id) {
+        if(reception_id.empty())return;
+        referenced_receptions.insert(reception_id);
+        inbox.erase(reception_id);
+    };
+    const auto retract_signal=[&](std::uint64_t id) {
+        for(const auto& reception_id:inbox.erase_signal(id))referenced_receptions.insert(reception_id);
+    };
+    for(const auto& signal:snapshot.signals) {
+        if(!signal.reception_id.empty())referenced_receptions.insert(signal.reception_id);
+        const auto cached_revision=inbox.revision(signal.id);
+        if(cached_revision && (signal.revision<*cached_revision ||
+            (signal.revision==*cached_revision && (!signal.complete || !signal.validated))))continue;
+        const auto previous=std::find_if(staged.lines().begin(),staged.lines().end(),[&](const auto& line) {
+            return line.id==signal.id;
+        });
+        const auto old_reception=previous!=staged.lines().end() && signal.revision>previous->revision?
+            previous->reception_id:std::string{};
+        const bool short_text=signal.complete&&!signal.validated&&!signal.binary&&!signal.raw_bits.empty();
+        SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,short_text,
+            signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,
+            signal.received_bits,signal.expected_bits,signal.pattern_score};
+        line.raw_bits=signal.raw_bits;line.missing_symbols=signal.missing_symbols;
+        line.fec_stats=signal.fec_stats;line.revision=signal.revision;
+        if(!staged.update(std::move(line)))continue;
+        if(cached_revision && signal.revision>*cached_revision)retract_signal(signal.id);
+        retract(old_reception);
+        accepted[signal.id]=&signal;
+        for(const auto id:signal.superseded_ids) {
+            if(id==signal.id)continue;
+            const auto obsolete=std::find_if(staged.lines().begin(),staged.lines().end(),[&](const auto& value) {
+                return value.id==id;
+            });
+            retract_signal(id);
+            if(obsolete!=staged.lines().end())retract(obsolete->reception_id);
+            staged.erase(id);accepted.erase(id);
+        }
+    }
+    std::map<std::string,const live::SignalUpdate*> completed_receptions;
+    for(const auto& [id,signal]:accepted)
+        if(signal->complete&&signal->validated&&!signal->reception_id.empty())
+            completed_receptions[signal->reception_id]=signal;
+    for(auto& received:snapshot.received) {
+        if(!received.stream_complete||!received.content_validated)continue;
+        const auto reception_id=id_label(received.content.message);
+        if(referenced_receptions.contains(reception_id)&&!completed_receptions.contains(reception_id))continue;
+        const auto completed=completed_receptions.find(reception_id);
+        const auto identity=completed==completed_receptions.end()?std::optional<Inbox::ReceptionIdentity>{}:
+            Inbox::ReceptionIdentity{completed->second->id,completed->second->revision};
+        inbox.put(std::move(received.content),identity);
+    }
+    for(const auto& [id,signal]:accepted) {
+        const auto current=std::find_if(staged.lines().begin(),staged.lines().end(),[&](const auto& line) {
+            return line.id==id;
+        });
+        if(current==staged.lines().end())continue;
+        const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) {
+            return id_label(item.message)==signal->reception_id;
+        });
+        auto line=*current;
+        line.text_message=line.text_message||(stream!=inbox.items().end()&&stream->message.kind==MessageKind::text);
+        staged.update(std::move(line));
+    }
+    signals=std::move(staged);
 }
 std::optional<std::string> Signals::copy_id(std::size_t index) const {
     if (index>=lines_.size() || lines_[index].binary || !lines_[index].validated || !lines_[index].text_message || lines_[index].reception_id.empty()) return std::nullopt;

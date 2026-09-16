@@ -62,6 +62,11 @@ struct SignalUpdate {
     // Exact transport bits retained when a completed short dictionary stream
     // is presented as text; absent for pending observations and interval data.
     std::string raw_bits;
+    // A stronger physical hypothesis can revise an earlier interpretation,
+    // including one whose shorter profile had already observed its own end.
+    // Consumers replace older revisions and withdraw superseded rows/content.
+    std::uint64_t revision = 0;
+    std::vector<std::uint64_t> superseded_ids;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct PatternScoreObservation {

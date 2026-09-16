@@ -28,6 +28,131 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+void revised_reception_ingestion() {
+    const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {
+        live::Snapshot snapshot;
+        transfer::Received received;received.stream_complete=true;received.content_validated=true;
+        received.content.message.local_id[0]=static_cast<std::uint8_t>(row);
+        received.content.message.kind=kind;received.content.message.data=Bytes{byte,byte};
+        received.content.message.filename=kind==MessageKind::text?"":"profile.bin";
+        live::SignalUpdate signal;signal.id=row;signal.revision=revision;signal.validated=true;signal.complete=true;
+        signal.reception_id=id_label(received.content.message);signal.text=kind==MessageKind::text?"text":"profile.bin";
+        snapshot.received.push_back(std::move(received));snapshot.signals.push_back(std::move(signal));
+        return snapshot;
+    };
+    const auto pending=[](std::uint64_t row,std::uint64_t revision) {
+        live::SignalUpdate signal;signal.id=row;signal.revision=revision;signal.binary=true;
+        signal.text="001";signal.received_bits=3;signal.pattern_score=32;
+        return signal;
+    };
+    for(const auto kind:{MessageKind::text,MessageKind::file}) {
+        Inbox inbox;Signals signals;
+        auto original=complete(101,1,kind,'a');const auto stale=original;
+        apply_receptions(inbox,signals,original);
+        check(inbox.items().size()==1&&inbox.size_bytes()==2&&signals.lines().size()==1&&
+              signals.lines().front().text_message==(kind==MessageKind::text),
+              "Controller reception ingestion did not retain completed source content and type");
+
+        auto stronger=stale;stronger.signals.push_back(pending(101,2));
+        // Both event orders can occur when one UI poll drains several profiles.
+        if(kind==MessageKind::file)std::reverse(stronger.signals.begin(),stronger.signals.end());
+        apply_receptions(inbox,signals,stronger);
+        check(inbox.items().empty()&&inbox.size_bytes()==0&&signals.lines().size()==1&&
+              signals.lines().front().revision==2&&!signals.lines().front().complete&&
+              !signals.copy_id(0)&&!signals.copy_raw_bits(0)&&!signals.copy_text(0),
+              "A later stronger pending profile did not retract the completed inbox source before replayed content was inserted");
+
+        auto replacement=complete(101,3,kind,'b');
+        apply_receptions(inbox,signals,replacement);
+        check(inbox.items().size()==1&&inbox.items().front().message.data==Bytes({'b','b'})&&
+              inbox.size_bytes()==2&&signals.lines().front().revision==3&&signals.lines().front().complete,
+              "Invalidation removed newly completed replacement content sharing the stable reception identity");
+        auto unchanged=complete(102,0,MessageKind::file,'c');apply_receptions(inbox,signals,unchanged);
+        auto late=stale;late.signals.front().superseded_ids={102};apply_receptions(inbox,signals,late);
+        check(signals.lines().size()==2&&signals.lines().front().revision==3&&inbox.items().size()==2&&
+              inbox.items().front().message.data==Bytes({'b','b'}),
+              "A stale revision reinserted old content or retracted an unrelated current reception");
+
+        live::Snapshot merged;auto event=pending(101,4);event.superseded_ids={102};merged.signals.push_back(event);
+        merged.received=complete(102,0,MessageKind::file,'c').received;
+        apply_receptions(inbox,signals,merged);
+        check(signals.lines().size()==1&&signals.lines().front().id==101&&signals.lines().front().revision==4&&
+              !signals.lines().front().complete&&inbox.items().empty()&&inbox.size_bytes()==0,
+              "Merging profile rows left an obsolete file, source payload or duplicate history row");
+        auto retired=complete(102,0,MessageKind::file,'c');apply_receptions(inbox,signals,retired);
+        check(signals.lines().size()==1&&inbox.items().empty(),
+              "A delayed event restored merged-away source content or its retired row");
+        auto final=complete(101,4,kind,'d');apply_receptions(inbox,signals,final);
+        check(signals.lines().size()==1&&signals.lines().front().complete&&inbox.items().size()==1&&
+              inbox.items().front().message.data==Bytes({'d','d'}),
+              "The merged pending reception could not complete with its stable row and source identity");
+        auto replaced_complete=complete(101,5,kind,'e');apply_receptions(inbox,signals,replaced_complete);
+        check(signals.lines().size()==1&&signals.lines().front().revision==5&&inbox.items().size()==1&&
+              inbox.size_bytes()==2&&inbox.items().front().message.data==Bytes({'e','e'}),
+              "Replacing a completed profile removed the new source sharing its canonical local identity");
+    }
+    for(const bool dictionary:{false,true}) {
+        Inbox inbox;Signals signals;live::Snapshot initial;
+        auto observed=pending(103,0);observed.complete=true;
+        if(dictionary) {observed.binary=false;observed.text="e";observed.raw_bits="001";}
+        initial.signals.push_back(observed);apply_receptions(inbox,signals,initial);
+        check(signals.copy_raw_bits(0)=="001","Raw/dictionary fixture lost its completed source bits");
+        live::Snapshot revised;revised.signals.push_back(pending(103,1));apply_receptions(inbox,signals,revised);
+        check(signals.lines().size()==1&&!signals.lines().front().complete&&!signals.copy_raw_bits(0)&&
+              !signals.copy_text(0),"Controller ingestion left completed raw/dictionary copy actions on a superseded profile");
+    }
+    for(const bool merge:{false,true}) {
+        Inbox inbox;Signals signals;
+        auto old=complete(101,5,MessageKind::file,'a');const auto stale=old;
+        apply_receptions(inbox,signals,old);
+        auto unrelated=complete(102,0,MessageKind::file,'b');apply_receptions(inbox,signals,unrelated);
+        for(std::uint64_t id=200;id<264;++id) {
+            SignalLine row;row.id=id;row.binary=true;row.text="0";row.received_bits=1;signals.update(row);
+        }
+        check(signals.lines().size()==64&&signals.lines().front().id==200&&inbox.items().size()==2,
+              "The cache regression did not retain sources beyond the visible row history");
+        auto late=complete(101,4,MessageKind::file,'z');late.signals.front().superseded_ids={102};
+        apply_receptions(inbox,signals,late);
+        live::Snapshot same_revision;same_revision.signals.push_back(pending(101,5));
+        apply_receptions(inbox,signals,same_revision);
+        check(signals.lines().front().id==200&&inbox.items().size()==2&&
+              inbox.items().front().message.data==Bytes({'a','a'}),
+              "Evicting a display row lost cached completion/revision protection or allowed stale alias retraction");
+
+        live::Snapshot revised;auto event=pending(merge?104:101,merge?0:6);
+        if(merge)event.superseded_ids={101};
+        revised.signals.push_back(event);revised.received=stale.received;
+        apply_receptions(inbox,signals,revised);
+        check(inbox.items().size()==1&&inbox.items().front().message.local_id[0]==102&&inbox.size_bytes()==2&&
+              !inbox.revision(101)&&inbox.revision(102)==0&&signals.lines().back().id==event.id&&
+              !signals.lines().back().complete,
+              "A revised or merged profile left its cached attachment after the old display row was evicted");
+        auto delayed=stale;apply_receptions(inbox,signals,delayed);
+        check(inbox.items().size()==1&&inbox.size_bytes()==2,
+              "A delayed completion restored an evicted row's superseded attachment");
+        auto final=complete(event.id,event.revision,MessageKind::file,'c');apply_receptions(inbox,signals,final);
+        check(inbox.items().size()==2&&inbox.revision(event.id)==event.revision&&
+              inbox.items().back().message.data==Bytes({'c','c'}),
+              "A replacement source lost ownership after its earlier display row had expired");
+    }
+    {
+        Inbox inbox(2);
+        const auto first=complete(101,1,MessageKind::file,'a');
+        const auto second=complete(102,2,MessageKind::file,'b');
+        inbox.put(first.received.front().content,Inbox::ReceptionIdentity{101,1});
+        inbox.put(second.received.front().content,Inbox::ReceptionIdentity{102,2});
+        check(!inbox.revision(101)&&inbox.revision(102)==2&&inbox.items().size()==1,
+              "Content-cache eviction retained obsolete signal ownership");
+        inbox.put(second.received.front().content,Inbox::ReceptionIdentity{103,3});
+        check(!inbox.revision(102)&&inbox.revision(103)==3,
+              "Replacing a cached source retained its previous signal ownership");
+        inbox.erase(second.signals.front().reception_id);
+        check(!inbox.revision(103)&&inbox.items().empty()&&inbox.size_bytes()==0,
+              "Erasing cached content left its signal ownership behind");
+        inbox.put(first.received.front().content,Inbox::ReceptionIdentity{101,1});inbox.clear();
+        check(!inbox.revision(101)&&inbox.items().empty(),"Clearing received content retained stale signal ownership");
+    }
+}
 void noise_start_stop(Controller& controller) {
     using F=ui::Field;using C=ui::Command;
     const auto draft=controller.field(F::message).text,binary=controller.field(F::binary).text;
@@ -1359,6 +1484,7 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        revised_reception_ingestion();
         rate_carrier_controls();
         shannon_capacity_display();
         profile_reference_display();

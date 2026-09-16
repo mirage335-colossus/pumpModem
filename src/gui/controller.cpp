@@ -642,19 +642,10 @@ struct Controller::Impl {
         plot_update.update_plots=plot_update.update_plots||changed.update_plots;
         plot_update.append_waterfall=plot_update.append_waterfall||changed.append_waterfall;
         plot_update.clear_waterfall=plot_update.clear_waterfall||changed.clear_waterfall;
-        for(auto& received:next.received)
-            if(received.stream_complete && received.content_validated)inbox.put(std::move(received.content));
-        if(!next.received.empty()) refresh_files();
-        for(const auto& signal:next.signals) {
-            const auto stream=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& item) { return id_label(item.message)==signal.reception_id; });
-            const bool short_text=signal.complete&&!signal.validated&&!signal.binary&&!signal.raw_bits.empty();
-            const bool text=short_text||(stream!=inbox.items().end()&&stream->message.kind==MessageKind::text);
-            SignalLine line{signal.id,signal.frequency_hz,signal.text,signal.validated,signal.reception_id,text,signal.preamble_received_percent,signal.pre_fec_accuracy,signal.binary,signal.complete,signal.received_bits,signal.expected_bits,signal.pattern_score};
-            line.raw_bits=signal.raw_bits;
-            line.missing_symbols=signal.missing_symbols;line.fec_stats=signal.fec_stats;
-            signals.update(std::move(line));
+        apply_receptions(inbox,signals,next);
+        if(!next.signals.empty() || !next.received.empty()) {
+            refresh_files();refresh_signals();
         }
-        if(!next.signals.empty() || !next.received.empty()) refresh_signals();
         if(transmit_requested&&!next.transmitting&&next.transmission_finished) {
             if(!noise_requested)gate.finished();
             transmit_requested=false; noise_requested=false;

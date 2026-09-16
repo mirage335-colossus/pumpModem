@@ -1,8 +1,16 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include <algorithm>
 #include <memory>
 
 namespace datapump::modem {
+// Cross-profile presentation weight for one admitted symbol. Native scores
+// have different conservative bounds on different DSP paths; cap each symbol
+// separately so a strong prefix cannot lend its surplus to a weak later fit.
+// This weight changes neither symbol admission nor physical completion.
+inline double pattern_symbol_support(double known_samples,double log_evidence,std::uint64_t chip_samples) {
+    return std::min(known_samples,std::max(0.,log_evidence)*static_cast<double>(chip_samples));
+}
 // Scores use natural-log evidence against an ideal circular-Gaussian reference.
 // Real-PCM covariance and adaptive searches require empirical calibration;
 // neither a lifetime false-alarm guarantee nor authentication is implied.
@@ -35,6 +43,9 @@ struct PatternBurst {
     // Compact all-unknown run, mutually exclusive with bits. It is emitted
     // only after a later found symbol confirms the run's observed extent.
     std::size_t missing_slots = 0;
+    // Cumulative per-symbol supported media samples for confirmed decisions.
+    // Missing positions add zero; draining chunks never resets this total.
+    double support_samples = 0;
 };
 // Completed failed-symbol observations covering this much received-media
 // time end the stream. One failed symbol suffices when it lasts >=6s.
