@@ -180,6 +180,32 @@ or `--json`, binary file content remains unsaved. Text defaults to stdout, so
 normal pipelines work. Public Reed–Solomon correction does not authenticate the
 sender.
 
+After observed symbol absence completes a reception, unresolved interval data
+can use a separate hard-bit recovery search. Its default wall-clock budget is
+five minutes, with workers up to the available CPU cores. `rx`, `simulate` and
+`listen` accept `--recovery-seconds N` (0 disables this additional search),
+`--recovery-threads N` (0 selects the available cores), and `--recovery-bits N`
+(default 65,536 retained symbol slots). These are local receiver settings;
+transmit bits, markers, airtime, encryption and authentication are unchanged.
+The search receives hard bits and missing-slot positions, with no analog samples
+or symbol-confidence scores. It never changes a bit's established encryption
+coordinates or joins receptions across physical completion.
+
+JSON reports `recovery.state`, `attempts`, `total` and `elapsed_ms` separately
+from `stream_complete` and `content_validated`. A physically complete reception
+may still have an incomplete recovery search. Exhausting its time budget does
+not establish a unique candidate or expose speculative source content. Recovery
+remains bounded by the retained slots and selected search scope; it cannot
+recover every possible insertion, deletion or lost interval. The API retains
+unfinished work for a later recovery call while its result remains alive.
+`--recovery-errors N` (default 2, range 0–24) reserves RS capacity for additional
+erroneous bytes by enumerating more missing bits. This can substantially increase
+the search domain; a larger value is not a guarantee that the search will finish
+within its time budget. See [the exact recovery scope](docs/protocol.md#exhaustive-hard-bit-recovery).
+The GUI's Recovery menu in Console + Compression resumes an unfinished search
+for another configured budget or cancels its current run. Clearing received
+content discards these jobs; stopping or reconfiguring the session does too.
+
 ```sh
 printf 'clipboard text' | ./build/pump tx --input - --output message.wav
 ./build/pump rx --input message.wav

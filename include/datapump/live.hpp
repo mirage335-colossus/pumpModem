@@ -67,6 +67,8 @@ struct SignalUpdate {
     // Consumers replace older revisions and withdraw superseded rows/content.
     std::uint64_t revision = 0;
     std::vector<std::uint64_t> superseded_ids;
+    // Physical completion is independent of the bounded, post-end search.
+    transfer::RecoveryProgress recovery_progress;
 };
 enum class ConstellationSource { input, transmitted, received };
 struct PatternScoreObservation {
@@ -125,6 +127,9 @@ struct Snapshot {
     std::uint32_t hardware_sample_rate = 0;
     double audio_passband_hz = 0;
     std::size_t dsp_buffered_bytes = 0;
+    // A separate bounded post-reception search pool; it never consumes the
+    // waveform/receiver workspace reserved by dsp_buffered_bytes.
+    std::size_t recovery_working_bytes = 0;
 };
 
 // Audio callbacks and modem work never run on the caller/UI thread. configure
@@ -161,6 +166,11 @@ public:
     // or use/register saved keys. Stop with cancel_transmit().
     void transmit_noise();
     void cancel_transmit();
+    // Resume a retained incomplete search with another configured time budget,
+    // or stop one search without interrupting reception or audio capture.
+    bool resume_recovery(std::uint64_t signal_id);
+    void cancel_recovery(std::uint64_t signal_id);
+    void clear_recoveries();
     Snapshot snapshot();
     void stop();
 private:

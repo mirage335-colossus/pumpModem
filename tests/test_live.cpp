@@ -184,6 +184,98 @@ live::Snapshot wait_for(live::Session& session,Predicate predicate) {
     }
     throw Error("timed out waiting for a transmission capture");
 }
+void background_recovery_lifecycle() {
+    using transfer::RecoveryState;
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session({},[&] {
+        return std::chrono::steady_clock::time_point{}+std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    auto value=settings();value.transfer.recovery_options.budget=1ms;value.transfer.recovery_options.workers=1;
+    session.start(value);
+    // A long explicit hard-bit reception is intentionally indistinguishable
+    // from a damaged interval source. It exercises async scheduling without
+    // teaching the receiver about simulated errors or symbol confidence.
+    Bytes bits(8192);std::uint32_t generator=0x1734abc5;
+    for(auto& bit:bits) {
+        generator^=generator<<13;generator^=generator>>17;generator^=generator<<5;
+        bit=static_cast<std::uint8_t>(generator&1U);
+    }
+    session.transmit_bits(bits);
+    const auto staged=wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    check(staged.received.empty()&&staged.recovery_working_bytes==0,
+          "Recovery ran before simulation physical completion reached its presentation deadline");
+    session.clear_recoveries();
+    replay_milliseconds=3000;
+    const auto cleared=session.snapshot();
+    check(cleared.signals.empty()&&cleared.received.empty()&&cleared.recovery_working_bytes==0&&!cleared.simulation_replay,
+          "Cleared staged recovery restored a row, job or source at the replay deadline");
+    session.transmit_bits(bits);
+    wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    replay_milliseconds=6000;
+    const auto ended=session.snapshot();
+    const auto ready=std::find_if(ended.signals.begin(),ended.signals.end(),[](const auto& signal) {
+        return signal.complete&&signal.recovery_progress.state==RecoveryState::ready;
+    });
+    check(ready!=ended.signals.end()&&ready->binary&&!ready->validated&&ended.received.empty(),
+          "Physical completion did not immediately release a pending recovery in the original row");
+    const auto id=ready->id,revision=ready->revision;
+    session.cancel_recovery(id);
+    const auto stopped=wait_for(session,[&](const auto& state) {
+        return std::any_of(state.signals.begin(),state.signals.end(),[&](const auto& signal) {
+            return signal.id==id&&(signal.recovery_progress.state==RecoveryState::cancelled||
+                                  signal.recovery_progress.state==RecoveryState::incomplete);
+        });
+    });
+    check(stopped.running&&stopped.received.empty()&&stopped.recovery_working_bytes<=16*1024*1024&&
+          std::all_of(stopped.signals.begin(),stopped.signals.end(),[&](const auto& signal) {
+              return signal.id!=id||(signal.revision==revision&&signal.complete&&!signal.validated);
+          }),"Cancelling background recovery changed physical completion, identity, authentication or resource bounds");
+    check(session.resume_recovery(id),"Cancelled recovery did not retain its resumable search");
+    session.configure(value);
+    check(!session.resume_recovery(id),"Reconfiguration retained an obsolete recovery generation");
+    session.transmit_bits(Bytes{0,0,1});
+    wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    replay_milliseconds=9000;
+    const auto next=session.snapshot();
+    check(std::none_of(next.signals.begin(),next.signals.end(),[&](const auto& signal) {
+              return signal.id==id&&(signal.validated||signal.recovery_progress.state==RecoveryState::running);
+          })&&std::any_of(next.signals.begin(),next.signals.end(),[&](const auto& signal) {
+              return signal.id!=id&&signal.complete&&signal.raw_bits=="001"&&signal.text=="e";
+          }),"Background recovery blocked subsequent reception or restored a stale generation");
+    value.transfer.compression=false;value.transfer.recovery_options.budget=1s;
+    Message source;source.data.resize(150);
+    for(auto& byte:source.data) {
+        generator^=generator<<13;generator^=generator>>17;generator^=generator<<5;
+        byte=static_cast<std::uint8_t>(generator);
+    }
+    auto damaged=transfer::message_wire_bits(source,value.transfer);
+    constexpr std::size_t cadence=192+128*8;
+    check(damaged.size()>cadence,"Published-recovery fixture must exceed the old single-interval fallback");
+    for(std::size_t start=0;start<damaged.size();start+=cadence)
+        for(std::size_t bit=0;bit<192;++bit)damaged[start+bit]^=1;
+    modem::PatternBurst fixture;fixture.bits=damaged;fixture.complete=true;
+    const auto repaired=transfer::interpret_pattern(std::move(fixture),value.transfer,value.transfer.timestamp);
+    check(repaired.content_validated&&repaired.recovery_progress.state==RecoveryState::recovered&&
+          repaired.content.message.data==source.data,
+          "Published-recovery fixture did not independently recover its source");
+    session.configure(value);session.transmit_bits(damaged);
+    wait_for(session,[](const auto& state){return state.transmission_finished&&state.simulation_replay;});
+    replay_milliseconds=12000;
+    const auto completing=session.snapshot();
+    check(std::any_of(completing.signals.begin(),completing.signals.end(),[](const auto& signal) {
+        return signal.recovery_progress.state==RecoveryState::ready;
+    }),"Published-recovery fixture did not enter background recovery");
+    // Let this tiny fixed search publish while the UI is not polling. Clearing
+    // must also retract a result whose job has left the coordinator's deque.
+    std::this_thread::sleep_for(1200ms);
+    session.clear_recoveries();
+    wait_for(session,[](const auto& state) {
+        check(state.signals.empty()&&state.received.empty(),
+              "Cleared completed recovery restored queued content or its final row");
+        return state.recovery_working_bytes==0;
+    });
+    session.clear_recoveries();session.stop();
+}
 void transmit_capture_tracks_generation_and_replay() {
     using Trace=modem::TransmitTrace;
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -371,7 +463,10 @@ int main(int argc,char** argv) {
         if(argc>1 && std::string_view(argv[1])=="--pattern-scores") {
             std::cout<<"pattern score observation lifetime passed\n";return 0;
         }
-        if(argc==1){run();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}
+        if(argc>1 && std::string_view(argv[1])=="--recovery") {
+            background_recovery_lifecycle();std::cout<<"background recovery lifecycle passed\n";return 0;
+        }
+        if(argc==1){run();background_recovery_lifecycle();transmit_capture_tracks_generation_and_replay();continuous_noise_lifecycle();}
         short_keyed_stream_survives_epoch_refresh();std::cout<<"live fixed-interval lifecycle passed\n";
     } catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}
 }

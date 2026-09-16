@@ -474,6 +474,13 @@ struct Controller::Impl {
         case Command::save_file: return selected_file()!=nullptr;
         case Command::copy_signal: { const auto index=selected_signal(); return index && (signals.copy_id(*index)||signals.copy_bits(*index)||signals.copy_text(*index)); }
         case Command::copy_raw_signal: { const auto index=selected_signal();return index&&signals.copy_raw_bits(*index).has_value(); }
+        case Command::resume_recovery: case Command::cancel_recovery: {
+            const auto index=selected_signal();if(!index)return false;
+            const auto state=signals.lines()[*index].recovery_progress.state;
+            return command==Command::resume_recovery?
+                state==transfer::RecoveryState::incomplete || state==transfer::RecoveryState::cancelled:
+                state==transfer::RecoveryState::ready || state==transfer::RecoveryState::running;
+        }
         case Command::paste_raw_signal: {
             const auto index=selected_signal();const auto bits=index?signals.copy_raw_bits(*index):std::nullopt;
             return !attachment&&!file_loading&&bits&&bits->size()<=transfer::short_message_bits;
@@ -706,7 +713,7 @@ struct Controller::Impl {
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel: session.cancel_transmit(); notice(noise_requested||snapshot.transmitting_noise?
             "Stopping noise...":snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
-        case Command::clear_received: inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
+        case Command::clear_received: session.clear_recoveries();inbox.clear(); signals.clear(); refresh_files(); refresh_signals(); notice("Received content cleared from memory."); break;
         case Command::attach_file:
             ++attachment_revision; pending_file.reset(); file_loading=false;
             request(Purpose::attach,ui::ServiceKind::open_file,"Choose an attachment"); break;
@@ -736,6 +743,12 @@ struct Controller::Impl {
             const auto bits=signals.copy_raw_bits(*selected_signal());
             request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received raw payload bits",*bits);break;
         }
+        case Command::resume_recovery:
+            if(!session.resume_recovery(signals.lines()[*selected_signal()].id))throw Error("That recovery is no longer retained");
+            notice("Recovery queued for another search budget.");break;
+        case Command::cancel_recovery:
+            session.cancel_recovery(signals.lines()[*selected_signal()].id);
+            notice("Cancelling recovery; reception continues.");break;
         case Command::paste_raw_signal:
             f(UiField::short_bits).text=*signals.copy_raw_bits(*selected_signal());short_bits_changed();
             ++f(UiField::short_bits).text_cursor_end_revision;break;

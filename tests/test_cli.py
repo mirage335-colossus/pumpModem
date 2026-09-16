@@ -55,6 +55,27 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['raw_bits'],'001'+'11111'+'00000000')
         self.assertEqual(value['raw_bit_count'],16)
         self.assertEqual(value['filename'],'')
+        self.assertEqual(value['recovery']['state'],'none')
+        self.assertEqual(value['recovery']['attempts'],0)
+    def test_recovery_settings(self):
+        helptext=self.run_pump('--help').stdout
+        for option in ('--recovery-seconds','--recovery-threads','--recovery-bits','--recovery-errors'):
+            self.assertIn(option.encode(),helptext)
+        # Recovery is a local receive policy and never changes the tiny wire path.
+        value=json.loads(self.run_pump('simulate','--text','e','--json','--snr','30',
+            '--clock-error-ppm','0','--phase-noise','0','--recovery-seconds','0',
+            '--recovery-threads','1','--recovery-bits','1024','--recovery-errors','0',*AUDIO).stdout)
+        self.assertTrue(value['stream_complete'])
+        self.assertEqual(value['raw_bits'],'001')
+        self.assertEqual(value['recovery']['state'],'none')
+        self.assertEqual(value['recovery']['attempts'],0)
+        for extra in (('--recovery-seconds','-1'),('--recovery-seconds','86401'),
+                      ('--recovery-threads','1025'),('--recovery-threads','1.5'),
+                      ('--recovery-bits','1023'),('--recovery-bits','1048577'),
+                      ('--recovery-errors','25'),('--recovery-errors','-1')):
+            self.run_pump('simulate','--text','e',*extra,*AUDIO,ok=False)
+        for command in ('tx','estimate','status-rx'):
+            self.run_pump(command,'--recovery-seconds','0',*AUDIO,ok=False)
     def test_live_json_reception_identity(self):
         result=self.run_pump('listen','--text','quick brown','--json','--seconds','8',
             '--simulation','3dBm -90dB','--bw','3600','--pattern','auto-pattern',
@@ -78,6 +99,9 @@ class StreamCLI(unittest.TestCase):
                 continue
             self.assertIsInstance(event['revision'],int)
             self.assertIsInstance(event['superseded_ids'],list)
+            if event.get('event') in ('raw_bits','reception_update'):
+                self.assertEqual(event['recovery']['state'],'none')
+                self.assertEqual(event['recovery']['attempts'],0)
             self.assertGreaterEqual(event['revision'],revisions.get(event['signal_id'],0))
             revisions[event['signal_id']]=event['revision']
         self.assertTrue(any(event['signal_id']==payload['signal_id'] for event in pending),
@@ -124,6 +148,8 @@ class StreamCLI(unittest.TestCase):
             self.assertFalse(pending['stream_complete'])
             self.assertFalse(pending['short_text_decoded'])
             self.assertEqual(pending['data_base64'],'')
+            self.assertEqual(pending['recovery']['state'],'none')
+            self.assertEqual(pending['recovery']['attempts'],0)
     def test_sampled_stream_roundtrip(self):
         source=b'fixed intervals\x00\x00'
         value=json.loads(self.run_pump('simulate','--input','-','--json','--snr','30',

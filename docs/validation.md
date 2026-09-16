@@ -4,6 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Exhaustive post-reception hard-bit recovery — 16 September 2026
+
+Unresolved interval receptions now retain a separate bounded hard-bit capture
+and, only after physical completion, may search missing-bit assignments and
+fixed-size alignment hypotheses. The default run lasts at most five minutes
+plus its final bounded worker batches, using up to the available CPU cores.
+Incomplete and cancelled searches retain their exact search position for an
+explicit resume. Candidates remain private until the competing alignments are
+resolved; keyed candidates still require the original HMAC verifier. Source
+interpretation then follows the existing bounded path. No encoder, RS primitive,
+cryptographic primitive, waveform or symbol-admission algorithm changes.
+
+The extra capture stores four hard decisions per byte, including explicit
+missing values, and releases storage if its configured retention is exceeded.
+This preserves the existing receiver working-memory assertion without relaxing
+its limit. The 4,096-bit diagnostic prefix and next-poll pending progress remain
+independent. Live recovery has a separate bounded queue and coordinator; later
+receptions continue while it searches. The shared Console and Compression menus
+provide resume/cancel actions, with physical completion and recovery status
+shown separately in the original row. CLI receive commands expose the local
+budget, workers, retained slots and error reserve, plus recovery JSON counters.
+
+New regression fixtures cover sparse missing bits beyond RS byte-erasure
+capacity, additional known byte errors, exact public and authenticated source
+reconstruction, and deterministic one/multiple-worker coverage. One keyed case
+exhausts all 8,192 assignments for 57 missing bits in separate bytes and preserves
+all 57 as missing in diagnostics. Further cases cover deadlines and cancellation
+with resumption, wrong authentication coordinates, competing public alignments,
+missing middle intervals, memory and integer limits, and uneven receive chunks
+crossing the packed retention boundaries. Live and shared GUI regressions cover
+same-row updates, stale result rejection, independent later reception, and
+clearing both staged and already-completed recovery publications.
+
+The Release build and all 22 selected suites passed in 182.53 seconds:
+`live_profiles`, `live_receptions`, `live`, `live_resources`, `compression_short`,
+`transfer`, `stream_codec`, `stream_receive`, `recovery`, `attachment`,
+`pattern_correlator`, `pattern_receiver`, `gui_application`, `gui_controller`,
+`gui_inspection`, `gui_binary_editor`, `cli`, `gui_layout`, `gui_contract`,
+`gui_link_boundary`, `gui_adapter_boundary` and `gui_native_policy`.
+`git diff --check` passed. The independent wire vectors, sampled hours-long
+physical-end cases and original memory assertions remain intact. The Compression
+geometry check now uses the same grouped menu controls as the native adapters,
+while checking that every menu entry agrees on its shared rectangle.
+These are synthetic hard-bit, sampled-audio and headless shared GUI checks;
+physical weak-signal/LPI performance and native window rendering were not
+exercised. No display server was available, and neither native adapter changed.
+
 ## RX target combinations and revised interpretations — 15 September 2026
 
 The receive-bank fix now covers differing automatic chip floors, integration

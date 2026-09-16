@@ -15,6 +15,10 @@
 #include <utility>
 
 namespace datapump::transfer {
+struct RecoverySource {
+    Options options;
+    std::size_t source_limit=0;
+};
 namespace {
 Options effective_options(const Options& input) {
     auto result=input;
@@ -43,6 +47,11 @@ void validate(const Options& options) {
         throw Error("encrypted spreading requires a symmetric key");
     (void)interval_parity_bytes(options.fec);
     (void)source_storage_limit(options.content_limit);
+    if(options.recovery_options.enabled &&
+       (options.recovery_options.budget.count()<0 || options.recovery_options.workers>1024 ||
+        options.recovery_options.retained_bits<1024 || options.recovery_options.retained_bits>1024*1024 ||
+        options.recovery_options.extra_errors>24))
+        throw Error("invalid post-reception recovery settings");
     if(options.dsp_workspace_bytes<256*1024)throw Error("streaming DSP workspace must be at least 256 KiB");
 }
 void validate_message(const Message& message,const Options& options) {
@@ -412,8 +421,16 @@ struct StreamReceiver::Impl {
         std::uint64_t next_symbol=0;
         std::size_t stored=0;
         bool failed=false,aligned=false;
+        // Four hard decisions per byte (0, 1, or 2 for a missing slot).
+        // Keep the extra retention inside the existing receive-memory bound.
+        Bytes recovery_bits;
+        std::size_t recovery_slots=0;
+        std::vector<std::uint64_t> recovery_starts;
+        std::uint64_t recovery_first=0;
+        bool recovery_truncated=false,recovery_contiguous=true,interval_failed=false;
         State(const Options& value,const modem::PatternBurst& burst)
-            :collector(burst.first_stream_symbol,0,true),options(value),next_symbol(burst.first_stream_symbol) {
+            :collector(burst.first_stream_symbol,0,true),options(value),next_symbol(burst.first_stream_symbol),
+             recovery_first(burst.first_stream_symbol) {
             options.modem.stream_phase_samples=burst.stream_phase_samples;
             result.timestamp=options.timestamp;
             const std::array<std::uint64_t,2> identity{options.timestamp,burst.stream_first_sample};
@@ -466,6 +483,9 @@ struct StreamReceiver::Impl {
     }
     void interval(State& state,const boundary_sync::Interval& interval) {
         state.aligned|=interval.marker_recognized;
+        if(state.options.recovery_options.enabled && state.options.recovery_options.budget.count()>0 &&
+           state.options.fec!=FecMode::off && !state.recovery_truncated && interval.marker_recognized)
+            state.recovery_starts.push_back(interval.first_stream_symbol);
         if(!state.aligned){fail(state,"alignment marker not established");return;}
         try {
             std::array<std::size_t,stream_interval_bytes> erasures{};std::size_t count=0;
@@ -473,7 +493,7 @@ struct StreamReceiver::Impl {
             const auto decoded=decode_interval(interval.bytes,interval_options(state.options,interval.first_stream_symbol),
                 std::span(erasures).first(count),interval.erasure_bits);
             accept_interval(state,decoded);
-        } catch(const Error& error) {fail(state,error.what());}
+        } catch(const Error& error) {state.interval_failed=true;fail(state,error.what());}
     }
     Received push(modem::PatternBurst burst,modem::Diagnostics diagnostics) {
         if(burst.missing_slots) {
@@ -506,7 +526,9 @@ struct StreamReceiver::Impl {
         state.options.modem.stream_phase_samples=burst.stream_phase_samples;
         state.result.diagnostics=std::move(diagnostics);state.result.diagnostics.pattern_score=burst.score;
         state.result.diagnostics.sample_offset=static_cast<std::size_t>(burst.stream_first_sample);
-        if(burst.first_stream_symbol!=state.next_symbol && !burst.bits.empty())fail(state,"noncontiguous received source");
+        if(burst.first_stream_symbol!=state.next_symbol && !burst.bits.empty()) {
+            state.recovery_contiguous=false;fail(state,"noncontiguous received source");
+        }
         auto& bits=burst.bits;
         std::size_t begin=0;
         for(std::size_t i=0;i<=bits.size();++i) {
@@ -525,12 +547,27 @@ struct StreamReceiver::Impl {
         else state.next_symbol=burst.first_stream_symbol+bits.size();
         const auto preview=std::min<std::size_t>(4096-state.result.raw_bits.size(),bits.size());
         for(std::size_t i=0;i<preview;++i)state.result.raw_bits.push_back(bits[i]==1?1:0);
+        if(state.options.recovery_options.enabled && state.options.recovery_options.budget.count()>0 &&
+           state.options.fec!=FecMode::off && !state.recovery_truncated) {
+            const auto available=state.options.recovery_options.retained_bits-state.recovery_slots;
+            if(bits.size()>available) {
+                state.recovery_truncated=true;
+                Bytes{}.swap(state.recovery_bits);
+                std::vector<std::uint64_t>{}.swap(state.recovery_starts);
+            } else {
+                for(const auto bit:bits) {
+                    if(state.recovery_slots%4==0)state.recovery_bits.push_back(0);
+                    state.recovery_bits.back()|=static_cast<std::uint8_t>(bit<<(2*(state.recovery_slots%4)));
+                    ++state.recovery_slots;
+                }
+            }
+        }
         {
             try {
                 const auto sink=[&](const boundary_sync::Interval& interval){this->interval(state,interval);};
                 state.collector.push(bits,sink);
                 if(burst.complete)state.collector.finish(true,sink);
-            } catch(const Error& error){fail(state,error.what());}
+            } catch(const Error& error){state.interval_failed=true;fail(state,error.what());}
         }
         state.result.stream_complete=burst.complete;
         // This fallback uses only the existing complete diagnostic prefix.
@@ -576,6 +613,30 @@ struct StreamReceiver::Impl {
             } catch(const Error&) {} // Keep exact raw bits when no complete interpretation fits.
         }
         if(burst.complete) {
+            // Seal only hard decisions and gap slots. No waveform or confidence
+            // data crosses into exhaustive recovery, and no search runs here.
+            const auto& recovery_options=state.options.recovery_options;
+            if(recovery_options.enabled && recovery_options.budget.count()>0 &&
+               state.options.fec!=FecMode::off && !state.result.content_validated &&
+               !state.result.short_text_decoded && state.result.observed_bits>short_message_bits &&
+               (state.interval_failed || !state.aligned)) {
+                if(state.recovery_truncated || !state.recovery_contiguous ||
+                   state.result.observed_bits!=state.recovery_slots) {
+                    state.result.recovery_progress.state=RecoveryState::unavailable;
+                } else {
+                    RecoveryInput capture;
+                    capture.bits.resize(state.recovery_slots);
+                    for(std::size_t i=0;i<capture.bits.size();++i)
+                        capture.bits[i]=static_cast<std::uint8_t>((state.recovery_bits[i/4]>>(2*(i%4)))&3);
+                    capture.first_symbol=state.recovery_first;
+                    capture.established_starts=std::move(state.recovery_starts);capture.fec=state.options.fec;
+                    capture.interval_options=[value=state.options](std::uint64_t first) {return interval_options(value,first);};
+                    state.result.recovery=std::make_shared<RecoveryJob>(std::move(capture),recovery_options);
+                    state.result.recovery_progress=state.result.recovery->progress();
+                    state.result.recovery_source=std::make_shared<RecoverySource>(RecoverySource{
+                        state.options,quota->limit-quota->used+state.stored});
+                }
+            }
             auto result=std::move(state.result);quota->used-=state.stored;states.erase(it);return result;
         }
         return state.result;
@@ -596,13 +657,65 @@ std::size_t StreamReceiver::working_bytes()const {
             state->collector.working_bytes()+state->options.receive_targets_db_hz.capacity()*sizeof(double)+
             result.raw_bits.capacity()+result.diagnostics.constellation.capacity()*sizeof(std::complex<double>)+
             result.diagnostics.waveform.capacity()*sizeof(float)+result.error.capacity()+
-            message.data.capacity()+message.filename.capacity()+message.callsign.capacity()+message.grid.capacity();
+            message.data.capacity()+message.filename.capacity()+message.callsign.capacity()+message.grid.capacity()+
+            state->recovery_bits.capacity()+state->recovery_starts.capacity()*sizeof(std::uint64_t);
         if(state->spool)bytes+=sizeof(std::FILE)+BUFSIZ;
     }
     return bytes;
 }
 Received interpret_pattern(modem::PatternBurst burst,const Options& options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {
-    StreamReceiver receiver(options,timestamp);return receiver.push(std::move(burst),std::move(diagnostics));
+    StreamReceiver receiver(options,timestamp);return recover_received(receiver.push(std::move(burst),std::move(diagnostics)));
+}
+
+Received recover_received(Received received,std::stop_token stop) {
+    if(!received.stream_complete || received.content_validated || !received.recovery || !received.recovery_source)
+        return received;
+    received.recovery->run(stop);
+    received.recovery_progress=received.recovery->progress();
+    if(received.recovery_progress.state==RecoveryState::recovered) {
+        try {
+            const auto& context=*received.recovery_source;
+            const auto& options=context.options;
+            const auto intervals=received.recovery->result();
+            Bytes source;
+            StreamContent content;content.message.local_id=received.content.message.local_id;
+            content.authenticated=options.key.has_value();
+            content.pre_fec_accuracy=StreamBitAccuracy{};
+            const auto add_region=[](FecRegionStats& to,const FecRegionStats& from) {
+                to.received_bits+=from.received_bits;to.corrected_bits+=from.corrected_bits;
+                to.missing_bits+=from.missing_bits;to.corrected_bytes+=from.corrected_bytes;
+                to.erased_bytes+=from.erased_bytes;to.repaired_bytes+=from.repaired_bytes;
+            };
+            for(const auto& interval:intervals) {
+                if(source.size()>context.source_limit || interval.data.size()>context.source_limit-source.size())
+                    throw Error("received source storage quota exhausted");
+                source.insert(source.end(),interval.data.begin(),interval.data.end());
+                content.corrected_bytes+=interval.corrected_bytes;content.consumed_bytes+=stream_interval_bytes;
+                content.authenticated=content.authenticated && interval.authenticated;
+                if(interval.pre_fec_accuracy) {
+                    content.pre_fec_accuracy->received_data_bits+=interval.pre_fec_accuracy->received_data_bits;
+                    content.pre_fec_accuracy->corrected_data_bits+=interval.pre_fec_accuracy->corrected_data_bits;
+                    content.pre_fec_accuracy->missing_data_bits+=interval.pre_fec_accuracy->missing_data_bits;
+                }
+                add_region(content.fec_stats.data,interval.fec_stats.data);
+                add_region(content.fec_stats.integrity,interval.fec_stats.integrity);
+                add_region(content.fec_stats.parity,interval.fec_stats.parity);
+            }
+            if(intervals.empty())throw Error("recovery produced no source intervals");
+            content.message.data=decode_source(source,interval_data_bytes(options.fec,options.key.has_value()),
+                options.compression,attachment::source_limit(options.content_limit));
+            attachment::interpret(content.message,options.content_limit);
+            received.content=std::move(content);received.content_validated=true;received.error.clear();
+        } catch(const Error& error) {
+            received.error=std::string("recovered intervals failed source validation: ")+error.what();
+        }
+    }
+    switch(received.recovery_progress.state) {
+    case RecoveryState::recovered:case RecoveryState::exhausted:case RecoveryState::ambiguous:case RecoveryState::unavailable:
+        received.recovery.reset();received.recovery_source.reset();break;
+    default:break; // Preserve unfinished hard-bit work for explicit resumption.
+    }
+    return received;
 }
 
 std::vector<float> transmit(const Message& message, const Options& input_options, std::stop_token stop) {
@@ -652,7 +765,7 @@ Received receive(std::span<const float> samples, const Options& input_options, P
     if(best) {
         const auto tail=samples.last(std::min<std::size_t>(2048,samples.size()));
         best->diagnostics.waveform.assign(tail.begin(),tail.end());
-        return std::move(*best);
+        return recover_received(std::move(*best),stop);
     }
     throw Error("no sufficiently confident pattern in timing search"+(last_error.empty()?std::string{}:": "+last_error));
 }
@@ -699,7 +812,7 @@ Received simulate(const Message& message, const Options& input_options, const mo
         decoder.finish(stop);harvest();
         }catch(const Error& error){check_cancelled(stop);last_error=error.what();}
     }
-    if(best)return std::move(*best);
+    if(best)return recover_received(std::move(*best),stop);
     throw Error("no sufficiently confident pattern in simulated timing search"+(last_error.empty()?std::string{}:": "+last_error));
 }
 }

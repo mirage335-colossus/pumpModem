@@ -71,6 +71,32 @@ then interpret its source. Source syntax cannot select alignment, and public
 correction cannot claim authentication. This fallback must neither run before
 physical completion nor replace established or failed interval sources.
 
+Additional exhaustive recovery runs only after that same physical completion
+event. Keep its coordinator outside the symbol scorer and existing RS/crypto
+algorithms: it consumes retained hard 0/1 decisions, explicit missing-slot masks
+and their established symbol positions. Do not pass analog samples or symbol
+confidence into this layer, shift canonical cipher addresses, or join separate
+physical receptions. Its local work and storage settings do not alter any wire
+path or marker cadence.
+
+The default additional search budget is five wall-clock minutes per run, using
+up to the available CPU cores, with 65,536 separately retained hard-bit slots.
+Keep this retention distinct from the unchanged 4,096-bit diagnostic prefix.
+An exhausted retention quota leaves recovery unavailable; it must not silently
+omit intervals, manufacture source continuity or hide newly admitted pending
+bits. All worker scratch and retained hypotheses must remain locally bounded.
+
+Workers may enumerate missing-bit assignments and fixed-size alignment
+hypotheses, then call the unchanged RS decoder and full HMAC verifier. Preserve
+unknown status in resulting diagnostics: guessed bits are never observations.
+Account for all admitted hypotheses in the independent alignment-evidence bound;
+HMAC and source syntax cannot substitute for that calculation. Commit only a
+unique reconstruction after its competing alignments have been resolved.
+Cancellation or the end of a computation budget leaves the search unfinished
+and resumable, with no speculative decoded source exposed. Physical completion
+and recovery progress must be independently visible in CLI/GUI status. Recovery
+must not block the live receive path or pending progress for a later reception.
+
 ## Pending reception is part of the feature
 
 Every newly accepted symbol must reach the next receiver progress poll. The
@@ -103,6 +129,7 @@ and decoder could otherwise change the codebook together without a test failing.
 | Original dictionary codes, every byte, canonical escapes, exact/truncated endpoints | `compression_short` |
 | Inclusive 16/17-byte split, FEC/compression/key combinations, exact airtime and raw bits | `transfer`, `stream_receive` |
 | Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, bounded post-end RS alignment search and ambiguity rejection, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
+| Exhaustive hard-bit assignments, deterministic worker coverage, timeout/cancellation resumption, unchanged evidence and original missing-bit accounting | `recovery` |
 | Actual sampled four-hour symbols draining one bit at a time with bounded memory; absence vs EOF and partial silence | `pattern_correlator`; complementary FFT reception checks in `pattern_receiver` |
 | Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
 | Pending prefixes and row identity, completed copy behavior, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
@@ -113,7 +140,7 @@ From the repository root, build and run the focused headless coverage:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure -j 2 \
-  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|attachment|pattern_correlator|pattern_receiver|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
+  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
 ```
 
 The long-symbol regression generates sampled PCM with four-hour coordinates; it

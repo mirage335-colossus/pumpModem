@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/stream_codec.hpp"
+#include "datapump/recovery.hpp"
 #include "utf8_policy.hpp"
 #include <chrono>
 #include <deque>
@@ -107,12 +108,14 @@ struct SignalLine {
     // A stronger competing receive profile may replace even a completed
     // interpretation while retaining this reception's row identity.
     std::uint64_t revision = 0;
+    transfer::RecoveryProgress recovery_progress;
 };
 bool signal_byte_aligned(const SignalLine& line);
 std::string signal_display_text(const SignalLine& line);
 std::string signal_status_label(const SignalLine& line);
 std::string signal_gap_label(const SignalLine& line);
 std::string signal_repair_label(const SignalLine& line);
+std::string signal_recovery_label(const SignalLine& line);
 std::string signal_preamble_label(const SignalLine& line);
 std::string signal_data_label(const SignalLine& line);
 // Pending decoder observations can be replaced as more symbols/parity arrive.

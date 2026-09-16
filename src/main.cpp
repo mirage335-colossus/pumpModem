@@ -85,6 +85,10 @@ Modem:
   --pad PATH            Required external >1GiB pad when bound to keyfile
   --time SECONDS        Local epoch; default current UNIX second
   --search-seconds N    RX epoch trials ±N seconds, nearest first; default6
+  --recovery-seconds N  Post-end hard-bit recovery budget, default300; 0 disables
+  --recovery-threads N  Recovery workers, default0 uses available CPU cores
+  --recovery-bits N     Separate retained hard-bit slots, default65536
+  --recovery-errors N   Reserve RS capacity for additional byte errors, default2
   --progress            Emit timing-search progress to stderr
 
 Audio/simulation:
@@ -123,7 +127,8 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","receive-targets","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time"};
+            "target-snr","receive-targets","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
+            "recovery-seconds","recovery-threads","recovery-bits","recovery-errors"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -179,6 +184,8 @@ public:
         if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
         if(command!="simulate" && command!="listen") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen");
         if(command!="simulate") reject({"receiver-time"},"is only valid for simulate");
+        if(command!="rx" && command!="simulate" && command!="listen")
+            reject({"recovery-seconds","recovery-threads","recovery-bits","recovery-errors"},"is only valid for rx/simulate/listen");
         if(command=="listen") reject({"snr","frequency-offset","delay-samples","output","tx-delay"},"is not a listen option; choose a simulation preset for its continuous channel");
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
@@ -286,6 +293,19 @@ transfer::Options transfer_options(const Args& a,const modem::Config& c,const st
     const auto window=a.integer("search-seconds",6);
     if(window>32768) throw Error("clock drift search exceeds32768 seconds");
     options.search_seconds=static_cast<unsigned>(window);
+    const auto recovery_seconds=a.integer("recovery-seconds",300);
+    const auto recovery_threads=a.integer("recovery-threads",0);
+    const auto recovery_bits=a.integer("recovery-bits",65536);
+    const auto recovery_errors=a.integer("recovery-errors",2);
+    if(recovery_seconds>86400)throw Error("recovery-seconds must be 0..86400");
+    if(recovery_threads>1024)throw Error("recovery-threads must be 0..1024");
+    if(recovery_bits<1024 || recovery_bits>1048576)throw Error("recovery-bits must be 1024..1048576");
+    if(recovery_errors>24)throw Error("recovery-errors must be 0..24");
+    options.recovery_options.enabled=recovery_seconds!=0;
+    options.recovery_options.budget=std::chrono::milliseconds(recovery_seconds*1000);
+    options.recovery_options.workers=static_cast<unsigned>(recovery_threads);
+    options.recovery_options.retained_bits=static_cast<std::size_t>(recovery_bits);
+    options.recovery_options.extra_errors=static_cast<unsigned>(recovery_errors);
     if(a.has("receive-targets") && !automatic_tuning(a))throw Error("receive-targets requires automatic tuning");
     options.automatic_receive_profiles=automatic_tuning(a);
     options.receive_pattern_mode=tuning::parse_pattern_mode(a.get("pattern",k?"auto-keystream":"auto-pattern"));
@@ -375,8 +395,34 @@ void report_signal_identity(const live::SignalUpdate& signal) {
         std::cout<<(i?",":"")<<signal.superseded_ids[i];
     std::cout<<']';
 }
+std::string_view recovery_state_name(transfer::RecoveryState state) {
+    switch(state) {
+    case transfer::RecoveryState::none:return "none";
+    case transfer::RecoveryState::ready:return "ready";
+    case transfer::RecoveryState::running:return "running";
+    case transfer::RecoveryState::incomplete:return "incomplete";
+    case transfer::RecoveryState::recovered:return "recovered";
+    case transfer::RecoveryState::exhausted:return "exhausted";
+    case transfer::RecoveryState::ambiguous:return "ambiguous";
+    case transfer::RecoveryState::cancelled:return "cancelled";
+    case transfer::RecoveryState::unavailable:return "unavailable";
+    }
+    return "unavailable";
+}
+void report_recovery_json(const transfer::RecoveryProgress& recovery) {
+    std::cout<<",\"recovery\":{\"state\":\""<<recovery_state_name(recovery.state)
+        <<"\",\"attempts\":"<<recovery.attempts<<",\"total\":"<<recovery.total
+        <<",\"elapsed_ms\":"<<recovery.elapsed.count()<<'}';
+}
+void report_recovery_status(bool complete,const transfer::RecoveryProgress& recovery) {
+    std::cerr<<"Reception "<<(complete?"complete":"incomplete")<<"; recovery "
+        <<recovery_state_name(recovery.state)<<" ("<<recovery.attempts<<'/'<<recovery.total
+        <<" attempts, "<<recovery.elapsed.count()<<" ms).\n";
+    if(recovery.state==transfer::RecoveryState::incomplete || recovery.state==transfer::RecoveryState::cancelled)
+        std::cerr<<"Recovery search is unfinished; no unique recovered source has been established.\n";
+}
 void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& d={},std::uint64_t timestamp=0,
-            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false,const live::SignalUpdate* signal=nullptr) {
+            bool content_validated=true,bool stream_complete=false,std::span<const std::uint8_t> raw_bits={},std::size_t missing_symbols=0,std::size_t observed_bits=0,std::string_view error={},bool short_text_decoded=false,const live::SignalUpdate* signal=nullptr,const transfer::RecoveryProgress* recovery=nullptr) {
     const auto& m=stream.message;
     if(a.has("save")) {
         if(!stream_complete || !(content_validated || short_text_decoded))
@@ -412,6 +458,7 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
         std::cout<<"],\"constellation\":[";
         for(std::size_t i=0;i<d.constellation.size();++i) std::cout<<(i?",":"")<<'['<<d.constellation[i].real()<<','<<d.constellation[i].imag()<<']';
         std::cout<<"]}";
+        if(recovery)report_recovery_json(*recovery);
         if(signal)report_signal_identity(*signal);
         std::cout<<"}\n";
     } else if(!a.has("save")) {
@@ -430,9 +477,11 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
     }
     if(missing_symbols && !a.has("json"))
         std::cerr<<"Raw bits include "<<missing_symbols<<(missing_symbols==1?" zero placeholder for a missing symbol.\n":" zero placeholders for missing symbols.\n");
+    if(recovery && recovery->state!=transfer::RecoveryState::none && !a.has("json"))
+        report_recovery_status(stream_complete,*recovery);
 }
 void report_received(const Args& a,const transfer::Received& received,const live::SignalUpdate* signal=nullptr) {
-    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded,signal);
+    report(a,received.content,received.diagnostics,received.timestamp,received.content_validated,received.stream_complete,received.raw_bits,received.missing_symbols,received.observed_bits,received.error,received.short_text_decoded,signal,&received.recovery_progress);
 }
 Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t time) {
     auto input=a.get("bits");if(input.empty() || input.size()>4096) throw Error("status requires1..4096 known binary --bits");
@@ -505,14 +554,24 @@ void listen(const Args& a,const transfer::Options& options) {
                 std::cout<<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
                     <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
                 if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
-                std::cout<<",\"pattern_score_units\":\"model log evidence\"}\n";
+                std::cout<<",\"pattern_score_units\":\"model log evidence\"";
+                report_recovery_json(signal.recovery_progress);std::cout<<"}\n";
             } else {
                 // Every profile revision is observable without --progress,
                 // including retractions of previously completed interpretations.
                 std::cout<<"{\"event\":\"reception_update\"";report_signal_identity(signal);
                 std::cout<<",\"complete\":"<<(signal.complete?"true":"false")
                     <<",\"content_validated\":"<<(signal.validated?"true":"false")
-                    <<",\"reception_id\":\""<<json_escape(signal.reception_id)<<"\"}\n";
+                    <<",\"reception_id\":\""<<json_escape(signal.reception_id)<<'"';
+                report_recovery_json(signal.recovery_progress);std::cout<<"}\n";
+            }
+        }
+        else for(const auto& signal:snapshot.signals) {
+            const auto state=signal.recovery_progress.state;
+            if(state!=transfer::RecoveryState::none && state!=transfer::RecoveryState::running &&
+               !(state==transfer::RecoveryState::recovered && signal.validated)) {
+                std::cerr<<"Signal "<<signal.id<<": ";
+                report_recovery_status(signal.complete,signal.recovery_progress);
             }
         }
         for(const auto& received:snapshot.received) {

@@ -105,6 +105,8 @@ void supported_sizes() {
               waterfall.y+waterfall.h<=layout[Slot::page].y+layout[Slot::page].h,
               "Generation scope displaced plots outside the Console page");
         check(contains(signals, layout[Slot::copy_signal]) && contains(signals, layout[Slot::paste_signal]) &&
+              contains(signals,layout[Slot::recovery_actions])&&
+              layout[Slot::paste_signal].x+layout[Slot::paste_signal].w<layout[Slot::recovery_actions].x&&
               layout[Slot::copy_signal].x+layout[Slot::copy_signal].w<layout[Slot::paste_signal].x &&
               contains(waterfall, layout[Slot::clear_waterfall]), "list or plot footer escapes its block");
         for (const auto slot : {Slot::zoom_in, Slot::zoom_out, Slot::reset_zoom})
@@ -113,7 +115,7 @@ void supported_sizes() {
         for(const auto slot:{Slot::compression_explanation,Slot::short_bits_label,Slot::short_bits,Slot::short_bits_detail,
                 Slot::compression_codes,Slot::short_use_text,Slot::short_send_key,Slot::short_transmit,Slot::short_transmit_noise,
                 Slot::short_cancel,Slot::short_airtime,Slot::compression_signals,Slot::copy_raw_signal,
-                Slot::paste_raw_signal,Slot::received_raw_bits})
+                Slot::paste_raw_signal,Slot::raw_recovery_actions,Slot::received_raw_bits})
             check(!persistent_slot(slot)&&contains(page,layout[slot]),"Compression page control escaped its viewport");
         const auto short_bits=layout[Slot::short_bits],codes=layout[Slot::compression_codes];
         check(short_bits.w>=489&&short_bits.h>=72&&short_bits.y+short_bits.h<layout[Slot::short_bits_detail].y&&

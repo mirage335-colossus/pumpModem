@@ -8,7 +8,10 @@ inline std::vector<ui::Record> signal_records(const Signals& signals) {
     std::vector<ui::Record> rows;
     for(std::size_t i=0;i<signals.lines().size();++i) {
         const auto& signal=signals.lines()[i];
-        const auto tone=(signal.validated || (signal.complete && (signal.binary || signal.pattern_score)))?ui::TextTone::normal:ui::TextTone::muted;
+        const auto state=signal.recovery_progress.state;
+        const bool searching=(state==transfer::RecoveryState::recovered && !signal.validated)||
+            (state!=transfer::RecoveryState::none && state!=transfer::RecoveryState::recovered && state!=transfer::RecoveryState::exhausted);
+        const auto tone=(!searching && (signal.validated || (signal.complete && (signal.binary || signal.pattern_score))))?ui::TextTone::normal:ui::TextTone::muted;
         ui::Record row;row.id=std::to_string(signal.id);
         row.activatable=signals.copy_id(i).has_value()||signals.copy_bits(i).has_value()||signals.copy_text(i).has_value();
         row.cells={
@@ -21,6 +24,8 @@ inline std::vector<ui::Record> signal_records(const Signals& signals) {
         auto detail=signal_gap_label(signal);
         const auto repairs=signal_repair_label(signal);
         if(!repairs.empty())detail+=(detail.empty()?"":"; ")+repairs;
+        const auto recovery=signal_recovery_label(signal);
+        if(!recovery.empty())detail+=(detail.empty()?"":"; ")+recovery;
         if(!detail.empty()) {
             row.cells.back().y=5;
             row.cells.push_back({detail,194,34,-10,15,11,tone,false});

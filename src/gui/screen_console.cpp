@@ -8,6 +8,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
     if(menu==Menu::keyfile)control.menu_label="Keyfile";
+    if(menu==Menu::recovery) {
+        control.menu_label="Recovery";control.font_size=11;
+        control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
+    }
     if(slot==Slot::header)control.font_size=22;
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -133,6 +137,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::list,Field::files,Command::none,Bitmap::none,Page::console,10,"Files in memory"}, Slot::files),
         placed({Kind::action,Field::count,Command::copy_signal,Bitmap::none,Page::console,11,"Copy selected"}, Slot::copy_signal),
         placed({Kind::action,Field::count,Command::paste_signal,Bitmap::none,Page::console,11,"Paste as message"}, Slot::paste_signal),
+        placed({Kind::action,Field::count,Command::resume_recovery,Bitmap::none,Page::console,11,"Resume search"}, Slot::recovery_actions, Menu::recovery),
+        placed({Kind::action,Field::count,Command::cancel_recovery,Bitmap::none,Page::console,11,"Cancel search"}, Slot::recovery_actions, Menu::recovery),
         placed({Kind::action,Field::count,Command::save_file,Bitmap::none,Page::console,11,"Save selected..."}, Slot::save_file),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waterfall,Page::console,12,"Spectrum"}, Slot::waterfall),
         placed({Kind::bitmap,Field::count,Command::none,Bitmap::waveform,Page::console,12,"Waveform"}, Slot::waveform),
@@ -163,6 +169,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::list,Field::signals,Command::none,Bitmap::none,Page::compression,4,"Received signals - select to inspect exact bits"}, Slot::compression_signals),
         placed({Kind::action,Field::count,Command::copy_raw_signal,Bitmap::none,Page::compression,5,"Copy raw bits"}, Slot::copy_raw_signal),
         placed({Kind::action,Field::count,Command::paste_raw_signal,Bitmap::none,Page::compression,5,"Use received bits"}, Slot::paste_raw_signal),
+        placed({Kind::action,Field::count,Command::resume_recovery,Bitmap::none,Page::compression,5,"Resume search"}, Slot::raw_recovery_actions, Menu::recovery),
+        placed({Kind::action,Field::count,Command::cancel_recovery,Bitmap::none,Page::compression,5,"Cancel search"}, Slot::raw_recovery_actions, Menu::recovery),
         placed({Kind::label,Field::received_raw_bits,Command::none,Bitmap::none,Page::compression,6,""}, Slot::received_raw_bits),
     };
     return controls;

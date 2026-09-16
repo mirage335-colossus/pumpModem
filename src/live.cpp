@@ -31,6 +31,8 @@ namespace {
 using Clock = std::chrono::steady_clock;
 constexpr std::size_t plot_size = 2048;
 constexpr std::size_t maximum_events = 64;
+constexpr std::size_t maximum_recovery_jobs = 8;
+constexpr std::size_t recovery_workspace_limit = 16 * 1024 * 1024;
 constexpr std::size_t replay_frames = 60;
 constexpr std::size_t replay_wave_samples = 256;
 constexpr std::size_t replay_bins = 257;
@@ -182,6 +184,9 @@ struct Session::Impl {
         std::vector<std::optional<SignalUpdate>> signals;
         std::optional<SignalUpdate> verified;
         std::optional<transfer::Received> received;
+        // Stamped when a physically completed result is staged, so clearing
+        // history can invalidate a source-thread result before replay handoff.
+        std::uint64_t recovery_clear_generation=0;
         std::size_t replay_count = 0, point_limit = 0;
         std::vector<std::complex<double>> pattern_scores;
         std::vector<PatternScoreObservation> pattern_score_observations;
@@ -189,6 +194,15 @@ struct Session::Impl {
         std::stop_token stop;
     };
     struct AudioBlock { std::vector<float> samples; std::uint64_t revision; };
+    struct RecoveryTask {
+        transfer::Received result;
+        std::shared_ptr<transfer::RecoveryJob> job;
+        SignalUpdate event;
+        std::stop_source stop;
+        std::uint64_t generation=0;
+        std::size_t reserved_bytes=0, retained_bytes=0;
+        bool started=false, obsolete=false;
+    };
     struct Receiver {
         transfer::Options options;
         Bytes key_tag;
@@ -239,6 +253,7 @@ struct Session::Impl {
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
     std::uint64_t last_pattern_transmit_epoch = 0;
+    std::uint64_t recovery_clear_generation = 0;
     std::array<std::uint8_t,16> reception_namespace{};
     std::atomic<std::uint64_t> pattern_score_observation_id{0};
     bool tx_busy = false;
@@ -249,6 +264,9 @@ struct Session::Impl {
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
     std::size_t audio_bytes = 0;
+    // At most one coordinator runs; each job owns its bounded parallel search.
+    std::deque<std::shared_ptr<RecoveryTask>> recoveries;
+    std::shared_ptr<RecoveryTask> active_recovery;
     modem::ConstellationBatch pending_points;
     ConstellationSource pending_source = ConstellationSource::input;
     std::vector<ReplayFrame> replay;
@@ -263,7 +281,7 @@ struct Session::Impl {
     std::size_t first_visible_replay_frame = 0;
     double replay_bin_hz = 0;
     std::stop_source capture_stop, tx_stop, decode_stop;
-    std::jthread source, encoder, decoder;
+    std::jthread source, encoder, decoder, recovery_worker;
 
     explicit Impl(EpochClock clock, ReplayClock presentation_clock)
         : epoch_clock(clock ? std::move(clock) : EpochClock(epoch_now)),
@@ -275,10 +293,11 @@ struct Session::Impl {
         source = std::jthread([this](std::stop_token stop) { source_loop(stop); });
         encoder = std::jthread([this](std::stop_token stop) { encode_loop(stop); });
         decoder = std::jthread([this](std::stop_token stop) { decode_loop(stop); });
+        recovery_worker = std::jthread([this](std::stop_token stop) { recovery_loop(stop); });
     }
     ~Impl() {
-        halt(); source.request_stop(); encoder.request_stop(); decoder.request_stop(); changed.notify_all();
-        source.join(); encoder.join(); decoder.join();
+        halt(); source.request_stop(); encoder.request_stop(); decoder.request_stop(); recovery_worker.request_stop(); changed.notify_all();
+        source.join(); encoder.join(); decoder.join(); recovery_worker.join();
     }
     double current_epoch() const {
         const auto now = epoch_clock();
@@ -303,6 +322,19 @@ struct Session::Impl {
         current.simulation_sample_fraction = 0;
         current.pattern_scores.clear();
         current.pattern_score_observations.clear();
+    }
+    void discard_staged_recovery(std::optional<transfer::Received>& received,
+                                 std::optional<SignalUpdate>& completed,
+                                 std::vector<std::optional<SignalUpdate>>& events) {
+        const bool recovering=(received && (received->recovery || received->recovery_progress.state!=transfer::RecoveryState::none)) ||
+            (completed && completed->recovery_progress.state!=transfer::RecoveryState::none);
+        if(!recovering)return;
+        const auto id=completed?completed->id:0;
+        received.reset();completed.reset();staged_received_bytes=0;
+        if(!id)return;
+        for(auto& event:events)if(event && event->id==id)event.reset();
+        std::erase_if(current.signals,[&](const auto& event){return event.id==id;});
+        if(replay_signal_id==id)replay_signal_id=0;
     }
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
@@ -350,6 +382,12 @@ struct Session::Impl {
             event.reset();
         }
         if (elapsed >= replay_duration) {
+            if(replay_received && replay_received->recovery && replay_verified) {
+                // Search starts after this simulation's physical completion
+                // reaches the presentation clock, preserving replay ordering.
+                queue_recovery(std::move(*replay_received),*replay_verified);
+                replay_received.reset();staged_received_bytes=0;
+            }
             if (replay_verified) {
                 // A stalled consumer needs the final state once, rather than
                 // every unpresented prefix followed by that same final state.
@@ -413,6 +451,8 @@ struct Session::Impl {
         replay_omitted = 0;
         ++generation; ++tx_serial; ++receive_revision;
         queued.clear(); ready.reset(); tx_busy = false; input.clear(); input_bytes = 0;
+        const auto unavailable=unavailable_recovery_events();invalidate_recoveries();
+        for(auto event:unavailable)append_signal(std::move(event));
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop(); changed.notify_all();
     }
     void configure(const Settings& requested) {
@@ -423,9 +463,11 @@ struct Session::Impl {
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
         input_bytes = receiver_bytes = received_bytes = audio_bytes = 0;
+        auto unavailable=unavailable_recovery_events();invalidate_recoveries();
         clear_replay(); pending_points = {};
         replay_omitted = 0;
         current = {}; current.running = true; current.simulation = settings.simulation;
+        for(auto& event:unavailable)append_signal(std::move(event));
         current.status = idle_status(); changed.notify_all();
     }
     void account(std::uint64_t samples, std::uint64_t version) {
@@ -668,12 +710,136 @@ struct Session::Impl {
         }
         current.signals.push_back(std::move(event));
     }
+    std::size_t recovery_bytes() const {
+        const auto bytes=[](const RecoveryTask& task) {
+            return task.retained_bytes+task.job->working_bytes();
+        };
+        std::size_t total=0;
+        for(const auto& task:recoveries)total+=bytes(*task);
+        if(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())
+            total+=bytes(*active_recovery);
+        return total;
+    }
+    std::vector<SignalUpdate> unavailable_recovery_events() {
+        std::vector<SignalUpdate> events;
+        for(const auto& task:recoveries)if(!task->obsolete) {
+            auto event=task->event;event.recovery_progress=task->job->progress();
+            event.recovery_progress.state=transfer::RecoveryState::unavailable;
+            event.sequence=next_event++;events.push_back(std::move(event));
+        }
+        return events;
+    }
+    std::size_t recovery_reserved_bytes() const {
+        std::size_t total=0;
+        for(const auto& task:recoveries)total+=task->reserved_bytes;
+        if(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())
+            total+=active_recovery->reserved_bytes;
+        return total;
+    }
+    void invalidate_recoveries(const SignalUpdate* replacement=nullptr) {
+        const auto obsolete=[&](const auto& task) {
+            return !replacement || (task->event.id==replacement->id && task->event.revision<replacement->revision) ||
+                std::find(replacement->superseded_ids.begin(),replacement->superseded_ids.end(),task->event.id)!=replacement->superseded_ids.end();
+        };
+        for(const auto& task:recoveries)if(obsolete(task)) {
+            task->obsolete=true;task->stop.request_stop();
+        }
+        std::erase_if(recoveries,[&](const auto& task){return task->obsolete;});
+        changed.notify_all();
+    }
+    void queue_recovery(transfer::Received result,SignalUpdate& event) {
+        if(!result.recovery || !result.stream_complete || result.content_validated)return;
+        event.recovery_progress=result.recovery->progress();
+        // Plot samples remain in the live diagnostic presentation. Background
+        // recovery retains only the hard-bit capture and scalar diagnostics.
+        result.diagnostics.waveform=std::vector<float>{};
+        result.diagnostics.constellation=std::vector<std::complex<double>>{};
+        const auto retained=sizeof(RecoveryTask)+4096+result.raw_bits.capacity()+result.error.capacity()+
+            result.content.message.data.capacity()+result.content.message.filename.capacity()+
+            result.content.message.callsign.capacity()+result.content.message.grid.capacity()+
+            event.text.capacity()+event.raw_bits.capacity()+event.reception_id.capacity()+
+            event.superseded_ids.capacity()*sizeof(std::uint64_t);
+        const auto memory=result.recovery->workspace_bound()+retained;
+        const auto used=recovery_reserved_bytes(),limit=recovery_workspace_limit;
+        if(recoveries.size()+(active_recovery && std::find(recoveries.begin(),recoveries.end(),active_recovery)==recoveries.end())>=maximum_recovery_jobs ||
+           memory>limit || used>limit-memory) {
+            event.recovery_progress.state=transfer::RecoveryState::unavailable;
+            return;
+        }
+        auto task=std::make_shared<RecoveryTask>();task->job=result.recovery;
+        task->reserved_bytes=memory;task->retained_bytes=retained;
+        task->result=std::move(result);task->event=event;task->generation=generation;
+        recoveries.push_back(std::move(task));changed.notify_all();
+    }
+    void publish_recovery_progress() {
+        // Only thread-safe counters are read on the UI path; no search or
+        // source decoding runs here, even when an audio stream is idle.
+        for(const auto& task:recoveries) {
+            if(task->obsolete || task!=active_recovery || task->generation!=generation)continue;
+            auto progress=task->job->progress();
+            // The codeword search may finish before bounded source validation.
+            // Keep that CPU work pending until the coordinator publishes it.
+            if(progress.state==transfer::RecoveryState::recovered)progress.state=transfer::RecoveryState::running;
+            const auto& previous=task->event.recovery_progress;
+            if(progress.state==previous.state && progress.attempts==previous.attempts &&
+               progress.elapsed.count()/1000==previous.elapsed.count()/1000)continue;
+            task->event.recovery_progress=progress;
+            auto event=task->event;event.sequence=next_event++;
+            append_signal(std::move(event));
+        }
+    }
+    void recovery_loop(std::stop_token stop) {
+        while(!stop.stop_requested()) {
+            std::shared_ptr<RecoveryTask> task;
+            transfer::Received result;
+            {
+                std::unique_lock lock(mutex);
+                changed.wait(lock,stop,[&]{return current.running && std::any_of(recoveries.begin(),recoveries.end(),
+                    [](const auto& item){return !item->started && !item->obsolete;});});
+                if(stop.stop_requested())return;
+                const auto next=std::find_if(recoveries.begin(),recoveries.end(),[](const auto& item){return !item->started && !item->obsolete;});
+                if(next==recoveries.end())continue;
+                task=*next;task->started=true;active_recovery=task;
+                result=std::move(task->result);
+            }
+            try { result=transfer::recover_received(std::move(result),task->stop.get_token()); }
+            catch(const std::exception& error) {
+                result.error=error.what();result.recovery_progress=task->job->progress();
+                result.recovery_progress.state=transfer::RecoveryState::unavailable;
+            }
+            std::lock_guard lock(mutex);
+            active_recovery.reset();
+            task->result=std::move(result);
+            if(task->obsolete || !current.running || task->generation!=generation)continue;
+            auto& recovered=task->result;
+            auto event=task->event;event.recovery_progress=recovered.recovery_progress;
+            if(recovered.content_validated) {
+                recovered.content.message.local_id=content_identity(event.id);
+                event.text=display_text(recovered.content.message);event.binary=false;event.validated=true;
+                event.reception_id=reception_id(recovered.content.message);
+                event.pre_fec_accuracy=recovered.content.pre_fec_accuracy;event.fec_stats=recovered.content.fec_stats;
+                try {
+                    admit_received(recovered.content.message.data.size(),settings.content_limit);
+                    current.received.push_back(std::move(recovered));
+                } catch(const Error& error) {
+                    current.error=error.what();event=task->event;
+                    event.recovery_progress.state=transfer::RecoveryState::unavailable;
+                }
+            }
+            task->event=event;event.sequence=next_event++;append_signal(std::move(event));
+            const auto state=task->event.recovery_progress.state;
+            if(state!=transfer::RecoveryState::incomplete && state!=transfer::RecoveryState::cancelled)
+                std::erase(recoveries,task);
+            ++current.sequence;
+        }
+    }
     std::array<std::uint8_t,16> content_identity(std::uint64_t signal_id) const {
         auto id=reception_namespace;
         for(std::size_t i=0;i<8;++i)id[8+i]^=static_cast<std::uint8_t>(signal_id>>(8*i));
         return id;
     }
     void discard_obsolete(const SignalUpdate& replacement,Prepared* wave) {
+        invalidate_recoveries(&replacement);
         const auto merged=[&](std::uint64_t id) {
             return std::find(replacement.superseded_ids.begin(),replacement.superseded_ids.end(),id)!=
                 replacement.superseded_ids.end();
@@ -827,6 +993,9 @@ struct Session::Impl {
                                 event.superseded_ids.assign(decision.superseded_ids.begin(),decision.superseded_ids.end());
                                 result.content.message.local_id=content_identity(event.id);
                                 event.text=std::move(bits);event.binary=true;event.complete=result.stream_complete;
+                                event.recovery_progress=result.recovery_progress;
+                                if(simulation_wave && result.recovery_progress.state!=transfer::RecoveryState::none)
+                                    simulation_wave->recovery_clear_generation=recovery_clear_generation;
                                 event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
                                 if(result.content_validated) {
                                     event.text=display_text(result.content.message);event.binary=false;event.validated=true;
@@ -842,8 +1011,15 @@ struct Session::Impl {
                                     discard_obsolete(event,simulation_wave);
                                     display.published_revision=decision.revision;
                                 }
+                                const bool recovery=result.recovery && result.stream_complete && !result.content_validated;
+                                if(recovery) {
+                                    event.recovery_progress=result.recovery_progress;
+                                    if(simulation_wave) {
+                                        simulation_wave->received=std::move(result);staged_received_bytes=0;
+                                    } else queue_recovery(std::move(result),event);
+                                }
                                 add_signal(std::move(event),simulation_wave);
-                                if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
+                                if(!recovery && (result.content_validated || result.short_text_decoded) && !display.content_reported) {
                                     const auto bytes=result.content.message.data.size();
                                     if(simulation_wave) {
                                         simulation_wave->received.reset();staged_received_bytes=0;
@@ -992,6 +1168,8 @@ struct Session::Impl {
         else if (!wave.stop.stop_requested()) {
             current.transmission_fraction = 1;
             if (settings.simulation && !wave.replay.empty()) {
+                if(wave.recovery_clear_generation!=recovery_clear_generation)
+                    discard_staged_recovery(wave.received,wave.verified,wave.signals);
                 replay = std::move(wave.replay); delivered_replay_frame.reset(); first_visible_replay_frame = 0;
                 replay_signals = std::move(wave.signals); replay_signal_cursor = 0;
                 replay_verified = std::move(wave.verified); replay_received = std::move(wave.received);
@@ -1389,6 +1567,52 @@ void Session::set_mono(bool mono) {
     std::lock_guard lock(impl_->mutex);
     impl_->settings.mono = mono;
 }
+bool Session::resume_recovery(std::uint64_t signal_id) {
+    std::lock_guard lock(impl_->mutex);
+    if(!impl_->current.running)return false;
+    const auto found=std::find_if(impl_->recoveries.begin(),impl_->recoveries.end(),[&](const auto& task) {
+        return task->event.id==signal_id && !task->obsolete && task->generation==impl_->generation;
+    });
+    if(found==impl_->recoveries.end() || *found==impl_->active_recovery)return false;
+    const auto& task=*found;
+    const auto state=task->event.recovery_progress.state;
+    if(state!=transfer::RecoveryState::incomplete && state!=transfer::RecoveryState::cancelled)return false;
+    task->stop=std::stop_source{};task->started=false;
+    task->event.recovery_progress.state=transfer::RecoveryState::ready;
+    auto event=task->event;event.sequence=impl_->next_event++;
+    impl_->append_signal(std::move(event));impl_->changed.notify_all();return true;
+}
+void Session::cancel_recovery(std::uint64_t signal_id) {
+    std::lock_guard lock(impl_->mutex);
+    for(const auto& task:impl_->recoveries) {
+        if(task->event.id!=signal_id || task->obsolete)continue;
+        task->stop.request_stop();
+        if(task!=impl_->active_recovery) {
+            task->started=true;task->event.recovery_progress.state=transfer::RecoveryState::cancelled;
+            auto event=task->event;event.sequence=impl_->next_event++;
+            impl_->append_signal(std::move(event));
+        }
+    }
+}
+void Session::clear_recoveries() {
+    std::lock_guard lock(impl_->mutex);
+    ++impl_->recovery_clear_generation;
+    impl_->discard_staged_recovery(impl_->replay_received,impl_->replay_verified,impl_->replay_signals);
+    if(impl_->ready)
+        impl_->discard_staged_recovery(impl_->ready->received,impl_->ready->verified,impl_->ready->signals);
+    // A finished coordinator can already have released its job while its
+    // publication is still waiting for the next UI poll.
+    std::erase_if(impl_->current.signals,[](const auto& event) {
+        return event.recovery_progress.state!=transfer::RecoveryState::none;
+    });
+    std::erase_if(impl_->current.received,[&](const auto& received) {
+        if(received.recovery_progress.state==transfer::RecoveryState::none)return false;
+        impl_->received_bytes-=received.content.message.data.size();return true;
+    });
+    for(const auto& task:impl_->recoveries)
+        std::erase_if(impl_->current.signals,[&](const auto& event){return event.id==task->event.id;});
+    impl_->invalidate_recoveries();
+}
 void Session::transmit(const Message& message) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
@@ -1424,6 +1648,8 @@ Snapshot Session::snapshot() {
     std::lock_guard lock(impl_->mutex);
     const auto now = impl_->replay_clock();
     impl_->advance_replay(now);
+    impl_->publish_recovery_progress();
+    impl_->current.recovery_working_bytes=impl_->recovery_bytes();
     auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
     impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
     if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {

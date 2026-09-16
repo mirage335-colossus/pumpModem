@@ -322,6 +322,59 @@ void revised_reception_records() {
         check(signals.lines().empty(),"A delayed superseded row was restored after its identity was merged");
     }
 }
+void recovery_reception_records() {
+    using transfer::RecoveryState;
+    Signals signals;
+    SignalLine line;line.id=94;line.revision=3;line.complete=true;line.binary=true;
+    line.text="01000001";line.received_bits=8;line.pattern_score=25;
+    for(const auto state:{RecoveryState::ready,RecoveryState::running,RecoveryState::incomplete,
+                          RecoveryState::cancelled,RecoveryState::unavailable,RecoveryState::ambiguous}) {
+        line.recovery_progress={state,2500000,9000000,std::chrono::milliseconds(10000)};
+        signals.update(line);
+        const auto rows=signal_records(signals);
+        check(rows.size()==1&&rows.front().id=="94"&&rows.front().cells[4].text==line.text&&
+              rows.front().cells[4].tone==ui::TextTone::muted&&!rows.front().activatable&&
+              rows.front().cells.back().text.find("Reception complete")!=std::string::npos&&
+              rows.front().cells.back().text.find("2500000 / 9000000 attempts")!=std::string::npos&&
+              signals.lines().front().complete&&!signals.lines().front().validated,
+              "Post-end recovery must keep one physically completed row with its exact pending bits and progress");
+        check(!signals.copy_id(0)&&!signals.copy_bits(0)&&signals.copy_raw_bits(0)==line.text&&
+              !signals.copy_bytes(0)&&!signals.copy_text(0),
+              "Unfinished recovery must allow exact physical raw bits without granting decoded-content copying");
+    }
+    line.recovery_progress.state=RecoveryState::exhausted;signals.update(line);
+    check(signals.copy_raw_bits(0)=="01000001"&&signals.copy_bytes(0)==Bytes{'A'}&&
+          signal_records(signals).front().cells.back().text.find("search exhausted")!=std::string::npos,
+          "Exhausted search must preserve explicitly raw completed observations");
+    line.recovery_progress.state=RecoveryState::recovered;signals.update(line);
+    check(signal_status_label(signals.lines().front())=="source invalid"&&!signals.copy_bytes(0)&&
+          signals.copy_raw_bits(0)==line.text,
+          "Corrected codewords with invalid source syntax must remain visibly unaccepted");
+    line.recovery_progress.state=RecoveryState::recovered;line.validated=true;line.binary=false;
+    line.text_message=true;line.reception_id="recovered-source";line.text="authenticated source";
+    signals.update(line);
+    check(signals.lines().size()==1&&signals.copy_id(0)=="recovered-source"&&signal_records(signals).front().activatable,
+          "Recovered source did not replace the existing pending row");
+    auto pending=line;pending.validated=false;pending.binary=true;pending.text="01000001";
+    pending.recovery_progress.state=RecoveryState::running;
+    signals.update(pending);
+    check(signals.copy_id(0)=="recovered-source","Delayed recovery progress replaced an accepted source");
+    ++pending.revision;pending.complete=false;pending.recovery_progress={};signals.update(pending);
+    signals.update(line);
+    check(!signals.lines().front().complete&&!signals.copy_id(0),
+          "A delayed recovered result replaced a stronger physical hypothesis");
+
+    for(const auto page:{ui::Page::console,ui::Page::compression}) {
+        unsigned actions=0;
+        for(const auto& control:ui::console_screen())if(control.page==page&&control.menu==ui::Menu::recovery) {
+            check(control.kind==ui::Kind::action&&std::string(control.menu_label)=="Recovery"&&
+                  (control.command==ui::Command::resume_recovery||control.command==ui::Command::cancel_recovery),
+                  "Recovery controls escaped the shared menu declarations");
+            ++actions;
+        }
+        check(actions==2,"Both received-signal pages need resume and cancel recovery controls");
+    }
+}
 void presentation() {
     Application app({.simulation=true});
     for(const auto field:{ui::Field::message,ui::Field::binary}) {
@@ -751,10 +804,10 @@ void compression_declarations() {
           "Compression view must be a declared native-control page");
     Application app({.simulation=true});
     check(!app.document(ui::Page::compression,900),"Compression controls acquired a duplicate document");
-    std::set<ui::Field> fields;std::set<ui::Command> commands;std::vector<const ui::Control*> controls;
+    std::set<ui::Field> fields;std::set<ui::Command> commands;
     bool explains_code=false;
     for(const auto& c:ui::console_screen())if(c.page==ui::Page::compression) {
-        controls.push_back(&c);fields.insert(c.field);commands.insert(c.command);
+        fields.insert(c.field);commands.insert(c.command);
         check(!c.persistent&&c.slot!=ui::Slot::none,"Compression binding lost shared page geometry");
         if(c.field==ui::Field::short_bits)
             check(c.kind==ui::Kind::text&&c.multiline&&c.byte_limit==2*transfer::short_message_bits&&c.submit==ui::Command::transmit_short_bits&&
@@ -777,8 +830,14 @@ void compression_declarations() {
         check(commands.contains(command),"Compression page lost a required action");
     for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
         std::vector<ui::Rect> occupied;
-        for(const auto* c:controls) {
+        // A named menu has one native control and several action declarations.
+        // Check the same grouped surfaces that both native adapters construct.
+        for(const auto& group:ui::control_groups(ui::console_screen())) {
+            const auto* c=group.control;if(c->page!=ui::Page::compression)continue;
             const auto geometry=ui::control_layout(*c,{},size.w,size.h);
+            for(const auto* item:group.menu_items)
+                check(ui::control_layout(*item,{},size.w,size.h).frame==geometry.frame,
+                      "Compression menu items disagree about their shared native control geometry");
             auto frame=geometry.frame;
             if(geometry.has_label&&c->kind!=ui::Kind::label) {
                 frame.h+=frame.y-geometry.label.y;frame.y=geometry.label.y;
@@ -849,6 +908,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

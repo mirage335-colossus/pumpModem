@@ -554,6 +554,70 @@ void few_bits_remain_visible_until_physical_end() {
               "physical completion retains all three raw bits and its dictionary interpretation with no padding or duration-sized storage");
     }
 }
+void exhaustive_recovery_preserves_physical_end_and_source() {
+    for(const bool keyed:{false,true})for(const std::size_t size:{17U,120U}) {
+        auto value=options(keyed);value.fec=FecMode::rs60;
+        value.recovery_options.workers=2;value.recovery_options.extra_errors=0;
+        value.recovery_options.budget=std::chrono::seconds(5);
+        const auto sent=message(size);auto wire=transfer::message_wire_bits(sent,value);
+        const auto interval=size>17?1216U:0U;
+        // Forty-nine separate partially missing bytes exceed RS60's 48-byte
+        // erasure capacity, despite only forty-nine absent bits. Recovery must
+        // preserve the other seven observed bits in every affected byte.
+        for(std::size_t byte=0;byte<49;++byte)
+            wire[interval+192+byte*8]=modem::missing_pattern_bit;
+        transfer::StreamReceiver receiver(value,value.timestamp);
+        transfer::Received pending;
+        for(std::size_t offset=0;offset<wire.size();) {
+            // Deliberately split retained two-bit fields and coded bytes across
+            // polls; packing must preserve missing values at their exact slots.
+            const auto count=std::min<std::size_t>(37,wire.size()-offset);
+            pending=receiver.push(chunk(std::span(wire).subspan(offset,count),offset));offset+=count;
+            check(pending.observed_bits==offset && !pending.recovery && !pending.stream_complete,
+                  "each uneven chunk must remain immediately visible before recovery");
+        }
+        check(!pending.stream_complete && !pending.recovery && !pending.content_validated &&
+              pending.missing_symbols==49 && pending.observed_bits==wire.size(),
+              "failed RS must preserve immediate observations without starting recovery before physical end");
+        auto complete=receiver.push(chunk({},wire.size(),100,true));
+        check(complete.stream_complete && !complete.content_validated && complete.recovery &&
+              complete.recovery_progress.state==transfer::RecoveryState::ready,
+              "physical completion must return a recovery job without executing the exhaustive search");
+        const auto raw=complete.raw_bits;const auto identity=complete.content.message.local_id;
+        const auto recovered=transfer::recover_received(std::move(complete));
+        check(recovered.stream_complete && recovered.content_validated && recovered.content.authenticated==keyed &&
+              recovered.content.message.data==sent.data && recovered.content.message.local_id==identity &&
+              recovered.raw_bits==raw && recovered.missing_symbols==49 &&
+              recovered.recovery_progress.state==transfer::RecoveryState::recovered && !recovered.recovery,
+              "exhaustive sparse-gap recovery must restore all intervals and preserve identity, raw bits and authentication");
+        const auto& stats=recovered.content.fec_stats;
+        check(stats.data.missing_bits+stats.integrity.missing_bits+stats.parity.missing_bits==49,
+              "guessed bits must remain missing in accepted correction diagnostics");
+    }
+    auto value=options();value.recovery_options.retained_bits=1024;
+    auto wire=transfer::message_wire_bits(message(17),value);
+    for(std::size_t byte=0;byte<49;++byte)wire[192+byte*8]=modem::missing_pattern_bit;
+    transfer::StreamReceiver bounded(value,value.timestamp);
+    auto result=bounded.push(chunk(wire,0,100,true));
+    check(result.stream_complete && !result.content_validated && !result.recovery &&
+          result.recovery_progress.state==transfer::RecoveryState::unavailable && result.observed_bits==wire.size(),
+          "a truncated recovery capture must never fabricate a complete source or truncate live progress");
+    value.recovery_options.enabled=false;
+    transfer::StreamReceiver disabled(value,value.timestamp);
+    result=disabled.push(chunk(wire,0,100,true));
+    check(!result.recovery && result.recovery_progress.state==transfer::RecoveryState::none,
+          "disabling exhaustive recovery must preserve ordinary receive behavior");
+    value.recovery_options.enabled=true;value.fec=FecMode::off;
+    const auto uncoded=transfer::message_wire_bits(message(17),value);
+    transfer::StreamReceiver no_fec(value,value.timestamp);
+    std::size_t steady=0;
+    for(std::size_t i=0;i<100;++i) {
+        no_fec.push(chunk(uncoded,i*uncoded.size()));
+        if(i==9)steady=no_fec.working_bytes();
+        if(i>=10)check(no_fec.working_bytes()==steady,
+                      "FEC-off reception must not accumulate unused recovery anchors after diagnostic retention fills");
+    }
+}
 void dictionary_interpretation_is_bounded_and_post_end() {
     auto value=options();
     const Bytes source{'e','i'};const auto bits=compression::encode_short_bits(source);
@@ -596,6 +660,7 @@ int main() {
          markerless_rs_ambiguity_is_rejected();
          late_acquisition_preserves_error_correction();late_acquisition_authenticates_actual_coordinates();
          marker_preserves_recovery_when_all_parity_is_absent();
+         exhaustive_recovery_preserves_physical_end_and_source();
          shared_quota_cleanup_and_identity();retain_widest_validated_source();diagnostics_accounting();few_bits_remain_visible_until_physical_end();dictionary_interpretation_is_bounded_and_post_end();std::cout<<"stream receive integration passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

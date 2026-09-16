@@ -20,14 +20,15 @@ enum class Command {
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
-    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores
+    transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
+    resume_recovery, cancel_recovery
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet
 };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
-enum class Menu { none, keyfile };
+enum class Menu { none, keyfile, recovery };
 enum class TextTone { normal, muted, data, inverse };
 enum class BitmapCaption { footer, overlay_error };
 // Overlay controls use viewport-relative insets and optional fixed dimensions.
