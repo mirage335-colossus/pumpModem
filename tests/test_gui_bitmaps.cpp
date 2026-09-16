@@ -1,9 +1,14 @@
 #include "../src/gui/plot_render.hpp"
 #include "../src/gui/theme.hpp"
+#include "datapump/pattern_code.hpp"
+#include "datapump/pattern_correlator.hpp"
+#include "datapump/pattern_pulse.hpp"
 #include <array>
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <random>
+#include <set>
 
 using namespace datapump;
 using namespace datapump::gui;
@@ -133,8 +138,8 @@ void tiled_replay() {
     const std::vector<PlotSnapshot> sources{
         PlotSnapshot{}, PlotSnapshot::waveform(wave, config), PlotSnapshot::waveform(wave, config, 256),
         PlotSnapshot::constellation({{.25, .2}, {.75, 0}, {-.1, -.8}}, true),
-        PlotSnapshot::pattern_scores({{2, 8}, {4, 4}, {9, 1}, {0, 0}, {4, 4}}),
-        PlotSnapshot::pattern_scores({}), PlotSnapshot::pattern_scores({{8, 2}}, false),
+        PlotSnapshot::pattern_scores({{{2, 8}, 4}, {{4, 4}, 4}, {{9, 1}, 3}, {{0, 0}, 4}, {{4, 4}, 4}}),
+        PlotSnapshot::pattern_scores({}), PlotSnapshot::pattern_scores({{{8, 2}, 4}}, false),
         PlotSnapshot::waterfall(history), PlotSnapshot::waterfall(history, true),
         PlotSnapshot::qr(encode_qr("tile transfer")), PlotSnapshot::qr(encode_qr("tile transfer"), plots::QrBrightness::normal),
         PlotSnapshot::pattern_chips(pattern), PlotSnapshot::pattern_distances(pattern), PlotSnapshot::pattern_evidence(pattern),
@@ -219,37 +224,92 @@ void qr_and_patterns() {
           "distance matrix does not preserve diagonal and shared full-vector distance");
 }
 void pattern_scores() {
-    const std::vector<std::complex<double>> scores{{10, 0}, {0, 5}, {4, 4}, {0, 0}};
+    const std::vector<plots::PatternScore> scores{
+        {{8, 0}, 8}, {{16, 0}, 8}, {{0, 8}, 8},
+        {{0, 16}, 8}, {{32, 8}, 8}, {{0, 0}, 8}};
     const auto source = PlotSnapshot::pattern_scores(scores);
     const auto request = full_bitmap_request(101, 101);
     const auto scalar = render(source, request);
-    check(red(scalar, 90, 90) == 255 && red(scalar, 10, 50) == 255 && red(scalar, 42, 58) == 255 && red(scalar, 10, 90) == 255,
-          "pattern scores must use P0 horizontal/P1 vertical with one nonnegative evidence scale");
+    // Preserve the native log scores: T occupies half the plot and 2T three
+    // quarters. Stronger scores use the upper logarithmic range, with the
+    // largest retained score at 95% and the same range on both axes.
+    check(red(scalar, 50, 90) == 255 && red(scalar, 70, 90) == 255 &&
+          red(scalar, 10, 50) == 255 && red(scalar, 10, 30) == 255 &&
+          red(scalar, 86, 50) == 255 && red(scalar, 10, 90) == 255,
+          "pattern evidence must use the same threshold-relative log-score scale for P0 horizontally and P1 vertically");
     check(red(scalar, 40, 60) == theme::grid && red(scalar, 40, 40) == 0,
           "pattern scores must show an equal-score diagonal rather than an I/Q crosshair");
+    const auto guides = render(PlotSnapshot::pattern_scores({}), request);
+    check(red(guides, 50, 20) == theme::muted && red(guides, 50, 21) == theme::muted &&
+          red(guides, 20, 50) == theme::muted && red(guides, 21, 50) == theme::muted,
+          "single-symbol threshold guides must be solid and halfway along both evidence axes");
+    for (unsigned offset = 0; offset < 4; ++offset) {
+        check(red(guides, 70, 16 + offset) == red(guides, 70, 16) &&
+              red(guides, 70, 20 + offset) == red(guides, 70, 20) &&
+              red(guides, 16 + offset, 30) == red(guides, 16, 30) &&
+              red(guides, 20 + offset, 30) == red(guides, 20, 30),
+              "twice-threshold guides must retain four-pixel dashes and four-pixel gaps");
+    }
+    check((red(guides, 70, 16) == theme::grid && red(guides, 70, 20) == 0) ||
+          (red(guides, 70, 16) == 0 && red(guides, 70, 20) == theme::grid),
+          "vertical twice-threshold guide must be dashed at three quarters of the evidence axis");
+    check((red(guides, 16, 30) == theme::grid && red(guides, 20, 30) == 0) ||
+          (red(guides, 16, 30) == 0 && red(guides, 20, 30) == theme::grid),
+          "horizontal twice-threshold guide must be dashed at three quarters of the evidence axis");
     auto aspect = request; aspect.sample_aspect_ratio = 2;
     const auto geometry = render(source, aspect);
-    check(red(geometry, 70, 90) == 255 && red(geometry, 30, 50) == 255,
+    check(red(geometry, 50, 90) == 255 && red(geometry, 60, 90) == 255 &&
+          red(geometry, 30, 50) == 255 && red(geometry, 30, 30) == 255 && red(geometry, 68, 50) == 255,
           "non-square samples distorted the relative scale of pattern scores");
     const auto color_request = full_bitmap_request(101, 101, false, true);
     const auto color = render(source, color_request);
-    const auto offset = (90U * 101 + 90) * 3;
+    const auto offset = (90U * 101 + 70) * 3;
     check(color.pixels()[offset] == theme::data_tint.red && color.pixels()[offset+1] == theme::data_tint.green &&
           color.pixels()[offset+2] == theme::data_tint.blue,
           "pattern scores must use the shared data tint");
     check(render(source, color_request, false).pixels() == scalar.pixels(), "pattern scores ignored disabled color preference");
     const auto mono = render(source, full_bitmap_request(101, 101, true));
-    check(red(mono, 90, 90) == 255 && red(mono, 39, 61) == 255 && red(mono, 40, 60) == 0,
+    check(red(mono, 70, 90) == 255 && red(mono, 39, 61) == 255 && red(mono, 40, 60) == 0,
           "monochrome pattern scores must preserve measured points and dotted references");
+    check(red(mono, 50, 20) == 255 && red(mono, 50, 21) == 255 && red(mono, 20, 50) == 255 &&
+          red(mono, 21, 50) == 255 && red(mono, 70, 16) != red(mono, 70, 20) &&
+          red(mono, 16, 30) != red(mono, 20, 30),
+          "monochrome must keep threshold guides solid and twice-threshold guides visibly dashed");
+    const std::vector<plots::PatternScore> relative{
+        {{12, 0}, 12}, {{32, 0}, 16}, {{0, 24}, 24},
+        {{0, 64}, 32}, {{192, 48}, 48}, {{0, 0}, 8}};
+    check(render(PlotSnapshot::pattern_scores(relative), request).pixels() == scalar.pixels(),
+          "equal log-score ratios at different thresholds must preserve relative geometry");
+    const auto weak = render(PlotSnapshot::pattern_scores({{{20, 20}, 30}}), request);
+    check(red(weak, 37, 63) == 255 && red(weak, 10, 90) != 255,
+          "subthreshold log scores must retain their visible spacing instead of collapsing to the origin");
+    const auto strong = render(PlotSnapshot::pattern_scores({
+        {{32, 0}, 8}, {{64, 0}, 8}, {{256, 0}, 8}, {{1024, 0}, 8}}), request);
+    check(red(strong, 73, 90) == 255 && red(strong, 75, 90) == 255 &&
+          red(strong, 81, 90) == 255 && red(strong, 86, 90) == 255,
+          "strong scores across orders of magnitude must retain distinct positions inside the plot");
     auto invalid = scores;
-    invalid.insert(invalid.end(), {{std::numeric_limits<double>::infinity(), 2},
-        {2, std::numeric_limits<double>::quiet_NaN()}, {-1, 100}, {100, -1}});
+    const auto infinity = std::numeric_limits<double>::infinity(), nan = std::numeric_limits<double>::quiet_NaN();
+    invalid.insert(invalid.end(), {{{infinity, 2}, 8}, {{2, nan}, 8}, {{-1, 100}, 8}, {{100, -1}, 8},
+        {{4, 4}, 0}, {{4, 4}, -1}, {{4, 4}, infinity}, {{4, 4}, nan}, {{4, 4}}});
     check(render(PlotSnapshot::pattern_scores(invalid), request).pixels() == scalar.pixels(),
-          "nonfinite or negative pattern scores changed the valid evidence plot");
+          "negative or nonfinite evidence and missing, nonpositive, or nonfinite thresholds changed the valid evidence plot");
     const auto maximum = std::numeric_limits<double>::max();
-    const auto extreme = render(PlotSnapshot::pattern_scores({{maximum, maximum}, {maximum/2, 0}}), request);
-    check(red(extreme, 90, 10) == 255 && red(extreme, 50, 90) == 255,
-          "large finite evidence must not overflow or be discarded as a complex magnitude");
+    auto outliers = scores;
+    outliers.push_back({{maximum, maximum}, 8});
+    const auto with_outlier = render(PlotSnapshot::pattern_scores(outliers), request);
+    check(red(with_outlier, 86, 14) == 255, "large finite scores must retain visible headroom at the shared range limit");
+    for (unsigned y = 32; y < request.height; ++y) for (unsigned x = 0; x < 69; ++x)
+        check(red(with_outlier, x, y) == red(scalar, x, y),
+              "an extreme candidate rescaled or obscured scores below the fixed 2T guides");
+    const auto tiny = std::numeric_limits<double>::denorm_min();
+    const auto large_threshold = render(PlotSnapshot::pattern_scores({{{maximum, maximum}, maximum}, {{maximum, 0}, maximum/2}}), request);
+    check(red(large_threshold, 50, 50) == 255 && red(large_threshold, 70, 90) == 255,
+          "large finite admission thresholds must preserve equal and twice-threshold scores without overflow");
+    const auto small_threshold = render(PlotSnapshot::pattern_scores({{{tiny, tiny}, tiny},
+        {{2 * tiny, tiny}, tiny}, {{maximum, maximum}, tiny}}), request);
+    check(red(small_threshold, 50, 50) == 255 && red(small_threshold, 70, 50) == 255 && red(small_threshold, 86, 14) == 255,
+          "subnormal thresholds must preserve score ratios and display extreme scores without overflow");
     for (const auto ratio : {std::numeric_limits<double>::denorm_min(), std::numeric_limits<double>::max()}) {
         auto narrow = full_bitmap_request(1, 1); narrow.sample_aspect_ratio = ratio;
         render(source, narrow);
@@ -257,20 +317,150 @@ void pattern_scores() {
         render(source, narrow);
     }
     const auto disabled = PlotSnapshot::pattern_scores(scores, false);
-    check(render(disabled, request).pixels() == render(PlotSnapshot::pattern_scores({}, false), request).pixels(),
+    const auto disabled_image = render(disabled, request);
+    check(disabled_image.pixels() == render(PlotSnapshot::pattern_scores({}, false), request).pixels(),
           "phase/amplitude mode must not display retained pattern scores");
-    check(source.caption().find("Horizontal P0 / vertical P1: 0..10 ln evidence vs noise") != std::string::npos &&
-          source.caption().find("4 retained candidates") != std::string::npos,
-          "pattern score caption lost axis orientation, evidence units, scale, or candidate count");
+    check(red(disabled_image, 50, 20) == 0 && red(disabled_image, 20, 50) == 0 &&
+          red(disabled_image, 70, 16) == 0 && red(disabled_image, 70, 20) == 0 &&
+          red(disabled_image, 16, 30) == 0 && red(disabled_image, 20, 30) == 0,
+          "phase/amplitude mode must not display admission threshold guides");
+    check(source.caption().find("Horizontal P0 / vertical P1") != std::string::npos &&
+          source.caption().find("log-score scale") != std::string::npos &&
+          source.caption().find("single-symbol threshold") != std::string::npos &&
+          source.caption().find("dashed 2T = twice the log score") != std::string::npos &&
+          source.caption().find("6 retained candidates") != std::string::npos,
+          "pattern score caption lost axis orientation, log-score scale, or candidate count");
     check(PlotSnapshot::pattern_scores({}).caption().find("waiting for pattern candidates") != std::string::npos &&
           disabled.caption().find("unavailable in phase/amplitude mode") != std::string::npos,
           "pattern scores must distinguish waiting for candidates from phase/amplitude mode");
-    check(source.caption(192) == "P0 x/P1 y; ln vs noise 0..10", "compact pattern caption lost axis labels or evidence scale");
+    check(source.caption(192) == "P0 x/P1 y; log score T / 2T", "compact pattern caption lost axis labels or relative evidence guides");
+}
+void sampled_pattern_score_clouds() {
+    modem::Config config;
+    config.pattern_symbols = true;
+    config.constellation_bits = 1;
+    config.spreading_factor = 128;
+    const auto symbol = static_cast<std::size_t>(modem::symbol_sample_count(config));
+    const auto noise_samples = [&](float deviation) {
+        std::vector<float> samples(15 * symbol);
+        std::mt19937 random(991);
+        std::normal_distribution<float> distribution(0, deviation);
+        for (auto& sample : samples) sample = distribution(random);
+        return samples;
+    };
+    const auto noise = noise_samples(.0001f);
+    auto click = noise;
+    // Repeated short carrier rings retain measurable overlap but never admit
+    // bits. They must be visible below the admission guide, with a clear gap.
+    for (std::size_t offset = 1; offset < 14; offset += 2)
+        for (std::size_t i = 0; i < 100; ++i)
+            click[offset * symbol + i] += static_cast<float>(std::cos(2 * std::numbers::pi * config.carrier_hz * i /
+                config.sample_rate) * std::exp(-4. * i / 100));
+    const Bytes expected{0, 1, 0, 0, 1, 1, 0, 1, 1, 0, 1, 0};
+    modem::PatternTransmitter transmitter(expected, config, config.stream_epoch, 0, false);
+    std::vector<std::complex<double>> analytic(static_cast<std::size_t>(transmitter.total_samples()));
+    transmitter.read_analytic(analytic);
+    const auto padding = static_cast<std::size_t>(modem::pattern_pulse_padding_samples(config));
+    struct Capture { Bytes bits; std::vector<modem::PatternEvidence> candidates; };
+    const auto receive = [&](const std::vector<float>& samples, bool clock) {
+        modem::PatternSearch search;
+        search.frequency_offsets_hz = {0};
+        search.initial_stream_symbols = 1;
+        const auto collect = [&](auto& receiver) {
+            Capture result;
+            const auto drain = [&] {
+                for (auto& burst : receiver.take_bursts())
+                    result.bits.insert(result.bits.end(), burst.bits.begin(), burst.bits.end());
+            };
+            for (std::size_t start = 0; start < samples.size(); start += 503) {
+                receiver.push(std::span(samples).subspan(start, std::min<std::size_t>(503, samples.size() - start)));
+                drain();
+            }
+            receiver.finish();
+            drain();
+            result.candidates = receiver.candidates();
+            return result;
+        };
+        if (clock) {
+            search.start_offset_seconds = 0;
+            modem::PatternCorrelator receiver(config, search, 8 * 1024 * 1024);
+            return collect(receiver);
+        }
+        modem::PatternReceiver receiver(config, 8 * 1024 * 1024, search);
+        return collect(receiver);
+    };
+    const auto plot = [](const std::vector<modem::PatternEvidence>& candidates) {
+        std::vector<plots::PatternScore> scores;
+        for (const auto& candidate : candidates) {
+            const auto zero = candidate.bit ? candidate.alternative_score : candidate.score;
+            const auto one = candidate.bit ? candidate.score : candidate.alternative_score;
+            scores.push_back({{zero, one}, candidate.admission_threshold});
+        }
+        return render(PlotSnapshot::pattern_scores(std::move(scores)), full_bitmap_request(201, 201));
+    };
+    for (const bool clock : {false, true}) {
+        const auto background = receive(noise, clock), impulse = receive(click, clock);
+        check(background.bits.empty() && !background.candidates.empty() &&
+              impulse.bits.empty() && !impulse.candidates.empty(),
+              "sampled noise and clicks must retain diagnostic evidence without admitting bits");
+        for (const auto& candidate : impulse.candidates)
+            check(candidate.score < candidate.admission_threshold - 5,
+                  "click fixture must remain over five log-score units below admission");
+        const auto noise_image = plot(background.candidates), click_image = plot(impulse.candidates);
+        bool visible_noise = false, visible_click = false;
+        std::set<std::pair<unsigned, unsigned>> weak_positions;
+        unsigned weak_left = 201, weak_right = 0, weak_top = 201, weak_bottom = 0;
+        for (unsigned y = 0; y < 201; ++y) for (unsigned x = 0; x < 201; ++x) {
+            if (red(noise_image, x, y) == 255) {
+                check(x <= 44 && y >= 156, "sampled background noise moved close to the admission guides");
+                visible_noise = visible_noise || x >= 25 || y <= 175;
+            }
+            if (red(click_image, x, y) == 255) {
+                check(x <= 80 && y >= 120, "unadmitted sampled clicks must retain a visible gap below admission");
+                visible_click = visible_click || x >= 28 || y <= 172;
+            }
+            if (red(noise_image, x, y) == 255 || red(click_image, x, y) == 255) {
+                weak_positions.emplace(x / 8, y / 8);
+                weak_left = std::min(weak_left, x); weak_right = std::max(weak_right, x);
+                weak_top = std::min(weak_top, y); weak_bottom = std::max(weak_bottom, y);
+            }
+        }
+        check(visible_noise && visible_click, "retained noise and click scores collapsed into the origin");
+        // A single 2x2 dot may straddle several cells. Require a span greater
+        // than eight pixels as well, so one relocated dot cannot pass.
+        check(weak_positions.size() >= 2 &&
+              (weak_right - weak_left > 8 || weak_bottom - weak_top > 8),
+              "noise and click candidates must retain multiple separated interior positions");
+        std::vector<modem::PatternEvidence> candidates;
+        // Retain candidates from successfully received clean, medium and noisy
+        // signals together. Their native scores span orders of magnitude, so
+        // checking only a strong endpoint would miss the three-dot collapse.
+        for (const float deviation : {.0001f, .3f, 1.f}) {
+            auto legal = noise_samples(deviation);
+            for (std::size_t i = padding; i < analytic.size() - padding; ++i)
+                legal[symbol + i - padding] += static_cast<float>((analytic[i] * std::polar(1., .7)).real());
+            const auto signal = receive(legal, clock);
+            check(signal.bits == expected, "sampled legal patterns at every noise level must retain their exact accepted bits");
+            candidates.insert(candidates.end(), signal.candidates.begin(), signal.candidates.end());
+        }
+        const auto signal_image = plot(candidates);
+        std::set<unsigned> zero_positions, one_positions;
+        for (unsigned y = 0; y < 201; ++y) for (unsigned x = 0; x < 201; ++x)
+            if (red(signal_image, x, y) == 255) {
+                check(x < 180 && y > 20, "candidates from successfully received signals collapsed onto the outer plot endpoints");
+                if (x > 100 && y > 100) zero_positions.insert((x - 100) / 4);
+                if (y < 100 && x < 100) one_positions.insert((100 - y) / 4);
+            }
+        check(zero_positions.size() >= 4 && one_positions.size() >= 4 &&
+              *zero_positions.rbegin() - *zero_positions.begin() >= 5 &&
+              *one_positions.rbegin() - *one_positions.begin() >= 5,
+              "candidates from successfully received signals at different noise levels must occupy separated interior positions on both axes");
+    }
 }
 }
 int main() {
     try {
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); qr_and_patterns(); pattern_scores();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

@@ -67,6 +67,9 @@ enum class ConstellationSource { input, transmitted, received };
 struct PatternScoreObservation {
     std::uint64_t id = 0;
     std::chrono::steady_clock::time_point observed_at{};
+    // Receiver's single-symbol admission reference for this observation.
+    // Zero denotes unavailable metadata; never a fabricated receive threshold.
+    double admission_threshold = 0;
     bool operator==(const PatternScoreObservation&) const = default;
 };
 struct Snapshot {

@@ -26,7 +26,8 @@ public:
             const auto previous = std::find_if(entries_.begin(), entries_.begin() + size_, same);
             const auto duplicate = std::find_if(next.begin(), next.begin() + count, same);
             const auto observation = previous != entries_.begin() + size_ ? previous->observation :
-                duplicate != next.begin() + count ? duplicate->observation : PatternScoreObservation{allocate_id(), now};
+                duplicate != next.begin() + count ? duplicate->observation :
+                PatternScoreObservation{allocate_id(), now, candidate.admission_threshold};
             next[count++] = {candidate, observation};
         }
         entries_ = next; size_ = count;

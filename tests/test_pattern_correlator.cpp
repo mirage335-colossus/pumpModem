@@ -218,11 +218,16 @@ void shaped_raw_sample_evidence() {
     receiver.push(samples);receiver.finish();
     const auto evidence=receiver.candidates();modem::PatternCode code(c,c.stream_epoch);
     check(evidence.size()>=bits.size(),"shaped symbol scores must remain available independently of admission");
+    check(std::abs(evidence.front().admission_threshold-std::log(4/search.false_alarm_probability))<1e-12,
+          "first single-hypothesis observation must carry the actual admission reference, not the retention floor");
     for(std::size_t index=0;index<bits.size();++index) {
         const auto start=payload_start+index*symbol;
         const auto observed=std::span(samples).subspan(static_cast<std::size_t>(start),symbol);
         const auto a=direct_score(observed,code,c,start,index,0),b=direct_score(observed,code,c,start,index,1);
         const auto& actual=evidence[index];
+        check(std::isfinite(actual.admission_threshold) && actual.admission_threshold>0 &&
+              (!index || actual.admission_threshold>evidence[index-1].admission_threshold),
+              "correlator evidence must retain its increasing trial-dependent admission reference");
         check(actual.first_sample==start && actual.end_sample==start+symbol,
               "pulse overlap cannot expand or duplicate a symbol's raw noise samples");
         check(std::abs(actual.score-std::max(a,b))<1e-6*std::max(1.,actual.score) &&

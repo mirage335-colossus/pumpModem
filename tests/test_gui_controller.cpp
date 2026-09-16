@@ -1288,6 +1288,12 @@ void bitmap_source_checks() {
           std::string_view(patterns->help).find("Click to clear") != std::string_view::npos &&
           std::string_view(patterns->help).find("older than six seconds") != std::string_view::npos,
           "Pattern evidence must declare its click-to-clear action and six-second retention in the shared GUI");
+    check(std::string_view(patterns->help).find("noise remains visible") != std::string_view::npos &&
+          std::string_view(patterns->help).find("single-symbol threshold T") != std::string_view::npos &&
+          std::string_view(patterns->help).find("shared logarithmic range") != std::string_view::npos &&
+          std::string_view(patterns->help).find("twice the log score, not twice the probability") != std::string_view::npos &&
+          std::string_view(patterns->help).find("crossing T alone does not guarantee") != std::string_view::npos,
+          "Pattern evidence must explain its threshold references without promising bit admission");
     const auto original = sources.get(ui::Bitmap::qr);
     const auto empty = render(original);
     check(empty.pixels()[0] == 32 && empty.pixels()[1] == 0 && empty.pixels()[2] == 0,

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <atomic>
+#include <cmath>
 #include <iostream>
 #include <thread>
 #include <tuple>
@@ -18,24 +19,26 @@ void pattern_score_observation_lifetime() {
     std::uint64_t next_id=0;
     const auto allocate=[&]{return ++next_id;};
     History history;
-    modem::PatternEvidence candidate{0,4ULL*60*60*8000,0,1500,80,1,0,0};
+    modem::PatternEvidence candidate{0,4ULL*60*60*8000,0,1500,80,1,0,0,40};
     // A four-hour symbol has no diagnostic age before its completed window.
     history.update({},origin,allocate);
     check(history.entries().empty(),"unfinished long pattern generated plot evidence");
     const auto completed=origin+4h;
     history.update(std::span(&candidate,1),completed,allocate);
     const auto original=history.entries().front().observation;
-    check(original.id==1 && original.observed_at==completed &&
+    check(original.id==1 && original.observed_at==completed && original.admission_threshold==40 &&
           !History::expired(original,completed+6s) && History::expired(original,completed+6s+1ns),
-          "pattern plot lifetime must start at completed evidence and expire only after six seconds");
+          "pattern plot lifetime and threshold must belong to completed evidence and expire only after six seconds");
+    candidate.admission_threshold=90;
     history.update(std::span(&candidate,1),completed+30s,allocate);
     check(history.entries().front().observation==original && history.best_score(completed+30s)<0 && next_id==1,
-          "retained candidates refreshed their plot lifetime or observation identity");
+          "retained candidates refreshed their plot lifetime, observation identity or original admission reference");
     auto fresh=candidate;fresh.first_sample=fresh.end_sample;fresh.end_sample+=8000;++fresh.stream_symbol;
     const std::array candidates{candidate,fresh};
     history.update(candidates,completed+30s,allocate);
     check(history.entries()[0].observation==original && history.entries()[1].observation.id!=original.id &&
-          history.entries()[1].observation.observed_at==completed+30s,
+          history.entries()[1].observation.observed_at==completed+30s &&
+          history.entries()[1].observation.admission_threshold==90,
           "fresh equal-valued pattern scores did not retain their independent observation identity");
     History strongest,weaker;
     strongest.update(std::span(&candidate,1),origin,allocate);
@@ -54,15 +57,17 @@ void pattern_score_observation_lifetime() {
 
     struct Frame {std::vector<live::PatternScoreObservation> pattern_score_observations;};
     std::vector<Frame> frames(4);
-    frames[1].pattern_score_observations={{101,origin}};
-    frames[2].pattern_score_observations={{102,origin}};
-    frames[3].pattern_score_observations={{101,origin},{102,origin}};
+    frames[1].pattern_score_observations={{101,origin,41}};
+    frames[2].pattern_score_observations={{102,origin,42}};
+    frames[3].pattern_score_observations={{101,origin,41},{102,origin,42}};
     live::detail::rebase_pattern_score_observations(frames,origin+20s,3s);
     check(frames[1].pattern_score_observations[0].observed_at==origin+20750ms &&
           frames[2].pattern_score_observations[0].observed_at==origin+21500ms &&
+          frames[1].pattern_score_observations[0].admission_threshold==41 &&
+          frames[2].pattern_score_observations[0].admission_threshold==42 &&
           frames[3].pattern_score_observations[0]==frames[1].pattern_score_observations[0] &&
           frames[3].pattern_score_observations[1]==frames[2].pattern_score_observations[0],
-          "replay refreshed evidence age or exposed its CPU-generation timestamp");
+          "replay changed the admission reference, refreshed evidence age or exposed its CPU-generation timestamp");
 }
 live::Settings settings() {
     live::Settings value;value.simulation=true;value.simulation_snr_db=30;
@@ -238,6 +243,10 @@ void transmit_capture_tracks_generation_and_replay() {
           middle.transmit_trace.generated_bits>0 && middle.transmit_trace.generated_bits<wire.size(),
           "middle replay frame must retain its own generated prefix");
     check_prefix(middle.transmit_trace);
+    check(!middle.pattern_scores.empty() && middle.pattern_score_observations.size()==middle.pattern_scores.size() &&
+          std::all_of(middle.pattern_score_observations.begin(),middle.pattern_score_observations.end(),[](const auto& observation) {
+              return std::isfinite(observation.admission_threshold) && observation.admission_threshold>0;
+          }),"live replay lost the receiver's admission references for its displayed evidence");
     check(same_capture(middle.transmit_trace,session.snapshot().transmit_trace),
           "repeated middle replay poll changed its transmission capture");
     replay_milliseconds=2999;

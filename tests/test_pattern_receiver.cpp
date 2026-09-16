@@ -103,6 +103,13 @@ void exact_blind_bits() {
         const auto& burst=exact(result,{0,0,1});
         check(burst.first_sample>=127 && burst.first_sample<=147,"blind start estimate missed arbitrary PCM delay");
         check(burst.end_sample>=137+3*symbol-10 && burst.end_sample<=137+3*symbol+10,"raw burst gained training or a padding symbol");
+        double previous=-std::log(modem::PatternSearch{}.false_alarm_probability);
+        check(!result.candidates.empty(),"received symbols must expose their retained diagnostic evidence");
+        for(const auto& candidate:result.candidates) {
+            check(std::isfinite(candidate.admission_threshold) && candidate.admission_threshold>=previous,
+                  "retained FFT evidence must carry the finite admission reference at its search position");
+            previous=candidate.admission_threshold;
+        }
     }
 }
 void short_pattern_sample_timing() {

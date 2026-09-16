@@ -402,6 +402,30 @@ inside an adapter. Changing QR brightness affects only that bitmap and never
 changes modem state. Monochrome and color are shared presentation preferences;
 unsupported targets retain the grayscale path.
 
+The Console **Pattern evidence** plot places received P0 log scores on the
+horizontal axis and P1 log scores on the vertical axis. It preserves the spread
+of noise and signal candidates instead of converting their scores into a
+saturating probability-like coordinate. Each observation uses its captured
+single-symbol admission threshold `T`. The lower half of each axis shows native
+log scores from zero to `T` linearly, keeping noise candidates visible. Solid
+guides mark `T` at 50%; dashed guides mark `2T` at 75%. **2T means twice the
+log score, not twice the evidence or probability.**
+
+Above `T`, the display uses logarithmic interpolation. For `r = score/T`, the
+position from `T` to `2T` is `0.5 + 0.25*log2(r)`. Above `2T`, it is
+`0.75 + 0.2*ln(r/2)/ln(M/2)`, where `M` is the larger of four and the greatest
+retained valid score/threshold ratio across both axes. This fits strong signals
+into the upper region with 5% headroom, rather than piling them onto the edges.
+Only this upper region adapts when strong points arrive or expire; the noise
+region and both guides stay fixed. Ratio logarithms are evaluated without
+overflow even for extreme finite scores and small positive thresholds.
+
+The diagonal means equal P0/P1 scores. Distances describe these diagnostic log
+scores, not a calibrated probability that a bit is correct. The display transform
+changes no receiver decisions. The reference is not a complete admission rule: chain evidence and
+the competing-pattern margin also matter. Missing or invalid threshold metadata
+cannot produce a plotted point with an invented threshold.
+
 Clicking the Console **Pattern evidence** plot clears its retained points.
 Each observation disappears after six seconds, including while input is idle;
 polling the same candidate does not refresh its age. New observations can appear

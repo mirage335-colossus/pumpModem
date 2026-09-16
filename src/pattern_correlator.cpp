@@ -198,6 +198,7 @@ struct PatternCorrelator::Impl {
     }
     void remember(PatternEvidence evidence) {
         if(evidence.score<search.retain_score)return;
+        evidence.admission_threshold=threshold();
         if(history.size()==search.candidate_limit)history.erase(history.begin());
         history.push_back(evidence);
     }

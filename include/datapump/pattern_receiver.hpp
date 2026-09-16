@@ -11,6 +11,10 @@ struct PatternEvidence {
     double frequency_hz = 0, score = 0, alternative_score = 0;
     unsigned bit = 0;
     std::uint64_t stream_phase_samples = 0;
+    // Single-symbol admission reference when retained, in the same log-evidence
+    // units. Diagnostic only: alternative margins and chain evidence also gate
+    // admission, and later search trials can raise this reference.
+    double admission_threshold = 0;
 };
 // Internal unknown-slot value; transfer interpretation replaces it with a
 // plaintext zero after advancing the Data mask through the same symbol slot.

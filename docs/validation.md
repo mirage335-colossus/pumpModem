@@ -2052,3 +2052,80 @@ receiver selection, replay timestamp preservation and bounded history.
 
 Validation was headless; native pointer/rendering checks and physical audio
 were not run. Both adapters use the existing shared bitmap click mechanism.
+
+### Threshold-relative pattern evidence scale (2026-09-15)
+
+The Console Pattern evidence plot now uses exponential axes relative to each
+observation's actual single-symbol admission threshold. The threshold occupies
+half of each axis with solid guides; twice-threshold occupies three quarters
+with dashed guides. Strong outliers approach the outer edges without shrinking
+this region. Both receiver engines attach the reference to diagnostic history;
+live snapshots and replay retain it with the original observation identity and
+age. Acquisition decisions, physical completion and pending-bit updates are
+unchanged. Chain evidence and competing-pattern margins still participate in
+admission, so the guides alone do not imply acceptance.
+
+The Release build and all 18 selected suites passed: `compression_short`,
+`transfer`, `stream_codec`, `stream_receive`, `attachment`, `pattern_correlator`,
+`pattern_receiver`, `live`, `live_resources`, `gui_application`, `gui_controller`,
+`gui_inspection`, `gui_binary_editor`, `gui_plots`, `gui_bitmaps`, `gui_contract`,
+`gui_adapter_boundary` and `gui_boundary_regression`. Checks cover independent
+threshold/twice-threshold pixel landmarks, per-candidate thresholds, outlier
+stability, invalid and extreme numeric inputs, color/monochrome, sample aspect,
+tiled repaint, reference capture, replay, expiry and clearing. A 241-by-221
+pixel output from the actual shared renderer was also visually inspected.
+
+Validation was headless; native windows and physical audio were not exercised.
+Both GUI adapters consume the same shared renderer and captions.
+
+### Log-evidence scale correction and sampled clicks (2026-09-15)
+
+The initial threshold-relative scale above incorrectly divided scores that
+were already logarithms. The display now derives relative inverse model
+noise-tail evidence as `exp(score - threshold)` before compressing it onto the
+axis. The threshold remains at 50%; the 75% guide now correctly means twice
+its evidence (`threshold + ln(2)`), rather than twice its log score. Receiver
+scoring, admission, observation retention and physical completion are unchanged.
+
+A sampled damped carrier click in the streaming correlator produced score
+18.2393 against threshold 25.5108, with no accepted bits. The initial display
+placed this at 39.08% of the axis, despite only 0.000695 times the threshold's
+inverse model noise-tail evidence. It now renders at the origin at the tested
+pixel resolution. The FFT receiver fixture also retains weak click evidence
+without accepting bits. Both fixtures separately recover the exact legal
+payload `01`, whose evidence remains visibly separated from the clicks.
+
+The Release build and the same 18 suites listed above passed. `gui_bitmaps`
+now tests actual sampled clicks and valid patterns through both receiver
+implementations and the shared renderer, along with additive log-evidence
+landmarks, a ten-log-unit deficit, outlier stability and numerical extremes.
+Validation was headless and does not calibrate physical click recordings or
+establish universal impulse rejection. These remain model evidence scores;
+competing-pattern margins and chain history also affect actual bit admission.
+
+### Visible noise and signal score distributions (2026-09-15)
+
+The preceding exponential relative-evidence transform is superseded: its
+saturation collapsed ordinary noise and strong signals onto the origin and
+outer endpoints. The plot now preserves native log-score variation below the
+threshold and uses logarithmic interpolation above it. The threshold remains
+at 50%, twice the log score at 75%, and stronger retained points share an
+adaptive upper range with 5% headroom. Only scores above `2T` change position
+when the upper range changes. Labels explicitly identify diagnostic log
+scores; `2T` does not mean twice the probability or evidence. Receiver decisions,
+framing, physical completion, pending bits and display retention are unchanged.
+
+The Release build and all 18 suites listed above passed. The final expanded
+`gui_bitmaps` suite also passed after strengthening its cloud-spread assertions.
+Sampled Gaussian noise and repeated damped clicks remain unadmitted and occupy
+separated interior positions below the reference. Twelve-bit signals decode
+exactly at three noise levels in both receiver implementations; their retained
+candidates span multiple separated display positions instead of three saturated
+points. Independent synthetic cases cover zero, `T`, `2T`, multiple strong
+scores, a shared upper range, outliers, invalid metadata and extreme finite
+values. Existing monochrome, color, aspect and tiled repaint checks remain.
+
+Actual shared-renderer output was visually inspected at 241-by-221 pixels for
+noise/clicks, signals at varied noise levels and combined clouds from both
+receivers. These are headless sampled fixtures, not native windows or physical
+audio measurements.

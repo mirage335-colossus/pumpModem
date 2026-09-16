@@ -355,6 +355,7 @@ struct PatternReceiver::Impl {
     }
     void remember(PatternEvidence item) {
         if(item.score<search.retain_score)return;
+        item.admission_threshold=threshold();
         if(history.size()==search.candidate_limit)history.erase(history.begin());
         history.push_back(item);
     }
