@@ -7,6 +7,7 @@
 #include "datapump/symbol_schedule.hpp"
 #include "signal_view.hpp"
 #include "live_pattern_scores.hpp"
+#include "live_receptions.hpp"
 #include "transmit_timing.hpp"
 #include <algorithm>
 #include <atomic>
@@ -170,8 +171,6 @@ struct Session::Impl {
         std::optional<std::uint64_t> protected_epoch;
         bool binary = false;
         bool noise = false;
-        double pattern_score = -1;
-        std::uint64_t stream_signal_id = 0;
         std::uint64_t generation = 0, serial = 0;
         std::uint64_t transmitted_samples = 0;
         std::uint64_t tail_remaining = 0;
@@ -194,18 +193,22 @@ struct Session::Impl {
         double admitted_at = 0;
         double last_confident_at = 0;
         std::uint64_t last_confident_end = 0;
+        std::uint64_t sample_origin = 0, family = 0;
         detail::PatternScoreHistory pattern_score_history;
-        struct Presentation { std::uint64_t signal_id=0; bool content_reported=false; };
+        struct Presentation { std::uint64_t candidate_id=0; bool content_reported=false; };
         // Candidate chunks may interleave. Keep each physical identity until
         // its actual completion, with the same bound as the content collector.
         std::map<std::pair<std::uint64_t,std::uint64_t>,Presentation> presentations;
+        std::vector<modem::PatternBurst> bursts;
         std::unique_ptr<modem::StreamingReceiver> modem;
         std::unique_ptr<transfer::StreamReceiver> content;
     };
     struct Bank {
         std::shared_ptr<transfer::ReceiveStorageQuota> source_quota;
         std::vector<Receiver> receivers;
-        std::size_t working_bytes = 0;
+        detail::ReceptionHistory receptions;
+        std::uint64_t samples = 0, next_candidate = 1;
+        std::size_t working_bytes = sizeof(detail::ReceptionHistory);
         double created_at = 0;
         bool limited = false;
         std::complex<double> mixer{1,0};
@@ -216,7 +219,9 @@ struct Session::Impl {
         const auto& config=receiver.options.modem;
         const auto compact=receiver.options.key && modem::symbol_sample_count(config)>=60ULL*config.sample_rate;
         const auto margin=compact?8192:65536;
-        return receiver.modem->working_bytes() + margin + sizeof(Receiver) +
+        std::size_t burst_bytes=receiver.bursts.capacity()*sizeof(modem::PatternBurst);
+        for(const auto& burst:receiver.bursts)burst_bytes+=burst.bits.capacity();
+        return receiver.modem->working_bytes() + margin + sizeof(Receiver) + burst_bytes +
             receiver.presentations.size()*(sizeof(decltype(receiver.presentations)::value_type)+4*sizeof(void*)) +
             (receiver.content?receiver.content->working_bytes():0);
     }
@@ -543,7 +548,8 @@ struct Session::Impl {
         for (const auto& key : value.receive_keys) add(key);
         const auto now = current_epoch();
         const auto center = value.transfer.timestamp ? value.transfer.timestamp : static_cast<std::uint64_t>(now);
-        for (const auto& key : keys) {
+        for (std::size_t family=0;family<keys.size();++family) {
+            const auto& key=keys[family];
             const auto profiles=value.transfer.automatic_receive_profiles?
                 tuning::receive_profiles(value.transfer.modem,value.transfer.receive_targets_db_hz,value.transfer.receive_pattern_mode,key.has_value()):
                 std::vector<modem::Config>{value.transfer.modem};
@@ -576,6 +582,7 @@ struct Session::Impl {
                     bank.limited=true;continue;
                 }
                 Receiver receiver;
+                receiver.sample_origin=bank.samples;receiver.family=family;
                 receiver.options = value.transfer; receiver.options.modem=profile;receiver.options.key = key; receiver.epoch = epoch;
                 receiver.admitted_at=now;
                 receiver.key_tag = tag;
@@ -638,7 +645,7 @@ struct Session::Impl {
                 return receiver.modem->clock_windowed() && now>receiver.admitted_at+prefix+symbol+allowance;
             return !value.transfer.timestamp && now>static_cast<double>(receiver.epoch)+prefix+symbol+allowance;
         });
-        bank.working_bytes=0;for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
+        bank.working_bytes=sizeof(detail::ReceptionHistory);for(const auto& receiver:bank.receivers)bank.working_bytes+=receiver_workspace(receiver);
         bank=make_bank(value,std::move(bank));
     }
     void append_signal(SignalUpdate event) {
@@ -680,131 +687,177 @@ struct Session::Impl {
         make_receive_room(bytes, limit);
         received_bytes += bytes;
     }
+    static detail::ReceptionHistory::Candidate reception_candidate(
+        const Receiver& receiver,const modem::PatternBurst& burst,std::uint64_t id) {
+        detail::ReceptionHistory::Candidate candidate;
+        candidate.id=id;candidate.family=receiver.family;
+        candidate.first=receiver.sample_origin+burst.stream_first_sample;
+        candidate.end=receiver.sample_origin+burst.end_sample;
+        candidate.frequency=burst.frequency_hz;
+        candidate.frequency_tolerance=static_cast<double>(receiver.options.modem.sample_rate)/
+            static_cast<double>(modem::symbol_sample_count(receiver.options.modem));
+        candidate.absence_samples=modem::pattern_absence_samples(receiver.options.modem);
+        candidate.score=burst.score;candidate.complete=burst.complete;
+        return candidate;
+    }
     template<class Feed> void feed_bank(Bank& bank, const Settings& value, std::uint64_t version,
-                                        std::stop_token stop, Feed feed, Prepared* simulation_wave = nullptr) {
+                                        std::stop_token stop, std::size_t sample_count, Feed feed,
+                                        Prepared* simulation_wave = nullptr) {
         // Admit the receiver's current clock epoch before consuming this PCM
         // block. A short burst can finish within one block after a second rolls
         // over; refreshing afterward can miss every chip of the new stream.
         refresh_bank(bank,value);
+        if(sample_count>std::numeric_limits<std::uint64_t>::max()-bank.samples)
+            throw Error("receive sample clock exceeds its platform range");
         const auto capacity = bank_capacity(value);
         std::vector<std::complex<double>> pattern_scores;
         std::vector<PatternScoreObservation> pattern_observations;
-        for (auto& receiver : bank.receivers) {
-            if (stop.stop_requested()) return;
-            auto accounted = receiver_workspace(receiver);
-            const auto update_workspace = [&] {
-                const auto actual = receiver_workspace(receiver);
-                bank.working_bytes = bank.working_bytes - accounted + actual;
-                accounted = actual;
-            };
-            try {
-                const auto overhead = accounted - receiver.modem->working_bytes();
-                const auto other = bank.working_bytes - accounted;
-                if (other > capacity || overhead > capacity - other)
-                    throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
-                // Idle keys reserve their actual state. The receiver being
-                // fed can use all remaining shared space for recording and
-                // replay, while later keys see its measured growth.
-                receiver.modem->set_workspace_bytes(capacity - other - overhead);
-                feed(*receiver.modem);
-                update_workspace();
-                {
-                    const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
-                    receiver.pattern_score_history.update(candidates, replay_clock(), [&] {
-                        return pattern_score_observation_id.fetch_add(1, std::memory_order_relaxed) + 1;
-                    });
-                }
-                {
-                    auto bursts=receiver.modem->take_pattern_bursts();
-                    for(auto& burst:bursts) {
-                        if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
-                        const auto score=burst.score,frequency=burst.frequency_hz;
-                        const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
-                        if(burst.end_sample>receiver.last_confident_end) {
-                            receiver.last_confident_end=burst.end_sample;receiver.last_confident_at=current_epoch();
-                        }
-                        auto result=receiver.content->push(std::move(burst),receiver.modem->diagnostics());
+        // Observe every profile before publishing any completion. Otherwise a
+        // weaker profile processed first could close the shared pending row.
+        for(unsigned phase=0;phase<2;++phase) {
+            for (auto& receiver : bank.receivers) {
+                if (stop.stop_requested()) return;
+                auto accounted = receiver_workspace(receiver);
+                const auto update_workspace = [&] {
+                    const auto actual = receiver_workspace(receiver);
+                    bank.working_bytes = bank.working_bytes - accounted + actual;
+                    accounted = actual;
+                };
+                try {
+                    if(phase==0) {
+                        const auto overhead = accounted - receiver.modem->working_bytes();
+                        const auto other = bank.working_bytes - accounted;
+                        if (other > capacity || overhead > capacity - other)
+                            throw Error("key and epoch receiver bank exceeds the configured DSP workspace");
+                        // Idle keys reserve their actual state. The receiver being
+                        // fed can use all remaining shared space for recording and
+                        // replay, while later keys see its measured growth.
+                        receiver.modem->set_workspace_bytes(capacity - other - overhead);
+                        feed(*receiver.modem);
                         update_workspace();
-                        if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
+                        {
+                            const auto candidates = receiver.modem->pattern_candidates(pattern_score_limit);
+                            receiver.pattern_score_history.update(candidates, replay_clock(), [&] {
+                                return pattern_score_observation_id.fetch_add(1, std::memory_order_relaxed) + 1;
+                            });
+                        }
+                        receiver.bursts=receiver.modem->take_pattern_bursts();
+                        update_workspace();
+                        if(bank.working_bytes>capacity)throw Error("receive event storage exceeds the configured DSP workspace");
+                        continue;
+                    }
+                    {
+                        for(auto& burst:receiver.bursts) {
+                            if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
+                            const auto score=burst.score,frequency=burst.frequency_hz;
+                            const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
+                            if(burst.end_sample>receiver.last_confident_end) {
+                                receiver.last_confident_end=burst.end_sample;receiver.last_confident_at=current_epoch();
+                            }
+                            auto presentation=receiver.presentations.find(physical_id);
+                            if(presentation==receiver.presentations.end())continue;
+                            auto& display=presentation->second;
+                            const auto candidate=reception_candidate(receiver,burst,display.candidate_id);
+                            auto result=receiver.content->push(std::move(burst),receiver.modem->diagnostics());
+                            update_workspace();
+                            if(bank.working_bytes>capacity)throw Error("receive content diagnostics exceed the configured DSP workspace");
+                            std::string bits;bits.reserve(result.raw_bits.size());
+                            for(auto bit:result.raw_bits)bits.push_back(bit?'1':'0');
+                            std::lock_guard lock(mutex);
+                            if(!current.running || generation!=version || stop.stop_requested())return;
+                            const auto complete=result.stream_complete;
+                            const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
+                            bank.limited|=decision.limited;
+                            if(decision.selected) {
+                                SignalUpdate event;event.id=decision.signal_id;event.frequency_hz=frequency;
+                                event.text=std::move(bits);event.binary=true;event.complete=result.stream_complete;
+                                event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
+                                if(result.content_validated) {
+                                    event.text=display_text(result.content.message);event.binary=false;event.validated=true;
+                                    event.reception_id=reception_id(result.content.message);event.pre_fec_accuracy=result.content.pre_fec_accuracy;event.fec_stats=result.content.fec_stats;
+                                }
+                                if(result.short_text_decoded) {
+                                    event.raw_bits=std::move(event.text);
+                                    event.text.assign(result.content.message.data.begin(),result.content.message.data.end());
+                                    event.binary=false;
+                                }
+                                add_signal(std::move(event),simulation_wave);
+                                if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
+                                    const auto bytes=result.content.message.data.size();
+                                    if(simulation_wave) {
+                                        simulation_wave->received.reset();staged_received_bytes=0;
+                                        make_receive_room(bytes,value.content_limit);staged_received_bytes=bytes;
+                                        simulation_wave->received=std::move(result);
+                                    } else {admit_received(bytes,value.content_limit);current.received.push_back(std::move(result));}
+                                    display.content_reported=true;
+                                }
+                            }
+                            if(complete)receiver.presentations.erase(presentation);
+                            update_workspace();
+                            if(bank.working_bytes>capacity)throw Error("receive presentation state exceeds the configured DSP workspace");
+                        }
+                        receiver.bursts.clear();update_workspace();
+                        continue;
+                    }
+                } catch (const Error& error) {
+                    update_workspace();
+                    if (stop.stop_requested()) return;
+                    {
+                        {
+                            std::lock_guard lock(mutex);
+                            if(current.running && generation==version)current.error=error.what();
+                        }
+                        bank.limited=true;
+                        modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
+
+                        search.compact_clock_search=receiver.options.key &&
+                            modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
+                        search.search_stream_phases=receiver.options.key.has_value();
+                        search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch();
+                        if(value.simulation || value.transfer.timestamp)
+                            *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(receiver.options.modem))+
+                                static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
+                        search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
+                        const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
+                        if(other>capacity || overhead>capacity-other)throw;
+                        const auto remaining=capacity-other-overhead;
+                        receiver.modem.reset();
+                        receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),remaining,search);
+                        receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
+                        receiver.admitted_at=current_epoch();
+                        receiver.sample_origin=bank.samples+sample_count;
+                        receiver.last_confident_at=0;receiver.last_confident_end=0;
+                        receiver.pattern_score_history = {};
+                        receiver.presentations.clear();
+                        receiver.bursts.clear();
+                    }
+                    update_workspace();
+                }
+            }
+            if(phase==0) {
+                std::lock_guard lock(mutex);
+                if(!current.running || generation!=version || stop.stop_requested())return;
+                for(auto& receiver:bank.receivers) {
+                    const auto before=receiver_workspace(receiver);
+                    for(const auto& burst:receiver.bursts) {
+                        if(burst.bits.empty() && !burst.missing_slots && !burst.complete)continue;
+                        const auto physical_id=std::pair{burst.stream_first_sample,burst.stream_first_symbol};
                         auto presentation=receiver.presentations.find(physical_id);
                         if(presentation==receiver.presentations.end()) {
-                            if(receiver.presentations.size()>=16) {bank.limited=true;continue;}
-                            presentation=receiver.presentations.emplace(physical_id,Receiver::Presentation{}).first;
+                            if(receiver.presentations.size()>=16){bank.limited=true;continue;}
+                            presentation=receiver.presentations.emplace(physical_id,
+                                Receiver::Presentation{bank.next_candidate++,false}).first;
                         }
-                        auto& display=presentation->second;
-                        std::string bits;bits.reserve(result.raw_bits.size());
-                        for(auto bit:result.raw_bits)bits.push_back(bit?'1':'0');
-                        std::lock_guard lock(mutex);
-                        if(!current.running || generation!=version || stop.stop_requested())return;
-                        const auto complete=result.stream_complete;
-                        const auto filtered=simulation_wave && !result.content_validated &&
-                            ((simulation_wave->verified && simulation_wave->verified->validated) || score<simulation_wave->pattern_score);
-                        if(!filtered) {
-                            if(!display.signal_id)display.signal_id=simulation_wave && simulation_wave->stream_signal_id?
-                                simulation_wave->stream_signal_id:next_signal++;
-                            if(simulation_wave){simulation_wave->stream_signal_id=display.signal_id;simulation_wave->pattern_score=score;}
-                            SignalUpdate event;event.id=display.signal_id;event.frequency_hz=frequency;
-                            event.text=std::move(bits);event.binary=true;event.complete=result.stream_complete;
-                            event.received_bits=result.observed_bits;event.pattern_score=score;event.missing_symbols=result.missing_symbols;
-                            if(result.content_validated) {
-                                event.text=display_text(result.content.message);event.binary=false;event.validated=true;
-                                event.reception_id=reception_id(result.content.message);event.pre_fec_accuracy=result.content.pre_fec_accuracy;event.fec_stats=result.content.fec_stats;
-                            }
-                            if(result.short_text_decoded) {
-                                event.raw_bits=std::move(event.text);
-                                event.text.assign(result.content.message.data.begin(),result.content.message.data.end());
-                                event.binary=false;
-                            }
-                            add_signal(std::move(event),simulation_wave);
-                            if((result.content_validated || result.short_text_decoded) && !display.content_reported) {
-                                const auto bytes=result.content.message.data.size();
-                                if(simulation_wave) {
-                                    simulation_wave->received.reset();staged_received_bytes=0;
-                                    make_receive_room(bytes,value.content_limit);staged_received_bytes=bytes;
-                                    simulation_wave->received=std::move(result);
-                                } else {admit_received(bytes,value.content_limit);current.received.push_back(std::move(result));}
-                                display.content_reported=true;
-                            }
-                        }
-                        if(complete)receiver.presentations.erase(presentation);
-                        update_workspace();
-                        if(bank.working_bytes>capacity)throw Error("receive presentation state exceeds the configured DSP workspace");
+                        auto candidate=reception_candidate(receiver,burst,presentation->second.candidate_id);
+                        candidate.complete=false;
+                        const auto decision=bank.receptions.observe(candidate,[&]{return next_signal++;});
+                        bank.limited|=decision.limited;
                     }
-                    continue;
+                    bank.working_bytes=bank.working_bytes-before+receiver_workspace(receiver);
                 }
-            } catch (const Error& error) {
-                update_workspace();
-                if (stop.stop_requested()) return;
-                {
-                    {
-                        std::lock_guard lock(mutex);
-                        if(current.running && generation==version)current.error=error.what();
-                    }
-                    bank.limited=true;
-                    modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
-
-                    search.compact_clock_search=receiver.options.key &&
-                        modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
-                    search.search_stream_phases=receiver.options.key.has_value();
-                    search.start_offset_seconds=static_cast<double>(receiver.epoch)-current_epoch();
-                    if(value.simulation || value.transfer.timestamp)
-                        *search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(receiver.options.modem))+
-                            static_cast<double>(modem::pattern_pulse_padding_samples(receiver.options.modem)))/receiver.options.modem.sample_rate;
-                    search.start_uncertainty_seconds=value.transfer.search_seconds+1.;
-                    const auto other=bank.working_bytes-accounted,overhead=accounted-receiver.modem->working_bytes();
-                    if(other>capacity || overhead>capacity-other)throw;
-                    const auto remaining=capacity-other-overhead;
-                    receiver.modem.reset();
-                    receiver.modem=std::make_unique<modem::StreamingReceiver>(transfer::seeded_config(receiver.options,receiver.epoch),remaining,search);
-                    receiver.content=std::make_unique<transfer::StreamReceiver>(receiver.options,receiver.epoch,bank.source_quota);
-                    receiver.admitted_at=current_epoch();
-                    receiver.last_confident_at=0;receiver.last_confident_end=0;
-                    receiver.pattern_score_history = {};
-                    receiver.presentations.clear();
-                }
-                update_workspace();
             }
         }
+        bank.samples+=sample_count;
         // Receiver histories are updated even while another receiver wins the
         // plot. Retained old evidence must not gain a new age or mask a fresh,
         // weaker receiver when the selected receiver changes.
@@ -859,7 +912,7 @@ struct Session::Impl {
             }
             bank.mixer/=std::abs(bank.mixer);
             const auto raw=samples.subspan(offset,count);const auto mixed=std::span(projected).first(count);
-            feed_bank(bank,value,version,stop,[&](auto& receiver){return receiver.push(raw,mixed,stop);},wave);
+            feed_bank(bank,value,version,stop,count,[&](auto& receiver){return receiver.push(raw,mixed,stop);},wave);
             offset+=count;
         }
     }

@@ -76,6 +76,13 @@ It trims and deduplicates valid entries, and resets the entire list to `32` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive
 profiles hold the selected rate, carrier and pattern/tone mode fixed.
+Competing profiles for the same received signal share one pending row. Stronger
+pattern evidence may revise that row's provisional bits; only the selected
+profile's observed physical end can complete it. A delayed weaker profile does
+not create another received message.
+If a much longer symbol first becomes admissible after a shorter interpretation
+has already completed, stronger new evidence starts a new pending reception.
+Completed rows stay completed, and the later accepted bits remain visible.
 
 | Vocabulary | Meaning |
 | --- | --- |

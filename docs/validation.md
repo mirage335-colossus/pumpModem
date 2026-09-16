@@ -4,6 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Competing RX target profiles — 15 September 2026
+
+RX targets `55,32` and `32,55` now arbitrate overlapping pattern observations
+in the live receiver bank. Public patterns of different lengths share chip
+prefixes, so a mismatched duration can admit real correlation evidence and
+previously publish its own bogus message. A bounded history now assigns one
+pending identity to competing observations of the same signal and selects the
+strongest cumulative pattern evidence. All receivers consume each PCM block
+before any completion is published; a weaker profile cannot complete the
+selected pending row or publish extra content. Hardware capture and simulation
+use this same policy.
+
+Receiver creation and recovery retain their origin on the bank's sample clock.
+The 64-entry arbitration history and drained event storage count toward the DSP
+budget. Completed history suppresses late weaker copies without extending its
+sample span into later independent transmissions. Wire bits, dictionary codes,
+interval geometry, admission thresholds and fully scored physical-end rules are
+unchanged. Source validity is not a selection criterion.
+
+`live_profiles` feeds deterministic PCM through the real asynchronous capture
+queue with stubbed audio I/O. Both target orders and both transmit profiles
+cover short `e`, explicit `001`, `hello`, fixed-interval text and consecutive
+transmissions switching profiles. It checks one signal ID, exact pending bits,
+one completed result, independent short-message vectors, and no completion at
+five seconds of silence. The test fails against the original library with
+multiple live signal IDs. `live_receptions` covers evidence replacement,
+losing completion, immediate per-observation progress, distinct frequencies and
+keys, large sample coordinates, bounded history and later independent messages.
+
+There remains an ambiguity when a much longer symbol first becomes admissible
+after a short prefix has already completed. A clean sampled probe with targets
+`55,5` demonstrated a short-prefix completion at about six seconds and stronger
+first-symbol evidence at about twenty seconds. Stronger late evidence receives
+a fresh pending identity instead of being discarded or reopening a completed
+row; the earlier interpretation can therefore remain visible. The helper
+regression preserves those newly accepted long-symbol bits. No additional wire
+framing or wait for every configured long profile was introduced.
+
+The Release build passed without compiler warnings. All 15 focused suites passed
+in 123.98 seconds: `live_profiles`, `live_receptions`, `live`, `live_resources`,
+`compression_short`, `transfer`, `stream_codec`, `stream_receive`, `attachment`,
+`pattern_correlator`, `pattern_receiver`, `gui_application`, `gui_controller`,
+`gui_inspection` and `gui_binary_editor`. This includes the existing sampled
+four-hour symbols, exact short endpoints and pending GUI prefixes. These are
+headless sampled-audio and shared GUI checks, not physical-link measurements or
+native-window rendering checks; neither GUI adapter was changed.
+
 ## Pattern steps beside evidence — 15 September 2026
 
 The Console's scrollable **Pattern steps** text list now sits at the right edge
