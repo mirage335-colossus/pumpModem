@@ -11,7 +11,8 @@ using Complex = FftComplex;
 constexpr double tau = 2 * std::numbers::pi;
 void cancelled(std::stop_token stop) { if(stop.stop_requested()) throw Error("pattern search cancelled"); }
 Complex template_value(PatternCode& code,const FftSearchGeometry& geometry,
-                       const FftSearchJob& job,std::size_t bin,unsigned bit) {
+                       const FftSearchJob& job,std::size_t bin,unsigned bit,
+                       std::span<const std::array<Complex,2>> nominal_reference={},bool rotate=true) {
     const auto& pattern=geometry.pattern;
     const auto sample_position=static_cast<long double>(bin)*geometry.bin_samples+
         static_cast<long double>(geometry.bin_samples-1)/2;
@@ -23,10 +24,12 @@ Complex template_value(PatternCode& code,const FftSearchGeometry& geometry,
         throw Error("pattern stream coordinate overflow");
     const auto chip=job.symbol*pattern.chips_per_symbol+local;
     const auto fraction=static_cast<double>(chip_position-local);
-    const auto value=pattern.shaped?
+    const bool cached=!nominal_reference.empty() && job.clock_ratio==1 &&
+        !pattern.scramble && !pattern.dsss && pattern.spreading_mode==static_cast<std::uint32_t>(SpreadingMode::pattern);
+    const auto value=cached?nominal_reference[bin][bit]:pattern.shaped?
         code.shaped_value(job.symbol*pattern.chips_per_symbol,bit,static_cast<double>(source_position)):
         code.value(chip,bit,fraction);
-    return value*std::polar(1.,tau*job.frequency_hz*static_cast<double>(sample_position)/pattern.sample_rate);
+    return rotate?value*std::polar(1.,tau*job.frequency_hz*static_cast<double>(sample_position)/pattern.sample_rate):value;
 }
 Complex carrier_square(const FftSearchGeometry& geometry,std::uint64_t bin) {
     const auto phase=std::remainder(2*static_cast<long double>(tau)*geometry.carrier_hz*
@@ -35,6 +38,21 @@ Complex carrier_square(const FftSearchGeometry& geometry,std::uint64_t bin) {
     return std::polar(1.,static_cast<double>(phase));
 }
 } // namespace
+void prepare_fft_nominal_reference(const FftSearchGeometry& geometry,PatternCode& code,
+                                   std::span<std::array<FftComplex,2>> reference,std::stop_token stop) {
+    const auto& pattern=geometry.pattern;
+    if(reference.size()!=geometry.bins_per_symbol || !geometry.bins_per_symbol || !geometry.bin_samples ||
+       !pattern.chip_samples || !pattern.chips_per_symbol ||
+       !pattern.sample_rate || !pattern.symbol_samples || pattern.scramble || pattern.dsss ||
+       pattern.spreading_mode!=static_cast<std::uint32_t>(SpreadingMode::pattern))
+        throw Error("invalid public nominal pattern reference");
+    const FftSearchJob nominal;
+    for(std::size_t bin=0;bin<reference.size();++bin) {
+        if((bin&4095U)==0)cancelled(stop);
+        for(unsigned bit=0;bit<2;++bit)
+            reference[bin][bit]=template_value(code,geometry,nominal,bin,bit,{},false);
+    }
+}
 void pattern_fft(std::span<FftComplex> a, bool inverse, std::stop_token stop) {
     // Every transform uses these same power-of-two stages. Preserve the exact
     // polar calculation while sharing its immutable result between transforms
@@ -110,6 +128,7 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
        !length || length>transform || !batch.starts ||
        batch.starts>transform-length+1 || batch.score_stride<batch.starts ||
        jobs.size()>scores.size()/batch.score_stride || batch.energy_prefix.size()<length+batch.starts ||
+       (!batch.nominal_reference.empty() && batch.nominal_reference.size()!=length) ||
        (geometry.sample_fit && batch.carrier_square.size()<batch.starts))
         throw Error("invalid pattern FFT batch geometry");
     const bool generates=std::any_of(jobs.begin(),jobs.end(),[](const auto& job) {
@@ -145,7 +164,8 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
                 if(!prepared) {
                     std::fill(row.begin(),row.end(),Complex{});
                     for(std::size_t i=0;i<length;++i) {
-                        const auto value=template_value(*workspace.code,geometry,job,i,bit);
+                        if((i&4095U)==0)cancelled(stop);
+                        const auto value=template_value(*workspace.code,geometry,job,i,bit,batch.nominal_reference);
                         row[length-1-i]=std::conj(value);norm+=std::norm(value);
                         if(geometry.sample_fit)square+=value*value*carrier_square(geometry,i);
                     }

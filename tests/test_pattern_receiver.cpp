@@ -269,6 +269,9 @@ void parallel_long_continuation_exact_progress() {
         search.frequency_offsets_hz={0,0,-step,step,0,-step,step};
         search.couple_clock_to_carrier=true;search.uncoupled_frequency_count=4;
         search.search_stream_phases=keyed;
+        // Public serial scoring and parallel scoring must agree even when
+        // streamed rows can use an optional shared nominal waveform cache.
+        search.prefer_streamed_templates=!keyed;
         modem::PatternReceiver path(received,2*1024*1024,search);
         check(!path.clock_windowed(),"long parallel fixture must exercise compact FFT tracking references");
         const auto payload_end=delay+expected.size()*symbol;

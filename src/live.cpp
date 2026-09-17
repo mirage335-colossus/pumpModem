@@ -277,6 +277,7 @@ struct Session::Impl {
     std::array<std::uint8_t,16> reception_namespace{};
     std::atomic<std::uint64_t> pattern_score_observation_id{0};
     bool tx_busy = false;
+    std::optional<Clock::time_point> simulation_compute_started;
     Clock::time_point next_hardware_send{};
     using Transmission = std::variant<Message, Bytes, modem::Noise>;
     std::deque<Transmission> queued;
@@ -329,6 +330,14 @@ struct Session::Impl {
     std::string idle_status() const {
         return settings.simulation ? "Simulated independent radios; sampled audio, clock error and phase noise" : "Listening to audio input";
     }
+    void update_simulation_elapsed() {
+        if(simulation_compute_started)
+            current.simulation_compute_seconds=std::chrono::duration<double>(Clock::now()-*simulation_compute_started).count();
+    }
+    void finish_simulation_elapsed() {
+        update_simulation_elapsed();simulation_compute_started.reset();
+        current.simulation_receiving_tail=false;
+    }
     void clear_replay(bool discard_pending = true) {
         if (discard_pending && replay_signal_id)
             std::erase_if(current.signals, [this](const auto& event) {
@@ -369,6 +378,7 @@ struct Session::Impl {
         if (!tx_busy) {
             current.transmitting_noise = noise;
             current.transmission_fraction = current.transmission_seconds = 0;
+            current.simulation_compute_seconds=0;current.simulation_receiving_tail=false;
             current.transmit_trace = {};
             clear_replay();
         }
@@ -464,6 +474,7 @@ struct Session::Impl {
     }
     void halt() {
         std::lock_guard lock(mutex);
+        finish_simulation_elapsed();
         current.running = current.transmitting = current.transmitting_noise = false;
         current.transmission_finished = true; current.transmission_cancelled = true;
         current.status = "Stopped";
@@ -487,6 +498,7 @@ struct Session::Impl {
         clear_replay(); pending_points = {};
         replay_omitted = 0;
         current = {}; current.running = true; current.simulation = settings.simulation;
+        simulation_compute_started.reset();
         for(auto& event:unavailable)append_signal(std::move(event));
         current.status = idle_status(); changed.notify_all();
     }
@@ -1187,6 +1199,7 @@ struct Session::Impl {
     void complete_tx(Prepared& wave, const std::string& error = {}) {
         std::lock_guard lock(mutex);
         if (wave.generation != generation || wave.serial != tx_serial) return;
+        finish_simulation_elapsed();
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
         if(!settings.simulation && !wave.noise)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
             std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.));
@@ -1224,6 +1237,7 @@ struct Session::Impl {
         current.transmission_seconds = static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) / wave.modem.sample_rate;
         current.transmission_fraction = wave.noise ? 0 : static_cast<double>(value.simulation ? wave.transmitted_samples : wave.transmitter->samples_emitted()) /
                                         static_cast<double>(wave.transmitter->total_samples());
+        current.simulation_receiving_tail=value.simulation && !wave.noise && wave.tail_started;
     }
     void retain_emitted_epoch(const Prepared& wave) {
         if(!wave.protected_epoch)return;
@@ -1444,6 +1458,9 @@ struct Session::Impl {
                 tx_busy = true; current.transmitting = true; current.transmission_finished = false;
                 current.transmitting_noise = std::holds_alternative<modem::Noise>(transmission);
                 current.transmission_fraction = current.transmission_seconds = 0;
+                current.simulation_compute_seconds=0;current.simulation_receiving_tail=false;
+                simulation_compute_started=value.simulation && !current.transmitting_noise?
+                    std::optional<Clock::time_point>(Clock::now()):std::nullopt;
                 current.status = current.transmitting_noise ? "Preparing noise with temporary keys" :
                     std::holds_alternative<Bytes>(transmission) ? "Preparing raw binary signal" :
                     "Preparing fixed-interval stream";
@@ -1548,6 +1565,7 @@ struct Session::Impl {
             } catch (const std::exception& exception) {
                 std::lock_guard lock(mutex);
                 if (generation != version || tx_serial != serial) continue;
+                finish_simulation_elapsed();
                 tx_busy = false; current.transmitting = !queued.empty(); current.transmission_finished = queued.empty();
                 current.transmitting_noise = false;
                 current.status = idle_status(); if (!token.stop_requested()) current.error = exception.what(); changed.notify_all();
@@ -1672,6 +1690,7 @@ void Session::transmit_noise() {
 void Session::cancel_transmit() {
     std::lock_guard lock(impl_->mutex);
     impl_->advance_replay(impl_->replay_clock());
+    impl_->finish_simulation_elapsed();
     impl_->tx_stop.request_stop(); ++impl_->tx_serial; impl_->queued.clear(); impl_->ready.reset(); impl_->tx_busy = false;
     impl_->current.transmitting = impl_->current.transmitting_noise = false;
     impl_->current.transmission_finished = true; impl_->current.transmission_cancelled = true;
@@ -1682,6 +1701,7 @@ void Session::cancel_transmit() {
 }
 Snapshot Session::snapshot() {
     std::lock_guard lock(impl_->mutex);
+    impl_->update_simulation_elapsed();
     const auto now = impl_->replay_clock();
     impl_->advance_replay(now);
     impl_->publish_recovery_progress();

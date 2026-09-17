@@ -6,6 +6,21 @@ confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
 
+The probability is conditional on finishing receiver computation; it does not
+predict completion within a time limit. During computation, the GUI labels
+the percentage as generated **audio**, with a separate elapsed wall time that
+continues advancing while the receiver scores that input. After all transmitted
+audio is generated, it reports **Checking reception after transmission** while
+observed-absence samples are processed. Neither stage forces physical completion.
+Elapsed computation freezes before the three-second replay or when cancelled.
+
+At low SNR, an unaccepted bit cannot exclude overlapping searches. Those later
+full acquisition passes add work that an already accepted bit can avoid. Thus
+identical waveform settings can spend different amounts of computation on strong
+and weak channels, and a nearly complete audio percentage is not a nearly
+complete computation. The noise-model percentage is not a measured reliability
+claim for the full receiver or its long, wide carrier search.
+
 The adjacent **Oscillator model** selector provides the original free-running
 crystal and three GPSDO cases: hobbyist XO without an oven, TCXO without an
 oven, and OCXO. It sets the same relative clock offset and phase diffusion
@@ -264,6 +279,13 @@ of established-track continuation. This is a one-stream planning allowance,
 not a runtime upper bound or a probability-weighted expected runtime. Competing
 or noise tracks, late acquisition, replacements and reacquisition can change
 the work. The workload correction does not change the RX probability model.
+
+For streamed long public patterns, the CPU receiver can optionally cache the
+unmodulated nominal-clock waveform before applying each carrier offset. This
+cache is released after the input push and is used only when it fits without
+reducing the affordable FFT worker count. Time-scaled clock hypotheses keep
+their own waveform generation. The engineering estimate retains its ordinary
+generation allowance; it does not promise a cache hit or its measured speedup.
 
 The fixed engineering budgets are:
 

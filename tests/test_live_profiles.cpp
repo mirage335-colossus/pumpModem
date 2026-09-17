@@ -2,6 +2,7 @@
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/pattern_search.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <atomic>
@@ -420,17 +421,22 @@ void continuous_long_fft_single_bit() {
     session.stop();
 }
 
-void simulated_long_fft_single_bit() {
+void simulated_long_fft_single_bit(double duration = 40, double snr = 30, std::uint64_t seed = 1) {
     auto value = settings({});
     auto& config = value.transfer.modem;
     config.sample_rate = 64;
     config.bandwidth_hz = 8;
     config.carrier_hz = 16;
     config.spreading_factor = 64;
-    config.integration_seconds = 40;
+    config.integration_seconds = duration;
     value.transfer.automatic_receive_profiles = false;
     value.simulation = true;
-    value.simulation_snr_db = 30;
+    value.simulation_snr_db = snr;
+    value.simulation_seed = seed;
+    const bool require_reception = snr == 30;
+    if (duration >= 400)
+        check(modem::default_pattern_frequency_offsets(config).size() > 5,
+              "seed fixture lost its expanded carrier and coupled-clock bank");
     // Retain the free-running sound-card model: 100 ppm clock mismatch and
     // 0.5 degrees per square-root second of independent phase diffusion.
     std::atomic<std::int64_t> replay_milliseconds{0};
@@ -438,30 +444,52 @@ void simulated_long_fft_single_bit() {
         return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
     });
     session.start(value);
+    check(session.snapshot().simulation_compute_seconds == 0,
+          "idle simulation retained a previous computation's elapsed time");
     session.transmit_bits(Bytes{0});
     const auto deadline = std::chrono::steady_clock::now() + 30s;
     bool computed = false;
+    double elapsed = 0, fraction = 0;
+    std::uint64_t samples = 0;
     while (std::chrono::steady_clock::now() < deadline) {
         const auto snapshot = session.snapshot();
         check(snapshot.error.empty(), "long sampled simulation failed: " + snapshot.error);
         check(snapshot.received.empty(), "single raw zero unexpectedly became source text");
+        check(snapshot.simulation_compute_seconds >= elapsed,
+              "simulation elapsed time moved backward while its presentation clock was frozen");
+        if (snapshot.transmitting && elapsed > 0 && snapshot.samples_received == samples &&
+            snapshot.transmission_fraction == fraction)
+            check(snapshot.simulation_compute_seconds > elapsed,
+                  "simulation elapsed time stopped advancing while audio/DSP progress was unchanged");
+        elapsed = snapshot.simulation_compute_seconds;
+        fraction = snapshot.transmission_fraction;
+        samples = snapshot.samples_received;
+        if (snapshot.simulation_receiving_tail)
+            check(snapshot.transmitting && !snapshot.transmission_finished && fraction == 1,
+                  "receiver-tail stage claimed unfinished TX audio or completed simulation work");
         if (snapshot.transmission_finished && snapshot.simulation_replay) {
+            check(!snapshot.simulation_receiving_tail && elapsed > 0,
+                  "completed computation kept the tail stage or lost its wall-clock elapsed time");
             computed = true;
             break;
         }
         std::this_thread::sleep_for(1ms);
     }
-    check(computed, "long sampled simulation did not finish its bounded PCM processing");
+    check(computed, "long sampled simulation did not finish: audio fraction " + std::to_string(fraction) +
+          ", samples " + std::to_string(samples) + ", elapsed " + std::to_string(elapsed));
     std::optional<std::uint64_t> pending_id;
     std::size_t complete = 0;
     for (std::int64_t milliseconds = 0; milliseconds <= 3000; milliseconds += 10) {
         replay_milliseconds = milliseconds;
         const auto snapshot = session.snapshot();
         check(snapshot.error.empty(), "long sampled replay failed: " + snapshot.error);
+        check(snapshot.simulation_compute_seconds == elapsed && !snapshot.simulation_receiving_tail,
+              "presentation replay changed the completed computation's elapsed time or stage");
         check(snapshot.received.empty(), "single raw zero unexpectedly became source text during replay");
         check(snapshot.dsp_buffered_bytes <= value.dsp_workspace_bytes,
               "long sampled simulation exceeded the configured DSP workspace");
         for (const auto& signal : snapshot.signals) {
+            if (!require_reception) continue;
             check(signal.binary && !signal.validated && signal.text == "0" &&
                   signal.received_bits == 1 && signal.missing_symbols == 0,
                   "long sampled simulation changed its exact one-bit reception");
@@ -475,9 +503,24 @@ void simulated_long_fft_single_bit() {
             }
         }
     }
-    check(pending_id && complete == 1,
+    check(!require_reception || (pending_id && complete == 1),
           "long sampled simulation did not replay a pending bit and exactly one completed reception");
+    const auto finished = session.snapshot();
+    check(!finished.transmitting && finished.transmission_finished && !finished.simulation_replay,
+          "sampled simulation did not leave replay after its presentation deadline");
+    session.configure(value);
+    check(session.snapshot().simulation_compute_seconds == 0 && !session.snapshot().simulation_receiving_tail,
+          "reconfiguration retained the completed simulation's elapsed time or stage");
     session.stop();
+}
+
+void sampled_long_fft_seeds() {
+    for (const auto seed : {1ULL, 7ULL, 19ULL, 73ULL}) for (const auto snr : {30., -25.}) {
+        try { simulated_long_fft_single_bit(400, snr, seed); }
+        catch (const Error& error) {
+            throw Error("seed " + std::to_string(seed) + " / SNR " + std::to_string(snr) + ": " + error.what());
+        }
+    }
 }
 }
 
@@ -514,8 +557,12 @@ int main(int argc, char** argv) {
     std::string context;
     try {
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft" || suite == "long_seeds",
               "unknown profile test suite");
+        if (suite == "all" || suite == "long_seeds") {
+            context = "sampled expanded FFT simulation across strong and weak noise seeds";
+            sampled_long_fft_seeds();
+        }
         if (suite == "all" || suite == "long" || suite == "long_fft") {
             context = "continuous public full FFT capture of one 40-second bit";
             continuous_long_fft_single_bit();

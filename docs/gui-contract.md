@@ -35,6 +35,16 @@ and saved keys remain intact. Simulation runs continuously without a completion
 replay. Automatic transmission capture stays hidden during noise; manual Hex/Bits
 show an explanatory caption and no retained temporary keystream diagnostics.
 
+Finite simulation reports generated **audio** percentage separately from elapsed
+wall time. Elapsed time continues updating on UI polls while receiver scoring
+holds the audio percentage unchanged. Once TX audio ends, the mode line says
+**Checking reception after transmission** while complete-symbol absence is
+processed. Completion or cancellation freezes the elapsed value; a new run or
+reconfiguration resets it. Replay time is separate. None of these presentation
+states declares a received message complete. **RX success (noise model)** is
+conditional on completed receiver computation, not a measured success rate or
+the probability of finishing within a deadline.
+
 The persistent **Mono** toggle below **Audio device** starts enabled. Transmit
 audio uses the right channel of a stereo output, with silence on the left;
 mono-only outputs use their sole channel. Turning Mono off sends the same audio

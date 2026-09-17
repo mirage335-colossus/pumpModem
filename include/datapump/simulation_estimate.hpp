@@ -9,7 +9,9 @@ inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
 
 struct Estimate {
     // Engineering estimates, not measurements or calibrated probabilities.
-    // Success means the entire supplied draft survives reception/correction.
+    // Idealized success conditional on completing receiver computation: the
+    // supplied draft survives reception/correction. This is not a deadline or
+    // an empirical success rate for the implementation.
     // success_probability is meaningful only when confidence_available is true.
     double success_probability = 0;
     double cpu_seconds = 0;

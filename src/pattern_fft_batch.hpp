@@ -54,6 +54,9 @@ struct FftSearchBatch {
     std::span<const FftComplex> spectrum, carrier_square;
     std::span<const double> energy_prefix;
     std::span<const FftPreparedTemplate> prepared;
+    // Optional public nominal-clock samples before carrier rotation. Coupled
+    // clock alternatives still generate their own time-scaled waveform.
+    std::span<const std::array<FftComplex,2>> nominal_reference;
     std::size_t starts = 0, score_stride = 0;
 };
 
@@ -76,6 +79,11 @@ struct FftSearchWorkspace {
 void execute_fft_search_cpu(const FftSearchBatch&,std::span<const FftSearchJob>,
                             std::span<FftSearchScore>,std::span<FftSearchWorkspace>,
                             std::stop_token = {});
+
+// Build exactly the unmodulated public-pattern values used by nominal-clock
+// jobs. The caller owns and budgets the complete supplied reference span.
+void prepare_fft_nominal_reference(const FftSearchGeometry&,PatternCode&,
+                                   std::span<std::array<FftComplex,2>>,std::stop_token = {});
 
 void pattern_fft(std::span<FftComplex>,bool inverse,std::stop_token);
 double pattern_evidence(FftComplex dot,double energy,double template_energy,double count,

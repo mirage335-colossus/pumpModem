@@ -62,6 +62,7 @@ struct PatternReceiver::Impl {
         std::vector<detail::FftSearchWorkspace> workspaces;
         std::vector<PatternCode> tracking_workers;
         std::size_t tracking_reservation=0;
+        std::vector<std::array<Complex,2>> nominal_reference;
     };
     // Exactly one push-scoped owner. Keeping only the original vector-sized
     // handle here preserves the idle footprint visible to the receiver bank.
@@ -352,7 +353,19 @@ struct PatternReceiver::Impl {
         if(!required_tracking_reference)std::vector<std::array<Complex,2>>().swap(tracking_reference);
         templates_valid=false;tracking_reference_valid=false;cache_reservation=0;
     }
-    void prepare_scoring() {
+    detail::FftSearchGeometry scoring_geometry()const {
+        detail::FftSearchGeometry geometry;
+        geometry.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),
+            shaped?1U:0U,config.scramble?1U:0U,config.dsss?1U:0U,
+            config.spreading_seed,config.dsss_seed};
+        geometry.bins_per_symbol=length;geometry.bin_samples=bin_samples;
+        geometry.carrier_hz=config.carrier_hz;geometry.evidence_count=evidence_count(length);
+        geometry.noise_condition=noise_condition;geometry.real_rank=real_rank;geometry.sample_fit=sample_fit;
+        geometry.extended_clock_window=search.couple_clock_to_carrier;
+        return geometry;
+    }
+    void prepare_scoring(std::stop_token stop) {
         if(!scoring.empty()) {
             if(!scoring.front().jobs.empty())return;
             // A tracking-only owner is optional scratch from an earlier
@@ -372,7 +385,21 @@ struct PatternReceiver::Impl {
         for(const auto& burst:bursts)retained+=burst.bits.capacity();
         if(retained>=budget)return;
         if(budget-static_cast<std::size_t>(retained)<=sizeof(ScoringStorage))return;
-        const auto spare=budget-static_cast<std::size_t>(retained)-sizeof(ScoringStorage);
+        auto spare=budget-static_cast<std::size_t>(retained)-sizeof(ScoringStorage);
+        const auto uncached_workers=std::min({workers,jobs,spare/(worker_bytes+job_bytes)});
+        bool cache_nominal=false;
+        if(long_symbol && streamed_templates && !config.scramble && !config.dsss &&
+           config.spreading_mode==SpreadingMode::pattern && uncached_workers>=2) {
+            std::size_t nominal_jobs=0;
+            for(std::size_t f=0;f<templates.size();++f)if(clock_ratio(f)==1)++nominal_jobs;
+            const auto bytes=static_cast<long double>(length)*sizeof(std::array<Complex,2>);
+            // Reserve the optional waveform before filling spare memory with
+            // FFT job outputs. Keep every affordable physical worker and at
+            // least one job per worker; only logical batch capacity may shrink.
+            if(nominal_jobs>uncached_workers && bytes<=spare-uncached_workers*(worker_bytes+job_bytes)) {
+                spare-=static_cast<std::size_t>(bytes);cache_nominal=true;
+            }
+        }
         const auto worker_count=std::min({workers,jobs,spare/(worker_bytes+job_bytes)});
         if(worker_count<2)return;
         // Logical batch capacity depends on the search and RAM, not the CPU
@@ -383,17 +410,20 @@ struct PatternReceiver::Impl {
         auto& storage=scoring.front();
         auto& scoring_jobs=storage.jobs;auto& scoring_templates=storage.templates;
         auto& scoring_outputs=storage.outputs;auto& scoring_workspaces=storage.workspaces;
+        if(cache_nominal)storage.nominal_reference.resize(length);
         scoring_jobs.resize(count);scoring_templates.resize(count);
         scoring_outputs.resize(count*hop);scoring_workspaces.reserve(worker_count);
         for(std::size_t i=0;i<worker_count;++i)scoring_workspaces.emplace_back(config,transform,needs_code);
         scoring_reservation=scoring.capacity()*sizeof(ScoringStorage)+scoring_jobs.capacity()*sizeof(detail::FftSearchJob)+
             scoring_templates.capacity()*sizeof(detail::FftPreparedTemplate)+
             scoring_outputs.capacity()*sizeof(detail::FftSearchScore)+
-            scoring_workspaces.capacity()*sizeof(detail::FftSearchWorkspace);
+            scoring_workspaces.capacity()*sizeof(detail::FftSearchWorkspace)+
+            storage.nominal_reference.capacity()*sizeof(decltype(storage.nominal_reference)::value_type);
         for(const auto& workspace:scoring_workspaces)scoring_reservation+=workspace.working_bytes();
         // A vector implementation may reserve more than requested. Optional
         // batching must still fit its measured capacities on that platform.
-        if(!cache_fits(budget,0))drop_scoring();
+        if(!cache_fits(budget,0)){drop_scoring();return;}
+        if(cache_nominal)detail::prepare_fft_nominal_reference(scoring_geometry(),code,storage.nominal_reference,stop);
     }
     void drop_scoring() {
         decltype(scoring)().swap(scoring);scoring_reservation=0;
@@ -471,7 +501,11 @@ struct PatternReceiver::Impl {
         // symbol contribution, without adding a receive filter whose correlated
         // output would incorrectly count as independent noise observations.
         // Adjacent unknown symbols are not used as timing or bit evidence.
-        const auto value=shaped?
+        // Public patterns repeat independently of stream index and phase.
+        // Reuse an already-budgeted acquisition cache during continuation
+        // when present; this path never allocates a cache just for tracking.
+        const bool cached=clock_ratio(f)==1 && !scoring.empty() && !scoring.front().nominal_reference.empty();
+        const auto value=cached?scoring.front().nominal_reference[bin][bit]:shaped?
             pattern.shaped_value(index*code.chips_per_symbol(),bit,static_cast<double>(source_position)):
             pattern.value(chip,bit,fraction);
         return value*std::polar(1.,tau*search.frequency_offsets_hz[f]*static_cast<double>(sample_position)/config.sample_rate);
@@ -965,15 +999,8 @@ struct PatternReceiver::Impl {
         if(!streamed_templates && cached_templates.empty() && !reuse_templates)
             for(auto& row:templates)for(auto& values:row)values.resize(transform);
         detail::FftSearchBatch batch;
-        auto& geometry=batch.geometry;
-        geometry.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
-            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),
-            shaped?1U:0U,config.scramble?1U:0U,config.dsss?1U:0U,
-            config.spreading_seed,config.dsss_seed};
-        geometry.bins_per_symbol=length;geometry.bin_samples=bin_samples;
-        geometry.carrier_hz=config.carrier_hz;geometry.evidence_count=evidence_count(length);
-        geometry.noise_condition=noise_condition;geometry.real_rank=real_rank;geometry.sample_fit=sample_fit;
-        geometry.extended_clock_window=search.couple_clock_to_carrier;
+        batch.geometry=scoring_geometry();
+        batch.nominal_reference=storage.nominal_reference;
         batch.spectrum=spectrum;batch.carrier_square=work;batch.energy_prefix=energy_prefix;
         batch.starts=count;batch.score_stride=hop;
         const auto flush=[&] {
@@ -1053,7 +1080,7 @@ struct PatternReceiver::Impl {
                 }
                 next_start+=count;continue_tracks(stop);continue;
             }
-            prepare_scoring();
+            prepare_scoring(stop);
             std::fill(work.begin(),work.end(),Complex{});energy_prefix[0]=0;
             for(std::size_t i=0;i<count+length-1;++i) {
                 work[i]=at(next_start+i);energy_prefix[i+1]=energy_prefix[i]+std::norm(work[i]);

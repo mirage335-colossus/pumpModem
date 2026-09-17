@@ -117,7 +117,15 @@ struct Snapshot {
     std::size_t buffered_samples = 0;
     double virtual_seconds = 0;
     double transmission_seconds = 0;
+    // Fraction of transmitted audio generated/played, not receiver work.
     double transmission_fraction = 0;
+    // Finite simulation is still scoring received samples after TX audio ends.
+    // This never implies physical reception completion.
+    bool simulation_receiving_tail = false;
+    // Steady-clock wall time spent preparing/generating/scoring this simulation.
+    // Updates on snapshot polls even during a synchronous scoring call, freezes
+    // at completion/cancellation, and excludes the presentation replay.
+    double simulation_compute_seconds = 0;
     bool transmission_finished = true; // CPU/audio work complete; simulation presentation may still be active.
     bool transmission_cancelled = false;
     // Completed simulations present training, measured plots and provisional

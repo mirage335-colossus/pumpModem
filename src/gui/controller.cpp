@@ -88,6 +88,13 @@ std::string probability_text(double probability) {
     text<<"~"<<std::fixed<<std::setprecision(1)<<100*probability<<'%';
     return text.str();
 }
+std::string elapsed_text(double seconds) {
+    const auto elapsed=static_cast<std::uint64_t>(std::max(0.,seconds));
+    std::ostringstream text;
+    text<<elapsed/3600<<':'<<std::setfill('0')<<std::setw(2)<<(elapsed/60)%60
+        <<':'<<std::setw(2)<<elapsed%60;
+    return text.str();
+}
 std::string workspace_text(unsigned percent,std::size_t bytes) {
     constexpr std::size_t gib=1024*1024*1024,mib=1024*1024;
     std::ostringstream text;
@@ -254,7 +261,7 @@ struct Controller::Impl {
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
     }
     void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu) {
-        f(UiField::simulation_confidence).text="RX success (model)\n"+std::move(confidence);
+        f(UiField::simulation_confidence).text="RX success (noise model)\n"+std::move(confidence);
         f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
         f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
     }
@@ -767,9 +774,12 @@ struct Controller::Impl {
             transmit_requested=false; noise_requested=false;
         }
         const auto mode=next.simulation?"Simulation / continuous receive":"Listening / "+settings.device;
+        const auto audio_percent=std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100));
         const auto tx_mode=next.transmitting_noise?
             std::string(next.simulation?"Simulating noise / ":"Transmitting noise / ")+seconds_text(next.transmission_seconds)+" elapsed":
-            std::string(next.simulation?"Calculating simulation ":"Transmitting ")+std::to_string(static_cast<int>(std::clamp(next.transmission_fraction,0.0,1.0)*100))+"% / "+seconds_text(next.transmission_seconds)+" media";
+            next.simulation?(next.simulation_receiving_tail?std::string("Checking reception after transmission"):
+                "Simulating / audio "+audio_percent+"%")+" / "+elapsed_text(next.simulation_compute_seconds)+" elapsed":
+            "Transmitting "+audio_percent+"% / "+seconds_text(next.transmission_seconds)+" media";
         f(UiField::mode).text=next.transmitting?tx_mode:next.simulation_replay?"Simulation replay "+std::to_string(static_cast<int>(std::clamp(next.simulation_sample_fraction,0.0,1.0)*100))+"%":mode;
         if(next.simulation_replay||snapshot.simulation_replay||Clock::now()>=notice_until) f(UiField::status).text=next.error.empty()?next.status:next.error;
         if(Clock::now()-cpu_time>=std::chrono::seconds(1)) { const auto now=Clock::now(); cpu_percent=100*static_cast<double>(std::clock()-cpu_clock)/CLOCKS_PER_SEC/std::chrono::duration<double>(now-cpu_time).count(); cpu_clock=std::clock(); cpu_time=now; }

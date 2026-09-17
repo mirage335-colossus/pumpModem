@@ -3097,3 +3097,104 @@ at this profile. The subsequently added parallel continuation is covered by
 the exact serial/parallel and physical-end regressions above, but was not
 rerun through this full-size acquisition. Physical audio and real-time
 throughput at this setting remain unverified.
+
+### Simulation computation stalls and progress (2026-09-17)
+
+The reported stall at a varying near-final audio percentage occurs before
+replay. `source_loop()` publishes generated-audio progress before a synchronous
+receiver push; a large acquisition or continuation pass can therefore leave
+that percentage unchanged. The finite tail loop and receiver search coordinates
+advance, and the code audit found no unbounded completion loop. Weak input can
+add work: without an admitted bit and its retained span, later overlapping
+full-bank acquisition batches cannot be skipped. This is a computation-cost
+explanation, not evidence that every reported wait is a confirmed decode failure.
+
+Finite simulations now report audio percentage separately from elapsed
+steady-clock wall time. Snapshot polls advance the elapsed display during DSP
+work even if no additional audio has been processed. Tail scoring has its own
+"Checking reception after transmission" stage. Completion/cancellation freezes
+elapsed time, reconfiguration/new work resets it, and replay uses its separate
+presentation clock. The noise-model success label and help explain that the
+probability assumes completed computation and is not an empirical success rate
+or deadline prediction. No probability penalty was invented from an unfinished
+run, and no timeout or UI state can complete reception.
+
+A bounded diagnostic used public raw `0`, 400-second symbols, 64 Hz sampling,
+8 Hz bandwidth, 16 Hz carrier, 100 ppm mismatch and 0.5-degree phase diffusion.
+All four seeds (1, 7, 19, 73) at -3 dB-Hz C/N0 and at a 50 dB stronger channel
+produced exact pending `0` and one physical completion without `finish()`.
+The weak scores were 132.79--192.88 against threshold 47.11; all eight cases
+took about 1.03 seconds. This 26-alternative search has different timing and
+trial penalties from the user's 1,914-alternative profile and does not establish
+its reliability or throughput. A separate live-session regression covers four
+strong and four weaker seeds, finite computation and replay completion, exact
+strong receptions, elapsed-time updates during unchanged audio progress,
+reconfiguration and cancellation.
+
+Streamed long public-pattern FFT searches now optionally retain one exact pair
+of unmodulated nominal-clock waveforms, then apply each carrier rotation in the
+original arithmetic order. The cache is push-scoped, included in measured
+workspace accounting, and eligible only when it preserves the affordable
+physical worker count and has more reusable jobs than workers. Private and
+time-scaled templates retain their generation path. An existing cache can be
+reused during continuation; tracking does not allocate another copy.
+
+A temporary 40-second public-pattern microbenchmark preserved the 14,400 Hz
+sample rate, 3,600 Hz bandwidth, 1,500 Hz carrier and projection geometry. With
+64 mixed nominal/coupled jobs and four workers, it measured 3.062497 seconds
+uncached versus 2.460236 seconds cached, including 0.076760 seconds to build the
+4,608,928-byte cache: about 20% less wall time. All 230,400 two-bit score outputs
+matched byte for byte. This is a reduced local microbenchmark, not a measured
+speedup or end-to-end completion at the user's full 1,914-alternative setting.
+The prototype is `/tmp/pumpmodem-nominal-cache/bench40.cpp`, run as
+`timeout 60 /tmp/pumpmodem-nominal-cache/bench40`.
+
+New batch regressions compare exact cached/uncached scores for shaped and
+unshaped public patterns, sample fits, partial final chips, extended observation
+windows, different stream indices and mixed clock alternatives. Poisoned cache
+values cannot affect time-scaled alternatives. Invalid geometry and cancelled
+construction/scoring are rejected. The continuous long-symbol comparison also
+exercises streamed public rows, serial versus parallel progress, idle workspace,
+pending prefixes and observed physical completion.
+
+The actual rebuilt library repeated the 40-second microbenchmark in both run
+orders, also with byte-identical scores. Baseline-first measured 2.595165 seconds
+uncached versus 1.997540 seconds cached including construction; cached-first
+measured 2.502675 versus 1.938406 seconds. Both are about 23% less wall time.
+Commands were `timeout 60 /tmp/pumpmodem-nominal-cache/bench_actual40` and the
+same command with `reverse`. These runs followed the regression suite, without
+another heavy workload dispatched in this task.
+
+The complete Release build succeeded, both FLTK and Rev GUI binaries were
+rebuilt, and all 21 development-contract suites plus `pattern_fft_batch` and
+`search_parallel` passed (23/23, 225.81 seconds). Full-library ASan/UBSan builds
+passed the FFT batch suite and the streamed public/private exact parallel
+long-symbol progress fixture; leak checks were disabled for the sandbox
+restriction. `git diff --check` passed. Native display workflows and physical
+speaker/microphone reception were not rerun.
+
+The final full-profile probe also completed successfully within its original
+1,800-second limit, using a frozen copy of the rebuilt library and no other
+heavy workload dispatched in this task. It sent public raw `0` with 3 dBm /
+-170 dB, 3,600 Hz Rate, 1,500 Hz carrier, -8 dB/Hz target, 14,400 Hz internal
+sampling, 100 ppm clock mismatch, 0.5-degree phase diffusion and noise seed 1.
+The receiver retained all 1,914 alternatives under a 1,200 MiB workspace budget,
+with automatic worker selection and no narrower fallback. One symbol was
+398.107170553 seconds. It accepted exact pending `0` at 399.217777778 seconds
+of input and 1,381.07810026 seconds of wall time (23:01), with evidence
+120.519906936, identical to the earlier full-profile result. It then observed
+physical completion at 796.547708333 seconds of input and 1,719.18909057 seconds
+of wall time (28:39). The final 800.428263889-second input finished at
+1,719.19319546 seconds, with one accepted bit and exactly one completion;
+neither `finish()` nor an oracle supplied completion.
+
+The largest sampled RSS was 1,195,220 KiB (about 1.14 GiB), falling to
+312,948 KiB during continuation; CPU time was 15,872.917 seconds. The command
+was `timeout 1800s /tmp/pump-exact-cache-parallel-053542`, with source, frozen
+archive and output alongside it as `.cpp`, `.a` and `.log`. The archive SHA-256
+was `c91e87b42f43a94b7eec2bcfbc0563342b864fee693d212d20b064edc1665f5b`.
+This establishes successful pending and physical completion for this one public
+seed, not the displayed model's population success rate, private-key behavior,
+real-time throughput or a physical audio link. End-to-end computation remains
+long at this setting; the roughly 23% reduced-benchmark saving is not a measured
+full-profile speedup.
