@@ -39,7 +39,8 @@ struct Plan {
 };
 // target_snr_db_hz is C/N0: signal power / noise power in a 1 Hz bandwidth.
 // Results are integration estimates, not empirical sensitivity guarantees.
-inline constexpr double maximum_bandwidth_hz = 30000000;
+inline constexpr double minimum_bandwidth_hz = modem::minimum_bandwidth_hz;
+inline constexpr double maximum_bandwidth_hz = modem::maximum_bandwidth_hz;
 // Ideal AWGN Shannon-Hartley channel capacity in bits/s. The target is C/N0
 // in dB-Hz, so in-band linear SNR is 10^(target_snr_db_hz/10)/bandwidth_hz.
 // This theoretical ceiling is independent of modem framing and coding.

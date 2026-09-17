@@ -17,9 +17,15 @@ struct Estimate {
     double simulated_seconds = 0;
     double modeled_symbol_snr_db = 0;
     double carrier_offset_hz = 0;
+    // Requested search span. If receiver_workspace_supported is false, live
+    // reception may use a narrower local fallback; no probability models it.
     double carrier_search_half_width_hz = 0;
     std::size_t receiver_profiles = 0;
     bool profile_matches = false;
+    // A matching profile must have enough modeled workspace for the expanded
+    // FFT search. This is an approximate per-bank allowance, not an allocation
+    // guarantee; reference compute times still describe the requested work.
+    bool receiver_workspace_supported = false;
     bool confidence_available = false;
     // The probability approximation requires the simulated carrier to lie
     // within the default receiver's finite frequency-search span. A signal

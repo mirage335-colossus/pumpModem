@@ -88,6 +88,7 @@ void shannon_capacity() {
     // Fixed reference values use C/N0 targets, not in-band dB. At 1 kHz,
     // 30 dB-Hz means equal signal and in-band noise powers: exactly 1 bit/s/Hz.
     near(tuning::shannon_capacity_bps(1,0),1,"one-hertz zero-dB capacity");
+    near(tuning::shannon_capacity_bps(.01,-20),.01,"sub-hertz capacity must use its actual noise bandwidth");
     near(tuning::shannon_capacity_bps(1000,30),1000,"C/N0 must be converted to in-band SNR");
     near(tuning::shannon_capacity_bps(1000,40),3459.4316186372973,"ten-dB in-band capacity");
     near(tuning::shannon_capacity_bps(1000,20),137.5035237499349,"negative in-band dB capacity");
@@ -99,7 +100,7 @@ void shannon_capacity() {
          "weak-signal capacity must retain precision");
     near(tuning::shannon_capacity_bps(1000,4000)/1318805.4536702829,1,
          "strong finite targets must not overflow while converting dB");
-    for(const auto bandwidth:{0.,.5,30000001.,std::numeric_limits<double>::quiet_NaN(),
+    for(const auto bandwidth:{0.,.009,30000001.,std::numeric_limits<double>::quiet_NaN(),
                               std::numeric_limits<double>::infinity()})
         rejects([&]{tuning::shannon_capacity_bps(bandwidth,60);},"invalid capacity bandwidth accepted");
     for(const auto target:{std::numeric_limits<double>::quiet_NaN(),
@@ -107,7 +108,7 @@ void shannon_capacity() {
         rejects([&]{tuning::shannon_capacity_bps(1000,target);},"nonfinite capacity target accepted");
 }
 void bandwidth_derived_clocks() {
-    for(const double bandwidth:{1.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
+    for(const double bandwidth:{.01,.1,.5,1.,16.,100.,100.25,1200.,1499.,1499.25,1500.,1501.,1703.,1800.,2000.,2000.25,2400.,24000.,192000.,1000000.,30000000.}) {
         const auto plan=tuning::resolve(bandwidth,150,tuning::PatternMode::auto_pattern,false);
         const auto carrier=std::max(1500.,.75*bandwidth);
         const auto expected=static_cast<std::uint32_t>(std::ceil(std::max(4*bandwidth,4*carrier)));
@@ -128,6 +129,47 @@ void bandwidth_derived_clocks() {
     const modem::Config defaults;
     near(defaults.carrier_hz,tuning::recommended_carrier_hz(defaults.bandwidth_hz),"raw default carrier differs from the automatic carrier");
     check(defaults.sample_rate==tuning::recommended_sample_rate(defaults.bandwidth_hz),"raw default clock differs from the automatic clock");
+}
+void sub_hertz_patterns() {
+    // Exercise the lower endpoint without allocating its eleven-hour audio
+    // waveform. The exact short dictionary and raw endpoints are unchanged.
+    transfer::Options options;
+    options.modem=tuning::resolve(.01,-3,tuning::PatternMode::auto_pattern,false).config;
+    options.timestamp=1800000000;
+    const Message message{MessageKind::text,Bytes{'a'}};
+    const Bytes bits{0,1,1};
+    check(transfer::message_wire_bits(message,options)==bits,
+          "sub-hertz planning changed the fixed dictionary or added wire bits");
+    check(options.modem.sample_rate==6000 && options.modem.carrier_hz==1500 &&
+          options.modem.spreading_factor==64,"sub-hertz plans must retain the audio carrier and chip floor");
+    near(modem::symbol_seconds(options.modem),12800,"sub-hertz symbols must retain the bandwidth-derived duration");
+    check(modem::symbol_sample_count(options.modem)==76800000 &&
+          modem::pattern_chip_samples(options.modem)==1200000 &&
+          modem::pattern_absence_samples(options.modem)==76800000,
+          "long symbols require a fully observed absent symbol even below one hertz");
+    const auto estimate=transfer::estimate(message,options);
+    const auto raw=transfer::estimate_binary(bits,options);
+    check(estimate.wire_bits==3 && raw.wire_bits==3 && estimate.waveform_samples==raw.waveform_samples,
+          "sub-hertz short text and exact raw bits must have identical framing and airtime");
+    near(estimate.coded_seconds,38400,"sub-hertz payload estimate lost the exact three-bit duration");
+    auto source=transfer::message_transmitter(message,options);
+    check(source->total_samples()==estimate.waveform_samples && source->working_bytes()<1024*1024,
+          "sub-hertz transmission must stay bounded independently of waveform duration");
+    std::array<float,2048> samples{};
+    check(source->read(samples)==samples.size() &&
+          std::all_of(samples.begin(),samples.end(),[](float value){return std::isfinite(value);}),
+          "sub-hertz sampled waveform generation failed");
+    const auto profiles=tuning::receive_profiles(options.modem,std::array<double,2>{-3,32},
+        tuning::PatternMode::auto_pattern,false);
+    check(profiles.size()==1 && profiles.front().bandwidth_hz==.01 &&
+          modem::symbol_sample_count(profiles.front())==76800000,
+          "receive planning must retain the sub-hertz profile and deduplicate identical geometry");
+    for(const auto bandwidth:{0.,.009,std::nextafter(tuning::minimum_bandwidth_hz,0.)}) {
+        rejects([&]{tuning::resolve(bandwidth,32,tuning::PatternMode::auto_pattern,false);},
+                "automatic planning accepted bandwidth below the documented lower bound");
+        auto invalid=options.modem;invalid.bandwidth_hz=bandwidth;
+        rejects([&]{modem::validate(invalid);},"manual modem configuration bypassed the bandwidth lower bound");
+    }
 }
 void explicit_carrier_planning() {
     near(tuning::recommended_carrier_hz(3600),2700,"GUI audio defaults must not change the legacy carrier recommendation");
@@ -355,6 +397,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

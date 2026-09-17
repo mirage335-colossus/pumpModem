@@ -57,6 +57,41 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['filename'],'')
         self.assertEqual(value['recovery']['state'],'none')
         self.assertEqual(value['recovery']['attempts'],0)
+    def test_sub_hertz_estimate(self):
+        for bandwidth in ('0.01', '0.1Hz', '0.5'):
+            numeric=float(bandwidth.removesuffix('Hz'))
+            value=json.loads(self.run_pump('estimate','--text','a','--bw',bandwidth,
+                                          '--target-snr','-3').stdout)
+            self.assertEqual(value['wire_bits'],3)
+            self.assertEqual(value['sample_rate'],6000)
+            self.assertEqual(value['carrier_hz'],1500)
+            self.assertTrue(math.isclose(value['symbol_seconds'],128/numeric,rel_tol=1e-12))
+            self.assertTrue(math.isclose(value['bit_rate'],numeric/128,rel_tol=1e-12))
+    def test_sub_hertz_sampled_reception(self):
+        # A reduced internal clock exercises the actual 3.56-hour symbol
+        # geometry with a bounded test recording, without waiting in real time.
+        # This is a zero-drift control, not a hardware sensitivity result.
+        value=json.loads(self.run_pump('simulate','--text','a','--json','--bw','0.01',
+            '--sample-rate','64','--carrier','16','--spreading','64',
+            '--clock-error-ppm','0','--phase-noise','0','--snr','30',
+            '--search-seconds','0','--time','1800000000').stdout)
+        self.assertTrue(value['stream_complete'])
+        self.assertEqual(value['raw_bits'],'011')
+        self.assertEqual(value['missing_symbols'],0)
+        self.assertEqual(base64.b64decode(value['data_base64']),b'a')
+    def test_short_shaped_carrier_at_passband_edge(self):
+        # The shaped waveform fits exactly above DC. Default offset search
+        # must retain its valid center when no negative pair fits the passband.
+        geometry=('--bw','3600','--sample-rate','14400','--carrier','1125','--spreading','16')
+        estimate=json.loads(self.run_pump('estimate','--text','a',*geometry).stdout)
+        self.assertEqual(estimate['wire_bits'],3)
+        value=json.loads(self.run_pump('simulate','--text','a','--json',*geometry,
+            '--snr','30','--clock-error-ppm','0','--phase-noise','0',
+            '--time','1800000000','--search-seconds','0').stdout)
+        self.assertTrue(value['stream_complete'])
+        self.assertEqual(value['raw_bits'],'011')
+        self.assertEqual(value['missing_symbols'],0)
+        self.assertEqual(base64.b64decode(value['data_base64']),b'a')
     def test_recovery_settings(self):
         helptext=self.run_pump('--help').stdout
         for option in ('--recovery-seconds','--recovery-threads','--recovery-bits','--recovery-errors'):
@@ -233,7 +268,7 @@ class StreamCLI(unittest.TestCase):
             self.assertFalse(incomplete['stream_complete'])
             self.assertFalse(incomplete['known_bits_match'])
     def test_invalid_input_is_bounded(self):
-        for extra in (('--fec','99'),('--cache-mb','0'),('--bw','0'),('--nonsense','x')):
+        for extra in (('--fec','99'),('--cache-mb','0'),('--bw','0'),('--bw','0.009'),('--nonsense','x')):
             self.run_pump('estimate','--text','x',*extra,ok=False)
         self.run_pump('tx','--text','x',ok=False)
 

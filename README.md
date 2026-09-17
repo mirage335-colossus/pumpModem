@@ -488,7 +488,7 @@ pending; it completes only after that profile observes physical absence.
 `reception_id` matches the completed payload's `id`. These are local presentation
 identities, not transmitted framing or authentication.
 
-The reference modem accepts nominal bandwidths from 1 Hz through 30 MHz and
+The reference modem accepts nominal bandwidths from 0.01 Hz through 30 MHz and
 forced durations of 1..16,384 chips. `--target-snr` is the desired C/N0 in dB-Hz,
 defaulting to 32 (32 dB/1Hz). Large messages and attachments default to 60%
 Reed–Solomon parity overhead (`--fec 60`).
@@ -498,6 +498,11 @@ preserve their duration and report unsupported automatic confidence assumptions
 when they miss the applicable floor. Integration may extend
 past 16,384 chips, subject to numeric, workspace and acquisition limits. This
 is not measured receiver sensitivity or a capacity optimum.
+
+For weak-signal operation, see [integration, clock search and practical link
+budgets](docs/weak-signal.md). Rate is a bandwidth parameter, not payload bits/s.
+Long pattern searches include carrier and sample-clock alternatives; extra
+integration is useful only while their finite coverage and phase coherence hold.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter

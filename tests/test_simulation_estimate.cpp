@@ -3,6 +3,7 @@
 #include "datapump/channel.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -98,10 +99,11 @@ void complete_symbol_absence() {
     check(rejected,"invalid channel input must be rejected");
 }
 std::optional<transfer::Received> sampled_reception(const Message& message,const transfer::Options& options,
-                                                   const modem::ChannelConfig& channel,bool observe_absence=true) {
+                                                   const modem::ChannelConfig& channel,bool observe_absence=true,
+                                                   modem::PatternSearch search={}) {
     const auto config=transfer::seeded_config(options,options.timestamp);
     auto source=transfer::message_transmitter(message,options);
-    modem::PatternSearch search;
+    search.expand_clock_search=true;
     search.start_offset_seconds=(static_cast<double>(modem::training_sample_count(config))+
         modem::pattern_pulse_padding_samples(config))/config.sample_rate;
     search.start_uncertainty_seconds=options.search_seconds+1.;
@@ -143,23 +145,31 @@ void narrow_band_carrier_coverage() {
     modem::ChannelConfig channel;
     channel.snr_db=tuning::link_budget(tuning::parse_simulation_preset("3dBm -120dB"),1,
                                      options.modem.sample_rate).sample_snr_db;
-    const auto outside=simulation::estimate(transmission,options,true,channel);
-    check(outside.profile_matches && !outside.carrier_in_search && !outside.confidence_available,
-          "100 ppm narrow-band carrier mismatch must not display a success percentage");
-    near(outside.carrier_offset_hz,.15,"default clock mismatch must include the 1500 Hz carrier shift");
-    near(outside.carrier_search_half_width_hz,.00390625,"carrier bank must use the actual five symbol-scaled offsets");
-    check(std::isfinite(outside.cpu_seconds) && outside.cpu_seconds>0 &&
-          std::isfinite(outside.gpu_seconds) && outside.gpu_seconds>0,
-          "unavailable confidence must preserve reference simulation time estimates");
-    const auto failed=sampled_reception(message,options,channel);
-    check(!failed,"default narrow-band channel must reproduce failure to admit any message");
+    const auto expanded=simulation::estimate(transmission,options,true,channel);
+    check(expanded.profile_matches && expanded.carrier_in_search && expanded.confidence_available,
+          "expanded narrow-band search must cover the default 100 ppm carrier mismatch");
+    near(expanded.carrier_offset_hz,.15,"default clock mismatch must include the 1500 Hz carrier shift");
+    near(expanded.carrier_search_half_width_hz,.30078125,"carrier bank must reflect the actual expanded symbol-scaled offsets");
+    check(std::isfinite(expanded.cpu_seconds) && expanded.cpu_seconds>0 &&
+          std::isfinite(expanded.gpu_seconds) && expanded.gpu_seconds>0,
+          "expanded bank must retain finite reference simulation time estimates");
+    modem::PatternSearch old_search;
+    constexpr auto old_step=1./512;
+    old_search.frequency_offsets_hz={0,-old_step,old_step,-2*old_step,2*old_step};
+    const auto failed=sampled_reception(message,options,channel,true,old_search);
+    check(!failed,"explicit old five-bin search must reproduce the uncovered-carrier failure");
+    const auto expanded_received=sampled_reception(message,options,channel);
+    check(expanded_received && expanded_received->stream_complete && expanded_received->short_text_decoded &&
+          expanded_received->raw_bits==Bytes({0,1,1}) && expanded_received->content.message.data==message.data,
+          "expanded default search must receive exact 011 and a despite the default clock error");
 
     channel.snr_db+=60;
+    channel.frequency_offset_hz=.4;
     check(!simulation::estimate(transmission,options,true,channel).confidence_available,
           "stronger signal cannot restore confidence outside the receiver carrier search");
-    channel.clock_error_ppm=-100;
+    channel.frequency_offset_hz=0;channel.clock_error_ppm=-100;
     const auto negative=simulation::estimate(transmission,options,true,channel);
-    check(!negative.carrier_in_search && !negative.confidence_available,"negative carrier offsets need the same coverage gate");
+    check(negative.carrier_in_search && negative.confidence_available,"expanded coverage must include both signs of clock error");
     near(negative.carrier_offset_hz,-.15,"negative clock mismatch must retain its sign");
 
     channel.snr_db-=60;channel.clock_error_ppm=0;
@@ -173,7 +183,7 @@ void narrow_band_carrier_coverage() {
           received->raw_bits==Bytes({0,1,1}) && received->content.message.data==message.data,
           "covered narrow-band sampled channel must receive exact 011 and a after physical completion");
 
-    constexpr double edge=.00390625;
+    constexpr double edge=.30078125;
     for(const double sign:{-1.,1.}) {
         channel.frequency_offset_hz=sign*std::nextafter(edge,0.);
         check(simulation::estimate(transmission,options,true,channel).confidence_available,
@@ -191,11 +201,76 @@ void narrow_band_carrier_coverage() {
     channel.frequency_offset_hz=0;
     const auto quantized=simulation::estimate(wire(3,options.modem),options,true,channel);
     check(modem::symbol_sample_count(options.modem)==768001,"fractional integration fixture must add exactly one sample");
-    const auto quantized_edge=.5*options.modem.sample_rate/768001.;
+    const auto geometry=modem::default_pattern_frequency_search(options.modem);
+    const auto quantized_edge=geometry.half_width_hz;
     near(quantized.carrier_search_half_width_hz,quantized_edge,"search width must follow sample-quantized symbol duration");
-    channel.frequency_offset_hz=(quantized_edge+.5/options.modem.integration_seconds)/2;
+    const auto unquantized_edge=static_cast<double>(geometry.count/2)*.25/options.modem.integration_seconds;
+    channel.frequency_offset_hz=(quantized_edge+unquantized_edge)/2;
     check(!simulation::estimate(wire(3,options.modem),options,true,channel).confidence_available,
           "unquantized duration must not enlarge the actual receiver carrier bank");
+}
+void coupled_and_independent_clock_estimates() {
+    transfer::Options options;
+    options.modem=tuning::resolve(100,-3,tuning::PatternMode::auto_pattern,false).config;
+    options.timestamp=1800000000;
+    const auto geometry=modem::default_pattern_frequency_search(options.modem);
+    check(geometry.count==395,"weak 100-Hz profile must use expanded default search");
+    auto independent=clean_channel();independent.snr_db=-20;independent.frequency_offset_hz=.15;
+    const auto independent_result=simulation::estimate(wire(3,options.modem),options,true,independent);
+    auto shared_clock=independent;shared_clock.frequency_offset_hz=0;shared_clock.clock_error_ppm=100;
+    const auto coupled=simulation::estimate(wire(3,options.modem),options,true,shared_clock);
+    check(independent_result.confidence_available && coupled.confidence_available,
+          "independent carrier and common clock errors must both be represented by the default bank");
+    check(coupled.modeled_symbol_snr_db<=independent_result.modeled_symbol_snr_db &&
+          independent_result.modeled_symbol_snr_db-coupled.modeled_symbol_snr_db<.05,
+          "coupled timing alternatives must remove most shared-clock smear while retaining independent carrier alternatives");
+    options.modem.integration_seconds=86400;
+    const auto capped=simulation::estimate(wire(3,options.modem),options,true,shared_clock);
+    near(capped.carrier_search_half_width_hz,modem::default_pattern_frequency_search(options.modem).half_width_hz,
+         "capped search model must advertise only its finite actual span");
+    check(!capped.carrier_in_search && !capped.confidence_available &&
+          std::isfinite(capped.cpu_seconds) && std::isfinite(capped.gpu_seconds),
+          "finite frequency cap must not masquerade as complete day-long clock coverage");
+}
+void streamed_template_workload() {
+    transfer::Options options;
+    options.modem=tuning::resolve(100,-6,tuning::PatternMode::auto_pattern,false).config;
+    options.timestamp=1800000000;
+    auto channel=clean_channel();channel.snr_db=-20;
+    const auto transmission=wire(3,options.modem);
+    options.dsp_workspace_bytes=64*1024*1024;
+    const auto streamed=simulation::estimate(transmission,options,true,channel);
+    options.dsp_workspace_bytes=std::size_t{8}*1024*1024*1024;
+    const auto retained=simulation::estimate(transmission,options,true,channel);
+    check(streamed.receiver_workspace_supported && retained.receiver_workspace_supported &&
+          streamed.confidence_available && retained.confidence_available,
+          "retained and streamed FFT profiles must both have affordable core workspace");
+    check(streamed.cpu_seconds>retained.cpu_seconds && streamed.gpu_seconds>retained.gpu_seconds,
+          "streamed template generation must add work when the complete bank cannot remain in memory");
+    near(streamed.success_probability,retained.success_probability,
+         "streaming transformed templates must preserve modeled search coverage and confidence");
+    const std::array shared_profiles{options.modem,options.modem};
+    const auto shared_large=simulation::estimate(transmission,options,true,channel,shared_profiles);
+    options.dsp_workspace_bytes=64*1024*1024;
+    const auto shared_small=simulation::estimate(transmission,options,true,channel,shared_profiles);
+    near(shared_large.cpu_seconds,shared_small.cpu_seconds,
+         "expanded live banks sharing RAM must stream rows even when an early bank could cache them");
+    near(shared_large.gpu_seconds,shared_small.gpu_seconds,
+         "shared-bank template policy must apply to both reference compute estimates");
+    options.dsp_workspace_bytes=16*1024*1024;
+    const auto half_budget=simulation::estimate(transmission,options,true,channel);
+    check(!half_budget.receiver_workspace_supported && !half_budget.confidence_available,
+          "a single live bank cannot claim the half of DSP memory reserved for transmit and peer work");
+    options.dsp_workspace_bytes=1024*1024;
+    const auto unsupported=simulation::estimate(transmission,options,true,channel);
+    check(unsupported.profile_matches && unsupported.carrier_in_search &&
+          !unsupported.receiver_workspace_supported && !unsupported.confidence_available,
+          "unaffordable expanded FFT core must withhold confidence instead of substituting a correlator");
+    check(std::isfinite(unsupported.cpu_seconds) && unsupported.cpu_seconds>0 &&
+          std::isfinite(unsupported.gpu_seconds) && unsupported.gpu_seconds>0,
+          "unaffordable expanded FFT must retain finite estimates of the requested compute work");
+    near(unsupported.carrier_search_half_width_hz,streamed.carrier_search_half_width_hz,
+         "insufficient workspace must not silently shrink the requested carrier bank");
 }
 void target_and_channel_are_independent() {
     transfer::Options options;
@@ -228,7 +303,7 @@ void target_and_channel_are_independent() {
 }
 int main() {
     try {probability_and_framing();workload_and_impairments();complete_symbol_absence();narrow_band_carrier_coverage();
-        target_and_channel_are_independent();
+        coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}
 }

@@ -173,7 +173,7 @@ struct Controller::Impl {
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
         f(UiField::mono).checked=true;
         f(UiField::bandwidth).text="3.6 kHz";
-        for(const auto* s:{"1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
+        for(const auto* s:{"0.01 Hz","0.1 Hz","1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
         f(UiField::snr).text="32"; f(UiField::long_snr).text="55";
         for(const auto id:{UiField::snr,UiField::long_snr})
@@ -696,6 +696,7 @@ struct Controller::Impl {
                 const auto& model=*result.simulation_estimate;
                 const auto confidence=!model.profile_matches?"No matching RX profile":
                     !model.carrier_in_search?"Carrier outside RX search":
+                    !model.receiver_workspace_supported?"Wide RX search exceeds RAM":
                     !model.confidence_available?"Unavailable":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
                     "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds));

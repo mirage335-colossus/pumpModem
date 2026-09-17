@@ -15,14 +15,16 @@ Complex template_value(PatternCode& code,const FftSearchGeometry& geometry,
     const auto& pattern=geometry.pattern;
     const auto sample_position=static_cast<long double>(bin)*geometry.bin_samples+
         static_cast<long double>(geometry.bin_samples-1)/2;
-    const auto chip_position=sample_position/pattern.chip_samples;
+    const auto source_position=sample_position*job.clock_ratio;
+    if(geometry.extended_clock_window && source_position>=pattern.symbol_samples)return {};
+    const auto chip_position=source_position/pattern.chip_samples;
     const auto local=static_cast<std::uint64_t>(chip_position);
     if(job.symbol>(std::numeric_limits<std::uint64_t>::max()-local)/pattern.chips_per_symbol)
         throw Error("pattern stream coordinate overflow");
     const auto chip=job.symbol*pattern.chips_per_symbol+local;
     const auto fraction=static_cast<double>(chip_position-local);
     const auto value=pattern.shaped?
-        code.shaped_value(job.symbol*pattern.chips_per_symbol,bit,static_cast<double>(sample_position)):
+        code.shaped_value(job.symbol*pattern.chips_per_symbol,bit,static_cast<double>(source_position)):
         code.value(chip,bit,fraction);
     return value*std::polar(1.,tau*job.frequency_hz*static_cast<double>(sample_position)/pattern.sample_rate);
 }

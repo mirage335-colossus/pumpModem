@@ -131,6 +131,7 @@ and decoder could otherwise change the codebook together without a test failing.
 | Fixed interval geometry, zero/trailing-byte preservation, errors/erasures, bounded post-end RS alignment search and ambiguity rejection, source decode only after physical end | `stream_codec`, `stream_receive`, `attachment` |
 | Exhaustive hard-bit assignments, deterministic worker coverage, timeout/cancellation resumption, unchanged evidence and original missing-bit accounting | `recovery` |
 | Actual sampled four-hour symbols draining one bit at a time with bounded memory; absence vs EOF and partial silence | `pattern_correlator`; complementary FFT reception checks in `pattern_receiver` |
+| Bounded carrier/clock search, sub-Hz configuration, exact weak sampled reception and noise-only rejection | `pattern_search`, `tuning`, `simulation_estimate`, `weak_signal`; coupled-clock and streamed-template checks in `pattern_receiver` |
 | Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
 | Pending prefixes and row identity, completed copy behavior, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
 
@@ -140,7 +141,7 @@ From the repository root, build and run the focused headless coverage:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure -j 2 \
-  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
+  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|pattern_search|tuning|simulation_estimate|weak_signal|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
 ```
 
 The long-symbol regression generates sampled PCM with four-hour coordinates; it

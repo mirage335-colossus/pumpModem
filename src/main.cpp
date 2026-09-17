@@ -64,7 +64,8 @@ Input/output:
   --callsign TEXT --grid TEXT --repeatable
 
 Modem:
-  --bw HZ               Nominal bandwidth, default1200 (also 1.2kHz etc.)
+  --bw HZ               Nominal bandwidth, 0.01..30000000 Hz; default1200
+                        Decimal Hz and units such as 1.2kHz are accepted
   --sample-rate HZ      Internal DSP clock, 64..120000000; default max(6000,4*bw)
   --carrier HZ          Default max(1500,0.75*bw); explicit overrides stay available
   --spreading N         Manual 4-bit APSK chips/symbol, 1..16384 (disables auto)

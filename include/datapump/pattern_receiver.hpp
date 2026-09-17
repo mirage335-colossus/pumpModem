@@ -23,6 +23,9 @@ struct PatternEvidence {
     // units. Diagnostic only: alternative margins and chain evidence also gate
     // admission, and later search trials can raise this reference.
     double admission_threshold = 0;
+    // Local search identity distinguishes equal-carrier clock alternatives.
+    // Not a transmitted address or a source interpretation.
+    std::size_t frequency_hypothesis = 0;
 };
 // Internal unknown-slot value; transfer interpretation replaces it with a
 // plaintext zero after advancing the Data mask through the same symbol slot.
@@ -51,9 +54,30 @@ struct PatternBurst {
 // time end the stream. One failed symbol suffices when it lasts >=6s.
 inline constexpr std::uint64_t pattern_absence_seconds = 6;
 struct PatternSearch {
-    // A finite, explicit frequency bank. Empty selects five offsets separated
-    // by 1/(4 symbol duration). No carrier/constellation lock precedes scoring.
+    // A finite, explicit frequency bank. Empty preserves the five-bin local
+    // search unless expand_clock_search is enabled by the application.
     std::vector<double> frequency_offsets_hz;
+    // Search long pattern symbols across bounded +/-200 ppm carrier error,
+    // with nominal and coupled sample-clock alternatives. See pattern_search.hpp.
+    // The low-level local-search default remains usable in tiny DSP budgets.
+    bool expand_clock_search = false;
+    // Application policy: retain all expanded hypotheses while generating
+    // their transformed rows in bounded scratch, leaving RAM for peer banks.
+    bool prefer_streamed_templates = false;
+    // Application-only opt-in for an automatic expanded request. If its FFT
+    // core cannot fit, retain the original five nominal-clock hypotheses and
+    // the full configured start window. Explicit banks remain strict.
+    bool allow_local_clock_fallback = false;
+    // Each carrier hypothesis also scales pattern time by 1 + offset/carrier.
+    // Automatically enabled for an expanded default pattern bank with the
+    // default {0} clock-rate list. Explicit frequency banks remain independent.
+    // Requires FFT competition across carrier alternatives; a compact-path
+    // preference cannot replace this evidence comparison. Insufficient FFT
+    // workspace rejects the search rather than switching to per-lane admission.
+    bool couple_clock_to_carrier = false;
+    // Internal partition of an automatic bank: nominal-clock alternatives
+    // precede coupled alternatives. Zero couples every explicit hypothesis.
+    std::size_t uncoupled_frequency_count = 0;
     // Nominal per-search significance, before finite-search trial penalties.
     // Correlated interference still needs independent pattern evidence.
     double false_alarm_probability = 1e-10;
@@ -118,6 +142,9 @@ public:
     bool synchronized() const;
     // True when acquisition covers an explicit finite system-clock window.
     bool clock_windowed() const;
+    // The application requested expansion but only the original local
+    // five-frequency search fitted its workspace. This is reduced coverage.
+    bool local_clock_fallback() const;
     std::size_t working_bytes() const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.

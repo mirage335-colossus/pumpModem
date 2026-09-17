@@ -17,6 +17,7 @@ struct FftSearchJob {
     std::uint64_t symbol = 0, phase = 0, frequency_index = 0;
     double frequency_hz = 0; // Offset from the nominal carrier in the geometry.
     std::uint64_t prepared_template = std::numeric_limits<std::uint64_t>::max();
+    double clock_ratio = 1;
 };
 struct FftSearchScore { double zero = 0, one = 0; };
 
@@ -33,7 +34,7 @@ struct FftSearchGeometry {
     FftPatternParameters pattern;
     std::uint64_t bins_per_symbol = 0, bin_samples = 0;
     double carrier_hz = 0, evidence_count = 0, noise_condition = 1;
-    std::uint32_t real_rank = 0, sample_fit = 0;
+    std::uint32_t real_rank = 0, sample_fit = 0, extended_clock_window = 0;
 };
 static_assert(std::is_trivially_copyable_v<FftSearchJob> && std::is_standard_layout_v<FftSearchJob>);
 static_assert(std::is_trivially_copyable_v<FftSearchScore> && std::is_standard_layout_v<FftSearchScore>);

@@ -1,4 +1,5 @@
 #include "datapump/pattern_correlator.hpp"
+#include "datapump/pattern_search.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/symbol_schedule.hpp"
@@ -101,8 +102,12 @@ struct PatternCorrelator::Impl {
         }
         if(search.frequency_offsets_hz.empty()) {
             const auto step=.25*c.sample_rate/static_cast<double>(code.symbol_samples());
+            require(!search.expand_clock_search || default_pattern_frequency_search(c).count<=5,
+                    "expanded carrier competition requires FFT workspace");
             search.frequency_offsets_hz={0,-step,step,-2*step,2*step};
         }
+        require(!search.couple_clock_to_carrier && (!search.expand_clock_search || search.frequency_offsets_hz.size()<=5),
+                "coupled carrier competition requires FFT workspace");
         require(search.frequency_offsets_hz.size()<=65,"frequency bank exceeds 65 hypotheses");
         const auto tone_limit=static_cast<double>(c.sample_rate)/(4*static_cast<double>(code.chip_samples()));
         for(auto frequency:search.frequency_offsets_hz) {

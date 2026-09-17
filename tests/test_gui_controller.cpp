@@ -77,14 +77,13 @@ void simulation_estimate_controls() {
     controller.edit(F::message,"a");
     controller.edit(F::bandwidth,"1 Hz");
     controller.select(F::simulation,"3dBm -120dB");prepare(controller);
-    check(text(F::simulation_confidence).ends_with("Carrier outside RX search")&&
-          text(F::simulation_confidence).find('%')==std::string::npos&&
+    check(text(F::simulation_confidence).find('%')!=std::string::npos&&
           text(F::simulation_cpu_time).find("\n~")!=std::string::npos&&
           text(F::simulation_gpu_time).find("\n~")!=std::string::npos,
-          "1 Hz clock mismatch must explain unavailable confidence while retaining compute estimates");
+          "Expanded 1 Hz clock search must restore modeled coverage and retain compute estimates");
     controller.select(F::simulation,"3dBm -60dB");prepare(controller);
-    check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
-          "High signal strength incorrectly restored confidence outside the carrier search");
+    check(text(F::simulation_confidence).find('%')!=std::string::npos,
+          "Strong signal within the expanded carrier search must retain modeled coverage");
     controller.edit(F::bandwidth,"3.6 kHz");prepare(controller);
     check(text(F::simulation_confidence).find('%')!=std::string::npos,
           "Returning to supported carrier coverage did not restore the modeled percentage");
@@ -388,6 +387,7 @@ void rate_carrier_controls() {
           "GUI defaults must use the 3.6 kHz rate, 1.5 kHz carrier, 32/55 dB-Hz targets and 60% FEC");
     struct CarrierPreset { const char* rate; const char* recommended; const char* center; double center_hz; };
     constexpr CarrierPreset presets[]={
+        {"0.01 Hz","1.5 kHz","0.005 Hz",.005},{"0.1 Hz","1.5 kHz","0.05 Hz",.05},
         {"1 Hz","1.5 kHz","0.5 Hz",.5},{"100 Hz","1.5 kHz","50 Hz",50},
         {"1.2 kHz","1.5 kHz","600 Hz",600},{"2.4 kHz","1.8 kHz","1.2 kHz",1200},
         {"3.6 kHz","1.5 kHz","1.8 kHz",1800},{"12 kHz","9 kHz","6 kHz",6000},
@@ -445,6 +445,23 @@ void rate_carrier_controls() {
     check(controller.settings().transfer.modem.carrier_hz==2700 &&
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone,
           "Raising the carrier did not recover the selected tone profile");
+}
+void sub_hertz_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    const auto& rates=controller.field(F::bandwidth).options;
+    for(const auto* value:{"0.01 Hz","0.1 Hz"})
+        check(std::any_of(rates.begin(),rates.end(),[&](const auto& option){return option.id==value;}),
+              "sub-hertz rates must be discoverable in the Rate dropdown");
+    controller.edit(F::message,"a");controller.edit(F::bandwidth,"0.01 Hz");prepare(controller);
+    check(controller.settings().transfer.modem.bandwidth_hz==.01 &&
+          controller.settings().transfer.modem.carrier_hz==1500 && controller.estimate()->wire_bits==3 &&
+          controller.estimate()->coded_seconds==38400 && controller.enabled(C::transmit),
+          "sub-hertz GUI preparation must keep the exact short message and permit bounded transmission");
+    controller.edit(F::bandwidth,"0.009 Hz");
+    check(!controller.enabled(C::transmit) && controller.settings().transfer.modem.bandwidth_hz==.01 &&
+          controller.field(F::status).text.find("0.01")!=std::string::npos,
+          "an out-of-range rate must preserve the previous configuration and explain the lower bound");
 }
 void shannon_capacity_display() {
     using F=ui::Field;
@@ -1700,6 +1717,7 @@ int main(int argc,char** argv) {
         simulation_estimate_controls();
         revised_reception_ingestion();
         rate_carrier_controls();
+        sub_hertz_controls();
         shannon_capacity_display();
         profile_reference_display();
         mono_controls();

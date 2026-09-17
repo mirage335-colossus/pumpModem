@@ -739,7 +739,8 @@ Received receive(std::span<const float> samples, const Options& input_options, P
         check_cancelled(stop);if(progress)progress(epoch);
         try {
         auto value=options;value.modem=profile;
-        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
+        modem::PatternSearch search;search.expand_clock_search=true;search.allow_local_clock_fallback=true;
+        search.start_offset_seconds=static_cast<double>(epoch)-options.capture_epoch.value_or(static_cast<double>(options.timestamp));
         if(!options.capture_epoch)*search.start_offset_seconds+=(static_cast<double>(modem::training_sample_count(profile))+
             static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);
@@ -785,7 +786,8 @@ Received simulate(const Message& message, const Options& input_options, const mo
         check_cancelled(stop);if(progress)progress(epoch);
         try {
         auto source=message_transmitter(message,options);auto value=options;value.modem=profile;
-        modem::PatternSearch search;search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
+        modem::PatternSearch search;search.expand_clock_search=true;search.allow_local_clock_fallback=true;
+        search.start_offset_seconds=static_cast<double>(epoch)-static_cast<double>(center)+
             (static_cast<double>(modem::training_sample_count(profile))+
              static_cast<double>(modem::pattern_pulse_padding_samples(profile)))/profile.sample_rate;
         search.bit_limit=pattern_bit_limit(value.content_limit);

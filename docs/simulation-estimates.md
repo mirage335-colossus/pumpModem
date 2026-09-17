@@ -40,12 +40,22 @@ At 100 Hz with public auto-pattern and the default 1,500 Hz carrier, target
 140 selects 64 chips and 1.28 seconds per bit; a +47 dB-Hz channel can therefore
 receive it despite being below the design target. Target -61 requests
 79,432,823 seconds (about 919 days) per bit. The default 100 ppm clock shift is
-0.15 Hz, while that long profile searches only approximately ±6.3 nanohertz.
-More nominal integration cannot compensate for the untracked drift. The
+0.15 Hz, while the capped long-profile search covers only approximately
+±6.45 microhertz. More nominal integration cannot compensate for drift outside
+that finite search. The
 current UI reports **Carrier outside RX search** for this long-symbol case,
 with no numeric probability. A sampled regression receives exact `011` / `a`
 for the strong 100 Hz case; it does not establish a calibrated 99.9% success
 rate across channel realizations.
+
+Useful weak-channel profiles need a design target near the actual link budget,
+with enough integration margin for acquisition. As reference geometries,
+public auto-pattern at target -6 dB-Hz chooses 256 seconds per bit at 1 Hz and
+327.68 seconds per bit at 100 Hz. Both searches include the default 0.15 Hz
+carrier shift. The sampled checks in [validation](validation.md) recovered
+exact `011` / `a` at both geometries with the -170 dB preset and default clock
+and phase noise. Those finite cases do not establish population reliability;
+airtime and search coverage alone are also insufficient to predict success.
 
 Elapsed simulated media includes the estimated waveform's settling, payload,
 filter padding and suppression; channel delay, an average 175 ms randomized
@@ -58,22 +68,66 @@ duration are different quantities. UI replay pacing is excluded.
 ## Probability model
 
 Numeric probability is available only when a matching receive profile covers
-the simulated carrier shift. The default receiver searches five offsets from
-`-0.5/T` through `+0.5/T`, where `T` is the actual sample-quantized symbol
-duration. The simulated shift includes both the explicit frequency offset and
+the simulated carrier shift and the expanded FFT core fits its modeled
+workspace allowance. The application enables an expanded carrier/clock
+search for pattern symbols lasting at least 16 sample-quantized seconds. Its
+frequency lattice has spacing `0.25/T`, where `T` is the actual sampled symbol
+duration. It retains the original local offsets when those suffice; otherwise
+it adds symmetric pairs toward ±200 ppm of the configured carrier.
+The search reserves the same intended waveform support above DC and below
+Nyquist as modem validation, including RRC rolloff for shaped patterns, and
+is capped at 4,097 distinct frequencies. Hitting a limit reduces the actual
+covered span; it never makes the lattice coarser to claim complete coverage.
+
+Each expanded frequency has two timing alternatives: the nominal sample clock
+and a clock scaled by `1 + frequency_offset/carrier_hz`. This retains coverage
+for both independent oscillator error and shared sample-clock error. The
+maximum expanded bank therefore contains 8,194 frequency/timing hypotheses.
+Projection bins shrink when necessary so averaging does not discard the
+carrier offsets the bank is intended to score. All tone profiles and pattern
+symbols shorter than 16 seconds retain the local bank of up to five frequencies.
+Implicit pattern offsets outside valid waveform headroom are omitted at any
+symbol duration, retaining the center even at a passband edge. The low-level
+`PatternSearch` API also preserves its local-bank default; live and
+transfer reception explicitly enable the application policy with
+`expand_clock_search`.
+
+Expanded coupled banks use the FFT receiver for public and private patterns.
+The compact-private hint does not replace that comparison. If its core cannot
+fit, application callers may retain the original local, nominal-clock
+correlator search if it fits; live status identifies that narrower coverage. They never
+substitute independent per-lane admission over the expanded clock bank.
+Low-level automatic expanded requests require an explicit opt-in for this
+fallback. Explicitly supplied frequency banks remain strict.
+
+The model withholds its percentage and the UI shows **Wide RX search exceeds
+RAM** when its approximate per-bank allowance predicts this case. A missing
+profile or a carrier outside the requested wide bank takes precedence in that
+label. The displayed coverage and compute times then describe the requested
+FFT search, not the narrower fallback. No probability is inferred for that
+fallback. The direct correlator API retains its existing local frequency banks.
+
+The simulated shift includes both the explicit frequency offset and
 `carrier_hz * clock_error_ppm / 1e6`. Outside that span, the UI shows **Carrier
 outside RX search** and retains the CPU/GPU estimates. This is a model-coverage
 limit, not a claim that reception has exactly zero probability.
 
 For example, public auto-pattern at 1 Hz and a 32 dB-Hz target uses 128-second
-symbols at the default 1,500 Hz carrier. Its frequency search spans only
-±0.00390625 Hz, while the default 100 ppm simulation clock error shifts the
-carrier by 0.15 Hz. The previous model incorrectly reported over 99.9% for
-`a` at +3 dBm/-120 dB. It treated mismatch solely as signal attenuation; the
+symbols at the default 1,500 Hz carrier. The expanded application search uses
+309 distinct frequencies spanning ±0.30078125 Hz, with both clock alternatives,
+and includes the default 100 ppm simulation shift of 0.15 Hz. The sampled
+regression requires exact `011` / `a` reception with that default clock error
+and a completely observed absent symbol.
+
+The former five-frequency search spanned only ±0.00390625 Hz. An explicit
+five-frequency negative control retains the original reception failure. The
+previous model incorrectly reported over 99.9% for `a` at +3 dBm/-120 dB because
+it treated mismatch solely as signal attenuation; the
 actual receiver divides fitted energy by total received energy, so signal that
 does not fit the template can limit evidence even when thermal noise is tiny.
-A high link budget cannot justify that extrapolation. This correction changes
-the estimate and its presentation, not receiver search or channel settings.
+A high link budget cannot justify extrapolation outside the actual search.
+The coverage check remains necessary after expanding the receiver, especially
+for integrations long enough to reach the finite frequency-bank cap.
 
 The channel SNR uses the simulator's `Fs/2` noise bandwidth. Before losses,
 the integrated symbol energy is
@@ -81,10 +135,13 @@ the integrated symbol energy is
 `Es/N0 (dB) = channel.snr_db + 10 log10(symbol_samples / 2)`.
 
 The model applies a fixed 3 dB implementation margin, squared-sinc loss for
-residual carrier frequency after selecting the closest of the receiver's five
-frequency hypotheses using sample-quantized symbol durations, expected
+residual carrier frequency after selecting the closest actual frequency
+hypothesis using sample-quantized symbol durations, expected
 coherent-energy loss from Wiener phase diffusion,
 and a triangular correlation loss for pattern timing smear within a symbol.
+For expanded banks the timing loss uses the smaller residual of the nominal
+clock and carrier-coupled alternatives. The nominal alternative prevents an
+independent oscillator offset from being mistaken for sample-clock drift.
 Tone profiles omit the pattern smear term. These are analytical approximations
 to the sampled channel; they do not reproduce adaptive tracking or the exact
 public/private codeword correlations.
@@ -93,12 +150,16 @@ With the remaining linear energy `g`, the assumed bit error rate is
 `0.5 exp(-g/2)`, the noncoherent orthogonal binary AWGN model. Symbol admission
 uses a Gaussian energy-statistic approximation with mean `g` and variance
 `1 + 2g`, threshold 5 for continuation, and a larger acquisition threshold
-`-ln(1e-10) + 2 ln(trials + 1) + ln(10)`. Trials reflect the half-chip start
-window, five frequencies and private phase groups of a matching receiver.
+`-ln(1e-10) + 2 ln(trials + 1) + ln(2 * hypotheses)`. Here `hypotheses` includes
+both timing alternatives when the frequency bank expands. Trials reflect the
+half-chip start window, that actual hypothesis count and private phase groups
+of a matching receiver.
 Other receive profiles/key families add compute work; their independent searches
 do not raise that receiver's admission threshold.
 The acquisition trial approximation describes the initial search geometry; it
 does not reproduce the actual running trial counter during an extended scan.
+The continuation approximation likewise omits the receiver's additional
+comparison penalties and adaptive chain decisions.
 These gates approximate the receiver's evidence requirements. Its real adaptive
 scores are **not calibrated receive probabilities**. In particular, the model
 does not turn the tuning planner's 18 dB target into an empirical success curve.
@@ -127,12 +188,36 @@ prediction, never a guarantee or authentication claim.
 
 The model counts full-rate waveform/channel samples, receiver projection work,
 FFT transforms or bounded streaming correlation lanes. It reflects half-chip
-start searches, the default five frequencies, private phase/initial-symbol
-searches and key/epoch/profile multiplicity. Large private symbols or FFT state
-exceeding an approximate per-bank workspace use the correlation cost model.
+start searches, the actual bounded frequency/timing bank, private phase/initial-symbol
+searches and key/epoch/profile multiplicity. Expanded coupled banks use the FFT
+cost model, including when their requested core exceeds the allowance. For
+unexpanded banks, large private symbols or an unaffordable FFT core retain the
+existing correlation cost model.
+The modeled per-bank allowance is the total divided by the modeled bank count,
+capped at half the total to match the live receiver's initial per-bank ceiling.
 The exact receiver's memory arbitration, reuse, bootstrap paths and template
-cache behavior can select different work; these estimates do not decide whether
-a receiver can allocate its workspace.
+cache behavior can select different work. The modeled allowance can withhold
+confidence but does not guarantee that the receiver can allocate its workspace.
+
+The FFT estimate uses the same projection-bin reduction as the receiver and
+extends the observation window for the slowest covered clock hypothesis. The
+transform starts at the next power of two covering twice the nominal symbol
+length, growing only when needed to contain the extended window. Its workspace
+approximation includes the FFT buffers, ring, energy prefix, row metadata and
+extra tracking scratch for expanded clocks. When that core fits but retaining
+both transformed bit templates for every hypothesis would exceed the allowance,
+the model selects streamed FFT work: generate a template and perform its forward
+transform for each job, using bounded scratch. Expanded live searches sharing
+memory with other keys, epochs or profiles also stream their rows, preserving
+room for the other banks. A single bank can retain its public transformed
+templates when they fit. An unaffordable expanded core
+leaves confidence unavailable; the model keeps the requested FFT cost rather
+than estimating the runtime's narrower correlator fallback.
+The existing compact-private/correlator choices apply only to unexpanded banks.
+These choices do not reduce the requested hypotheses. The
+streamed-template estimate includes extra forward transforms and template
+generation for public as well as private profiles, without benchmarking the
+computer.
 
 The fixed engineering budgets are:
 
@@ -185,8 +270,16 @@ waveform geometry, not the secret key's validity or successful authentication.
 length response, fixed-interval FEC versus unprotected short input, incompatible
 receive profiles, additional receiver work, phase noise and full four-hour
 absence accounting. It also feeds the reported 1 Hz case through the sampled
-channel and ordinary receiver, comparing default clock drift with zero drift,
-and checks frequency-search coverage independently of signal strength.
+channel with expanded application search, retaining an explicit old-five-bin
+failure control and zero-drift controls. A capture without a full absent symbol
+must remain incomplete even at EOF. Coverage checks include both signs, exact
+frequency endpoints, sample quantization, the finite cap, and independent
+carrier versus coupled sample-clock error. `pattern_search` separately checks
+the 16-second expansion boundary, short/tone compatibility, projection-bin
+divisors and very large sample coordinates.
+Compute regressions distinguish retained templates, streamed FFT templates and
+unaffordable expanded cores, preserving the requested carrier span while
+withholding unsupported confidence.
 These checks validate model mechanics, not its empirical
 calibration. The independent protocol and physical-completion regressions remain
 the authority for actual transport behavior.

@@ -4,6 +4,93 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Sub-Hz planning and weak-signal clock search — 16 September 2026
+
+The application now accepts 0.01 Hz through 30 MHz. Sub-Hz tests preserve exact
+`a=011` and raw-bit lengths, fixed message framing, bounded waveform generation
+and whole-symbol absence. An independently sampled 0.01 Hz control at Fs=64 Hz,
+carrier=16 Hz and zero clock/phase drift recovers `a` using 12,800-second symbols.
+That control exercises long coordinates efficiently; it does not establish
+unrestricted oscillator tolerance at 0.01 Hz.
+
+For pattern symbols of at least 16 seconds, application receive paths request
+a bounded carrier lattice at spacing 0.25/T, targeting ±200 ppm with at most
+4097 distinct offsets. Each has nominal and carrier-coupled timing alternatives.
+FFT templates and next-symbol predictions use the hypothesized clock rate;
+the longest hypothesis must be observed before comparison. Projection bins
+retain the expanded offsets. Additional trials increase evidence penalties.
+Matching-time carrier alternatives compete before admission, preventing the
+existing bit-mask harmonics from producing wrong-label alias receptions.
+Weak candidates cannot migrate onto a confirmed stream and publish duplicate
+suffixes. No waveform bits, short dictionary codes, FEC or framing changed.
+
+Wide FFT banks can generate templates in bounded scratch instead of retaining
+all transformed rows. Expanded live banks sharing RAM stream those rows so
+early key/epoch caches cannot crowd out the remaining banks. Private expanded
+searches also use FFT competition. If its core cannot fit, application callers
+may retain the original local five-bin, nominal-clock correlator and live status
+reports the narrower coverage. Explicit expanded searches reject insufficient
+workspace by default; expanded per-lane correlator admission is never used.
+The existing local correlator and its four-hour physical progress tests retain
+their original path. The model uses the requested wide search geometry
+and regeneration work while keeping the fixed i9-13900H/RTX 4090 Laptop reference
+budgets. It withholds percentages outside modeled carrier or FFT-workspace
+coverage. No hardware benchmark or GPU execution backend was introduced.
+
+Actual sampled PCM tests use the +3 dBm/-170 dB preset (-3 dB-Hz actual C/N0),
+the default 1,500 Hz carrier, 100 ppm crystal error, 0.5 degrees/sqrt(second)
+phase diffusion and the exact three-bit message `a`. The receiver gets no
+channel offset, channel seed, expected text or payload length:
+
+| Rate and design target | Symbol duration | Sampled results |
+| --- | ---: | --- |
+| 1 Hz, target -6 | 256 seconds | Seeds 1, 2 and 3 each recover exact `011`/`a`, one stream and one physical completion |
+| 100 Hz, target -6 | 327.68 seconds | Seeds 1 and 2 each recover exact `011`/`a`, one stream and one physical completion, with a 64 MiB DSP limit |
+| 100 Hz, target -3 | 163.84 seconds | Seed 1 has insufficient acquisition margin in the full blind search and does not recover the complete message |
+| 1 Hz, target 32, +3 dBm/-120 dB | 128 seconds | Original strong-link failure now recovers exact `a` once; former alias duplicates are rejected |
+
+Matched-duration noise-only controls produce no reception at 1 Hz or 100 Hz.
+The 100 Hz streamed search retained about 9.45 MB idle state within its 64 MiB
+ceiling. The finite seed checks establish these cases, not calibrated 99.9%
+population reliability, practical -200/-230 dB links or an interception bound.
+The permanent `weak_signal` suite retains the three 1 Hz seeds, a separate
+noise-only control and the 100 Hz seed-1 sampled path.
+
+Cached and streamed FFT tests compare exact candidates, scores and every
+progress poll across serial and parallel execution. Coupled-clock tests cover
+±200 ppm and ±8000 ppm stress cases, nine exact bits, duplicate carrier/timing
+alternatives, bounded memory, immediate pending drainage, EOF/partial-silence
+rejection and fully observed physical completion. Both compact preference
+settings retain FFT competition; unsupported direct-correlator requests reject.
+
+Both Release GUI executables were rebuilt. Native FLTK self-check, adapter and
+document conformance passed (three checks, 60.68 seconds). Native Rev self-check,
+adapter/platform conformance and 1x/2x coordinates passed (five checks,
+95.33 seconds), each on a private virtual display. Rev's focused tuning,
+search-geometry, FFT-batch, estimator and controller checks passed
+(five suites, 70.54 seconds). Reference-hardware benchmarking was not performed.
+
+Follow-up memory regressions preserve the original local five-bin candidate
+scores, every progress poll and physical completion when an application opts
+into fallback. Explicit frequency/clock requests and missing clock windows
+remain strict. Shared expanded banks retain their full search while releasing
+template-cache space. The original live and live-resource assertions pass.
+An added sampled CLI case also receives exact `a` at a valid shaped passband
+edge; implicit local searches retain their feasible offsets, including a
+center-only bank, while explicit invalid offsets are rejected.
+
+After the final receiver changes, native self-checks passed again for FLTK
+(16.29 seconds) and Rev (20.12 seconds). The revised per-bank memory estimate
+also passed on Rev (13.70 seconds), including the half-budget ceiling used by
+live reception. Both GUI executables were rebuilt with these changes.
+
+The final full headless run passed all 65 suites (256.45 seconds), including
+the development-contract coverage, all 23 shared GUI suites, the unchanged
+live/resource checks and the new `weak_signal` suite (142.37 seconds). Command:
+`ctest --test-dir build --output-on-failure -j2 -E '^gui_(self_check|workflow|adapter_conformance|document_conformance)$'`.
+`git diff --check` also passed. These are software and sampled-channel checks;
+physical audio, RF links and interception performance were not measured.
+
 ## TX design target versus simulation channel strength — 16 September 2026
 
 The 100 Hz comparison was checked with public auto-pattern, text `a`, default

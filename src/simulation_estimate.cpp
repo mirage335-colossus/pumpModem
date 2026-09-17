@@ -3,6 +3,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/pattern_search.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -74,7 +75,7 @@ long double phase_coherence(long double x) {
     if(x<1e-4L)return 1-x/3+x*x/12;
     return 2*(1+(std::expm1(-x)/x))/x;
 }
-struct Work {long double serial=0,parallel=0,search_trials=1;};
+struct Work {long double serial=0,parallel=0,search_trials=1;bool workspace_supported=true;};
 Work receiver_work(const modem::Config& config,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys) {
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
@@ -83,37 +84,61 @@ Work receiver_work(const modem::Config& config,long double samples,
         (options.timestamp?0:std::ceil((static_cast<long double>(modem::training_sample_count(config))+
             modem::pattern_pulse_padding_samples(config))/config.sample_rate)):1.L;
     const auto banks=epochs*keys;
-    auto bin=std::gcd(std::gcd(chip,symbol),std::max<std::uint64_t>(1,chip/2));
+    const auto geometry=modem::default_pattern_frequency_search(config);
+    const bool coupled=geometry.count>5 && config.spreading_mode==modem::SpreadingMode::pattern;
+    const auto frequencies=static_cast<long double>(geometry.count)*(coupled?2:1);
+    const auto maximum_clock_ratio=coupled?geometry.half_width_hz/config.carrier_hz:0.;
+    auto bin=modem::pattern_projection_bin_samples(config,geometry.half_width_hz);
     const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
     const auto sine=std::sin(omega);
     const auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
     if(symbol<=256 && (!private_pattern || image>1e-10*static_cast<double>(bin)))bin=1;
-    const auto length=std::max(4.L,std::ceil(static_cast<long double>(symbol)/bin));
-    const auto fft_log=std::ceil(std::log2(2*length));
+    const auto observation_samples=static_cast<long double>(symbol)/(1-maximum_clock_ratio);
+    const auto length=std::max(4.L,std::ceil(observation_samples/bin));
+    const auto nominal_length=std::max(4.L,std::ceil(static_cast<long double>(symbol)/bin));
+    const auto fft_log=std::max(std::ceil(std::log2(2*nominal_length)),std::ceil(std::log2(length)));
     const auto transform=std::exp2(fft_log),hop=transform-length+1;
-    const auto fft_bytes=transform*16*15+(4*length+2*hop)*16;
-    const auto allowance=static_cast<long double>(options.dsp_workspace_bytes)/std::max(1.L,banks*profiles);
-    const bool correlator=(private_pattern && symbol>=60.L*config.sample_rate) || fft_bytes>allowance;
+    // Retaining transformed template rows is optional. The streamed path
+    // keeps FFT/ring/tracking scratch and empty row metadata, then generates
+    // each template in existing per-job scratch without reducing coverage.
+    const auto fft_core_bytes=transform*16*5+(4*length+2*hop)*16+
+        (coupled?2*length*16:0)+(transform+1)*8+
+        frequencies*(2*24+2*8+2*16+18*8+2*8)+
+        4096*16+4096*sizeof(modem::PatternEvidence);
+    const auto fft_bytes=fft_core_bytes+2*frequencies*transform*16;
+    // Live reserves at least half of the total for peer receivers, transmit
+    // work and plots even when there is only one requested receive bank.
+    const auto allowance=static_cast<long double>(options.dsp_workspace_bytes)/std::max(2.L,banks*profiles);
+    // Expanded coupled banks require the FFT path. A compact private hint or
+    // insufficient memory cannot silently substitute a different search path.
+    const bool correlator=!coupled &&
+        ((private_pattern && symbol>=60.L*config.sample_rate) || fft_core_bytes>allowance);
+    // Live banks stream expanded template rows when several profiles, keys or
+    // epochs share the budget, so early banks cannot consume it with caches.
+    const bool streamed_templates=!correlator && (fft_bytes>allowance || (coupled && banks*profiles>1));
     const auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
-                               std::max(1.L,std::floor(chip/2.L)))+1;
+                               std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
     const auto phase_groups=private_pattern?3.L:1.L;
     Work result;
+    result.workspace_supported=!coupled || fft_core_bytes<=allowance;
     result.serial=samples*projection_operations_per_sample*banks;
     // Admission thresholds belong to one receiver; unrelated keys and
     // waveform profiles add compute work, not evidence against this signal.
-    result.search_trials=std::max(1.L,starts*5*phase_groups);
+    result.search_trials=std::max(1.L,starts*frequencies*phase_groups);
     if(correlator) {
         // Bounded streaming projections are reused by half-chip start lanes;
         // each lane still evaluates two candidate bit fits per observation.
         const auto observations=std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
-        result.parallel=observations*starts*5*phase_groups*64*banks;
+        result.parallel=observations*starts*frequencies*phase_groups*64*banks;
     } else {
         const auto blocks=std::ceil(samples/(bin*hop));
-        const auto jobs=5*phase_groups*(private_pattern?4:1);
-        // Five real operations per complex FFT element per stage. Both bit
-        // templates need inverse transforms; private templates may regenerate.
-        result.parallel=blocks*(5*transform*fft_log*(1+2*jobs*(private_pattern?2:1))+
-            jobs*(12*transform+40*hop))*banks;
+        const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
+        // Five real operations per complex FFT element per stage. Streamed
+        // public templates need the same additional forward transform and
+        // generation allowance as regenerated private templates.
+        const bool generate_templates=private_pattern || streamed_templates;
+        result.parallel=blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
+            jobs*(12*transform+40*hop+(generate_templates?40*length:0)))*banks;
     }
     return result;
 }
@@ -147,7 +172,10 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         result.profile_matches|=matches;
         const auto work=receiver_work(profile,media*profile.sample_rate,options,profiles.size(),keys);
         serial+=work.serial;parallel+=work.parallel;
-        if(matches)trials=std::max(trials,work.search_trials);
+        if(matches) {
+            trials=std::max(trials,work.search_trials);
+            result.receiver_workspace_supported|=work.workspace_supported;
+        }
     }
     const auto serial_seconds=serial/serial_operations_per_second;
     result.cpu_seconds=finite_seconds(.03L+serial_seconds+parallel/cpu_scoring_operations_per_second);
@@ -158,16 +186,29 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // The simulator's SNR is per Fs/2 noise bandwidth, so Es/N0=snr*Fs*T/2.
     const auto symbol_db=channel.snr_db+10*std::log10(static_cast<long double>(samples_per_symbol)/2);
     const auto frequency=channel.frequency_offset_hz+config.carrier_hz*channel.clock_error_ppm*1e-6L;
-    const auto spacing=.25L/seconds;
+    const auto geometry=modem::default_pattern_frequency_search(config);
+    const bool coupled=geometry.count>5 && config.spreading_mode==modem::SpreadingMode::pattern;
+    const auto frequencies=static_cast<long double>(geometry.count)*(coupled?2:1);
+    const auto spacing=static_cast<long double>(geometry.step_hz);
+    const auto outer_bin=static_cast<long double>(geometry.count/2);
     result.carrier_offset_hz=static_cast<double>(frequency);
-    result.carrier_search_half_width_hz=static_cast<double>(2*spacing);
-    result.carrier_in_search=std::abs(frequency)<=2*spacing;
-    const auto nearest=std::clamp(std::round(frequency/spacing),-2.L,2.L)*spacing;
+    result.carrier_search_half_width_hz=geometry.half_width_hz;
+    result.carrier_in_search=std::abs(frequency)<=geometry.half_width_hz;
+    const auto nearest_bin=std::clamp(std::round(frequency/spacing),-outer_bin,outer_bin);
+    // Generate the same double-valued offset as the receiver's bank before
+    // evaluating the residual; endpoints cannot drift beyond modeled coverage.
+    const auto nearest=static_cast<long double>(static_cast<double>(nearest_bin)*geometry.step_hz);
     const auto angle=std::numbers::pi_v<long double>*(frequency-nearest)*seconds;
     const auto carrier_loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
     const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi_v<long double>/180;
     const auto phase_loss=phase_coherence(.5L*diffusion*diffusion*seconds);
-    const auto smear=std::abs(channel.clock_error_ppm)*1e-6L*seconds/chip_seconds;
+    auto residual_clock_ppm=std::abs(static_cast<long double>(channel.clock_error_ppm));
+    if(coupled)residual_clock_ppm=std::min(residual_clock_ppm,
+        std::abs(channel.clock_error_ppm-nearest/config.carrier_hz*1e6L));
+    // Expanded default banks retain both nominal symbol timing and timing
+    // scaled by each carrier hypothesis. Independent carrier error can favor
+    // the nominal-clock alternative; shared sample-clock error favors coupling.
+    const auto smear=residual_clock_ppm*1e-6L*seconds/chip_seconds;
     const auto timing_loss=config.spreading_mode==modem::SpreadingMode::tone?1.L:
         std::pow(std::max(0.L,1-smear/2),2);
     const auto coherence=carrier_loss*phase_loss*timing_loss;
@@ -178,12 +219,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // fit ceiling even at high SNR. Attenuating Es/N0 alone cannot predict that
     // regime. Do not extrapolate a numeric probability beyond the bank, nor
     // claim zero: some out-of-bank signals can still produce admitted fits.
-    if(!result.profile_matches || !result.carrier_in_search)return result;
+    if(!result.profile_matches || !result.carrier_in_search || !result.receiver_workspace_supported)return result;
     result.confidence_available=true;
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));
     const auto bit_error=.5*std::exp(-energy/2);
     const auto admitted=normal_above(energy,5);
-    const auto threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(trials+1)+std::log(10.L));
+    const auto threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(trials+1)+std::log(2*frequencies));
     const auto acquired=normal_above(energy,threshold);
     const auto correct_bit=admitted*(1-bit_error);
     const auto count=static_cast<long double>(transmission.wire_bits);

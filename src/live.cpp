@@ -227,6 +227,7 @@ struct Session::Impl {
         Bytes key_tag;
         std::uint64_t epoch = 0;
         double admitted_at = 0;
+        bool prefer_streamed_templates = false;
         double last_confident_at = 0;
         std::uint64_t last_confident_end = 0;
         std::uint64_t sample_origin = 0, family = 0;
@@ -654,13 +655,16 @@ struct Session::Impl {
                 }
                 Receiver receiver;
                 receiver.sample_origin=bank.samples;receiver.family=family;
+                receiver.prefer_streamed_templates=keys.size()>1 || profiles.size()>1 || epochs.size()>1;
                 receiver.options = value.transfer; receiver.options.modem=profile;receiver.options.key = key; receiver.epoch = epoch;
                 receiver.admitted_at=now;
                 receiver.key_tag = tag;
                 const auto config = transfer::seeded_config(receiver.options, epoch);
                 try {
                     modem::PatternSearch search;
-
+                    search.expand_clock_search=true;
+                    search.prefer_streamed_templates=receiver.prefer_streamed_templates;
+                    search.allow_local_clock_fallback=true;
                     search.compact_clock_search=compact;
                     search.search_stream_phases=key.has_value();
                     search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
@@ -1064,7 +1068,10 @@ struct Session::Impl {
                             if(current.running && generation==version)current.error=error.what();
                         }
                         bank.limited=true;
-                        modem::PatternSearch search;search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
+                        modem::PatternSearch search;search.expand_clock_search=true;
+                        search.prefer_streamed_templates=receiver.prefer_streamed_templates;
+                        search.allow_local_clock_fallback=true;
+                        search.bit_limit=transfer::pattern_bit_limit(value.content_limit);
 
                         search.compact_clock_search=receiver.options.key &&
                             modem::symbol_sample_count(receiver.options.modem)>=60ULL*receiver.options.modem.sample_rate;
@@ -1154,7 +1161,11 @@ struct Session::Impl {
             }
             receiver_bytes = bank.working_bytes;
             if(bank.limited)current.status="Pattern search is limited by the configured DSP workspace";
-            else if(current.status=="Pattern search is limited by the configured DSP workspace")current.status=idle_status();
+            else if(std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+                return receiver.modem->local_clock_fallback();
+            }))current.status="Using local carrier search; increase DSP memory for wider clock coverage";
+            else if(current.status=="Pattern search is limited by the configured DSP workspace" ||
+                    current.status=="Using local carrier search; increase DSP memory for wider clock coverage")current.status=idle_status();
             current.dsp_buffered_bytes = receiver_bytes + input_bytes + decoding_bytes + audio_bytes + plot_workspace(value) + (tx_busy ? value.dsp_workspace_bytes / 4 : 0);
         }
     }
