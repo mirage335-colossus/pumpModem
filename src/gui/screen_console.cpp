@@ -15,6 +15,13 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::header)control.font_size=22;
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
+    if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
+    if(slot==Slot::simulation_confidence)
+        control.help="Estimated probability of receiving the entire current draft under the selected simulation channel and matching receiver settings. Uses an ideal noise and independent-error model with the selected waveform, exact message length and applicable error correction. This is model-based probability, not measured receiver confidence or a guarantee. Additional recovery is excluded.";
+    if(slot==Slot::simulation_cpu_time)
+        control.help="Heuristic simulation computation time for a fixed high-end Intel Core i9-13900H laptop reference. Based on the current draft and modem workload; no local benchmark or hardware detection. Replay playback and additional recovery time are excluded.";
+    if(slot==Slot::simulation_gpu_time)
+        control.help="Projected simulation computation time for a fixed NVIDIA GeForce RTX 4090 Laptop GPU reference. GPU simulation is not implemented. Uses a heuristic workload model, not a local benchmark; actual laptop power and cooling affect performance. Replay playback and additional recovery time are excluded.";
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
     if(control.multiline) {
@@ -102,7 +109,10 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::callsign,Command::none,Bitmap::none,Page::console,1,"Callsign",1,false,128}, Slot::callsign),
         placed({Kind::text,Field::grid,Command::none,Bitmap::none,Page::console,1,"Grid",1,false,128}, Slot::grid),
         placed({Kind::toggle,Field::repeatable,Command::none,Bitmap::none,Page::console,1,"Repeatable"}, Slot::repeatable),
-        placed({Kind::choice,Field::simulation,Command::none,Bitmap::none,Page::console,1,"Simulation"}, Slot::simulation),
+        placed({Kind::choice,Field::simulation,Command::none,Bitmap::none,Page::console,2,"Simulation"}, Slot::simulation),
+        placed({Kind::label,Field::simulation_confidence,Command::none,Bitmap::none,Page::console,2,"RX success (model)"}, Slot::simulation_confidence),
+        placed({Kind::label,Field::simulation_cpu_time,Command::none,Bitmap::none,Page::console,2,"CPU / i9-13900H"}, Slot::simulation_cpu_time),
+        placed({Kind::label,Field::simulation_gpu_time,Command::none,Bitmap::none,Page::console,2,"GPU / RTX 4090 Laptop (projected)"}, Slot::simulation_gpu_time),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),

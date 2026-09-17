@@ -28,6 +28,53 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+void simulation_estimate_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    const auto text=[&](F field) {return controller.field(field).text;};
+    for(const auto field:{F::simulation_confidence,F::simulation_cpu_time,F::simulation_gpu_time}) {
+        const auto& screen=ui::console_screen();
+        const auto declaration=std::find_if(screen.begin(),screen.end(),[&](const auto& control) {return control.field==field;});
+        check(declaration!=screen.end()&&declaration->kind==ui::Kind::label&&declaration->persistent&&
+              std::string_view(declaration->help).size()>40,
+              "Simulation estimates need persistent shared labels and explanatory help");
+    }
+    controller.edit(F::message,"e");prepare(controller);
+    check(text(F::simulation_confidence).find('%')!=std::string::npos&&
+          text(F::simulation_cpu_time).find("i9-13900H\n~")!=std::string::npos&&
+          text(F::simulation_gpu_time).find("RTX 4090 Laptop (projected)\n~")!=std::string::npos,
+          "Simulation estimates omitted modeled probability or named reference hardware");
+    const auto dictionary_cpu=text(F::simulation_cpu_time);
+    const auto dictionary_confidence=text(F::simulation_confidence);
+    controller.edit(F::short_bits,"001");
+    check(text(F::simulation_confidence).ends_with("Calculating..."),
+          "Draft change left a stale simulation probability on screen");
+    prepare(controller);
+    check(text(F::simulation_cpu_time)==dictionary_cpu&&text(F::simulation_confidence)==dictionary_confidence,
+          "Identical three-bit dictionary and raw transmissions have different simulation estimates");
+    controller.edit(F::message,"A longer message that requires fixed intervals.");prepare(controller);
+    check(text(F::simulation_cpu_time)!=dictionary_cpu,
+          "Simulation compute estimate ignored a longer framed draft");
+    const auto strong_probability=text(F::simulation_confidence);
+    controller.select(F::simulation,std::string(tuning::simulation_presets().back().name));prepare(controller);
+    check(text(F::simulation_confidence)!=strong_probability,
+          "Simulation probability did not respond to the weak channel preset");
+    controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));
+    for(const auto field:{F::simulation_confidence,F::simulation_cpu_time,F::simulation_gpu_time})
+        check(text(field).ends_with("Simulation off"),"Disabling simulation retained a numeric estimate");
+    // An in-flight preparation must not restore an estimate for an older preset.
+    prepare(controller);
+    check(text(F::simulation_cpu_time).ends_with("Simulation off"),"Stale preparation restored a disabled simulation estimate");
+    controller.select(F::simulation,std::string(tuning::simulation_presets()[2].name));
+    controller.edit(F::bandwidth,"invalid");
+    check(text(F::simulation_confidence).ends_with("Invalid settings")&&
+          text(F::simulation_cpu_time).ends_with("Invalid settings"),
+          "Invalid settings left a previous numeric simulation estimate visible");
+    controller.edit(F::bandwidth,"3.6 kHz");prepare(controller);
+    controller.edit(F::short_bits,"001x");
+    check(text(F::simulation_confidence).ends_with("Unavailable"),
+          "Invalid bit draft left a previous numeric reception estimate visible");
+}
 void revised_reception_ingestion() {
     const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {
         live::Snapshot snapshot;
@@ -1624,6 +1671,7 @@ void bitmap_source_checks() {
 int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
+        simulation_estimate_controls();
         revised_reception_ingestion();
         rate_carrier_controls();
         shannon_capacity_display();

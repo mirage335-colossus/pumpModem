@@ -316,8 +316,10 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 866 logical
-pixels, with a 1030 by 786 minimum. `control_layout.hpp` computes frame, label,
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 952 logical
+pixels, with a 1030 by 872 minimum. A persistent simulation row holds the
+dropdown, modeled receive probability and reference CPU/GPU compute estimates.
+`control_layout.hpp` computes frame, label,
 editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display
 scale. Slot-free rows provide ordered stretch-weight placement for alternate

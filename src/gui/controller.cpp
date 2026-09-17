@@ -8,6 +8,7 @@
 #include "binary_editor.hpp"
 #include "datapump/audio.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/simulation_estimate.hpp"
 #include "datapump/tuning.hpp"
 #include <array>
 #include <cctype>
@@ -80,6 +81,13 @@ std::string seconds_text(double seconds) {
     else text<<std::fixed<<std::setprecision(2)<<seconds<<" s";
     return text.str();
 }
+std::string probability_text(double probability) {
+    if(probability<.001)return "<0.1%";
+    if(probability>.999)return ">99.9%";
+    std::ostringstream text;
+    text<<"~"<<std::fixed<<std::setprecision(1)<<100*probability<<'%';
+    return text.str();
+}
 std::string workspace_text(unsigned percent,std::size_t bytes) {
     constexpr std::size_t gib=1024*1024*1024,mib=1024*1024;
     std::ostringstream text;
@@ -136,6 +144,7 @@ struct Controller::Impl {
         PrepKind kind=PrepKind::estimate;
         std::uint64_t revision=0;
         std::shared_ptr<const Inspection> inspection;
+        std::optional<simulation::Estimate> simulation_estimate;
         std::vector<KeyEntry> keys;
         std::vector<std::string> names;
         std::vector<audio::Device> devices;
@@ -235,10 +244,20 @@ struct Controller::Impl {
         // live reception would discard a pending symbol when crossing 16 bytes.
         refresh_transmit_target();
         ++revision; estimate.reset(); inspection.reset(); estimate_requested=Clock::now(); pattern_first=0;
+        simulation_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         f(UiField::airtime).text="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
         f(UiField::flow_detail).text.clear(); f(UiField::transmission_detail).text.clear();
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
+    }
+    void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu) {
+        f(UiField::simulation_confidence).text="RX success (model)\n"+std::move(confidence);
+        f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
+        f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
+    }
+    void simulation_estimate_status(std::string state) {
+        if(!tuning::parse_simulation_preset(f(UiField::simulation).selected).enabled)state="Simulation off";
+        simulation_estimate_text(state,state,state);
     }
     void encryption_changed() {
         if(tone())f(UiField::key).selected="none";
@@ -295,11 +314,12 @@ struct Controller::Impl {
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             settings=std::move(next); settings_valid=true;
+            simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             short_plan=plan; long_plan=longer_plan; short_target=short_snr; long_target=long_snr;
             displayed_short_target.reset(); refresh_transmit_target();
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
-        } catch(...) { settings_valid=false; f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
+        } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -604,7 +624,37 @@ struct Controller::Impl {
             request.options.modem=transmit_config();
             if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
-            start_worker([request=std::move(request)](Prepared& value,std::stop_token) { value.inspection=std::make_shared<const Inspection>(inspect(request)); },std::move(result));
+            start_worker([request=std::move(request),simulation_settings=settings](Prepared& value,std::stop_token) {
+                value.inspection=std::make_shared<const Inspection>(inspect(request));
+                if(!simulation_settings.simulation)return;
+                // Keep a failed advisory model independent of transmission preparation.
+                try {
+                    modem::ChannelConfig channel;
+                    channel.snr_db=simulation_settings.simulation_snr_db;
+                    channel.clock_error_ppm=simulation_settings.simulation_clock_error_ppm;
+                    channel.phase_noise_degrees_per_sqrt_second=simulation_settings.simulation_phase_noise_degrees_per_sqrt_second;
+                    channel.seed=simulation_settings.simulation_seed;
+                    const auto& base=simulation_settings.transfer;
+                    // Match the live bank's deduplication of identical key material.
+                    std::vector<Bytes> key_tags;
+                    const auto add_key=[&](const Crypto& key) {
+                        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+                        if(std::find(key_tags.begin(),key_tags.end(),tag)==key_tags.end())key_tags.push_back(std::move(tag));
+                    };
+                    if(base.key)add_key(*base.key);
+                    for(const auto& key:simulation_settings.receive_keys)add_key(key);
+                    std::vector<modem::Config> profiles;
+                    const auto add_profiles=[&](bool keyed) {
+                        const auto family=tuning::receive_profiles(base.modem,base.receive_targets_db_hz,
+                            base.receive_pattern_mode,keyed);
+                        profiles.insert(profiles.end(),family.begin(),family.end());
+                    };
+                    if(simulation_settings.permits_plaintext())add_profiles(false);
+                    for(std::size_t key=0;key<key_tags.size();++key)add_profiles(true);
+                    value.simulation_estimate=simulation::estimate(value.inspection->estimate,request.options,
+                        request.binary.has_value()||transfer::uses_raw_message(request.message),channel,profiles);
+                } catch(const std::exception&) { value.simulation_estimate.reset(); }
+            },std::move(result));
         }
     }
     void accept(Prepared result) {
@@ -615,7 +665,7 @@ struct Controller::Impl {
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
         if(!result.error.empty()) {
             if(result.kind==PrepKind::keys) { key_failed=true; f(UiField::key_path).text=result.created?"Keyfile saved; load failed":"Keyfile operation failed"; }
-            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
+            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; simulation_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
             return;
         }
@@ -638,6 +688,15 @@ struct Controller::Impl {
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
+            if(!settings.simulation)simulation_estimate_status("Simulation off");
+            else if(receive_targets_due)simulation_estimate_status("Calculating...");
+            else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
+            else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");
+            else if(result.simulation_estimate) {
+                const auto& model=*result.simulation_estimate;
+                simulation_estimate_text(model.profile_matches?probability_text(model.success_probability):"No matching RX profile",
+                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds));
+            } else simulation_estimate_status("Unavailable");
             f(UiField::inspection).text=inspection->title+"\n"+inspection->summary;
             std::ostringstream flow,transmission;
             for(const auto& lane:inspection->lanes) {
@@ -872,7 +931,10 @@ void Controller::edit(UiField field,std::string text) {
         p.f(field).text=std::move(text);
         if(field==UiField::short_bits)p.short_bits_changed();
         else if(field==UiField::binary) p.binary_changed();
-        else if(field==UiField::receive_snr)p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
+        else if(field==UiField::receive_snr) {
+            p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
+            p.simulation_estimate_status("Calculating...");
+        }
         else if(field==UiField::snr||field==UiField::long_snr) p.configure(true);
         else if(field==UiField::bandwidth) p.configure(false,true);
         else if(field==UiField::device||field==UiField::carrier) p.configure();

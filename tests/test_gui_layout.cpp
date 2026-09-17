@@ -15,27 +15,27 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 909 &&
-          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 829,
+    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 952 &&
+          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 872,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 94, 1148, 656}, "tab viewport moved");
-    check(layout[Slot::page] == Rect{16, 126, 1148, 624}, "page viewport moved");
-    check(layout[Slot::message] == Rect{16, 152, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 130, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 152, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 152, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 289, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 651, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 518, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 518, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 651, 205, 91}, "waterfall size changed");
-    check(layout[Slot::device] == Rect{16, 774, 220, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{246, 774, 127, 27} &&
-          layout[Slot::carrier] == Rect{383, 774, 135, 27}, "Rate and Carrier editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 817, 260, 27} &&
-          layout[Slot::long_snr] == Rect{286, 817, 260, 27} &&
-          layout[Slot::receive_snr] == Rect{556, 817, 608, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::status] == Rect{16, 878, 1148, 24}, "persistent status moved");
+    check(layout[Slot::tabs] == Rect{16, 137, 1148, 656}, "tab viewport moved");
+    check(layout[Slot::page] == Rect{16, 169, 1148, 624}, "page viewport moved");
+    check(layout[Slot::message] == Rect{16, 195, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 173, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 195, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 195, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 332, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 694, 280, 91}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 561, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 561, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 694, 205, 91}, "waterfall size changed");
+    check(layout[Slot::device] == Rect{16, 817, 220, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{246, 817, 127, 27} &&
+          layout[Slot::carrier] == Rect{383, 817, 135, 27}, "Rate and Carrier editors lost their reserved widths");
+    check(layout[Slot::snr] == Rect{16, 860, 260, 27} &&
+          layout[Slot::long_snr] == Rect{286, 860, 260, 27} &&
+          layout[Slot::receive_snr] == Rect{556, 860, 608, 27}, "separate transmit targets lost their persistent row");
+    check(layout[Slot::status] == Rect{16, 921, 1148, 24}, "persistent status moved");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -62,6 +62,29 @@ void supported_sizes() {
                       "persistent control overlaps a page");
             }
         }
+        const auto simulation=layout[Slot::simulation];
+        auto previous_estimate=simulation;
+        for(const auto slot:{Slot::simulation_confidence,Slot::simulation_cpu_time,Slot::simulation_gpu_time}) {
+            const auto estimate=layout[slot];
+            check(persistent_slot(slot)&&estimate.x>=previous_estimate.x+previous_estimate.w+10&&
+                  estimate.y==simulation.y-label_height&&estimate.y+estimate.h==simulation.y+simulation.h&&
+                  estimate.y>=layout[Slot::callsign].y+layout[Slot::callsign].h&&
+                  estimate.y+estimate.h<layout[Slot::tabs].y&&estimate.h>=2*16&&estimate.w>=200,
+                  "Simulation estimates must remain adjacent, readable and clear of identity controls and tabs");
+            Control label{Kind::label};label.slot=slot;
+            const std::array controls{label};
+            const auto native=control_layout(label,{},size.w,size.h,controls);
+            check(native.has_label&&native.label==estimate&&native.widget==estimate,
+                  "Simulation estimate must use shared native label geometry");
+            previous_estimate=estimate;
+        }
+        check(layout[Slot::simulation_gpu_time].w>=355&&previous_estimate.x+previous_estimate.w==size.w-margin,
+              "Projected laptop GPU estimate lost room for its hardware label");
+        const auto key_action=layout[Slot::key_actions],key_path=layout[Slot::key_path],key=layout[Slot::key];
+        check(layout[Slot::repeatable].x+layout[Slot::repeatable].w<key_action.x&&
+              key_action.x+key_action.w<key_path.x&&key_path.x+key_path.w<key.x&&
+              key_action.y==key_path.y&&key_path.y==key.y&&key_path.w>=298,
+              "Moving Simulation must preserve the key controls and expose more of the key path");
         const auto message = layout[Slot::message], binary = layout[Slot::binary], qr = layout[Slot::qr];
         check(message.y == binary.y && binary.y == qr.y &&
               message.h == binary.h && qr.h >= 87 && qr.w == qr.h &&

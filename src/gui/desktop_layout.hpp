@@ -4,13 +4,14 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 909;
-inline constexpr int min_width = 1030, min_height = 829;
+inline constexpr int default_width = 1180, default_height = 952;
+inline constexpr int min_width = 1030, min_height = 872;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
 enum class Slot {
-    none, header, mode, clear, callsign, grid, repeatable, simulation, key_actions,
+    none, header, mode, clear, callsign, grid, repeatable, simulation,
+    simulation_confidence, simulation_cpu_time, simulation_gpu_time, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -27,6 +28,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     switch (slot) {
     case Slot::header: case Slot::mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
+    case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -58,14 +60,25 @@ struct DesktopLayout {
         out[Slot::callsign] = {margin, 62, 115, field_height};
         out[Slot::grid] = {142, 62, 85, field_height};
         out[Slot::repeatable] = {238, 61, 119, 28};
-        out[Slot::simulation] = {366, 62, 183, field_height};
-        out[Slot::key_actions] = {560, 62, 92, field_height};
-        out[Slot::key_path] = {660, 62, std::max(90, width - 926), field_height};
+        out[Slot::key_actions] = {366, 62, 92, field_height};
+        out[Slot::key_path] = {466, 62, std::max(90, width - 732), field_height};
         out[Slot::key] = {width - 248, 62, 232, field_height};
-        out[Slot::tabs] = {margin, 94, width - 2 * margin, height - 253};
-        out[Slot::page] = {margin, 126, width - 2 * margin, height - 285};
+        // Keep the simulation choice and its model estimates together above
+        // every page. Estimates use two native text lines: title, then value.
+        // The taller desktop preserves all established content allocations.
+        const int simulation_extra = std::max(0, width - min_width);
+        const int confidence_width = 200 + simulation_extra / 5;
+        const int cpu_width = 230 + simulation_extra * 3 / 10;
+        out[Slot::simulation] = {margin, 105, 183, field_height};
+        out[Slot::simulation_confidence] = {209, 89, confidence_width, 43};
+        const int cpu_x = out[Slot::simulation_confidence].x + confidence_width + 10;
+        out[Slot::simulation_cpu_time] = {cpu_x, 89, cpu_width, 43};
+        const int gpu_x = cpu_x + cpu_width + 10;
+        out[Slot::simulation_gpu_time] = {gpu_x, 89, width - margin - gpu_x, 43};
+        out[Slot::tabs] = {margin, 137, width - 2 * margin, height - 296};
+        out[Slot::page] = {margin, 169, width - 2 * margin, height - 328};
 
-        constexpr int compose_y = 152, binary_width = 220;
+        constexpr int compose_y = 195, binary_width = 220;
         // Keep all ten generation rows visible, including native scrollbar
         // space, at the minimum desktop size. Taller windows grow the editors
         // and received history before allocating the remainder to the plots.
@@ -78,13 +91,13 @@ struct DesktopLayout {
         const int editor_width = width - 2 * margin - qr_size - binary_width - 28;
         const int binary_x = margin + editor_width + 14;
         constexpr int previous_width = 240;
-        out[Slot::message_label] = {margin, 130, editor_width - previous_width - 8, 20};
-        out[Slot::paste_previous] = {margin + editor_width - previous_width, 130, previous_width, 20};
+        out[Slot::message_label] = {margin, 173, editor_width - previous_width - 8, 20};
+        out[Slot::paste_previous] = {margin + editor_width - previous_width, 173, previous_width, 20};
         const int qr_choice_width=std::max(78,qr_size);
-        out[Slot::binary_label] = {binary_x, 130, binary_width-(qr_choice_width-qr_size), 20};
+        out[Slot::binary_label] = {binary_x, 173, binary_width-(qr_choice_width-qr_size), 20};
         out[Slot::message] = {margin, compose_y, editor_width, compose_height};
         out[Slot::binary] = {binary_x, compose_y, binary_width, compose_height};
-        out[Slot::qr_brightness] = {width - margin - qr_choice_width, 130, qr_choice_width, 20};
+        out[Slot::qr_brightness] = {width - margin - qr_choice_width, 173, qr_choice_width, 20};
         out[Slot::qr] = {width - margin - qr_size, compose_y, qr_size, qr_size};
 
         const int buttons_y = compose_y + compose_height + 8;
@@ -151,13 +164,13 @@ struct DesktopLayout {
         // and let its reception history grow with the page viewport.
         const int compression_width = width - 2 * margin;
         const int compression_column = (compression_width - 20) / 2;
-        out[Slot::compression_explanation] = {margin, 130, compression_width, 54};
-        out[Slot::short_bits_label] = {margin, 190, compression_column, 22};
-        out[Slot::short_bits] = {margin, 216, compression_column, 72};
-        out[Slot::short_bits_detail] = {margin, 296, compression_column, 58};
-        out[Slot::compression_codes] = {margin + compression_column + 20, 184,
+        out[Slot::compression_explanation] = {margin, 173, compression_width, 54};
+        out[Slot::short_bits_label] = {margin, 233, compression_column, 22};
+        out[Slot::short_bits] = {margin, 259, compression_column, 72};
+        out[Slot::short_bits_detail] = {margin, 339, compression_column, 58};
+        out[Slot::compression_codes] = {margin + compression_column + 20, 227,
             compression_width - compression_column - 20, 166};
-        constexpr int short_actions_y = 362;
+        constexpr int short_actions_y = 405;
         out[Slot::short_use_text] = {margin, short_actions_y, 90, action_height};
         out[Slot::short_send_key] = {116, short_actions_y, 150, action_height};
         out[Slot::short_transmit] = {276, short_actions_y, 125, action_height};
@@ -166,7 +179,7 @@ struct DesktopLayout {
         out[Slot::short_airtime] = {676, short_actions_y, width - margin - 676, action_height};
         const int raw_detail_y = out[Slot::page].y + out[Slot::page].h - 62;
         const int raw_actions_y = raw_detail_y - 38;
-        out[Slot::compression_signals] = {margin, 426, compression_width, raw_actions_y - 436};
+        out[Slot::compression_signals] = {margin, 469, compression_width, raw_actions_y - 479};
         out[Slot::copy_raw_signal] = {margin, raw_actions_y, 150, action_height};
         out[Slot::paste_raw_signal] = {margin + 160, raw_actions_y, 180, action_height};
         out[Slot::raw_recovery_actions] = {margin + 350, raw_actions_y, 150, action_height};

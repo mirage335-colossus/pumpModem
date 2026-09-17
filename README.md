@@ -88,6 +88,11 @@ no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
 The desktop has **Console**, **Modem flow**, **Transmission layout**, and
 **Compression / raw bits** tabs.
+Beside **Simulation**, the desktop shows a modeled whole-message receive
+probability and estimated computation times for a fixed **Intel Core i9-13900H**
+and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
+a projection; simulation currently executes on the CPU. These rough estimates
+update with the draft and settings; see the [model and its assumptions](docs/simulation-estimates.md).
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots

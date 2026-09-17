@@ -40,8 +40,8 @@ selection on the modem host. Existing files are never overwritten.
 `ui_contract.hpp` and `screen_console.cpp` describe ordered controls, stable IDs,
 application bindings, shared desktop slots and grouped command menus.
 `desktop_layout.hpp` supplies the same logical geometry to FLTK and Rev, including
-the persistent header/identity row and modem/status footer around the tab viewport.
-The shared default is 1180 by 909 logical pixels and the minimum is 1030 by 829.
+the persistent header, identity and simulation rows and modem/status footer around the tab viewport.
+The shared default is 1180 by 952 logical pixels and the minimum is 1030 by 872.
 Rev maps controls to Text, Button, Checkbox, Dropdown and Box elements. Lists and
 tabs compose those elements. FLTK uses the same declarations and shared
 application lifecycle with its own native widgets. `controller.cpp` owns drafts, validation, eligibility, exact binary

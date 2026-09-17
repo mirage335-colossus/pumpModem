@@ -4,6 +4,42 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Simulation probability and reference compute estimates — 16 September 2026
+
+The persistent Simulation row now shows a modeled whole-draft reception
+probability, an Intel Core i9-13900H CPU computation estimate and a projected
+RTX 4090 Laptop GPU computation estimate. A bounded analytical model consumes
+the existing encoded draft estimate and independently configured receiver
+profiles. It preserves exact short/raw bit lengths, applicable interval FEC,
+sample-quantized symbol timing and fully scored absence tails. It runs no local
+benchmark and does not inspect processor/GPU identity. Fixed throughput budgets
+and probability assumptions are documented in [simulation estimates](simulation-estimates.md);
+these checks do not calibrate the model or establish GPU execution support.
+
+The shared controller invalidates displayed estimates on draft/settings changes,
+rejects stale preparation results, and explicitly presents off, invalid and
+unavailable states. FLTK and Rev use the same declarations and geometry. The
+default/minimum desktop heights increased by 43 logical pixels to retain the
+existing content space while making room beside the dropdown.
+
+Release builds succeeded. All 23 selected suites passed in 174.69 seconds:
+the complete focused development-contract set, the new `simulation_estimate`
+suite, shared layout/contract/link-boundary tests and adapter-boundary guards.
+The new checks cover SNR and length response, unprotected short/raw input,
+fixed-interval FEC, unmatched profiles, independent bank cost, impairment losses,
+four-hour absence accounting, equivalent dictionary/raw draft estimates and
+stale/off/invalid GUI states. No transport regression assertions were relaxed.
+
+FLTK self-check and native adapter/document conformance passed. Rev self-check,
+native adapter/platform conformance and 1x/2x coordinates all passed (five tests,
+74.49 seconds). Default
+1180 by 952 and minimum 1030 by 872 windows were captured and visually inspected
+in both FLTK and Rev; the three estimate labels were readable without overlap.
+The initial sandboxed native attempt could not create Xvfb's local display
+socket; successful native retries used private displays outside that sandbox.
+No reference laptop benchmark, physical-link calibration, Windows execution or
+GPU execution was performed.
+
 ## Narrow-band simulation scheduling — 16 September 2026
 
 A reported 37% CPU utilization in a public 1 Hz simulation exposed a scheduling

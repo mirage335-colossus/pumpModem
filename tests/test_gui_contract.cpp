@@ -35,6 +35,13 @@ static_assert(!HasDomainFactory<BitmapSource>);
 static_assert(std::same_as<decltype(ui::DocumentNode{}.plot), BitmapSource>);
 static_assert(std::same_as<decltype(BitmapPresentation{}.source), BitmapSource>);
 static_assert(std::is_copy_constructible_v<BitmapSource>);
+// Both native backends bind these shared fields and slots. Model estimates
+// remain visible on every page without introducing toolkit-specific controls.
+static_assert(ui::persistent_slot(ui::Slot::simulation_confidence));
+static_assert(ui::persistent_slot(ui::Slot::simulation_cpu_time));
+static_assert(ui::persistent_slot(ui::Slot::simulation_gpu_time));
+static_assert(ui::Field::simulation_confidence!=ui::Field::simulation_cpu_time&&
+              ui::Field::simulation_cpu_time!=ui::Field::simulation_gpu_time);
 
 // Semantic tones must keep identical meaning for document labels, list cells
 // and bitmap captions, including the full-white monochrome data accent.
