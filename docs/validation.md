@@ -4,6 +4,65 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Bounded extreme-link planning — 16 September 2026
+
+`pump analyze-link` now runs three matched-correlation reference experiments
+without PCM generation or production receiver execution. Its statistics have
+constant storage and work proportional to the Monte Carlo trial count, even
+for represented symbols lasting years. The output retains exact draft wire
+size and airtime, current receiver coverage limits, and the fixed i9-13900H /
+RTX 4090 Laptop GPU compute estimates. The GPU estimate remains hypothetical;
+no hardware benchmark or new receive backend was added. New -3 dBm/-200 dB and
+-3 dBm/-230 dB presets are available in both GUI builds.
+
+The statistical unit suite compares reduced draws against an independent
+explicit complex-segment implementation for one and four segments, including
+correlated alternatives. It checks moments, detection probabilities, exact
+integer-shape Gamma noise tails, search penalties, joint phase/frequency
+coherence by numerical quadrature, the long-duration Wiener energy asymptote,
+full-duration segment coverage, deterministic seeds and invalid inputs.
+The extreme-geometry case represents 1e12 segments over 1e18 seconds without
+iterating over them. These are statistical-model checks, not physical modem
+calibration.
+
+New CLI tests preserve exact `0`, `001` and `a` wire lengths and existing
+airtime estimates; separate channel power from the TX design target; preserve
+explicit independent RX profiles; test both custom and preset links; reject
+misplaced/invalid options; and analyze a billion-second symbol under a
+10-second subprocess timeout. Analysis outputs contain no received bits,
+decoded source or physical-completion events. The four new CLI tests also
+pass with the Rev/Clang-built CLI (0.31 seconds combined).
+
+Eleven bounded 10,000-trial scenario runs covered -3 dBm at -200, -210 and
+-220 dB attenuation, durations from 501,187 seconds to 1e10 seconds, 3,600-
+and 20,000-second coherent segments, 0.5 and 0.05 degrees/sqrt(second) phase
+diffusion, and 1e6 or 1e8 prescribed search alternatives. Their computed
+examples are recorded in [fast weak-link planning](weak-link-planning.md).
+They expose the strong loss from phase diffusion and the growing time cost
+of segmented energy accumulation. They do not establish actual reception
+at -200 dB, whole-message probabilities, real-world confidence intervals or
+an interception bound. Sampled receiver behavior is unchanged by this work.
+
+Both Release GUI executables and CLIs build successfully. Rev's focused
+`correlation_experiment`, `tuning`, `simulation_estimate`, `gui_controller`
+and `gui_application` suites pass (five tests, 62.43 seconds). Native adapter
+code was unchanged; native display conformance was not repeated for this
+planning-only addition.
+
+The complete focused development-contract run plus the new statistical suite
+passes: 22 tests in 222.87 seconds, including sampled `weak_signal`, whole-symbol
+physical-end tests, short wire vectors, fixed intervals, pending GUI updates,
+live profile arbitration and the full CLI suite. No existing assertions were
+relaxed. Commands used after both Release builds:
+
+```sh
+ctest --test-dir build --output-on-failure -j 2 \
+  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|pattern_search|tuning|simulation_estimate|correlation_experiment|weak_signal|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
+ctest --test-dir build-rev --output-on-failure -j 2 \
+  -R '^(correlation_experiment|tuning|simulation_estimate|gui_controller|gui_application)$'
+python3 tests/test_cli.py build-rev/pump -k link_analysis
+```
+
 ## Sub-Hz planning and weak-signal clock search — 16 September 2026
 
 The application now accepts 0.01 Hz through 30 MHz. Sub-Hz tests preserve exact

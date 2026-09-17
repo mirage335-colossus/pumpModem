@@ -69,6 +69,7 @@ constexpr std::array presets{
     SimulationPreset{"3dBm -60dB",true,3,-60},SimulationPreset{"3dBm -90dB",true,3,-90},
     SimulationPreset{"3dBm -120dB",true,3,-120},SimulationPreset{"3dBm -170dB",true,3,-170},
     SimulationPreset{"3dBm -200dB",true,3,-200},SimulationPreset{"3dBm -230dB",true,3,-230},
+    SimulationPreset{"-3dBm -200dB",true,-3,-200},SimulationPreset{"-3dBm -230dB",true,-3,-230},
     SimulationPreset{"50dBm -200dB",true,50,-200},SimulationPreset{"50dBm -270dB",true,50,-270},
     SimulationPreset{"70dBm -250dB",true,70,-250}};
 std::size_t index_of(PatternMode mode) {

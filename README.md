@@ -95,6 +95,10 @@ a projection; simulation currently executes on the CPU. These rough estimates
 update with the draft and settings. A simulated carrier outside the receiver's
 frequency search shows an explanation instead of a numeric probability; see the
 [model and its assumptions](docs/simulation-estimates.md).
+For extreme links, `pump analyze-link` compares bounded statistical detector
+experiments and extrapolated processing costs without generating PCM. See
+[fast weak-link planning](docs/weak-link-planning.md) for the -3 dBm/-200 dB
+case, example commands and the distinction from actual receiver success.
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots

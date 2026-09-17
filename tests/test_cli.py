@@ -13,8 +13,8 @@ PUMP = str(pathlib.Path(sys.argv.pop(1)).resolve())
 AUDIO = ('--sample-rate','8000','--bw','1000','--carrier','1500','--spreading','16','--time','1800000000','--search-seconds','0')
 
 class StreamCLI(unittest.TestCase):
-    def run_pump(self,*args,data=None,ok=True):
-        p=subprocess.run([PUMP,*map(str,args)],input=data,capture_output=True,timeout=90)
+    def run_pump(self,*args,data=None,ok=True,timeout=90):
+        p=subprocess.run([PUMP,*map(str,args)],input=data,capture_output=True,timeout=timeout)
         self.assertEqual(p.returncode,0 if ok else 2,p.stderr.decode(errors='replace'))
         return p
     def test_removed_commands(self):
@@ -67,6 +67,116 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(value['carrier_hz'],1500)
             self.assertTrue(math.isclose(value['symbol_seconds'],128/numeric,rel_tol=1e-12))
             self.assertTrue(math.isclose(value['bit_rate'],numeric/128,rel_tol=1e-12))
+    def test_link_analysis_exact_draft_and_airtime(self):
+        geometry=('--bw','100','--target-snr','-42','--time','1800000000')
+        link=('--tx-dbm','-3','--attenuation-db','-200','--trials','2000')
+        for draft,count in ((('--bits','0'),1),(('--bits','001'),3),(('--text','a'),3)):
+            value=json.loads(self.run_pump('analyze-link',*draft,*geometry,*link,timeout=10).stdout)
+            self.assertEqual(value['transmission']['wire_bits'],count)
+            self.assertTrue(value['transmission']['raw_wire_path'])
+            self.assertFalse(value['production_decoder_run'])
+            self.assertFalse(value['pcm_generated'])
+            self.assertTrue(value['conditional_on_matched_timing_and_clock'])
+            self.assertTrue(value['prescribed_template_correlation_not_measured'])
+            self.assertEqual(value['receive_profile_assumption'],'matching_transmit_profile')
+            self.assertTrue(value['current_receiver']['profile_matches'])
+            self.assertEqual(value['transmission']['symbol_duration_source'],'configured_tx_plan')
+            self.assertNotIn('stream_complete',value)
+            self.assertNotIn('raw_bits',value)
+            self.assertNotIn('data_base64',value)
+            self.assertEqual(value['link']['received_power_dbm'],-203)
+            self.assertEqual(value['link']['cn0_db_hz'],-39)
+            self.assertEqual(value['link']['snr_100hz_db'],-59)
+            self.assertTrue(math.isclose(value['link']['ideal_18db_symbol_seconds'],10**5.7,rel_tol=1e-12))
+            self.assertTrue(math.isclose(value['link']['zero_residual_coherent_energy_asymptote_linear'],
+                                        4*10**(-3.9)/math.radians(0.5)**2,rel_tol=1e-12))
+            self.assertIsNone(value['current_receiver']['success_probability'])
+            self.assertFalse(value['current_receiver']['carrier_in_search'])
+            self.assertEqual(value['current_receiver']['clock_error_ppm'],100)
+            self.assertEqual(value['current_receiver']['frequency_offset_hz'],0)
+            self.assertTrue(value['current_receiver']['gpu_hypothetical'])
+            self.assertIn('i9-13900H',value['current_receiver']['cpu_reference'])
+            self.assertIn('4090 Laptop GPU',value['current_receiver']['gpu_reference'])
+            self.assertLessEqual(value['current_receiver']['frequency_hypotheses'],4097)
+            self.assertGreater(value['current_receiver']['full_200ppm_frequency_hypotheses'],4097)
+            for experiment in value['experiments'].values():
+                self.assertEqual(experiment['trials'],2000)
+                self.assertGreater(experiment['chips_per_segment'],0)
+                self.assertLessEqual(experiment['correct_detection_probability_low'],experiment['correct_detection_probability'])
+                self.assertGreaterEqual(experiment['correct_detection_probability_high'],experiment['correct_detection_probability'])
+            self.assertFalse(value['experiments']['ideal_coherent']['phase_mean_energy_approximation'])
+            self.assertTrue(value['experiments']['coherent_phase_model']['phase_mean_energy_approximation'])
+        exact=json.loads(self.run_pump('estimate','--text','a',*geometry).stdout)
+        for field in ('wire_bits','coded_bytes','content_bytes','coded_seconds','content_seconds'):
+            self.assertEqual(value['transmission'][field],exact[field])
+        self.assertEqual(value['transmission']['waveform_seconds'],exact['total_seconds'])
+        self.assertGreater(value['transmission']['simulated_seconds'],exact['total_seconds'])
+    def test_link_analysis_bounded_extreme_duration(self):
+        # A billion-second symbol must stay an O(trials) statistical job;
+        # generating or searching even its first PCM symbol would time out.
+        args=('analyze-link','--bits','001','--tx-dbm','-3','--attenuation-db','-200',
+              '--bw','100','--symbol-seconds','1e9','--trials','2000','--seed','17')
+        value=json.loads(self.run_pump(*args,timeout=10).stdout)
+        self.assertEqual(value['transmission']['symbol_seconds'],1e9)
+        self.assertEqual(value['transmission']['symbol_duration_source'],'explicit_override')
+        self.assertEqual(value['transmission']['wire_bits'],3)
+        self.assertGreater(value['transmission']['waveform_samples'],10**12)
+        segmented=value['experiments']['segmented_phase_model']
+        self.assertEqual(segmented['segments'],math.ceil(1e9/3600))
+        self.assertTrue(math.isclose(segmented['segments']*segmented['segment_seconds'],1e9,rel_tol=1e-12))
+        self.assertFalse(value['current_receiver']['confidence_available'])
+        self.assertIsNone(value['current_receiver']['success_probability'])
+        self.assertTrue(math.isclose(value['reference_assumptions']['noise_pair_union_bound'],2e-12,rel_tol=1e-12))
+        repeat=json.loads(self.run_pump(*args,timeout=10).stdout)
+        self.assertEqual(value['experiments'],repeat['experiments'])
+    def test_link_analysis_independent_targets_channel_and_reference(self):
+        args=('analyze-link','--text','a','--bw','100','--trials','100',
+              '--tx-dbm','-3','--attenuation-db','-200')
+        fast=json.loads(self.run_pump(*args,'--target-snr','32',timeout=10).stdout)
+        slow=json.loads(self.run_pump(*args,'--target-snr','-42',timeout=10).stdout)
+        self.assertEqual(fast['link'],slow['link'])
+        self.assertGreater(slow['transmission']['symbol_seconds'],fast['transmission']['symbol_seconds'])
+        profile=json.loads(self.run_pump(*args,'--target-snr','-42','--receive-targets','32',timeout=10).stdout)
+        self.assertEqual(profile['receive_profile_assumption'],'explicit_receive_targets')
+        self.assertFalse(profile['current_receiver']['profile_matches'])
+        self.assertIsNone(profile['current_receiver']['success_probability'])
+        ideal=json.loads(self.run_pump(*args,'--phase-noise','0','--clock-error-ppm','0',
+            '--frequency-offset','0.125','--residual-frequency-hz','0.001',
+            '--symbol-seconds','10000','--template-correlation','0.25','--noise-figure-db','4',timeout=10).stdout)
+        self.assertEqual(ideal['link']['cn0_db_hz'],-33)
+        self.assertIsNone(ideal['link']['zero_residual_coherent_energy_asymptote_linear'])
+        self.assertEqual(ideal['current_receiver']['clock_error_ppm'],0)
+        self.assertEqual(ideal['current_receiver']['frequency_offset_hz'],0.125)
+        self.assertEqual(ideal['transmission']['symbol_duration_source'],'explicit_override')
+        self.assertEqual(ideal['current_receiver']['actual_carrier_offset_hz'],0.125)
+        self.assertEqual(ideal['reference_assumptions']['residual_frequency_hz'],0.001)
+        self.assertEqual(ideal['experiments']['segmented_phase_model']['template_correlation'],0.25)
+        preset=json.loads(self.run_pump('analyze-link','--input','-','--simulation','-3dBm -200dB',
+            '--trials','100','--bw','100','--target-snr','-42',data=b'a',timeout=10).stdout)
+        self.assertEqual(preset['link'],slow['link'])
+        self.assertEqual(preset['transmission']['wire_bits'],3)
+    def test_link_analysis_rejects_invalid_and_misplaced_options(self):
+        args=('analyze-link','--text','a','--tx-dbm','-3','--attenuation-db','-200','--trials','10')
+        for extra in (('--symbol-seconds','0'),('--symbol-seconds','-1'),('--symbol-seconds','1e308'),
+                      ('--coherent-seconds','0'),('--coherent-seconds','1e19'),
+                      ('--hypotheses','1'),('--false-alarm','0'),('--false-alarm','1'),
+                      ('--residual-frequency-hz','nan'),('--template-correlation','2'),
+                      ('--noise-figure-db','-1'),('--output','unused.wav'),('--snr','20')):
+            self.run_pump(*args,*extra,ok=False,timeout=10)
+        for trials in ('0','1000001','1.5','-1'):
+            self.run_pump(*args[:-2],'--trials',trials,ok=False,timeout=10)
+        for draft in ((),('--bits',''),('--bits','01x'),('--bits','0','--text','a'),
+                      ('--bits','0','--input','-'),('--bits','0','--callsign','CQ'),
+                      ('--bits','0','--repeatable')):
+            self.run_pump('analyze-link',*draft,'--tx-dbm','-3','--attenuation-db','-200',ok=False,timeout=10)
+        for power in ((),('--tx-dbm','-3'),('--attenuation-db','-200'),
+                      ('--tx-dbm','-3','--attenuation-db','200'),
+                      ('--simulation','off'),('--simulation','3dBm -170dB','--tx-dbm','-3'),
+                      ('--simulation','3dBm -170dB','--attenuation-db','-200')):
+            self.run_pump('analyze-link','--text','a',*power,ok=False,timeout=10)
+        for flag in ('tx-dbm','attenuation-db','noise-figure-db','symbol-seconds','coherent-seconds',
+                     'trials','hypotheses','false-alarm','residual-frequency-hz','template-correlation'):
+            self.run_pump('estimate','--text','a','--'+flag,'1',ok=False)
     def test_sub_hertz_sampled_reception(self):
         # A reduced internal clock exercises the actual 3.56-hour symbol
         # geometry with a bounded test recording, without waiting in real time.

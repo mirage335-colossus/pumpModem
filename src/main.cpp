@@ -1,8 +1,11 @@
 #include "datapump/audio.hpp"
 #include "datapump/channel.hpp"
+#include "datapump/correlation_experiment.hpp"
 #include <array>
 #include "datapump/crypto.hpp"
 #include "datapump/modem.hpp"
+#include "datapump/pattern_search.hpp"
+#include "datapump/simulation_estimate.hpp"
 #include "datapump/stream_codec.hpp"
 #include "datapump/qr.hpp"
 #include "datapump/runtime.hpp"
@@ -22,6 +25,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <sstream>
@@ -44,6 +48,7 @@ Usage: pump COMMAND [OPTIONS]
   simulate     Free-running sampled channel and blind receiver acquisition
   listen       Continuous live receiver (or noise/loopback with --simulation)
   estimate     Calculate exact message airtime without creating a waveform
+  analyze-link Bounded statistical link analysis as JSON; no PCM or decoder
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
   keygen       Create an owner-only 128 MiB symmetric keyfile (--output)
@@ -105,6 +110,20 @@ Audio/simulation:
   --phase-noise N       Phase diffusion, degrees/sqrt(second); default0.5
   --receiver-time N     Independent receive epoch for simulate (default --time)
 
+Statistical link analysis (analyze-link only):
+  --tx-dbm N --attenuation-db N  Custom link; attenuation is nonpositive
+                        Both are required unless --simulation selects a preset
+  --noise-figure-db N   Receiver noise figure; default10 dB
+  --symbol-seconds N    Override analyzed symbol duration; otherwise use TX plan
+  --coherent-seconds N  Maximum coherent segment; default3600 seconds
+  --trials N           Monte Carlo trials per reference model; 1..1000000, default10000
+  --hypotheses N        Total searched alternatives, including both bits; default1000000
+  --false-alarm P       Global reference false-alarm budget; default0.000001
+  --residual-frequency-hz N  Error after hypothetical acquisition; default0
+  --template-correlation N   Assumed normalized template correlation; default0
+                        Uses --text, --input or exact --bits; never decodes them
+                        Without --receive-targets, current RX is assumed to match TX
+
 Very slow status:
   --bits 010            Exact known callsign bits (1..4096), no MAC or FEC
   --format svg|pbm      QR output format; default svg; up to500 characters
@@ -116,6 +135,7 @@ Examples:
   pump rx --input transfer.wav --save received.png
   pump tx --text "hello" --device default
   pump rx --device default --seconds 30 --json
+  pump analyze-link --text a --bw 100 --target-snr -42 --tx-dbm -3 --attenuation-db -200
 GUI: datapump-gui
 )HELP";
 
@@ -129,7 +149,9 @@ public:
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
             "target-snr","receive-targets","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
-            "recovery-seconds","recovery-threads","recovery-bits","recovery-errors"};
+            "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
+            "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
+            "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
         for(int i=1;i<argc;++i) {
             std::string arg=argv[i];
             if(arg=="--tx" || arg=="--rx") {if(!command.empty()) throw Error("choose one command");command=arg.substr(2);continue;}
@@ -182,8 +204,20 @@ public:
         if(command!="rx") reject({"save"},"is only valid for rx");
         if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
-        if(command!="simulate" && command!="listen") reject({"simulation"},"is only valid for simulate/listen");
-        if(command!="simulate" && command!="listen") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen");
+        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
+        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
+        if(command!="analyze-link")
+            reject({"tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds","trials",
+                "hypotheses","false-alarm","residual-frequency-hz","template-correlation"},"is only valid for analyze-link");
+        if(command=="analyze-link") {
+            reject({"snr","output","tx-delay","seconds","format"},"is not an analyze-link option");
+            if(!has("bits") && !has("text") && !has("input"))
+                throw Error("analyze-link requires --text, --input or --bits");
+            if(has("bits"))reject({"text","input","kind","filename","callsign","grid","repeatable"},"cannot accompany exact --bits");
+            if(has("simulation"))reject({"tx-dbm","attenuation-db"},"cannot accompany a simulation preset");
+            else if(!has("tx-dbm") || !has("attenuation-db"))
+                throw Error("analyze-link requires both --tx-dbm and --attenuation-db, or --simulation");
+        }
         if(command!="simulate") reject({"receiver-time"},"is only valid for simulate");
         if(command!="rx" && command!="simulate" && command!="listen")
             reject({"recovery-seconds","recovery-threads","recovery-bits","recovery-errors"},"is only valid for rx/simulate/listen");
@@ -491,6 +525,146 @@ Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t tim
     if(k) {auto stream=k->stream(StreamPurpose::Data,time,0,(bits.size()+7)/8);for(std::size_t i=0;i<bits.size();++i)bits[i]^=static_cast<std::uint8_t>((stream[i/8]>>(7-i%8))&1);}
     return bits;
 }
+void json_number(long double value) {
+    if(std::isfinite(value))std::cout<<value;else std::cout<<"null";
+}
+void report_correlation_experiment(const simulation::CorrelationExperimentResult& result,double chip_seconds) {
+    std::cout<<"{\"segments\":"<<result.segments<<",\"segment_seconds\":";json_number(result.segment_seconds);
+    std::cout<<",\"expected_coherence\":";json_number(result.expected_coherence);
+    std::cout<<",\"expected_signal_energy\":";json_number(result.expected_signal_energy);
+    std::cout<<",\"noncentrality\":";json_number(2.L*result.expected_signal_energy);
+    std::cout<<",\"threshold\":";json_number(result.threshold);
+    std::cout<<",\"template_correlation\":";json_number(result.template_correlation);
+    std::cout<<",\"chips_per_segment\":";json_number(result.segment_seconds/chip_seconds);
+    std::cout<<",\"trials\":"<<result.trials<<",\"detected_correct\":"<<result.detected_correct
+        <<",\"noise_pair_above\":"<<result.noise_pair_above<<",\"correct_detection_probability\":";
+    json_number(result.correct_probability);
+    std::cout<<",\"correct_detection_probability_low\":";json_number(result.correct_probability_low);
+    std::cout<<",\"correct_detection_probability_high\":";json_number(result.correct_probability_high);
+    std::cout<<",\"signal_statistic_mean\":";json_number(result.signal_statistic_mean);
+    std::cout<<",\"signal_statistic_variance\":";json_number(result.signal_statistic_variance);
+    std::cout<<",\"phase_mean_energy_approximation\":"<<(result.phase_mean_energy_approximation?"true":"false")<<'}';
+}
+void analyze_link(const Args& a,transfer::Options options) {
+    if(a.has("symbol-seconds")) {
+        options.modem.integration_seconds=a.number("symbol-seconds",0);
+        if(options.modem.integration_seconds<=0)throw Error("symbol-seconds must be positive");
+        modem::validate(options.modem);
+    }
+    const bool matching_profile=!a.has("receive-targets");
+    if(matching_profile)options.automatic_receive_profiles=false;
+    const auto& c=options.modem;
+    auto preset=a.has("simulation")?tuning::parse_simulation_preset(a.get("simulation")):
+        tuning::SimulationPreset{"custom",true,a.number("tx-dbm",0),a.number("attenuation-db",0)};
+    const auto noise_figure=a.number("noise-figure-db",10);
+    const auto link=tuning::link_budget(preset,c.bandwidth_hz,c.sample_rate,noise_figure);
+    modem::ChannelConfig channel;
+    channel.snr_db=link.sample_snr_db;channel.seed=a.integer("seed",1);
+    channel.delay_samples=a.integer("delay-samples",137);
+    channel.frequency_offset_hz=a.number("frequency-offset",0);
+    channel.clock_error_ppm=a.number("clock-error-ppm",100);
+    channel.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+    modem::validate_channel(c,channel);
+    const auto trials=a.integer("trials",10000);
+    if(!trials || trials>1000000)throw Error("trials must be 1..1000000");
+    const auto segment_seconds=a.number("coherent-seconds",3600);
+    if(segment_seconds<=0 || segment_seconds>1e18)throw Error("coherent-seconds must be positive and at most 1e18");
+    simulation::CorrelationExperimentParameters experiment;
+    experiment.cn0_db_hz=link.snr_db_hz;
+    experiment.symbol_seconds=static_cast<double>(modem::symbol_sample_count(c))/c.sample_rate;
+    experiment.segment_seconds=experiment.symbol_seconds;
+    experiment.trials=static_cast<std::size_t>(trials);experiment.seed=channel.seed;
+    experiment.search_hypotheses=a.number("hypotheses",1e6);
+    experiment.false_alarm_probability=a.number("false-alarm",1e-6);
+    experiment.template_correlation=a.number("template-correlation",0);
+    experiment.phase_noise_degrees_per_sqrt_second=0;
+    const auto ideal=simulation::correlation_experiment(experiment);
+    experiment.phase_noise_degrees_per_sqrt_second=channel.phase_noise_degrees_per_sqrt_second;
+    experiment.residual_frequency_hz=a.number("residual-frequency-hz",0);
+    const auto coherent=simulation::correlation_experiment(experiment);
+    experiment.segment_seconds=std::min(experiment.symbol_seconds,segment_seconds);
+    const auto segmented=simulation::correlation_experiment(experiment);
+    transfer::Estimate transmission;
+    bool raw=true;
+    if(a.has("bits"))transmission=transfer::estimate_binary(status_bits(a,{},options.timestamp),options);
+    else {
+        const auto outgoing=message(a);raw=transfer::uses_raw_message(outgoing);
+        transmission=transfer::estimate(outgoing,options);
+    }
+    const auto profiles=options.automatic_receive_profiles?tuning::receive_profiles(c,
+        options.receive_targets_db_hz,options.receive_pattern_mode,options.key.has_value()):std::vector<modem::Config>{c};
+    const auto current=simulation::estimate(transmission,options,raw,channel,profiles);
+    const auto geometry=modem::default_pattern_frequency_search(c);
+    const auto phase=static_cast<long double>(channel.phase_noise_degrees_per_sqrt_second)*std::numbers::pi_v<long double>/180;
+    const auto rho=std::pow(10.L,static_cast<long double>(link.snr_db_hz)/10);
+    const auto full_half_width=static_cast<long double>(c.carrier_hz)*modem::default_clock_uncertainty_ppm/1e6L;
+    const auto full_frequency_count=1+2*std::ceil(full_half_width*experiment.symbol_seconds/.25L);
+    std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10)
+        <<"{\"analysis\":\"matched_correlation_reference\",\"production_decoder_run\":false,\"pcm_generated\":false"
+        <<",\"conditional_on_matched_timing_and_clock\":true"
+        <<",\"prescribed_template_correlation_not_measured\":true"
+        <<",\"monte_carlo_intervals\":\"model_only_95_percent_Wilson\""
+        <<",\"receive_profile_assumption\":\""<<(matching_profile?"matching_transmit_profile":"explicit_receive_targets")<<'"'
+        <<",\"link\":{\"transmit_dbm\":";json_number(preset.transmit_dbm);
+    std::cout<<",\"attenuation_db\":";json_number(preset.attenuation_db);
+    std::cout<<",\"noise_figure_db\":";json_number(noise_figure);
+    std::cout<<",\"noise_density_dbm_hz\":";json_number(-174.L+noise_figure);
+    std::cout<<",\"received_power_dbm\":";json_number(link.received_power_dbm);
+    std::cout<<",\"cn0_db_hz\":";json_number(link.snr_db_hz);
+    std::cout<<",\"snr_100hz_db\":";json_number(link.snr_db_hz-20.L);
+    std::cout<<",\"selected_band_snr_db\":";json_number(link.snr_db);
+    std::cout<<",\"ideal_18db_symbol_seconds\":";json_number(std::pow(10.L,(18.L-link.snr_db_hz)/10));
+    // Linear Es/N0 for zero residual carrier error; zero diffusion has no
+    // finite asymptote, represented by JSON null rather than infinity.
+    std::cout<<",\"zero_residual_coherent_energy_asymptote_linear\":";
+    if(phase>0)json_number(4*rho/(phase*phase));else std::cout<<"null";
+    std::cout<<"},\"transmission\":{\"wire_bits\":"<<transmission.wire_bits
+        <<",\"coded_bytes\":"<<transmission.coded_bytes<<",\"content_bytes\":"<<transmission.content_bytes
+        <<",\"raw_wire_path\":"<<(raw?"true":"false")<<",\"waveform_samples\":"<<transmission.waveform_samples
+        <<",\"sample_rate\":"<<c.sample_rate<<",\"bandwidth_hz\":";json_number(c.bandwidth_hz);
+    std::cout<<",\"carrier_hz\":";json_number(c.carrier_hz);
+    std::cout<<",\"tx_target_cn0_db_hz\":";json_number(a.number("target-snr",32));
+    std::cout<<",\"symbol_duration_source\":\""<<(a.has("symbol-seconds")?"explicit_override":"configured_tx_plan")<<'"';
+    std::cout<<",\"symbol_seconds\":";json_number(experiment.symbol_seconds);
+    std::cout<<",\"coded_seconds\":";json_number(transmission.coded_seconds);
+    std::cout<<",\"content_seconds\":";json_number(transmission.content_seconds);
+    std::cout<<",\"waveform_seconds\":";json_number(transmission.total_seconds);
+    std::cout<<",\"simulated_seconds\":";json_number(current.simulated_seconds);
+    std::cout<<"},\"current_receiver\":{\"profile_matches\":"<<(current.profile_matches?"true":"false")
+        <<",\"receiver_profiles\":"<<current.receiver_profiles
+        <<",\"carrier_in_search\":"<<(current.carrier_in_search?"true":"false")
+        <<",\"workspace_supported\":"<<(current.receiver_workspace_supported?"true":"false")
+        <<",\"confidence_available\":"<<(current.confidence_available?"true":"false")
+        <<",\"success_probability\":";
+    if(current.confidence_available)json_number(current.success_probability);else std::cout<<"null";
+    std::cout<<",\"clock_error_ppm\":";json_number(channel.clock_error_ppm);
+    std::cout<<",\"frequency_offset_hz\":";json_number(channel.frequency_offset_hz);
+    std::cout<<",\"actual_carrier_offset_hz\":";json_number(current.carrier_offset_hz);
+    std::cout<<",\"requested_search_half_width_hz\":";json_number(current.carrier_search_half_width_hz);
+    std::cout<<",\"frequency_step_hz\":";json_number(geometry.step_hz);
+    std::cout<<",\"clock_error_for_quarter_chip_ppm\":";
+    json_number(1e6L*.25L*modem::pattern_chip_samples(c)/c.sample_rate/experiment.symbol_seconds);
+    std::cout<<",\"frequency_hypotheses\":"<<geometry.count
+        <<",\"frequency_hypotheses_cap\":"<<modem::maximum_pattern_frequency_hypotheses
+        <<",\"full_200ppm_frequency_hypotheses\":";json_number(full_frequency_count);
+    std::cout<<",\"modeled_symbol_snr_db\":";json_number(current.modeled_symbol_snr_db);
+    std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu
+        <<"\",\"gpu_hypothetical\":"<<(current.gpu_hypothetical?"true":"false")<<",\"cpu_seconds\":";
+    json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);
+    std::cout<<"},\"reference_assumptions\":{\"search_hypotheses\":";json_number(experiment.search_hypotheses);
+    std::cout<<",\"false_alarm_probability\":";json_number(experiment.false_alarm_probability);
+    std::cout<<",\"noise_pair_union_bound\":";
+    json_number(2.L*experiment.false_alarm_probability/experiment.search_hypotheses);
+    std::cout<<",\"residual_frequency_hz\":";json_number(experiment.residual_frequency_hz);
+    std::cout<<",\"phase_noise_degrees_per_sqrt_second\":";json_number(experiment.phase_noise_degrees_per_sqrt_second);
+    std::cout<<",\"requested_coherent_seconds\":";json_number(segment_seconds);
+    std::cout<<",\"template_correlation\":";json_number(experiment.template_correlation);
+    std::cout<<",\"seed\":"<<experiment.seed<<"},\"experiments\":{\"ideal_coherent\":";
+    const auto chip_seconds=static_cast<double>(modem::pattern_chip_samples(c))/c.sample_rate;
+    report_correlation_experiment(ideal,chip_seconds);std::cout<<",\"coherent_phase_model\":";
+    report_correlation_experiment(coherent,chip_seconds);std::cout<<",\"segmented_phase_model\":";
+    report_correlation_experiment(segmented,chip_seconds);std::cout<<"}}\n";
+}
 volatile std::sig_atomic_t interrupted=0;
 void interrupt_handler(int) {interrupted=1;}
 void listen(const Args& a,const transfer::Options& options) {
@@ -629,13 +803,14 @@ int main(int argc,char** argv) {
             for(const auto& d:audio::devices()) std::cout<<d.id<<'\t'<<d.description<<'\n';
             return 0;
         }
-        const std::set<std::string> commands={"tx","rx","simulate","status-tx","status-rx","estimate","listen"};
+        const std::set<std::string> commands={"tx","rx","simulate","status-tx","status-rx","estimate","listen","analyze-link"};
         if(!commands.contains(a.command)) throw Error("unknown command: "+a.command);
         auto c=config(a);auto timestamp=epoch(a);
         auto k=c.spreading_mode==modem::SpreadingMode::tone?std::optional<Crypto>{}:key(a);
         if(c.spreading_mode==modem::SpreadingMode::tone && a.has("keyfile"))
             std::cerr<<"Tone mode is unencrypted; key selection is disabled.\n";
         auto settings=transfer_options(a,c,k,timestamp);
+        if(a.command=="analyze-link") {analyze_link(a,settings);return 0;}
         transfer::Progress progress;
         if(a.has("progress")) progress=[](std::uint64_t candidate) {std::cerr<<"Searching epoch "<<candidate<<'\n';};
         if(a.command=="estimate") {

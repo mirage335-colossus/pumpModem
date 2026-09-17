@@ -286,7 +286,7 @@ void automatic_pattern_rates() {
     clock.constellation_bits=7;rejects([&]{modem::validate(clock);},"multi-bit symbol transport accepted");
 }
 void physical_simulation_presets() {
-    check(tuning::simulation_presets().size()==11,"all specified simulation presets");
+    check(tuning::simulation_presets().size()==13,"all specified simulation presets");
     check(!tuning::parse_simulation_preset("no").enabled,"simulation defaults off");
     auto preset=tuning::parse_simulation_preset("3dBm -170dB");
     const auto result=tuning::link_budget(preset,1200,48000);
@@ -296,6 +296,11 @@ void physical_simulation_presets() {
     near(result.snr_db,-3-10*std::log10(1200.),"in-band SNR");
     near(result.sample_snr_db,-3-10*std::log10(24000.),"AWGN SNR uses sampled Nyquist noise bandwidth");
     near(tuning::link_budget(preset,1200,96000).sample_snr_db,result.sample_snr_db-10*std::log10(2.),"sample-rate-independent physical PSD");
+    const auto low_power=tuning::link_budget(tuning::parse_simulation_preset("-3dBm -200dB"),100,6000);
+    near(low_power.received_power_dbm,-203,"negative transmit dBm must retain its sign");
+    near(low_power.snr_db_hz,-39,"low-power extreme link C/N0");
+    near(tuning::link_budget(tuning::parse_simulation_preset("-3dBm -230dB"),100,6000).snr_db_hz,-69,
+         "lower power and further attenuation must add independently");
     check(tuning::parse_simulation_preset("50dbm-270db").transmit_dbm==50,"stable compact preset spelling");
     rejects([]{tuning::parse_simulation_preset("3dBm -7dB");},"reject unlisted preset");
 }
