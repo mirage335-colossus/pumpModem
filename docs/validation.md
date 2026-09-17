@@ -3002,3 +3002,98 @@ The corresponding generated-noise benchmark improved from 1.25429x to 1.57008x
 real time, about 25% greater throughput. Both receiver versions used 11 workers
 and the same remaining library objects. Commands, CPU-utilization observations
 and measurement limits are in [throughput](throughput.md#cpu-and-live-throughput).
+
+### Long-symbol live acquisition and progress (2026-09-17)
+
+A generated-PCM reproduction of a public raw `0` at Rate 3,600 Hz, carrier
+1,500 Hz and target -8 dB-Hz confirmed the reported simulation failure. The
+internal clock is 14,400 Hz and each bit occupies 5,732,744 samples (398.107
+seconds). The original full FFT path buffered 1,165.084 seconds before its first
+acquisition pass. Feeding all 800.428 seconds of sampled transmission and
+observed-absence tail from the +3 dBm/-170 dB, 100 ppm, 0.5 degrees/sqrt(second)
+channel produced no candidates or bits. This reproduction used the full 1,914
+carrier/clock alternatives with sufficient memory, not the local fallback.
+The live GUI simulation does not call the offline receiver's EOF flush.
+
+Long-symbol acquisition now uses a smaller FFT when its overlap leaves useful
+coverage, caps the range of new starts per batch, and scores an initial range
+after a complete symbol plus at most one second of new starts. Established
+tracks score complete available symbols at input progress boundaries instead
+of waiting for another acquisition batch. Separate tracking scratch keeps the
+smaller FFT buffers safe. Transmission, hypothesis coverage, confidence gates,
+exact bit prefixes and fully observed physical absence remain unchanged.
+
+Entire acquisition batches may be skipped only when one retained accepted span
+already excludes every start and carrier under the existing admission rules,
+and no ready continuation can rotate that span out before admission. Their
+trial penalties remain charged; rejected-overlap diagnostic records are not
+generated. An independent temporary build with this optimization disabled
+produced 336 byte-identical emitted events across long-symbol progress and
+coupled-clock fixtures. Instrumentation confirmed 524 skipped batches covering
+145,016 start positions. Bits, poll positions, identities, sample endpoints,
+scores, carrier estimates, missing slots and completion flags matched.
+
+Long-symbol continuation also distributes independent carrier fits across CPU
+workers when their bounded private pattern caches fit the workspace. Timing
+selection and the ordered score reduction remain serial. A new exact comparison
+passes for one worker versus three and automatic workers, including public and
+private patterns, changing private stream phases, nominal/coupled clock fits,
+duplicate-carrier ties, pending prefixes, diagnostics, idle memory and physical
+completion without `finish()`. The compute estimate retains a conservative
+serial-rate tracking allowance rather than promising this parallel speedup.
+The parallel continuation and continuous FFT progress fixtures also passed
+ASan/UBSan with the complete library instrumented; leak detection was disabled
+for the sandbox restriction.
+
+New regression coverage uses continuous PCM without `finish()`: public `001`
+appears as `0`, `00`, then `001`, including delayed starts, different chunk
+sizes and shared carrier projections. Noise-only input stays unadmitted and
+partial silence cannot complete a message. Separate asynchronous live capture
+and sampled live simulation tests expose a pending one-bit row and complete
+that same row only after a whole absent symbol. The new capture regression
+failed before the fix and passed afterward. ASan/UBSan passed the new continuous
+FFT progress, coupled-clock progress/absence and streamed-template regressions;
+leak detection was disabled for the sandbox restriction.
+
+The initial complete Release build and 20 selected development-contract suites
+passed (344.08 seconds); the FFT receiver suite also passed independently.
+After the final continuation change, the complete Release build and all 21
+development-contract suites plus `search_parallel` passed (22/22, 662.52
+seconds while sharing the host with the exact-profile probe). FLTK and Rev GUI
+binaries were rebuilt successfully. `git diff --check` passed.
+These are software checks, not a new physical microphone/speaker validation.
+
+The first exact-profile test of the updated scheduler entered acquisition at
+about 399.1 seconds of media but did not finish the full search within a
+600-second wall-time limit. It used automatic workers, restricted to four CPUs
+after about 95 seconds to share the host with regressions, and consumed 44m14s
+of CPU at a stable 1,202,164 KiB RSS. Removing the input-buffering delay does not
+establish real-time throughput for this large search. The simulation compute
+estimate reflects the new geometry and cadence but remains an engineering
+model, not a benchmark or runtime guarantee.
+
+The public exact-profile first pass still requires 7,657 transforms of
+2,097,152 complex points: one input transform plus a generated-template forward
+transform and inverse transform for each bit and each of 1,914 hypotheses.
+That is about 169 billion radix-2 butterflies, excluding template generation.
+Parallel continuation cannot reduce this acquisition cost. Keeping both
+transformed templates for the whole bank would take about 120 GiB, so the
+bounded receiver streams them instead.
+
+A longer probe of a frozen scheduler/pruning build, before continuation was
+parallelized, confirmed exact acquisition with the full public-pattern bank.
+It published pending raw `0` at media time 399.217778 seconds, after 1,469.328724
+wall seconds (24m29s), with score 120.519907. It used the same +3 dBm/-170 dB
+sampled channel, 100 ppm clock mismatch and phase diffusion, without a narrowed
+carrier bank or EOF flush. Covered-batch skipping then let input advance to the
+absent-symbol decision at media time 796.405 seconds. RSS fell from 1,202,216
+KiB during acquisition to 312,896 KiB during serial continuation. The host was
+also running the final regression checks during acquisition, so this is an
+observed shared-host time rather than an uncontended throughput benchmark.
+The probe reached its original 1,800-second wall limit (exit 124) while scoring
+that absent symbol; it emitted no completion event. Total CPU time was
+205m12.060s. This proves exact pending acquisition, not end-to-end completion
+at this profile. The subsequently added parallel continuation is covered by
+the exact serial/parallel and physical-end regressions above, but was not
+rerun through this full-size acquisition. Physical audio and real-time
+throughput at this setting remain unverified.

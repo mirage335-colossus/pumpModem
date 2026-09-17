@@ -118,7 +118,8 @@ struct ComparedProgress {
     std::size_t completed_at=0;
 };
 ComparedProgress compare_parallel_progress(const std::vector<float>& samples,const modem::Config& c,
-                                          modem::PatternSearch search,unsigned workers,bool shrink=false) {
+                                          modem::PatternSearch search,unsigned workers,bool shrink=false,
+                                          bool finish_capture=true) {
     constexpr std::size_t workspace=2*1024*1024,reduced=256*1024;
     search.candidate_limit=31;search.track_limit=4;search.bit_limit=128;
     search.worker_threads=1;modem::PatternReceiver serial(c,workspace,search);
@@ -180,8 +181,10 @@ ComparedProgress compare_parallel_progress(const std::vector<float>& samples,con
             poll(position);
         }
     }
-    serial.finish();parallel.finish();poll(samples.size());
-    serial.finish();parallel.finish();poll(samples.size());
+    if(finish_capture) {
+        serial.finish();parallel.finish();poll(samples.size());
+        serial.finish();parallel.finish();poll(samples.size());
+    }
     return result;
 }
 void parallel_search_exact_progress() {
@@ -243,6 +246,49 @@ void parallel_search_physical_absence() {
               "parallel search must expose pending partial bytes and exactly one physical completion");
         check(result.completed_at>=delay+bits.size()*symbol+modem::pattern_absence_samples(c),
               "parallel search completed before six seconds of fully scored absence");
+    }
+}
+void parallel_long_continuation_exact_progress() {
+    const Bytes expected{0,0,1};
+    constexpr std::size_t delay=16;
+    for(const bool keyed:{false,true}) {
+        auto transmitted=config(64,keyed);
+        transmitted.sample_rate=64;transmitted.bandwidth_hz=8;transmitted.carrier_hz=16;
+        // A quarter-second remainder lets later private symbols separate
+        // subsecond start phases that shared the first symbol's stream epoch.
+        transmitted.integration_seconds=keyed?40.25:40;
+        transmitted.stream_phase_samples=keyed?48:0;
+        const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(transmitted));
+        const auto samples=waveform(transmitted,expected,delay,3*symbol,.73,.003);
+        auto received=transmitted;received.stream_phase_samples=0;
+        modem::PatternSearch search;
+        const auto step=.25*received.sample_rate/static_cast<double>(symbol);
+        // Keep exact ties and both nominal-clock and coupled-clock fits in
+        // their original order. One worker must produce byte-for-byte equal
+        // decisions, diagnostics and evidence to parallel continuation.
+        search.frequency_offsets_hz={0,0,-step,step,0,-step,step};
+        search.couple_clock_to_carrier=true;search.uncoupled_frequency_count=4;
+        search.search_stream_phases=keyed;
+        modem::PatternReceiver path(received,2*1024*1024,search);
+        check(!path.clock_windowed(),"long parallel fixture must exercise compact FFT tracking references");
+        const auto payload_end=delay+expected.size()*symbol;
+        const std::vector<float> partial(samples.begin(),samples.begin()+
+            static_cast<std::ptrdiff_t>(payload_end+symbol/2));
+        for(const unsigned workers:{3U,0U}) {
+            try {
+                const auto pending=compare_parallel_progress(partial,received,search,workers,false,false);
+                check(pending.bits==expected && pending.pending_polls==expected.size() && pending.complete_events==0,
+                      "parallel long continuation lost per-symbol pending bits or completed on a partial absent symbol");
+                const auto complete=compare_parallel_progress(samples,received,search,workers,false,false);
+                check(complete.bits==expected && complete.pending_polls==expected.size() && complete.complete_events==1,
+                      "parallel long continuation failed exact pending bits and one physical completion without EOF");
+                check(complete.completed_at>=payload_end+symbol,
+                      "parallel long continuation ended before a complete absent symbol was observed");
+            } catch(const Error& error) {
+                throw Error(std::string(keyed?"private changing phase":"public mixed clock bank")+" / "+
+                            std::to_string(workers)+" workers: "+error.what());
+            }
+        }
     }
 }
 void exact_blind_bits() {
@@ -408,6 +454,93 @@ void changing_chunks_and_late_start() {
           first.support_samples==second.support_samples && first.support_samples>0 &&
           first.support_samples<=3*static_cast<double>(symbol),
           "PCM push chunk boundaries changed acquisition evidence");
+}
+void continuous_long_fft_progress() {
+    auto c=config(64);c.sample_rate=64;c.bandwidth_hz=8;c.carrier_hz=16;c.integration_seconds=40;
+    const auto symbol=static_cast<std::size_t>(modem::symbol_sample_count(c));
+    const Bytes expected{0,0,1};
+    constexpr std::size_t workspace=2*1024*1024;
+    constexpr std::array<std::size_t,1> regular{64};
+    constexpr std::array<std::size_t,5> changing{7,137,1,31,83};
+    for(const bool shared:{false,true})for(const auto delay:{std::size_t{16},3*symbol+16})
+    for(const auto chunks:{std::span<const std::size_t>(regular),std::span<const std::size_t>(changing)}) {
+        try {
+            modem::PatternSearch search;
+            search.worker_threads=1;search.candidate_limit=32;search.track_limit=4;search.bit_limit=128;
+            // At forty seconds the compact FFT is shorter than twice the
+            // symbol. Continuing each accepted symbol therefore also checks
+            // the separately retained tracking reference.
+            modem::PatternReceiver receiver(c,workspace,search);
+            check(!receiver.clock_windowed(),"continuous long fixture must exercise the full FFT receiver");
+            const auto samples=waveform(c,expected,delay,3*symbol,.73,.003);
+            std::vector<std::complex<double>> projected(samples.size());
+            for(std::size_t i=0;i<samples.size();++i)
+                projected[i]=static_cast<double>(samples[i])*std::polar(1.,.37-2*std::numbers::pi*c.carrier_hz*i/c.sample_rate);
+            Bytes observed;
+            std::optional<std::uint64_t> first_sample;
+            std::size_t position=0,chunk=0,pending=0,complete=0;
+            const auto poll=[&] {
+                check(receiver.working_bytes()<=workspace,"continuous long FFT receiver exceeded its workspace");
+                for(const auto& event:receiver.take_bursts()) {
+                    check(!event.missing_slots,"clean continuous long FFT receiver manufactured an unknown slot");
+                    if(!first_sample)first_sample=event.stream_first_sample;
+                    check(event.stream_first_sample==*first_sample,"continuous long FFT receiver changed stream identity");
+                    observed.insert(observed.end(),event.bits.begin(),event.bits.end());
+                    if(!event.bits.empty()) {
+                        check(!event.complete,"continuous long FFT receiver withheld a payload bit until completion");
+                        ++pending;
+                    }
+                    if(event.complete) {
+                        check(position>=delay+(expected.size()+1)*symbol,
+                              "continuous long FFT receiver completed before a fully observed absent symbol");
+                        ++complete;
+                    }
+                }
+                check(observed.size()<=expected.size() && std::equal(observed.begin(),observed.end(),expected.begin()),
+                      "continuous long FFT receiver changed the exact pending bit prefix");
+            };
+            const auto advance=[&](std::size_t endpoint) {
+                while(position<endpoint) {
+                    const auto count=std::min(chunks[chunk++%chunks.size()],endpoint-position);
+                    const auto raw=std::span(samples).subspan(position,count);
+                    if(shared)receiver.push(raw,std::span(projected).subspan(position,count));
+                    else receiver.push(raw);
+                    position+=count;poll();
+                }
+            };
+            for(std::size_t count=1;count<=expected.size();++count) {
+                advance(delay+count*symbol+symbol/2);
+                check(observed==Bytes(expected.begin(),expected.begin()+static_cast<std::ptrdiff_t>(count)) &&
+                      pending==count && complete==0,
+                      "continuous long FFT receiver hid an accepted bit behind a later symbol or FFT block");
+            }
+            advance(delay+(expected.size()+1)*symbol-1);
+            check(complete==0,"six seconds of silence completed a still-partial long absent symbol");
+            advance(samples.size());
+            check(observed==expected && pending==expected.size() && complete==1,
+                  "continuous long FFT receiver did not emit exact bits and one physical completion without EOF");
+            check(receiver.take_bursts().empty(),"continuous long FFT progress polling duplicated events");
+
+            modem::PatternReceiver background(c,workspace,search);
+            std::mt19937_64 random(731);std::normal_distribution<float> noise;
+            std::vector<float> quiet(samples.size());
+            for(auto& sample:quiet)sample=noise(random);
+            for(std::size_t i=0;i<quiet.size();++i)
+                projected[i]=static_cast<double>(quiet[i])*std::polar(1.,.37-2*std::numbers::pi*c.carrier_hz*i/c.sample_rate);
+            for(std::size_t offset=0,index=0;offset<quiet.size();++index) {
+                const auto count=std::min(chunks[index%chunks.size()],quiet.size()-offset);
+                const auto raw=std::span(quiet).subspan(offset,count);
+                if(shared)background.push(raw,std::span(projected).subspan(offset,count));
+                else background.push(raw);
+                offset+=count;
+                check(background.take_bursts().empty(),"continuous long FFT acquisition admitted noise-only input");
+                check(background.working_bytes()<=workspace,"continuous long noise search exceeded its workspace");
+            }
+        } catch(const Error& error) {
+            throw Error(std::string(shared?"shared projection":"raw PCM")+" / delay "+std::to_string(delay)+
+                        " / "+std::to_string(chunks.size())+" chunk sizes: "+error.what());
+        }
+    }
 }
 void carrier_evidence_recovers_after_distorted_start() {
     auto c=config(16);c.sample_rate=14400;c.bandwidth_hz=3600;c.carrier_hz=1500;c.spreading_seed.fill(0);
@@ -1163,6 +1296,7 @@ int main(int argc,char** argv) {
         catch(const std::exception& error){++failures;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
     run("exact blind bits",exact_blind_bits);run("chunk invariance and late start",changing_chunks_and_late_start);
+    run("continuous long FFT progress",continuous_long_fft_progress);
     run("carrier evidence after distorted startup",carrier_evidence_recovers_after_distorted_start);
     run("short pattern sample timing",short_pattern_sample_timing);
     run("short pattern wrong keys and noise",short_pattern_wrong_key_and_noise);
@@ -1188,6 +1322,7 @@ int main(int argc,char** argv) {
     run("short template cache workspace and exact equivalence",short_template_cache_workspace);
     run("parallel search exact progress",parallel_search_exact_progress);
     run("parallel search physical absence",parallel_search_physical_absence);
+    run("parallel long continuation exact progress",parallel_long_continuation_exact_progress);
     run("bounded long clock-window fallback",long_clock_window_fallback);
     run("streamed template rows preserve exact search",streamed_template_rows_preserve_exact_search);
     run("application local fallback preserves original search",application_local_fallback_preserves_original_search);

@@ -104,14 +104,24 @@ Work receiver_work(const modem::Config& config,long double samples,
     const bool sample_fit=bin==1 && (symbol<=256 || !private_pattern);
     const auto observation_samples=static_cast<long double>(symbol)/(1-maximum_clock_ratio);
     const auto length=std::max(4.L,std::ceil(observation_samples/bin));
-    const auto nominal_length=std::max(4.L,std::ceil(static_cast<long double>(symbol)/bin));
-    const auto fft_log=std::max(std::ceil(std::log2(2*nominal_length)),std::ceil(std::log2(length)));
-    const auto transform=std::exp2(fft_log),hop=transform-length+1;
+    const auto nominal_length=std::ceil(static_cast<long double>(symbol)/bin);
+    auto fft_log=std::max(std::ceil(std::log2(2*std::max(4.L,nominal_length))),std::ceil(std::log2(length)));
+    auto transform=std::exp2(fft_log),hop=transform-length+1;
+    const bool bounded_acquisition=symbol>=16.L*config.sample_rate;
+    auto initial_batch=hop;
+    if(bounded_acquisition) {
+        const auto compact=std::exp2(std::ceil(std::log2(length+4)));
+        if(compact-length+1>=std::max(4.L,std::floor(length/4)))transform=std::min(transform,compact);
+        fft_log=std::log2(transform);
+        hop=std::min(transform-length+1,std::max(1.L,std::floor(nominal_length/2)));
+        initial_batch=std::min(hop,std::max(1.L,std::floor(static_cast<long double>(config.sample_rate)/bin)));
+    }
+    const bool separate_tracking_reference=coupled || transform<2*length;
     // Retaining transformed template rows is optional. The streamed path
     // keeps FFT/ring/tracking scratch and empty row metadata, then generates
     // each template in existing per-job scratch without reducing coverage.
     const auto fft_core_bytes=transform*16*5+(4*length+2*hop)*16+
-        (coupled?2*length*16:0)+(transform+1)*8+
+        (separate_tracking_reference?2*length*16:0)+(transform+1)*8+
         frequencies*(2*24+2*8+2*16+18*8+2*8)+
         4096*16+4096*sizeof(modem::PatternEvidence);
     const auto fft_bytes=fft_core_bytes+2*frequencies*transform*16;
@@ -140,14 +150,25 @@ Work receiver_work(const modem::Config& config,long double samples,
         const auto observations=std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
         result.parallel=observations*starts*frequencies*phase_groups*64*banks;
     } else {
-        const auto blocks=std::ceil(samples/(bin*hop));
+        auto blocks=std::ceil(samples/(bin*hop));
+        auto scored_starts=blocks*hop;
+        if(bounded_acquisition) {
+            // Live input scores only fully observed windows. The first small
+            // batch follows one complete symbol; later batches use the fixed
+            // bounded hop without an EOF-triggered partial transform.
+            const auto observed_bins=std::floor(samples/bin);
+            const auto first_batch_end=length+initial_batch-1;
+            blocks=observed_bins<first_batch_end?0:1+std::floor((observed_bins-first_batch_end)/hop);
+            scored_starts=blocks>0?initial_batch+(blocks-1)*hop:0;
+        }
         const auto jobs=frequencies*phase_groups*(private_pattern?4:1);
         // Five real operations per complex FFT element per stage. Streamed
         // public templates need the same additional forward transform and
         // generation allowance as regenerated private templates.
         const bool generate_templates=private_pattern || streamed_templates;
-        result.parallel=blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
-            jobs*(12*transform+40*hop+(generate_templates?template_pair_operations_per_bin*length:0)))*banks;
+        result.parallel=(blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
+            jobs*(12*transform+(generate_templates?template_pair_operations_per_bin*length:0)))+
+            jobs*40*scored_starts)*banks;
         if(established_stream_bits) {
             // Acquisition supplies the first bit. An established track then
             // scores each remaining bit and complete absent symbols covering
@@ -210,7 +231,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     }
     result.tracking_seconds=finite_seconds(tracking_serial/serial_operations_per_second);
     result.tracking_symbol_windows=finite_seconds(tracking_windows);
-    // Whole-bank track refinement is currently serial. The hypothetical GPU
+    // Budget track refinement at the serial rate even when long-symbol carrier
+    // fits can share CPU workers. The hypothetical GPU
     // model offloads FFT scoring only, so this term remains in both totals.
     const auto serial_seconds=(serial+tracking_serial)/serial_operations_per_second;
     result.cpu_seconds=finite_seconds(.03L+serial_seconds+parallel/cpu_scoring_operations_per_second);

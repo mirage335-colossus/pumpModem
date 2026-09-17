@@ -1,6 +1,7 @@
 #include "datapump/audio.hpp"
 #include "datapump/live.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include "datapump/pattern_receiver.hpp"
 #include "datapump/tuning.hpp"
 #include <algorithm>
 #include <atomic>
@@ -358,6 +359,126 @@ void separated_long_and_short() {
     Observations::check_received(observed.content.begin()->second, second);
     session.stop();
 }
+
+void continuous_long_fft_single_bit() {
+    auto value = settings({});
+    auto& config = value.transfer.modem;
+    config.sample_rate = 64;
+    config.bandwidth_hz = 8;
+    config.carrier_hz = 16;
+    config.spreading_factor = 64;
+    config.integration_seconds = 40;
+    value.transfer.automatic_receive_profiles = false;
+    // A single public profile with ample workspace selects the full FFT
+    // receiver. The multi-profile fixtures above prefer streamed templates
+    // and therefore cannot catch delays caused by FFT input batching.
+    modem::PatternSearch search;
+    search.expand_clock_search = true;
+    search.allow_local_clock_fallback = true;
+    search.start_offset_seconds = static_cast<double>(modem::pattern_pulse_padding_samples(config)) /
+                                  config.sample_rate;
+    search.start_uncertainty_seconds = 1;
+    modem::PatternReceiver path(config, value.dsp_workspace_bytes / 2, search);
+    check(!path.clock_windowed(), "long single-bit fixture did not select the full FFT receiver");
+
+    Waveform expected;
+    expected.text = expected.bits = "0";
+    expected.binary = true;
+    expected.rate = config.sample_rate;
+    expected.symbol_samples = modem::symbol_sample_count(config);
+    expected.payload_end = modem::training_sample_count(config) +
+        modem::pattern_pulse_padding_samples(config) + expected.symbol_samples;
+    auto transmitter = transfer::binary_transmitter(Bytes{0}, value.transfer);
+    expected.transmit_end = transmitter->total_samples();
+    expected.samples.resize(expected.payload_end + 3 * expected.symbol_samples);
+    for (std::size_t offset = 0; offset < expected.transmit_end;)
+        offset += transmitter->read(std::span(expected.samples).subspan(offset, expected.transmit_end - offset));
+
+    CaptureScript capture;
+    capture.samples = expected.samples;
+    capture.rate = expected.rate;
+    capture_script = &capture;
+    live::Session session([] { return static_cast<double>(epoch); });
+    session.start(value);
+    Observations observed;
+    // Keep the microphone stream open. A complete, high-SNR payload symbol
+    // must become pending without waiting for the rest of an arbitrary FFT
+    // block, for a full absent symbol, or for an offline finish() flush.
+    advance(session, capture, expected.payload_end + expected.symbol_samples / 2,
+            observed, expected, 0, true);
+    check(observed.rows.size() == 1 && observed.prefixes.contains("0") &&
+          !observed.rows.begin()->second.complete && observed.complete == 0 && observed.received == 0,
+          "continuous full FFT capture hid the one-bit pending prefix until a later input block");
+    advance(session, capture, expected.payload_end + expected.symbol_samples - 1,
+            observed, expected, 0, true);
+    check(observed.rows.size() == 1 && !observed.rows.begin()->second.complete,
+          "continuous full FFT capture completed before observing the whole absent symbol");
+    advance(session, capture, expected.samples.size(), observed, expected, 0, false);
+    check(observed.ids.size() == 1 && observed.complete == 1 && observed.received == 0,
+          "continuous full FFT capture changed identity or duplicated one-bit completion");
+    observed.check_final(expected);
+    session.stop();
+}
+
+void simulated_long_fft_single_bit() {
+    auto value = settings({});
+    auto& config = value.transfer.modem;
+    config.sample_rate = 64;
+    config.bandwidth_hz = 8;
+    config.carrier_hz = 16;
+    config.spreading_factor = 64;
+    config.integration_seconds = 40;
+    value.transfer.automatic_receive_profiles = false;
+    value.simulation = true;
+    value.simulation_snr_db = 30;
+    // Retain the free-running sound-card model: 100 ppm clock mismatch and
+    // 0.5 degrees per square-root second of independent phase diffusion.
+    std::atomic<std::int64_t> replay_milliseconds{0};
+    live::Session session([] { return static_cast<double>(epoch); }, [&] {
+        return std::chrono::steady_clock::time_point{} + std::chrono::milliseconds(replay_milliseconds.load());
+    });
+    session.start(value);
+    session.transmit_bits(Bytes{0});
+    const auto deadline = std::chrono::steady_clock::now() + 30s;
+    bool computed = false;
+    while (std::chrono::steady_clock::now() < deadline) {
+        const auto snapshot = session.snapshot();
+        check(snapshot.error.empty(), "long sampled simulation failed: " + snapshot.error);
+        check(snapshot.received.empty(), "single raw zero unexpectedly became source text");
+        if (snapshot.transmission_finished && snapshot.simulation_replay) {
+            computed = true;
+            break;
+        }
+        std::this_thread::sleep_for(1ms);
+    }
+    check(computed, "long sampled simulation did not finish its bounded PCM processing");
+    std::optional<std::uint64_t> pending_id;
+    std::size_t complete = 0;
+    for (std::int64_t milliseconds = 0; milliseconds <= 3000; milliseconds += 10) {
+        replay_milliseconds = milliseconds;
+        const auto snapshot = session.snapshot();
+        check(snapshot.error.empty(), "long sampled replay failed: " + snapshot.error);
+        check(snapshot.received.empty(), "single raw zero unexpectedly became source text during replay");
+        check(snapshot.dsp_buffered_bytes <= value.dsp_workspace_bytes,
+              "long sampled simulation exceeded the configured DSP workspace");
+        for (const auto& signal : snapshot.signals) {
+            check(signal.binary && !signal.validated && signal.text == "0" &&
+                  signal.received_bits == 1 && signal.missing_symbols == 0,
+                  "long sampled simulation changed its exact one-bit reception");
+            if (!signal.complete) {
+                if (!pending_id) pending_id = signal.id;
+                check(signal.id == *pending_id, "long sampled simulation changed its pending reception identity");
+            } else {
+                check(pending_id && signal.id == *pending_id,
+                      "long sampled simulation withheld its pending bit or changed identity at completion");
+                ++complete;
+            }
+        }
+    }
+    check(pending_id && complete == 1,
+          "long sampled simulation did not replay a pending bit and exactly one completed reception");
+    session.stop();
+}
 }
 
 // These definitions deliberately replace audio.cpp in this statically linked
@@ -393,8 +514,14 @@ int main(int argc, char** argv) {
     std::string context;
     try {
         const std::string suite = argc > 1 ? argv[1] : "all";
-        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long",
+        check(suite == "all" || suite == "original" || suite == "matrix" || suite == "long" || suite == "long_fft",
               "unknown profile test suite");
+        if (suite == "all" || suite == "long" || suite == "long_fft") {
+            context = "continuous public full FFT capture of one 40-second bit";
+            continuous_long_fft_single_bit();
+            context = "sampled public full FFT simulation of one 40-second bit";
+            simulated_long_fft_single_bit();
+        }
         if (suite == "all" || suite == "original") for (const auto& targets : {std::vector<double>{55, 32}, std::vector<double>{32, 55}}) {
             for (const double target : {55., 32.}) {
                 const auto profiles = "RX " + std::to_string(targets[0]) + "," + std::to_string(targets[1]) +

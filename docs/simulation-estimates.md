@@ -209,9 +209,23 @@ confidence but does not guarantee that the receiver can allocate its workspace.
 The FFT estimate uses the same projection-bin reduction as the receiver and
 extends the observation window for the slowest covered clock hypothesis. The
 transform starts at the next power of two covering twice the nominal symbol
-length, growing only when needed to contain the extended window. Its workspace
-approximation includes the FFT buffers, ring, energy prefix, row metadata and
-extra tracking scratch for expanded clocks. When that core fits but retaining
+length, growing when needed to contain the extended window. For symbols lasting
+at least 16 seconds, a smaller transform is used when it retains room for at
+least a quarter-symbol range of new starts and the tracking scratch. Acquisition
+batches then cover at most half a nominal symbol of new starts. The first batch
+covers at most one second of starts after a complete observation window is
+available; later batches use the bounded hop. The estimate counts these live
+passes without relying on an offline end-of-input flush. Established tracks
+score available complete symbols at input progress boundaries independently of
+the acquisition batches. These choices reduce input buffering latency but do
+not remove the CPU cost of searching every configured hypothesis.
+The work estimate allows for every scheduled acquisition batch; reception may
+skip batches whose starts are all already excluded by retained accepted bits.
+This allowance does not make the overall runtime estimate an upper bound.
+
+The workspace approximation includes the FFT buffers, ring, energy prefix, row
+metadata and separate tracking scratch whenever expanded clocks or a smaller
+transform require it. When that core fits but retaining
 both transformed bit templates for every hypothesis would exceed the allowance,
 the model selects streamed FFT work: generate a template and perform its forward
 transform for each job, using bounded scratch. Expanded live searches sharing
@@ -227,7 +241,7 @@ generation for public as well as private profiles, without benchmarking the
 computer.
 
 For each matching FFT profile, the model also budgets one desired stream
-acquired at its first bit. Acquisition supplies that bit; serial continuation
+acquired at its first bit. Acquisition supplies that bit; continuation
 then scores `wire_bits - 1 + ceil(6 / symbol_seconds)` complete windows. This
 includes the full observed-absence duration, even for hours-long symbols, and
 does not add transmitted bits. The count uses nominal symbol durations; clock
@@ -240,8 +254,11 @@ and incompatible profiles add acquisition work, not additional desired streams.
 The correlator's continuous lane budget already covers its observation time;
 it receives no duplicate FFT-tracking charge.
 
-`tracking_seconds` reports this serial component, included in **both** CPU and
+`tracking_seconds` reports a serial-rate allowance, included in **both** CPU and
 hypothetical GPU totals; `tracking_symbol_windows` reports its window count.
+Long-symbol continuation can distribute independent carrier fits across bounded
+CPU workers. This model conservatively retains the serial-rate allowance rather
+than assuming that those workers or their workspace are available.
 The GPU projection accelerates FFT scoring but does not assume a GPU rewrite
 of established-track continuation. This is a one-stream planning allowance,
 not a runtime upper bound or a probability-weighted expected runtime. Competing
@@ -269,7 +286,7 @@ plus template multiplication and scoring; correlation uses 64 equivalent
 operations per two-bit lane observation. These are deliberately rounded
 **assumed effective budgets**, not vendor benchmark results or measured
 application throughput. The CPU aggregate budget allows parallel scoring on
-the reference laptop while keeping serial channel and tracking work separate.
+the reference laptop while keeping channel and tracking allowances separate.
 The GPU budget reserves substantial headroom for double-precision arithmetic,
 memory access and irregular batches; it is not derived by multiplying CUDA
 cores by advertised FP32 clock rates. A tenfold scoring budget never becomes a
