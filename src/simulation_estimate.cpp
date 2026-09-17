@@ -21,6 +21,10 @@ constexpr long double gpu_scoring_operations_per_second = 80e9L;
 constexpr long double gpu_transfer_bytes_per_second = 8e9L;
 constexpr long double channel_operations_per_sample = 400;
 constexpr long double projection_operations_per_sample = 40;
+constexpr long double template_pair_operations_per_bin = 40;
+constexpr long double tracking_pair_operations_per_bin = 32;
+constexpr long double tracking_real_pair_operations_per_bin = 64;
+constexpr long double tracking_evidence_operations_per_fit = 64;
 constexpr long double model_implementation_loss_db = 3;
 
 double finite_seconds(long double value) {
@@ -75,9 +79,13 @@ long double phase_coherence(long double x) {
     if(x<1e-4L)return 1-x/3+x*x/12;
     return 2*(1+(std::expm1(-x)/x))/x;
 }
-struct Work {long double serial=0,parallel=0,search_trials=1;bool workspace_supported=true;};
+struct Work {
+    long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1;
+    bool workspace_supported=true;
+};
 Work receiver_work(const modem::Config& config,long double samples,
-                   const transfer::Options& options,std::size_t profiles,std::size_t keys) {
+                   const transfer::Options& options,std::size_t profiles,std::size_t keys,
+                   std::size_t established_stream_bits) {
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const bool private_pattern=config.scramble || config.dsss;
     const auto epochs=private_pattern?2.L*options.search_seconds+1+
@@ -93,6 +101,7 @@ Work receiver_work(const modem::Config& config,long double samples,
     const auto sine=std::sin(omega);
     const auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
     if(symbol<=256 && (!private_pattern || image>1e-10*static_cast<double>(bin)))bin=1;
+    const bool sample_fit=bin==1 && (symbol<=256 || !private_pattern);
     const auto observation_samples=static_cast<long double>(symbol)/(1-maximum_clock_ratio);
     const auto length=std::max(4.L,std::ceil(observation_samples/bin));
     const auto nominal_length=std::max(4.L,std::ceil(static_cast<long double>(symbol)/bin));
@@ -138,7 +147,27 @@ Work receiver_work(const modem::Config& config,long double samples,
         // generation allowance as regenerated private templates.
         const bool generate_templates=private_pattern || streamed_templates;
         result.parallel=blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
-            jobs*(12*transform+40*hop+(generate_templates?40*length:0)))*banks;
+            jobs*(12*transform+40*hop+(generate_templates?template_pair_operations_per_bin*length:0)))*banks;
+        if(established_stream_bits) {
+            // Acquisition supplies the first bit. An established track then
+            // scores each remaining bit and complete absent symbols covering
+            // six seconds. This desired-stream allowance is independent of
+            // unrelated key/epoch banks; extra competing/noise tracks and
+            // reacquisition can add work, so it is not a runtime upper bound.
+            result.tracking_windows=static_cast<long double>(established_stream_bits-1)+
+                static_cast<long double>(modem::pattern_absence_samples(config))/symbol;
+            // continue_tracks() refines five starts for each possible private
+            // phase group, then compares the chosen start against every other
+            // carrier/clock hypothesis. measure() reuses a template pair for
+            // those five starts, regenerating it when frequency/phase changes.
+            const auto fits=5*phase_groups+frequencies-1;
+            const auto generated_pairs=phase_groups+frequencies-1;
+            const auto fit_operations=sample_fit?tracking_real_pair_operations_per_bin:
+                tracking_pair_operations_per_bin;
+            result.tracking_serial=result.tracking_windows*(length*(
+                generated_pairs*template_pair_operations_per_bin+fits*fit_operations)+
+                fits*tracking_evidence_operations_per_fit);
+        }
     }
     return result;
 }
@@ -165,19 +194,25 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         static_cast<long double>(channel.delay_samples)/config.sample_rate+.175L+tail;
     result.simulated_seconds=finite_seconds(media);
     const auto samples=media*config.sample_rate;
-    long double serial=samples*channel_operations_per_sample,parallel=0,trials=1;
+    long double serial=samples*channel_operations_per_sample,parallel=0,tracking_serial=0,tracking_windows=0,trials=1;
     for(const auto& profile:profiles) {
         modem::validate(profile);
         const auto matches=same_profile(config,profile);
         result.profile_matches|=matches;
-        const auto work=receiver_work(profile,media*profile.sample_rate,options,profiles.size(),keys);
+        const auto work=receiver_work(profile,media*profile.sample_rate,options,profiles.size(),keys,
+                                      matches?transmission.wire_bits:0);
         serial+=work.serial;parallel+=work.parallel;
+        tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
             trials=std::max(trials,work.search_trials);
             result.receiver_workspace_supported|=work.workspace_supported;
         }
     }
-    const auto serial_seconds=serial/serial_operations_per_second;
+    result.tracking_seconds=finite_seconds(tracking_serial/serial_operations_per_second);
+    result.tracking_symbol_windows=finite_seconds(tracking_windows);
+    // Whole-bank track refinement is currently serial. The hypothetical GPU
+    // model offloads FFT scoring only, so this term remains in both totals.
+    const auto serial_seconds=(serial+tracking_serial)/serial_operations_per_second;
     result.cpu_seconds=finite_seconds(.03L+serial_seconds+parallel/cpu_scoring_operations_per_second);
     result.gpu_seconds=finite_seconds(.11L+serial_seconds+parallel/gpu_scoring_operations_per_second+
         samples*sizeof(float)/gpu_transfer_bytes_per_second);

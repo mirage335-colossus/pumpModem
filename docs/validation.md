@@ -4,6 +4,51 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## 1.2 kHz feasibility and tracking cost — 17 September 2026
+
+The fixed-laptop compute estimate now includes serial continuation of one
+desired stream per matching FFT profile, through nominal complete-symbol
+absence. That component remains in both CPU and hypothetical GPU totals and
+is exposed as `tracking_seconds` / `tracking_symbol_windows` in `analyze-link`.
+No hardware benchmarking, receiver algorithm, confidence probability, wire
+format or pending/completion behavior changed. Added regressions cover exact
+one-/three-/ten-bit workload scaling, whole-symbol absence, empty drafts,
+matching profiles, unrelated keys and correlator accounting.
+
+The 1.2 kHz / -10 dB-Hz target / +3 dBm/-170 dB / crystal case reproduces
+1,895.899 seconds of TX waveform and 2,527.892 seconds of simulated media.
+Its corrected i9 estimate is 1,461.826 seconds, including 331.056 seconds of
+serial tracking; the hypothetical GPU total is 448.252 seconds. A seed-1
+sampled probe with an explicit matching RX target and 1 GiB DSP workspace
+was stopped at its 240-second verification limit without output. Reception
+remains unverified; the limit is not a failure result or calibration datum.
+
+Bounded 100,000-trial reference experiments examined day-long -200 dB and
+-230 dB cases. The 2 dB noise-figure / GPSDO-TCXO / -200 dB candidate has
+99,936 correct reference detections, conditional on acquired timing/clock,
+zero residual frequency and prescribed orthogonal templates. Its current
+receiver workspace remains unsupported and requested-work CPU estimate is
+about 41.3 hours. The [case study](1200hz-weak-link-planning.md) records the
+commands, oscillator/energy limitations and distinction from actual reception.
+
+Both Release builds succeeded (GCC/FLTK and Clang/Rev). The 24 selected GCC
+checks covered the full development-contract filter plus `correlation_experiment`,
+`gui_contract` and `gui_layout`; 23 passed in the concurrent 672.30-second run,
+and `gui_controller` passed an isolated rerun in 77.46 seconds. The seven
+selected Clang checks covered the estimator, statistical experiment, CLI and
+shared GUI application/controller/contract/layout; six passed in the initial
+83.98-second run, and the final controller rerun passed in 90.54 seconds.
+
+The convenience-message GUI test initially exceeded its fixed 15-second wait,
+including in an isolated Clang run. A temporary instrumented Clang test observed
+the exact message and finished transmission after 15.9868 seconds; all original
+byte, metadata and composer-state assertions passed. Its test-only deadline
+was therefore increased to a bounded 60 seconds, retaining 10 ms polling and
+every assertion. The Clang rerun above uses that correction. No application
+timeout or completion behavior changed. Native display workflows, physical
+audio and Windows were not rerun. `git diff --check` and case-study numbers
+and local documentation links passed their checks.
+
 ## Corrected transmit power and oscillator selection — 16 September 2026
 
 The two mistaken -3 dBm presets were removed; the existing +3 dBm/-200 dB and

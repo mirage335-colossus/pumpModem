@@ -662,6 +662,8 @@ void analyze_link(const Args& a,transfer::Options options) {
     std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu
         <<"\",\"gpu_hypothetical\":"<<(current.gpu_hypothetical?"true":"false")<<",\"cpu_seconds\":";
     json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);
+    std::cout<<",\"tracking_seconds\":";json_number(current.tracking_seconds);
+    std::cout<<",\"tracking_symbol_windows\":";json_number(current.tracking_symbol_windows);
     std::cout<<"},\"reference_assumptions\":{\"search_hypotheses\":";json_number(experiment.search_hypotheses);
     std::cout<<",\"false_alarm_probability\":";json_number(experiment.false_alarm_probability);
     std::cout<<",\"noise_pair_union_bound\":";

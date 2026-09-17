@@ -14,6 +14,12 @@ struct Estimate {
     double success_probability = 0;
     double cpu_seconds = 0;
     double gpu_seconds = 0;
+    // Included in both totals: serial whole-symbol continuation for one
+    // established signal stream per matching FFT profile, through observed
+    // absence. Competing/noise tracks and reacquisition are not upper-bounded.
+    // Unrelated key/epoch banks add acquisition work, not established streams.
+    double tracking_seconds = 0;
+    double tracking_symbol_windows = 0;
     double simulated_seconds = 0;
     double modeled_symbol_snr_db = 0;
     double carrier_offset_hz = 0;

@@ -194,7 +194,7 @@ prediction, never a guarantee or authentication claim.
 ## Fixed reference compute model
 
 The model counts full-rate waveform/channel samples, receiver projection work,
-FFT transforms or bounded streaming correlation lanes. It reflects half-chip
+FFT acquisition, established-stream tracking or bounded streaming correlation lanes. It reflects half-chip
 start searches, the actual bounded frequency/timing bank, private phase/initial-symbol
 searches and key/epoch/profile multiplicity. Expanded coupled banks use the FFT
 cost model, including when their requested core exceeds the allowance. For
@@ -226,6 +226,28 @@ streamed-template estimate includes extra forward transforms and template
 generation for public as well as private profiles, without benchmarking the
 computer.
 
+For each matching FFT profile, the model also budgets one desired stream
+acquired at its first bit. Acquisition supplies that bit; serial continuation
+then scores `wire_bits - 1 + ceil(6 / symbol_seconds)` complete windows. This
+includes the full observed-absence duration, even for hours-long symbols, and
+does not add transmitted bits. The count uses nominal symbol durations; clock
+scaling at an exact six-second boundary can add an observed absent window.
+Each window fits five timing refinements per
+possible phase group, then compares every other carrier/clock hypothesis at
+the selected timing. Template pairs are reused across the five timing fits.
+Private patterns budget up to three phase groups. Unrelated key/epoch banks
+and incompatible profiles add acquisition work, not additional desired streams.
+The correlator's continuous lane budget already covers its observation time;
+it receives no duplicate FFT-tracking charge.
+
+`tracking_seconds` reports this serial component, included in **both** CPU and
+hypothetical GPU totals; `tracking_symbol_windows` reports its window count.
+The GPU projection accelerates FFT scoring but does not assume a GPU rewrite
+of established-track continuation. This is a one-stream planning allowance,
+not a runtime upper bound or a probability-weighted expected runtime. Competing
+or noise tracks, late acquisition, replacements and reacquisition can change
+the work. The workload correction does not change the RX probability model.
+
 The fixed engineering budgets are:
 
 | Assumption | Value |
@@ -236,6 +258,9 @@ The fixed engineering budgets are:
 | Host-to-device transfer | 8 billion bytes/s |
 | Channel generation/resampling/noise | 400 equivalent operations/sample |
 | Receiver projections | 40 equivalent operations/sample/bank |
+| Tracking template-pair generation | 40 equivalent operations/projected bin |
+| Tracking paired fit | 32 equivalent operations/projected bin; 64 for exact-real Gram fits |
+| Tracking evidence calculation | 64 equivalent operations/fit |
 | CPU startup allowance | 30 ms |
 | GPU path startup allowance, including CPU startup | 110 ms |
 
@@ -244,7 +269,7 @@ plus template multiplication and scoring; correlation uses 64 equivalent
 operations per two-bit lane observation. These are deliberately rounded
 **assumed effective budgets**, not vendor benchmark results or measured
 application throughput. The CPU aggregate budget allows parallel scoring on
-the reference laptop while keeping the serial channel bottleneck separate.
+the reference laptop while keeping serial channel and tracking work separate.
 The GPU budget reserves substantial headroom for double-precision arithmetic,
 memory access and irregular batches; it is not derived by multiplying CUDA
 cores by advertised FP32 clock rates. A tenfold scoring budget never becomes a
@@ -262,7 +287,10 @@ Laptop power limits, sustained thermals, compiler choices, caching and eventual
 GPU implementation can change runtime substantially. Treat the displayed times
 as order-of-magnitude estimates; even a factor of four is not a validated error
 bound. Content compression, exceptional recovery searches and concurrent
-background tasks are excluded.
+background tasks are excluded. A total shorter than simulated airtime does not
+guarantee real-time operation: FFT block scheduling can delay acquisition and
+accepted bits, and bursts of work can exceed the live capture queue's capacity.
+See the [1.2 kHz case study](1200hz-weak-link-planning.md).
 
 The UI supplies the profile geometries of every distinct receive-key family,
 including plaintext where permitted, so private epochs and search costs are
@@ -286,7 +314,10 @@ the 16-second expansion boundary, short/tone compatibility, projection-bin
 divisors and very large sample coordinates.
 Compute regressions distinguish retained templates, streamed FFT templates and
 unaffordable expanded cores, preserving the requested carrier span while
-withholding unsupported confidence.
+withholding unsupported confidence. Tracking regressions check exact bit-count
+scaling, nominal complete-symbol absence, empty drafts, matching profiles,
+unrelated keys and avoiding duplicate correlator work. CLI checks retain the
+exact one-bit and three-bit wire paths while exposing the tracking breakdown.
 These checks validate model mechanics, not its empirical
 calibration. The independent protocol and physical-completion regressions remain
 the authority for actual transport behavior.

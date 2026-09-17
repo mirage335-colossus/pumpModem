@@ -97,6 +97,10 @@ class StreamCLI(unittest.TestCase):
             self.assertTrue(value['current_receiver']['gpu_hypothetical'])
             self.assertIn('i9-13900H',value['current_receiver']['cpu_reference'])
             self.assertIn('4090 Laptop GPU',value['current_receiver']['gpu_reference'])
+            self.assertGreaterEqual(value['current_receiver']['tracking_seconds'],0)
+            self.assertGreaterEqual(value['current_receiver']['cpu_seconds'],value['current_receiver']['tracking_seconds'])
+            self.assertGreaterEqual(value['current_receiver']['gpu_seconds'],value['current_receiver']['tracking_seconds'])
+            self.assertEqual(value['current_receiver']['tracking_symbol_windows'],count)
             self.assertLessEqual(value['current_receiver']['frequency_hypotheses'],4097)
             self.assertGreater(value['current_receiver']['full_200ppm_frequency_hypotheses'],4097)
             for experiment in value['experiments'].values():

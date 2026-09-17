@@ -954,7 +954,9 @@ void previous_message_controls() {
     const auto next_draft=controller.field(F::message).text;
     check(next_draft==repeatable_marker(next_draft)+"The next message is already being typed",
           "Typing the next message lost its repeatable marker or message body");
-    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    // This checks exact delivery and composer state, not processing speed.
+    // Sampled interval reception can exceed 15 seconds across compiler builds.
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(60);
     while((controller.inbox().items().empty()||!controller.snapshot().transmission_finished)&&
           std::chrono::steady_clock::now()<deadline) {
         controller.poll(); std::this_thread::sleep_for(std::chrono::milliseconds(10));

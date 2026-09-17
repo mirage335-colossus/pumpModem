@@ -84,6 +84,48 @@ void workload_and_impairments() {
     check(impaired.modeled_symbol_snr_db<base.modeled_symbol_snr_db &&
           impaired.success_probability<base.success_probability,"phase diffusion must reduce model confidence");
 }
+void established_tracking_workload() {
+    transfer::Options options;
+    options.modem=tuning::resolve(1200,-10,tuning::PatternMode::auto_pattern,false).config;
+    options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    options.timestamp=1800000000;
+    auto channel=clean_channel();channel.snr_db=-40;
+    const auto one=simulation::estimate(wire(1,options.modem),options,true,channel);
+    const auto three=simulation::estimate(wire(3,options.modem),options,true,channel);
+    const auto ten=simulation::estimate(wire(10,options.modem),options,true,channel);
+    check(three.receiver_workspace_supported && three.tracking_seconds>0,
+          "wide long-symbol FFT planning must include established-stream tracking");
+    near(one.tracking_symbol_windows,1,"one long bit requires tracking its fully observed absent symbol");
+    near(three.tracking_symbol_windows,3,"three long bits need two continuation windows and one absent window");
+    near(ten.tracking_symbol_windows,10,"tracking must follow exact payload symbols without byte padding");
+    near(three.tracking_seconds,3*one.tracking_seconds,"each whole-symbol continuation must add the same modeled work");
+    near(ten.tracking_seconds,10*one.tracking_seconds,"tracking work must scale with exact wire-bit count");
+    check(three.cpu_seconds>three.tracking_seconds && three.gpu_seconds>three.tracking_seconds,
+          "serial continuation must be included in both CPU and hypothetical GPU totals");
+    check(ten.tracking_seconds>three.tracking_seconds && ten.cpu_seconds>three.cpu_seconds &&
+          ten.gpu_seconds>three.gpu_seconds,"longer payloads must increase tracking and both total estimates");
+
+    const auto keys=simulation::estimate(wire(3,options.modem),options,true,channel,{},3);
+    near(keys.tracking_seconds,three.tracking_seconds,"unrelated key banks must not multiply established signal streams");
+    near(keys.tracking_symbol_windows,three.tracking_symbol_windows,"key search must not duplicate desired-stream absence");
+    auto other=options.modem;other.integration_seconds*=2;
+    const std::array profiles{options.modem,other};
+    const auto extra_profile=simulation::estimate(wire(3,options.modem),options,true,channel,profiles);
+    near(extra_profile.tracking_seconds,three.tracking_seconds,"incompatible profiles add search but not desired-stream tracking");
+    const auto no_profile=simulation::estimate(wire(3,options.modem),options,true,channel,std::span(&other,1));
+    near(no_profile.tracking_seconds,0,"no matching receiver profile must not invent an established signal stream");
+    const auto empty=simulation::estimate(wire(0,options.modem),options,true,channel);
+    near(empty.tracking_seconds,0,"an empty draft must not invent a tracking or completion workload");
+    near(empty.tracking_symbol_windows,0,"an empty draft has no established stream windows");
+
+    options.modem.integration_seconds=1;
+    const auto short_symbols=simulation::estimate(wire(3,options.modem),options,true,channel);
+    near(short_symbols.tracking_symbol_windows,8,
+         "one-second symbols require two remaining payload windows plus six complete absent windows");
+    options.dsp_workspace_bytes=64*1024;
+    const auto correlator=simulation::estimate(wire(3,options.modem),options,true,channel);
+    near(correlator.tracking_seconds,0,"continuous correlator lane work must not gain duplicate FFT tracking costs");
+}
 void complete_symbol_absence() {
     transfer::Options options;options.modem.integration_seconds=4*60*60;
     auto channel=clean_channel();
@@ -92,7 +134,9 @@ void complete_symbol_absence() {
     const auto tail=result.simulated_seconds-value.total_seconds;
     const auto required=4*60*60+1+.175+2.*modem::pattern_pulse_padding_samples(options.modem)/options.modem.sample_rate;
     near(tail,required,"four-hour symbol needs a complete four-hour absent symbol plus lookahead");
-    check(std::isfinite(result.cpu_seconds) && std::isfinite(result.gpu_seconds),"long sampled estimates must remain finite");
+    check(std::isfinite(result.cpu_seconds) && std::isfinite(result.gpu_seconds) && std::isfinite(result.tracking_seconds),
+          "long sampled estimates must remain finite");
+    near(result.tracking_symbol_windows,1,"a four-hour bit needs one fully scored four-hour absent window");
     channel.snr_db=std::numeric_limits<double>::quiet_NaN();
     bool rejected=false;
     try {(void)simulation::estimate(value,options,true,channel);}catch(const Error&){rejected=true;}
@@ -302,7 +346,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

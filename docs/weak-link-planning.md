@@ -6,6 +6,10 @@ size and airtime with the existing fixed-laptop compute model and a bounded
 Monte Carlo experiment on matched-correlation statistics. Work depends on the
 requested trial count, not the number of audio samples or coherent segments.
 
+The [1.2 kHz case study](1200hz-weak-link-planning.md) compares the requested
+3 dBm/-170 dB mode with -200 dB and -230 dB, including a conditional day-long
+-200 dB detector candidate and the current receiver's compute/workspace limits.
+
 For the requested **3 dBm / -200 dB** case, received power is -197 dBm. With
 the preset noise density of -164 dBm/Hz, actual C/N0 is **-33 dB-Hz** and SNR
 in 100 Hz is -53 dB. This is 30 dB weaker than +3 dBm / -170 dB.
@@ -16,6 +20,7 @@ in 100 Hz is -53 dB. This is 30 dB weaker than +3 dBm / -170 dB.
 | 3 dBm | -200 dB | -33 dB-Hz | 1.46 days/bit | 5.83 days |
 | 3 dBm | -210 dB | -43 dB-Hz | 14.6 days/bit | 58.3 days |
 | 3 dBm | -220 dB | -53 dB-Hz | 146 days/bit | 1.60 years |
+| 3 dBm | -230 dB | -63 dB-Hz | 3.99 years/bit | 15.96 years |
 
 These are energy calculations at the existing planner's 18 dB target, not
 capacity limits, measured sensitivities or predictions of successful reception.
@@ -109,6 +114,9 @@ produce identical draws across compiler libraries.
   remains unavailable. Compute time in this case describes requested work,
   not a simulation that is guaranteed to run or decode successfully. The GPU
   estimate remains hypothetical; the production receiver runs on the CPU.
+  `tracking_seconds` is the modeled serial continuation component included in
+  both CPU/GPU totals, and `tracking_symbol_windows` includes fully scored
+  absence. Competing/noise tracks and reacquisition are not upper-bounded.
 - `ideal_coherent` assumes perfect phase stability and zero residual carrier
   error across the whole symbol.
 - `coherent_phase_model` applies the selected phase diffusion and residual
