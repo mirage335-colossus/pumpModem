@@ -286,7 +286,7 @@ void automatic_pattern_rates() {
     clock.constellation_bits=7;rejects([&]{modem::validate(clock);},"multi-bit symbol transport accepted");
 }
 void physical_simulation_presets() {
-    check(tuning::simulation_presets().size()==13,"all specified simulation presets");
+    check(tuning::simulation_presets().size()==11,"all specified simulation presets");
     check(!tuning::parse_simulation_preset("no").enabled,"simulation defaults off");
     auto preset=tuning::parse_simulation_preset("3dBm -170dB");
     const auto result=tuning::link_budget(preset,1200,48000);
@@ -296,13 +296,53 @@ void physical_simulation_presets() {
     near(result.snr_db,-3-10*std::log10(1200.),"in-band SNR");
     near(result.sample_snr_db,-3-10*std::log10(24000.),"AWGN SNR uses sampled Nyquist noise bandwidth");
     near(tuning::link_budget(preset,1200,96000).sample_snr_db,result.sample_snr_db-10*std::log10(2.),"sample-rate-independent physical PSD");
-    const auto low_power=tuning::link_budget(tuning::parse_simulation_preset("-3dBm -200dB"),100,6000);
-    near(low_power.received_power_dbm,-203,"negative transmit dBm must retain its sign");
-    near(low_power.snr_db_hz,-39,"low-power extreme link C/N0");
-    near(tuning::link_budget(tuning::parse_simulation_preset("-3dBm -230dB"),100,6000).snr_db_hz,-69,
-         "lower power and further attenuation must add independently");
+    const auto low_power=tuning::link_budget(tuning::parse_simulation_preset("3dBm -200dB"),100,6000);
+    near(low_power.received_power_dbm,-197,"corrected weak-link preset uses positive three dBm");
+    near(low_power.snr_db_hz,-33,"corrected weak-link C/N0");
+    near(tuning::link_budget(tuning::parse_simulation_preset("3dBm -230dB"),100,6000).snr_db_hz,-63,
+         "corrected weaker planning preset");
+    for(const auto* name:{"-3dBm -200dB","-3dBm -230dB"})
+        rejects([&]{tuning::parse_simulation_preset(name);},"mistaken negative-power preset remains listed");
+    near(tuning::link_budget({"custom",true,-3,-200},100,6000).snr_db_hz,-39,
+         "custom link budgets must still support negative transmit power");
     check(tuning::parse_simulation_preset("50dbm-270db").transmit_dbm==50,"stable compact preset spelling");
     rejects([]{tuning::parse_simulation_preset("3dBm -7dB");},"reject unlisted preset");
+}
+void oscillator_simulation_presets() {
+    const auto presets=tuning::oscillator_presets();
+    check(presets.size()==4,"oscillator simulation must include crystal and three GPSDO tiers");
+    const modem::ChannelConfig defaults;
+    check(presets.front().id=="crystal" &&
+          presets.front().clock_error_ppm==defaults.clock_error_ppm &&
+          presets.front().phase_noise_degrees_per_sqrt_second==defaults.phase_noise_degrees_per_sqrt_second,
+          "default oscillator must preserve existing channel impairments exactly");
+    for(std::size_t i=0;i<presets.size();++i) {
+        const auto& preset=presets[i];
+        check(!preset.id.empty() && !preset.name.empty() && std::isfinite(preset.clock_error_ppm) &&
+              std::isfinite(preset.phase_noise_degrees_per_sqrt_second),
+              "oscillator presets need named finite impairments");
+        check(tuning::parse_oscillator_preset(preset.id).id==preset.id &&
+              tuning::parse_oscillator_preset(preset.name).id==preset.id,
+              "oscillator IDs and display labels must select the same preset");
+        auto channel=defaults;channel.clock_error_ppm=preset.clock_error_ppm;
+        channel.phase_noise_degrees_per_sqrt_second=preset.phase_noise_degrees_per_sqrt_second;
+        modem::validate_channel(modem::Config{},channel);
+        for(std::size_t j=0;j<i;++j)
+            check(preset.id!=presets[j].id && preset.name!=presets[j].name,
+                  "oscillator preset IDs and names must be unique");
+    }
+    const auto xo=tuning::parse_oscillator_preset("gpsdo-xo");
+    const auto tcxo=tuning::parse_oscillator_preset("gpsdo-tcxo");
+    const auto ocxo=tuning::parse_oscillator_preset("gpsdo-ocxo");
+    check(xo.clock_error_ppm>tcxo.clock_error_ppm && tcxo.clock_error_ppm>ocxo.clock_error_ppm &&
+          xo.phase_noise_degrees_per_sqrt_second>tcxo.phase_noise_degrees_per_sqrt_second &&
+          tcxo.phase_noise_degrees_per_sqrt_second>ocxo.phase_noise_degrees_per_sqrt_second,
+          "GPSDO tiers must distinguish residual frequency and phase stability");
+    check(tuning::parse_oscillator_preset(" GPSDO-XO\t").id=="gpsdo-xo" &&
+          tuning::parse_oscillator_preset(" GPSDO: tcxo (no oven) ").id=="gpsdo-tcxo",
+          "oscillator selection must normalize case and surrounding whitespace");
+    for(const auto* name:{"", "gpsdo", "gpsdo-rubidium", "off"})
+        rejects([&]{tuning::parse_oscillator_preset(name);},"unknown oscillator preset accepted");
 }
 void sizing_and_validation() {
     transfer::Options options;
@@ -402,6 +442,6 @@ void receive_target_lists() {
 }
 }
 int main() {
-    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
+    try {modes_and_patterns();snr_planning();shannon_capacity();receive_target_lists();automatic_pattern_rates();bandwidth_derived_clocks();sub_hertz_patterns();explicit_carrier_planning();audio_passband_pattern_roundtrips();physical_simulation_presets();oscillator_simulation_presets();sizing_and_validation();std::cout<<"tuning tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"tuning tests failed: "<<error.what()<<'\n';return 1;}
 }

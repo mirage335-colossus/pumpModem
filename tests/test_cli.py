@@ -68,8 +68,8 @@ class StreamCLI(unittest.TestCase):
             self.assertTrue(math.isclose(value['symbol_seconds'],128/numeric,rel_tol=1e-12))
             self.assertTrue(math.isclose(value['bit_rate'],numeric/128,rel_tol=1e-12))
     def test_link_analysis_exact_draft_and_airtime(self):
-        geometry=('--bw','100','--target-snr','-42','--time','1800000000')
-        link=('--tx-dbm','-3','--attenuation-db','-200','--trials','2000')
+        geometry=('--bw','100','--target-snr','-36','--time','1800000000')
+        link=('--tx-dbm','3','--attenuation-db','-200','--trials','2000')
         for draft,count in ((('--bits','0'),1),(('--bits','001'),3),(('--text','a'),3)):
             value=json.loads(self.run_pump('analyze-link',*draft,*geometry,*link,timeout=10).stdout)
             self.assertEqual(value['transmission']['wire_bits'],count)
@@ -84,12 +84,12 @@ class StreamCLI(unittest.TestCase):
             self.assertNotIn('stream_complete',value)
             self.assertNotIn('raw_bits',value)
             self.assertNotIn('data_base64',value)
-            self.assertEqual(value['link']['received_power_dbm'],-203)
-            self.assertEqual(value['link']['cn0_db_hz'],-39)
-            self.assertEqual(value['link']['snr_100hz_db'],-59)
-            self.assertTrue(math.isclose(value['link']['ideal_18db_symbol_seconds'],10**5.7,rel_tol=1e-12))
+            self.assertEqual(value['link']['received_power_dbm'],-197)
+            self.assertEqual(value['link']['cn0_db_hz'],-33)
+            self.assertEqual(value['link']['snr_100hz_db'],-53)
+            self.assertTrue(math.isclose(value['link']['ideal_18db_symbol_seconds'],10**5.1,rel_tol=1e-12))
             self.assertTrue(math.isclose(value['link']['zero_residual_coherent_energy_asymptote_linear'],
-                                        4*10**(-3.9)/math.radians(0.5)**2,rel_tol=1e-12))
+                                        4*10**(-3.3)/math.radians(0.5)**2,rel_tol=1e-12))
             self.assertIsNone(value['current_receiver']['success_probability'])
             self.assertFalse(value['current_receiver']['carrier_in_search'])
             self.assertEqual(value['current_receiver']['clock_error_ppm'],100)
@@ -114,7 +114,7 @@ class StreamCLI(unittest.TestCase):
     def test_link_analysis_bounded_extreme_duration(self):
         # A billion-second symbol must stay an O(trials) statistical job;
         # generating or searching even its first PCM symbol would time out.
-        args=('analyze-link','--bits','001','--tx-dbm','-3','--attenuation-db','-200',
+        args=('analyze-link','--bits','001','--tx-dbm','3','--attenuation-db','-200',
               '--bw','100','--symbol-seconds','1e9','--trials','2000','--seed','17')
         value=json.loads(self.run_pump(*args,timeout=10).stdout)
         self.assertEqual(value['transmission']['symbol_seconds'],1e9)
@@ -131,19 +131,19 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['experiments'],repeat['experiments'])
     def test_link_analysis_independent_targets_channel_and_reference(self):
         args=('analyze-link','--text','a','--bw','100','--trials','100',
-              '--tx-dbm','-3','--attenuation-db','-200')
+              '--tx-dbm','3','--attenuation-db','-200')
         fast=json.loads(self.run_pump(*args,'--target-snr','32',timeout=10).stdout)
-        slow=json.loads(self.run_pump(*args,'--target-snr','-42',timeout=10).stdout)
+        slow=json.loads(self.run_pump(*args,'--target-snr','-36',timeout=10).stdout)
         self.assertEqual(fast['link'],slow['link'])
         self.assertGreater(slow['transmission']['symbol_seconds'],fast['transmission']['symbol_seconds'])
-        profile=json.loads(self.run_pump(*args,'--target-snr','-42','--receive-targets','32',timeout=10).stdout)
+        profile=json.loads(self.run_pump(*args,'--target-snr','-36','--receive-targets','32',timeout=10).stdout)
         self.assertEqual(profile['receive_profile_assumption'],'explicit_receive_targets')
         self.assertFalse(profile['current_receiver']['profile_matches'])
         self.assertIsNone(profile['current_receiver']['success_probability'])
         ideal=json.loads(self.run_pump(*args,'--phase-noise','0','--clock-error-ppm','0',
             '--frequency-offset','0.125','--residual-frequency-hz','0.001',
             '--symbol-seconds','10000','--template-correlation','0.25','--noise-figure-db','4',timeout=10).stdout)
-        self.assertEqual(ideal['link']['cn0_db_hz'],-33)
+        self.assertEqual(ideal['link']['cn0_db_hz'],-27)
         self.assertIsNone(ideal['link']['zero_residual_coherent_energy_asymptote_linear'])
         self.assertEqual(ideal['current_receiver']['clock_error_ppm'],0)
         self.assertEqual(ideal['current_receiver']['frequency_offset_hz'],0.125)
@@ -151,12 +151,12 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(ideal['current_receiver']['actual_carrier_offset_hz'],0.125)
         self.assertEqual(ideal['reference_assumptions']['residual_frequency_hz'],0.001)
         self.assertEqual(ideal['experiments']['segmented_phase_model']['template_correlation'],0.25)
-        preset=json.loads(self.run_pump('analyze-link','--input','-','--simulation','-3dBm -200dB',
-            '--trials','100','--bw','100','--target-snr','-42',data=b'a',timeout=10).stdout)
+        preset=json.loads(self.run_pump('analyze-link','--input','-','--simulation','3dBm -200dB',
+            '--trials','100','--bw','100','--target-snr','-36',data=b'a',timeout=10).stdout)
         self.assertEqual(preset['link'],slow['link'])
         self.assertEqual(preset['transmission']['wire_bits'],3)
     def test_link_analysis_rejects_invalid_and_misplaced_options(self):
-        args=('analyze-link','--text','a','--tx-dbm','-3','--attenuation-db','-200','--trials','10')
+        args=('analyze-link','--text','a','--tx-dbm','3','--attenuation-db','-200','--trials','10')
         for extra in (('--symbol-seconds','0'),('--symbol-seconds','-1'),('--symbol-seconds','1e308'),
                       ('--coherent-seconds','0'),('--coherent-seconds','1e19'),
                       ('--hypotheses','1'),('--false-alarm','0'),('--false-alarm','1'),
@@ -168,15 +168,49 @@ class StreamCLI(unittest.TestCase):
         for draft in ((),('--bits',''),('--bits','01x'),('--bits','0','--text','a'),
                       ('--bits','0','--input','-'),('--bits','0','--callsign','CQ'),
                       ('--bits','0','--repeatable')):
-            self.run_pump('analyze-link',*draft,'--tx-dbm','-3','--attenuation-db','-200',ok=False,timeout=10)
-        for power in ((),('--tx-dbm','-3'),('--attenuation-db','-200'),
-                      ('--tx-dbm','-3','--attenuation-db','200'),
-                      ('--simulation','off'),('--simulation','3dBm -170dB','--tx-dbm','-3'),
+            self.run_pump('analyze-link',*draft,'--tx-dbm','3','--attenuation-db','-200',ok=False,timeout=10)
+        for power in ((),('--tx-dbm','3'),('--attenuation-db','-200'),
+                      ('--tx-dbm','3','--attenuation-db','200'),
+                      ('--simulation','off'),('--simulation','3dBm -170dB','--tx-dbm','3'),
                       ('--simulation','3dBm -170dB','--attenuation-db','-200')):
             self.run_pump('analyze-link','--text','a',*power,ok=False,timeout=10)
         for flag in ('tx-dbm','attenuation-db','noise-figure-db','symbol-seconds','coherent-seconds',
                      'trials','hypotheses','false-alarm','residual-frequency-hz','template-correlation'):
             self.run_pump('estimate','--text','a','--'+flag,'1',ok=False)
+    def test_oscillator_models_and_overrides(self):
+        args=('analyze-link','--text','a','--bw','100','--symbol-seconds','10000',
+              '--simulation','3dBm -200dB','--trials','100')
+        for name,clock,phase in (('crystal',100,.5),('gpsdo-xo',.1,.5),
+                                 ('gpsdo-tcxo',.01,.05),('gpsdo-ocxo',.0001,.005)):
+            value=json.loads(self.run_pump(*args,'--oscillator',name).stdout)
+            self.assertEqual(value['oscillator_model'],{'preset':name,'illustrative':True,'overridden':False})
+            self.assertEqual(value['current_receiver']['clock_error_ppm'],clock)
+            self.assertEqual(value['reference_assumptions']['phase_noise_degrees_per_sqrt_second'],phase)
+            explicit=json.loads(self.run_pump(*args,'--clock-error-ppm',clock,'--phase-noise',phase).stdout)
+            self.assertEqual(value['current_receiver'],explicit['current_receiver'])
+            self.assertEqual(value['experiments'],explicit['experiments'])
+        override=json.loads(self.run_pump(*args,'--oscillator','gpsdo-ocxo','--phase-noise','2').stdout)
+        self.assertTrue(override['oscillator_model']['overridden'])
+        self.assertEqual(override['current_receiver']['clock_error_ppm'],.0001)
+        self.assertEqual(override['reference_assumptions']['phase_noise_degrees_per_sqrt_second'],2)
+        # Custom negative transmit powers remain valid, but are no longer presets.
+        negative=json.loads(self.run_pump('analyze-link','--bits','0','--tx-dbm','-3',
+                                         '--attenuation-db','-200','--trials','10').stdout)
+        self.assertEqual(negative['link']['received_power_dbm'],-203)
+        self.run_pump('analyze-link','--bits','0','--simulation','-3dBm -200dB',ok=False)
+        for command in ('simulate','listen','analyze-link'):
+            self.run_pump(command,'--text','a','--simulation','3dBm -120dB',
+                          '--oscillator','missing',ok=False)
+        self.run_pump('estimate','--text','a','--oscillator','gpsdo-xo',ok=False)
+    def test_oscillator_preset_applies_to_sampled_waveform(self):
+        with tempfile.TemporaryDirectory() as directory:
+            args=('simulate','--text','a',*AUDIO,'--snr','30','--seed','713')
+            for name,clock,phase in (('gpsdo-xo',.1,.5),('gpsdo-ocxo',.0001,.005)):
+                preset=pathlib.Path(directory)/(name+'-preset.wav')
+                explicit=pathlib.Path(directory)/(name+'-explicit.wav')
+                self.run_pump(*args,'--oscillator',name,'--output',preset)
+                self.run_pump(*args,'--clock-error-ppm',clock,'--phase-noise',phase,'--output',explicit)
+                self.assertEqual(preset.read_bytes(),explicit.read_bytes())
     def test_sub_hertz_sampled_reception(self):
         # A reduced internal clock exercises the actual 3.56-hour symbol
         # geometry with a bounded test recording, without waiting in real time.

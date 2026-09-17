@@ -24,6 +24,9 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Heuristic simulation computation time for a fixed high-end Intel Core i9-13900H laptop reference. Based on the current draft and modem workload; no local benchmark or hardware detection. Replay playback and additional recovery time are excluded.";
     if(slot==Slot::simulation_gpu_time)
         control.help="Projected simulation computation time for a fixed NVIDIA GeForce RTX 4090 Laptop GPU reference. GPU simulation is not implemented. Uses a heuristic workload model, not a local benchmark; actual laptop power and cooling affect performance. Replay playback and additional recovery time are excluded.";
+    if(slot==Slot::simulation_oscillator||slot==Slot::simulation_oscillator_detail)
+        control.help="Illustrative effective TX/RX residual clock mismatch and random-walk phase diffusion used by both sampled simulation and model estimates. GPS lock does not imply phase coherence. Hobbyist XO and TCXO choices have no oven and retain more phase noise than the OCXO model. These are scenario assumptions, not measured product specifications or a full GPS control-loop model. This choice does not discipline audio hardware or control a physical oscillator.";
+    if(slot==Slot::simulation_oscillator_detail)control.font_size=12;
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
     if(control.multiline) {
@@ -115,6 +118,8 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::simulation_confidence,Command::none,Bitmap::none,Page::console,2,"RX success (model)"}, Slot::simulation_confidence),
         placed({Kind::label,Field::simulation_cpu_time,Command::none,Bitmap::none,Page::console,2,"CPU / i9-13900H"}, Slot::simulation_cpu_time),
         placed({Kind::label,Field::simulation_gpu_time,Command::none,Bitmap::none,Page::console,2,"GPU / RTX 4090 Laptop (projected)"}, Slot::simulation_gpu_time),
+        placed({Kind::choice,Field::simulation_oscillator,Command::none,Bitmap::none,Page::console,3,"Oscillator model"}, Slot::simulation_oscillator),
+        placed({Kind::label,Field::simulation_oscillator_detail,Command::none,Bitmap::none,Page::console,3,""}, Slot::simulation_oscillator_detail),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),

@@ -100,6 +100,60 @@ void simulation_estimate_controls() {
     check(text(F::simulation_confidence).ends_with(">99.9%"),
           "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
 }
+void oscillator_controls() {
+    using F=ui::Field;
+    Controller controller({true,true});
+    check(controller.field(F::simulation_oscillator).selected=="crystal"&&
+          controller.field(F::simulation_oscillator).options.size()==tuning::oscillator_presets().size()&&
+          controller.settings().simulation_clock_error_ppm==100&&
+          controller.settings().simulation_phase_noise_degrees_per_sqrt_second==.5,
+          "The default oscillator must preserve the existing independent-clock simulation");
+    controller.edit(F::message,"a");prepare(controller);
+    const auto original_bits=controller.estimate()->wire_bits;
+    const auto original_samples=controller.estimate()->waveform_samples;
+    check(original_bits==3,"Oscillator fixture changed the exact a dictionary endpoint");
+    for(const auto& preset:tuning::oscillator_presets()) {
+        const auto revision=controller.revision();
+        const bool changed=controller.field(F::simulation_oscillator).selected!=preset.id;
+        controller.select(F::simulation_oscillator,std::string(preset.id));
+        check(controller.settings().simulation_clock_error_ppm==preset.clock_error_ppm&&
+              controller.settings().simulation_phase_noise_degrees_per_sqrt_second==preset.phase_noise_degrees_per_sqrt_second,
+              "Oscillator selection did not reach the sampled simulation settings");
+        if(changed)check(controller.revision()>revision&&!controller.estimate()&&
+              controller.field(F::simulation_confidence).text.ends_with("Calculating..."),
+              "Oscillator selection kept an estimate prepared with the old clock or phase model");
+        prepare(controller);
+        check(controller.estimate()->wire_bits==original_bits&&controller.estimate()->waveform_samples==original_samples,
+              "Oscillator selection changed transmitted source bits or waveform geometry");
+    }
+    check(controller.field(F::simulation_oscillator_detail).text.find("Clock mismatch ")!=std::string::npos&&
+          controller.field(F::simulation_oscillator_detail).text.find("Phase diffusion ")!=std::string::npos&&
+          controller.field(F::simulation_oscillator_detail).text.find("GPS lock does not imply phase coherence")!=std::string::npos,
+          "Selected oscillator model must show both residual values and its phase-coherence limitation");
+    const auto accepted=controller.field(F::simulation_oscillator).selected;
+    const auto revision=controller.revision();
+    controller.select(F::simulation_oscillator,"unknown");
+    check(controller.revision()==revision&&controller.field(F::simulation_oscillator).selected==accepted,
+          "Unknown oscillator IDs changed accepted simulation settings");
+    controller.select(F::simulation_oscillator,"crystal");
+    controller.edit(F::bandwidth,"100 Hz");controller.edit(F::snr,"-30");prepare(controller);
+    check(controller.field(F::simulation_confidence).text.ends_with("Carrier outside RX search"),
+          "Long-symbol oscillator fixture must expose the default clock's uncovered carrier");
+    controller.select(F::simulation_oscillator,"gpsdo-ocxo");prepare(controller);
+    check(!controller.field(F::simulation_confidence).text.ends_with("Carrier outside RX search")&&
+          !controller.field(F::simulation_confidence).text.ends_with("Calculating..."),
+          "The model estimate did not use the selected oscillator's narrower carrier mismatch");
+    const auto ppm=controller.settings().simulation_clock_error_ppm;
+    const auto phase=controller.settings().simulation_phase_noise_degrees_per_sqrt_second;
+    controller.edit(F::snr,"32");controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));
+    check(controller.settings().simulation_clock_error_ppm==ppm&&
+          controller.settings().simulation_phase_noise_degrees_per_sqrt_second==phase,
+          "Other simulation or modem edits discarded the saved oscillator choice");
+    controller.close();controller.select(F::simulation_oscillator,"crystal");
+    check(!controller.field(F::simulation_oscillator).enabled&&
+          controller.field(F::simulation_oscillator).selected=="gpsdo-ocxo",
+          "A stale oscillator callback reconfigured a closing application");
+}
 void revised_reception_ingestion() {
     const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {
         live::Snapshot snapshot;
@@ -241,6 +295,13 @@ void noise_start_stop(Controller& controller) {
     check(!controller.enabled(C::transmit_noise)&&!controller.enabled(C::transmit)&&
           controller.enabled(C::cancel)&&controller.command_label(C::cancel)=="Stop noise",
           "Queued noise did not immediately disable competing sends and expose Stop noise");
+    const auto oscillator=controller.field(F::simulation_oscillator).selected;
+    controller.select(F::simulation_oscillator,oscillator=="crystal"?"gpsdo-ocxo":"crystal");
+    check(!controller.field(F::simulation_oscillator).enabled&&
+          controller.field(F::simulation_oscillator).selected==oscillator&&
+          controller.settings().simulation_clock_error_ppm==settings.simulation_clock_error_ppm&&
+          controller.settings().simulation_phase_noise_degrees_per_sqrt_second==settings.simulation_phase_noise_degrees_per_sqrt_second,
+          "An oscillator selection changed a queued or running transmission's channel");
     const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     do { controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5)); }
     while((!controller.snapshot().transmitting_noise||controller.snapshot().transmission_seconds<=0)&&
@@ -1715,6 +1776,7 @@ int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
+        oscillator_controls();
         revised_reception_ingestion();
         rate_carrier_controls();
         sub_hertz_controls();

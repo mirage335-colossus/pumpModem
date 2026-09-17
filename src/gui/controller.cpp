@@ -182,6 +182,9 @@ struct Controller::Impl {
         for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
         const auto presets=tuning::simulation_presets();
         f(UiField::simulation).selected=std::string(presets[(options.simulation||options.smoke)?std::min<std::size_t>(2,presets.size()-1):0].name);
+        for(const auto& preset:tuning::oscillator_presets())
+            f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
+        f(UiField::simulation_oscillator).selected="crystal";
         f(UiField::key).options={{"none","None"}}; f(UiField::key).selected="none"; f(UiField::key_path).text="None";
         f(UiField::qr_brightness).options={{"normal","Normal"},{"dim","Dim"},{"dark","Dark"},{"off","Off"}}; f(UiField::qr_brightness).selected="dark";
         f(UiField::send_key).options={{"enter","on Enter"},{"ctrl-enter","on Ctrl+Enter"}}; f(UiField::send_key).selected="enter";
@@ -305,6 +308,13 @@ struct Controller::Impl {
             next.mono=f(UiField::mono).checked;
             const auto preset=tuning::parse_simulation_preset(f(UiField::simulation).selected); next.simulation=preset.enabled;
             if(preset.enabled) { const auto budget=tuning::link_budget(preset,next.transfer.modem.bandwidth_hz,next.transfer.modem.sample_rate); next.simulation_snr_db=budget.sample_snr_db; channel_snr=budget.snr_db; }
+            const auto oscillator=tuning::parse_oscillator_preset(f(UiField::simulation_oscillator).selected);
+            next.simulation_clock_error_ppm=oscillator.clock_error_ppm;
+            next.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+            std::ostringstream oscillator_detail;
+            oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<oscillator.clock_error_ppm<<" ppm | Phase diffusion "
+                <<oscillator.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)\nIllustrative residual model; GPS lock does not imply phase coherence.";
+            f(UiField::simulation_oscillator_detail).text=oscillator_detail.str();
             const auto workspace_percent=f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
             if(workspace_percent!=dsp_workspace_percent) {
                 dsp_workspace_bytes=runtime::dsp_workspace_budget(workspace_percent);
@@ -564,7 +574,7 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -959,7 +969,7 @@ void Controller::select(UiField field,std::string id) {
             p.encryption_changed(); p.configure();
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
-        else if(field==UiField::simulation||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
+        else if(field==UiField::simulation||field==UiField::simulation_oscillator||field==UiField::fec||field==UiField::dsp_workspace) p.configure();
         else if(field==UiField::transmit_scope_format)
             p.f(UiField::transmit_scope).records=transmit_scope_records(p.snapshot.transmit_trace,state.selected=="bits");
     } catch(const std::exception& e) { p.notice(e.what(),10); }

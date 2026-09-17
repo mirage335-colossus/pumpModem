@@ -6,16 +6,16 @@ size and airtime with the existing fixed-laptop compute model and a bounded
 Monte Carlo experiment on matched-correlation statistics. Work depends on the
 requested trial count, not the number of audio samples or coherent segments.
 
-For the requested **-3 dBm / -200 dB** case, received power is -203 dBm. With
-the preset noise density of -164 dBm/Hz, actual C/N0 is **-39 dB-Hz** and SNR
-in 100 Hz is -59 dB. This is 36 dB weaker than +3 dBm / -170 dB.
+For the requested **3 dBm / -200 dB** case, received power is -197 dBm. With
+the preset noise density of -164 dBm/Hz, actual C/N0 is **-33 dB-Hz** and SNR
+in 100 Hz is -53 dB. This is 30 dB weaker than +3 dBm / -170 dB.
 
 | TX power | Attenuation | Actual C/N0 | Ideal duration for 18 dB Es/N0 | Three bits plus one absent symbol |
 | ---: | ---: | ---: | ---: | ---: |
-| -3 dBm | -190 dB | -29 dB-Hz | 13.9 hours/bit | 2.32 days |
-| -3 dBm | -200 dB | -39 dB-Hz | 5.80 days/bit | 23.2 days |
-| -3 dBm | -210 dB | -49 dB-Hz | 58.0 days/bit | 232 days |
-| -3 dBm | -220 dB | -59 dB-Hz | 580 days/bit | 6.36 years |
+| 3 dBm | -190 dB | -23 dB-Hz | 3.50 hours/bit | 14.0 hours |
+| 3 dBm | -200 dB | -33 dB-Hz | 1.46 days/bit | 5.83 days |
+| 3 dBm | -210 dB | -43 dB-Hz | 14.6 days/bit | 58.3 days |
+| 3 dBm | -220 dB | -53 dB-Hz | 146 days/bit | 1.60 years |
 
 These are energy calculations at the existing planner's 18 dB target, not
 capacity limits, measured sensitivities or predictions of successful reception.
@@ -25,7 +25,7 @@ a whole absent symbol when that symbol lasts longer than six seconds.
 
 ## Computed reference cases
 
-The following results use 100 Hz bandwidth, -3 dBm transmit power, a 10 dB
+The following results use 100 Hz bandwidth, 3 dBm transmit power, a 10 dB
 noise figure, 0.5 degrees/sqrt(second) phase diffusion, zero residual frequency,
 orthogonal template projections, one million prescribed search alternatives
 and a 1e-6 total noise false-alarm budget. Each row uses 10,000 trials with
@@ -35,49 +35,58 @@ production receiver or a complete message.
 
 | Attenuation | Symbol duration | Maximum coherent segment | Correct detection | 95% model-only interval |
 | ---: | ---: | ---: | ---: | ---: |
-| -200 dB | 501,187.234 s (5.80 days) | 20,000 s | 9.45% | 8.89–10.04% |
-| -200 dB | 1,000,000 s (11.57 days) | 20,000 s | 88.93% | 88.30–89.53% |
-| -200 dB | 2,000,000 s (23.15 days) | 20,000 s | 10,000/10,000 trials | 99.962–100% |
-| -200 dB | 4,000,000 s (46.30 days) | 3,600 s | 10,000/10,000 trials | 99.962–100% |
-| -210 dB | 5,000,000 s (57.87 days) | 20,000 s | 0/10,000 trials | 0–0.0384% |
-| -210 dB | 100,000,000 s (3.17 years) | 20,000 s | 10,000/10,000 trials | 99.962–100% |
+| -200 dB | 125,892.541 s (1.46 days) | 20,000 s | 61.36% | 60.40–62.31% |
+| -200 dB | 250,000 s (2.89 days) | 20,000 s | 99.98% | 99.927–99.995% |
+| -200 dB | 500,000 s (5.79 days) | 20,000 s | 10,000/10,000 trials | 99.962–100% |
+| -200 dB | 1,000,000 s (11.57 days) | 3,600 s | 10,000/10,000 trials | 99.962–100% |
+| -210 dB | 1,250,000 s (14.47 days) | 20,000 s | 0.33% | 0.235–0.463% |
+| -210 dB | 10,000,000 s (115.74 days) | 20,000 s | 10,000/10,000 trials | 99.962–100% |
 
 All-success trials do not establish certainty, and these intervals omit model
 error. In particular, replacing phase-path energy with its mean omits fading
-variability. The 23.15-day symbol would require at least **92.6 days** for `a`
-and a complete absent symbol, before waveform tails. These sampled durations
+variability. The 2.89-day symbol would require at least **11.6 days** for `a`
+and a complete absent symbol, before waveform tails. These analyzed durations
 are examples, not optimized minimum durations. At still weaker power, fixed
 coherent segments enter the low-energy regime where useful accumulated
 detection evidence scales approximately with power squared: another 10 dB
 of attenuation can require about 100 times the observation time.
 
-At the 5.80-day point, the ideal coherent reference succeeds in 99.73% of
-trials; the default uninterrupted phase model succeeds in none. Reducing phase
+At the 1.46-day point, the ideal coherent reference succeeds in 99.73% of
+trials; the default uninterrupted phase model succeeds in 2.45%. Reducing phase
 diffusion tenfold to 0.05 degrees/sqrt(second) raises that uninterrupted model
-to 99.28% (99.09–99.43%). This comparison shows why oscillator stability and
+to 99.65% (99.51–99.75%). This comparison shows why oscillator stability and
 tracking matter at least as much as making the configured bandwidth smaller.
 
 ## Run an analysis
 
 ```sh
-./build/pump analyze-link --text a --bw 100 --target-snr -42 \
-  --tx-dbm -3 --attenuation-db -200 --coherent-seconds 3600 --trials 10000
+./build/pump analyze-link --text a --bw 100 --target-snr -36 \
+  --tx-dbm 3 --attenuation-db -200 --coherent-seconds 3600 --trials 10000
 ```
 
-The target -42 requests three dB of integration margin relative to the actual
--39 dB-Hz channel. It selects a 1,000,000-second symbol at 100 Hz. The target
+The target -36 requests three dB of integration margin relative to the actual
+-33 dB-Hz channel. It selects a 251,188.643-second symbol at 100 Hz. The target
 does not change channel power. To examine a specific observation duration:
 
 ```sh
-./build/pump analyze-link --bits 011 --bw 100 --symbol-seconds 2000000 \
-  --simulation '-3dBm -200dB' --coherent-seconds 20000 --trials 10000
+./build/pump analyze-link --bits 011 --bw 100 --symbol-seconds 250000 \
+  --simulation '3dBm -200dB' --coherent-seconds 20000 --trials 10000
 ```
 
 Custom power/attenuation inputs also allow cases beyond the GUI presets. Their
 attenuation convention is negative: use `--attenuation-db -210`. Preset and
-custom link inputs cannot be mixed. The GUI additionally offers
-`-3dBm -200dB` and `-3dBm -230dB` for the existing sampled simulation; adding a
+custom link inputs cannot be mixed. The GUI offers
+`3dBm -200dB` and `3dBm -230dB` for the existing sampled simulation; adding a
 preset does not establish that the receiver can decode it.
+
+The GUI's **Oscillator model** dropdown and CLI `--oscillator` option select
+free-running crystal, hobbyist GPSDO/XO without an oven, GPSDO/TCXO without an
+oven, or GPSDO/OCXO impairments. They change both the sampled channel and the
+estimates. See [oscillator models](oscillator-models.md) for the illustrative
+values and the distinction between GPS frequency accuracy and phase stability.
+An individual `--clock-error-ppm` or `--phase-noise` value overrides that part
+of the selected model. The examples and table above use the unchanged
+free-running-crystal default.
 
 Useful comparison controls are `--phase-noise` (degrees/sqrt(second)),
 `--coherent-seconds`, `--noise-figure-db`, `--hypotheses`,
@@ -139,17 +148,17 @@ squared-sinc loss. Diffusion and frequency are integrated jointly; multiplying
 separate loss factors is not generally correct.
 
 With zero residual frequency and the default 0.5 degree/sqrt(second), the
-5.80-day symbol loses about 10 dB of expected coherent energy. As duration
+1.46-day symbol loses about 4.80 dB of expected coherent energy. As duration
 increases, one uncorrected coherent filter approaches expected energy
-`4 r / sigma^2`: only **8.20 dB** at C/N0=-39 dB-Hz. This is a limitation of
+`4 r / sigma^2`: only **14.20 dB** at C/N0=-33 dB-Hz. This is a limitation of
 that receiver and channel model, not an impossibility theorem for communication.
 Within-observation phase fluctuations matter; see the filtered Wiener phase
 model in [Ghozlan and Kramer](https://arxiv.org/pdf/1503.03130).
 
-The current carrier search is another constraint. At 501,187 seconds per bit,
-its 4097-frequency cap covers approximately +/-1.02 mHz, while the default
+The current carrier search is another constraint. At 125,893 seconds per bit,
+its 4097-frequency cap covers approximately +/-4.07 mHz, while the default
 100 ppm shift at a 1500 Hz carrier is 0.15 Hz. A complete +/-200 ppm search
-would need about 1.20 million frequencies before timing/clock alternatives.
+would need about 302,145 frequencies before timing/clock alternatives.
 Longer integration alone does not supply that coverage.
 
 ## The reduced statistical experiment
@@ -178,10 +187,11 @@ time, carrier, clock, bit, epoch and key trials. This is not the production
 receiver's adaptive evidence threshold, and the complete search is not run.
 `--hypotheses` is prescribed independently of `current_receiver` geometry;
 it is not an automatic count of that receiver's search. For example, the
--42 target above needs about 2.4 million frequencies for full +/-200 ppm
+-36 target above needs about 602,855 frequencies for full +/-200 ppm
 coverage, before other alternatives, while the reference default is one
-million cells. A reference with that default does not cover that complete
-production search. Increase M when examining a larger search.
+million cells. After counting both bit labels and the other alternatives,
+that complete production search exceeds the reference default. Increase M
+when examining a larger search.
 
 Nonzero phase diffusion replaces random path energy with its exact mean eta.
 The resulting detection distribution is therefore an approximation that omits

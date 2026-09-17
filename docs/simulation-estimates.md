@@ -6,6 +6,13 @@ confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
 
+The adjacent **Oscillator model** selector provides the original free-running
+crystal and three GPSDO cases: hobbyist XO without an oven, TCXO without an
+oven, and OCXO. It sets the same relative clock offset and phase diffusion
+for the sampled simulation and this estimate. The selected numeric values
+appear alongside the dropdown. These are illustrative sensitivity models,
+not measured GPSDO specifications; see [oscillator models](oscillator-models.md).
+
 The fixed reference machine is an **Intel Core i9-13900H** with an
 **NVIDIA GeForce RTX 4090 Laptop GPU**. The estimator never benchmarks the
 computer, queries CPU/GPU identity, counts local processor threads, or measures

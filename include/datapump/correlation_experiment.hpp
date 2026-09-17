@@ -11,8 +11,8 @@ namespace datapump::simulation {
 // acquisition. The correlation parameter is a prescribed template geometry,
 // not a measurement of this modem's finite waveform or search bank.
 struct CorrelationExperimentParameters {
-    double cn0_db_hz = -39;
-    double symbol_seconds = 501187.2336272725;
+    double cn0_db_hz = -33;
+    double symbol_seconds = 125892.54117941675;
     double segment_seconds = 3600;
     double phase_noise_degrees_per_sqrt_second = .5;
     double residual_frequency_hz = 0;

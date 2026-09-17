@@ -97,8 +97,12 @@ frequency search shows an explanation instead of a numeric probability; see the
 [model and its assumptions](docs/simulation-estimates.md).
 For extreme links, `pump analyze-link` compares bounded statistical detector
 experiments and extrapolated processing costs without generating PCM. See
-[fast weak-link planning](docs/weak-link-planning.md) for the -3 dBm/-200 dB
+[fast weak-link planning](docs/weak-link-planning.md) for the 3 dBm/-200 dB
 case, example commands and the distinction from actual receiver success.
+The **Oscillator model** selector includes free-running crystal, hobbyist
+GPSDO/XO and GPSDO/TCXO without ovens, and GPSDO/OCXO models. The same profiles
+are available as `--oscillator` in CLI simulations and analysis; see
+[their assumptions](docs/oscillator-models.md).
 The inspection views show the two pattern codewords, their modeled distances,
 and exact bit/symbol counts. Long patterns use a bounded illustrative prefix;
 keyed previews use clearly labeled public example streams. These design plots

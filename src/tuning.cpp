@@ -69,9 +69,13 @@ constexpr std::array presets{
     SimulationPreset{"3dBm -60dB",true,3,-60},SimulationPreset{"3dBm -90dB",true,3,-90},
     SimulationPreset{"3dBm -120dB",true,3,-120},SimulationPreset{"3dBm -170dB",true,3,-170},
     SimulationPreset{"3dBm -200dB",true,3,-200},SimulationPreset{"3dBm -230dB",true,3,-230},
-    SimulationPreset{"-3dBm -200dB",true,-3,-200},SimulationPreset{"-3dBm -230dB",true,-3,-230},
     SimulationPreset{"50dBm -200dB",true,50,-200},SimulationPreset{"50dBm -270dB",true,50,-270},
     SimulationPreset{"70dBm -250dB",true,70,-250}};
+constexpr std::array oscillator_models{
+    OscillatorPreset{"crystal","Free-running crystal",100,.5},
+    OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.1,.5},
+    OscillatorPreset{"gpsdo-tcxo","GPSDO: TCXO (no oven)",.01,.05},
+    OscillatorPreset{"gpsdo-ocxo","GPSDO: OCXO",.0001,.005}};
 std::size_t index_of(PatternMode mode) {
     const auto found=std::find(modes.begin(),modes.end(),mode);
     if(found==modes.end()) throw Error("unknown pattern mode");
@@ -261,6 +265,13 @@ SimulationPreset parse_simulation_preset(std::string_view name) {
     if(wanted=="off") return presets[0];
     for(const auto& preset:presets) if(normalized(preset.name)==wanted) return preset;
     throw Error("unknown simulation preset: "+std::string(name));
+}
+std::span<const OscillatorPreset> oscillator_presets(){return oscillator_models;}
+OscillatorPreset parse_oscillator_preset(std::string_view name) {
+    const auto wanted=normalized(name);
+    for(const auto& preset:oscillator_models)
+        if(normalized(preset.id)==wanted || normalized(preset.name)==wanted)return preset;
+    throw Error("unknown oscillator preset: "+std::string(name));
 }
 LinkBudget link_budget(const SimulationPreset& preset,double bandwidth_hz,std::uint32_t sample_rate,double noise_figure_db) {
     if(!preset.enabled) throw Error("simulation preset is disabled");

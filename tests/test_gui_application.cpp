@@ -622,6 +622,46 @@ void mono_declaration() {
     check(!app.control(mono).enabled&&app.field(mono.field).checked,
           "A stale declared Mono callback reconfigured a closing application");
 }
+void oscillator_declaration() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& oscillator=control(F::simulation_oscillator);
+    const auto& detail=control(F::simulation_oscillator_detail);
+    const std::string_view help=oscillator.help;
+    check(oscillator.kind==ui::Kind::choice&&oscillator.persistent&&
+          detail.kind==ui::Kind::label&&detail.persistent&&
+          app.field(oscillator.field).selected=="crystal"&&
+          help.find("effective TX/RX")!=help.npos&&help.find("no oven")!=help.npos&&
+          help.find("GPS lock does not imply phase coherence")!=help.npos&&
+          help.find("does not discipline audio hardware")!=help.npos,
+          "Oscillator scenarios need a persistent shared choice with explicit residual-model limitations");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);
+        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&app.control(detail).visible,
+              "Oscillator scenario or its numeric explanation disappeared on another page");
+        app.select(oscillator,"gpsdo-xo");
+        check(app.field(oscillator.field).selected=="gpsdo-xo"&&
+              app.field(detail.field).text.find("Clock mismatch 0.1 ppm")!=std::string::npos&&
+              app.field(detail.field).text.find("Phase diffusion 0.5 deg / sqrt(s)")!=std::string::npos,
+              "Hobbyist GPSDO selection lost its non-oven clock and phase assumptions through the facade");
+        app.select(oscillator,"gpsdo-ocxo");
+        check(app.field(oscillator.field).selected=="gpsdo-ocxo"&&
+              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
+              app.field(detail.field).text.find("Phase diffusion 0.005 deg / sqrt(s)")!=std::string::npos,
+              "OCXO model values did not update through shared native choice dispatch");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto choice_geometry=app.control_layout(oscillator,size.w,size.h);
+            const auto detail_geometry=app.control_layout(detail,size.w,size.h);
+            check(choice_geometry.has_label&&choice_geometry.widget.w>=320&&
+                  choice_geometry.frame.x+choice_geometry.frame.w<detail_geometry.frame.x&&
+                  detail_geometry.frame.w>=668&&detail_geometry.frame.h>=2*16,
+                  "Oscillator choice and selected model values overlap or clip in native layout");
+        }
+    }
+    app.close();app.select(oscillator,"crystal");
+    check(!app.control(oscillator).enabled&&app.field(oscillator.field).selected=="gpsdo-ocxo",
+          "A stale oscillator callback changed a closing facade");
+}
 void declared_submission() {
     Application app({.simulation=true});
     app.edit(ui::Field::binary,"001");
@@ -955,6 +995,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -532,9 +532,17 @@ void expanded_bitmap_clicks() {
         app.application.select(ui::Field::qr_brightness,"normal");refresh();
         click(geometry.widget.x+geometry.widget.w/2,geometry.widget.y+geometry.widget.h/2);refresh();
         overlay=expanded();require(overlay,"Restored bitmap could not be expanded again");
-        app.application.edit(ui::Field::message,std::string(4096,'x'));refresh();
-        const auto error=app.application.bitmap(*declared);auto* caption=find_label(*overlay,error.caption);
-        require(!error.caption.empty()&&caption&&caption->visible_r()&&caption->labelcolor()==text_color(error.caption_tone),
+        app.application.edit(ui::Field::message,std::string(4096,'x'));
+        // Bitmap sources poll every 40 ms; native presentation polls every
+        // 100 ms. Wait for both stages instead of racing their relative phase.
+        const auto caption_ready=[&] {
+            const auto error=app.application.bitmap(*declared);
+            auto* caption=find_label(*overlay,error.caption);
+            return !error.caption.empty()&&caption&&caption->visible_r()&&caption->labelcolor()==text_color(error.caption_tone);
+        };
+        const auto caption_deadline=Clock::now()+std::chrono::seconds(2);
+        while(!caption_ready()&&Clock::now()<caption_deadline)Fl::wait(.005);
+        require(caption_ready(),
             "Expanded bitmap lost its error caption or caption tone");
         Fl::e_keysym=FL_Escape;Fl::e_state=0;Fl::handle(FL_KEYDOWN,window);refresh();
         require(!expanded()&&!app.application.overlay()&&!app.application.closing()&&window_count()==original_windows&&

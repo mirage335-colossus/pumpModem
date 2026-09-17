@@ -4,14 +4,16 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 952;
-inline constexpr int min_width = 1030, min_height = 872;
+inline constexpr int default_width = 1180, default_height = 1000;
+inline constexpr int min_width = 1030, min_height = 920;
+inline constexpr int oscillator_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
 enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation,
-    simulation_confidence, simulation_cpu_time, simulation_gpu_time, key_actions,
+    simulation_confidence, simulation_cpu_time, simulation_gpu_time,
+    simulation_oscillator, simulation_oscillator_detail, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -29,6 +31,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::header: case Slot::mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
+    case Slot::simulation_oscillator: case Slot::simulation_oscillator_detail:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -54,6 +57,7 @@ struct DesktopLayout {
     explicit DesktopLayout(int width = default_width, int height = default_height,
                            bool transmit_scope_visible = true) {
         auto& out = *this;
+        const int content_height = height - oscillator_row_height;
         out[Slot::header] = {margin, 10, 220, 32};
         out[Slot::mode] = {235, 13, width - 420, 28};
         out[Slot::clear] = {width - 153, 12, 137, 28};
@@ -75,8 +79,10 @@ struct DesktopLayout {
         out[Slot::simulation_cpu_time] = {cpu_x, 89, cpu_width, 43};
         const int gpu_x = cpu_x + cpu_width + 10;
         out[Slot::simulation_gpu_time] = {gpu_x, 89, width - margin - gpu_x, 43};
-        out[Slot::tabs] = {margin, 137, width - 2 * margin, height - 296};
-        out[Slot::page] = {margin, 169, width - 2 * margin, height - 328};
+        out[Slot::simulation_oscillator] = {margin, 153, 320, field_height};
+        out[Slot::simulation_oscillator_detail] = {346, 137, width - margin - 346, 43};
+        out[Slot::tabs] = {margin, 137, width - 2 * margin, content_height - 296};
+        out[Slot::page] = {margin, 169, width - 2 * margin, content_height - 328};
 
         constexpr int compose_y = 195, binary_width = 220;
         // Keep all ten generation rows visible, including native scrollbar
@@ -124,7 +130,7 @@ struct DesktopLayout {
         out[Slot::files] = {width - margin - files_width, signal_y, files_width, signal_height - 36};
         out[Slot::save_file] = {width - margin - files_width, signal_y + signal_height - 29, files_width, action_height};
 
-        const int plots_y = signal_y + signal_height + 23, plot_height = height - plots_y - 167;
+        const int plots_y = signal_y + signal_height + 23, plot_height = content_height - plots_y - 167;
         // Keep the scrollable profile reference inline with the plots at the
         // right edge, leaving reception history its full width.
         constexpr int reference_width=280;
@@ -187,7 +193,7 @@ struct DesktopLayout {
 
         // Two persistent rows keep both target labels readable at the minimum
         // width without reducing the composition, reception or plot areas.
-        const int controls_y = height - 135, extra = std::max(0, width - min_width);
+        const int controls_y = content_height - 135, extra = std::max(0, width - min_width);
         constexpr int control_gap = 10;
         const int device_width = 190 + extra * 20 / 100, bandwidth_width = 112 + extra * 10 / 100;
         const int carrier_width = 120 + extra * 10 / 100;
@@ -200,16 +206,20 @@ struct DesktopLayout {
         out[Slot::fec] = {x, controls_y, fec_width, field_height}; x += fec_width + control_gap;
         out[Slot::dsp_workspace] = {x, controls_y, width - margin - x, field_height};
         constexpr int snr_width = 260;
-        const int targets_y = height - 92;
+        const int targets_y = content_height - 92;
         out[Slot::snr] = {margin, targets_y, snr_width, field_height};
         out[Slot::long_snr] = {margin + snr_width + control_gap, targets_y, snr_width, field_height};
         const int receive_x = margin + 2 * (snr_width + control_gap);
         out[Slot::receive_snr] = {receive_x, targets_y, width - margin - receive_x, field_height};
         // Audio routing and diagnostics sit below the modem settings without
         // narrowing the editors or their labels at the minimum desktop width.
-        out[Slot::mono] = {margin, height - 56, 74, 22};
-        out[Slot::diagnostics] = {margin + 82, height - 56, width - 2 * margin - 82, 22};
-        out[Slot::status] = {margin, height - 31, width - 2 * margin, 24};
+        out[Slot::mono] = {margin, content_height - 56, 74, 22};
+        out[Slot::diagnostics] = {margin + 82, content_height - 56, width - 2 * margin - 82, 22};
+        out[Slot::status] = {margin, content_height - 31, width - 2 * margin, 24};
+        // Reserve one oscillator row above every page. Shift the complete
+        // content and lower settings together, preserving their allocations.
+        for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<slots.size();++index)
+            slots[index].y+=oscillator_row_height;
     }
 };
 }

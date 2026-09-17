@@ -73,6 +73,17 @@ struct SimulationPreset {
 };
 std::span<const SimulationPreset> simulation_presets();
 SimulationPreset parse_simulation_preset(std::string_view name);
+// Illustrative residual clock error and Wiener phase diffusion for simulation,
+// not measured device specifications. GPS discipline alone does not establish
+// short-term phase stability; the underlying oscillator and loop also matter.
+struct OscillatorPreset {
+    std::string_view id;
+    std::string_view name;
+    double clock_error_ppm = 100;
+    double phase_noise_degrees_per_sqrt_second = .5;
+};
+std::span<const OscillatorPreset> oscillator_presets();
+OscillatorPreset parse_oscillator_preset(std::string_view name);
 struct LinkBudget {
     double received_power_dbm = 0;
     double noise_power_dbm = 0; // In the configured channel bandwidth.

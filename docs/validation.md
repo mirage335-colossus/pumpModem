@@ -4,6 +4,65 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Corrected transmit power and oscillator selection — 16 September 2026
+
+The two mistaken -3 dBm presets were removed; the existing +3 dBm/-200 dB and
++3 dBm/-230 dB entries are the corrected choices. Their actual C/N0 values
+are -33 and -63 dB-Hz under the unchanged noise model. Custom negative transmit
+power remains supported by the analysis command. The planning examples and
+statistical API defaults now use the corrected +3 dBm case. Seven 10,000-trial
+reference cases were rerun at that power; current results are recorded in
+[fast weak-link planning](weak-link-planning.md).
+
+The shared GUI now offers free-running crystal, hobbyist GPSDO/XO without an
+oven, GPSDO/TCXO without an oven, and GPSDO/OCXO models. Numeric residual clock
+and phase values are visible. Both GUI backends use the same declarations and
+configuration path, with one extra 48-pixel row preserving existing content
+allocations. The selector changes both sampled channel settings and the
+estimate, follows the transmission busy lock, preserves draft wire geometry,
+and invalidates estimates made with the previous oscillator. Other modem
+edits retain the choice. The original 100 ppm / 0.5 degrees/sqrt(second)
+crystal scenario remains the default.
+
+The same `--oscillator` profiles apply to `simulate`, `listen` and
+`analyze-link`. Explicit clock/phase flags override their respective values.
+New CLI tests compare sampled WAV output byte-for-byte between GPSDO profiles
+and equivalent explicit channel settings, and compare analytical outputs for
+all four profiles. They also check corrected link arithmetic, unknown profile
+rejection, override metadata and command scope. These checks validate the
+configuration mapping, not a physical GPSDO's performance.
+
+At +3 dBm/-200 dB and 125,892.541-second symbols, the 10,000-trial coherent
+reference model gives 2.45% for crystal and hobbyist XO, 99.65% for TCXO, and
+99.73% for OCXO. GPSDO profiles bring the modeled carrier into the existing
+search, but its modeled FFT workspace remains unsupported for this case.
+Production RX confidence therefore remains unavailable. The profiles are
+illustrative relative link impairments, not device specifications or models
+of GPS servo dynamics, warm-up, holdover, or oscillator aging. The
+[oscillator documentation](oscillator-models.md) records the primary sources
+and why long-term GPS accuracy does not imply short-term phase coherence.
+
+Both Release GUI executables and CLIs rebuilt. All 66 headless tests passed
+(280.15 seconds), retaining the independent short-wire vectors, sampled weak
+reception, physical-end and pending-bit regressions. Rev's eight focused
+configuration, layout, controller, application and CLI suites passed
+(68.28 seconds). Native Rev self-check, adapter/platform conformance and
+1x/2x coordinate checks passed (five tests, 71.91 seconds). FLTK self-check
+and document conformance passed; adapter conformance passed in 40.36 seconds
+after a test-only timing correction. Its expanded-bitmap caption test had
+raced the separate 40 ms source and 100 ms presentation polls with a fixed
+130 ms delay. It now waits at most two seconds for the same caption,
+visibility and exact tone predicate. No runtime behavior or assertion was
+weakened. Both actual native windows were also captured on private displays
+and visually inspected; the oscillator row and existing controls fit.
+
+```sh
+ctest --test-dir build --output-on-failure -j 2 \
+  -E '^(gui_self_check|gui_workflow|gui_adapter_conformance|gui_document_conformance)$'
+ctest --test-dir build-rev --output-on-failure -j 2 \
+  -R '^(tuning|simulation_estimate|correlation_experiment|gui_layout|gui_contract|gui_application|gui_controller|cli)$'
+```
+
 ## Bounded extreme-link planning — 16 September 2026
 
 `pump analyze-link` now runs three matched-correlation reference experiments
@@ -12,8 +71,10 @@ constant storage and work proportional to the Monte Carlo trial count, even
 for represented symbols lasting years. The output retains exact draft wire
 size and airtime, current receiver coverage limits, and the fixed i9-13900H /
 RTX 4090 Laptop GPU compute estimates. The GPU estimate remains hypothetical;
-no hardware benchmark or new receive backend was added. New -3 dBm/-200 dB and
--3 dBm/-230 dB presets are available in both GUI builds.
+no hardware benchmark or new receive backend was added. The initially added
+-3 dBm/-200 dB and -3 dBm/-230 dB presets were subsequently removed after the
+user corrected transmit power to +3 dBm; the existing positive-power entries
+already cover those links.
 
 The statistical unit suite compares reduced draws against an independent
 explicit complex-segment implementation for one and four segments, including
@@ -37,7 +98,8 @@ Eleven bounded 10,000-trial scenario runs covered -3 dBm at -200, -210 and
 -220 dB attenuation, durations from 501,187 seconds to 1e10 seconds, 3,600-
 and 20,000-second coherent segments, 0.5 and 0.05 degrees/sqrt(second) phase
 diffusion, and 1e6 or 1e8 prescribed search alternatives. Their computed
-examples are recorded in [fast weak-link planning](weak-link-planning.md).
+examples were recorded in the original planning document; that document now
+contains rerun +3 dBm examples following the power correction.
 They expose the strong loss from phase diffusion and the growing time cost
 of segmented energy accumulation. They do not establish actual reception
 at -200 dB, whole-message probabilities, real-world confidence intervals or

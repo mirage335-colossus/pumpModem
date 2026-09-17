@@ -106,8 +106,10 @@ Audio/simulation:
   --snr DB              Simulator measured signal/noise power ratio; default20
   --simulation PRESET   e.g. "3dBm -120dB": TX power and channel attenuation
   --seed N --delay-samples N --frequency-offset HZ
-  --clock-error-ppm N   Relative crystal error; default100 (0 for ideal clock)
-  --phase-noise N       Phase diffusion, degrees/sqrt(second); default0.5
+  --oscillator MODEL    crystal (default), gpsdo-xo, gpsdo-tcxo, gpsdo-ocxo
+                        Illustrative residual clock/phase models; no hardware control
+  --clock-error-ppm N   Override model's relative clock error; crystal default100
+  --phase-noise N       Override diffusion, degrees/sqrt(second); crystal default0.5
   --receiver-time N     Independent receive epoch for simulate (default --time)
 
 Statistical link analysis (analyze-link only):
@@ -135,7 +137,7 @@ Examples:
   pump rx --input transfer.wav --save received.png
   pump tx --text "hello" --device default
   pump rx --device default --seconds 30 --json
-  pump analyze-link --text a --bw 100 --target-snr -42 --tx-dbm -3 --attenuation-db -200
+  pump analyze-link --text a --bw 100 --target-snr -36 --tx-dbm 3 --attenuation-db -200
 GUI: datapump-gui
 )HELP";
 
@@ -148,7 +150,7 @@ public:
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
-            "target-snr","receive-targets","pattern","simulation","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
+            "target-snr","receive-targets","pattern","simulation","oscillator","key-name","key-names","cache-mb","dsp-mb","clock-error-ppm","phase-noise","receiver-time",
             "recovery-seconds","recovery-threads","recovery-bits","recovery-errors",
             "tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds",
             "trials","hypotheses","false-alarm","residual-frequency-hz","template-correlation"};
@@ -205,7 +207,7 @@ public:
         if(command!="tx" && command!="rx" && command!="status-tx" && command!="listen") reject({"device"},"is only valid for live audio commands");
         if(command!="keygen") reject({"key-names"},"is only valid for keygen");
         if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"simulation"},"is only valid for simulate/listen/analyze-link");
-        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
+        if(command!="simulate" && command!="listen" && command!="analyze-link") reject({"oscillator","clock-error-ppm","phase-noise"},"is only valid for simulate/listen/analyze-link");
         if(command!="analyze-link")
             reject({"tx-dbm","attenuation-db","noise-figure-db","symbol-seconds","coherent-seconds","trials",
                 "hypotheses","false-alarm","residual-frequency-hz","template-correlation"},"is only valid for analyze-link");
@@ -225,6 +227,12 @@ public:
         if(command=="tx" && has("output") && has("device")) throw Error("choose one TX destination: --output or --device");
     }
 };
+tuning::OscillatorPreset oscillator_config(const Args& a) {
+    auto result=tuning::parse_oscillator_preset(a.get("oscillator","crystal"));
+    result.clock_error_ppm=a.number("clock-error-ppm",result.clock_error_ppm);
+    result.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",result.phase_noise_degrees_per_sqrt_second);
+    return result;
+}
 bool stdout_terminal() {
 #ifdef _WIN32
     return _isatty(_fileno(stdout))!=0;
@@ -562,8 +570,9 @@ void analyze_link(const Args& a,transfer::Options options) {
     channel.snr_db=link.sample_snr_db;channel.seed=a.integer("seed",1);
     channel.delay_samples=a.integer("delay-samples",137);
     channel.frequency_offset_hz=a.number("frequency-offset",0);
-    channel.clock_error_ppm=a.number("clock-error-ppm",100);
-    channel.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+    const auto oscillator=oscillator_config(a);
+    channel.clock_error_ppm=oscillator.clock_error_ppm;
+    channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
     modem::validate_channel(c,channel);
     const auto trials=a.integer("trials",10000);
     if(!trials || trials>1000000)throw Error("trials must be 1..1000000");
@@ -604,6 +613,8 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<",\"conditional_on_matched_timing_and_clock\":true"
         <<",\"prescribed_template_correlation_not_measured\":true"
         <<",\"monte_carlo_intervals\":\"model_only_95_percent_Wilson\""
+        <<",\"oscillator_model\":{\"preset\":\""<<oscillator.id<<"\",\"illustrative\":true,\"overridden\":"
+        <<((a.has("clock-error-ppm")||a.has("phase-noise"))?"true":"false")<<'}'
         <<",\"receive_profile_assumption\":\""<<(matching_profile?"matching_transmit_profile":"explicit_receive_targets")<<'"'
         <<",\"link\":{\"transmit_dbm\":";json_number(preset.transmit_dbm);
     std::cout<<",\"attenuation_db\":";json_number(preset.attenuation_db);
@@ -682,8 +693,9 @@ void listen(const Args& a,const transfer::Options& options) {
             options.modem.bandwidth_hz,options.modem.sample_rate).sample_snr_db;
     }
     settings.simulation_seed=a.integer("seed",1);
-    settings.simulation_clock_error_ppm=a.number("clock-error-ppm",100);
-    settings.simulation_phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+    const auto oscillator=oscillator_config(a);
+    settings.simulation_clock_error_ppm=oscillator.clock_error_ppm;
+    settings.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
     if(options.modem.spreading_mode!=modem::SpreadingMode::tone && a.has("keyfile") && !a.has("key-name")) {
         for(const auto& entry:load_keyring(a.get("keyfile"),a.has("pad")?
             std::optional<std::filesystem::path>(a.get("pad")):std::nullopt)) settings.receive_keys.push_back(entry.key);
@@ -906,8 +918,9 @@ int main(int argc,char** argv) {
         }
         channel.delay_samples=a.integer("delay-samples",137);
         channel.frequency_offset_hz=a.number("frequency-offset",0);
-        channel.clock_error_ppm=a.number("clock-error-ppm",100);
-        channel.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",.5);
+        const auto oscillator=oscillator_config(a);
+        channel.clock_error_ppm=oscillator.clock_error_ppm;
+        channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
         if(a.has("receiver-time")) channel.receiver_timestamp=a.integer("receiver-time",timestamp);
         const auto outgoing=message(a);
         transfer::Received result;

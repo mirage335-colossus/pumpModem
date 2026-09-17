@@ -131,7 +131,7 @@ Public patterns are reproducible; using them does not establish a low
 probability of interception. Neither the simulation nor its estimated receive
 percentage is a measurement of interference or interception probability.
 
-For lower-power cases such as -3 dBm/-200 dB, the bounded `analyze-link`
+For lower-power cases such as 3 dBm/-200 dB, the bounded `analyze-link`
 command compares coherent and segmented statistical reference detectors
 without generating long PCM recordings. See [fast planning](weak-link-planning.md).
 Sampled cases and actual checks are recorded in [validation](validation.md).

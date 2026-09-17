@@ -43,6 +43,20 @@ during transmission. Changing it preserves the running receiver, pending bits,
 plots and airtime estimate; the selected routing applies to the next playback.
 Simulated samples and exported WAV framing are independent of this choice.
 
+The persistent **Oscillator model** dropdown below the Simulation estimates
+offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO
+(no oven)**, **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. A neighboring label
+shows the selected effective TX/RX clock mismatch in ppm and phase diffusion
+in degrees per square-root second. These are illustrative residual scenarios,
+not measured specifications for products: GPS lock does not establish phase
+coherence, and low-cost non-oven oscillators retain more short-term instability
+than the OCXO scenario. The settings do not control physical clock hardware.
+Both sampled simulation and the RX/CPU/GPU advisory model consume the same
+selected values. Changing the selection invalidates the old estimate, preserves
+the draft and exact wire format, and follows the Simulation dropdown's busy
+lock. Other modem edits retain the choice; invalid or stale choices do not
+reconfigure a running or closed session.
+
 The persistent **DSP workspace** choice selects 25%, 50% (default), or 75% of
 available RAM. Its display includes the resolved MiB/GiB ceiling. The value is
 sampled at controller startup and when the percentage changes; other modem edits
@@ -316,9 +330,12 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 952 logical
-pixels, with a 1030 by 872 minimum. A persistent simulation row holds the
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1000 logical
+pixels, with a 1030 by 920 minimum. A persistent simulation row holds the
 dropdown, modeled receive probability and reference CPU/GPU compute estimates.
+The following persistent row holds the oscillator dropdown and selected model
+values. The extra row preserves the existing composition, reception and plot
+allocations rather than narrowing the estimate labels.
 `control_layout.hpp` computes frame, label,
 editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display
