@@ -24,6 +24,29 @@ exact wire-bit count and receive **no FEC benefit**, regardless of the saved FEC
 choice. Longer text and attachments use the actual count of fixed 128-byte coded
 intervals and their existing 192-bit markers.
 
+**TX target C/N0 is a design input, not an enforced detection threshold.** In
+automatic modes it chooses pattern duration: lower targets request longer
+integration; higher targets shorten it until the applicable minimum pattern
+length is reached. Fixed pattern modes keep their chosen length. The target
+does not change the simulated signal or noise power. The preset supplies actual
+C/N0 using transmit power, attenuation and the default 10 dB noise figure:
+
+| Preset | Received power | Actual C/N0 |
+| --- | ---: | ---: |
+| 3dBm -170dB | -167 dBm | -3 dB-Hz |
+| 3dBm -120dB | -117 dBm | +47 dB-Hz |
+
+At 100 Hz with public auto-pattern and the default 1,500 Hz carrier, target
+140 selects 64 chips and 1.28 seconds per bit; a +47 dB-Hz channel can therefore
+receive it despite being below the design target. Target -61 requests
+79,432,823 seconds (about 919 days) per bit. The default 100 ppm clock shift is
+0.15 Hz, while that long profile searches only approximately ±6.3 nanohertz.
+More nominal integration cannot compensate for the untracked drift. The
+current UI reports **Carrier outside RX search** for this long-symbol case,
+with no numeric probability. A sampled regression receives exact `011` / `a`
+for the strong 100 Hz case; it does not establish a calibrated 99.9% success
+rate across channel realizations.
+
 Elapsed simulated media includes the estimated waveform's settling, payload,
 filter padding and suppression; channel delay, an average 175 ms randomized
 startup and waveform clock-rate conversion; then
@@ -33,6 +56,24 @@ symbol requires a fully scored four-hour absent symbol. Compute time and media
 duration are different quantities. UI replay pacing is excluded.
 
 ## Probability model
+
+Numeric probability is available only when a matching receive profile covers
+the simulated carrier shift. The default receiver searches five offsets from
+`-0.5/T` through `+0.5/T`, where `T` is the actual sample-quantized symbol
+duration. The simulated shift includes both the explicit frequency offset and
+`carrier_hz * clock_error_ppm / 1e6`. Outside that span, the UI shows **Carrier
+outside RX search** and retains the CPU/GPU estimates. This is a model-coverage
+limit, not a claim that reception has exactly zero probability.
+
+For example, public auto-pattern at 1 Hz and a 32 dB-Hz target uses 128-second
+symbols at the default 1,500 Hz carrier. Its frequency search spans only
+±0.00390625 Hz, while the default 100 ppm simulation clock error shifts the
+carrier by 0.15 Hz. The previous model incorrectly reported over 99.9% for
+`a` at +3 dBm/-120 dB. It treated mismatch solely as signal attenuation; the
+actual receiver divides fitted energy by total received energy, so signal that
+does not fit the template can limit evidence even when thermal noise is tiny.
+A high link budget cannot justify that extrapolation. This correction changes
+the estimate and its presentation, not receiver search or channel settings.
 
 The channel SNR uses the simulator's `Fs/2` noise bandwidth. Before losses,
 the integrated symbol energy is
@@ -143,6 +184,9 @@ waveform geometry, not the secret key's validity or successful authentication.
 `simulation_estimate` checks deterministic reference estimates, SNR and draft
 length response, fixed-interval FEC versus unprotected short input, incompatible
 receive profiles, additional receiver work, phase noise and full four-hour
-absence accounting. These checks validate model mechanics, not its empirical
+absence accounting. It also feeds the reported 1 Hz case through the sampled
+channel and ordinary receiver, comparing default clock drift with zero drift,
+and checks frequency-search coverage independently of signal strength.
+These checks validate model mechanics, not its empirical
 calibration. The independent protocol and physical-completion regressions remain
 the authority for actual transport behavior.

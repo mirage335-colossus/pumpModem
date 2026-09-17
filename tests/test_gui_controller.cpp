@@ -74,6 +74,32 @@ void simulation_estimate_controls() {
     controller.edit(F::short_bits,"001x");
     check(text(F::simulation_confidence).ends_with("Unavailable"),
           "Invalid bit draft left a previous numeric reception estimate visible");
+    controller.edit(F::message,"a");
+    controller.edit(F::bandwidth,"1 Hz");
+    controller.select(F::simulation,"3dBm -120dB");prepare(controller);
+    check(text(F::simulation_confidence).ends_with("Carrier outside RX search")&&
+          text(F::simulation_confidence).find('%')==std::string::npos&&
+          text(F::simulation_cpu_time).find("\n~")!=std::string::npos&&
+          text(F::simulation_gpu_time).find("\n~")!=std::string::npos,
+          "1 Hz clock mismatch must explain unavailable confidence while retaining compute estimates");
+    controller.select(F::simulation,"3dBm -60dB");prepare(controller);
+    check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
+          "High signal strength incorrectly restored confidence outside the carrier search");
+    controller.edit(F::bandwidth,"3.6 kHz");prepare(controller);
+    check(text(F::simulation_confidence).find('%')!=std::string::npos,
+          "Returning to supported carrier coverage did not restore the modeled percentage");
+    controller.edit(F::bandwidth,"100 Hz");
+    controller.edit(F::snr,"-61");
+    controller.select(F::simulation,"3dBm -170dB");prepare(controller);
+    check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
+          "100 Hz with a -61 target must not show the old low numeric probability");
+    const auto preset_snr=controller.settings().simulation_snr_db;
+    controller.edit(F::snr,"140");prepare(controller);
+    check(controller.settings().simulation_snr_db==preset_snr,
+          "Changing the TX design target must not change simulated channel SNR");
+    controller.select(F::simulation,"3dBm -120dB");prepare(controller);
+    check(text(F::simulation_confidence).ends_with(">99.9%"),
+          "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
 }
 void revised_reception_ingestion() {
     const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {

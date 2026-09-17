@@ -4,6 +4,63 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## TX design target versus simulation channel strength — 16 September 2026
+
+The 100 Hz comparison was checked with public auto-pattern, text `a`, default
+1,500 Hz carrier, 100 ppm clock error and 0.5 degrees/sqrt(second) phase noise.
+The +3 dBm/-170 dB preset supplies -3 dB-Hz C/N0; target -61 selects about
+79,432,823 seconds per bit and falls outside carrier-search coverage. The
++3 dBm/-120 dB preset supplies +47 dB-Hz C/N0; target 140 reaches the applicable
+64-chip floor at 1.28 seconds per bit. Its sampled-channel regression receives
+exact `011` and decoded `a` with physical completion. The numerical target is
+a design input for duration, not a required minimum received C/N0. No reversed
+units or change to simulated power was found.
+
+Shared help now explains the two independent settings and the drift limitation.
+New model/controller regressions cover both reported 100 Hz cases and verify
+that changing the target cannot change channel SNR. The local Rev executable
+still contained the estimator from before the carrier-search fix; both default
+FLTK and Rev builds were refreshed and checked for the corrected explanation
+and target help. Six focused suites passed in the default Release build
+(57.01 seconds): estimator, tuning, controller, application and both adapter
+boundary guards. Rev's estimator/tuning/controller suites passed (60.97 seconds),
+as did all five native checks on a private software-GL display: self-check,
+adapter/platform conformance and 1x/2x coordinates (67.82 seconds).
+These sampled checks validate the specific cases, not a
+calibrated population-wide 99.9% success rate. No full multi-year symbol or
+reference-hardware benchmark was run.
+
+## Carrier-search coverage in simulation confidence — 16 September 2026
+
+The reported public auto-pattern case (1 Hz, 32 dB-Hz target, +3 dBm/-120 dB,
+text `a`) reproduced the misleading >99.9% estimate. The exact wire bits remain
+`011`. At the default 1,500 Hz carrier, 100 ppm clock error shifts the carrier
+by 0.15 Hz; the 128-second symbol's five frequency hypotheses span only
+±0.00390625 Hz. A sampled-channel reproduction retained a maximum score of
+12.52 against an admission threshold of 39.67 and admitted no reception. With
+zero clock error, the same source/channel strength produced `011` and `a`
+after the fully sampled absence tail.
+
+The estimator now marks numeric confidence unavailable outside its modeled
+carrier-search span, including either sign of explicit frequency offset plus
+carrier clock drift. The GUI shows **Carrier outside RX search** and retains
+both reference compute estimates. This deliberately makes no zero-probability
+claim: the actual normalized energy fits can sometimes admit signals outside
+the bank, but the previous attenuation-only approximation cannot predict that
+regime. Receiver search, sampled channel, wire format and completion rules are
+unchanged.
+
+The Release build and all 22 selected contract, estimator and shared GUI suites
+passed (172.71 seconds). The estimator regression includes the actual sampled
+failure and successful zero-drift control, a separate EOF-without-absence
+negative control, both frequency-bank edges, sample-quantized durations, and
+stronger-SNR exclusion. GUI checks verify the exact reported settings, preserved
+CPU/GPU values and restoration of numeric confidence when coverage returns.
+The explanation was visually inspected in native FLTK windows at default and
+minimum size, including a stronger 1 Hz preset. `git diff --check` passed.
+Rev native conformance was not rerun for this shared text/model change; no
+adapter code or geometry changed. No reference-hardware benchmark was run.
+
 ## Simulation probability and reference compute estimates — 16 September 2026
 
 The persistent Simulation row now shows a modeled whole-draft reception

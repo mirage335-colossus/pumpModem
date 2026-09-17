@@ -694,7 +694,10 @@ struct Controller::Impl {
             else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");
             else if(result.simulation_estimate) {
                 const auto& model=*result.simulation_estimate;
-                simulation_estimate_text(model.profile_matches?probability_text(model.success_probability):"No matching RX profile",
+                const auto confidence=!model.profile_matches?"No matching RX profile":
+                    !model.carrier_in_search?"Carrier outside RX search":
+                    !model.confidence_available?"Unavailable":probability_text(model.success_probability);
+                simulation_estimate_text(confidence,
                     "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds));
             } else simulation_estimate_status("Unavailable");
             f(UiField::inspection).text=inspection->title+"\n"+inspection->summary;

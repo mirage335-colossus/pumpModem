@@ -10,14 +10,22 @@ inline constexpr std::string_view reference_gpu = "RTX 4090 Laptop GPU";
 struct Estimate {
     // Engineering estimates, not measurements or calibrated probabilities.
     // Success means the entire supplied draft survives reception/correction.
+    // success_probability is meaningful only when confidence_available is true.
     double success_probability = 0;
     double cpu_seconds = 0;
     double gpu_seconds = 0;
     double simulated_seconds = 0;
     double modeled_symbol_snr_db = 0;
+    double carrier_offset_hz = 0;
+    double carrier_search_half_width_hz = 0;
     std::size_t receiver_profiles = 0;
     bool profile_matches = false;
     bool confidence_available = false;
+    // The probability approximation requires the simulated carrier to lie
+    // within the default receiver's finite frequency-search span. A signal
+    // outside it is not proven impossible to receive; its probability is
+    // unsupported by this model regardless of the signal strength.
+    bool carrier_in_search = false;
     // The production receiver currently has no GPU execution backend.
     bool gpu_hypothetical = true;
 };

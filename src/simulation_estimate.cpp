@@ -154,12 +154,14 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.gpu_seconds=finite_seconds(.11L+serial_seconds+parallel/gpu_scoring_operations_per_second+
         samples*sizeof(float)/gpu_transfer_bytes_per_second);
     if(!transmission.wire_bits)return result;
-    result.confidence_available=true;
 
     // The simulator's SNR is per Fs/2 noise bandwidth, so Es/N0=snr*Fs*T/2.
     const auto symbol_db=channel.snr_db+10*std::log10(static_cast<long double>(samples_per_symbol)/2);
     const auto frequency=channel.frequency_offset_hz+config.carrier_hz*channel.clock_error_ppm*1e-6L;
     const auto spacing=.25L/seconds;
+    result.carrier_offset_hz=static_cast<double>(frequency);
+    result.carrier_search_half_width_hz=static_cast<double>(2*spacing);
+    result.carrier_in_search=std::abs(frequency)<=2*spacing;
     const auto nearest=std::clamp(std::round(frequency/spacing),-2.L,2.L)*spacing;
     const auto angle=std::numbers::pi_v<long double>*(frequency-nearest)*seconds;
     const auto carrier_loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
@@ -171,6 +173,13 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto coherence=carrier_loss*phase_loss*timing_loss;
     const auto effective_db=coherence>0?symbol_db-model_implementation_loss_db+10*std::log10(coherence):-300.L;
     result.modeled_symbol_snr_db=static_cast<double>(std::max(-300.L,effective_db));
+    // The real receiver scores explained / total energy. Signal energy that
+    // misses its finite carrier bank remains in that denominator, imposing a
+    // fit ceiling even at high SNR. Attenuating Es/N0 alone cannot predict that
+    // regime. Do not extrapolate a numeric probability beyond the bank, nor
+    // claim zero: some out-of-bank signals can still produce admitted fits.
+    if(!result.profile_matches || !result.carrier_in_search)return result;
+    result.confidence_available=true;
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));
     const auto bit_error=.5*std::exp(-energy/2);
     const auto admitted=normal_above(energy,5);
