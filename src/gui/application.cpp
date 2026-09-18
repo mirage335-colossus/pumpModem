@@ -186,6 +186,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     // The planner owns its concise LPI reference and single model warning.
     // The current-draft advisory remains unchanged on the other pages.
     if(!declaration.surface&&declaration.field==ui::Field::lpi_estimate&&page()==ui::Page::planner)view.visible=false;
+    if(!declaration.surface&&declaration.field==ui::Field::simulation_oscillator_detail&&page()==ui::Page::planner)view.visible=false;
+    if(!declaration.surface&&declaration.field==ui::Field::planner_target)view.visible=page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
@@ -195,6 +197,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
         const auto effective=(state.display_text.size()>6?"":"using ")+state.display_text+" dB-Hz";
         if(declaration.field==ui::Field::snr)view.label="Short ≤16 B · "+effective;
         else if(declaration.field==ui::Field::long_snr)view.label="Long / file · "+effective;
+        else if(declaration.field==ui::Field::planner_target)view.label="Planner target · "+effective;
+        else if(declaration.field==ui::Field::receive_snr)view.label="RX targets · adjusted; Enter to show";
     }
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
@@ -237,7 +241,8 @@ void Application::select_page(ui::Page page) {
 ui::Page Application::page() const { return impl_->page; }
 bool Application::smoke_passed() const { return impl_->passed; }
 bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
-    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr)&&!ctrl&&!shift) {
+    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr||
+        control.field==ui::Field::receive_snr||control.field==ui::Field::planner_target)&&!ctrl&&!shift) {
         if(accepts_input(control))impl_->controller.commit_target(control.field);
         return true;
     }

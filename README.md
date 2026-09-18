@@ -86,8 +86,10 @@ Marker recognition uses bounded fixed-cadence searches and a conservative `2^-84
 random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
-The desktop has **Console**, **Modem flow**, **Transmission layout**, and
-**Compression / raw bits** tabs.
+The desktop has **Console**, **Link planner**, **Compression / raw bits**,
+**Modem flow**, and **Transmission layout** tabs, in that order. Link planner
+compares bit duration, modeled one-bit reception and receiver CPU pace at the
+selected power, path loss, noise and oscillator settings.
 Beside **Simulation**, the desktop shows a modeled whole-message receive
 probability and estimated computation times for a fixed **Intel Core i9-13900H**
 and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
@@ -163,10 +165,15 @@ Changing Rate selects its default carrier: `1.5 kHz` for `3.6 kHz`, otherwise
 `max(1500, 0.75 × rate)` Hz. The Carrier dropdown offers only the current rate's
 default carrier; manual frequency entry remains available.
 The **RX targets (dB-Hz)** comma-list starts at `32, 55`. Changing either TX SNR to
-a valid value replaces the RX list with both targets (deduplicated); the RX
+a valid value replaces the RX list with both effective targets (deduplicated); the RX
 list can then be edited independently. Search varies this list while holding
 the selected rate, carrier, and pattern/tone mode fixed. Invalid RX input resets
 the entire list to `32`.
+In automatic modes, all GUI target entries check Clock/RAM fit and may adjust
+to a nearby usable value, preferring weaker targets. Fixed modes retain exact
+entries. Typing preserves the edit buffer; Enter or a preset displays the exact
+accepted value. The independent Planner target changes only its preview until
+explicitly applied. See [Link planner](docs/link-planner.md).
 
 Beside the gross bitrate, diagnostics show the **[Shannon-Hartley limit](https://disalw3.epfl.ch/teaching/signals_instruments_systems/ay_2025-26/lecture/SIS_25-26_W07_lecture.pdf#page=33)** for the
 selected TX target and nominal bandwidth. This is ideal Gaussian-noise channel

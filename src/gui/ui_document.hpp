@@ -8,7 +8,7 @@ namespace datapump::gui::ui {
 // Native text and controls surrounding opaque bitmaps. This vocabulary is
 // independent of the document's subject and of every widget toolkit.
 enum class DocumentKind { column, row, text, bitmap, action };
-enum class DocumentTone { text, muted, accent };
+enum class DocumentTone { text, muted, accent, comparison, positive, caution, negative };
 enum class DocumentFill { none, surface, alternate, parity };
 struct DocumentNode {
     DocumentKind kind=DocumentKind::column;

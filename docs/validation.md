@@ -3731,3 +3731,49 @@ phase-state combining. Its results cannot establish a limit on those methods.
 No multi-day PCM reception, physical RF link or full native transmission workflow
 was tested. The previously recorded Rev workflow timeout remains a validation
 limit. `git diff --check` passed.
+
+### All-target fitting, RX curve and CPU pace (2026-09-18)
+
+All automatic-mode GUI target editors now select checked Clock/RAM fits,
+including short/long TX, manual RX lists and the independent native Planner
+dropdown. TX and RX edits account for their companion targets and active
+receive banks. Tests retain typed text until commit, verify accepted targets
+against receiver support, and preserve exact wire counts and preview isolation.
+The RX-list regression now checks the independently resolved usable targets
+under its actual RAM budget instead of requiring the previously literal 6 dB
+target, which can fall outside clock search. Fixed-mode geometry is unchanged.
+
+The time graph overlays one-bit reception probability with its own percentage
+axis. Tests check its probabilities independently, distinguish unavailable
+regions from zero probability, retain a connected transition at 2 and 8 GiB,
+and check draft independence and stable sampling across repaints, changed
+keys/noise/phase/RAM and cache eviction. Costly sampling is bounded to twelve
+additional evaluations; a checked fit within 0.001 dB can replace a tiny raw
+rounding gap. Rendering tests cover all pixel formats, clipped damage, visible
+isolated points and unbridged unsupported intervals.
+
+The CPU indicator compares receiver-only work with incoming audio, including
+the required fully scored absence tail, on the existing i9-13900H reference.
+It reports processing seconds per audio second with green/yellow/red text and
+colors. Expanded details retain total one-bit simulation CPU time. Tests verify
+excluded synthetic-channel work, receive-bank scaling, tracking cost and draft
+independence. Existing total CPU/GPU estimates, reception probability formulas,
+LPI estimates, receiver scoring and framing are unchanged.
+
+Both complete Release builds passed. The GCC shared GUI/estimate selection
+passed 27/27 suites in 87.31 seconds; Clang/Rev passed 26/26 in 29.86 seconds.
+Native FLTK adapter/document conformance passed 2/2; Rev adapter/platform and
+1×/2× coordinate conformance passed 4/4 in 64.16 seconds. Default and minimum
+windows were inspected in both backends: the target dropdown and CPU status
+fit, and the RX transition is clearly visible beside the time curve. The
+minimum window uses the existing document scroll. These are model and GUI
+checks, not local CPU calibration or physical RF performance measurements.
+
+The remaining 20 development-contract suites passed in 233.66 seconds;
+together with the shared GUI/estimate selection, all 25 listed contract suites
+passed, including independent short-wire vectors, four-hour sampled symbols,
+physical completion and pending-prefix regressions. After clarifying the CPU
+line as processing seconds per audio second, both builds and planner suites
+passed again (15.51 seconds GCC, 17.73 seconds Rev), and all four window captures
+were refreshed and checked. No physical audio/RF or full native transmission
+workflow was rerun. `git diff --check` passed.

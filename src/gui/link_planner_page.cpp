@@ -102,9 +102,13 @@ void buttons(Node& parent, const std::vector<Button>& values) {
 struct Tick { double value; std::string label; };
 struct Chart {
     std::vector<std::pair<double, double>> points;
+    // Unavailable samples keep their position and break the RX line.
+    std::vector<std::pair<double, double>> receive_points;
     std::vector<Tick> y_ticks;
     double strong = 25, weak = -35, low_log = 0, high_log = 1;
     double selected_target = 0, selected_value = 0;
+    double selected_probability = 0;
+    bool receive_available = false;
 };
 double y_fraction(const Chart& chart, double value) {
     return (chart.high_log - std::log10(value)) / (chart.high_log - chart.low_log);
@@ -113,6 +117,18 @@ Chart chart_data(const planner::Model& model, bool observer) {
     Chart chart;
     chart.selected_target = model.inputs.target_db_hz;
     chart.selected_value = observer ? (model.observer_available ? model.observer_ratio : 0) : model.bit_seconds;
+    if(!observer) {
+        chart.receive_available=model.confidence_available;
+        chart.selected_probability=model.one_bit_success_probability;
+        for(const auto& point:model.receive_points) {
+            if(!std::isfinite(point.target_db_hz))continue;
+            chart.strong=std::max(chart.strong,point.target_db_hz);
+            chart.weak=std::min(chart.weak,point.target_db_hz);
+            chart.receive_points.emplace_back(point.target_db_hz,point.confidence_available?
+                point.success_probability:std::numeric_limits<double>::quiet_NaN());
+        }
+        std::sort(chart.receive_points.begin(),chart.receive_points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+    }
     for (const auto& point : model.points) {
         chart.strong = std::max(chart.strong, point.target_db_hz);
         chart.weak = std::min(chart.weak, point.target_db_hz);
@@ -153,7 +169,7 @@ Chart chart_data(const planner::Model& model, bool observer) {
 }
 
 // Only geometry enters the raster. Labels, controls and explanations stay native.
-// A paint retains at most one span and one output pixel per damaged column;
+// A paint retains three line/point spans and one output pixel per damaged column;
 // storage never scales with bitmap area or planned transmission duration.
 BitmapSource chart_bitmap(Chart chart) {
     return BitmapSource([chart = std::move(chart)](const BitmapRequest& request, const BitmapSink& sink, bool color_enabled) {
@@ -171,26 +187,48 @@ BitmapSource chart_bitmap(Chart chart) {
         const double top = std::min(8., (request.height - 1.) / 4), bottom = request.height - 1. - top;
         const auto x_at = [&](double target) { return left + (chart.strong - target) / (chart.strong - chart.weak) * (right - left); };
         const auto y_at = [&](double value) { return top + y_fraction(chart, value) * (bottom - top); };
-        std::vector<std::pair<double, double>> spans(damage.width, {std::numeric_limits<double>::infinity(), -std::numeric_limits<double>::infinity()});
-        const auto stroke = [&](double x1, double y1, double x2, double y2) {
+        const auto p_at = [&](double value) { return top + (1-std::clamp(value,0.,1.)) * (bottom-top); };
+        using Spans=std::vector<std::pair<double,double>>;
+        const auto empty_span=std::pair{std::numeric_limits<double>::infinity(),-std::numeric_limits<double>::infinity()};
+        Spans spans(damage.width,empty_span),receive_spans(damage.width,empty_span),receive_markers(damage.width,empty_span);
+        const auto stroke = [&](Spans& destination,double x1, double y1, double x2, double y2) {
             const int first = std::max(static_cast<int>(damage.x), static_cast<int>(std::floor(std::min(x1, x2) - 1)));
             const int last = std::min(static_cast<int>(damage.x + damage.width - 1), static_cast<int>(std::ceil(std::max(x1, x2) + 1)));
             for (int x = first; x <= last; ++x) {
-                auto& span = spans[static_cast<unsigned>(x) - damage.x];
-                span.first = std::min(span.first, std::min(y1, y2) - 1);
-                span.second = std::max(span.second, std::max(y1, y2) + 1);
+                const auto a=std::abs(x2-x1)<1e-12?0.:std::clamp((x-1.-x1)/(x2-x1),0.,1.);
+                const auto b=std::abs(x2-x1)<1e-12?1.:std::clamp((x+1.-x1)/(x2-x1),0.,1.);
+                const auto ay=y1+a*(y2-y1),by=y1+b*(y2-y1);
+                auto& span = destination[static_cast<unsigned>(x) - damage.x];
+                span.first = std::min(span.first, std::min(ay,by) - 1);
+                span.second = std::max(span.second, std::max(ay,by) + 1);
             }
         };
         for (std::size_t i = 1; i < chart.points.size(); ++i) {
             const auto& a = chart.points[i - 1]; const auto& b = chart.points[i];
             const double ax = x_at(a.first), ay = y_at(a.second), bx = x_at(b.first), by = y_at(b.second);
-            stroke(ax, ay, bx, ay); stroke(bx, ay, bx, by);
+            stroke(spans,ax, ay, bx, ay); stroke(spans,bx, ay, bx, by);
+        }
+        for(std::size_t i=1;i<chart.receive_points.size();++i) {
+            const auto& a=chart.receive_points[i-1];const auto& b=chart.receive_points[i];
+            if(!std::isfinite(a.second)||!std::isfinite(b.second))continue;
+            stroke(receive_spans,x_at(a.first),p_at(a.second),x_at(b.first),p_at(b.second));
+        }
+        // Tiny supported islands still have useful estimates. Keep their
+        // endpoints visible without drawing a connection through a RAM gap.
+        for(std::size_t i=0;i<chart.receive_points.size();++i) {
+            const auto& point=chart.receive_points[i];
+            if(!std::isfinite(point.second))continue;
+            if(i&&i+1<chart.receive_points.size()&&std::isfinite(chart.receive_points[i-1].second)&&
+               std::isfinite(chart.receive_points[i+1].second))continue;
+            const auto x=x_at(point.first),y=p_at(point.second);
+            stroke(receive_markers,x,y,x,y);
         }
         std::vector<double> grid;
         for (const auto& tick : chart.y_ticks) grid.push_back(y_at(tick.value));
         const double selected_x = x_at(chart.selected_target);
         const bool selected = chart.selected_value > 0 && std::isfinite(chart.selected_value);
         const double selected_y = selected ? y_at(chart.selected_value) : 0;
+        const double selected_p=chart.receive_available?p_at(chart.selected_probability):0;
         std::vector<unsigned char> pixels(pixel_row_bytes(damage.width, format));
         for (unsigned y = damage.y; y < damage.y + damage.height; ++y) {
             std::fill(pixels.begin(), pixels.end(), 0);
@@ -206,8 +244,15 @@ BitmapSource chart_bitmap(Chart chart) {
                     ink = theme::grayscale(theme::muted);
                 const auto& span = spans[x - damage.x];
                 if (within && y >= span.first && y <= span.second) ink = theme::data_rgb(color);
+                const auto& receive_span=receive_spans[x-damage.x];
+                if(within&&y>=receive_span.first&&y<=receive_span.second&&((x+y)/5)%2==0)
+                    ink=theme::comparison_rgb(color);
+                const auto& marker=receive_markers[x-damage.x];
+                if(within&&y>=marker.first&&y<=marker.second)ink=theme::comparison_rgb(color);
                 const double dx = (x - selected_x) * request.sample_aspect_ratio, dy = y - selected_y;
                 if (selected && dx * dx + dy * dy <= 16) ink = theme::data_rgb(color);
+                const double diamond=std::abs(dx)+std::abs(y-selected_p);
+                if(chart.receive_available&&diamond>=3&&diamond<=5)ink=theme::comparison_rgb(color);
                 const auto offset = static_cast<std::size_t>(x - damage.x);
                 if (format == PixelFormat::rgb24) {
                     pixels[3 * offset] = ink.red; pixels[3 * offset + 1] = ink.green; pixels[3 * offset + 2] = ink.blue;
@@ -224,8 +269,14 @@ Node graph(const planner::Model& model, bool observer, float width) {
     paragraph(n, observer ? "Observer / receiver time" : "Time per bit", 14, Tone::text, true, 4);
     paragraph(n, observer ? (model.observer_available ? ratio(model.observer_ratio) : "Outside model range") :
         planner::duration(model.bit_seconds) + " per bit", 13, Tone::accent, true, 6);
+    if(!observer) {
+        paragraph(n,"━ Bit time · left axis",11,Tone::accent,false,2);
+        paragraph(n,"┄ 1-bit RX · right axis"+(model.confidence_available?" · "+probability(model.one_bit_success_probability):""),
+            11,Tone::comparison,false,4);
+    }
     const auto chart = chart_data(model, observer);
-    const float label_width = 44, plot_width = inner - label_width, height = 120;
+    const float label_width = 44,right_label_width=observer?0.f:36.f;
+    const float plot_width = inner - label_width-right_label_width, height = 160;
     auto body = row(inner); auto labels = column(label_width); labels.height = height;
     float previous = 0;
     for (const auto& tick : chart.y_ticks) {
@@ -237,7 +288,18 @@ Node graph(const planner::Model& model, bool observer, float width) {
     body.children.push_back(std::move(labels));
     auto plot = column(plot_width); plot.kind = Kind::bitmap; plot.height = height;
     plot.plot_name = observer ? "planner/observer-time" : "planner/bit-time"; plot.plot = chart_bitmap(chart);
-    body.children.push_back(std::move(plot)); n.children.push_back(std::move(body));
+    body.children.push_back(std::move(plot));
+    if(!observer) {
+        auto percentages=column(right_label_width);percentages.height=height;float previous_label=0;
+        for(const auto percent:{100,50,0}) {
+            const float position=8+(1-static_cast<float>(percent)/100)*(height-17)-7;
+            auto label=text(std::to_string(percent)+"%",right_label_width,10,Tone::comparison);
+            label.height=14;label.top=position-previous_label;previous_label=position+14;
+            percentages.children.push_back(std::move(label));
+        }
+        body.children.push_back(std::move(percentages));
+    }
+    n.children.push_back(std::move(body));
     auto axis = row(inner);
     const unsigned count = plot_width >= 300 ? 5 : 3;
     std::vector<std::string> x_labels;
@@ -257,7 +319,8 @@ Node graph(const planner::Model& model, bool observer, float width) {
         axis.children.push_back(text(std::move(x_labels[i]), cell, 10));
     }
     axis.bottom = 4; n.children.push_back(std::move(axis));
-    paragraph(n, "Stronger → weaker · dB in 1 Hz", 10, Tone::muted, false, 0);
+    paragraph(n, "Stronger → weaker · dB in 1 Hz", 10, Tone::muted, false, observer?0.f:3.f);
+    if(!observer)paragraph(n,"RX gaps: clock/RAM limit or unavailable estimate.",10,Tone::muted,false,0);
     return n;
 }
 
@@ -303,8 +366,29 @@ void link_budget(Node& root, const planner::Model& model) {
             (model.inputs.wire_bits==1?": ":" (all bits): ");
         const auto verdict = !search_fits ? model.receiver_status : !model.confidence_available ?
             "RX estimate unavailable" : label+probability(model.success_probability);
-        paragraph(n, verdict, 17, search_fits && model.confidence_available && model.success_probability >= .5 ?
-            Tone::accent : Tone::text, true, 4);
+        const auto rx_tone=search_fits&&model.confidence_available&&model.success_probability>=.5?Tone::accent:Tone::text;
+        const bool cpu_available=search_fits&&model.one_bit_cpu_available;
+        const auto cpu_ratio=model.cpu_realtime_ratio;
+        const auto cpu_tone=!cpu_available?Tone::muted:cpu_ratio>=1?Tone::negative:
+            cpu_ratio>=.5?Tone::caution:Tone::positive;
+        const auto cpu_label=!cpu_available?"CPU estimate unavailable":cpu_ratio>=1?"CPU estimate: slower than real time":
+            cpu_ratio>=.5?"CPU estimate: limited headroom":"CPU estimate: headroom";
+        const auto pace=!cpu_available?std::string{}:cpu_ratio<.01?"<0.01 s processing per 1 s audio":
+            cpu_ratio>1000?">1,000 s processing per 1 s audio":"≈ "+number(cpu_ratio,2)+" s processing per 1 s audio";
+        if(n.width>=560) {
+            const auto inner=n.width-2*n.padding;
+            auto heading=row(inner);heading.bottom=4;
+            auto rx=column((inner-12)/2);rx.right=12;
+            paragraph(rx,verdict,17,rx_tone,true,0);
+            auto cpu=column((inner-12)/2);
+            paragraph(cpu,cpu_label,13,cpu_tone,true,2);
+            if(cpu_available)paragraph(cpu,pace,11,Tone::muted,false,0);
+            heading.children.push_back(std::move(rx));heading.children.push_back(std::move(cpu));
+            n.children.push_back(std::move(heading));
+        } else {
+            paragraph(n,verdict,17,rx_tone,true,4);
+            paragraph(n,cpu_label+(cpu_available?" · "+pace:""),12,cpu_tone,true,4);
+        }
         paragraph(n, "Received: " + db(model.received_dbm) + " dBm  ·  Signal: " + db(model.actual_cn0_db_hz) +
             " dB in 1 Hz  ·  Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", 11, Tone::muted, false, 4);
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
@@ -321,6 +405,11 @@ void details(Node& root,const planner::Model& model) {
             ". Phase loss within a section: "+number(model.section_phase_coherence_loss_db)+" dB.");
     paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
+    if(model.one_bit_cpu_available)
+        paragraph(n,"CPU. Reference: Intel Core i9-13900H. A one-bit simulation takes about "+
+            planner::duration(model.one_bit_cpu_seconds)+" of processing for "+planner::duration(model.bit_seconds)+
+            " per bit. The CPU indicator counts receiver work only, averaged over incoming audio including the final silence check. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
+    paragraph(n,"Graph. Solid line: time per bit on the left logarithmic axis. Dashed line: one-bit reception probability on the right percentage axis, using the selected power, path and noise. Both use the same target scale; their visual crossing is not a detection threshold. Gaps have no supported estimate.");
     paragraph(n, "Reception. The estimate includes signal strength, phase drift, clock and timing mismatch, acquisition and RAM. It assumes one matching receive target and every wire bit correct, before any error correction. The top-bar RX estimate uses the actual configured draft and receive bank. Oscillator values are illustrative; GPS phase corrections are not modeled.");
     paragraph(n, "Pattern transitions. Long patterns also fit four fixed sections with separate gain and phase, then combine their evidence across the whole bit. One strong section cannot carry the match alone. RX estimate models both this fit and the original coherent match, including their shared noise, competing bit patterns and extra decision penalty. It uses 4096 deterministic statistical trials, without generating audio or running the complete receiver search. Small RAM budgets can retain only the original match; RX reference labels a limited model when the combined estimate is unavailable. Sections must still be coherent; there is no special 0.01 Hz cutoff.");
     paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
@@ -350,8 +439,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
         "  ·  " + (crystal ? "Free-running crystal" : "Clock mismatch " + number(channel.clock_error_ppm) + " ppm") +
         "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
         number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
-    buttons(root, {{"Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", Command::planner_target},
-                   {"Stronger", Command::planner_stronger, model.stronger_fit_target.has_value()},
+    buttons(root, {{"Stronger", Command::planner_stronger, model.stronger_fit_target.has_value()},
                    {"Weaker", Command::planner_weaker, model.weaker_fit_target.has_value()},
                    {"−8 example", Command::planner_example_short}, {"+23 LPI example", Command::planner_example_lpi},
                    {use_draft ? "Plan 1 bit" : "Use current draft", Command::planner_toggle_draft}});

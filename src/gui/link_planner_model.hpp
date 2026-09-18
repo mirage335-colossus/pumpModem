@@ -25,9 +25,20 @@ struct Point {
     double observer_ratio=0;
     bool observer_available=false;
 };
+struct ReceivePoint {
+    double target_db_hz=0;
+    double success_probability=0;
+    bool confidence_available=false;
+    bool clock_supported=false;
+    bool workspace_supported=false;
+};
 struct Model {
     Inputs inputs;
     std::vector<Point> points;
+    // One-bit reception at the unchanged link budget. Missing confidence is a
+    // graph gap, never a prediction of zero; intermediate values interpolate
+    // bounded statistical samples, with extra samples near the transition.
+    std::vector<ReceivePoint> receive_points;
     bool available=false;
     bool automatic_mode=true;
     bool observer_available=false;
@@ -48,11 +59,20 @@ struct Model {
     // requires confidence_available and completed receiver computation.
     // No interval FEC/source context is available; the full draft is separate.
     double success_probability=0;
+    double one_bit_success_probability=0;
     double phase_coherence_loss_db=0;
     bool coherent_reference_only=false;
     bool drift_model_available=false;
     double coherent_success_probability=0;
     double section_phase_coherence_loss_db=0;
+    // One exact bit plus its full waveform and absence processing, regardless
+    // of draft length. The receiver ratio excludes synthetic channel creation
+    // and divides receiver work by all received audio, including absence.
+    bool one_bit_cpu_available=false;
+    double one_bit_cpu_seconds=0;
+    double receiver_cpu_seconds=0;
+    double cpu_realtime_ratio=0;
+    double cpu_per_bit_ratio=0;
     double occupied_bandwidth_hz=0;
     double low_audio_hz=0;
     double high_audio_hz=0;

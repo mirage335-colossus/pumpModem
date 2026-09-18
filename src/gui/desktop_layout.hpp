@@ -17,7 +17,7 @@ enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation,
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, key_actions,
+    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, planner_target, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -37,7 +37,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::link_power: case Slot::link_loss: case Slot::link_noise:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::simulation_oscillator: case Slot::simulation_oscillator_detail:
-    case Slot::lpi_estimate:
+    case Slot::lpi_estimate: case Slot::planner_target:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -95,6 +95,9 @@ struct DesktopLayout {
         out[Slot::simulation_oscillator] = {margin, 153, 320, field_height};
         out[Slot::simulation_oscillator_detail] = {346, 137, width - margin - 346, 21};
         out[Slot::lpi_estimate] = {346, 160, width - margin - 346, 21};
+        // The planner replaces the right-hand clock notes with its native
+        // preview target editor; ordinary pages retain those notes.
+        out[Slot::planner_target] = {346, 153, 320, field_height};
         const int cpu_width = (width - 2 * margin - group_gap) * 42 / 100;
         out[Slot::simulation_cpu_time] = {margin, 185, cpu_width, simulation_estimates_visible ? 43 : 0};
         const int gpu_x = margin + cpu_width + group_gap;

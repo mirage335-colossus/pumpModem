@@ -14,6 +14,7 @@
 #include <map>
 #include <numeric>
 #include <sstream>
+#include <tuple>
 
 namespace datapump::gui::planner {
 namespace {
@@ -357,6 +358,143 @@ std::uint64_t add_samples(std::uint64_t first,std::uint64_t second) {
         throw Error("planned duration exceeds the modem sample counter");
     return first+second;
 }
+transfer::Estimate one_bit_estimate(const modem::Config& config) {
+    const auto symbol=modem::symbol_sample_count(config);
+    auto count=add_samples(modem::training_sample_count(config),symbol);
+    count=add_samples(count,modem::pattern_pulse_padding_samples(config));
+    count=add_samples(count,modem::pattern_pulse_padding_samples(config));
+    count=add_samples(count,modem::suppression_sample_count(config));
+    transfer::Estimate result;
+    result.wire_bits=result.coded_bytes=result.content_bytes=1;
+    result.content_seconds=result.coded_seconds=seconds(config);
+    result.total_seconds=static_cast<double>(count)/config.sample_rate;
+    result.waveform_samples=count<=std::numeric_limits<std::size_t>::max()?static_cast<std::size_t>(count):0;
+    return result;
+}
+auto curve_key(const transfer::Options& options,const modem::ChannelConfig& channel) {
+    const auto c=options.key?transfer::seeded_config(options,options.modem.stream_epoch):options.modem;
+    // Only quantities read by the estimator enter this bounded cache. The
+    // private key's derived pattern identity is retained; the sampled-channel
+    // RNG seed does not choose probability draws.
+    return std::tuple{c.pattern_symbols,c.stream_epoch,c.stream_phase_samples,c.sample_rate,
+        c.constellation_bits,c.carrier_hz,c.bandwidth_hz,c.training_seconds,
+        modem::symbol_sample_count(c),modem::pattern_chip_samples(c),c.spreading_mode,c.pulse_shaping,c.scramble,c.dsss,
+        c.spreading_seed,c.dsss_seed,c.memory_limit,options.dsp_workspace_bytes,
+        options.timestamp,options.search_seconds,channel.snr_db,channel.frequency_offset_hz,
+        channel.delay_samples,channel.clock_error_ppm,channel.phase_noise_degrees_per_sqrt_second};
+}
+using CurveKey=decltype(curve_key(transfer::Options{},modem::ChannelConfig{}));
+struct CurveEntry {
+    CurveKey key;
+    simulation::Estimate estimate;
+    bool probability_computed=false;
+};
+std::vector<CurveEntry>& curve_cache() {
+    // A GUI edit can reuse the curve independently of selected target and
+    // draft length. Storage never grows with symbol duration or graph width.
+    thread_local std::vector<CurveEntry> entries;
+    return entries;
+}
+CurveEntry& curve_entry(const transfer::Options& options,const modem::ChannelConfig& channel) {
+    auto& entries=curve_cache();
+    const auto key=curve_key(options,channel);
+    const auto found=std::find_if(entries.begin(),entries.end(),[&](const auto& entry){return entry.key==key;});
+    if(found!=entries.end())return *found;
+    if(entries.size()==512)entries.erase(entries.begin());
+    entries.push_back({key,simulation::estimate(one_bit_estimate(options.modem),options,true,channel,{},1,false),false});
+    return entries.back();
+}
+ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bool numerical_range) {
+    return {target,estimate.success_probability,estimate.confidence_available&&numerical_range,
+        estimate.carrier_in_search,estimate.receiver_workspace_supported};
+}
+void receive_curve(Model& model,const simulation::Estimate& selected_one) {
+    if(model.points.empty())return;
+    const auto& inputs=model.inputs;
+    const auto low=model.points.front().target_db_hz,high=model.points.back().target_db_hz;
+    constexpr unsigned expensive_limit=12,coarse_limit=6,refinement_limit=32;
+    unsigned expensive=0;
+    std::map<double,ReceivePoint> output;
+    const auto evaluate=[&](double target,bool permit_expensive) -> bool {
+        if(target<low||target>high||output.contains(target))return false;
+        const auto geometry=try_resolve(inputs,target);
+        if(!geometry){output.emplace(target,ReceivePoint{target});return true;}
+        auto options=inputs.options;options.modem=*geometry;
+        auto channel=inputs.channel;
+        const auto sample_snr=model.actual_cn0_db_hz-10*std::log10(geometry->sample_rate/2.);
+        const bool numerical_range=sample_snr>=-300&&sample_snr<=300;
+        channel.snr_db=std::clamp(sample_snr,-300.,300.);
+        auto& entry=curve_entry(options,channel);
+        if(!entry.estimate.carrier_in_search||!entry.estimate.receiver_workspace_supported||!numerical_range) {
+            output.emplace(target,receive_point(target,entry.estimate,numerical_range));return true;
+        }
+        const bool costly=entry.estimate.drift_sections>1;
+        if(costly&&(!permit_expensive||expensive>=expensive_limit))return false;
+        // Count chosen expensive sample locations, including cache hits, so
+        // identical inputs produce an identical curve on every repaint.
+        if(costly)++expensive;
+        if(!entry.probability_computed) {
+            entry.estimate=simulation::estimate(one_bit_estimate(*geometry),options,true,channel);
+            entry.probability_computed=true;
+        }
+        output.emplace(target,receive_point(target,entry.estimate,numerical_range));return true;
+    };
+    const auto probe=[&](double target,bool permit_expensive) {
+        bool added=evaluate(target,permit_expensive);
+        const auto exact=output.find(target);
+        if(model.automatic_mode&&exact!=output.end()&&!exact->second.confidence_available) {
+            // A decimal target can select an odd-sample RAM gap immediately
+            // beside a useful aligned profile. Use that checked target when
+            // the difference is below displayed precision, as the dropdown
+            // does. Wider unavailable intervals remain explicit graph gaps.
+            if(const auto aligned=clock_candidate(inputs,target);aligned&&aligned->target!=target) {
+                added=evaluate(aligned->target,permit_expensive)||added;
+                if(std::abs(aligned->target-target)<=.001&&target!=inputs.target_db_hz) {
+                    auto options=inputs.options;options.modem=aligned->config;
+                    auto channel=inputs.channel;
+                    const auto snr=model.actual_cn0_db_hz-10*std::log10(aligned->config.sample_rate/2.);
+                    channel.snr_db=std::clamp(snr,-300.,300.);
+                    const auto& support=curve_entry(options,channel).estimate;
+                    if(snr>=-300&&snr<=300&&support.carrier_in_search&&support.receiver_workspace_supported)
+                        output.erase(target);
+                }
+            }
+        }
+        return added;
+    };
+    // The selected one-bit probability comes from the already evaluated
+    // headline, including when that headline describes a longer draft.
+    output.emplace(inputs.target_db_hz,receive_point(inputs.target_db_hz,selected_one,model.confidence_available));
+    // Check every existing graph sample cheaply. Unsupported geometry breaks
+    // the overlay; short/coherent profiles can be evaluated analytically here.
+    for(const auto& point:model.points)probe(point.target_db_hz,false);
+    // Integration is chosen from target C/N0. Its receive transition is
+    // usually near the actual link C/N0; probe both sides before refining.
+    const std::array coarse{model.actual_cn0_db_hz,model.actual_cn0_db_hz-6,
+        model.actual_cn0_db_hz+6,high,model.clock_target.value_or(low),
+        model.actual_cn0_db_hz-3,model.actual_cn0_db_hz-12,low};
+    for(const auto target:coarse)probe(std::clamp(target,low,high),expensive<coarse_limit);
+    // Refine the largest probability change first. Also inspect long gaps
+    // between supported samples: a phase-limited peak can sit between equal
+    // endpoint values. Genuine unsupported intervals remain explicit.
+    for(unsigned iteration=0;iteration<refinement_limit&&expensive<expensive_limit;++iteration) {
+        double best=-1,middle=0;
+        auto previous=output.end();
+        for(auto next=output.begin();next!=output.end();++next) {
+            if(!next->second.confidence_available)continue;
+            if(previous==output.end()){previous=next;continue;}
+            const auto begin=previous;previous=next;
+            const auto width=next->first-begin->first;
+            if(width<.25)continue;
+            const auto difference=std::abs(next->second.success_probability-begin->second.success_probability);
+            const auto priority=difference>.05?1+difference*std::min(width,12.):width/100;
+            if(priority>best){best=priority;middle=(begin->first+next->first)/2;}
+        }
+        if(best<0||!probe(middle,true))break;
+    }
+    model.receive_points.reserve(output.size());
+    for(const auto& [target,point]:output){(void)target;model.receive_points.push_back(point);}
+}
 }
 
 std::optional<double> nearest_fit_target(const Inputs& inputs,
@@ -404,6 +542,7 @@ Model build(const Inputs& inputs) {
         // Scale its payload sample count without allocating a draft or PCM.
         constexpr std::array<std::uint8_t,1> one_bit{0};
         auto transmission=transfer::estimate_binary(one_bit,options);
+        const auto single_transmission=transmission;
         if(!transmission.waveform_samples || transmission.waveform_samples<symbol)
             throw Error("planned duration exceeds the platform sample counter");
         const auto overhead=static_cast<std::uint64_t>(transmission.waveform_samples)-symbol;
@@ -443,11 +582,30 @@ Model build(const Inputs& inputs) {
         result.receiver_workspace_supported=receiver.receiver_workspace_supported;
         result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
         result.success_probability=result.confidence_available?receiver.success_probability:0;
+        result.one_bit_success_probability=result.confidence_available?receiver.one_bit_success_probability:0;
         result.phase_coherence_loss_db=receiver.phase_coherence_loss_db;
         result.coherent_reference_only=receiver.coherent_reference_only;
         result.drift_model_available=receiver.drift_model_available&&result.confidence_available;
         result.coherent_success_probability=result.confidence_available?receiver.coherent_success_probability:0;
         result.section_phase_coherence_loss_db=receiver.section_phase_coherence_loss_db;
+        auto single_receiver=inputs.wire_bits==1?receiver:
+            simulation::estimate(single_transmission,options,true,channel,{},1,false);
+        // Draft length changes continuation and total work, but acquisition
+        // already supplies this one-bit probability without another trial run.
+        single_receiver.success_probability=receiver.one_bit_success_probability;
+        single_receiver.confidence_available=receiver.confidence_available;
+        single_receiver.drift_model_available=receiver.drift_model_available;
+        single_receiver.coherent_reference_only=receiver.coherent_reference_only;
+        result.one_bit_cpu_seconds=single_receiver.cpu_seconds;
+        result.receiver_cpu_seconds=single_receiver.receiver_cpu_seconds;
+        result.cpu_realtime_ratio=single_receiver.simulated_seconds>0?
+            single_receiver.receiver_cpu_seconds/single_receiver.simulated_seconds:0;
+        result.cpu_per_bit_ratio=single_receiver.cpu_seconds/result.bit_seconds;
+        result.one_bit_cpu_available=single_receiver.receiver_workspace_supported&&
+            std::isfinite(result.one_bit_cpu_seconds)&&std::isfinite(result.receiver_cpu_seconds)&&
+            std::isfinite(result.cpu_realtime_ratio)&&result.one_bit_cpu_seconds>0&&single_receiver.simulated_seconds>0;
+        auto& selected_cache=curve_entry(options,channel);
+        selected_cache.estimate=single_receiver;selected_cache.probability_computed=true;
         if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
         if(!receiver.receiver_workspace_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";
@@ -497,6 +655,7 @@ Model build(const Inputs& inputs) {
             point.observer_ratio=estimate.equivalent_symbols;
             result.points.push_back(point);
         }
+        receive_curve(result,single_receiver);
         result.available=true;
     } catch(const Error& error) {
         result.error=error.what();result.receiver_status="Plan unavailable";

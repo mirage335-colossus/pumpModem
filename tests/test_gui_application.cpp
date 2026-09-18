@@ -723,8 +723,9 @@ void oscillator_declaration() {
           "Oscillator scenarios need a persistent shared choice with explicit residual-model limitations");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
-        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&app.control(detail).visible,
-              "Oscillator scenario or its numeric explanation disappeared on another page");
+        check(app.control(oscillator).visible&&app.control(oscillator).enabled&&
+              app.control(detail).visible==(page.id!=ui::Page::planner),
+              "Oscillator detail must yield its planner space only to the native preview-target editor");
         app.select(oscillator,"gpsdo-xo");
         check(app.field(oscillator.field).selected=="gpsdo-xo"&&
               app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&

@@ -26,11 +26,21 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 ## Controls and state
 
 **Link planner** is the second tab, immediately after **Console**. It previews a
-target independently of the live transmit/receive targets, with **Time per bit**, **Observer / receiver
-time**, send time and an earliest completion estimate. The two logarithmic
-graphs follow actual sampled automatic-profile steps. Native buttons edit the
-target through a numeric prompt, move to a stronger or weaker usable target,
-select the −8/+23 examples,
+target independently of the live transmit/receive targets, with **Time per bit**,
+**Observer / receiver time**, send time and an earliest completion estimate.
+The time graph combines solid logarithmic time on the left axis with dashed
+**RX 1 bit** probability on a linear 0–100% right axis. The RX curve keeps power,
+path, noise and oscillator settings fixed. Tiny rounding gaps may use an
+independently checked usable target within 0.001 dB; wider unsupported gaps break
+the curve. Intermediate values interpolate bounded model samples. The curves' crossing has
+no detection-threshold or optimum meaning. The separate observer graph retains
+its logarithmic ratio scale and existing normalized LPI calculation.
+Both graphs follow actual sampled automatic-profile steps.
+
+The native **Planner target** editable dropdown sits beside the oscillator
+selector, replacing its numeric clock notes only on this tab. It offers the
+same target presets as the transmit controls and changes only the preview.
+Native buttons move to a stronger or weaker usable target, select the −8/+23 examples,
 or select the one-bit/second, one-day/bit and combined clock/RAM search edges.
 Milestones are derived from the current rate, carrier, pattern and key geometry;
 fixed modes omit target-dependent boundaries. The selected receiver check uses
@@ -62,21 +72,37 @@ recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform, runs no receiver and starts no worker or transmission.
 Immutable documents and plots are cached across unchanged presentation polls.
 
-In automatic modes, edits to either transmit-target dropdown below −20 dB-Hz
-select an exact clock/RAM fit, preferring the nearest checked weaker target and
-falling back stronger if needed. Already fitting values remain exact. The
-search includes the other effective transmit target and the same deduplicated
-plaintext/key families as the configured RX estimate. It leaves the other
-target unchanged. If no fitting candidate is found, settings become unavailable
-and stale reception estimates are cleared. Values at or above −20 and fixed
-modes are unchanged.
+In automatic modes, edits to every target dropdown select an exact clock/RAM
+fit at all target levels, preferring the nearest checked weaker target and
+falling back stronger if needed. Already fitting values remain exact. Transmit
+entries include the other effective transmit target and the same deduplicated
+plaintext/key families as the configured RX estimate, leaving the other target
+unchanged. Each independently edited RX-list entry is checked with its companion
+targets and those same banks; the final complete list must fit. Planner target
+checks one matching receive profile and never changes live TX/RX settings.
+If no fitting candidate is found, the affected settings or preview become
+unavailable and stale estimates are cleared. Fixed modes keep exact entries and
+unchanged fixed waveform geometry. CPU pace and RX probability do not choose
+the clock/RAM fit.
 Typing retains the user's edit buffer; an adjusted label shows the effective
 value. Presets and plain Enter commit full precision without retuning or
 rebuilding the draft. Matched RX targets use effective values, not edit buffers.
-Manual RX lists and explicit planner Apply remain exact.
+RX and Planner edits retain their own buffers until commitment. Explicit
+planner Apply preserves the preview's full precision.
 
-The planner opens with the preview's RX estimate or a clock/RAM limit, followed
-by budget margin and whole-bit phase loss. Its probability assumes every wire bit
+The planner opens with the preview's RX estimate or a clock/RAM limit, beside a
+receiver CPU estimate, followed by budget margin and whole-bit phase loss.
+The CPU indicator uses receiver-only processing divided by incoming audio time
+for a one-bit preview, including complete-symbol absence. It excludes synthetic
+channel generation and uses the fixed i9-13900H reference: green below 0.5,
+yellow from 0.5 to below 1, and red at 1 or above. Unsupported clock/RAM geometry
+withholds the indicator. The estimate is not measured CPU utilization and does
+not guarantee per-bit latency. Expanded details separately compare complete
+one-bit simulation CPU time, including channel generation, with bit duration.
+This indicator remains visible in both simulation modes and does not alter RX
+probability or the LPI warning.
+
+The headline probability assumes every wire bit
 correct before FEC and one matching RX profile; top-bar RX confidence retains
 the actual configured draft and receive-bank model. Eligible long patterns also
 can use four section fits with separate gain and phase when RAM permits. Their
@@ -85,8 +111,9 @@ The coherent-only comparison and model limitations remain in expanded details;
 **RX reference** is reserved for a limited fallback model. Its power/path/noise
 input controls appear once, in the shared top bar. The **Simulation** dropdown offers
 only **Yes / No**, and the editable budget dropdowns stay visible in both modes.
-CPU/GPU computation estimates appear only with **Yes**; reception is estimated
-in either mode. The CPU/GPU row collapses with **No**, moving the tabs and page
+Simulation CPU/GPU computation times appear only with **Yes**; reception and the
+planner's receiver CPU indicator are estimated in either mode. The simulation
+CPU/GPU row collapses with **No**, moving the tabs and page
 up without moving the top-bar inputs or bottom modem settings. Power presets
 run from 100 W to 1 µW.
 Typing preserves the entered text; incomplete or invalid values show **Check
@@ -143,7 +170,8 @@ The persistent **Oscillator model** dropdown below the Simulation estimates
 offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO
 (no oven)**, **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. A neighboring label
 shows the selected effective TX/RX clock mismatch in ppm and phase diffusion
-in degrees per square-root second. These are illustrative residual scenarios,
+in degrees per square-root second on other tabs; Link planner uses that space
+for its independent Planner target editor. These are illustrative residual scenarios,
 not measured specifications for products: GPS lock does not establish phase
 coherence, and low-cost non-oven oscillators retain more short-term instability
 than the OCXO scenario. The settings do not control physical clock hardware.
@@ -227,6 +255,9 @@ The **RX targets (dB-Hz)** comma-list initially matches both TX defaults, `32, 5
 Changing either TX SNR to a valid value replaces the RX list with both targets,
 deduplicated when equal. The RX list can then be edited independently without
 changing either TX SNR.
+In automatic modes it fits each entry against clock/RAM coverage with the other
+receive banks, without changing either transmit target. Enter or a preset
+displays the exact accepted list; a typing buffer can show an adjustment label.
 It trims and deduplicates valid entries, and resets the entire list to `32` on
 invalid input. Its 512-byte edit limit and 750 ms normalization delay allow
 comma/minus drafts while keeping native adapters free of parser logic. Receive

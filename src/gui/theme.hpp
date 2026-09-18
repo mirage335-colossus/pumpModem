@@ -20,6 +20,10 @@ struct Rgb {
 // grayscale roles above unchanged for monochrome and scalar plot intensities.
 inline constexpr std::uint8_t color_text = 208;
 inline constexpr Rgb data_tint{144, 192, 184};
+inline constexpr Rgb comparison_tint{192, 168, 224};
+inline constexpr Rgb positive_tint{144, 200, 152};
+inline constexpr Rgb caution_tint{224, 196, 128};
+inline constexpr Rgb negative_tint{224, 144, 136};
 
 inline constexpr Rgb grayscale(std::uint8_t level) { return {level, level, level}; }
 inline constexpr Rgb text_rgb(bool use_color, std::uint8_t fallback = text) {
@@ -27,6 +31,9 @@ inline constexpr Rgb text_rgb(bool use_color, std::uint8_t fallback = text) {
 }
 inline constexpr Rgb data_rgb(bool use_color, std::uint8_t fallback = accent) {
     return use_color ? data_tint : grayscale(fallback);
+}
+inline constexpr Rgb comparison_rgb(bool use_color) {
+    return use_color ? comparison_tint : grayscale(text);
 }
 
 // Common native-widget appearance. Adapters map these roles to toolkit fields,

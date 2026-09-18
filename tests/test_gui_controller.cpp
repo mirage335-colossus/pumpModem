@@ -4,6 +4,7 @@
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/simulation_estimate.hpp"
 #include <filesystem>
 #include <iostream>
 #include <set>
@@ -1688,13 +1689,37 @@ void receive_target_controls() {
     check(controller.field(F::receive_snr).text=="40,","a partial comma-list edit must remain editable before normalization");
     controller.edit(F::receive_snr," 40, +6, -6, 40 ");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.field(F::receive_snr).text=="40, 6, -6" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),"receive target field must canonicalize a valid list");
+    const auto accepted_targets=controller.settings().transfer.receive_targets_db_hz;
+    const bool adjusted_list=accepted_targets.size()==3&&accepted_targets.front()==40&&
+          accepted_targets[1]!=6&&
+          controller.field(F::receive_snr).text==" 40, +6, -6, 40 "&&
+          !controller.field(F::receive_snr).display_text.empty();
+    if(!adjusted_list)throw Error("The short-profile clock gap near 6 dB must snap without overwriting the typed RX list: "+
+        controller.field(F::receive_snr).text+" / "+controller.field(F::receive_snr).display_text+" / "+
+        controller.field(F::status).text);
+    auto options=controller.settings().transfer;
+    auto input=controller.link_plan()->inputs;input.options=options;input.target_db_hz=-6;
+    const std::array companions{accepted_targets[0],accepted_targets[1]};
+    const auto expected_last=planner::nearest_fit_target(input,companions,planner::ReceiveBanks{true,0});
+    check(expected_last&&*expected_last==accepted_targets.back(),
+          "The RX list must use the nearest checked target under its actual RAM allowance and companion bank");
+    const auto profiles=tuning::receive_profiles(options.modem,accepted_targets,options.receive_pattern_mode,false);
+    modem::ChannelConfig channel;channel.clock_error_ppm=controller.settings().simulation_clock_error_ppm;
+    for(const auto& profile:profiles) {
+        options.modem=profile;
+        const auto receiver=simulation::estimate(transfer::estimate_binary(Bytes{0},options),options,true,channel,profiles,1,false);
+        check(receiver.carrier_in_search&&receiver.receiver_workspace_supported,
+              "Every advertised RX target must independently fit clock search and the shared receiver workspace");
+    }
+    controller.commit_target(F::receive_snr);
+    check(tuning::parse_receive_targets(controller.field(F::receive_snr).text).values==accepted_targets&&
+          controller.field(F::receive_snr).display_text.empty(),
+          "Enter must reveal the complete exact accepted RX list");
     check(controller.field(F::snr).text=="32" && controller.settings().transfer.modem.spreading_factor==tx.spreading_factor &&
           controller.settings().transfer.modem.integration_seconds==tx.integration_seconds,"receive search targets must not change the transmitted profile");
     controller.edit(F::bandwidth,"18 kHz");
     check(controller.settings().transfer.modem.bandwidth_hz==18000 &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({40,6,-6}),
+          controller.settings().transfer.receive_targets_db_hz==accepted_targets,
           "bandwidth changes must preserve custom receive targets");
     controller.edit(F::receive_snr,"20,");
     controller.edit(F::snr,"-23");

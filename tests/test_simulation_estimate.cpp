@@ -86,6 +86,36 @@ void workload_and_impairments() {
     check(impaired.modeled_symbol_snr_db<base.modeled_symbol_snr_db &&
           impaired.success_probability<base.success_probability,"phase diffusion must reduce model confidence");
 }
+void receiver_cpu_budget() {
+    transfer::Options options;auto channel=clean_channel();
+    const auto draft=wire(3,options.modem);
+    const auto base=simulation::estimate(draft,options,true,channel);
+    const auto repeat=simulation::estimate(draft,options,true,channel);
+    check(base.receiver_cpu_seconds>0 && base.receiver_cpu_seconds<base.cpu_seconds,
+          "receiver workload must exclude the synthetic channel while retaining positive receive work");
+    near(base.receiver_cpu_seconds,repeat.receiver_cpu_seconds,
+         "receiver CPU estimate must be deterministic");
+    const auto synthetic_channel=base.cpu_seconds-base.receiver_cpu_seconds;
+    const auto longer=simulation::estimate(wire(100,options.modem),options,true,channel);
+    check(longer.receiver_cpu_seconds>base.receiver_cpu_seconds,
+          "a longer reception must increase the receiver-only workload");
+    near((longer.cpu_seconds-longer.receiver_cpu_seconds)/synthetic_channel,
+         longer.simulated_seconds/base.simulated_seconds,
+         "excluded synthetic-channel work must scale with generated audio duration");
+    auto other=options.modem;other.spreading_factor*=2;
+    const std::array profiles{options.modem,other};
+    const auto bank=simulation::estimate(draft,options,true,channel,profiles);
+    const auto keys=simulation::estimate(draft,options,true,channel,{},3);
+    for(const auto* larger:{&bank,&keys}) {
+        check(larger->receiver_cpu_seconds>base.receiver_cpu_seconds,
+              "additional receive profiles or keys must increase receiver-only CPU work");
+        near(larger->cpu_seconds-larger->receiver_cpu_seconds,synthetic_channel,
+             "additional receiver banks must not add another synthetic channel");
+    }
+    check(base.simulated_seconds>draft.total_seconds &&
+          std::isfinite(base.receiver_cpu_seconds/base.simulated_seconds),
+          "CPU pace must include observed-absence audio and have a finite workload ratio");
+}
 void whole_symbol_phase_coherence() {
     transfer::Options options;
     options.modem=tuning::resolve(1,0,tuning::PatternMode::auto_pattern,false,1500).config;
@@ -292,8 +322,9 @@ void established_tracking_workload() {
     near(ten.tracking_symbol_windows,10,"tracking must follow exact payload symbols without byte padding");
     near(three.tracking_seconds,3*one.tracking_seconds,"each whole-symbol continuation must add the same modeled work");
     near(ten.tracking_seconds,10*one.tracking_seconds,"tracking work must scale with exact wire-bit count");
-    check(three.cpu_seconds>three.tracking_seconds && three.gpu_seconds>three.tracking_seconds,
-          "serial continuation must be included in both CPU and hypothetical GPU totals");
+    check(three.cpu_seconds>three.tracking_seconds && three.gpu_seconds>three.tracking_seconds &&
+          three.receiver_cpu_seconds>three.tracking_seconds,
+          "serial continuation must be included in receiver-only CPU, simulation CPU and hypothetical GPU totals");
     check(ten.tracking_seconds>three.tracking_seconds && ten.cpu_seconds>three.cpu_seconds &&
           ten.gpu_seconds>three.gpu_seconds,"longer payloads must increase tracking and both total estimates");
 
@@ -507,8 +538,10 @@ void streamed_template_workload() {
           !unsupported.receiver_workspace_supported && !unsupported.confidence_available,
           "unaffordable expanded FFT core must withhold confidence instead of substituting a correlator");
     check(std::isfinite(unsupported.cpu_seconds) && unsupported.cpu_seconds>0 &&
+          std::isfinite(unsupported.receiver_cpu_seconds) && unsupported.receiver_cpu_seconds>0 &&
+          unsupported.receiver_cpu_seconds<unsupported.cpu_seconds &&
           std::isfinite(unsupported.gpu_seconds) && unsupported.gpu_seconds>0,
-          "unaffordable expanded FFT must retain finite estimates of the requested compute work");
+          "unaffordable expanded FFT must retain requested receive-work estimates without restoring confidence");
     near(unsupported.carrier_search_half_width_hz,streamed.carrier_search_half_width_hz,
          "insufficient workspace must not silently shrink the requested carrier bank");
 
@@ -560,7 +593,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();whole_symbol_phase_coherence();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();whole_symbol_phase_coherence();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

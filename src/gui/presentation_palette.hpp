@@ -22,6 +22,10 @@ inline constexpr Rgb text_rgb(ui::DocumentTone tone, bool use_color, bool enable
     case ui::DocumentTone::muted:return text_rgb(ui::TextTone::muted,use_color);
     case ui::DocumentTone::accent:return text_rgb(ui::TextTone::data,use_color);
     case ui::DocumentTone::text:return text_rgb(ui::TextTone::normal,use_color);
+    case ui::DocumentTone::comparison:return comparison_rgb(use_color);
+    case ui::DocumentTone::positive:return use_color?positive_tint:text_rgb(false);
+    case ui::DocumentTone::caution:return use_color?caution_tint:text_rgb(false);
+    case ui::DocumentTone::negative:return use_color?negative_tint:text_rgb(false);
     }
     return text_rgb(use_color);
 }

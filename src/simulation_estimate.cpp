@@ -298,6 +298,9 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // model offloads FFT scoring only, so this term remains in both totals.
     const auto serial_seconds=(serial+tracking_serial)/serial_operations_per_second;
     result.cpu_seconds=finite_seconds(.03L+serial_seconds+parallel/cpu_scoring_operations_per_second);
+    result.receiver_cpu_seconds=finite_seconds(.03L+
+        (serial-samples*channel_operations_per_sample+tracking_serial)/serial_operations_per_second+
+        parallel/cpu_scoring_operations_per_second);
     result.gpu_seconds=finite_seconds(.11L+serial_seconds+parallel/gpu_scoring_operations_per_second+
         samples*sizeof(float)/gpu_transfer_bytes_per_second);
     if(!transmission.wire_bits)return result;
@@ -397,6 +400,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         }
         const auto probability=detail::receiver_probability(parameters);
         result.drift_model_available=true;result.coherent_reference_only=false;
+        result.one_bit_success_probability=probability.acquired_correct;
         const auto count=static_cast<long double>(transmission.wire_bits);
         const auto draft_probability=[&](double acquired_correct,double acquired_wrong,double retained_correct,double retained_wrong) {
             if(raw_bits)return acquired_correct*probability_power(retained_correct,count-1);
@@ -436,6 +440,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         detector_choice_penalty;
     const auto acquired=normal_above(energy,threshold);
     const auto correct_bit=admitted*(1-bit_error);
+    result.one_bit_success_probability=acquired*correct_bit;
     const auto count=static_cast<long double>(transmission.wire_bits);
     double probability=0;
     if(raw_bits)probability=acquired*probability_power(correct_bit,count);

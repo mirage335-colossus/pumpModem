@@ -16,6 +16,7 @@
 #include <set>
 #include <string_view>
 #include <thread>
+#include <tuple>
 
 using namespace datapump;
 using namespace datapump::gui;
@@ -626,13 +627,19 @@ void controller_target_alignment() {
           controller.revision()==revision&&controller.estimate()->wire_bits==5,
           "Committing the long target must preserve its full precision and the exact short raw draft");
     controller.edit(F::receive_snr,"-47, 55");controller.edit(F::carrier,"1500 Hz");
-    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-47,55}),
-          "The manually configured RX list must retain its exact unsnapped values");
+    const auto manual_targets=controller.settings().transfer.receive_targets_db_hz;
+    check(manual_targets==std::vector<double>({short_target,55}),
+          "The manual RX list must choose the same checked target with its actual companion bank");
+    controller.commit_target(F::receive_snr);
+    check(tuning::parse_receive_targets(controller.field(F::receive_snr).text).values==manual_targets&&
+          controller.field(F::receive_snr).display_text.empty(),
+          "Committing an adjusted RX list must expose its exact sampled targets");
+    const auto boundary_target=expected(-20,long_target);
     controller.edit(F::snr,"-20");prepare(controller);
-    check(controller.field(F::snr).text=="-20"&&controller.field(F::snr).display_text.empty()&&
+    check(controller.field(F::snr).text=="-20"&&
           modem::symbol_sample_count(controller.settings().transfer.modem)==
-          modem::symbol_sample_count(tuning::resolve(1,-20,tuning::PatternMode::auto_pattern,false,1500).config),
-          "The -20 dB boundary itself must retain the existing unrounded tuning behavior");
+          modem::symbol_sample_count(planned_config(controller.link_plan()->inputs,boundary_target)),
+          "The former -20 dB boundary must use the same clock/RAM alignment as every other target");
     const auto fallback=expected(-200,long_target);
     controller.edit(F::snr,"-200");prepare(controller);
     check(controller.field(F::snr).text=="-200"&&!controller.field(F::snr).display_text.empty()&&
@@ -996,6 +1003,69 @@ void one_warning_on_planner_page() {
           "Returning to Console must restore the existing advisory without modifying its content");
     app.close();
 }
+void all_target_dropdowns_and_native_planner_editor() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller;
+    controller.edit(F::short_bits,"00101");
+    auto input=controller.link_plan()->inputs;input.options=controller.settings().transfer;input.target_db_hz=-18;
+    const std::array companion{55.};
+    const auto expected=planner::nearest_fit_target(input,companion,planner::ReceiveBanks{true,0});
+    check(expected&&*expected!=-18,"Above -20 fixture must expose a real free-running clock gap");
+    controller.edit(F::snr,"-18");prepare(controller);
+    check(controller.field(F::snr).text=="-18"&&!controller.field(F::snr).display_text.empty()&&
+          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({*expected,55})&&
+          controller.estimate()->wire_bits==5&&controller.field(F::short_bits).text=="00101",
+          "Every automatic TX target, including above -20, must select a checked fit without rewriting a raw draft");
+    const auto tx_samples=modem::symbol_sample_count(controller.settings().transfer.modem);
+    controller.edit(F::receive_snr,"-18, 55");controller.commit_target(F::receive_snr);
+    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>({*expected,55})&&
+          tuning::parse_receive_targets(controller.field(F::receive_snr).text).values==
+              controller.settings().transfer.receive_targets_db_hz&&
+          modem::symbol_sample_count(controller.settings().transfer.modem)==tx_samples,
+          "A manual RX list must snap all entries with companions without retuning transmission");
+    controller.close();
+
+    Application app({});
+    const auto& screen=ui::console_screen();
+    const auto editor=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::planner_target;});
+    const auto active=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::snr;});
+    const auto receive=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::receive_snr;});
+    check(editor!=screen.end()&&active!=screen.end()&&receive!=screen.end()&&editor->kind==ui::Kind::text&&
+          editor->persistent&&std::string_view(editor->label).starts_with("Planner target")&&
+          app.field(F::planner_target).options.size()==app.field(F::snr).options.size()&&
+          !app.field(F::receive_snr).options.empty(),
+          "Planner and receive targets must have actual shared editable preset controls in both adapters");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);
+        check(app.control(*editor).visible==(page.id==ui::Page::planner),
+              "The independent planner target editor must appear only on its tab");
+    }
+    app.select_page(ui::Page::planner);
+    const auto geometry=app.control_layout(*editor,ui::min_width,ui::min_height);
+    check(geometry.has_label&&geometry.has_suggestions&&geometry.widget.w>250&&geometry.suggestions.w>0&&
+          geometry.frame.y+geometry.frame.h<app.page_bounds(ui::min_width,ui::min_height).y,
+          "Planner target must use a visible native textbox and dropdown above the page, not a document action");
+    const auto short_text=app.field(F::snr).text,long_text=app.field(F::long_snr).text,rx_text=app.field(F::receive_snr).text;
+    app.edit(*editor,"-18");
+    check(app.field(F::planner_target).text=="-18"&&!app.field(F::planner_target).display_text.empty(),
+          "Native planner typing must preserve its buffer while exposing the checked target");
+    check(app.submit(*editor,false,false),"Enter must commit the native planner's exact accepted target");
+    const auto exact=std::stod(app.field(F::planner_target).text);
+    check(exact!=-18&&app.field(F::planner_target).display_text.empty(),
+          "Native planner commit must retain full target precision");
+    app.edit(*editor,"-");
+    check(app.field(F::planner_target).text=="-"&&contains_text(*app.document(ui::Page::planner,900),"Check planner target"),
+          "An incomplete planner target must retain the edit and suppress stale calculations");
+    app.preset(*editor,"-20");
+    check(app.field(F::planner_target).text!="-20"&&app.field(F::planner_target).display_text.empty()&&
+          app.field(F::snr).text==short_text&&app.field(F::long_snr).text==long_text&&app.field(F::receive_snr).text==rx_text,
+          "Planner preset selection must recover, reveal the checked target and preserve active TX/RX settings");
+    app.preset(*receive,"-20");
+    check(app.field(F::receive_snr).text!="-20"&&app.field(F::receive_snr).display_text.empty()&&
+          app.field(F::snr).text==short_text&&app.field(F::long_snr).text==long_text,
+          "The RX preset dropdown must snap and commit independently of both transmit targets");
+    app.close();
+}
 void application_prompt_roundtrips() {
     using F=ui::Field;using C=ui::Command;
     Launch launch;launch.simulation=true;Application app(launch);
@@ -1053,6 +1123,55 @@ void application_prompt_roundtrips() {
           "Explicit long-target apply changed the wrong transmit profile");
     app.close();
 }
+void receiver_overlay_and_cpu_status() {
+    planner::Model model;model.inputs=example();model.available=true;
+    model.clock_search_supported=model.receiver_workspace_supported=true;
+    model.bit_seconds=model.send_seconds=60;model.finish_seconds=120;
+    model.points={{25,1,0,false},{0,60,0,false},{-35,86400,0,false}};
+    model.one_bit_cpu_available=true;model.one_bit_cpu_seconds=30;
+    for(const auto& [ratio,label,tone]:std::array{
+        std::tuple{.2,"CPU estimate: headroom",ui::DocumentTone::positive},
+        std::tuple{.75,"CPU estimate: limited headroom",ui::DocumentTone::caution},
+        std::tuple{1.,"CPU estimate: slower than real time",ui::DocumentTone::negative}}) {
+        model.cpu_realtime_ratio=ratio;
+        const auto page=planner_page::build(model,900,false,false);
+        const auto flat=nodes(page);
+        check(std::any_of(flat.begin(),flat.end(),[&](const auto* node){return node->text==label&&node->tone==tone;}),
+              "CPU headroom must retain a readable status as well as its green/yellow/red semantic color");
+    }
+    model.receiver_workspace_supported=false;
+    const auto unsupported=planner_page::build(model,900,false,false);
+    check(contains_text(unsupported,"CPU estimate unavailable")&&!contains_text(unsupported,"CPU estimate: headroom"),
+          "An unsupported receiver must not advertise CPU feasibility");
+    model.receiver_workspace_supported=true;
+    const auto render=[&](const planner::Model& input,PixelFormat format) {
+        const auto page=planner_page::build(input,900,false,false);
+        const auto flat=nodes(page);
+        const auto plot=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->plot_name=="planner/bit-time";});
+        check(plot!=flat.end(),"Time/receive comparison needs its stable shared plot");
+        BitmapImage result(319,167,format);
+        (*plot)->plot.paint(full_bitmap_request(319,167,format==PixelFormat::mono1,format==PixelFormat::rgb24),
+            [&](unsigned x,unsigned y,PixelBlock pixels){result.blit(x,y,pixels);});
+        return result;
+    };
+    for(const auto format:{PixelFormat::mono1,PixelFormat::gray8,PixelFormat::rgb24}) {
+        model.receive_points.clear();const auto empty=render(model,format);
+        model.receive_points={{25,.1,true,true,true},{0,0,false,false,false},{-35,.9,true,true,true}};
+        const auto gap=render(model,format);
+        check(gap.pixels()!=empty.pixels(),"Supported RX islands must remain visible as points beside gaps");
+        const auto stride=pixel_row_bytes(319,format);
+        for(unsigned y=0;y<167;++y)for(unsigned x=130;x<141;++x) {
+            const auto begin=y*stride+(format==PixelFormat::mono1?x/8:format==PixelFormat::rgb24?3*x:x);
+            const auto bytes=format==PixelFormat::rgb24?3u:1u;
+            for(unsigned component=0;component<bytes;++component)
+                check(gap.pixels()[begin+component]==empty.pixels()[begin+component],
+                      "RX overlay must not bridge an unavailable Clock/RAM region");
+        }
+        model.receive_points[1]={0,.5,true,true,true};
+        const auto connected=render(model,format);
+        check(connected.pixels()!=empty.pixels(),"The RX curve must remain visible in color, grayscale and monochrome");
+    }
+}
 void document_semantics_layout_and_plots() {
     const auto model=planner::build(example());
     for(const float width:{220.f,460.f,900.f}) {
@@ -1068,14 +1187,19 @@ void document_semantics_layout_and_plots() {
               })==1,"Planner must use one succinct general LPI warning");
         check(!contains_text(document,"safely hidden")&&!contains_text(document,"safe bits"),
               "Observer time must not be presented as a count of safely hidden bits");
-        for(const auto command:{ui::Command::planner_target,ui::Command::planner_example_short,
+        check(contains_text(document,"1-bit RX · right axis")&&contains_text(document,"100%")&&
+              contains_text(document,"50%")&&contains_text(document,"0%")&&contains_text(document,"CPU estimate"),
+              "Planner must label its probability axis and CPU feasibility alongside reception");
+        check(std::none_of(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;}),
+              "Native planner dropdown must replace the former target prompt button");
+        for(const auto command:{ui::Command::planner_example_short,
                                 ui::Command::planner_example_lpi,ui::Command::planner_fast,
                                 ui::Command::planner_day,ui::Command::planner_clock,
                                 ui::Command::planner_toggle_draft,ui::Command::planner_toggle_details})
             check(std::any_of(flat.begin(),flat.end(),[&](const auto* node) {
                       return node->kind==ui::DocumentKind::action&&node->command==command;
                   }),"Planner milestone and editing affordances must use native shared actions");
-        const auto target=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;});
+        const auto target=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_stronger;});
         const auto verdict=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->text.starts_with("RX estimate")||node->text.starts_with("RX reference");});
         check(verdict!=flat.end()&&verdict<target,"Planner must put its reception estimate before the target controls");
         for(const auto command:{ui::Command::planner_power,ui::Command::planner_loss,ui::Command::planner_noise}) {
@@ -1158,14 +1282,14 @@ int main() {
         nearest_usable_targets();nearest_target_shares_receiver_budget();
         phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
-        current_draft_and_modem_isolation();application_prompt_roundtrips();
+        current_draft_and_modem_isolation();application_prompt_roundtrips();all_target_dropdowns_and_native_planner_editor();
         controller_checked_navigation();
         controller_target_alignment();
         failed_draft_estimate_and_recovery();one_warning_on_planner_page();
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
-        document_semantics_layout_and_plots();
+        receiver_overlay_and_cpu_status();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

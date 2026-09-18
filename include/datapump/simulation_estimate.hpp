@@ -14,7 +14,14 @@ struct Estimate {
     // an empirical success rate for the implementation.
     // success_probability is meaningful only when confidence_available is true.
     double success_probability = 0;
+    // First raw bit in the same geometry, independent of draft length/FEC.
+    // Shares confidence_available with the complete-draft probability.
+    double one_bit_success_probability = 0;
     double cpu_seconds = 0;
+    // Receive projection, search and tracking only; excludes synthetic channel
+    // generation. Divide by simulated_seconds for a rough real-time workload,
+    // not a measured CPU utilization or a guarantee about per-bit latency.
+    double receiver_cpu_seconds = 0;
     double gpu_seconds = 0;
     // Included in both totals: serial whole-symbol continuation for one
     // established signal stream per matching FFT profile, through observed

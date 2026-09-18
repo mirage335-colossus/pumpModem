@@ -262,8 +262,14 @@ full running search counter or competing evidence chains.
 the extra `ln(2)` penalty, in that same statistical scenario. It is a comparison
 model, not a second measured receiver run. The CLI reports this comparison as
 `null` when the combined model or confidence is unavailable. Support-only
-planner searches bypass probability trials; only the selected plan computes
-the reception estimate.
+planner searches bypass probability trials. The Link planner
+curve shows one-bit reception at the fixed power, path, noise and clock settings;
+it does not replace the whole-draft headline. Each build adds at most twelve
+new four-section estimates, reuses a bounded cache and refines around probability
+changes. Short coherent estimates use the cheaper analytical model. Clock/RAM
+checks cover the existing graph samples; an unusable rounded target may use an
+independently checked fit within 0.001 dB. Wider unsupported gaps break the RX line.
+Intermediate values interpolate the sampled estimates.
 
 Sections must still be coherent; four quarters do not provide arbitrary drift
 tracking over a days-long bit. Pattern transitions do not reset oscillator
@@ -314,6 +320,22 @@ completion or as extra confidence. A displayed value near 100% is still a model
 prediction, never a guarantee or authentication claim.
 
 ## Fixed reference compute model
+
+Link planner's **CPU estimate** compares estimated processing for a one-bit receive
+preview with its incoming audio duration. It uses `receiver_cpu_seconds`: carrier
+projection, acquisition and tracking, plus the fixed startup allowance, without generating
+or resampling a synthetic channel. The simulation's existing `cpu_seconds`
+includes that channel work. Both use the named reference laptop; neither
+measures the current computer or reports CPU utilization.
+
+The workload ratio is `receiver_cpu_seconds / simulated_seconds`. The audio
+span includes the fully observed absent symbols needed to finish reception.
+One second of CPU work per second of audio means equal modeled processing and
+arrival rates; above that, the reference workload cannot keep pace on average.
+Below it, FFT batches and competing searches can still delay reception or
+overrun a live capture queue. This is a planning comparison, not a real-time
+pass/fail guarantee. RX probability remains conditional on completing the work;
+CPU pace does not change the waveform, LPI model or receiver admission rules.
 
 The model counts full-rate waveform/channel samples, receiver projection work,
 FFT acquisition, established-stream tracking or bounded streaming correlation lanes. It reflects half-chip

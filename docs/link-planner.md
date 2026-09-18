@@ -8,31 +8,57 @@ The power field accepts watts,
 milliwatts, microwatts or dBm.
 
 The timing preview starts at −8 dB in 1 Hz, independently of the current
-transmit targets. Rate, carrier, waveform, key, oscillator and DSP
-allowance follow the shared controls. Choose **Use target for short messages**
-or **Use target for long messages** to apply a preview.
+transmit targets. Edit **Planner target** beside the oscillator selector; this
+native dropdown replaces the numeric clock notes while the planner is open.
+Rate, carrier, waveform, key, oscillator and DSP allowance follow the shared
+controls. Choose **Use target for short messages** or **Use target for long
+messages** to apply a preview.
 
-The short and long target dropdowns automatically align entries below −20 dB-Hz
-in automatic modes. An already fitting value stays exact; otherwise selection
+In automatic modes, every target entry checks clock coverage and RAM: the short
+and long transmit dropdowns, each value in the independent RX list, and the
+Planner target. An already fitting value stays exact; otherwise selection
 prefers the nearest checked weaker target, with a stronger fallback when needed.
-The check includes the other transmit target and all active plaintext/key banks.
-It checks clock coverage and RAM, independently of the RX probability.
-Preset selections display the exact fitted value immediately. While typing,
-your text stays intact and the label shows the value in use; Enter displays its
-full precision. The matched RX list always uses the exact effective values.
-Manual RX lists and explicit planner Apply retain their exact-input behavior.
+Transmit entries include the other transmit target and active plaintext/key
+banks. RX entries include the other receive targets and those same banks. The
+independent Planner target checks one matching receive profile. These checks
+do not depend on RX probability or CPU pace. Fixed modes retain their exact
+values and fixed waveform geometry.
+
+While typing, your text stays intact and an adjusted label shows the value in
+use. A preset or Enter displays the exact accepted value or RX list. Editing RX
+or Planner targets does not retune transmission. Changing a transmit target
+updates the matched RX list from both exact effective transmit values. Explicit
+planner Apply preserves the selected target's full precision.
 
 The top-bar **Simulation** choice is **Yes / No**. Editable power, path-loss and
 noise dropdowns stay beside it in both modes, sharing their values with the
 planner and RX estimate. The estimate remains available without sampled
-simulation; CPU/GPU computation estimates appear only with **Yes**. The planner
+simulation; simulation CPU/GPU times appear only with **Yes**. The planner
 does not repeat the input controls, and the estimate row takes no space with
 **No**. Changes to the budget in live mode update estimates without restarting
 reception.
 
-The graphs use a logarithmic vertical scale: equally spaced steps represent
-multiples of time. Weaker targets generally need longer bits; automatic profile
-boundaries make discrete steps before integration varies continuously.
+**Time per bit** combines two scales: the solid line uses logarithmic time on
+the left; dashed **RX 1 bit** uses 0–100% on the right. Power, path, noise and
+oscillator settings stay fixed along the RX curve. Unsupported targets leave
+gaps rather than implying zero probability; tiny rounding gaps may use an
+independently checked usable target within 0.001 dB. The selected point follows the
+current preview; intermediate values interpolate bounded model samples.
+The lines' visual crossing is not a detection threshold or an optimum.
+Weaker targets generally need longer bits; automatic profile boundaries make
+discrete steps before integration varies continuously. **Observer / receiver
+time** retains its separate logarithmic ratio scale and existing LPI model.
+
+The headline's **CPU estimate** is available in either simulation mode. It
+compares receiver processing with incoming audio for a one-bit preview,
+including the final silence check, on the reference Intel Core i9-13900H.
+Green means less than 0.5 seconds of modeled work per audio second; yellow
+means 0.5–1, and red means 1 or more. These are planning indicators, not measured
+CPU utilization or a guarantee of timely reception. Search bursts and other
+receive targets can consume additional headroom. RX probability remains
+conditional on completing the work. Expanded details also compare the complete
+one-bit simulation CPU time, including synthetic channel generation, with the
+bit's transmit duration.
 
 At 3.6 kHz rate and a 1.5 kHz carrier, the automatic shaped pattern gives:
 
@@ -66,7 +92,7 @@ can have separate coverage or memory gaps.
 **Stronger** and **Weaker** select usable targets, normally about 1 dB apart,
 and skip targets that fail either check. If less than 1 dB remains, the final
 usable edge is still selectable. A disabled button means no usable point was
-found in that direction. The target prompt remains available for manual entry.
+found in that direction. The Planner target dropdown accepts manual entry.
 Selections and Apply preserve the exact target even when its label is rounded.
 
 These gaps can be extremely narrow. At 1 Hz rate, a 1.5 kHz carrier, the hobby
