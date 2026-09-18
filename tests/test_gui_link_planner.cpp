@@ -374,8 +374,12 @@ void phase_loss_and_receiver_confidence() {
           weak.success_probability<.001,
           "A clock/RAM-compatible long symbol must retain its poor modeled reception when phase loss consumes its energy");
     near(weak.phase_coherence_loss_db,17.832566385,"The hobby-GPSDO phase-loss anchor changed");
+    check(weak.coherent_reference_only&&weak.section_phase_coherence_loss_db>0&&
+          weak.section_phase_coherence_loss_db<weak.phase_coherence_loss_db,
+          "Long-pattern probability must identify the coherent reference and retain finite section phase loss");
     const auto weak_page=planner_page::build(weak,900,false,false);
-    check(contains_text(weak_page,"RX estimate: <0.1%")&&contains_text(weak_page,"Phase drift loss: 17.8 dB")&&
+    check(contains_text(weak_page,"RX reference: <0.1%")&&contains_text(weak_page,"Phase drift loss: 17.8 dB")&&
+          contains_text(weak_page,"Extra drift-tolerant gain is not yet estimated")&&
           !contains_text(weak_page,"Meets target")&&!contains_text(weak_page,"Pattern transitions."),
           "The primary planner must show weak reception and phase loss without presenting clock/RAM fit as successful reception");
     for(const auto diffusion:{.5,.05,.005,0.}) {
@@ -395,13 +399,13 @@ void phase_loss_and_receiver_confidence() {
     near(stronger_link.phase_coherence_loss_db,weak.phase_coherence_loss_db,
          "Extra received power must not erase the modeled oscillator phase loss");
     const auto stronger_page=planner_page::build(stronger_link,900,false,false);
-    check(contains_text(stronger_page,"RX estimate: >99.9%")&&contains_text(stronger_page,"Phase drift loss: 17.8 dB"),
+    check(contains_text(stronger_page,"RX reference: >99.9%")&&contains_text(stronger_page,"Phase drift loss: 17.8 dB"),
           "The reception headline must respond to actual link power while retaining the same phase loss");
     const auto detailed_page=planner_page::build(weak,900,true,false);
-    check(contains_text(detailed_page,"Pattern transitions.")&&contains_text(detailed_page,"whole bit coherently")&&
-          contains_text(detailed_page,"Relative phase changes can carry useful evidence")&&
-          contains_text(detailed_page,"shorter sections")&&contains_text(detailed_page,"would need a different detector"),
-          "Expanded details must distinguish current coherent reception from proposed section comparisons");
+    check(contains_text(detailed_page,"Pattern transitions.")&&contains_text(detailed_page,"four fixed sections")&&
+          contains_text(detailed_page,"separate gain and phase")&&contains_text(detailed_page,"extra decision penalty")&&
+          contains_text(detailed_page,"Sections must still be coherent"),
+          "Expanded details must explain implemented section fits and the numerical reference's limits");
     inputs.tx_dbm=inputs.target_db_hz+inputs.path_loss_db+inputs.noise_density_dbm_hz;
     inputs.channel.phase_noise_degrees_per_sqrt_second=.05;inputs.wire_bits=3;
     const auto three=planner::build(inputs);
@@ -412,7 +416,7 @@ void phase_loss_and_receiver_confidence() {
     const auto independent=simulation::estimate(transmission,options,true,channel);
     near(three.success_probability,independent.success_probability,
          "Planner receive probability must cover the exact current wire-bit count");
-    check(contains_text(planner_page::build(three,900,false,true),"RX estimate (all bits):"),
+    check(contains_text(planner_page::build(three,900,false,true),"RX reference (all bits):"),
           "Current-draft reception must label its all-wire-bits probability");
     inputs.wire_bits=1;
     check(three.success_probability<planner::build(inputs).success_probability,
@@ -1036,7 +1040,7 @@ void document_semantics_layout_and_plots() {
                       return node->kind==ui::DocumentKind::action&&node->command==command;
                   }),"Planner milestone and editing affordances must use native shared actions");
         const auto target=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;});
-        const auto verdict=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->text.starts_with("RX estimate");});
+        const auto verdict=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->text.starts_with("RX estimate")||node->text.starts_with("RX reference");});
         check(verdict!=flat.end()&&verdict<target,"Planner must put its reception estimate before the target controls");
         for(const auto command:{ui::Command::planner_power,ui::Command::planner_loss,ui::Command::planner_noise}) {
             check(std::none_of(flat.begin(),flat.end(),[&](const auto* node){return node->command==command;}),

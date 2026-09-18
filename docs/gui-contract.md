@@ -78,8 +78,11 @@ Manual RX lists and explicit planner Apply remain exact.
 The planner opens with the preview's RX estimate or a clock/RAM limit, followed
 by budget margin and phase-drift loss. Its probability assumes every wire bit
 correct before FEC and one matching RX profile; top-bar RX confidence retains
-the actual configured draft and receive-bank model. Pattern reversals do not
-create an unimplemented segmented or phase-tracking receiver. Its power/path/noise
+the actual configured draft and receive-bank model. Eligible long patterns also
+can use four section fits with separate gain and phase when RAM permits. Their headline reads **RX
+reference**, with a brief note that added drift-tolerant gain is not yet estimated:
+the number models the original coherent match with the extra detector-choice
+penalty, not the complete new detector. Its power/path/noise
 input controls appear once, in the shared top bar. The **Simulation** dropdown offers
 only **Yes / No**, and the editable budget dropdowns stay visible in both modes.
 CPU/GPU computation estimates appear only with **Yes**; RX success is estimated

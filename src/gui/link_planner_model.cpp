@@ -444,6 +444,8 @@ Model build(const Inputs& inputs) {
         result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
         result.success_probability=result.confidence_available?receiver.success_probability:0;
         result.phase_coherence_loss_db=receiver.phase_coherence_loss_db;
+        result.coherent_reference_only=receiver.coherent_reference_only;
+        result.section_phase_coherence_loss_db=receiver.section_phase_coherence_loss_db;
         if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
         if(!receiver.receiver_workspace_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";

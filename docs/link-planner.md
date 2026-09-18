@@ -2,8 +2,8 @@
 
 Set transmit power, path loss and noise in the top bar, then open **Link
 planner**, immediately after **Console**. Its headline shows the preview's RX
-estimate or its clock/RAM limit. Below it are the power budget's margin or
-shortfall and the modeled loss from phase drift. The power field accepts watts,
+estimate, RX reference or clock/RAM limit. Below it are the power budget's margin
+or shortfall and the modeled loss from phase drift. The power field accepts watts,
 milliwatts, microwatts or dBm.
 
 The timing preview starts at −8 dB in 1 Hz, independently of the current
@@ -81,29 +81,42 @@ The planner preview checks one matching RX profile, rather than the currently
 unapplied receive-target list. More profiles or keys can require additional
 workspace; the transmit dropdowns include those banks when choosing a fit.
 
-The planner's **RX estimate** includes the existing model's signal strength,
+The planner's **RX estimate** includes the model's signal strength,
 whole-bit phase loss, residual frequency and timing error, acquisition and RAM
 checks. It estimates reception of every wire bit before error correction;
 the top-bar estimate uses the actual configured draft, receive bank and FEC.
-The phase-loss readout exposes the existing calculation without changing its
-probability formula. A power-budget margin therefore need not imply a good RX
-estimate. Neither estimate establishes measured sensitivity.
+For eligible long patterns, **RX reference** labels the coherent-branch estimate,
+including the cost of trying the additional four-section detector. The latter's
+reception gain is not yet quantified; this reference is not a proven lower bound.
+The phase-loss readout retains the whole-bit penalty; the estimator separately
+reports section loss without substituting it into the probability. Neither
+value establishes measured sensitivity.
 
 The dense low-target timings existed before the planner found them. At 1 Hz,
 the nearby 3,162,277- and 3,162,278-second symbols both fit the 4 GiB/hobby-GPSDO
 check; their target levels differ by about 0.00000137 dB. They are discrete
 sample timings. The latter lasts about 37 days and loses about 17.8 dB to phase
-diffusion in that oscillator model. Known pattern reversals help identify the
-waveform, but the current receiver combines each complete bit coherently.
-Its score tolerates an unknown constant phase, not arbitrary phase changes
-within the bit. Relative phase values shown in the live constellation are
-diagnostics; the decoder does not accumulate those displayed differences.
-There is no special 0.01 Hz transition threshold. Relative phase changes can still be detected by comparing
-neighboring sections and accumulating their evidence, without resolving each
-change individually or preserving absolute phase for days. That requires a
-different detector and its noise model. Accumulating energies from shorter
-matched sections is the separate [experimental detector](weak-link-planning.md),
-not a production receive path.
+diffusion in a whole-bit coherent fit under that oscillator model.
+
+The receiver now also fits four fixed sections when a pattern lasts at least
+16 seconds and every quarter contains at least 16 complete chips. Each section
+allows a separate signal amplitude and phase; their evidence is combined only
+after the whole bit is observed. The section score excludes its strongest
+quarter, requiring support beyond one isolated burst. The original coherent
+match remains available, and the score accounts for both the extra fitting
+freedom and trying two detectors.
+This changes neither the waveform nor the exact wire-bit count.
+Compact banks retain the coherent-only path if the added section state cannot
+fit RAM. The planner describes eligible geometry; the RX reference keeps the
+choice penalty even when that fallback would avoid it.
+
+Each quarter must still retain useful coherence. Four sections do not make a
+37-day bit equivalent to repeated 100-second comparisons, and there is no special
+0.01 Hz transition threshold. The live constellation's relative-phase values
+remain display diagnostics. More flexible differential or drift-tracking
+detectors, and the arbitrary segment lengths in the
+[statistical experiments](weak-link-planning.md), are separate from this fixed
+four-section implementation.
 
 **Observer / receiver time** uses the existing [relative LPI model](lpi-estimates.md).
 Each graph point holds the intended receiver's bit energy relative to noise at

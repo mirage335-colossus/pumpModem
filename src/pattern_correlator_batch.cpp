@@ -53,9 +53,16 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
         for(std::size_t group=0;group<group_count;++group) {
             pattern.set_stream_phase_samples(groups[group].lower);
             auto& fit=lane.fits[group];
+            auto* drift=g.drift_sections>1?&lane.drift_fits[group]:nullptr;
             auto observed=cursor;
             while(observed<end) {
                 const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*lane.rate);
+                auto section_end=symbol_end;
+                if(drift) {
+                    for(auto& item:*drift)item.advance(observed,symbol_start,lane.rate,g.symbol_samples,g.drift_sections);
+                    section_end=symbol_start+static_cast<long double>(drift_boundary(
+                        (*drift)[0].section+1,g.symbol_samples,g.drift_sections))/lane.rate;
+                }
                 if(g.shaped) {
                     require(lane.index<=std::numeric_limits<std::uint64_t>::max()/g.chips_per_symbol,
                             "pattern chip coordinate overflow");
@@ -66,6 +73,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto phase=pattern.shaped_value(first_chip,bit,static_cast<double>(within));
                         fit[bit].add(projection,phase,1);
+                        if(drift)(*drift)[bit].active.add(projection,phase,1);
                     }
                     ++observed;continue;
                 }
@@ -78,7 +86,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                 const auto chip=lane.index*g.chips_per_symbol+local;
                 const auto fraction=std::clamp(static_cast<double>(within/g.chip_samples-local),0.,std::nextafter(1.,0.));
                 const auto chip_end=symbol_start+(static_cast<long double>(local)+1)*g.chip_samples/lane.rate;
-                const auto boundary=std::min(static_cast<long double>(end),std::ceil(std::min(chip_end,symbol_end)));
+                const auto boundary=std::min(static_cast<long double>(end),std::ceil(std::min(chip_end,section_end)));
                 const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
                 const auto left=static_cast<std::size_t>(observed-block.sample),right=static_cast<std::size_t>(until-block.sample);
                 for(unsigned bit=0;bit<2;++bit) {
@@ -93,6 +101,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     const auto row=block.projection_offset+bank*(block.count+1);
                     const auto projection=batch.projections[row+right]-batch.projections[row+left];
                     fit[bit].add(projection,phase,right-left);
+                    if(drift)(*drift)[bit].active.add(projection,phase,right-left);
                 }
                 observed=until;
             }
@@ -110,6 +119,7 @@ void accumulate_correlator_cpu(const CorrelationBatch& batch,std::span<Correlati
     cancelled(stop);
     const auto& g=batch.geometry;
     require(g.symbol_samples && g.chip_samples && g.chips_per_symbol && g.phase_step && g.sample_rate &&
+            (g.drift_sections==1 || (g.drift_sections==4 && !g.tone)) &&
             g.phase_step<=g.sample_rate && std::isfinite(g.carrier_hz) &&
             g.frequency_count && g.frequency_count<=65 && g.frequency_count==batch.frequency_offsets.size() &&
             batch.bank_frequencies.size()>=g.frequency_count &&

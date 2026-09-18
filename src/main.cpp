@@ -695,6 +695,11 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<",\"frequency_hypotheses_cap\":"<<modem::maximum_pattern_frequency_hypotheses
         <<",\"full_200ppm_frequency_hypotheses\":";json_number(full_frequency_count);
     std::cout<<",\"modeled_symbol_snr_db\":";json_number(current.modeled_symbol_snr_db);
+    std::cout<<",\"coherent_reference_only\":"<<(current.coherent_reference_only?"true":"false")
+        <<",\"drift_sections\":"<<current.drift_sections<<",\"drift_section_seconds\":";
+    json_number(current.drift_section_seconds);
+    std::cout<<",\"phase_coherence_loss_db\":";json_number(current.phase_coherence_loss_db);
+    std::cout<<",\"section_phase_coherence_loss_db\":";json_number(current.section_phase_coherence_loss_db);
     std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu
         <<"\",\"gpu_hypothetical\":"<<(current.gpu_hypothetical?"true":"false")<<",\"cpu_seconds\":";
     json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);

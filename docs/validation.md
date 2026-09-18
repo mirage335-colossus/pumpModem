@@ -4,6 +4,77 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Bounded phase and gain tolerance — 18 September 2026
+
+Long pattern reception adds four fixed section fits alongside the original
+coherent match. Each quarter needs at least sixteen complete chips, and the bit
+must last at least sixteen seconds. Section boundaries use symbol coordinates,
+including the tested clock hypothesis, rather than input chunks. The score
+removes the strongest quarter's explained energy so a filter tail cannot
+supply a whole bit, uses a conservative four-coefficient noise tail, and charges
+`ln(2)` for choosing between two detectors. The compact branch caps repeated
+samples within a chip at the existing FFT evidence scale. This is a bounded
+channel-fit improvement, not arbitrary phase tracking over a days-long symbol.
+
+The compact receiver retains one active section and fixed summaries per
+hypothesis. It reserves this state when selecting the bank, materializes it
+at the first quarter boundary, and retains the coherent detector if the extra
+state cannot fit. FFT sections reuse product scratch and stream templates;
+small start batches directly reuse generated samples. Runtime getters identify
+the selected detector. The planner and top bar label eligible numerical
+probabilities **RX reference** because the added gain is not calibrated. Compute
+estimates include the new work and scratch. LPI formulas, waveform generation,
+dictionary/raw endpoints, framing and physical completion rules are unchanged.
+
+The GCC Release build succeeded. The existing `pattern_receiver`,
+`pattern_correlator` and `simulation_estimate` suites passed together in
+120.28 seconds while a full build ran concurrently. They include sampled
+four-hour progress, compact 64 KiB idle bounds, full clock-bank coverage,
+coupled-clock decoding and whole-symbol absence. Initial checks exposed a
+compact carrier-evidence regression, extra memory pressure and an FFT filter
+tail admitted as a fourth bit; these were corrected without relaxing those
+regressions. Original optional-template-cache coverage remains explicit with
+the coherent detector, alongside a new assertion that section scoring streams
+its templates.
+
+The new `pattern_drift`, `pattern_fft_batch` and `pattern_correlator_batch`
+suites passed together in 5.93 seconds. Sampled phase-flip and phase-wander
+fixtures at approximately −8.3 dB measured sample SNR recover exact `001` on
+both receivers while the coherent baseline fails. Coverage includes gain
+steps, unrelated carriers and keys, noise-only input, isolated quarters and
+tails, whole-symbol absence versus EOF, chunk/worker invariance, budget fallback,
+and unchanged ineligible scores. Direct/FFT comparisons cover public/private,
+shaped/plain, real/complex observations and clock offsets; independent binomial
+tails check the section evidence calculation.
+
+Thirty other selected GCC suites passed in the 341.51-second contract run.
+Its new CLI assertion initially assumed identical quarter lengths; integer
+sample boundaries can differ by one sample. After checking the exact longest
+quarter instead, `cli` passed all 25 cases in 32.65 seconds. Together these
+runs cover 37 distinct suites, including every development-contract suite and
+the LPI, waveform and shared GUI regressions.
+
+On the small identical-PCM fixture, FFT time changed from 20.81 to 34.62 ms and
+peak workspace from 193,747 to 173,267 bytes; compact time changed from 86.53
+to 107.54 ms and workspace from 49,006 to 49,806 bytes. These are diagnostic
+measurements under concurrent build/test load, not calibrated throughput.
+An additional warmed public FFT probe measured approximately 3.4–3.7 times
+the coherent runtime on the same exact decoded `001` input.
+Full acquisition has about four times the uncached template FFT work; tracking
+and tiny direct batches have different costs. Compact retained state remains
+independent of symbol duration.
+
+The three new/focused DSP suites also passed ASan, UBSan and LeakSanitizer
+in 40.10 seconds with leak detection enabled. The sandbox prevented the initial
+LeakSanitizer process inspection; the automatically approved unsandboxed rerun
+passed without errors or leaks.
+
+The final GCC/FLTK and Clang/Rev Release builds succeeded. All 17 selected
+Clang/Rev DSP, estimator, LPI and shared GUI suites passed in 153.01 seconds.
+`git diff --check` passed. Native window rendering and physical radio links
+were not tested; the sampled fixtures do not calibrate sensitivity for arbitrary
+oscillators, interference or channel trajectories.
+
 ## Relative LPI observation against one receiver bit — 17 September 2026
 
 The advisory now compares total observer bit durations with the receiver's

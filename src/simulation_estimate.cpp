@@ -4,6 +4,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
+#include "pattern_drift.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -87,6 +88,7 @@ Work receiver_work(const modem::Config& config,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
                    std::size_t established_stream_bits) {
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
+    const auto drift_sections=modem::detail::drift_section_count(config);
     const bool private_pattern=config.scramble || config.dsss;
     const auto epochs=private_pattern?2.L*options.search_seconds+1+
         (options.timestamp?0:std::ceil((static_cast<long double>(modem::training_sample_count(config))+
@@ -123,7 +125,7 @@ Work receiver_work(const modem::Config& config,long double samples,
     const auto fft_core_bytes=transform*16*5+(4*length+2*hop)*16+
         (separate_tracking_reference?2*length*16:0)+(transform+1)*8+
         frequencies*(2*24+2*8+2*16+18*8+2*8)+
-        4096*16+4096*sizeof(modem::PatternEvidence);
+        4096*16+4096*sizeof(modem::PatternEvidence)+(drift_sections>1?48*hop:0);
     const auto fft_bytes=fft_core_bytes+2*frequencies*transform*16;
     // Live reserves at least half of the total for peer receivers, transmit
     // work and plots even when there is only one requested receive bank.
@@ -134,7 +136,8 @@ Work receiver_work(const modem::Config& config,long double samples,
         ((private_pattern && symbol>=60.L*config.sample_rate) || fft_core_bytes>allowance);
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
-    const bool streamed_templates=!correlator && (fft_bytes>allowance || (coupled && banks*profiles>1));
+    const bool streamed_templates=!correlator &&
+        (drift_sections>1 || fft_bytes>allowance || (coupled && banks*profiles>1));
     const auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
                                std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
     const auto phase_groups=private_pattern?3.L:1.L;
@@ -148,7 +151,10 @@ Work receiver_work(const modem::Config& config,long double samples,
         // Bounded streaming projections are reused by half-chip start lanes;
         // each lane still evaluates two candidate bit fits per observation.
         const auto observations=std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
-        result.parallel=observations*starts*frequencies*phase_groups*64*banks;
+        // Eligible lanes retain the coherent fit and one active section fit;
+        // completed sections contribute only fixed-size summary statistics.
+        result.parallel=observations*starts*frequencies*phase_groups*64*
+            (drift_sections>1?2:1)*banks;
     } else {
         auto blocks=std::ceil(samples/(bin*hop));
         auto scored_starts=blocks*hop;
@@ -166,9 +172,26 @@ Work receiver_work(const modem::Config& config,long double samples,
         // public templates need the same additional forward transform and
         // generation allowance as regenerated private templates.
         const bool generate_templates=private_pattern || streamed_templates;
-        result.parallel=(blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
-            jobs*(12*transform+(generate_templates?template_pair_operations_per_bin*length:0)))+
-            jobs*40*scored_starts)*banks;
+        if(drift_sections>1) {
+            // Section transforms reuse one full-size work buffer. Their sum
+            // also supplies the coherent dot; there is no fifth template FFT.
+            // The input spectrum is still computed once per acquisition hop.
+            // Tiny batches directly match their <=4 complete start windows.
+            const auto direct_blocks=blocks>0?(hop<=4?blocks:(initial_batch<=4?1.L:0.L)):0.L;
+            const auto direct_starts=hop<=4?scored_starts:(direct_blocks>0?initial_batch:0.L);
+            const auto transformed_blocks=blocks-direct_blocks;
+            const auto fit_operations=sample_fit?tracking_real_pair_operations_per_bin:
+                tracking_pair_operations_per_bin;
+            result.parallel=(blocks*5*transform*fft_log+
+                transformed_blocks*jobs*(20*drift_sections*transform*fft_log+
+                    12*drift_sections*transform+template_pair_operations_per_bin*length)+
+                direct_starts*jobs*length*(template_pair_operations_per_bin+fit_operations)+
+                jobs*40*(drift_sections+1)*scored_starts)*banks;
+        } else {
+            result.parallel=(blocks*(5*transform*fft_log*(1+2*jobs*(generate_templates?2:1))+
+                jobs*(12*transform+(generate_templates?template_pair_operations_per_bin*length:0)))+
+                jobs*40*scored_starts)*banks;
+        }
         if(established_stream_bits) {
             // Acquisition supplies the first bit. An established track then
             // scores each remaining bit and complete absent symbols covering
@@ -187,7 +210,7 @@ Work receiver_work(const modem::Config& config,long double samples,
                 tracking_pair_operations_per_bin;
             result.tracking_serial=result.tracking_windows*(length*(
                 generated_pairs*template_pair_operations_per_bin+fits*fit_operations)+
-                fits*tracking_evidence_operations_per_fit);
+                fits*tracking_evidence_operations_per_fit*(drift_sections>1?drift_sections+1:1));
         }
     }
     return result;
@@ -204,6 +227,13 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto& config=options.modem;
     const auto samples_per_symbol=modem::symbol_sample_count(config);
     const auto seconds=static_cast<long double>(samples_per_symbol)/config.sample_rate;
+    result.drift_sections=modem::detail::drift_section_count(config);
+    result.coherent_reference_only=result.drift_sections>1;
+    // Integer quarter boundaries differ by at most one sample. Expose the
+    // longest section so the phase diagnostic never understates its duration.
+    const auto section_samples=samples_per_symbol/result.drift_sections+
+        (samples_per_symbol%result.drift_sections!=0);
+    result.drift_section_seconds=static_cast<double>(section_samples)/config.sample_rate;
     const auto chip_seconds=static_cast<long double>(modem::pattern_chip_samples(config))/config.sample_rate;
     // The sampled transport adds this complete-symbol absence and lookahead
     // after the exact waveform, including its settling and suppression noise.
@@ -260,6 +290,8 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi_v<long double>/180;
     const auto phase_loss=phase_coherence(.5L*diffusion*diffusion*seconds);
     result.phase_coherence_loss_db=static_cast<double>(std::max(0.L,-10*std::log10(phase_loss)));
+    const auto section_phase_loss=phase_coherence(.5L*diffusion*diffusion*result.drift_section_seconds);
+    result.section_phase_coherence_loss_db=static_cast<double>(std::max(0.L,-10*std::log10(section_phase_loss)));
     auto residual_clock_ppm=std::abs(static_cast<long double>(channel.clock_error_ppm));
     if(coupled)residual_clock_ppm=std::min(residual_clock_ppm,
         std::abs(channel.clock_error_ppm-nearest/config.carrier_hz*1e6L));
@@ -281,8 +313,16 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.confidence_available=true;
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));
     const auto bit_error=.5*std::exp(-energy/2);
-    const auto admitted=normal_above(energy,5);
-    const auto threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(trials+1)+std::log(2*frequencies));
+    // Keep the eligible coherent reference with the two-detector choice cost.
+    // A compact bank can fall back when the added state cannot fit; retaining
+    // the choice cost is conservative in that case, without claiming that the
+    // reference bounds actual reception or that section fitting is active.
+    // Merely substituting section phase loss here would omit the section
+    // statistic's higher rank and correlated alternative-bit comparisons.
+    const auto detector_choice_penalty=result.coherent_reference_only?std::log(2.):0.;
+    const auto admitted=normal_above(energy,5+detector_choice_penalty);
+    const auto threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(trials+1)+std::log(2*frequencies))+
+        detector_choice_penalty;
     const auto acquired=normal_above(energy,threshold);
     const auto correct_bit=admitted*(1-bit_error);
     const auto count=static_cast<long double>(transmission.wire_bits);

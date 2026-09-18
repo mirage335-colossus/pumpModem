@@ -54,6 +54,11 @@ struct PatternBurst {
 // time end the stream. One failed symbol suffices when it lasts >=6s.
 inline constexpr std::uint64_t pattern_absence_seconds = 6;
 struct PatternSearch {
+    // Long pattern symbols also fit four fixed sections with independent
+    // complex gains. Full-symbol evidence includes the extra noise degrees
+    // and detector-choice penalty; the waveform and completion rule stay fixed.
+    // False retains the coherent reference detector for comparisons.
+    bool drift_tolerant = true;
     // A finite, explicit frequency bank. Empty preserves the five-bin local
     // search unless expand_clock_search is enabled by the application.
     std::vector<double> frequency_offsets_hz;
@@ -145,6 +150,8 @@ public:
     // The application requested expansion but only the original local
     // five-frequency search fitted its workspace. This is reduced coverage.
     bool local_clock_fallback() const;
+    // Whether the additional section detector fits this profile and budget.
+    bool drift_tolerant() const;
     std::size_t working_bytes() const;
     // Reject a reduction that cannot retain current state. Future candidate
     // growth is capped within the new ceiling; excess payload throws Error.

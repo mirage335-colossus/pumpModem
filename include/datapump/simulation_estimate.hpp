@@ -27,6 +27,19 @@ struct Estimate {
     // Nonnegative loss from random phase drift during one complete coherent
     // symbol. Pattern reversals do not reset the carrier's phase history.
     double phase_coherence_loss_db = 0;
+    // Eligible geometry can additionally combine four section fits. These
+    // fields describe that policy, not a live receiver's allocation: compact
+    // banks retain the coherent-only path if the added state cannot fit.
+    // Numeric success remains the coherent-branch engineering reference,
+    // including the detector-choice penalty; its section-branch gain and
+    // cross-branch bit comparisons are not modeled, nor is it a lower bound.
+    // The reference retains the choice penalty even on that compact fallback.
+    bool coherent_reference_only = false;
+    std::size_t drift_sections = 1;
+    double drift_section_seconds = 0;
+    // Phase loss within the longest implemented section, diagnostic only.
+    // It does not replace whole-symbol loss in success_probability.
+    double section_phase_coherence_loss_db = 0;
     double carrier_offset_hz = 0;
     // Requested search span. If receiver_workspace_supported is false, live
     // reception may use a narrower local fallback; no probability models it.

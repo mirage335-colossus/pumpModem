@@ -49,6 +49,8 @@ struct Model {
     // No interval FEC/source context is available; the full draft is separate.
     double success_probability=0;
     double phase_coherence_loss_db=0;
+    bool coherent_reference_only=false;
+    double section_phase_coherence_loss_db=0;
     double occupied_bandwidth_hz=0;
     double low_audio_hz=0;
     double high_audio_hz=0;

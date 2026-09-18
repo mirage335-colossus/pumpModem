@@ -146,6 +146,15 @@ class StreamCLI(unittest.TestCase):
             self.assertTrue(value['prescribed_template_correlation_not_measured'])
             self.assertEqual(value['receive_profile_assumption'],'matching_transmit_profile')
             self.assertTrue(value['current_receiver']['profile_matches'])
+            receiver=value['current_receiver']
+            self.assertTrue(receiver['coherent_reference_only'])
+            self.assertEqual(receiver['drift_sections'],4)
+            sample_rate=value['transmission']['sample_rate']
+            symbol_samples=round(value['transmission']['symbol_seconds']*sample_rate)
+            longest_quarter=((symbol_samples+3)//4)/sample_rate
+            self.assertTrue(math.isclose(receiver['drift_section_seconds'],longest_quarter,rel_tol=1e-12))
+            self.assertGreater(receiver['phase_coherence_loss_db'],receiver['section_phase_coherence_loss_db'])
+            self.assertGreater(receiver['section_phase_coherence_loss_db'],0)
             self.assertEqual(value['transmission']['symbol_duration_source'],'configured_tx_plan')
             self.assertNotIn('stream_complete',value)
             self.assertNotIn('raw_bits',value)

@@ -5,6 +5,10 @@ running the receiver, or benchmarking the computer. It combines exact wire
 size and airtime with the existing fixed-laptop compute model and a bounded
 Monte Carlo experiment on matched-correlation statistics. Work depends on the
 requested trial count, not the number of audio samples or coherent segments.
+The production receiver now has a fixed four-section option in addition to its
+coherent match. The experiments below still describe separate reference
+detectors with user-chosen segment lengths; they are not measurements of that
+implementation.
 
 The [1.2 kHz case study](1200hz-weak-link-planning.md) compares the requested
 3 dBm/-170 dB mode with -200 dB and -230 dB, including a conditional day-long
@@ -68,8 +72,8 @@ Loss of whole-symbol coherence does not erase every useful phase transition.
 A differential receiver can compare neighboring matched sections; a receiver
 that models phase drift can use relationships between several nearby sections.
 Neither approach requires a reliable decision on each individual transition.
-These are different statistics from both the current whole-symbol correlation
-and the experimental sum of section energies. The latter discards relationships
+These are different statistics from both whole-symbol correlation and a sum
+of section energies. The latter discards relationships
 between section phases, so its results do not bound a differential receiver.
 See the primary study of
 [differential combining for weak GPS acquisition](https://www.sciencedirect.com/science/article/abs/pii/S0165168406002696).
@@ -84,20 +88,33 @@ does not give a reception probability. GPS discipline improves long-term time
 and frequency accuracy; short-interval stability also depends on the local
 oscillator and control loop ([NIST](https://www.nist.gov/publications/measurement-transient-environmental-effects-gps-disciplined-clocks)).
 
-The current pattern score fits a constant unknown carrier phase across each
-complete bit. Its squared magnitude already contains relationships between
-pattern phases, but it does not reweight them according to their separation in
-time or track phase within the bit. The adjacent-phase values in the live
-constellation are display diagnostics only. A different detector could improve
-phase tolerance; these planner changes do not implement or credit that gain.
+The production receiver retains that whole-symbol match and also fits four
+fixed quarters for patterns lasting at least 16 seconds with at least 16
+complete chips per quarter. Each quarter has its own unknown amplitude and
+phase. The receiver combines explained energy across the complete bit while
+excluding the strongest quarter, requiring support beyond an isolated burst.
+It accounts for the extra fit coefficients and pays an `ln(2)` evidence penalty for choosing
+between the coherent and section scores. This tolerates channel changes between
+quarters while retaining the known transitions inside each one. The waveform,
+wire count and full-symbol completion rule are unchanged. See the
+[score and compute model](simulation-estimates.md#probability-model).
+Compact receivers keep the coherent path if the added section state cannot fit
+their RAM allowance.
 
-The same fit uses the full expected amplitude pattern, but has no separate
-adjacent-amplitude difference/ratio accumulator or varying-gain model. Scaling
-all received samples, including their noise, by one constant leaves the
-normalized score unchanged; increasing signal power against fixed noise still
-improves SNR. Positive gain changes within a bit mismatch its expected envelope,
-without the vector cancellation caused by phase wander. The live constellation
-shows phase differences and current amplitude, not amplitude differences.
+Four sections still require useful coherence within each quarter. With the
+0.5-degree/√second model, a quarter of a 37-day bit has roughly 447 degrees RMS
+phase movement; this receiver does not supply arbitrary 100-second comparisons
+over that duration. More flexible differential and channel-tracking detectors
+remain distinct possibilities. The live constellation shows phase differences
+and current amplitude for display; its plotted values are not decoder inputs.
+
+Power changes can reduce a coherent match without the vector cancellation that
+phase changes can cause. The new separate section gains accommodate some of
+these variations, but neither detector permits arbitrary independent gain and
+phase at every chip: that would absorb the transitions distinguishing the bits.
+Numeric **RX reference** values retain the coherent-branch model with its
+detector-choice penalty. The extra branch's reception gain is unquantified;
+the reference is not a proven lower bound.
 
 ## Run an analysis
 
@@ -154,12 +171,16 @@ produce identical draws across compiler libraries.
   `tracking_seconds` is the modeled serial continuation component included in
   both CPU/GPU totals, and `tracking_symbol_windows` includes fully scored
   absence. Competing/noise tracks and reacquisition are not upper-bounded.
+  For eligible long patterns, its numeric probability is the coherent reference,
+  while compute costs include the implemented four-section work.
 - `ideal_coherent` assumes perfect phase stability and zero residual carrier
   error across the whole symbol.
 - `coherent_phase_model` applies the selected phase diffusion and residual
   frequency over the whole symbol.
 - `segmented_phase_model` accumulates energy from shorter coherent segments.
-  This is a proposed detector experiment, not a newly implemented receive path.
+  Its arbitrary segment count, prescribed template correlation and statistical
+  threshold remain a separate experiment, not a simulation of the production
+  four-section detector.
 
 The experiments condition on matched symbol timing and sample-clock rate.
 Their duration is the nominal transmitted symbol duration.
@@ -247,7 +268,8 @@ waveform-dependent Gram matrices and the modem's adaptive decisions.
 [ESA's acquisition discussion](https://gssc.esa.int/navipedia/index.php/Baseband_Processing)
 describes the coherent/noncoherent integration tradeoff and squaring loss.
 
-The next production step would require segmented acquisition and accumulation
-across candidate clock/drift trajectories, followed by sampled receiver and
-noise-only validation. This planning command does not change transmission,
-symbol admission, pending-bit progress or physical completion.
+The implemented fixed four-section fit is a bounded first step. Shorter or
+adaptive sections and explicit clock/drift trajectories need their own scoring,
+resource limits and sampled signal/noise validation. This planning command
+does not change transmission, symbol admission, pending-bit progress or
+physical completion.

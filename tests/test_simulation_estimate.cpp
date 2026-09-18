@@ -129,6 +129,65 @@ void whole_symbol_phase_coherence() {
     check(!unsupported.confidence_available&&unsupported.phase_coherence_loss_db>17,
           "phase loss should remain visible when insufficient RAM prevents a numeric receive estimate");
 }
+void drift_receiver_reference() {
+    transfer::Options options;
+    options.modem.sample_rate=256;
+    options.modem.carrier_hz=64;
+    options.modem.bandwidth_hz=8;
+    options.modem.integration_seconds=16;
+    options.modem.pulse_shaping=false;
+    options.search_seconds=0;
+    options.dsp_workspace_bytes=std::size_t{1024}*1024*1024;
+    auto channel=clean_channel();
+    channel.snr_db=20-10*std::log10(2048.);
+    const auto value=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(value.confidence_available && value.coherent_reference_only && value.drift_sections==4,
+          "a sixteen-second pattern with sixteen complete chips per quarter uses the coherent reference of the four-section receiver");
+    near(value.drift_section_seconds,4,"four-section diagnostic must use the actual quarter duration");
+    near(value.section_phase_coherence_loss_db,0,"stable phase must have no section phase loss");
+    // Independently fixed fixture: five frequency hypotheses and seventeen
+    // possible half-chip starts. Trying both detectors costs ln(2) evidence.
+    const auto energy=std::pow(10.,1.7);
+    const auto above=[&](double threshold) {
+        return .5*std::erfc((threshold-energy)/std::sqrt(2*(1+2*energy)));
+    };
+    const auto threshold=-std::log(1e-10)+2*std::log(86.)+std::log(10.);
+    const auto expected=above(threshold+std::log(2.))*above(5+std::log(2.))*(1-.5*std::exp(-energy/2));
+    near(value.success_probability,expected,
+         "coherent reference must account for the real detector-choice cost without crediting unmodeled section gain");
+    check(value.success_probability<above(threshold)*above(5)*(1-.5*std::exp(-energy/2)),
+          "an additional detector must not receive a free false-alarm budget");
+
+    channel.phase_noise_degrees_per_sqrt_second=180/std::numbers::pi*std::sqrt(2./16);
+    const auto drift=simulation::estimate(wire(1,options.modem),options,true,channel);
+    const auto quarter_fraction=8*(1+4*std::expm1(-.25));
+    near(drift.section_phase_coherence_loss_db,-10*std::log10(quarter_fraction),
+         "section phase diagnostic must integrate phase diffusion over four seconds, not the whole sixteen seconds");
+    near(drift.phase_coherence_loss_db,10*std::log10(std::exp(1.)/2),
+         "coherent reference must retain its independent whole-symbol phase penalty");
+    near(value.modeled_symbol_snr_db-drift.modeled_symbol_snr_db,drift.phase_coherence_loss_db,
+         "showing reduced section phase loss must not silently change numeric coherent-reference sensitivity");
+    check(drift.success_probability<value.success_probability &&
+          drift.section_phase_coherence_loss_db<drift.phase_coherence_loss_db,
+          "section diagnostics should show improved phase tolerance while the reference still accounts for whole-bit drift");
+
+    options.modem.integration_seconds=16-1./256;
+    const auto short_symbol=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(!short_symbol.coherent_reference_only && short_symbol.drift_sections==1,
+          "the sub-sixteen-second boundary must retain the original detector model");
+    near(short_symbol.section_phase_coherence_loss_db,short_symbol.phase_coherence_loss_db,
+         "one-section diagnostic must equal the ordinary whole-symbol loss");
+    options.modem.integration_seconds=16;
+    options.modem.bandwidth_hz=7.9;
+    const auto sparse=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(!sparse.coherent_reference_only && sparse.drift_sections==1,
+          "a quarter with fewer than sixteen complete chips cannot claim the section detector");
+    options.modem.bandwidth_hz=8;
+    options.modem.spreading_mode=modem::SpreadingMode::tone;
+    const auto tone=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(!tone.coherent_reference_only && tone.drift_sections==1,
+          "tone reception must keep its existing coherent estimate");
+}
 void established_tracking_workload() {
     transfer::Options options;
     options.modem=tuning::resolve(1200,-10,tuning::PatternMode::auto_pattern,false).config;
@@ -334,8 +393,12 @@ void streamed_template_workload() {
     check(streamed.receiver_workspace_supported && retained.receiver_workspace_supported &&
           streamed.confidence_available && retained.confidence_available,
           "retained and streamed FFT profiles must both have affordable core workspace");
-    check(streamed.cpu_seconds>retained.cpu_seconds && streamed.gpu_seconds>retained.gpu_seconds,
-          "streamed template generation must add work when the complete bank cannot remain in memory");
+    check(streamed.drift_sections==4 && retained.drift_sections==4,
+          "the long dense fixture must exercise the new section detector");
+    near(streamed.cpu_seconds,retained.cpu_seconds,
+         "four-section FFT work must stream its partial templates even with enough RAM to cache old whole-bit rows");
+    near(streamed.gpu_seconds,retained.gpu_seconds,
+         "hypothetical GPU work must reflect the same fixed section-template policy");
     near(streamed.success_probability,retained.success_probability,
          "streaming transformed templates must preserve modeled search coverage and confidence");
     const std::array shared_profiles{options.modem,options.modem};
@@ -360,6 +423,24 @@ void streamed_template_workload() {
           "unaffordable expanded FFT must retain finite estimates of the requested compute work");
     near(unsupported.carrier_search_half_width_hz,streamed.carrier_search_half_width_hz,
          "insufficient workspace must not silently shrink the requested carrier bank");
+
+    // A sixty-chip pattern cannot support the extra fit. Preserve coverage
+    // of the original cache-versus-stream compute policy for this geometry.
+    options.modem=tuning::resolve(1,32,tuning::PatternMode::auto_pattern,false).config;
+    options.modem.integration_seconds=120;
+    const auto sparse_transmission=wire(3,options.modem);
+    options.dsp_workspace_bytes=2*1024*1024;
+    const auto sparse_streamed=simulation::estimate(sparse_transmission,options,true,channel);
+    options.dsp_workspace_bytes=64*1024*1024;
+    const auto sparse_retained=simulation::estimate(sparse_transmission,options,true,channel);
+    check(sparse_streamed.drift_sections==1 && sparse_retained.drift_sections==1 &&
+          sparse_streamed.receiver_workspace_supported && sparse_retained.receiver_workspace_supported,
+          "original template-cache comparison must use an affordable geometry without section fitting");
+    check(sparse_streamed.cpu_seconds>sparse_retained.cpu_seconds &&
+          sparse_streamed.gpu_seconds>sparse_retained.gpu_seconds,
+          "streamed whole-bit template generation must still add work outside the section detector");
+    near(sparse_streamed.success_probability,sparse_retained.success_probability,
+         "whole-bit template caching must preserve the original search confidence");
 }
 void target_and_channel_are_independent() {
     transfer::Options options;
@@ -391,7 +472,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();whole_symbol_phase_coherence();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();whole_symbol_phase_coherence();drift_receiver_reference();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

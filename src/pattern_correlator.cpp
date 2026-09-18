@@ -21,6 +21,7 @@ void require(bool condition, const char* message) { if (!condition) throw Error(
 void cancelled(std::stop_token stop) { if (stop.stop_requested()) throw Error("pattern correlation cancelled"); }
 using Projection=detail::CorrelationProjection;
 using Fit=detail::CorrelationFit;
+using DriftFit=detail::CorrelationDriftFit;
 struct Bank {
     double frequency=0;
     std::vector<Projection> prefix;
@@ -34,11 +35,12 @@ struct PatternCorrelator::Impl {
     // Mutable keystream/chip caches belong to one scoring worker. Completions
     // still run in hypothesis order on the caller after these workers finish.
     std::vector<PatternCode> worker_codes;
-    std::size_t budget=0,bit_limit=0,accounted_bytes=0;
+    std::size_t budget=0,bit_limit=0,accounted_bytes=0,drift_reserved=0;
     std::uint64_t sample=0,trials=0;
     std::uint64_t phase_step=1;
     std::size_t alternate_groups=0;
     std::size_t block_samples=block_size;
+    unsigned drift_sections=1;
     bool finished=false,shaped=false;
     struct Hypothesis {
         long double origin=0,rate=1;
@@ -65,6 +67,9 @@ struct PatternCorrelator::Impl {
     // Only unresolved subsecond schedules need extra fits. Ordinary explicit
     // schedules retain the original pair of per-hypothesis accumulators.
     std::vector<std::array<Fit,2>> alternate_fits;
+    // Allocated only for eligible long patterns; one active section per bit
+    // and schedule, independent of symbol duration and input chunk length.
+    std::vector<std::array<DriftFit,2>> drift_fits;
     std::vector<Bank> banks;
     std::vector<PatternEvidence> history;
     std::vector<PatternBurst> bursts;
@@ -74,6 +79,7 @@ struct PatternCorrelator::Impl {
 
     Impl(Config c,PatternSearch options,std::size_t bytes):config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
+        drift_sections=detail::drift_section_count(c,search.drift_tolerant);
         if(search.compact_clock_search) {
             search.candidate_limit=std::min<std::size_t>(search.candidate_limit,32);
             block_samples=32;
@@ -123,7 +129,7 @@ struct PatternCorrelator::Impl {
         const auto origins=std::ceil((upper-lower)/step)+1;
         const auto total=origins*search.frequency_offsets_hz.size()*search.clock_errors_ppm.size();
         const auto bank_count=search.frequency_offsets_hz.size()*(c.spreading_mode==SpreadingMode::tone?2*search.clock_errors_ppm.size():1);
-        const long double fixed=sizeof(PatternCorrelator)+sizeof(Impl)+code.working_bytes()+
+        long double fixed=sizeof(PatternCorrelator)+sizeof(Impl)+code.working_bytes()+
             total*(sizeof(Hypothesis)+alternate_groups*sizeof(std::array<Fit,2>))+
             bank_count*(sizeof(Bank)+(block_samples+1)*sizeof(Projection))+point_capacity*sizeof(Complex)+
             static_cast<long double>(search.candidate_limit)*sizeof(PatternEvidence)+search.track_limit*(sizeof(PatternBurst)+sizeof(Emission))+
@@ -131,8 +137,16 @@ struct PatternCorrelator::Impl {
         require(total>=1 && total<=std::numeric_limits<std::size_t>::max() && fixed<bytes,
                 "complete half-chip clock/frequency/rate coverage exceeds DSP workspace");
         const auto count=static_cast<std::size_t>(total);
-        const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         const auto denominator=2*count+2*search.track_limit+2;
+        if(drift_sections>1) {
+            const auto extra=total*(alternate_groups+1)*sizeof(std::array<DriftFit,2>);
+            // Drift tolerance is optional; it must not displace an otherwise
+            // affordable complete clock bank or its minimum bit retention.
+            if(fixed+extra+denominator<=bytes) {
+                drift_reserved=static_cast<std::size_t>(extra);fixed+=extra;
+            } else drift_sections=1;
+        }
+        const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
         hypotheses.reserve(count);emissions.reserve(search.track_limit);banks.resize(bank_count);
@@ -141,6 +155,10 @@ struct PatternCorrelator::Impl {
         require(!alternate_groups || count<=std::numeric_limits<std::size_t>::max()/alternate_groups,
                 "pattern phase fits exceed address space");
         alternate_fits.resize(count*alternate_groups);
+        if(drift_sections>1) {
+            require(count<=std::numeric_limits<std::size_t>::max()/(alternate_groups+1),
+                    "pattern drift fits exceed address space");
+        }
         history.reserve(search.candidate_limit);bursts.reserve(search.track_limit);
         for(std::size_t rate=0;rate<search.clock_errors_ppm.size();++rate) {
             const auto ratio=1+static_cast<long double>(search.clock_errors_ppm[rate])*1e-6L;
@@ -160,8 +178,27 @@ struct PatternCorrelator::Impl {
                 }
             }
         }
-        accounted_bytes=working_bytes();
+        accounted_bytes=working_bytes()+drift_reserved;
         require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"clock-search state exceeds DSP workspace");
+    }
+    void prepare_drift(std::uint64_t end) {
+        if(!drift_reserved)return;
+        const auto first_boundary=detail::drift_boundary(1,code.symbol_samples(),drift_sections);
+        const auto needed=std::any_of(hypotheses.begin(),hypotheses.end(),[&](const auto& h) {
+            return static_cast<long double>(end)>std::ceil(h.origin+
+                (static_cast<long double>(h.index)*code.symbol_samples()+first_boundary)/h.rate);
+        });
+        if(!needed)return;
+        // Until the first boundary the ordinary whole-symbol fit is also the
+        // first section fit. Reserve its eventual state from construction, but
+        // keep idle long-symbol searches at their historical physical size.
+        drift_fits.resize(hypotheses.size()*(alternate_groups+1));
+        for(std::size_t i=0;i<hypotheses.size();++i)for(std::size_t group=0;group<=alternate_groups;++group) {
+            auto& drift=section_fits(i,group);const auto& whole=fits(hypotheses[i],i,group);
+            for(unsigned bit=0;bit<2;++bit)drift[bit].active=whole[bit];
+        }
+        drift_reserved=0;accounted_bytes=working_bytes();
+        room_for(0);
     }
     void prepare_workers() {
         if(!worker_codes.empty())return;
@@ -171,7 +208,7 @@ struct PatternCorrelator::Impl {
             std::vector<PatternCode> prepared;prepared.reserve(workers);
             for(std::size_t worker=0;worker<workers;++worker)prepared.emplace_back(config,config.stream_epoch);
             worker_codes=std::move(prepared);
-            accounted_bytes=working_bytes();
+            accounted_bytes=working_bytes()+drift_reserved;
             require(sizeof(PatternCorrelator)+accounted_bytes<=budget,"parallel pattern caches exceed DSP workspace");
         }
     }
@@ -179,6 +216,7 @@ struct PatternCorrelator::Impl {
         auto value=sizeof(Impl)+code.working_bytes()+hypotheses.capacity()*sizeof(Hypothesis)+banks.capacity()*sizeof(Bank)+
             emissions.capacity()*sizeof(Emission)+
             alternate_fits.capacity()*sizeof(decltype(alternate_fits)::value_type)+
+            drift_fits.capacity()*sizeof(decltype(drift_fits)::value_type)+
             points.capacity()*sizeof(Complex)+
             history.capacity()*sizeof(PatternEvidence)+bursts.capacity()*sizeof(PatternBurst)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
@@ -239,6 +277,9 @@ struct PatternCorrelator::Impl {
         if(!group)return h.fits;
         require(group<=alternate_groups,"pattern phase fit exceeds its allocated bank");
         return alternate_fits[hypothesis*alternate_groups+group-1];
+    }
+    std::array<DriftFit,2>& section_fits(std::size_t hypothesis,std::size_t group) {
+        return drift_fits[hypothesis*(alternate_groups+1)+group];
     }
     Emission& output_stream(Hypothesis& h) {
         const auto same_clock=[&](long double origin,double frequency) {
@@ -379,7 +420,12 @@ struct PatternCorrelator::Impl {
         trials+=group_count;
         for(std::size_t group=0;group<group_count;++group) {
             const auto& fit=fits(h,hypothesis,group);
-            const auto a=fit[0].score(),b=fit[1].score();
+            auto a=fit[0].score(),b=fit[1].score();
+            if(drift_sections>1) {
+                const auto& drift=section_fits(hypothesis,group);
+                a=detail::combine_drift_evidence(a,drift[0].score(fit[0],drift_sections,code.chip_samples()),drift_sections);
+                b=detail::combine_drift_evidence(b,drift[1].score(fit[1],drift_sections,code.chip_samples()),drift_sections);
+            }
             if(std::max(a,b)>e.score) {
                 e={h.observed_start,end,h.index,config.carrier_hz+search.frequency_offsets_hz[h.frequency],
                     std::max(a,b),std::min(a,b),b>a?1U:0U,groups[group].lower};
@@ -460,6 +506,8 @@ struct PatternCorrelator::Impl {
         h.fits={};
         for(std::size_t group=0;group<alternate_groups;++group)
             alternate_fits[hypothesis*alternate_groups+group]={};
+        if(drift_sections>1)for(std::size_t group=0;group<=alternate_groups;++group)
+            section_fits(hypothesis,group)={};
         require(h.index<std::numeric_limits<std::uint64_t>::max(),"pattern stream symbol counter overflow");++h.index;
     }
     std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
@@ -478,9 +526,16 @@ struct PatternCorrelator::Impl {
         for(std::size_t group=0;group<group_count;++group) {
             pattern.set_stream_phase_samples(groups[group].lower);
             auto& fit=fits(h,hypothesis,group);
+            auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
             auto observed=cursor;
             while(observed<segment_end) {
                 const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*h.rate);
+                auto section_end=symbol_end;
+                if(drift) {
+                    for(auto& item:*drift)item.advance(observed,symbol_start,h.rate,code.symbol_samples(),drift_sections);
+                    section_end=symbol_start+static_cast<long double>(detail::drift_boundary(
+                        (*drift)[0].section+1,code.symbol_samples(),drift_sections))/h.rate;
+                }
                 if(shaped) {
                     require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
                             "pattern chip coordinate overflow");
@@ -494,6 +549,7 @@ struct PatternCorrelator::Impl {
                     for(unsigned bit=0;bit<2;++bit) {
                         const auto phase=pattern.shaped_value(first_chip,bit,static_cast<double>(within));
                         fit[bit].add(projection,phase,1);
+                        if(drift)(*drift)[bit].active.add(projection,phase,1);
                     }
                     ++observed;continue;
                 }
@@ -502,7 +558,7 @@ struct PatternCorrelator::Impl {
                 const auto chip=h.index*code.chips_per_symbol()+local;
                 const auto fraction=std::clamp(static_cast<double>(within/code.chip_samples()-local),0.,std::nextafter(1.,0.));
                 const auto chip_end=symbol_start+(static_cast<long double>(local)+1)*code.chip_samples()/h.rate;
-                const auto boundary=std::min(static_cast<long double>(segment_end),std::ceil(std::min(chip_end,symbol_end)));
+                const auto boundary=std::min(static_cast<long double>(segment_end),std::ceil(std::min(chip_end,section_end)));
                 const auto until=static_cast<std::uint64_t>(std::max(static_cast<long double>(observed+1),boundary));
                 const auto left=static_cast<std::size_t>(observed-sample),right=static_cast<std::size_t>(until-sample);
                 for(unsigned bit=0;bit<2;++bit) {
@@ -515,6 +571,7 @@ struct PatternCorrelator::Impl {
                     }
                     const auto projection=bank.prefix[right]-bank.prefix[left];
                     fit[bit].add(projection,phase,right-left);
+                    if(drift)(*drift)[bit].active.add(projection,phase,right-left);
                 }
                 observed=until;
             }
@@ -535,7 +592,7 @@ struct PatternCorrelator::Impl {
         constexpr std::size_t max_blocks=64,max_lanes=65536;
         using Lane=detail::CorrelationLane;
         using Block=detail::CorrelationBlock;
-        const auto retained=sizeof(PatternCorrelator)+working_bytes();
+        const auto retained=sizeof(PatternCorrelator)+working_bytes()+drift_reserved;
         if(retained>=budget)return 0;
         const auto spare=budget-retained;
         const auto per_block=banks.size()*(block_samples+1)*sizeof(Projection)+sizeof(Block);
@@ -592,7 +649,7 @@ struct PatternCorrelator::Impl {
              config.sample_rate,search.frequency_offsets_hz.size(),config.carrier_hz,shaped,
              config.spreading_mode==SpreadingMode::tone,
              {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
-              config.spreading_seed,config.dsss_seed}},
+              config.spreading_seed,config.dsss_seed},drift_fits.empty()?1:drift_sections},
             {blocks.get(),block_count},{projections.get(),row_offset},{frequencies.get(),banks.size()},search.frequency_offsets_hz};
         // Numeric tiles contain no PatternBurst, heap-owned input, or references
         // to peer admission state. Device implementations can operate on these
@@ -606,6 +663,8 @@ struct PatternCorrelator::Impl {
                 lane.frequency=h.frequency;lane.rate_index=h.rate_index;lane.fits[0]=h.fits;
                 for(std::size_t group=0;group<alternate_groups;++group)
                     lane.fits[group+1]=alternate_fits[(first+i)*alternate_groups+group];
+                if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
+                    lane.drift_fits[group]=section_fits(first+i,group);
             }
             detail::accumulate_correlator_cpu(batch,{lanes.get(),count},worker_codes,stop);
             for(std::size_t i=0;i<count;++i) {
@@ -613,6 +672,8 @@ struct PatternCorrelator::Impl {
                 h.observed_start=lane.observed_start;h.fits=lane.fits[0];
                 for(std::size_t group=0;group<alternate_groups;++group)
                     alternate_fits[(first+i)*alternate_groups+group]=lane.fits[group+1];
+                if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
+                    section_fits(first+i,group)=lane.drift_fits[group];
             }
             first+=count;
         }
@@ -684,7 +745,7 @@ void PatternCorrelator::push(std::span<const float> samples,std::stop_token stop
         Impl& state;
         ~ReleaseWorkers() {state.drop_workers();}
     } release{s};
-    if(!samples.empty())s.prepare_workers();
+    if(!samples.empty()){s.prepare_drift(s.sample+samples.size());s.prepare_workers();}
     for(std::size_t offset=0;offset<samples.size();) {
         auto count=s.process_batch(samples.subspan(offset),stop);
         if(!count) {
@@ -707,7 +768,7 @@ std::vector<PatternBurst> PatternCorrelator::take_bursts(){
     // admit weak decisions, release the clock, or imply physical completion.
     for(auto& h:s.hypotheses)s.publish(h,false,true,true);
     auto result=std::move(s.bursts);s.bursts={};s.bursts.reserve(s.search.track_limit);
-    s.accounted_bytes=s.working_bytes();return result;
+    s.accounted_bytes=s.working_bytes()+s.drift_reserved;return result;
 }
 PatternBurst PatternCorrelator::provisional()const {
     const auto& h=impl_->hypotheses;
@@ -728,9 +789,17 @@ std::vector<Complex> PatternCorrelator::take_chip_constellation() {
 }
 bool PatternCorrelator::acquiring()const {return !impl_->finished && std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted || !h.burst.bits.empty();});}
 bool PatternCorrelator::synchronized()const{return std::any_of(impl_->hypotheses.begin(),impl_->hypotheses.end(),[](const auto& h){return h.admitted;});}
+bool PatternCorrelator::drift_tolerant()const{return impl_->drift_sections>1;}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())impl_->drop_workers();
+    if(impl_->drift_sections>1 && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
+        // Whole-symbol coherent fits have always been retained; reducing an
+        // optional detector's reservation never resets physical reception.
+        decltype(impl_->drift_fits)().swap(impl_->drift_fits);
+        impl_->drift_reserved=0;impl_->drift_sections=1;
+        impl_->accounted_bytes=impl_->working_bytes();
+    }
     require(bytes>=working_bytes(),"DSP workspace is smaller than streaming pattern state");impl_->budget=bytes;
 }
 Diagnostics PatternCorrelator::diagnostics()const {

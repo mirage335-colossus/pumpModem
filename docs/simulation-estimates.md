@@ -5,6 +5,9 @@ two **rough compute-time estimates**. They are planning aids, not measured
 confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
+For patterns eligible for the four-section detector, the GUI labels the percentage
+**RX reference**: it models the coherent branch with the detector-choice penalty,
+without estimating the added section branch's gain or claiming a lower bound.
 
 The separate [LPI relative observation advisory](lpi-estimates.md) compares an
 unkeyed energy detector's total observation with a one-symbol receiver design
@@ -177,18 +180,44 @@ Tone profiles omit the pattern smear term. These are analytical approximations
 to the sampled channel; they do not reproduce adaptive tracking or the exact
 public/private codeword correlations.
 
-`phase_coherence_loss_db` exposes the phase penalty already used by the
-probability calculation. It describes the whole symbol: known pattern phase
-reversals are removed before the receiver sums the complex correlation.
-The final squared magnitude (or equivalent two-real-basis fit) cancels an
-unknown constant phase; phase wandering during the symbol still reduces the
-score. The differential constellation points are diagnostics and do not feed
-this score. Increasing transition frequency does not restart the oscillator's
-phase error, and there is no special 0.01 Hz transition threshold. GPS discipline alone does not
-make separate oscillators phase coherent; the selected residual phase diffusion
-still applies. Accumulating energies from shorter coherent sections would need
-a different detector, including its additional noise and acquisition costs;
-it is not credited to the current receiver.
+`phase_coherence_loss_db` remains the whole-symbol phase penalty used by the
+numeric reference. Known pattern reversals are removed before coherent matching;
+an unknown constant phase cancels, but phase wander reduces the match.
+
+The production receiver additionally fits four fixed quarters for patterns
+lasting at least 16 seconds with at least 16 complete chips in every quarter.
+Each section fits its own complex gain, accommodating different amplitudes and
+phases. Before scoring, the strongest quarter's explained energy is removed,
+so an isolated tail or burst cannot supply all the section evidence. The
+remaining explained energy is divided by the whole symbol's received energy.
+Without that removal, the independent Gaussian reference gives
+`Beta(4, N/2 - 4)` for N real samples, or `Beta(4, N - 4)` for N complex samples.
+The section score uses the negative log of this survival function. Removing
+the strongest contribution only lowers the statistic, so the same tail remains
+a conservative bound. Existing covariance/Gram corrections apply before scoring.
+This retains the penalty for eight fitted real coefficients. The receiver keeps
+the coherent score
+and uses `max(coherent, section) - ln(2)`, clipped at zero, to account for trying
+both detectors. Ineligible profiles keep their original score.
+
+`drift_sections` and `drift_section_seconds` identify this geometry;
+`section_phase_coherence_loss_db` describes phase loss in the longest quarter.
+`coherent_reference_only` identifies the limited scope of numeric confidence.
+These fields describe eligible geometry, not a live allocation. Compact banks
+can retain coherent-only scoring when section state cannot fit; the reference
+conservatively keeps `ln(2)` even if that fallback would omit it. Runtime
+`PatternReceiver::drift_tolerant()` and `PatternCorrelator::drift_tolerant()`
+report the selected detector policy.
+The probability model retains whole-symbol phase and residual-frequency losses,
+and includes the `ln(2)` choice cost. Replacing them with quarter-duration losses
+would omit the section statistic's extra noise and correlated bit/branch
+comparisons. Those gains are not yet modeled.
+
+Sections must still be coherent; four quarters do not provide arbitrary drift
+tracking over a days-long bit. Neither faster pattern transitions nor GPS
+discipline resets oscillator phase error. There is no special 0.01 Hz threshold.
+The differential constellation points remain display diagnostics. All admission,
+pending-bit publication and physical-absence decisions still require complete symbols.
 
 With the remaining linear energy `g`, the assumed bit error rate is
 `0.5 exp(-g/2)`, the noncoherent orthogonal binary AWGN model. Symbol admission
@@ -198,6 +227,8 @@ uses a Gaussian energy-statistic approximation with mean `g` and variance
 both timing alternatives when the frequency bank expands. Trials reflect the
 half-chip start window, that actual hypothesis count and private phase groups
 of a matching receiver.
+For the four-section receiver's coherent reference, both thresholds additionally
+include `ln(2)`; the bit-error approximation remains the coherent reference.
 Other receive profiles/key families add compute work; their independent searches
 do not raise that receiver's admission threshold.
 The acquisition trial approximation describes the initial search geometry; it
@@ -267,8 +298,9 @@ both transformed bit templates for every hypothesis would exceed the allowance,
 the model selects streamed FFT work: generate a template and perform its forward
 transform for each job, using bounded scratch. Expanded live searches sharing
 memory with other keys, epochs or profiles also stream their rows, preserving
-room for the other banks. A single bank can retain its public transformed
-templates when they fit. An unaffordable expanded core
+room for the other banks. A single bank without section fitting can retain its
+public transformed templates when they fit. Four-section jobs always generate
+partial templates in shared scratch. An unaffordable expanded core
 leaves confidence unavailable; the model keeps the requested FFT cost rather
 than estimating the runtime's narrower correlator fallback.
 The existing compact-private/correlator choices apply only to unexpanded banks.
@@ -276,6 +308,20 @@ These choices do not reduce the requested hypotheses. The
 streamed-template estimate includes extra forward transforms and template
 generation for public as well as private profiles, without benchmarking the
 computer.
+
+Four-section acquisition normally performs four forward/inverse template FFT
+pairs per candidate bit and hypothesis. Summing the partial correlations also
+supplies the coherent match, so it needs no fifth pair. Batches of at most four
+starts directly match the available windows instead; the input spectrum is
+still computed once. The core allowance adds 48 bytes per hop position, with
+bounded additional worker scratch. Tracking stays one pass through the samples
+and scores four section fits plus the coherent fit. Compact lanes retain one
+active section fit and fixed-size summaries, without storing a bit's section
+history. They reserve the added state when constructing the bank and allocate
+it only when section accumulation needs it; if the added state cannot fit,
+the original coherent bank remains usable. The estimate includes the extra
+work; bounded memory does not imply that every long or wide search is
+computationally practical.
 
 For each matching FFT profile, the model also budgets one desired stream
 acquired at its first bit. Acquisition supplies that bit; continuation

@@ -319,10 +319,10 @@ struct Controller::Impl {
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
     }
-    void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu) {
+    void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu,bool coherent_reference=false) {
         if(!link_inputs_valid())confidence=cpu=gpu="Check link inputs";
         const auto target=short_draft()?short_target:long_target;
-        std::ostringstream label;label<<"RX success · "<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
+        std::ostringstream label;label<<(coherent_reference?"RX reference · ":"RX success · ")<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
         f(UiField::simulation_confidence).text=label.str()+std::move(confidence);
         f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
         f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
@@ -925,7 +925,7 @@ struct Controller::Impl {
                     !model.receiver_workspace_supported?"Wide RX search exceeds RAM":
                     !model.confidence_available?"Unavailable":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
-                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds));
+                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds),model.coherent_reference_only);
             } else simulation_estimate_status("Unavailable");
             f(UiField::inspection).text=inspection->title+"\n"+inspection->summary;
             std::ostringstream flow,transmission;

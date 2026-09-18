@@ -1,4 +1,5 @@
 #include "../src/pattern_fft_batch.hpp"
+#include "../src/pattern_drift.hpp"
 #include "../src/search_parallel.hpp"
 #include <algorithm>
 #include <iostream>
@@ -191,9 +192,120 @@ void public_nominal_reference_exactness() {
         check(rejected,"nominal reference accepted a private pattern");
     }
 }
+void drift_rank_and_partition() {
+    // Independent binomial-CDF identity for integer Beta parameters, rather
+    // than repeating the production rising-factorial survival polynomial.
+    for(unsigned rank=1;rank<=4;++rank)for(unsigned residual:{1U,4U,30U,500U})
+    for(long double q:{.0001L,.01L,.1L,.3L,.9L})for(bool real:{false,true}) {
+        const unsigned trials=residual+rank-1;
+        long double probability=0,choose=1;
+        for(unsigned successes=0;successes<rank;++successes) {
+            probability+=choose*std::pow(q,successes)*std::pow(1-q,trials-successes);
+            choose*=static_cast<long double>(trials-successes)/(successes+1);
+        }
+        const auto reference=-std::log(probability);
+        const auto actual=drift_evidence(static_cast<double>(q),1.,(real?2.:1.)*(residual+rank),rank,real);
+        check(std::abs(reference-actual)<=1e-10L*std::max(1.L,std::abs(reference)),
+              "section evidence disagrees with independent Beta-tail rank calibration");
+    }
+    check(combine_drift_evidence(11,17,1)==11 && combine_drift_evidence(0,.1,4)==0 &&
+          std::abs(combine_drift_evidence(11,17,4)-(17-std::numbers::ln2))<1e-14,
+          "section detector changed the coherent baseline or omitted its two-detector penalty");
+    const auto maximum=std::numeric_limits<std::uint64_t>::max();
+    check(drift_boundary(0,maximum,4)==0 && drift_boundary(4,maximum,4)==maximum &&
+          drift_boundary(3,maximum,4)==maximum/4*3+2,
+          "section boundaries overflowed wide symbol coordinates");
+    Config c;c.sample_rate=256;c.bandwidth_hz=8;c.carrier_hz=64;c.spreading_factor=64;
+    check(drift_section_count(c)==4 && drift_section_count(c,false)==1,
+          "complete long-pattern quarters did not enable the bounded section detector");
+    c.spreading_factor=65;
+    check(drift_section_count(c)==1,"cut quarter edges counted incomplete chips as sixteen complete chips");
+    c.spreading_factor=128;c.spreading_mode=SpreadingMode::tone;
+    check(drift_section_count(c)==1,"tone frequency labels enabled pattern section fitting");
+}
+
+void drift_direct_fft_and_real_gram() {
+    for(bool keyed:{false,true})for(bool shaped:{false,true})for(std::size_t bin:{1U,4U}) {
+        Config config;config.sample_rate=256;config.bandwidth_hz=32;config.carrier_hz=61;
+        config.integration_seconds=16.00390625;config.scramble=keyed;config.pulse_shaping=shaped;
+        config.stream_epoch=1789312671;config.spreading_seed[2]=91;
+        PatternCode code(config,config.stream_epoch);
+        FftSearchBatch batch;auto& g=batch.geometry;
+        g.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),shaped?1U:0U,keyed?1U:0U,0,
+            config.spreading_seed,config.dsss_seed};
+        const auto length=static_cast<std::size_t>((code.symbol_samples()+bin-1)/bin+3);
+        g.bins_per_symbol=length;g.bin_samples=bin;g.carrier_hz=config.carrier_hz;
+        g.evidence_count=bin==1?4.*length/code.chip_samples():static_cast<double>(length);
+        g.sample_fit=g.real_rank=bin==1;g.drift_sections=4;g.extended_clock_window=1;
+        batch.first_bin=37;batch.starts=3;batch.score_stride=5;
+        std::size_t transform=1;while(transform<length+batch.starts-1)transform*=2;
+        std::vector<FftComplex> observations(transform),spectrum;
+        std::vector<double> energy(transform+1);
+        code.set_stream_phase_samples(7);
+        // Exact-real observations retain their absolute carrier orientation;
+        // complex bins use both independent coordinates.
+        for(std::size_t i=0;i<transform;++i) {
+            const auto carrier=2*std::numbers::pi*config.carrier_hz*
+                (static_cast<double>((batch.first_bin+i)*bin)+static_cast<double>(bin-1)/2)/config.sample_rate;
+            const auto x=std::sin(.19*i)+.7*std::cos(.13*i);
+            const auto within=static_cast<double>(i*bin)+static_cast<double>(bin-1)/2;
+            FftComplex signal{};
+            if(within<code.symbol_samples()) {
+                const auto chip=static_cast<std::uint64_t>(within/code.chip_samples());
+                signal=shaped?code.shaped_value(3*code.chips_per_symbol(),0,within):
+                    code.value(3*code.chips_per_symbol()+chip,0,within/code.chip_samples()-chip);
+                signal*=std::polar(1.,.7*static_cast<double>((i*4/length)%4));
+            }
+            observations[i]=bin==1?(.3*x+(signal*std::polar(1.,carrier)).real())*std::polar(1.,-carrier):
+                signal+.3*FftComplex{x,std::cos(.17*i)};
+            energy[i+1]=energy[i]+std::norm(observations[i]);
+        }
+        spectrum=observations;pattern_fft(spectrum,false,{});
+        batch.spectrum=spectrum;batch.observations=observations;batch.energy_prefix=energy;
+        std::array<FftSearchJob,3> jobs{};
+        for(std::size_t j=0;j<jobs.size();++j) {
+            jobs[j].symbol=3;jobs[j].phase=7;jobs[j].clock_ratio=1.+(static_cast<double>(j)-1)*.007;
+            jobs[j].frequency_hz=.03125*(static_cast<double>(j)-1);
+        }
+        std::vector<FftSearchWorkspace> workers;workers.emplace_back(config,transform,true,batch.starts);
+        std::vector<FftSearchScore> direct(jobs.size()*batch.score_stride,untouched),fft(direct);
+        execute_fft_search_cpu(batch,jobs,direct,workers);
+        batch.observations={}; // Force the FFT path over the identical samples.
+        execute_fft_search_cpu(batch,jobs,fft,workers);
+        bool meaningful=false;
+        for(std::size_t job=0;job<jobs.size();++job)for(std::size_t start=0;start<batch.score_stride;++start) {
+            const auto a=direct[job*batch.score_stride+start],b=fft[job*batch.score_stride+start];
+            if(start>=batch.starts)check(equal(a,untouched)&&equal(b,untouched),"section scorer overwrote job padding");
+            else {
+                meaningful|=a.zero>1 || a.one>1;
+                check(std::abs(a.zero-b.zero)<=1e-8*std::max({1.,a.zero,b.zero}) &&
+                      std::abs(a.one-b.one)<=1e-8*std::max({1.,a.one,b.one}),
+                      "direct and FFT section fits disagree with clock offsets, real Gram phase or partial chips");
+            }
+        }
+        check(meaningful,"section equivalence fixture has only zero evidence");
+        std::vector<FftComplex> product(transform);
+        std::vector<FftDriftAccumulator> scratch(batch.starts);
+        const auto rejected=[&] {
+            try {execute_drift_search_job(batch,jobs[0],direct,product,scratch,code);}
+            catch(const Error&){return true;}
+            return false;
+        };
+        batch.energy_prefix=std::span(energy).first(length);
+        check(rejected(),"serial section scorer accepted a truncated energy prefix");
+        batch.energy_prefix=energy;g.pattern.chip_samples=0;
+        check(rejected(),"serial section scorer accepted zero chip geometry");
+        g.pattern.chip_samples=code.chip_samples();batch.starts=0;
+        check(rejected(),"serial section scorer accepted an empty start range");
+        batch.starts=3;batch.spectrum=std::span(spectrum).first(transform-1);product.resize(transform-1);
+        check(rejected(),"serial section scorer accepted a non-power-of-two transform");
+    }
+}
 } // namespace
 int main() {
-    try {flat_batch_tiling_and_order();prepared_template_and_cancellation();public_nominal_reference_exactness();}
+    try {flat_batch_tiling_and_order();prepared_template_and_cancellation();public_nominal_reference_exactness();
+        drift_rank_and_partition();drift_direct_fft_and_real_gram();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";
 }

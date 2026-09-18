@@ -5,6 +5,10 @@ short-message wire path: `a` is exactly `011`. The cheap `analyze-link` command
 does not generate PCM or run the production receiver. Its statistical reference
 results describe a hypothetical matched detector, separately from the current
 receiver's coverage and fixed-laptop compute estimates.
+The numerical runs recorded below predate the production four-section detector.
+Link powers, exact wire counts, airtimes and hypothetical detector experiments
+remain useful references. Recorded CPU/RAM and sampled-probe results describe
+that earlier implementation; rerun the commands for current work estimates.
 
 ## The requested -170 dB baseline
 
@@ -19,28 +23,31 @@ the free-running crystal model and the default 10 dB noise figure:
 | Payload airtime, three bits | 31.55 minutes |
 | Complete TX waveform | 31.60 minutes |
 | Simulation, including a whole absent symbol and lookahead | 42.13 minutes |
-| Fixed i9-13900H computation estimate | 24.36 minutes |
-| Hypothetical RTX 4090 Laptop GPU estimate | 7.47 minutes |
-| Included serial tracking component in each estimate | 5.52 minutes |
+| Historical i9-13900H computation estimate | 24.36 minutes |
+| Historical hypothetical RTX 4090 Laptop GPU estimate | 7.47 minutes |
+| Historical serial tracking component in each estimate | 5.52 minutes |
 
-The former 18.85-minute CPU estimate omitted established-stream tracking.
-The corrected model includes two remaining signal symbols and one fully
-observed absent symbol. Hardware throughput assumptions were not benchmarked
-or recalibrated. See [the compute model](simulation-estimates.md#fixed-reference-compute-model).
+The still earlier 18.85-minute CPU estimate omitted established-stream tracking.
+The recorded correction includes two remaining signal symbols and one fully
+observed absent symbol. Current estimates additionally budget four-section
+scoring and its bounded scratch. Hardware throughput assumptions were not
+benchmarked or recalibrated. See
+[the compute model](simulation-estimates.md#fixed-reference-compute-model).
 
 This remains an interesting candidate, but average compute below airtime does
-not establish a usable live mode. The expanded FFT core needs about 287 MiB
-per bank. Under the modeled half-workspace allowance, this case needs at least
-575 MiB total for a single profile; other profiles/keys can need more. The
+not establish a usable live mode. The recorded expanded FFT core needed about
+287 MiB per bank, or 575 MiB total under the modeled half-workspace allowance.
+Those figures predate section scratch; other profiles/keys can need more. The
 CLI defaults to 64 MiB, while the GUI derives its DSP allowance from available
-memory. At `--dsp-mb 1024`, the modeled core fits.
+memory. The recorded core fit at `--dsp-mb 1024`.
 
-The current receiver also batches acquisition in large FFT blocks: approximately
-29.1 minutes for the first block and 18.6 minutes per subsequent hop from the
-bank origin. Full-symbol tracking runs within that processing schedule. A
-shorter total compute estimate cannot establish timely progress or prove that
-the live capture queue will avoid overflow. Newly accepted bits still reach
-the next progress poll; no acceptance or physical-end rule changed here.
+The older acquisition schedule used approximately 29.1 minutes for the first
+block and 18.6 minutes per subsequent hop from the bank origin. Current
+acquisition begins after a complete observation window and at most one second
+of candidate starts; established tracks score complete symbols independently
+of later acquisition batches. Neither schedule makes total compute time a
+guarantee of timely progress or capture-queue capacity. Newly accepted bits
+still reach the next progress poll.
 
 A sampled seed-1 probe with a matching -10 dB-Hz RX target and 1 GiB DSP
 workspace was stopped after a 240-second verification limit. It emitted no
@@ -116,9 +123,9 @@ mean also omits phase-fade variability, especially for long crystal segments.
   --noise-figure-db 2 --trials 100000
 ```
 
-The existing receiver reports **workspace unsupported** for this candidate,
-so no current-receiver RX probability is available. Its corrected requested-work
-CPU estimate is about **41.3 hours**, including 8.49 hours of serial tracking;
+The recorded receiver reported **workspace unsupported** for this candidate,
+so no receiver RX probability was available. Its historical requested-work
+CPU estimate was about **41.3 hours**, including 8.49 hours of serial tracking;
 this is not an executable real-time claim. It still requests thousands
 of carrier hypotheses; GPS discipline does not automatically provide exact
 timing, clock, carrier and pattern acquisition.
@@ -129,11 +136,19 @@ trials give a model-only 95% upper bound of about 0.00384%, not proof of an
 impossibility. This case needs substantially more collected energy or a much
 longer observation than the -200 dB candidate.
 
-The production work needed next is bounded-window correlation with accumulated
-full-symbol evidence and searches across frequency/clock drift trajectories.
-Partial windows can guide accumulation but must never substitute for a fully
-scored symbol when deciding absence. Coherent/noncoherent accumulation also
-has a sensitivity tradeoff; see [ESA's baseband processing discussion](https://gssc.esa.int/navipedia/index.php/Baseband_Processing).
-Such a receiver needs sampled signal and noise-only validation before these
-conditional results can become credible RX estimates. No segmented receiver
-or new wire format was introduced by this analysis.
+The production receiver now adds four fixed sections for sufficiently long,
+dense patterns, fitting separate amplitude and phase in each quarter. It keeps
+the coherent branch and accounts for both the higher-rank section fit and
+choosing between two detectors. The section score excludes the strongest
+quarter so an isolated burst cannot supply all its evidence. Decisions still
+require the whole symbol;
+the wire format is unchanged. This is not the three-segment reference detector
+in the table, nor an arbitrary drift-tracking receiver.
+
+Each quarter must still be coherent. Shorter or adaptive sections and searches
+over changing clock/frequency trajectories require further work and their own
+validation. The current **RX reference** retains the coherent probability model
+with the additional detector-choice cost; it does not quantify the extra branch's
+gain or promise a lower bound. Coherent/noncoherent accumulation also has a
+sensitivity tradeoff; see
+[ESA's baseband processing discussion](https://gssc.esa.int/navipedia/index.php/Baseband_Processing).
