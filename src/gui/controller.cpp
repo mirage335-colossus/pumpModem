@@ -65,6 +65,35 @@ double frequency(std::string value,const char* name) {
     else if(value.ends_with("Hz")) value.resize(value.size()-2);
     return number(value,name)*scale;
 }
+std::string compact_units(std::string value) {
+    std::erase_if(value,[](unsigned char c){return std::isspace(c)!=0;});
+    return value;
+}
+double power_dbm(std::string value) {
+    value=compact_units(std::move(value));
+    if(value.ends_with("dBm")) {value.resize(value.size()-3);return number(value,"Transmit power");}
+    double milliwatts=0;
+    if(value.ends_with("µW") || value.ends_with("μW")) {value.resize(value.size()-3);milliwatts=.001;}
+    else if(value.ends_with("uW")) {value.resize(value.size()-2);milliwatts=.001;}
+    else if(value.ends_with("mW")) {value.resize(value.size()-2);milliwatts=1;}
+    else if(value.ends_with("kW")) {value.resize(value.size()-2);milliwatts=1000000;}
+    else if(value.ends_with("W")) {value.pop_back();milliwatts=1000;}
+    if(!milliwatts)return number(value,"Transmit power (dBm)");
+    const auto amount=number(value,"Transmit power");
+    if(amount<=0)throw Error("Transmit power must be positive in watts");
+    return 10*(std::log10(amount)+std::log10(milliwatts));
+}
+double level(std::string value,std::string_view suffix,const char* name) {
+    value=compact_units(std::move(value));
+    if(value.ends_with(suffix))value.resize(value.size()-suffix.size());
+    return number(value,name);
+}
+std::string power_text(double dbm) {
+    const auto milliwatts=std::pow(10.,dbm/10);
+    const auto scale=milliwatts>=1000000?1000000.:milliwatts>=1000?1000.:milliwatts>=1?1.:.001;
+    std::ostringstream text;text<<std::setprecision(3)<<milliwatts/scale;
+    return text.str()+(scale==1000000?" kW":scale==1000?" W":scale==1?" mW":" µW");
+}
 std::string frequency_text(double hz) {
     const double scale=hz>=1000000?1000000:hz>=1000?1000:1;
     std::ostringstream text;text<<std::setprecision(12)<<hz/scale;
@@ -145,6 +174,7 @@ struct Controller::Impl {
     std::optional<transfer::Estimate> estimate;
     std::shared_ptr<const Inspection> inspection;
     planner::Inputs planner_inputs;
+    std::array<bool,3> invalid_link_inputs{};
     mutable std::shared_ptr<const planner::Model> planner_model;
     bool planner_details=false,planner_draft=false;
     std::uint64_t revision=0,estimated_revision=0,service_id=0,attachment_revision=0;
@@ -191,9 +221,18 @@ struct Controller::Impl {
         for(const auto id:{UiField::snr,UiField::long_snr})
             for(const auto* s:{"140","120","100","80","60","55","40","32","20","6","-6","-10","-16","-20","-23","-26","-30","-60"}) f(id).options.push_back({s,s});
         f(UiField::receive_snr).text="32, 55";
-        for(const auto& p:tuning::simulation_presets()) f(UiField::simulation).options.push_back({std::string(p.name),p.enabled?std::string(p.name):"No"});
-        const auto presets=tuning::simulation_presets();
-        f(UiField::simulation).selected=std::string(presets[(options.simulation||options.smoke)?std::min<std::size_t>(2,presets.size()-1):0].name);
+        f(UiField::simulation).options={{"no","No"},{"yes","Yes"}};
+        f(UiField::simulation).selected=options.simulation||options.smoke?"yes":"no";
+        // The sampled native smoke retains its established strong test link.
+        // Ordinary planning and simulation start from the shared 170 dB loss.
+        if(options.smoke)planner_inputs.path_loss_db=60;
+        for(const auto* value:{"100 W","4 W","1 W","100 mW","2 mW","1 mW","30 µW","1 µW"})
+            f(UiField::link_power).options.push_back({value,value});
+        for(const auto* value:{"6 dB","60 dB","90 dB","120 dB","150 dB","170 dB","180 dB","200 dB","220 dB","250 dB","270 dB"})
+            f(UiField::link_loss).options.push_back({value,value});
+        for(const auto* value:{"-174 dBm/Hz","-170 dBm/Hz","-164 dBm/Hz","-150 dBm/Hz","-130 dBm/Hz"})
+            f(UiField::link_noise).options.push_back({value,value});
+        sync_link_fields();
         for(const auto& preset:tuning::oscillator_presets())
             f(UiField::simulation_oscillator).options.push_back({std::string(preset.id),std::string(preset.name)});
         f(UiField::simulation_oscillator).selected="crystal";
@@ -229,9 +268,9 @@ struct Controller::Impl {
     }
     void notice(std::string text,double seconds=4) { f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
     bool short_draft() const {
-        return !attachment && (composer.raw_bits().has_value() ||
-            (!composer.bytes().empty() && composer.bytes().size()<=transfer::short_message_bytes));
+        return !attachment && (composer.raw_bits().has_value() || composer.bytes().size()<=transfer::short_message_bytes);
     }
+    bool empty_draft() const {return !attachment&&(composer.raw_bits()?composer.raw_bits()->empty():composer.bytes().empty());}
     const modem::Config& transmit_config() const {
         return !short_draft() && settings.long_message_modem ? *settings.long_message_modem : settings.transfer.modem;
     }
@@ -268,16 +307,79 @@ struct Controller::Impl {
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
     }
     void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu) {
-        f(UiField::simulation_confidence).text="RX success (noise model)\n"+std::move(confidence);
+        if(!link_inputs_valid())confidence=cpu=gpu="Check link inputs";
+        const auto target=short_draft()?short_target:long_target;
+        std::ostringstream label;label<<"RX success · "<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
+        f(UiField::simulation_confidence).text=label.str()+std::move(confidence);
         f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
         f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
     }
     void simulation_estimate_status(std::string state) {
-        if(!tuning::parse_simulation_preset(f(UiField::simulation).selected).enabled)state="Simulation off";
         simulation_estimate_text(state,state,state);
     }
     void lpi_estimate_status(const std::string& state) {
-        f(UiField::lpi_estimate).text="LPI relative observation advisory\n"+state;
+        f(UiField::lpi_estimate).text="Observer / receiver time: "+state;
+    }
+    static std::size_t link_input_index(UiField field) {
+        return field==UiField::link_power?0:field==UiField::link_loss?1:2;
+    }
+    bool link_inputs_valid() const {
+        return std::none_of(invalid_link_inputs.begin(),invalid_link_inputs.end(),[](bool value){return value;});
+    }
+    void sync_link_fields(std::optional<UiField> editing={}) {
+        if(editing!=UiField::link_power)f(UiField::link_power).text=power_text(planner_inputs.tx_dbm);
+        if(editing!=UiField::link_loss)f(UiField::link_loss).text=planner_number(planner_inputs.path_loss_db)+" dB";
+        if(editing!=UiField::link_noise)f(UiField::link_noise).text=planner_number(planner_inputs.noise_density_dbm_hz)+" dBm/Hz";
+        for(const auto field:{UiField::link_power,UiField::link_loss,UiField::link_noise})
+            if(editing!=field)invalid_link_inputs[link_input_index(field)]=false;
+    }
+    void update_link_channel(live::Settings& value) {
+        const auto cn0=planner_inputs.tx_dbm-planner_inputs.path_loss_db-planner_inputs.noise_density_dbm_hz;
+        // ChannelConfig's sampled-noise model accepts only this finite range.
+        // Retain the exact budget above for the planner's power and margin.
+        value.simulation_snr_db=std::clamp(cn0-10*std::log10(value.transfer.modem.sample_rate/2.),-300.,300.);
+        channel_snr=cn0-10*std::log10(value.transfer.modem.bandwidth_hz);
+    }
+    static void validate_link_value(UiField field,double value) {
+        if(!std::isfinite(value))throw Error("Link budget values must be finite");
+        if(field==UiField::link_power) {
+            if(value< -200||value>100)throw Error("Transmit power must be -200 to 100 dBm");
+        } else if(field==UiField::link_loss) {
+            if(value<0||value>500)throw Error("Path loss must be 0 to 500 dB");
+        } else {
+            if(value< -250||value>0)throw Error("Noise density must be -250 to 0 dBm/Hz");
+        }
+    }
+    void set_link_budget(UiField field,double value,std::optional<UiField> editing={}) {
+        if(transmit_requested||snapshot.transmitting)throw Error("Wait until transmission finishes to change the link budget");
+        validate_link_value(field,value);
+        if(field==UiField::link_power)planner_inputs.tx_dbm=value;
+        else if(field==UiField::link_loss)planner_inputs.path_loss_db=value;
+        else planner_inputs.noise_density_dbm_hz=value;
+        invalid_link_inputs[link_input_index(field)]=false;
+        sync_link_fields(editing);update_link_channel(settings);dirty();
+        // A hypothetical power edit must not discard a live pending symbol.
+        if(started&&settings_valid&&settings.simulation)session.configure(settings);
+    }
+    void edit_link_budget(UiField field,const std::string& text,bool editing=false) {
+        if(editing)f(field).text=text;
+        double value;
+        try {
+            value=field==UiField::link_power?power_dbm(text):
+                field==UiField::link_loss?level(text,"dB","Path loss"):level(text,"dBm/Hz","Noise density");
+            validate_link_value(field,value);
+        } catch(const Error&) {
+            // Native text callbacks run after each keystroke. Empty/sign/unit
+            // prefixes keep their edit buffer and the last accepted budget.
+            // Explicit dialogs still report invalid completed input.
+            if(editing) {
+                invalid_link_inputs[link_input_index(field)]=true;
+                planner_model.reset();simulation_estimate_status("Check link inputs");
+                return;
+            }
+            throw;
+        }
+        set_link_budget(field,value,editing?std::optional(field):std::nullopt);
     }
     void encryption_changed() {
         if(tone())f(UiField::key).selected="none";
@@ -323,14 +425,14 @@ struct Controller::Impl {
             if(!tone())for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             next.mono=f(UiField::mono).checked;
-            const auto preset=tuning::parse_simulation_preset(f(UiField::simulation).selected); next.simulation=preset.enabled;
-            if(preset.enabled) { const auto budget=tuning::link_budget(preset,next.transfer.modem.bandwidth_hz,next.transfer.modem.sample_rate); next.simulation_snr_db=budget.sample_snr_db; channel_snr=budget.snr_db; }
+            next.simulation=f(UiField::simulation).selected=="yes";
+            update_link_channel(next);
             const auto oscillator=tuning::parse_oscillator_preset(f(UiField::simulation_oscillator).selected);
             next.simulation_clock_error_ppm=oscillator.clock_error_ppm;
             next.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
             std::ostringstream oscillator_detail;
             oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<oscillator.clock_error_ppm<<" ppm | Phase diffusion "
-                <<oscillator.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)\nIllustrative residual model; GPS lock does not imply phase coherence.";
+                <<oscillator.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)";
             f(UiField::simulation_oscillator_detail).text=oscillator_detail.str();
             const auto workspace_percent=f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
             if(workspace_percent!=dsp_workspace_percent) {
@@ -341,10 +443,10 @@ struct Controller::Impl {
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             settings=std::move(next); settings_valid=true;
-            simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
-            lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             short_plan=plan; long_plan=longer_plan; short_target=short_snr; long_target=long_snr;
             displayed_short_target.reset(); refresh_transmit_target();
+            simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
+            lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
         } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
@@ -358,9 +460,10 @@ struct Controller::Impl {
         input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
         input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
         input.wire_bits=planner_draft&&estimate?estimate->wire_bits:1;
-        if(!settings_valid || (planner_draft&&(!estimate||estimated_revision!=revision))) {
+        input.empty_draft=empty_draft();
+        if(!link_inputs_valid() || !settings_valid || (planner_draft&&(!estimate||estimated_revision!=revision))) {
             auto model=std::make_shared<planner::Model>();model->inputs=std::move(input);
-            model->error=!settings_valid?"Fix the modem settings to continue planning.":
+            model->error=!link_inputs_valid()?"Check link inputs":!settings_valid?"Fix the modem settings to continue planning.":
                 (!draft_error.empty()?draft_error:!estimate_error.empty()?estimate_error:"Calculating the current draft...");
             planner_model=std::move(model);
         } else planner_model=std::make_shared<const planner::Model>(planner::build(input));
@@ -399,6 +502,7 @@ struct Controller::Impl {
 
     void short_bits_changed() {
         const auto input=f(UiField::short_bits).text;
+        if(compact_units(input).empty()) {message_changed("");return;}
         try {
             const auto bits=parse_binary_bits(input);
             if(bits.size()>transfer::short_message_bits)throw Error("Enter 1-"+std::to_string(transfer::short_message_bits)+" exact bits.");
@@ -516,7 +620,11 @@ struct Controller::Impl {
         seeded_message=composer.text(); dirty();
     }
     void message_changed(std::string_view text) {
-        if(text.empty()) { seed_composer(); return; }
+        if(text.empty()) {
+            composer=BinaryEditor{};repeatable_prefix.clear();seeded_message.clear();
+            pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
+            sync_composer();dirty();return;
+        }
         const auto edited=repeatable_message_edit(text);
         try { composer.edit_text(edited); }
         catch(const std::exception& e) {
@@ -532,7 +640,7 @@ struct Controller::Impl {
     void binary_changed() {
         try {
             composer.edit_binary(f(UiField::binary).text);
-            if(!composer.raw_bits()&&composer.bytes().empty()) { seed_composer(); return; }
+            if(!composer.raw_bits()&&composer.bytes().empty()) { message_changed("");return; }
             if(composer.raw_bits()) {
                 repeatable_prefix.clear(); pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             } else if(has_repeatable_prefix()) {
@@ -569,6 +677,10 @@ struct Controller::Impl {
         switch(command) {
         case Command::planner_apply_short: case Command::planner_apply_long:
             return !busy&&!key_loading&&!key_failed&&settings_valid&&link_plan()->available;
+        case Command::planner_power: case Command::planner_loss: case Command::planner_noise:
+        case Command::planner_power_100w: case Command::planner_power_4w: case Command::planner_power_1w:
+        case Command::planner_power_100mw: case Command::planner_power_2mw: case Command::planner_power_1mw:
+        case Command::planner_power_30uw: case Command::planner_power_1uw: return !busy;
         case Command::planner_fast: return link_plan()->available&&link_plan()->fast_target.has_value();
         case Command::planner_day: return link_plan()->available&&link_plan()->day_target.has_value();
         case Command::planner_clock: return link_plan()->available&&link_plan()->clock_target.has_value();
@@ -576,7 +688,7 @@ struct Controller::Impl {
         case Command::planner_weaker: return planner_inputs.target_db_hz> -200;
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
-        case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
+        case Command::transmit: return !empty_draft() && !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
         case Command::transmit_noise: return !busy && !key_loading && settings_valid;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
@@ -623,7 +735,11 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
-        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
+        const bool simulation=f(UiField::simulation).selected=="yes";
+        for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=!simulation;
+        f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
+        f(UiField::simulation_confidence).visible=true;
         if(key_loading || tone()) f(UiField::key).enabled=false;
         for(auto id:{UiField::callsign,UiField::grid}) f(id).enabled=!closing;
         f(UiField::short_bits).enabled=!attachment&&!file_loading&&!closing;
@@ -632,9 +748,9 @@ struct Controller::Impl {
         f(UiField::repeatable).enabled=!attachment&&!file_loading&&!composer.raw_bits()&&draft_error.empty()&&
             composer.bytes().size()+repeatable_overhead<=repeatable_limit&&!closing;
         const bool short_message=!attachment&&!composer.raw_bits()&&!composer.bytes().empty()&&composer.bytes().size()<=transfer::short_message_bytes;
-        const bool raw=!attachment&&(composer.raw_bits().has_value()||short_message);
+        const bool raw=!attachment&&(composer.raw_bits().has_value()||short_message||empty_draft());
         f(UiField::fec).enabled=f(UiField::fec).enabled&&!raw;
-        f(UiField::fec).display_text=short_message?"Off (short dictionary)":raw?"Off (raw bits)":"";
+        f(UiField::fec).display_text=empty_draft()?"Off (1-bit preview)":short_message?"Off (short dictionary)":raw?"Off (raw bits)":"";
         short_bits_status();
     }
     void refresh_files() {
@@ -681,11 +797,11 @@ struct Controller::Impl {
             result.kind=PrepKind::estimate; result.revision=revision; InspectionRequest request;
             request.message=message(); request.options=settings.transfer;
             request.options.modem=transmit_config();
-            if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
+            if(empty_draft())request.binary=Bytes{};
+            else if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
             start_worker([request=std::move(request),simulation_settings=settings](Prepared& value,std::stop_token) {
                 value.inspection=std::make_shared<const Inspection>(inspect(request));
-                if(!simulation_settings.simulation)return;
                 // Keep a failed advisory model independent of transmission preparation.
                 try {
                     modem::ChannelConfig channel;
@@ -711,7 +827,7 @@ struct Controller::Impl {
                     if(simulation_settings.permits_plaintext())add_profiles(false);
                     for(std::size_t key=0;key<key_tags.size();++key)add_profiles(true);
                     value.simulation_estimate=simulation::estimate(value.inspection->estimate,request.options,
-                        request.binary.has_value()||transfer::uses_raw_message(request.message),channel,profiles);
+                        value.inspection->binary||transfer::uses_raw_message(request.message),channel,profiles);
                 } catch(const std::exception&) { value.simulation_estimate.reset(); }
             },std::move(result));
         }
@@ -749,8 +865,7 @@ struct Controller::Impl {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
             if(planner_draft)planner_model.reset();
             f(UiField::lpi_estimate).text=inspection->lpi_summary;
-            if(!settings.simulation)simulation_estimate_status("Simulation off");
-            else if(receive_targets_due)simulation_estimate_status("Calculating...");
+            if(receive_targets_due)simulation_estimate_status("Calculating...");
             else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
             else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");
             else if(result.simulation_estimate) {
@@ -790,6 +905,7 @@ struct Controller::Impl {
             f(UiField::flow_detail).text=flow.str(); f(UiField::transmission_detail).text=transmission.str();
             auto text="TX "+seconds_text(estimate->total_seconds)+" / content "+seconds_text(estimate->content_seconds);
             if(!estimate->memory_supported) text="Content / DSP budget exceeded: "+seconds_text(estimate->total_seconds);
+            if(inspection->preview_only)text="1-bit preview · "+text;
             f(UiField::airtime).text=std::move(text);
         }
     }
@@ -863,19 +979,19 @@ struct Controller::Impl {
         case Command::planner_toggle_details: planner_details=!planner_details;break;
         case Command::planner_toggle_draft: planner_draft=!planner_draft;planner_model.reset();break;
         case Command::planner_power:
-            request(Purpose::planner_power,ui::ServiceKind::prompt,"Average transmit power (dBm)",planner_number(planner_inputs.tx_dbm));break;
+            request(Purpose::planner_power,ui::ServiceKind::prompt,"Average transmit power (W, mW, µW or dBm)",planner_number(planner_inputs.tx_dbm)+" dBm");break;
         case Command::planner_loss:
             request(Purpose::planner_loss,ui::ServiceKind::prompt,"Path loss (positive dB)",planner_number(planner_inputs.path_loss_db));break;
         case Command::planner_noise:
             request(Purpose::planner_noise,ui::ServiceKind::prompt,"Receiver noise density (dBm/Hz)",planner_number(planner_inputs.noise_density_dbm_hz));break;
-        case Command::planner_power_100w: planner_inputs.tx_dbm=50;planner_model.reset();break;
-        case Command::planner_power_4w: planner_inputs.tx_dbm=10*std::log10(4000.);planner_model.reset();break;
-        case Command::planner_power_1w: planner_inputs.tx_dbm=30;planner_model.reset();break;
-        case Command::planner_power_100mw: planner_inputs.tx_dbm=20;planner_model.reset();break;
-        case Command::planner_power_2mw: planner_inputs.tx_dbm=10*std::log10(2.);planner_model.reset();break;
-        case Command::planner_power_1mw: planner_inputs.tx_dbm=0;planner_model.reset();break;
-        case Command::planner_power_30uw: planner_inputs.tx_dbm=10*std::log10(.03);planner_model.reset();break;
-        case Command::planner_power_1uw: planner_inputs.tx_dbm=-30;planner_model.reset();break;
+        case Command::planner_power_100w: set_link_budget(UiField::link_power,50);break;
+        case Command::planner_power_4w: set_link_budget(UiField::link_power,10*std::log10(4000.));break;
+        case Command::planner_power_1w: set_link_budget(UiField::link_power,30);break;
+        case Command::planner_power_100mw: set_link_budget(UiField::link_power,20);break;
+        case Command::planner_power_2mw: set_link_budget(UiField::link_power,10*std::log10(2.));break;
+        case Command::planner_power_1mw: set_link_budget(UiField::link_power,0);break;
+        case Command::planner_power_30uw: set_link_budget(UiField::link_power,10*std::log10(.03));break;
+        case Command::planner_power_1uw: set_link_budget(UiField::link_power,-30);break;
         case Command::planner_apply_short: case Command::planner_apply_long:
             f(command==Command::planner_apply_short?UiField::snr:UiField::long_snr).text=planner_number(planner_inputs.target_db_hz);
             configure(true);notice(command==Command::planner_apply_short?"Planner target applied to short messages.":"Planner target applied to long messages and files.");break;
@@ -978,21 +1094,9 @@ struct Controller::Impl {
         if(!result.error.empty()) throw Error(result.error);
         switch(pending.purpose) {
         case Purpose::planner_target: planner_target(number(result.value,"Planner target"));break;
-        case Purpose::planner_power: {
-            const auto value=number(result.value,"Transmit power");
-            if(value< -200||value>100)throw Error("Transmit power must be -200 to 100 dBm");
-            planner_inputs.tx_dbm=value;planner_model.reset();break;
-        }
-        case Purpose::planner_loss: {
-            const auto value=number(result.value,"Path loss");
-            if(value<0||value>500)throw Error("Path loss must be 0 to 500 dB");
-            planner_inputs.path_loss_db=value;planner_model.reset();break;
-        }
-        case Purpose::planner_noise: {
-            const auto value=number(result.value,"Noise density");
-            if(value< -250||value>0)throw Error("Noise density must be -250 to 0 dBm/Hz");
-            planner_inputs.noise_density_dbm_hz=value;planner_model.reset();break;
-        }
+        case Purpose::planner_power: edit_link_budget(UiField::link_power,result.value);break;
+        case Purpose::planner_loss: edit_link_budget(UiField::link_loss,result.value);break;
+        case Purpose::planner_noise: edit_link_budget(UiField::link_noise,result.value);break;
         case Purpose::open_key: begin_key(path_from_text(result.value)); break;
         case Purpose::generate_names: request(Purpose::generate_path,ui::ServiceKind::save_file,"Save new encryption keyfile","shared.key",{},key_entry_names(result.value)); break;
         case Purpose::generate_path: begin_key(path_from_text(result.value),std::move(pending.names)); break;
@@ -1028,6 +1132,7 @@ bool Controller::closing() const { return impl_->closing; }
 bool Controller::ready_to_close() const { return impl_->closing&&!impl_->preparing; }
 void Controller::edit(UiField field,std::string text) {
     auto& p=*impl_; if(!p.f(field).enabled||(p.f(field).text==text&&
+        field!=UiField::link_power&&field!=UiField::link_loss&&field!=UiField::link_noise&&
         !(field==UiField::message&&(!p.draft_error.empty()||p.composer.raw_bits()))&&
         !(field==UiField::short_bits&&(!p.composer.raw_bits()||!p.draft_error.empty())))) return;
     try {
@@ -1039,6 +1144,9 @@ void Controller::edit(UiField field,std::string text) {
             p.f(field).text="32";p.configure();p.controls();return;
         }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
+        if(field==UiField::link_power||field==UiField::link_loss||field==UiField::link_noise) {
+            p.edit_link_budget(field,text,true);p.controls();return;
+        }
         const bool untouched=!p.composer.raw_bits()&&p.draft_error.empty()&&p.f(UiField::message).text==p.seeded_message;
         p.f(field).text=std::move(text);
         if(field==UiField::short_bits)p.short_bits_changed();
@@ -1056,8 +1164,22 @@ void Controller::edit(UiField field,std::string text) {
     p.controls();
 }
 void Controller::select(UiField field,std::string id) {
-    auto& p=*impl_; auto& state=p.f(field); if(!state.enabled||state.selected==id) return;
+    auto& p=*impl_; auto& state=p.f(field); if(!state.enabled) return;
     try {
+        bool legacy_budget=false;
+        if(field==UiField::simulation&&id!="yes"&&id!="no") {
+            // Accept saved/test preset identifiers without exposing them in
+            // the two-choice Simulation selector. They share the same budget.
+            const auto preset=tuning::parse_simulation_preset(id);
+            if(preset.enabled) {
+                p.planner_inputs.tx_dbm=preset.transmit_dbm;
+                p.planner_inputs.path_loss_db=-preset.attenuation_db;
+                p.planner_inputs.noise_density_dbm_hz=-164;
+                p.sync_link_fields();legacy_budget=true;
+            }
+            id=preset.enabled?"yes":"no";
+        }
+        if(state.selected==id&&!legacy_budget)return;
         const bool list=std::any_of(ui::console_screen().begin(),ui::console_screen().end(),[&](const auto& control){return control.field==field&&control.kind==ui::Kind::list;});
         const bool available=list?std::any_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==id&&row.enabled;}):
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});

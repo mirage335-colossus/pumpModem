@@ -211,6 +211,7 @@ void current_draft_and_modem_isolation() {
     check(controller.planner_uses_draft()&&controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==3,
           "Current draft must use the fixed dictionary's three-bit e endpoint");
     controller.activate(C::planner_power_100w);controller.activate(C::planner_toggle_details);
+    prepare(controller); // Shared link power also refreshes the RX probability.
     check(controller.planner_details()&&controller.link_plan()->inputs.tx_dbm==50,
           "Planner detail and power actions did not update their own preview state");
     check(controller.field(F::snr).text==short_target&&controller.field(F::long_snr).text==long_target&&
@@ -308,6 +309,211 @@ void selected_workspace_reaches_planner() {
     }
     controller.close();
 }
+void shared_link_budget_without_simulation() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller;
+    check(controller.field(F::simulation).selected=="no"&&!controller.settings().simulation,
+          "A normal GUI must begin with sampled simulation off");
+    controller.edit(F::message,"e");controller.edit(F::snr,"0");prepare(controller);
+    const auto initial=controller.link_plan();
+    near(initial->inputs.tx_dbm,3,"Shared power default must be 3 dBm");
+    near(initial->inputs.path_loss_db,170,"Shared path-loss default must be 170 dB");
+    near(initial->inputs.noise_density_dbm_hz,-164,"Shared noise default must be -164 dBm/Hz");
+    const auto initial_confidence=controller.field(F::simulation_confidence).text;
+    check(initial_confidence.find('%')!=std::string::npos,
+          "RX confidence must be computed from the link budget with Simulation No");
+    const auto targets=controller.settings().transfer.receive_targets_db_hz;
+    const auto geometry=controller.settings().transfer.modem;
+    controller.edit(F::link_power,"100 mW");controller.edit(F::link_loss,"150 dB");
+    controller.edit(F::link_noise,"-170 dBm/Hz");prepare(controller);
+    const auto edited=controller.link_plan();
+    near(edited->inputs.tx_dbm,20,"Editable power units did not reach the planner");
+    near(edited->inputs.path_loss_db,150,"Editable path loss did not reach the planner");
+    near(edited->inputs.noise_density_dbm_hz,-170,"Editable noise density did not reach the planner");
+    near(edited->actual_cn0_db_hz,40,"Shared link inputs did not combine as power minus loss minus noise");
+    near(controller.settings().simulation_snr_db,40-10*std::log10(geometry.sample_rate/2.),
+         "RX confidence and planner must use the same sampled noise level");
+    check(controller.field(F::simulation_confidence).text!=initial_confidence&&
+          controller.field(F::simulation_confidence).text.find('%')!=std::string::npos&&
+          !controller.settings().simulation&&controller.message_bytes()==Bytes{'e'}&&
+          controller.settings().transfer.receive_targets_db_hz==targets&&
+          controller.settings().transfer.modem.integration_seconds==geometry.integration_seconds&&
+          controller.settings().transfer.modem.spreading_factor==geometry.spreading_factor,
+          "Link-budget edits must update confidence while preserving the draft and modem profile");
+    controller.activate(C::planner_power_1w);prepare(controller);
+    near(controller.link_plan()->inputs.tx_dbm,30,"Planner power preset must update the shared link budget");
+    near(controller.settings().simulation_snr_db,50-10*std::log10(geometry.sample_rate/2.),
+         "Planner power preset did not update RX confidence's shared link strength");
+    check(!controller.field(F::link_power).text.empty(),"Planner power edit must remain visible in the global editable field");
+    controller.select(F::simulation,"yes");prepare(controller);
+    const auto confidence=controller.field(F::simulation_confidence).text;
+    check(controller.settings().simulation,"Simulation Yes did not enable sampled simulation");
+    controller.select(F::simulation,"no");prepare(controller);
+    check(!controller.settings().simulation&&controller.field(F::simulation_confidence).text==confidence&&
+          controller.link_plan()->inputs.tx_dbm==30,
+          "Simulation toggle must preserve the shared link and its modeled RX confidence");
+    controller.close();
+}
+void shared_link_controls_visibility() {
+    using F=ui::Field;
+    Application app(Launch{});
+    const auto& screen=ui::console_screen();
+    const auto declaration=[&](F field)->const ui::Control& {
+        const auto found=std::find_if(screen.begin(),screen.end(),[&](const auto& control){return control.field==field;});
+        check(found!=screen.end(),"Shared link control is missing from the native declaration");return *found;
+    };
+    const auto& simulation=app.field(F::simulation);
+    check(simulation.selected=="no"&&simulation.options.size()==2&&
+          std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="yes";})&&
+          std::any_of(simulation.options.begin(),simulation.options.end(),[](const auto& option){return option.id=="no";}),
+          "Simulation must offer the simple Yes/No choices");
+    for(const auto& page:ui::pages())for(const auto* mode:{"no","yes"}) {
+        app.select_page(page.id);app.select(F::simulation,mode);
+        const bool simulated=std::string_view(mode)=="yes";
+        for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {
+            const auto& control=declaration(field);
+            check(control.kind==ui::Kind::text&&control.persistent&&!app.field(field).options.empty()&&
+                  app.control(control).visible==!simulated,
+                  "Editable link presets must remain native and visible on every page with Simulation No");
+        }
+        check(app.control(declaration(F::simulation_confidence)).visible,
+              "RX confidence must remain visible with either Simulation choice");
+        for(const auto field:{F::simulation_cpu_time,F::simulation_gpu_time})
+            check(app.control(declaration(field)).visible==simulated,
+                  "CPU/GPU computation estimates must appear only with Simulation Yes");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            std::vector<ui::Rect> occupied;
+            for(const auto field:{F::simulation,F::link_power,F::link_loss,F::link_noise,
+                                 F::simulation_confidence,F::simulation_cpu_time,F::simulation_gpu_time}) {
+                const auto& control=declaration(field);if(!app.control(control).visible)continue;
+                const auto rect=app.control_layout(control,size.w,size.h).frame;
+                check(rect.w>0&&rect.h>0&&rect.x>=0&&rect.y>=0&&rect.x+rect.w<=size.w,
+                      "Visible shared link control falls outside the desktop");
+                for(const auto& prior:occupied)
+                    check(rect.x+rect.w<=prior.x||prior.x+prior.w<=rect.x||
+                          rect.y+rect.h<=prior.y||prior.y+prior.h<=rect.y,
+                          "Visible link inputs and simulation estimates overlap");
+                occupied.push_back(rect);
+            }
+        }
+    }
+    app.select(F::simulation,"no");
+    for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {
+        const auto& options=app.field(field).options;
+        app.preset(declaration(field),options.front().id);
+        check(!app.field(field).text.empty(),"A native link preset did not populate its editable field");
+    }
+    app.close();
+}
+void link_budget_edit_buffers() {
+    using F=ui::Field;
+    Controller controller;
+    controller.edit(F::message,"e");prepare(controller);
+    const auto targets=controller.settings().transfer.receive_targets_db_hz;
+    const auto value=[&](F field) {
+        const auto& inputs=controller.link_plan()->inputs;
+        return field==F::link_power?inputs.tx_dbm:
+               field==F::link_loss?inputs.path_loss_db:inputs.noise_density_dbm_hz;
+    };
+    struct Keystroke { const char* text;double accepted; };
+    const auto type=[&](F field,std::initializer_list<Keystroke> steps) {
+        for(const auto& step:steps) {
+            controller.edit(field,step.text);controller.poll();
+            check(controller.field(field).text==step.text,
+                  "A native keystroke must retain its exact edit buffer instead of replacing it with formatted units");
+            near(value(field),step.accepted,"A link-input prefix changed the accepted budget incorrectly");
+        }
+    };
+    // Each successive string is the next native change callback, including
+    // the temporarily incomplete unit suffix and a leading minus sign.
+    type(F::link_power,{{"",3},{"1",1},{"10",10},{"100",100},{"100 ",100},{"100 W",50}});
+    type(F::link_power,{{"",50},{"1",1},{"10",10},{"100",100},{"100 ",100},
+                        {"100 m",100},{"100 mW",20}});
+    type(F::link_noise,{{"",-164},{"-",-164},{"-1",-1},{"-17",-17},{"-174",-174},
+                        {"-174 ",-174},{"-174 d",-174},{"-174 dB",-174},{"-174 dBm",-174},
+                        {"-174 dBm/",-174},{"-174 dBm/H",-174},{"-174 dBm/Hz",-174}});
+    type(F::link_loss,{{"",170},{"2",2},{"22",22},{"220",220},{"220 ",220},
+                       {"220 d",220},{"220 dB",220}});
+    prepare(controller);
+    const auto accepted=controller.link_plan();
+    const auto sampled_snr=controller.settings().simulation_snr_db;
+    for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {
+        for(const auto* invalid:{"","-","1e","nonsense","nan","inf","1e300"}) {
+            controller.edit(field,invalid);controller.poll();
+            const auto& pending=controller.link_plan();
+            check(controller.field(field).text==invalid&&!pending->available&&pending->error=="Check link inputs"&&
+                  pending->inputs.tx_dbm==accepted->inputs.tx_dbm&&
+                  pending->inputs.path_loss_db==accepted->inputs.path_loss_db&&
+                  pending->inputs.noise_density_dbm_hz==accepted->inputs.noise_density_dbm_hz&&
+                  controller.settings().simulation_snr_db==sampled_snr&&
+                  controller.field(F::simulation_confidence).text.find("Check link inputs")!=std::string::npos&&
+                  controller.field(F::simulation_confidence).text.find('%')==std::string::npos,
+                  "Incomplete or invalid link input must retain its buffer and accepted budget while hiding stale confidence");
+            check(controller.take_services().empty(),"An unfinished native edit must not open a validation dialog");
+        }
+    }
+    controller.edit(F::link_noise,"-174 dBm/Hz");
+    check(controller.link_plan()->available,"A valid link edit must restore planning and clear prior incomplete fields");
+    controller.edit(F::link_noise,"-");prepare(controller);
+    check(controller.estimate().has_value()&&!controller.link_plan()->available&&
+          controller.field(F::simulation_confidence).text.find("Check link inputs")!=std::string::npos&&
+          controller.field(F::simulation_confidence).text.find('%')==std::string::npos,
+          "An asynchronously completed estimate must not restore stale confidence while a link input is incomplete");
+    controller.edit(F::link_noise,"-174 dBm/Hz");prepare(controller);
+    check(controller.link_plan()->available&&controller.field(F::simulation_confidence).text.find('%')!=std::string::npos,
+          "Finishing a valid link input must restore the planner and RX confidence");
+    check(controller.message_bytes()==Bytes{'e'}&&
+          controller.settings().transfer.receive_targets_db_hz==targets&&!controller.settings().simulation,
+          "Typing link estimates must preserve the source and live receiver targets");
+    controller.close();
+}
+void link_budget_preset_and_dialog_sync() {
+    using F=ui::Field;using C=ui::Command;
+    Application app(Launch{});
+    const auto declaration=[&](F field)->const ui::Control& {
+        const auto& screen=ui::console_screen();
+        const auto found=std::find_if(screen.begin(),screen.end(),[&](const auto& control){return control.field==field;});
+        check(found!=screen.end(),"Editable link preset declaration is missing");return *found;
+    };
+    const auto prompt=[&](C command) {
+        app.activate(command);const auto requests=app.take_services();
+        check(requests.size()==1&&requests.front().kind==ui::ServiceKind::prompt,
+              "The shared link dialog must use the existing native prompt service");
+        return requests.front();
+    };
+    const auto accepted=[&](C command) {
+        const auto request=prompt(command);app.complete_service({request.id,true,{},{}});
+        return std::stod(request.value);
+    };
+    struct Preset { F field;C command;const char* text;double value; };
+    for(const auto& preset:{Preset{F::link_power,C::planner_power,"100 mW",20},
+                             {F::link_loss,C::planner_loss,"220 dB",220},
+                             {F::link_noise,C::planner_noise,"-174 dBm/Hz",-174}}) {
+        app.edit(preset.field,"1e");
+        check(app.field(preset.field).text=="1e","Application refresh must preserve an incomplete native edit");
+        const auto pending=app.document(ui::Page::planner,900);
+        check(contains_text(*pending,"Check link inputs")&&!contains_text(*pending,"Received:"),
+              "The planner must withhold stale link headlines while a shared field is incomplete");
+        app.preset(declaration(preset.field),preset.text);
+        check(app.field(preset.field).text==preset.text,"A native preset must replace the incomplete edit buffer");
+        near(accepted(preset.command),preset.value,"A native preset did not reach the planner's accepted value");
+        check(!contains_text(*app.document(ui::Page::planner,900),"Check link inputs"),
+              "A native preset must restore the planner after an incomplete edit");
+    }
+    app.edit(F::link_power,"4 ");
+    app.activate(C::planner_power_1w);
+    check(app.field(F::link_power).text=="1 W","A planner preset must synchronize the native edit buffer");
+    near(accepted(C::planner_power),30,"A planner preset did not synchronize the shared power dialog");
+    for(const auto& entry:{Preset{F::link_power,C::planner_power,"4 W",10*std::log10(4000.)},
+                            {F::link_loss,C::planner_loss,"123.5 dB",123.5},
+                            {F::link_noise,C::planner_noise,"-180.25 dBm/Hz",-180.25}}) {
+        app.edit(entry.field,"-");
+        const auto request=prompt(entry.command);app.complete_service({request.id,false,entry.text,{}});
+        check(app.field(entry.field).text==entry.text,"A completed planner dialog must synchronize the native edit buffer");
+        near(accepted(entry.command),entry.value,"A completed planner dialog did not preserve its accepted numeric value");
+    }
+    app.close();
+}
 void one_warning_on_planner_page() {
     Launch launch;launch.simulation=true;Application app(launch);
     const auto& pages=ui::pages();
@@ -359,7 +565,9 @@ void application_prompt_roundtrips() {
           "Model details action did not expose its native shared controls");
     app.activate(C::planner_example_short);check(value(C::planner_target)=="-8","Short example action did not reach the shared facade");
     edit(C::planner_target,"-12.5");check(value(C::planner_target)=="-12.5","Planner target prompt did not round-trip");
-    edit(C::planner_power,"20");check(value(C::planner_power)=="20","Planner power prompt did not round-trip");
+    edit(C::planner_power,"20");
+    check(value(C::planner_power)=="20 dBm"&&app.field(F::link_power).text=="100 mW",
+          "A 20 dBm power entry must retain precise prompt units and display as 100 mW in the shared field");
     edit(C::planner_loss,"150");check(value(C::planner_loss)=="150","Planner path-loss prompt did not round-trip");
     edit(C::planner_noise,"-170");check(value(C::planner_noise)=="-170","Planner noise-density prompt did not round-trip");
     for(const auto command:{C::planner_target,C::planner_power,C::planner_loss,C::planner_noise}) {
@@ -405,6 +613,11 @@ void document_semantics_layout_and_plots() {
             check(std::any_of(flat.begin(),flat.end(),[&](const auto* node) {
                       return node->kind==ui::DocumentKind::action&&node->command==command;
                   }),"Planner milestone and editing affordances must use native shared actions");
+        const auto target=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;});
+        for(const auto command:{ui::Command::planner_power,ui::Command::planner_loss,ui::Command::planner_noise}) {
+            const auto budget=std::find_if(flat.begin(),flat.end(),[&](const auto* node){return node->command==command;});
+            check(budget!=flat.end()&&budget<target,"Planner must put its always-visible link budget before the target controls");
+        }
         const auto layout=ui::layout_document(document,static_cast<int>(width),[](const auto& node,int available) {
             const auto lines=std::max(1.,std::ceil(node.text.size()*node.font_size*.55/std::max(1,available)));
             return lines*node.font_size*1.2;
@@ -478,6 +691,8 @@ int main() {
         current_draft_and_modem_isolation();application_prompt_roundtrips();
         failed_draft_estimate_and_recovery();one_warning_on_planner_page();
         selected_workspace_reaches_planner();
+        shared_link_budget_without_simulation();shared_link_controls_visibility();
+        link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
         document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

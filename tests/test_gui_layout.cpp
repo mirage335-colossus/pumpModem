@@ -18,17 +18,17 @@ void established_default() {
     check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1048 &&
           DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 968,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 233, 1148, 656}, "tab viewport moved");
-    check(layout[Slot::page] == Rect{16, 265, 1148, 624}, "page viewport moved");
-    check(layout[Slot::message] == Rect{16, 291, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 269, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 291, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 291, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 428, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 790, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 657, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 657, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 790, 205, 91}, "waterfall size changed");
+    check(layout[Slot::tabs] == Rect{16, 185, 1148, 704}, "compact header must return its former LPI row to the tab viewport");
+    check(layout[Slot::page] == Rect{16, 217, 1148, 672}, "compact header must enlarge the page viewport");
+    check(layout[Slot::message] == Rect{16, 243, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 221, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 243, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 243, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 380, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 742, 280, 139}, "profile reference must share the enlarged plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 609, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 609, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 742, 205, 139}, "compact header must return its former LPI row to plot height");
     check(layout[Slot::device] == Rect{16, 913, 220, 27}, "persistent modem controls moved");
     check(layout[Slot::bandwidth] == Rect{246, 913, 127, 27} &&
           layout[Slot::carrier] == Rect{383, 913, 135, 27}, "Rate and Carrier editors lost their reserved widths");
@@ -64,13 +64,13 @@ void supported_sizes() {
         }
         const auto simulation=layout[Slot::simulation];
         auto previous_estimate=simulation;
-        for(const auto slot:{Slot::simulation_confidence,Slot::simulation_cpu_time,Slot::simulation_gpu_time}) {
+        for(const auto slot:{Slot::simulation_cpu_time,Slot::simulation_gpu_time,Slot::simulation_confidence}) {
             const auto estimate=layout[slot];
             check(persistent_slot(slot)&&estimate.x>=previous_estimate.x+previous_estimate.w+10&&
                   estimate.y==simulation.y-label_height&&estimate.y+estimate.h==simulation.y+simulation.h&&
                   estimate.y>=layout[Slot::callsign].y+layout[Slot::callsign].h&&
                   estimate.y+estimate.h<layout[Slot::tabs].y&&estimate.h>=2*16&&estimate.w>=200,
-                  "Simulation estimates must remain adjacent, readable and clear of identity controls and tabs");
+                  "Visible Simulation Yes estimates must remain adjacent, readable and clear of identity controls and tabs");
             Control label{Kind::label};label.slot=slot;
             const std::array controls{label};
             const auto native=control_layout(label,{},size.w,size.h,controls);
@@ -78,21 +78,31 @@ void supported_sizes() {
                   "Simulation estimate must use shared native label geometry");
             previous_estimate=estimate;
         }
-        check(layout[Slot::simulation_gpu_time].w>=355&&previous_estimate.x+previous_estimate.w==size.w-margin,
-              "Projected laptop GPU estimate lost room for its hardware label");
+        check(layout[Slot::simulation_gpu_time].w>=320&&previous_estimate.x+previous_estimate.w==size.w-margin,
+              "Simulation estimates must leave room for the hardware label and end with persistent RX confidence");
+        auto previous_input=simulation;
+        for(const auto slot:{Slot::link_power,Slot::link_loss,Slot::link_noise}) {
+            const auto input=layout[slot];
+            check(persistent_slot(slot)&&input.x>=previous_input.x+previous_input.w+10&&
+                  input.y==simulation.y&&input.h==field_height&&input.w>=150,
+                  "Simulation No must provide readable, separate editable link inputs");
+            previous_input=input;
+        }
+        check(previous_input.x+previous_input.w+10<=layout[Slot::simulation_confidence].x,
+              "Shared link inputs must stop before the always-visible RX confidence");
         const auto oscillator=layout[Slot::simulation_oscillator];
         const auto detail=layout[Slot::simulation_oscillator_detail];
         check(persistent_slot(Slot::simulation_oscillator)&&persistent_slot(Slot::simulation_oscillator_detail)&&
               oscillator.x==simulation.x&&oscillator.w>=320&&oscillator.h==field_height&&
               oscillator.y-label_height>simulation.y+simulation.h&&
-              detail.x>=oscillator.x+oscillator.w+10&&detail.w>=668&&detail.h>=2*16&&
-              detail.y==oscillator.y-label_height&&detail.y+detail.h==oscillator.y+oscillator.h&&
+              detail.x>=oscillator.x+oscillator.w+10&&detail.w>=668&&detail.h>=20&&
+              detail.y==oscillator.y-label_height&&
               detail.x+detail.w==size.w-margin&&oscillator.y+oscillator.h<layout[Slot::tabs].y,
               "Oscillator choice and numeric model detail must fit below estimates without crowding any page");
         const auto lpi=layout[Slot::lpi_estimate];
-        check(persistent_slot(Slot::lpi_estimate)&&lpi.x==margin&&lpi.w==size.w-2*margin&&
-              lpi.h>=2*16&&lpi.y>detail.y+detail.h&&lpi.y+lpi.h<layout[Slot::tabs].y,
-              "LPI advisory needs a full-width persistent two-line row clear of oscillator and tabs");
+        check(persistent_slot(Slot::lpi_estimate)&&lpi.x==detail.x&&lpi.w==detail.w&&
+              lpi.h>=20&&lpi.y>detail.y+detail.h&&lpi.y+lpi.h<layout[Slot::tabs].y,
+              "Concise LPI reference must fit below clock values beside the oscillator without wasting a row");
         const auto key_action=layout[Slot::key_actions],key_path=layout[Slot::key_path],key=layout[Slot::key];
         check(layout[Slot::repeatable].x+layout[Slot::repeatable].w<key_action.x&&
               key_action.x+key_action.w<key_path.x&&key_path.x+key_path.w<key.x&&

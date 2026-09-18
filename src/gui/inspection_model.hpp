@@ -31,6 +31,8 @@ struct Constellation {
 struct Inspection {
     std::string title,summary;
     bool binary=false;
+    // Empty GUI drafts use a single raw zero only for analytical estimates.
+    bool preview_only=false;
     std::vector<FlowLane> lanes;
     std::vector<StructureSection> sections;
     std::vector<Field> fields;

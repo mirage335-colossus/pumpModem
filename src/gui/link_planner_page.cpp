@@ -214,12 +214,12 @@ BitmapSource chart_bitmap(Chart chart) {
 }
 
 Node graph(const planner::Model& model, bool observer, float width) {
-    auto n = card(width); n.padding = 10; const float inner = width - 2 * n.padding;
+    auto n = card(width); n.padding = 8; const float inner = width - 2 * n.padding;
     paragraph(n, observer ? "Observer / receiver time" : "Time per bit", 14, Tone::text, true, 4);
     paragraph(n, observer ? (model.observer_available ? ratio(model.observer_ratio) : "Outside model range") :
         planner::duration(model.bit_seconds) + " per bit", 13, Tone::accent, true, 6);
     const auto chart = chart_data(model, observer);
-    const float label_width = 44, plot_width = inner - label_width, height = 144;
+    const float label_width = 44, plot_width = inner - label_width, height = 120;
     auto body = row(inner); auto labels = column(label_width); labels.height = height;
     float previous = 0;
     for (const auto& tick : chart.y_ticks) {
@@ -289,28 +289,46 @@ void notable_points(Node& root, const planner::Model& model) {
     }
 }
 
-void details(Node& root, const planner::Model& model) {
-    auto n = card(root.width);
-    paragraph(n, "Power, path and noise", 15, Tone::text, true, 10);
-    buttons(n, {{"Transmit: " + db(model.inputs.tx_dbm) + " dBm", Command::planner_power},
+std::string watts(double dbm) {
+    const double value = std::pow(10., (dbm - 30) / 10);
+    if (value >= 1) return number(value) + " W";
+    if (value >= .001) return number(value * 1000) + " mW";
+    return number(value * 1000000) + " µW";
+}
+void link_budget(Node& root, const planner::Model& model) {
+    auto n = card(root.width); n.padding = 8; n.bottom = 8;
+    paragraph(n, "Power, path and noise", 15, Tone::text, true, 6);
+    buttons(n, {{"Transmit: " + watts(model.inputs.tx_dbm) + " (" + db(model.inputs.tx_dbm) + " dBm)", Command::planner_power},
                 {"Path loss: " + number(model.inputs.path_loss_db) + " dB", Command::planner_loss},
                 {"Noise: " + db(model.inputs.noise_density_dbm_hz) + " dBm/Hz", Command::planner_noise}});
-    buttons(n, {{"100 W", Command::planner_power_100w}, {"4 W", Command::planner_power_4w},
-                {"1 W", Command::planner_power_1w}, {"100 mW", Command::planner_power_100mw},
-                {"2 mW", Command::planner_power_2mw}, {"1 mW", Command::planner_power_1mw},
-                {"30 µW", Command::planner_power_30uw}, {"1 µW", Command::planner_power_1uw}});
-    if (model.available)
+    if (model.available) {
+        const bool search_fits = model.clock_search_supported && model.receiver_workspace_supported;
+        const auto verdict = !search_fits ? model.receiver_status : model.margin_db < 0 ?
+            "Below target · " + number(-model.margin_db) + " dB short" :
+            "Meets target · " + number(model.margin_db) + " dB margin";
+        paragraph(n, verdict, 17, search_fits && model.margin_db >= 0 ? Tone::accent : Tone::text, true, 4);
         paragraph(n, "Received: " + db(model.received_dbm) + " dBm  ·  Signal: " + db(model.actual_cn0_db_hz) +
-            " dB in 1 Hz  ·  " + number(std::abs(model.margin_db)) + " dB " + (model.margin_db >= 0 ? "above" : "below") + " target",
-            12, Tone::accent, true);
-    paragraph(n, "Automatic targets set bit duration. Average power, path loss and noise set received strength.", 12, Tone::muted, false, 14);
+            " dB in 1 Hz  ·  Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", 11, Tone::muted, false, 0);
+    } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
+    root.children.push_back(std::move(n));
+}
+void details(Node& root) {
+    auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
+    paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
-    paragraph(n, "Receiver search must cover the clock mismatch and fit the selected RAM allowance. One matching receive target; phase stability is unverified.");
+    paragraph(n, "Receiver search must cover the clock mismatch and fit the selected RAM allowance. One matching receive target; phase stability is unverified. Oscillator values are illustrative residual models; GPS lock does not imply phase coherence.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
-    paragraph(n, "Scenarios. Groundwave, skywave, meteor scatter and moonbounce need separate antenna gains, path loss and receiver noise. dBm is power; dB is loss or ratio. FT8 and SSB are operating modes, not path losses.", 12, Tone::muted, false, 0);
+    paragraph(n, "Quick references", 15, Tone::text, true, 8);
+    paragraph(n, "Rough examples; antennas, propagation and noise change the result. Power (dBm) and path loss (dB) are separate quantities.");
+    paragraph(n, "Sub-9 kHz · 200 ft antenna · 10 kW: 0 dBm power reference; 200 dB path loss.");
+    paragraph(n, "Groundwave · 1 MHz · 150 miles: −180 dBm power reference.");
+    paragraph(n, "Groundwave · 30 MHz · 150 miles: −210 dBm power reference.");
+    paragraph(n, "Skywave · 1–30 MHz: SSB voice, 130 dB path loss; FT8, 160 dB path loss.");
+    paragraph(n, "Meteor burst: 150 dB path loss.");
+    paragraph(n, "Earth–Moon–Earth · 5.8 GHz: −30 dBm transmit power; 220 dB path loss.", 12, Tone::muted, false, 0);
     root.children.push_back(std::move(n));
 }
 }
@@ -318,6 +336,7 @@ void details(Node& root, const planner::Model& model) {
 ui::DocumentNode build(const planner::Model& model, float width, bool show_details, bool use_draft, std::string error) {
     auto root = column(std::max(220.0f, width));
     paragraph(root, "Link planner", 22, Tone::text, true, 4);
+    link_budget(root, model);
     const auto& config = model.inputs.options.modem;
     const auto& channel = model.inputs.channel;
     const bool crystal = channel.clock_error_ppm == 100 && channel.phase_noise_degrees_per_sqrt_second == .5;
@@ -333,22 +352,25 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     if (!error.empty()) paragraph(root, std::move(error), 12, Tone::accent, true);
     if (!model.available) {
         paragraph(root, "Adjust the target or modem settings to calculate this link.", 13, Tone::text);
-        buttons(root, {{show_details ? "Hide model limits" : "Power, path and model limits", Command::planner_toggle_details}});
-        if (show_details) details(root, model);
+        buttons(root, {{show_details ? "Hide details" : "Model limits and references", Command::planner_toggle_details}});
+        if (show_details) details(root);
         return root;
     }
+    buttons(root, {{"Use target for short messages", Command::planner_apply_short},
+                   {"Use target for long messages", Command::planner_apply_long},
+                   {show_details ? "Hide details" : "Model limits and references", Command::planner_toggle_details}});
     const bool wide = root.width >= 460;
     auto headline = wide ? row(root.width, true) : column(root.width);
     const float headline_width = wide ? (root.width - 12) / 2 : root.width;
     auto send = card(headline_width); send.padding = 10; send.right = wide ? 12 : 0; send.bottom = wide ? 0 : 8;
-    paragraph(send, use_draft ? "Send current draft · " + std::to_string(model.inputs.wire_bits) + " bits" : "Send 1 bit", 12, Tone::text, true, 4);
+    paragraph(send, model.inputs.empty_draft ? "1-bit preview" : use_draft ?
+        "Send current draft · " + std::to_string(model.inputs.wire_bits) + " bits" : "Send 1 bit", 12, Tone::text, true, 4);
     paragraph(send, planner::duration(model.send_seconds), 23, Tone::accent, true, 0);
     auto finish = card(headline_width); finish.padding = 10;
     paragraph(finish, "Receiver can finish after", 12, Tone::text, true, 4);
     paragraph(finish, "≈ " + planner::duration(model.finish_seconds), 23, Tone::accent, true, 0);
     headline.children.push_back(std::move(send)); headline.children.push_back(std::move(finish)); headline.bottom = 6;
     root.children.push_back(std::move(headline));
-    paragraph(root, model.receiver_status, 12, Tone::text, true, 6);
     if (root.width >= 820) {
         auto charts = row(root.width, true); charts.bottom = 6;
         auto time = graph(model, false, (root.width - 12) / 2); time.right = 12;
@@ -363,10 +385,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     paragraph(root, std::string(model.observer_hypothetical ? "Hypothetical private pattern. " : "Private pattern. ") +
         "LPI is not guaranteed. See model limits.", 11, Tone::muted, false, 8);
     notable_points(root, model);
-    buttons(root, {{"Use target for short messages", Command::planner_apply_short},
-                   {"Use target for long messages", Command::planner_apply_long},
-                   {show_details ? "Hide model limits" : "Power, path and model limits", Command::planner_toggle_details}});
-    if (show_details) details(root, model);
+    if (show_details) details(root);
     return root;
 }
 }

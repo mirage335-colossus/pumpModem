@@ -654,7 +654,9 @@ void oscillator_declaration() {
             const auto detail_geometry=app.control_layout(detail,size.w,size.h);
             check(choice_geometry.has_label&&choice_geometry.widget.w>=320&&
                   choice_geometry.frame.x+choice_geometry.frame.w<detail_geometry.frame.x&&
-                  detail_geometry.frame.w>=668&&detail_geometry.frame.h>=2*16,
+                  detail_geometry.frame.w>=668&&detail_geometry.frame.h>=20&&
+                  app.field(detail.field).text.find("GPS lock")==std::string::npos&&
+                  app.field(detail.field).text.find('\n')==std::string::npos,
                   "Oscillator choice and selected model values overlap or clip in native layout");
         }
     }
@@ -686,10 +688,11 @@ void lpi_declaration() {
             const auto geometry=app.control_layout(advisory,size.w,size.h);
             const auto oscillator=app.control_layout(control(F::simulation_oscillator_detail),size.w,size.h);
             const ui::DesktopLayout layout(size.w,size.h);
-            check(geometry.has_label&&geometry.label==geometry.widget&&geometry.widget.w==size.w-2*ui::margin&&
-                  geometry.widget.h>=2*16&&geometry.frame.y>oscillator.frame.y+oscillator.frame.h&&
+            check(geometry.has_label&&geometry.label==geometry.widget&&geometry.widget.w==oscillator.widget.w&&
+                  geometry.widget.x==oscillator.widget.x&&geometry.widget.h>=20&&
+                  geometry.frame.y>oscillator.frame.y+oscillator.frame.h&&
                   geometry.frame.y+geometry.frame.h<layout[ui::Slot::tabs].y,
-                  "LPI label must retain two full-width lines clear of the oscillator and tab viewport");
+                  "Compact LPI label must share the clock-detail column and remain clear of the tabs");
         }
     }
 }

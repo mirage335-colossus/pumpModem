@@ -14,6 +14,7 @@ struct Inputs {
     double path_loss_db=170;
     double noise_density_dbm_hz=-164;
     std::size_t wire_bits=1;
+    bool empty_draft=false; // One-bit preview; the composer remains empty.
     // Presentation only; the actual byte allowance above drives every check.
     unsigned dsp_workspace_percent=0;
 };

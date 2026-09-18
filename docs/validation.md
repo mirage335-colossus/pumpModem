@@ -3389,3 +3389,48 @@ All 29 GCC/FLTK headless checks passed in 242.03 seconds, including every one of
 the 21 development-contract suites. `git diff --check` passed. Native end-to-end
 workflows and physical audio were not rerun for this planner-only correction;
 the earlier Rev workflow timeout remains an unclosed validation limit.
+
+### Shared link budget and empty-draft preview (2026-09-18)
+
+Power, path loss and noise now lead Link planner, with a target margin or
+shortfall and clock/RAM support in the headline. The Simulation selector is
+Yes/No: No exposes the shared editable budget fields; Yes shows computation
+time estimates. RX success remains visible and identifies the current draft's
+transmit target, independently of the planner's preview target. Detailed model
+assumptions and the supplied propagation references are collapsed by default;
+the moonbounce reference uses the confirmed 220 dB path loss.
+
+An empty text/raw draft uses a hypothetical single raw zero bit for GUI
+estimates and cannot start ordinary transmission. Clearing it leaves the
+composer empty. Empty attachments, exact nonempty short/raw encodings, fixed
+intervals and physical completion retain their established behavior. Editing
+the hypothetical budget with Simulation set to No does not reconfigure the
+live receiver or discard pending data.
+
+Both Release builds succeeded. All 29 GCC/FLTK headless suites passed in
+220.17 seconds, including every development-contract suite. After the final
+input-buffer handling and graph-spacing changes, the ten focused FLTK checks
+passed again in 64.18 seconds, including `gui_controller`; Rev's nine focused
+checks passed in 2.30 seconds. Added cases exercise character-by-character
+power/noise/path entry, incomplete-input suppression through asynchronous
+estimate completion, valid-input recovery, preset/dialog synchronization,
+empty-draft send guards and uninterrupted pending reception.
+
+Final native windows were inspected in FLTK at default and minimum sizes and
+Rev at default size. Budget controls, both graphs and all four milestones fit
+the default view. The minimum view retains the shared header and scrolls the
+remaining planner content. Simulation No shows the editable budget fields;
+Simulation Yes shows CPU/GPU estimates. The live-mode preview used a null audio
+device, not a physical radio; its unpaced input can report receiver overruns.
+
+Final FLTK native adapter/document conformance passed (2/2, 47.73 seconds).
+Two earlier adapter runs failed the bitmap-overlay focus assertion. A diagnostic
+run showed the original control enabled and focus restored at both window
+sizes; the final uninstrumented test then passed with its original assertion
+and timeout. No adapter or test change was retained, so those earlier failures
+are recorded without claiming a diagnosed fix.
+
+Rev native adapter/platform and 1×/2× coordinate conformance passed (4/4,
+58.86 seconds). `git diff --check` passed. Full native transmission workflows
+and physical audio were not rerun; the previously recorded Rev workflow timeout
+remains an unclosed validation limit.

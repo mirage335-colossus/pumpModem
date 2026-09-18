@@ -60,11 +60,12 @@ void simulation_estimate_controls() {
     check(text(F::simulation_confidence)!=strong_probability,
           "Simulation probability did not respond to the weak channel preset");
     controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));
-    for(const auto field:{F::simulation_confidence,F::simulation_cpu_time,F::simulation_gpu_time})
-        check(text(field).ends_with("Simulation off"),"Disabling simulation retained a numeric estimate");
-    // An in-flight preparation must not restore an estimate for an older preset.
+    check(!controller.settings().simulation,"Simulation No did not stop sampled simulation");
+    // RX probability remains a link model when sampled simulation is off.
     prepare(controller);
-    check(text(F::simulation_cpu_time).ends_with("Simulation off"),"Stale preparation restored a disabled simulation estimate");
+    check(text(F::simulation_confidence).find('%')!=std::string::npos&&
+          !text(F::simulation_confidence).ends_with("Simulation off"),
+          "Simulation No must retain RX confidence for the configured link");
     controller.select(F::simulation,std::string(tuning::simulation_presets()[2].name));
     controller.edit(F::bandwidth,"invalid");
     check(text(F::simulation_confidence).ends_with("Invalid settings")&&
@@ -100,6 +101,56 @@ void simulation_estimate_controls() {
     check(text(F::simulation_confidence).ends_with(">99.9%"),
           "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
 }
+void empty_composer_preview() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::snr,"-8");controller.edit(F::long_snr,"55");
+    const auto expected=transfer::estimate_binary(Bytes{0},controller.settings().transfer);
+    const auto check_empty=[&] {
+        prepare(controller);
+        check(controller.message_bytes().empty()&&controller.field(F::message).text.empty()&&
+              controller.field(F::binary).text.empty()&&controller.field(F::short_bits).text.empty(),
+              "The empty-composer preview must not insert its hypothetical zero into any editor");
+        check(controller.inspection()->preview_only&&controller.inspection()->binary&&
+              !controller.inspection()->stream_layout&&controller.estimate()->wire_bits==1&&
+              controller.estimate()->waveform_samples==expected.waveform_samples&&
+              controller.inspection()->title=="1-bit preview",
+              "An empty GUI draft must preview exactly one raw zero at the short target");
+        check(!controller.enabled(C::transmit)&&!controller.enabled(C::transmit_short_bits)&&
+              controller.enabled(C::transmit_noise),
+              "An empty preview must disable message sends while leaving tuning noise available");
+        controller.activate(C::transmit);controller.activate(C::transmit_short_bits);
+        check(controller.message_bytes().empty()&&!controller.snapshot().transmitting,
+              "A one-bit planning placeholder became an actual transmission");
+    };
+    check_empty();
+    for(const auto field:{F::message,F::binary,F::short_bits}) {
+        controller.edit(F::short_bits,"001");prepare(controller);
+        check(!controller.inspection()->preview_only&&controller.estimate()->wire_bits==3,
+              "A real partial-byte draft was incorrectly marked as a hypothetical preview");
+        controller.edit(field,"");check_empty();
+    }
+    controller.activate(C::planner_toggle_draft);
+    check(controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==1,
+          "The planner's current-draft view must use the empty editor's one-bit preview");
+    // An empty file still has attachment metadata and fixed coding intervals.
+    const auto path=std::filesystem::temp_directory_path()/
+        ("dp-empty-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    struct Remove {std::filesystem::path path;~Remove(){std::error_code ignored;std::filesystem::remove(path,ignored);}} remove{path};
+    write_new_file(path.string(),{});
+    controller.activate(C::attach_file);const auto requests=controller.take_services();
+    check(requests.size()==1,"Empty attachment fixture did not request a file");
+    controller.complete_service({requests.front().id,false,path.string(),{}});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while((!controller.inspection()||!controller.inspection()->stream_layout)&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.inspection()&&!controller.inspection()->preview_only&&controller.inspection()->stream_layout&&
+          controller.estimate()->wire_bits>=1216&&controller.estimate()->wire_bits%1216==0&&
+          controller.enabled(C::transmit),
+          "An empty attachment must retain its fixed-interval format and normal send eligibility");
+    controller.close();
+}
 void oscillator_controls() {
     using F=ui::Field;
     Controller controller({true,true});
@@ -128,8 +179,9 @@ void oscillator_controls() {
     }
     check(controller.field(F::simulation_oscillator_detail).text.find("Clock mismatch ")!=std::string::npos&&
           controller.field(F::simulation_oscillator_detail).text.find("Phase diffusion ")!=std::string::npos&&
-          controller.field(F::simulation_oscillator_detail).text.find("GPS lock does not imply phase coherence")!=std::string::npos,
-          "Selected oscillator model must show both residual values and its phase-coherence limitation");
+          controller.field(F::simulation_oscillator_detail).text.find("GPS lock")==std::string::npos&&
+          controller.field(F::simulation_oscillator_detail).text.find('\n')==std::string::npos,
+          "Selected oscillator values must stay concise while detailed limitations remain in help");
     const auto accepted=controller.field(F::simulation_oscillator).selected;
     const auto revision=controller.revision();
     controller.select(F::simulation_oscillator,"unknown");
@@ -174,9 +226,10 @@ void lpi_estimate_controls() {
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
-          text().find("bit durations : RX 1 bit")!=std::string::npos&&
-          text().find("18 dB Es/N0 design reference")!=std::string::npos&&
+          text().find("hypothetical")!=std::string::npos&&
+          text().find("Observer / receiver")!=std::string::npos&&
+          text().find("18 dB")==std::string::npos&&text().find('\n')==std::string::npos&&
+          controller.inspection()->lpi_description.find("pattern design reference")!=std::string::npos&&
           controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
           "Unkeyed GUI must show a warned relative estimate while preserving its public waveform and exact short endpoint");
@@ -201,7 +254,8 @@ void lpi_estimate_controls() {
           !reference->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos&&
           std::abs(reference->lpi_estimate.reference_cn0_db_hz-
               (18-10*std::log10(reference->lpi_estimate.symbol_seconds)))<1e-10&&
-          text()==reference->lpi_summary&&text().find("no hidden-traffic guarantee")!=std::string::npos,
+          text()==reference->lpi_summary&&text().find("guarantee")==std::string::npos&&
+          reference->lpi_description.find("no guaranteed hidden traffic")!=std::string::npos,
           "Private GUI estimate must use the one-bit receiver reference and shared inspection model");
     for(const auto& preset:tuning::simulation_presets()) {
         controller.select(F::simulation,std::string(preset.name));prepare(controller);
@@ -253,17 +307,17 @@ void lpi_estimate_controls() {
     same_advisory(*long_reference);
     controller.edit(F::long_snr,"55");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
-          text().find("Unavailable: in-band SNR above -10 dB")!=std::string::npos,
+          text().find("×")==std::string::npos,
           "Short symbol geometry outside the normalized weak-signal model must withdraw unsupported numbers");
     controller.select(F::key,"none");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          text().find("hypothetical")!=std::string::npos&&
           !controller.settings().transfer.key,
           "Turning encryption off must restore the hypothetical warning even outside the relative weak-signal model");
     controller.edit(F::long_snr,"0");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          text().find("Warning: encryption off; hypothetical only")!=std::string::npos,
+          text().find("hypothetical")!=std::string::npos,
           "Public experiments must retain numerical relative estimates after encryption is turned off");
     controller.select(F::key,"key:LPI estimate");prepare(controller);
     check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos,
@@ -272,7 +326,7 @@ void lpi_estimate_controls() {
     controller.select(F::pattern,"auto-tone");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          text().find("hypothetical")!=std::string::npos&&
           controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
@@ -859,11 +913,8 @@ void composer_conveniences() {
     check(controller.field(F::message).text_cursor_end_revision==draft_cursor_revision,
           "Changing convenience fields moved the cursor in a user-written draft");
     controller.edit(F::message,"");
-    check(controller.field(F::message).text_cursor_end_revision>draft_cursor_revision,
-          "Clearing a draft left the cursor before its new greeting");
-    check(controller.field(F::message).text==
-          "CQ CQ CQ DE Portable station / N0CALL GRID Somewhere nearby. Please reply. ",
-          "Clearing the message did not seed the latest verbatim convenience fields");
+    check(controller.field(F::message).text.empty()&&controller.message_bytes().empty(),
+          "Clearing a draft must leave it empty even when convenience fields are populated");
     controller.edit(F::callsign,"");
     check(controller.field(F::message).text=="CQ CQ CQ GRID Somewhere nearby. Please reply. ",
           "A grid-only greeting retained an empty callsign separator");
@@ -942,6 +993,8 @@ void composer_conveniences() {
     controller.edit(F::callsign,std::string(128,'C'));
     controller.edit(F::grid,std::string(128,'G'));
     controller.edit(F::message,"");
+    controller.edit(F::grid,std::string(127,'G'));
+    controller.edit(F::grid,std::string(128,'G'));
     check(controller.field(F::message).text=="CQ CQ CQ DE "+std::string(128,'C')+" GRID "+std::string(128,'G')+". Please reply. "&&
           !controller.field(F::repeatable).checked&&!controller.field(F::repeatable).enabled,
           "Large convenience fields lost text or retained an over-limit repeatable greeting");
@@ -1052,9 +1105,9 @@ void repeatable_message_identity() {
               "Rejecting an oversized repeatable paste changed its committed text, binary, identifier or prepared estimate");
     }
     controller.edit(F::message,"");
-    const auto cleared=repeatable_marker(controller.field(F::message).text);
-    check(cleared!=marker&&controller.field(F::message).text==cleared,
-          "Clearing the message did not seed a fresh repeatable identifier");
+    check(controller.field(F::message).text.empty()&&controller.message_bytes().empty()&&
+          !controller.enabled(ui::Command::transmit),
+          "Clearing a repeatable message must leave an empty, unsendable preview");
 }
 void previous_message_controls() {
     using F=ui::Field; using C=ui::Command;
@@ -1688,6 +1741,9 @@ void message_target_selection() {
         check(std::stod(inspect_value("TX target C/N0"))==target &&
               inspection.stream_layout.has_value()==stream && inspection.binary==binary,
               "Draft source selected the wrong TX target or changed its existing wire path");
+        const auto target_label=std::string(target>=0?"+":"")+std::to_string(static_cast<int>(target))+" dB target";
+        check(controller.field(F::simulation_confidence).text.find(target_label)!=std::string::npos,
+              "RX confidence must identify the actual draft target, independently of the planner preview");
         auto options=controller.settings().transfer;
         options.modem=tuning::resolve(3600,target,tuning::PatternMode::auto_pattern,false,1500).config;
         const auto expected=transfer::estimate_binary(Bytes(inspection.estimate.wire_bits,0),options);
@@ -1700,7 +1756,10 @@ void message_target_selection() {
               format_bit_rate(tuning::shannon_capacity_bps(3600,target))+" |"),
               "Draft diagnostics did not follow the selected target and modem geometry");
     };
-    expect(55,true,false); // Empty text keeps the byte-stream path.
+    expect(32,false,true); // An empty GUI draft previews one raw bit at the short target.
+    check(controller.inspection()->preview_only&&controller.estimate()->wire_bits==1&&
+          controller.message_bytes().empty()&&!controller.enabled(C::transmit),
+          "Empty GUI target selection must keep the editor empty and its one-bit preview unsendable");
     controller.edit(F::message,"e");expect(32,false,false);
     check(controller.estimate()->wire_bits==3,"Short-target selection changed the exact e dictionary code");
     controller.edit(F::message,"quick brown fox ");expect(32,false,false);
@@ -1908,6 +1967,7 @@ int main(int argc,char** argv) {
     try {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
+        empty_composer_preview();
         oscillator_controls();
         lpi_estimate_controls();
         revised_reception_ingestion();

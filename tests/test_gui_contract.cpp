@@ -36,7 +36,10 @@ static_assert(std::same_as<decltype(ui::DocumentNode{}.plot), BitmapSource>);
 static_assert(std::same_as<decltype(BitmapPresentation{}.source), BitmapSource>);
 static_assert(std::is_copy_constructible_v<BitmapSource>);
 // Both native backends bind these shared fields and slots. Model estimates
-// remain visible on every page without introducing toolkit-specific controls.
+// use shared visibility rules without introducing toolkit-specific controls.
+static_assert(ui::persistent_slot(ui::Slot::link_power));
+static_assert(ui::persistent_slot(ui::Slot::link_loss));
+static_assert(ui::persistent_slot(ui::Slot::link_noise));
 static_assert(ui::persistent_slot(ui::Slot::simulation_confidence));
 static_assert(ui::persistent_slot(ui::Slot::simulation_cpu_time));
 static_assert(ui::persistent_slot(ui::Slot::simulation_gpu_time));

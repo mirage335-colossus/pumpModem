@@ -110,7 +110,10 @@ void lpi_advisory() {
     };
     const auto public_pattern=gui::inspect(request);
     check(public_pattern.lpi_estimate.status==lpi::Status::available&&public_pattern.lpi_estimate.hypothetical_encryption&&
-          public_pattern.lpi_summary.find("\nWarning: encryption off; hypothetical only")!=std::string::npos&&
+          public_pattern.lpi_summary.find("hypothetical private pattern")!=std::string::npos&&
+          public_pattern.lpi_summary.find("Observer / receiver time")!=std::string::npos&&
+          public_pattern.lpi_summary.find('\n')==std::string::npos&&
+          public_pattern.lpi_description.find("Warning: encryption off; hypothetical only")!=std::string::npos&&
           field(public_pattern,"LPI scenario").find("current timing and RX one-bit reference")!=std::string::npos&&
           public_pattern.lpi_description.find("actual public pattern or tone can be easier to detect")!=std::string::npos&&
           public_pattern.lpi_description.find("No key, waveform or transmission setting is changed")!=std::string::npos&&
@@ -131,8 +134,9 @@ void lpi_advisory() {
           std::abs(model.reference_cn0_db_hz-(18-10*std::log10(model.symbol_seconds)))<1e-10&&
           field(reference,"LPI receiver reference").find("18 dB Es/N0 design reference")!=std::string::npos&&
           field(reference,"LPI reference C/N0").find("normalized to RX 1 bit; not measured link power")!=std::string::npos&&
-          reference.lpi_summary.find("90% detection / 1% false alarm")!=std::string::npos&&
-          reference.lpi_summary.find("bit durations : RX 1 bit")!=std::string::npos&&
+          field(reference,"LPI detection criterion").find("90% detection / 1% false alarm")!=std::string::npos&&
+          field(reference,"LPI observer : receiver").find("bit durations : RX 1 bit")!=std::string::npos&&
+          reference.lpi_summary.find("90% detection")==std::string::npos&&
           reference.estimate.wire_bits==3&&reference.estimate.waveform_samples==public_pattern.estimate.waveform_samples,
           "Private LPI advisory must show the one-bit relative reference and preserve exact short wire/airtime");
     check(field(reference,"LPI draft exposure").find("including settling, pulse tails and suppression")!=std::string::npos&&
@@ -173,26 +177,50 @@ void lpi_advisory() {
     request.options.modem=tuning::resolve(3600,55,tuning::PatternMode::auto_pattern,true).config;
     const auto strong=gui::inspect(request);
     check(strong.lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
-          strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
+          strong.lpi_summary.find("outside model range")!=std::string::npos&&
           field(strong,"LPI draft exposure").find("comparison unavailable")!=std::string::npos,
           "Insufficient processing gain at the one-bit reference must not receive unsupported weak-signal times");
     request.options.key.reset();request.options.modem.scramble=false;request.options.modem.dsss=false;
     const auto hypothetical_strong=gui::inspect(request);
     check(hypothetical_strong.lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           hypothetical_strong.lpi_estimate.hypothetical_encryption&&
-          hypothetical_strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
-          hypothetical_strong.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos,
+          hypothetical_strong.lpi_summary.find("outside model range")!=std::string::npos&&
+          hypothetical_strong.lpi_summary.find("hypothetical private pattern")!=std::string::npos,
           "Unencrypted settings outside the relative model must retain the hypothetical warning");
     request.options.modem=tuning::resolve(3600,0,tuning::PatternMode::auto_tone,false).config;
     const auto actual_tone=transfer::estimate_binary(*request.binary,request.options);
     const auto tone=gui::inspect(request);
     check(tone.lpi_estimate.status==lpi::Status::available&&tone.lpi_estimate.hypothetical_encryption&&
-          tone.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          tone.lpi_summary.find("hypothetical private pattern")!=std::string::npos&&
           tone.estimate.wire_bits==3&&tone.estimate.waveform_samples==actual_tone.waveform_samples&&
           field(tone,"Pulse tails")=="0 s / 0 payload bits"&&
           field(tone,"LPI draft exposure").find("current draft duration under hypothetical encrypted model")!=std::string::npos&&
           request.options.modem.spreading_mode==modem::SpreadingMode::tone&&!request.options.key,
           "Tone experiments must show hypothetical private-pattern estimates while preserving actual exact-bit tone airtime");
+}
+void empty_gui_preview() {
+    gui::InspectionRequest request;
+    request.options.modem=tuning::resolve(3600,-8,tuning::PatternMode::auto_pattern,false,1500).config;
+    const auto expected=transfer::estimate_binary(Bytes{0},request.options);
+    for(const bool raw:{false,true}) {
+        if(raw)request.binary=Bytes{};
+        const auto empty=gui::inspect(request);
+        check(empty.preview_only&&empty.binary&&!empty.stream_layout&&empty.title=="1-bit preview"&&
+              empty.estimate.wire_bits==1&&empty.estimate.waveform_samples==expected.waveform_samples&&
+              request.message.data.empty()&&(!request.binary||request.binary->empty()),
+              "Empty GUI inspection must use one raw zero without altering the source or adding framing");
+        check(field(empty,"Source").find("preview")!=std::string::npos,
+              "Hypothetical empty-draft inspection must be visibly identified as a preview");
+        check_airtime(empty);
+    }
+    request.binary.reset();request.message.kind=MessageKind::file;request.message.filename="empty";
+    const auto attachment=gui::inspect(request);
+    check(!attachment.preview_only&&!attachment.binary&&attachment.stream_layout&&
+          attachment.estimate.wire_bits>=1216&&attachment.estimate.wire_bits%1216==0,
+          "An empty attachment must retain fixed interval inspection, not become a one-bit preview");
+    Message byte_api_empty;
+    check(transfer::estimate(byte_api_empty,request.options).wire_bits>=1216,
+          "GUI empty-draft preview must not change the transport byte API's empty-source format");
 }
 void raw_and_short_sources() {
     gui::InspectionRequest request;request.binary=Bytes{0,0,1};
@@ -262,4 +290,4 @@ void raw_and_short_sources() {
     check_airtime(marked);
 }
 }
-int main(){try{fixed_stream_layout();tone_protection();static_pattern_binding();lpi_advisory();raw_and_short_sources();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{fixed_stream_layout();tone_protection();static_pattern_binding();lpi_advisory();empty_gui_preview();raw_and_short_sources();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

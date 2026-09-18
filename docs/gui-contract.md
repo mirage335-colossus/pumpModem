@@ -49,19 +49,35 @@ seconds. The displayed finish time excludes processing delay.
 
 **Use target for short messages** and **Use target for long messages** explicitly
 apply the preview through the existing target/RX-list update. All other planner
-actions preserve the draft, modem configuration and live reception. Preview
+actions preserve the draft and modem geometry. Shared power/path/noise edits
+update estimates without restarting reception in live mode. Preview
 recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform, runs no receiver and starts no worker or transmission.
 Immutable documents and plots are cached across unchanged presentation polls.
 
-**Power, path and model limits** expands native editing actions for average
-transmit power, positive path loss and receiver noise density. Power presets run
-from 100 W to 1 µW. The initial budget is +3 dBm, 170 dB loss and −164 dBm/Hz
+**Power, path and noise** leads the planner, with editable average transmit
+power, positive path loss and receiver noise density. Its verdict compares the
+actual budget to the selected target and checks clock/RAM support. The
+top-bar **Simulation** dropdown offers only **Yes / No**. With **No**, editable
+power/path/noise dropdowns appear beside it and share the planner's values;
+with **Yes**, CPU/GPU computation estimates occupy that space. RX success is
+estimated in either mode. Power presets run from 100 W to 1 µW.
+Typing preserves the entered text; incomplete or invalid values show **Check
+link inputs** instead of a stale RX or planner result. Valid edits and presets
+restore estimates using the shared accepted budget.
+The initial budget is +3 dBm, 170 dB loss and −164 dBm/Hz
 noise, yielding −167 dBm received and −3 dB-Hz actual C/N0. These inputs affect
 the actual budget separately from the target-driven timing and the existing
 normalized observer comparison. Propagation names do not supply unverified
-path-loss presets. The details retain the SSB/FT8 references and assumptions in
+path-loss presets. **Model limits and references** retains the SSB/FT8 and rough
+scenario references, oscillator caveats, and normalized LPI assumptions in
 [link planning](link-planner.md).
+
+Empty text/raw drafts remain empty and cannot start normal transmission. Their
+GUI airtime, inspection, RX and LPI estimates use one raw `0` bit at the short
+target and explicitly identify a preview. This does not change byte-API empty
+sources or attachment framing. Clearing a draft does not repopulate it with a
+default message. Nonempty short/raw input and pending reception are unchanged.
 
 The tab uses one general LPI warning: **LPI is not guaranteed. See model limits.**
 Its private-pattern hypothetical state is a short qualifier. While this tab is
