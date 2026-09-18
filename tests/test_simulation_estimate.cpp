@@ -4,6 +4,7 @@
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
+#include "../src/receiver_probability.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -129,7 +130,7 @@ void whole_symbol_phase_coherence() {
     check(!unsupported.confidence_available&&unsupported.phase_coherence_loss_db>17,
           "phase loss should remain visible when insufficient RAM prevents a numeric receive estimate");
 }
-void drift_receiver_reference() {
+void drift_receiver_estimate() {
     transfer::Options options;
     options.modem.sample_rate=256;
     options.modem.carrier_hz=64;
@@ -141,22 +142,19 @@ void drift_receiver_reference() {
     auto channel=clean_channel();
     channel.snr_db=20-10*std::log10(2048.);
     const auto value=simulation::estimate(wire(1,options.modem),options,true,channel);
-    check(value.confidence_available && value.coherent_reference_only && value.drift_sections==4,
-          "a sixteen-second pattern with sixteen complete chips per quarter uses the coherent reference of the four-section receiver");
+    check(value.confidence_available && value.drift_model_available && !value.coherent_reference_only && value.drift_sections==4,
+          "an affordable sixteen-second pattern with sixteen complete chips per quarter models both receiver branches");
     near(value.drift_section_seconds,4,"four-section diagnostic must use the actual quarter duration");
     near(value.section_phase_coherence_loss_db,0,"stable phase must have no section phase loss");
-    // Independently fixed fixture: five frequency hypotheses and seventeen
-    // possible half-chip starts. Trying both detectors costs ln(2) evidence.
-    const auto energy=std::pow(10.,1.7);
-    const auto above=[&](double threshold) {
-        return .5*std::erfc((threshold-energy)/std::sqrt(2*(1+2*energy)));
-    };
-    const auto threshold=-std::log(1e-10)+2*std::log(86.)+std::log(10.);
-    const auto expected=above(threshold+std::log(2.))*above(5+std::log(2.))*(1-.5*std::exp(-energy/2));
-    near(value.success_probability,expected,
-         "coherent reference must account for the real detector-choice cost without crediting unmodeled section gain");
-    check(value.success_probability<above(threshold)*above(5)*(1-.5*std::exp(-energy/2)),
-          "an additional detector must not receive a free false-alarm budget");
+    near(value.modeled_symbol_snr_db,20,
+         "the joint statistic already models receiver noise and must not retain an arbitrary three-dB margin");
+    const auto repeated=simulation::estimate(wire(1,options.modem),options,true,channel);
+    near(value.success_probability,repeated.success_probability,"fixed statistical draws must make receive estimates repeatable");
+    const auto support=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(support.profile_matches && support.carrier_in_search && support.receiver_workspace_supported &&
+          !support.confidence_available && !support.drift_model_available && support.success_probability==0,
+          "coverage-only planning must skip numeric confidence while retaining the actual search and RAM checks");
+    near(support.cpu_seconds,value.cpu_seconds,"skipping probability trials must not change receiver compute estimates");
 
     channel.phase_noise_degrees_per_sqrt_second=180/std::numbers::pi*std::sqrt(2./16);
     const auto drift=simulation::estimate(wire(1,options.modem),options,true,channel);
@@ -164,29 +162,119 @@ void drift_receiver_reference() {
     near(drift.section_phase_coherence_loss_db,-10*std::log10(quarter_fraction),
          "section phase diagnostic must integrate phase diffusion over four seconds, not the whole sixteen seconds");
     near(drift.phase_coherence_loss_db,10*std::log10(std::exp(1.)/2),
-         "coherent reference must retain its independent whole-symbol phase penalty");
+         "the whole-symbol diagnostic must retain its independent coherent phase penalty");
     near(value.modeled_symbol_snr_db-drift.modeled_symbol_snr_db,drift.phase_coherence_loss_db,
-         "showing reduced section phase loss must not silently change numeric coherent-reference sensitivity");
+         "the coherent energy diagnostic must use the exact joint mean, separately from the sampled success distribution");
     check(drift.success_probability<value.success_probability &&
           drift.section_phase_coherence_loss_db<drift.phase_coherence_loss_db,
-          "section diagnostics should show improved phase tolerance while the reference still accounts for whole-bit drift");
+          "section diagnostics should show improved phase tolerance while finite drift still costs receive confidence");
 
     options.modem.integration_seconds=16-1./256;
     const auto short_symbol=simulation::estimate(wire(1,options.modem),options,true,channel);
-    check(!short_symbol.coherent_reference_only && short_symbol.drift_sections==1,
+    check(!short_symbol.coherent_reference_only && !short_symbol.drift_model_available && short_symbol.drift_sections==1,
           "the sub-sixteen-second boundary must retain the original detector model");
     near(short_symbol.section_phase_coherence_loss_db,short_symbol.phase_coherence_loss_db,
          "one-section diagnostic must equal the ordinary whole-symbol loss");
     options.modem.integration_seconds=16;
     options.modem.bandwidth_hz=7.9;
     const auto sparse=simulation::estimate(wire(1,options.modem),options,true,channel);
-    check(!sparse.coherent_reference_only && sparse.drift_sections==1,
+    check(!sparse.coherent_reference_only && !sparse.drift_model_available && sparse.drift_sections==1,
           "a quarter with fewer than sixteen complete chips cannot claim the section detector");
     options.modem.bandwidth_hz=8;
     options.modem.spreading_mode=modem::SpreadingMode::tone;
     const auto tone=simulation::estimate(wire(1,options.modem),options,true,channel);
-    check(!tone.coherent_reference_only && tone.drift_sections==1,
+    check(!tone.coherent_reference_only && !tone.drift_model_available && tone.drift_sections==1,
           "tone reception must keep its existing coherent estimate");
+
+    options.modem.spreading_mode=modem::SpreadingMode::pattern;
+    options.modem.sample_rate=128;options.modem.carrier_hz=4;
+    options.modem.bandwidth_hz=4;options.modem.integration_seconds=64;
+    options.modem.scramble=true;options.dsp_workspace_bytes=1024*1024;
+    channel=clean_channel();channel.snr_db=-10;
+    const auto fallback=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(fallback.confidence_available && fallback.coherent_reference_only && !fallback.drift_model_available &&
+          fallback.drift_sections==4 && fallback.receiver_workspace_supported,
+          "tight compact workspace must label the limited coherent model instead of crediting unallocated section state");
+}
+void receiver_statistic_controls() {
+    using simulation::detail::ReceiverProbabilityParameters;
+    using simulation::detail::receiver_probability;
+    ReceiverProbabilityParameters parameters;
+    parameters.seconds=16;parameters.signal_energy=40;
+    parameters.noise_dimensions=parameters.coherent_dimensions=parameters.section_dimensions=4096;
+    parameters.acquisition_threshold=parameters.continuation_threshold=40;
+    const auto stable=receiver_probability(parameters);
+    check(stable.trials>=1024 && stable.acquired_correct>0 && stable.acquired_correct<1,
+          "stable comparison must exercise the receiver probability transition");
+    check(stable.acquired_correct<stable.coherent_acquired_correct,
+          "stable patterns must pay the extra detector-choice penalty instead of gaining a free branch");
+    auto searched=parameters;
+    searched.diffusion_degrees=30;searched.signal_energy=60;
+    const auto fixed_carrier=receiver_probability(searched);
+    searched.frequency_step_hz=.25/searched.seconds;
+    searched.frequency_bin_min=-2;searched.frequency_bin_max=2;
+    const auto searched_carrier=receiver_probability(searched);
+    check(searched_carrier.acquired_correct>fixed_carrier.acquired_correct+.02,
+          "a finite carrier bank should recover some realized linear phase wander without perfect phase tracking");
+    parameters.sections=false;
+    const auto coherent=receiver_probability(parameters);
+    near(coherent.acquired_correct,coherent.coherent_acquired_correct,
+         "disabled section scoring must coincide with its coherent comparison on shared observations");
+
+    parameters.sections=true;parameters.signal_energy=400;parameters.diffusion_degrees=90;
+    const auto drift=receiver_probability(parameters);
+    check(drift.acquired_correct>drift.coherent_acquired_correct+.03,
+          "independent section phases should improve a sufficiently energetic drifting full-bit match");
+
+    // This extreme duration must not retain the 1/node_count energy floor
+    // produced by simply sampling a fixed number of independent phasors.
+    parameters.seconds=1e12;parameters.signal_energy=1e8;
+    parameters.noise_dimensions=parameters.coherent_dimensions=parameters.section_dimensions=1e9;
+    const auto incoherent=receiver_probability(parameters);
+    check(std::isfinite(incoherent.acquired_correct) && incoherent.acquired_correct<.005 &&
+          incoherent.coherent_acquired_correct<.005,
+          "days-long and longer phase diffusion must not invent coherence from the finite quadrature grid");
+
+    parameters={};parameters.seconds=16;parameters.signal_energy=1e8;
+    parameters.timing_coherence=.01;
+    const auto mismatched=receiver_probability(parameters);
+    check(mismatched.acquired_correct<.005,
+          "unfitted high-power signal must remain in whole-symbol energy and impose an evidence ceiling");
+
+    parameters.timing_coherence=1;parameters.signal_energy=100;
+    parameters.correlations.fill(.999999);
+    const auto indistinguishable=receiver_probability(parameters);
+    check(indistinguishable.acquired_correct+indistinguishable.acquired_wrong<.01,
+          "nearly identical bit templates cannot acquire confidence from independently invented noise");
+
+    parameters.correlations.fill(0);
+    const auto full_rank=receiver_probability(parameters);
+    parameters.coherent_dimensions=parameters.section_dimensions=32;
+    const auto capped_rank=receiver_probability(parameters);
+    check(capped_rank.acquired_correct<full_rank.acquired_correct-.2,
+          "reducing evidence dimensions must retain the larger physical-noise denominator");
+}
+void raw_sample_probability_geometry() {
+    transfer::Options options;
+    options.modem.sample_rate=128;options.modem.carrier_hz=32;
+    options.modem.bandwidth_hz=8;options.modem.integration_seconds=16;
+    options.modem.pulse_shaping=false;options.search_seconds=0;
+    options.dsp_workspace_bytes=8*1024*1024;
+    auto channel=clean_channel();channel.phase_noise_degrees_per_sqrt_second=30;
+    channel.snr_db=26-10*std::log10(1024.);
+    const auto projected=simulation::estimate(wire(1,options.modem),options,true,channel);
+    // One additional sample changes gcd(symbol,chip) to1. The receiver must
+    // fit raw real samples while retaining its conservative held-chip score
+    // scale:1024.5 complex-equivalent noise dimensions,128.0625 score dimensions.
+    // Integer quarters still contain16 complete chips, so both branches apply.
+    options.modem.integration_seconds=2049./128;
+    channel.snr_db=26-10*std::log10(1024.5);
+    const auto raw_sample=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(projected.drift_model_available && raw_sample.drift_model_available &&
+          raw_sample.receiver_workspace_supported && raw_sample.carrier_in_search,
+          "the sample-quantized gcd edge must retain eligible section scoring and finite coverage");
+    check(projected.success_probability>.8 && raw_sample.success_probability<.25,
+          "raw-sample scoring must retain its physical-noise denominator and larger finite start search");
 }
 void established_tracking_workload() {
     transfer::Options options;
@@ -472,7 +560,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();whole_symbol_phase_coherence();drift_receiver_reference();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();whole_symbol_phase_coherence();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

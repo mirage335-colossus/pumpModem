@@ -72,8 +72,10 @@ constexpr std::array presets{
     SimulationPreset{"70dBm -250dB",true,70,-250}};
 constexpr std::array oscillator_models{
     OscillatorPreset{"crystal","Free-running crystal",100,.5},
-    OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.1,.5},
-    OscillatorPreset{"gpsdo-tcxo","GPSDO: TCXO (no oven)",.01,.05},
+    // Shared locked-link residual assumption; oscillator class changes the
+    // phase-diffusion stress model, not an inferred unlocked frequency budget.
+    OscillatorPreset{"gpsdo-xo","GPSDO: hobbyist XO (no oven)",.0001,.5},
+    OscillatorPreset{"gpsdo-tcxo","GPSDO: TCXO (no oven)",.0001,.05},
     OscillatorPreset{"gpsdo-ocxo","GPSDO: OCXO",.0001,.005}};
 std::size_t index_of(PatternMode mode) {
     const auto found=std::find(modes.begin(),modes.end(),mode);

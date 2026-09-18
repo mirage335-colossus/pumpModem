@@ -4,6 +4,87 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Receiver probability and GPSDO assumptions — 18 September 2026
+
+The planner and top bar now model both implemented long-pattern detector
+branches. The bounded statistical calculation shares noise between competing
+bits, retains unfitted signal in the observed-energy denominator, subtracts the
+strongest section, and applies the actual rank and detector-choice penalties.
+It approximates finite carrier refinement, fractional start timing, projection
+loss and the standalone confirmation required for every long bit. The coherent
+comparison uses the same draft and correction assumptions. Search-only planner
+probes bypass the probability calculation. No wire, receiver, physical-end,
+pending-progress or LPI calculation changed.
+
+The GPSDO presets now share an illustrative 0.0001 ppm relative frequency
+residual. Their separate phase-diffusion values remain 0.5, 0.05 and 0.005
+degrees/sqrt(second). This removes the previous unsupported assumption that
+locked frequency accuracy differs by 1,000 times solely with oscillator class.
+The presets are sensitivity scenarios, not device specifications; GPS phase
+corrections remain outside the channel model. Hard Clock/RAM coverage is tested
+independently of phase diffusion. See [oscillator models](oscillator-models.md).
+
+The new `receiver_probability` regression uses 20 conditions and 64 independent
+sampled channel captures per condition (1,280 captures), with 128 additional
+coherent-only receiver comparisons on the same audio. It spans public/private
+patterns, 64/256-chip symbols, stable and wandering phase, frequency/sample-clock
+offsets, shaped/unshaped waveforms, and exact one-bit and `001` messages. Every
+case uses production sampled-channel generation and receiver admission, and
+requires observed whole-symbol absence and exact received bits. Tests retain
+their predeclared per-case discrepancy and 0.18 RMS limits; no gate was relaxed
+to accommodate the new model.
+
+Across these 20 scenarios, RMS discrepancy was 0.07214 and maximum discrepancy
+0.14893 (probability units). Selected results at a 128 Hz sample rate and
+16-second bit duration:
+
+| Scenario | Modeled success | Sampled success |
+| --- | ---: | ---: |
+| Public, stable, 18 dB Es/N0, 256 chips | 81.2% | 57/64 |
+| Private, stable, 18 dB Es/N0, 256 chips | 69.1% | 49/64 |
+| Public, 60 degrees/sqrt(second), 26 dB Es/N0 | 91.1% | 59/64 |
+| Private, same drift and energy | 88.1% | 56/64 |
+| Public `001`, 30 degrees/sqrt(second), 20 dB Es/N0 | 40.1% | 35/64 |
+| Private `001`, 60 degrees/sqrt(second), 26 dB Es/N0 | 58.0% | 43/64 |
+| Shaped private, same drift and energy, one bit | 93.2% | 60/64 |
+
+For the two 60-degree one-bit cases, section-enabled reception recovered 115/128
+captures versus 87/128 with the coherent-only receiver. These comparisons use
+independently sampled phase trajectories rather than the earlier handcrafted
+phase/gain fixture. They validate a useful statistical approximation, not
+hardware reliability or extreme false-alarm tails.
+
+Additional temporary probes checked the live compact policy with a real test
+key (64-second symbols, 26 dB Es/N0): stable reception was 64/64 versus modeled
+100%, and 30-degree diffusion gave 60/64 versus 79.9%. A public 2,049-sample
+symbol forces one-sample projections: at the same energy, stable reception was
+53/64 versus 77.5%, and 30-degree diffusion gave 6/64 versus 2.0%. This supports
+keeping physical noise dimensions distinct from capped evidence dimensions.
+Permanent direct tests also cover detector-choice cost, shared competing-bit
+noise, finite frequency refinement, unfitted-energy ceilings, and the absence
+of an artificial phase-coherence floor at extreme durations.
+
+Selected planner computations took roughly 58–96 ms in a local probe, with
+search-only navigation around 10 ms. The estimator uses 4,096 fixed statistical
+draws (approximately 5 MiB shared storage), a small cache and bounded quadrature;
+its work does not grow with represented symbol duration. These timings are
+local observations, not UI latency guarantees or simulated decoder timings.
+
+Validation completed with GCC/FLTK and Clang 19/Rev Release builds. GCC passed
+the 29 selected contract, LPI, correlation and shared-GUI suites, plus the new
+sampled probability regression. Twelve targeted Clang/Rev suites passed.
+During final checking, a seed-derivation change incorrectly demanded transfer
+credentials for an already seeded private modem configuration. The permanent
+matrix caught it; the estimator now derives a transfer seed only when a key is
+provided, and both compiler builds passed the affected probability and
+simulation-estimate suites again after the fix. No acceptance gate changed.
+
+The updated `simulation_estimate` suite passed AddressSanitizer and
+UndefinedBehaviorSanitizer. LeakSanitizer first failed because this sandbox's
+tracing environment prevents its operation; the successful rerun used
+`ASAN_OPTIONS=detect_leaks=0`, so this is not a leak-check result. These checks
+do not establish native-window rendering or physical-radio performance.
+
 ## Bounded phase and gain tolerance — 18 September 2026
 
 Long pattern reception adds four fixed section fits alongside the original

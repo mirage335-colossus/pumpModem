@@ -10,17 +10,22 @@ or synchronize the computer.
 These are **illustrative sensitivity profiles**, not measurements, typical
 product specifications, or promises of reception. The numbers describe the
 effective relative transmitter/receiver impairment at the modem. They are
-deliberately spread out to reveal whether clock error or phase coherence limits
-a proposed weak link.
+chosen separately: the GPS profiles share one conservative locked-link frequency
+residual, while phase diffusion is spread out to examine coherence sensitivity.
 
 | CLI profile | Oscillator scenario | Relative clock offset | Phase diffusion |
 | --- | --- | ---: | ---: |
 | `crystal` | Existing consumer/free-running crystal case | 100 ppm | 0.5 degrees/sqrt(second) |
-| `gpsdo-xo` | Hobbyist GPSDO, basic crystal, no oven | 0.1 ppm | 0.5 degrees/sqrt(second) |
-| `gpsdo-tcxo` | GPSDO with temperature compensation, no oven | 0.01 ppm | 0.05 degrees/sqrt(second) |
+| `gpsdo-xo` | Hobbyist GPSDO, basic crystal, no oven | 0.0001 ppm | 0.5 degrees/sqrt(second) |
+| `gpsdo-tcxo` | GPSDO with temperature compensation, no oven | 0.0001 ppm | 0.05 degrees/sqrt(second) |
 | `gpsdo-ocxo` | GPSDO with an oven-controlled crystal | 0.0001 ppm | 0.005 degrees/sqrt(second) |
 
 The default remains `crystal`, preserving the previous simulation assumptions.
+The common GPS residual, 0.0001 ppm (a fractional offset of 10^-10), is an
+explicit link-planning assumption, not a measured or universal locked-device
+specification. It is not derived from an Allan-deviation point or an unlocked
+temperature-stability rating. Changing GPS oscillator class therefore changes
+phase sensitivity without changing clock-search coverage for the same waveform.
 The hobbyist profile improves average frequency offset without assuming an
 improvement in phase diffusion. Across the GPS profiles, the phase-diffusion
 amplitude differs by 100 times, so its variance differs by 10,000 times. This is
@@ -43,6 +48,13 @@ accuracy. It specifies typical phase noise at multiple offsets, rather than a
 single phase-stability number. This product is an example of a non-oven design,
 not the calibration source for the `gpsdo-tcxo` profile.
 
+Locked performance and unlocked temperature drift must be kept distinct.
+[Ettus's GPSDO specifications](https://kb.ettus.com/GPSDO) explicitly mark the
+TCXO and OCXO temperature-stability figures as applying when unlocked, while
+listing GPS-locked timing separately. Those unlocked figures do not justify
+assigning a larger constant locked-link offset simply because an oscillator
+has no oven.
+
 A raw GPS receiver timepulse is another distinct case. Its frequency may
 average accurately while clock quantization introduces jitter. The
 [u-blox timing application note](https://content.u-blox.com/sites/default/files/products/documents/Timing_AppNote_%28GPS.G6-X-11007%29.pdf)
@@ -63,7 +75,7 @@ behavior when those measurements are available.
 
 `clock_error_ppm` is a **constant relative frequency and sample-rate offset**.
 Positive offset raises the received carrier and shortens received symbols. At
-a 1,500 Hz carrier, 0.1 ppm adds 0.00015 Hz before any separately configured
+a 1,500 Hz carrier, the shared 0.0001 ppm GPS assumption adds 0.00000015 Hz before any separately configured
 frequency offset. This parameter is not an Allan deviation, a drift rate or a
 manufacturer's long-term accuracy specification.
 

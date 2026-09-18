@@ -133,6 +133,7 @@ and decoder could otherwise change the codebook together without a test failing.
 | Actual sampled four-hour symbols draining one bit at a time with bounded memory; absence vs EOF and partial silence | `pattern_correlator`; complementary FFT reception checks in `pattern_receiver` |
 | Bounded carrier/clock search, sub-Hz configuration, exact weak sampled reception and noise-only rejection | `pattern_search`, `tuning`, `simulation_estimate`, `weak_signal`; coupled-clock and streamed-template checks in `pattern_receiver` |
 | Whole-bit section fitting under phase and gain changes, conservative evidence, isolated-tail rejection, exact pending prefixes and bounded memory | `pattern_drift`, `pattern_fft_batch`, `pattern_correlator_batch` |
+| Modeled reception versus independent sampled captures, phase/frequency/timing impairments, raw-bit draft success and physical completion | `receiver_probability`, `simulation_estimate` |
 | Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
 | Pending prefixes and row identity, completed copy behavior, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
 
@@ -142,7 +143,7 @@ From the repository root, build and run the focused headless coverage:
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 2
 ctest --test-dir build --output-on-failure -j 2 \
-  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|pattern_drift|pattern_fft_batch|pattern_correlator_batch|pattern_search|tuning|simulation_estimate|weak_signal|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
+  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|pattern_drift|pattern_fft_batch|pattern_correlator_batch|pattern_search|tuning|simulation_estimate|receiver_probability|weak_signal|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
 ```
 
 The long-symbol regression generates sampled PCM with four-hour coordinates; it

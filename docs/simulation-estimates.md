@@ -5,9 +5,10 @@ two **rough compute-time estimates**. They are planning aids, not measured
 confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
-For patterns eligible for the four-section detector, the GUI labels the percentage
-**RX reference**: it models the coherent branch with the detector-choice penalty,
-without estimating the added section branch's gain or claiming a lower bound.
+For eligible long patterns, **RX estimate** models both the original coherent
+match and the four-section detector. Expanded details retain the coherent-only
+comparison. **RX reference** identifies a limited fallback model when the
+combined statistical estimate is unavailable.
 
 The separate [LPI relative observation advisory](lpi-estimates.md) compares an
 unkeyed energy detector's total observation with a one-symbol receiver design
@@ -168,7 +169,7 @@ the integrated symbol energy is
 
 `Es/N0 (dB) = channel.snr_db + 10 log10(symbol_samples / 2)`.
 
-The model applies a fixed 3 dB implementation margin, squared-sinc loss for
+The original coherent approximation applies a fixed 3 dB implementation margin, squared-sinc loss for
 residual carrier frequency after selecting the closest actual frequency
 hypothesis using sample-quantized symbol durations, expected
 coherent-energy loss from Wiener phase diffusion,
@@ -180,8 +181,8 @@ Tone profiles omit the pattern smear term. These are analytical approximations
 to the sampled channel; they do not reproduce adaptive tracking or the exact
 public/private codeword correlations.
 
-`phase_coherence_loss_db` remains the whole-symbol phase penalty used by the
-numeric reference. Known pattern reversals are removed before coherent matching;
+`phase_coherence_loss_db` describes whole-symbol coherent phase loss. It is not
+the combined detector's complete penalty. Known pattern reversals are removed before coherent matching;
 an unknown constant phase cancels, but phase wander reduces the match.
 
 The production receiver additionally fits four fixed quarters for patterns
@@ -202,24 +203,77 @@ both detectors. Ineligible profiles keep their original score.
 
 `drift_sections` and `drift_section_seconds` identify this geometry;
 `section_phase_coherence_loss_db` describes phase loss in the longest quarter.
-`coherent_reference_only` identifies the limited scope of numeric confidence.
+`drift_model_available` reports that the combined statistical model ran;
+`coherent_reference_only` identifies an eligible but unmodeled fallback.
 These fields describe eligible geometry, not a live allocation. Compact banks
 can retain coherent-only scoring when section state cannot fit; the reference
 conservatively keeps `ln(2)` even if that fallback would omit it. Runtime
 `PatternReceiver::drift_tolerant()` and `PatternCorrelator::drift_tolerant()`
 report the selected detector policy.
-The probability model retains whole-symbol phase and residual-frequency losses,
-and includes the `ln(2)` choice cost. Replacing them with quarter-duration losses
-would omit the section statistic's extra noise and correlated bit/branch
-comparisons. Those gains are not yet modeled.
+The combined probability model uses 4096 deterministic matched-statistic trials.
+It models correlated noise and a shared whole-symbol energy denominator, finite
+correlation between bit patterns, and continuous Brownian phase drift through
+four section means using bounded quadrature and a mixing approximation. Each
+trial applies the strongest-quarter removal, rank-corrected Beta score,
+`ln(2)` choice penalty and competing-bit margin. This models both detectors
+together; it does not substitute quarter-duration phase loss into the original
+coherent formula. It generates no PCM and does not run the full adaptive search
+or evidence-chain logic. Finite-trial precision limits small differences between
+reported probabilities.
+
+The phase calculation uses 32 midpoint nodes per quarter, with Brownian
+increments continuing across quarter boundaries and a correction to the known
+mean coherent energy. For a resolved phase path, a least-squares phase slope
+selects a neighborhood of at most six frequencies on the actual finite search
+grid, including the nominal candidate. Coherent and combined detectors choose
+their signal fit separately before matched noise is added. This approximates
+the carrier bank's ability to follow a linear phase trend; it is not a full
+adaptive search over noisy candidates. For strongly mixed phase, it transitions to a joint
+complex-Gaussian approximation with section means and cross-section covariance.
+That approximation neglects pseudocovariance and clips the negligible phasor
+averages above unit magnitude. The remaining noise energy uses a bounded
+Wilson–Hilferty gamma approximation. These choices keep cost independent of
+symbol duration; they do not reproduce every extreme tail of the sampled
+channel.
+
+For patterns with at most 1024 complete chips, the model calculates quarter
+correlations from the unshaped chip weights and sign mask. Denser patterns use
+the orthogonal mean. Pulse shaping and within-section coupling between pattern
+weights and a particular phase path remain approximations. The same fixed
+normal draws serve both bit alternatives and both detectors; a small cache
+reuses results for matching model parameters. Changing transmission length
+does not select a different random experiment.
+
+Fractional start timing is uniform over the nearest candidate's half-bin
+spacing. Unshaped chips use triangular timing correlation; shaped chips use
+the matched raised-cosine correlation. Energy lost at chip edges during
+projection is removed before the score denominator, while phase-spoiled signal
+energy that remains in those observations stays in the denominator.
+
+The initial admission threshold includes the actual first FFT batch or compact
+start window, frequency/timing alternatives, and private phase groups and four
+initial stream symbols where applicable. Every eligible bit lasts at least
+16 seconds, exceeding the six-second absence interval, so following bits need
+standalone admission evidence. The combined model approximates that growing
+threshold at the midpoint of the remaining draft. It does not reproduce the
+full running search counter or competing evidence chains.
+
+`coherent_success_probability` compares the original coherent score, without
+the extra `ln(2)` penalty, in that same statistical scenario. It is a comparison
+model, not a second measured receiver run. The CLI reports this comparison as
+`null` when the combined model or confidence is unavailable. Support-only
+planner searches bypass probability trials; only the selected plan computes
+the reception estimate.
 
 Sections must still be coherent; four quarters do not provide arbitrary drift
-tracking over a days-long bit. Neither faster pattern transitions nor GPS
-discipline resets oscillator phase error. There is no special 0.01 Hz threshold.
+tracking over a days-long bit. Pattern transitions do not reset oscillator
+phase error. This channel omits GPS servo corrections, which can constrain
+long-term phase error in a real locked device. There is no special 0.01 Hz threshold.
 The differential constellation points remain display diagnostics. All admission,
 pending-bit publication and physical-absence decisions still require complete symbols.
 
-With the remaining linear energy `g`, the assumed bit error rate is
+For short/ineligible profiles and the limited coherent reference, with the
+remaining linear energy `g`, the assumed bit error rate is
 `0.5 exp(-g/2)`, the noncoherent orthogonal binary AWGN model. Symbol admission
 uses a Gaussian energy-statistic approximation with mean `g` and variance
 `1 + 2g`, threshold 5 for continuation, and a larger acquisition threshold
@@ -239,8 +293,8 @@ These gates approximate the receiver's evidence requirements. Its real adaptive
 scores are **not calibrated receive probabilities**. In particular, the model
 does not turn the tuning planner's 18 dB target into an empirical success curve.
 
-For raw/short drafts, acquisition is multiplied by the probability that **every
-wire bit** is admitted and correct. For interval drafts, an independent-byte
+For raw/short drafts, the combined model requires correct initial acquisition
+and correct admission of **every remaining wire bit**. For interval drafts, an independent-byte
 dynamic program applies the existing Reed–Solomon capacity rule
 `2 * erroneous_bytes + erased_bytes <= parity_bytes` to each 128-byte codeword.
 A byte with any unadmitted bit is an erasure. The marker approximation allows

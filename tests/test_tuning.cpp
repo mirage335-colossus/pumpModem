@@ -334,10 +334,11 @@ void oscillator_simulation_presets() {
     const auto xo=tuning::parse_oscillator_preset("gpsdo-xo");
     const auto tcxo=tuning::parse_oscillator_preset("gpsdo-tcxo");
     const auto ocxo=tuning::parse_oscillator_preset("gpsdo-ocxo");
-    check(xo.clock_error_ppm>tcxo.clock_error_ppm && tcxo.clock_error_ppm>ocxo.clock_error_ppm &&
+    check(xo.clock_error_ppm==.0001 && tcxo.clock_error_ppm==xo.clock_error_ppm &&
+          ocxo.clock_error_ppm==xo.clock_error_ppm &&
           xo.phase_noise_degrees_per_sqrt_second>tcxo.phase_noise_degrees_per_sqrt_second &&
           tcxo.phase_noise_degrees_per_sqrt_second>ocxo.phase_noise_degrees_per_sqrt_second,
-          "GPSDO tiers must distinguish residual frequency and phase stability");
+          "Locked GPSDO scenarios must share the residual frequency assumption while distinguishing phase diffusion");
     check(tuning::parse_oscillator_preset(" GPSDO-XO\t").id=="gpsdo-xo" &&
           tuning::parse_oscillator_preset(" GPSDO: tcxo (no oven) ").id=="gpsdo-tcxo",
           "oscillator selection must normalize case and surrounding whitespace");

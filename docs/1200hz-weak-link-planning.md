@@ -147,8 +147,9 @@ in the table, nor an arbitrary drift-tracking receiver.
 
 Each quarter must still be coherent. Shorter or adaptive sections and searches
 over changing clock/frequency trajectories require further work and their own
-validation. The current **RX reference** retains the coherent probability model
-with the additional detector-choice cost; it does not quantify the extra branch's
-gain or promise a lower bound. Coherent/noncoherent accumulation also has a
+validation. The current **RX estimate** models both implemented branches with
+their shared noise, finite pattern correlation and detector-choice cost. Its
+coherent-only comparison is available in expanded details. This statistical
+model does not execute the complete adaptive receiver. Coherent/noncoherent accumulation also has a
 sensitivity tradeoff; see
 [ESA's baseband processing discussion](https://gssc.esa.int/navipedia/index.php/Baseband_Processing).

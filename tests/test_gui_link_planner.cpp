@@ -142,6 +142,7 @@ planner::Inputs gpsdo_islands() {
     planner::Inputs inputs;
     inputs.options.modem=tuning::resolve(1,-47,tuning::PatternMode::auto_pattern,false,1500).config;
     inputs.options.dsp_workspace_bytes=4096ULL*1024*1024;
+    // Fixed residual-frequency stress geometry, independent of the GPSDO presets.
     inputs.channel.clock_error_ppm=.1;
     inputs.channel.phase_noise_degrees_per_sqrt_second=.5;
     inputs.target_db_hz=-47;
@@ -374,12 +375,13 @@ void phase_loss_and_receiver_confidence() {
           weak.success_probability<.001,
           "A clock/RAM-compatible long symbol must retain its poor modeled reception when phase loss consumes its energy");
     near(weak.phase_coherence_loss_db,17.832566385,"The hobby-GPSDO phase-loss anchor changed");
-    check(weak.coherent_reference_only&&weak.section_phase_coherence_loss_db>0&&
+    check(weak.drift_model_available&&!weak.coherent_reference_only&&weak.section_phase_coherence_loss_db>0&&
           weak.section_phase_coherence_loss_db<weak.phase_coherence_loss_db,
-          "Long-pattern probability must identify the coherent reference and retain finite section phase loss");
+          "Long-pattern probability must identify the combined model and retain finite section phase loss");
     const auto weak_page=planner_page::build(weak,900,false,false);
-    check(contains_text(weak_page,"RX reference: <0.1%")&&contains_text(weak_page,"Phase drift loss: 17.8 dB")&&
-          contains_text(weak_page,"Extra drift-tolerant gain is not yet estimated")&&
+    check(contains_text(weak_page,"RX estimate: <0.1%")&&contains_text(weak_page,"Whole-bit phase loss: 17.8 dB")&&
+          !contains_text(weak_page,"Extra drift-tolerant gain is not yet estimated")&&
+          !contains_text(weak_page,"Coherent-only comparison:")&&
           !contains_text(weak_page,"Meets target")&&!contains_text(weak_page,"Pattern transitions."),
           "The primary planner must show weak reception and phase loss without presenting clock/RAM fit as successful reception");
     for(const auto diffusion:{.5,.05,.005,0.}) {
@@ -399,15 +401,20 @@ void phase_loss_and_receiver_confidence() {
     near(stronger_link.phase_coherence_loss_db,weak.phase_coherence_loss_db,
          "Extra received power must not erase the modeled oscillator phase loss");
     const auto stronger_page=planner_page::build(stronger_link,900,false,false);
-    check(contains_text(stronger_page,"RX reference: >99.9%")&&contains_text(stronger_page,"Phase drift loss: 17.8 dB"),
+    check(contains_text(stronger_page,"RX estimate: >99.9%")&&contains_text(stronger_page,"Whole-bit phase loss: 17.8 dB"),
           "The reception headline must respond to actual link power while retaining the same phase loss");
     const auto detailed_page=planner_page::build(weak,900,true,false);
     check(contains_text(detailed_page,"Pattern transitions.")&&contains_text(detailed_page,"four fixed sections")&&
           contains_text(detailed_page,"separate gain and phase")&&contains_text(detailed_page,"extra decision penalty")&&
-          contains_text(detailed_page,"Sections must still be coherent"),
-          "Expanded details must explain implemented section fits and the numerical reference's limits");
+          contains_text(detailed_page,"Sections must still be coherent")&&
+          contains_text(detailed_page,"Coherent-only comparison:")&&
+          contains_text(detailed_page,"Phase loss within a section:"),
+          "Expanded details must explain implemented section fits and retain the coherent comparison");
     inputs.tx_dbm=inputs.target_db_hz+inputs.path_loss_db+inputs.noise_density_dbm_hz;
-    inputs.channel.phase_noise_degrees_per_sqrt_second=.05;inputs.wire_bits=3;
+    // This intermediate phase case has both acquisition and continuation
+    // failures; otherwise all continuation trials can pass and one/three-bit
+    // probabilities legitimately coincide at the model's finite resolution.
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.1;inputs.wire_bits=3;
     const auto three=planner::build(inputs);
     auto options=inputs.options;options.modem=planned_config(inputs,inputs.target_db_hz);
     auto channel=inputs.channel;
@@ -416,7 +423,9 @@ void phase_loss_and_receiver_confidence() {
     const auto independent=simulation::estimate(transmission,options,true,channel);
     near(three.success_probability,independent.success_probability,
          "Planner receive probability must cover the exact current wire-bit count");
-    check(contains_text(planner_page::build(three,900,false,true),"RX reference (all bits):"),
+    near(three.coherent_success_probability,independent.coherent_success_probability,
+         "Planner coherent comparison must come from the same draft's statistical model");
+    check(contains_text(planner_page::build(three,900,false,true),"RX estimate (all bits):"),
           "Current-draft reception must label its all-wire-bits probability");
     inputs.wire_bits=1;
     check(three.success_probability<planner::build(inputs).success_probability,
@@ -427,6 +436,33 @@ void phase_loss_and_receiver_confidence() {
               outside.receiver_workspace_supported&&std::isfinite(outside.phase_coherence_loss_db),
               "Outside the supported sampled-noise range, hide extrapolated probability while retaining phase and search facts");
     }
+}
+void gpsdo_phase_does_not_change_clock_coverage() {
+    auto inputs=gpsdo_islands();
+    inputs.target_db_hz=static_cast<double>(18-10*std::log10((18973668000.L-.5L)/6000));
+    std::optional<planner::Model> first;
+    double previous_loss=std::numeric_limits<double>::infinity();
+    for(const auto name:{"gpsdo-xo","gpsdo-tcxo","gpsdo-ocxo"}) {
+        const auto oscillator=tuning::parse_oscillator_preset(name);
+        inputs.channel.clock_error_ppm=oscillator.clock_error_ppm;
+        inputs.channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+        auto model=planner::build(inputs);
+        check(model.available&&model.clock_search_supported&&model.receiver_workspace_supported&&model.clock_target,
+              "Each locked GPSDO profile must fit the same independently sampled clock/RAM island");
+        check(model.phase_coherence_loss_db<previous_loss,
+              "The GPSDO phase-sensitivity scenarios must retain their separate coherence assumptions");
+        previous_loss=model.phase_coherence_loss_db;
+        if(first) {
+            check(model.receiver_status==first->receiver_status&&model.clock_target==first->clock_target&&
+                  model.clock_limit_reason==first->clock_limit_reason&&
+                  model.stronger_fit_target==first->stronger_fit_target&&model.weaker_fit_target==first->weaker_fit_target,
+                  "Changing only GPSDO phase diffusion must not alter hard clock/RAM gates or navigation");
+        } else first=std::move(model);
+    }
+    inputs.channel.clock_error_ppm=1;
+    const auto explicit_offset=planner::build(inputs);
+    check(explicit_offset.available&&!explicit_offset.clock_search_supported&&explicit_offset.receiver_workspace_supported,
+          "An explicitly larger residual clock offset must still expose the actual finite frequency-search limit");
 }
 void separate_link_budget_and_observer_model() {
     auto inputs=example();const auto reference=planner::build(inputs);
@@ -1120,7 +1156,7 @@ int main() {
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         nearest_usable_targets();nearest_target_shares_receiver_budget();
-        phase_loss_and_receiver_confidence();
+        phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
         current_draft_and_modem_isolation();application_prompt_roundtrips();
         controller_checked_navigation();

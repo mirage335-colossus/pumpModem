@@ -112,9 +112,11 @@ Power changes can reduce a coherent match without the vector cancellation that
 phase changes can cause. The new separate section gains accommodate some of
 these variations, but neither detector permits arbitrary independent gain and
 phase at every chip: that would absorb the transitions distinguishing the bits.
-Numeric **RX reference** values retain the coherent-branch model with its
-detector-choice penalty. The extra branch's reception gain is unquantified;
-the reference is not a proven lower bound.
+Numeric **RX estimate** values for eligible long patterns model both branches,
+including correlated noise, finite pattern correlation, the strongest-quarter
+removal and detector-choice penalty. The coherent-only comparison remains in
+expanded details. These bounded statistical trials do not reproduce the full
+adaptive receiver search; a limited fallback is labeled **RX reference**.
 
 ## Run an analysis
 
@@ -141,7 +143,9 @@ preset does not establish that the receiver can decode it.
 The GUI's **Oscillator model** dropdown and CLI `--oscillator` option select
 free-running crystal, hobbyist GPSDO/XO without an oven, GPSDO/TCXO without an
 oven, or GPSDO/OCXO impairments. They change both the sampled channel and the
-estimates. See [oscillator models](oscillator-models.md) for the illustrative
+estimates. All three GPSDO choices share the 0.0001 ppm locked-link frequency
+assumption; their phase-diffusion scenarios differ. The channel does not model
+GPS phase corrections. See [oscillator models](oscillator-models.md) for the illustrative
 values and the distinction between GPS frequency accuracy and phase stability.
 An individual `--clock-error-ppm` or `--phase-noise` value overrides that part
 of the selected model. The examples and table above use the unchanged

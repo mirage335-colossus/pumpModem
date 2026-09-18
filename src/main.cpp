@@ -48,7 +48,7 @@ const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text 
 Usage: pump COMMAND [OPTIONS]
   simulate     Free-running sampled channel and blind receiver acquisition
   listen       Continuous live receiver (or noise/loopback with --simulation)
-  estimate     Exact airtime and relative LPI model (one-bit RX reference)
+  estimate     Exact airtime and relative LPI model (one-bit RX estimate)
   analyze-link Bounded statistical link analysis as JSON; no PCM or decoder
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
@@ -696,6 +696,11 @@ void analyze_link(const Args& a,transfer::Options options) {
         <<",\"full_200ppm_frequency_hypotheses\":";json_number(full_frequency_count);
     std::cout<<",\"modeled_symbol_snr_db\":";json_number(current.modeled_symbol_snr_db);
     std::cout<<",\"coherent_reference_only\":"<<(current.coherent_reference_only?"true":"false")
+        <<",\"drift_model_available\":"<<(current.drift_model_available?"true":"false")
+        <<",\"coherent_success_probability\":";
+    if(current.confidence_available&&current.drift_model_available)json_number(current.coherent_success_probability);
+    else std::cout<<"null";
+    std::cout
         <<",\"drift_sections\":"<<current.drift_sections<<",\"drift_section_seconds\":";
     json_number(current.drift_section_seconds);
     std::cout<<",\"phase_coherence_loss_db\":";json_number(current.phase_coherence_loss_db);

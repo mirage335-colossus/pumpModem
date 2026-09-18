@@ -727,7 +727,7 @@ void oscillator_declaration() {
               "Oscillator scenario or its numeric explanation disappeared on another page");
         app.select(oscillator,"gpsdo-xo");
         check(app.field(oscillator.field).selected=="gpsdo-xo"&&
-              app.field(detail.field).text.find("Clock mismatch 0.1 ppm")!=std::string::npos&&
+              app.field(detail.field).text.find("Clock mismatch 0.0001 ppm")!=std::string::npos&&
               app.field(detail.field).text.find("Phase diffusion 0.5 deg / sqrt(s)")!=std::string::npos,
               "Hobbyist GPSDO selection lost its non-oven clock and phase assumptions through the facade");
         app.select(oscillator,"gpsdo-ocxo");

@@ -147,7 +147,8 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(value['receive_profile_assumption'],'matching_transmit_profile')
             self.assertTrue(value['current_receiver']['profile_matches'])
             receiver=value['current_receiver']
-            self.assertTrue(receiver['coherent_reference_only'])
+            self.assertIn('drift_model_available',receiver)
+            self.assertIsNone(receiver['coherent_success_probability'])
             self.assertEqual(receiver['drift_sections'],4)
             sample_rate=value['transmission']['sample_rate']
             symbol_samples=round(value['transmission']['symbol_seconds']*sample_rate)
@@ -190,6 +191,22 @@ class StreamCLI(unittest.TestCase):
             self.assertEqual(value['transmission'][field],exact[field])
         self.assertEqual(value['transmission']['waveform_seconds'],exact['total_seconds'])
         self.assertGreater(value['transmission']['simulated_seconds'],exact['total_seconds'])
+    def test_link_analysis_combined_receiver_estimate(self):
+        args=('analyze-link','--bits','0','--bw','100','--symbol-seconds','16',
+              '--time','1800000000','--tx-dbm','0','--attenuation-db','-150',
+              '--clock-error-ppm','0','--phase-noise','40','--trials','100')
+        value=json.loads(self.run_pump(*args,timeout=10).stdout)
+        receiver=value['current_receiver']
+        self.assertTrue(receiver['confidence_available'])
+        self.assertTrue(receiver['drift_model_available'])
+        self.assertFalse(receiver['coherent_reference_only'])
+        for field in ('success_probability','coherent_success_probability'):
+            self.assertGreaterEqual(receiver[field],0)
+            self.assertLessEqual(receiver[field],1)
+        repeat=json.loads(self.run_pump(*args,timeout=10).stdout)
+        self.assertEqual(receiver,repeat['current_receiver'])
+        self.assertFalse(value['pcm_generated'])
+        self.assertFalse(value['production_decoder_run'])
     def test_link_analysis_bounded_extreme_duration(self):
         # A billion-second symbol must stay an O(trials) statistical job;
         # generating or searching even its first PCM symbol would time out.
@@ -259,8 +276,8 @@ class StreamCLI(unittest.TestCase):
     def test_oscillator_models_and_overrides(self):
         args=('analyze-link','--text','a','--bw','100','--symbol-seconds','10000',
               '--simulation','3dBm -200dB','--trials','100')
-        for name,clock,phase in (('crystal',100,.5),('gpsdo-xo',.1,.5),
-                                 ('gpsdo-tcxo',.01,.05),('gpsdo-ocxo',.0001,.005)):
+        for name,clock,phase in (('crystal',100,.5),('gpsdo-xo',.0001,.5),
+                                 ('gpsdo-tcxo',.0001,.05),('gpsdo-ocxo',.0001,.005)):
             value=json.loads(self.run_pump(*args,'--oscillator',name).stdout)
             self.assertEqual(value['oscillator_model'],{'preset':name,'illustrative':True,'overridden':False})
             self.assertEqual(value['current_receiver']['clock_error_ppm'],clock)
@@ -272,6 +289,10 @@ class StreamCLI(unittest.TestCase):
         self.assertTrue(override['oscillator_model']['overridden'])
         self.assertEqual(override['current_receiver']['clock_error_ppm'],.0001)
         self.assertEqual(override['reference_assumptions']['phase_noise_degrees_per_sqrt_second'],2)
+        frequency_override=json.loads(self.run_pump(*args,'--oscillator','gpsdo-xo','--clock-error-ppm','.1').stdout)
+        self.assertTrue(frequency_override['oscillator_model']['overridden'])
+        self.assertEqual(frequency_override['current_receiver']['clock_error_ppm'],.1)
+        self.assertEqual(frequency_override['reference_assumptions']['phase_noise_degrees_per_sqrt_second'],.5)
         # Custom negative transmit powers remain valid, but are no longer presets.
         negative=json.loads(self.run_pump('analyze-link','--bits','0','--tx-dbm','-3',
                                          '--attenuation-db','-200','--trials','10').stdout)
@@ -284,7 +305,7 @@ class StreamCLI(unittest.TestCase):
     def test_oscillator_preset_applies_to_sampled_waveform(self):
         with tempfile.TemporaryDirectory() as directory:
             args=('simulate','--text','a',*AUDIO,'--snr','30','--seed','713')
-            for name,clock,phase in (('gpsdo-xo',.1,.5),('gpsdo-ocxo',.0001,.005)):
+            for name,clock,phase in (('gpsdo-xo',.0001,.5),('gpsdo-ocxo',.0001,.005)):
                 preset=pathlib.Path(directory)/(name+'-preset.wav')
                 explicit=pathlib.Path(directory)/(name+'-explicit.wav')
                 self.run_pump(*args,'--oscillator',name,'--output',preset)

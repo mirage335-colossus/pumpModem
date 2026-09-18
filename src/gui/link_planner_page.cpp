@@ -308,20 +308,21 @@ void link_budget(Node& root, const planner::Model& model) {
         paragraph(n, "Received: " + db(model.received_dbm) + " dBm  ·  Signal: " + db(model.actual_cn0_db_hz) +
             " dB in 1 Hz  ·  Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", 11, Tone::muted, false, 4);
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
-            "  ·  Phase drift loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
+            "  ·  Whole-bit phase loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
             " dB", 11, Tone::muted, false, 0);
-        if(model.coherent_reference_only)
-            paragraph(n,"Extra drift-tolerant gain is not yet estimated.",11,Tone::muted,false,0);
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
     root.children.push_back(std::move(n));
 }
-void details(Node& root) {
+void details(Node& root,const planner::Model& model) {
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
+    if(model.drift_model_available&&model.confidence_available)
+        paragraph(n,"Coherent-only comparison: "+probability(model.coherent_success_probability)+
+            ". Phase loss within a section: "+number(model.section_phase_coherence_loss_db)+" dB.");
     paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
-    paragraph(n, "Reception. The estimate includes signal strength, phase drift, clock and timing mismatch, acquisition and RAM. It assumes one matching receive target and every wire bit correct, before any error correction. The top-bar RX estimate uses the actual configured draft and receive bank. Oscillator values are illustrative; GPS lock does not imply phase coherence.");
-    paragraph(n, "Pattern transitions. Long patterns also fit four fixed sections with separate gain and phase, then combine their evidence across the whole bit. One strong section cannot carry the match alone. The score accounts for the extra fitting freedom and keeps the original coherent match. Small RAM budgets can retain only the original match. RX reference includes the extra decision penalty but no unmeasured drift-tolerant gain. Sections must still be coherent; there is no special 0.01 Hz cutoff.");
+    paragraph(n, "Reception. The estimate includes signal strength, phase drift, clock and timing mismatch, acquisition and RAM. It assumes one matching receive target and every wire bit correct, before any error correction. The top-bar RX estimate uses the actual configured draft and receive bank. Oscillator values are illustrative; GPS phase corrections are not modeled.");
+    paragraph(n, "Pattern transitions. Long patterns also fit four fixed sections with separate gain and phase, then combine their evidence across the whole bit. One strong section cannot carry the match alone. RX estimate models both this fit and the original coherent match, including their shared noise, competing bit patterns and extra decision penalty. It uses 4096 deterministic statistical trials, without generating audio or running the complete receiver search. Small RAM budgets can retain only the original match; RX reference labels a limited model when the combined estimate is unavailable. Sections must still be coherent; there is no special 0.01 Hz cutoff.");
     paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. Radio filtering and spectral tails still matter.");
@@ -361,7 +362,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     if (!model.available) {
         paragraph(root, "Adjust the target or modem settings to calculate this link.", 13, Tone::text);
         buttons(root, {{show_details ? "Hide details" : "Model limits and references", Command::planner_toggle_details}});
-        if (show_details) details(root);
+        if (show_details) details(root,model);
         return root;
     }
     buttons(root, {{"Use target for short messages", Command::planner_apply_short},
@@ -393,7 +394,7 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     paragraph(root, std::string(model.observer_hypothetical ? "Hypothetical private pattern. " : "Private pattern. ") +
         "LPI is not guaranteed. See model limits.", 11, Tone::muted, false, 8);
     notable_points(root, model);
-    if (show_details) details(root);
+    if (show_details) details(root,model);
     return root;
 }
 }

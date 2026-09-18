@@ -76,16 +76,16 @@ rebuilding the draft. Matched RX targets use effective values, not edit buffers.
 Manual RX lists and explicit planner Apply remain exact.
 
 The planner opens with the preview's RX estimate or a clock/RAM limit, followed
-by budget margin and phase-drift loss. Its probability assumes every wire bit
+by budget margin and whole-bit phase loss. Its probability assumes every wire bit
 correct before FEC and one matching RX profile; top-bar RX confidence retains
 the actual configured draft and receive-bank model. Eligible long patterns also
-can use four section fits with separate gain and phase when RAM permits. Their headline reads **RX
-reference**, with a brief note that added drift-tolerant gain is not yet estimated:
-the number models the original coherent match with the extra detector-choice
-penalty, not the complete new detector. Its power/path/noise
+can use four section fits with separate gain and phase when RAM permits. Their
+**RX estimate** includes both detectors, shared noise and competing bit patterns.
+The coherent-only comparison and model limitations remain in expanded details;
+**RX reference** is reserved for a limited fallback model. Its power/path/noise
 input controls appear once, in the shared top bar. The **Simulation** dropdown offers
 only **Yes / No**, and the editable budget dropdowns stay visible in both modes.
-CPU/GPU computation estimates appear only with **Yes**; RX success is estimated
+CPU/GPU computation estimates appear only with **Yes**; reception is estimated
 in either mode. The CPU/GPU row collapses with **No**, moving the tabs and page
 up without moving the top-bar inputs or bottom modem settings. Power presets
 run from 100 W to 1 µW.
@@ -127,7 +127,7 @@ holds the audio percentage unchanged. Once TX audio ends, the mode line says
 **Checking reception after transmission** while complete-symbol absence is
 processed. Completion or cancellation freezes the elapsed value; a new run or
 reconfiguration resets it. Replay time is separate. None of these presentation
-states declares a received message complete. **RX success (noise model)** is
+states declares a received message complete. **RX estimate** is
 conditional on completed receiver computation, not a measured success rate or
 the probability of finishing within a deadline.
 

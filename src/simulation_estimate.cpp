@@ -5,6 +5,8 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "pattern_drift.hpp"
+#include "receiver_probability.hpp"
+#include "datapump/correlation_experiment.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -82,6 +84,11 @@ long double phase_coherence(long double x) {
 }
 struct Work {
     long double serial=0,parallel=0,tracking_serial=0,tracking_windows=0,search_trials=1;
+    double noise_dimensions=0,coherent_dimensions=0,section_dimensions=0,noise_condition=1;
+    double timing_uncertainty_chips=0,acquisition_threshold=0;
+    double projection_bin_chips=0;
+    double following_search_ratio=0;
+    bool drift_supported=false;
     bool workspace_supported=true;
 };
 Work receiver_work(const modem::Config& config,long double samples,
@@ -101,8 +108,9 @@ Work receiver_work(const modem::Config& config,long double samples,
     auto bin=modem::pattern_projection_bin_samples(config,geometry.half_width_hz);
     const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
     const auto sine=std::sin(omega);
-    const auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
+    auto image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
     if(symbol<=256 && (!private_pattern || image>1e-10*static_cast<double>(bin)))bin=1;
+    image=std::abs(sine)>1e-12?std::abs(std::sin(static_cast<double>(bin)*omega)/sine):static_cast<double>(bin);
     const bool sample_fit=bin==1 && (symbol<=256 || !private_pattern);
     const auto observation_samples=static_cast<long double>(symbol)/(1-maximum_clock_ratio);
     const auto length=std::max(4.L,std::ceil(observation_samples/bin));
@@ -140,9 +148,30 @@ Work receiver_work(const modem::Config& config,long double samples,
         (drift_sections>1 || fft_bytes>allowance || (coupled && banks*profiles>1));
     const auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
                                std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
-    const auto phase_groups=private_pattern?3.L:1.L;
+    const auto phase_groups=private_pattern&&symbol%config.sample_rate!=0?(symbol>=config.sample_rate?2.L:3.L):1.L;
     Work result;
     result.workspace_supported=!coupled || fft_core_bytes<=allowance;
+    const auto real_rank=static_cast<long double>(bin)-image<=1e-10L*bin;
+    const auto count=static_cast<double>(length);
+    result.noise_dimensions=correlator?static_cast<double>(symbol)/2:count*(real_rank?.5:1.);
+    result.coherent_dimensions=correlator?result.noise_dimensions:
+        (sample_fit?std::min(count,4*count/static_cast<double>(chip)):count)*(real_rank?.5:1.);
+    result.section_dimensions=correlator?std::min(static_cast<double>(symbol),4.*static_cast<double>(symbol)/static_cast<double>(chip))/2:
+        result.coherent_dimensions;
+    result.noise_condition=correlator||real_rank?1:(static_cast<double>(bin)+image)/(static_cast<double>(bin)-image);
+    result.timing_uncertainty_chips=correlator?.25:static_cast<double>(bin)/(2*static_cast<double>(chip));
+    result.projection_bin_chips=correlator||bin==1?0:static_cast<double>(bin)/static_cast<double>(chip);
+    const auto initial_symbols=private_pattern?4.L:1.L;
+    const auto acquisition_trials=(correlator?starts:initial_batch)*frequencies*phase_groups*initial_symbols;
+    result.acquisition_threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(acquisition_trials+1)+
+        std::log(2*frequencies*initial_symbols));
+    result.following_search_ratio=correlator?0:static_cast<double>(nominal_length/initial_batch);
+    // Compact layout is not allocated by the planner. Use a deliberately
+    // generous per-lane upper allowance before crediting optional section
+    // state; tighter compact budgets retain the coherent reference.
+    const auto compact_bound=starts*frequencies*phase_groups*4096+2*1024*1024;
+    result.drift_supported=drift_sections>1&&result.workspace_supported&&
+        (!correlator||compact_bound<=allowance)&&result.noise_dimensions>=16;
     result.serial=samples*projection_operations_per_sample*banks;
     // Admission thresholds belong to one receiver; unrelated keys and
     // waveform profiles add compute work, not evidence against this signal.
@@ -218,7 +247,8 @@ Work receiver_work(const modem::Config& config,long double samples,
 }
 
 Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
-                  const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys) {
+                  const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
+                  bool compute_probability) {
     modem::validate(options.modem);modem::validate_channel(options.modem,channel);
     if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys)
         throw Error("invalid simulation estimate input");
@@ -246,6 +276,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.simulated_seconds=finite_seconds(media);
     const auto samples=media*config.sample_rate;
     long double serial=samples*channel_operations_per_sample,parallel=0,tracking_serial=0,tracking_windows=0,trials=1;
+    Work matching_work;
     for(const auto& profile:profiles) {
         modem::validate(profile);
         const auto matches=same_profile(config,profile);
@@ -255,6 +286,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         serial+=work.serial;parallel+=work.parallel;
         tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
+            matching_work=work;
             trials=std::max(trials,work.search_trials);
             result.receiver_workspace_supported|=work.workspace_supported;
         }
@@ -310,7 +342,86 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // regime. Do not extrapolate a numeric probability beyond the bank, nor
     // claim zero: some out-of-bank signals can still produce admitted fits.
     if(!result.profile_matches || !result.carrier_in_search || !result.receiver_workspace_supported)return result;
+    if(!compute_probability)return result;
     result.confidence_available=true;
+    if(matching_work.drift_supported) {
+        detail::ReceiverProbabilityParameters parameters;
+        parameters.signal_energy=static_cast<double>(std::pow(10.L,symbol_db/10));
+        parameters.seconds=static_cast<double>(seconds);
+        parameters.diffusion_degrees=channel.phase_noise_degrees_per_sqrt_second;
+        parameters.residual_frequency=static_cast<double>(frequency-nearest);
+        parameters.frequency_step_hz=geometry.step_hz;
+        parameters.frequency_bin_min=static_cast<int>(-outer_bin-nearest_bin);
+        parameters.frequency_bin_max=static_cast<int>(outer_bin-nearest_bin);
+        parameters.timing_coherence=static_cast<double>(timing_loss);
+        parameters.timing_uncertainty_chips=matching_work.timing_uncertainty_chips;
+        parameters.projection_bin_chips=matching_work.projection_bin_chips;
+        parameters.pulse_shaping=modem::pattern_pulse_enabled(config);
+        parameters.noise_dimensions=matching_work.noise_dimensions;
+        parameters.coherent_dimensions=matching_work.coherent_dimensions;
+        parameters.section_dimensions=matching_work.section_dimensions;
+        parameters.noise_condition=matching_work.noise_condition;
+        parameters.acquisition_threshold=matching_work.acquisition_threshold;
+        // Every eligible symbol lasts longer than the physical six-second
+        // absence interval: a merely retained, unconfirmed bit cannot wait
+        // for later bits to establish a chain. It needs standalone evidence.
+        // Approximate the growing search threshold at the middle of the
+        // remaining draft; acquisition retains its separate first-bit value.
+        parameters.continuation_threshold=parameters.acquisition_threshold+2*std::log1p(
+            matching_work.following_search_ratio*std::max(1.,static_cast<double>(transmission.wire_bits)/2));
+        // The two unshaped bit templates share an amplitude envelope and a
+        // balanced eight-chip sign mask. Resolve finite quarter correlations
+        // exactly for small patterns; dense patterns use the orthogonal mean.
+        const auto chip=modem::pattern_chip_samples(config);
+        if(samples_per_symbol/chip<=1024) {
+            auto code_config=config;
+            if(options.timestamp)code_config.stream_epoch=options.timestamp;
+            if(options.key)code_config=transfer::seeded_config(options,code_config.stream_epoch);
+            modem::PatternCode code(code_config,code_config.stream_epoch);
+            for(unsigned j=0;j<4;++j) {
+                const auto begin=modem::detail::drift_boundary(j,samples_per_symbol,4);
+                const auto end=modem::detail::drift_boundary(j+1,samples_per_symbol,4);
+                double norm0=0,norm1=0,cross=0;
+                for(auto at=begin;at<end;) {
+                    const auto index=at/chip,until=std::min(end,(index+1)*chip);
+                    const auto a=code.value(index,0,0),b=code.value(index,1,0);
+                    const auto weight=static_cast<double>(until-at);
+                    norm0+=weight*std::norm(a);norm1+=weight*std::norm(b);
+                    cross+=weight*(a*std::conj(b)).real();at=until;
+                }
+                parameters.correlations[j]=std::clamp(cross/std::sqrt(norm0*norm1),-.999,.999);
+                parameters.weights[j]=norm0;
+            }
+            const auto weight=std::accumulate(parameters.weights.begin(),parameters.weights.end(),0.);
+            for(auto& section_weight:parameters.weights)section_weight/=weight;
+        }
+        const auto probability=detail::receiver_probability(parameters);
+        result.drift_model_available=true;result.coherent_reference_only=false;
+        const auto count=static_cast<long double>(transmission.wire_bits);
+        const auto draft_probability=[&](double acquired_correct,double acquired_wrong,double retained_correct,double retained_wrong) {
+            if(raw_bits)return acquired_correct*probability_power(retained_correct,count-1);
+            const auto retained=retained_correct+retained_wrong;
+            const auto error=retained>0?retained_wrong/retained:0.;
+            const auto intervals=static_cast<long double>(transmission.coded_bytes)/stream_interval_bytes;
+            const auto marker=binomial_at_most(boundary_sync::marker_bits,boundary_sync::maximum_marker_errors,1-retained_correct);
+            const auto absent=std::ceil(static_cast<long double>(modem::pattern_absence_samples(config))/samples_per_symbol);
+            const auto premature=std::max(0.L,count-absent+1)*probability_power(1-retained,absent);
+            return (acquired_correct+acquired_wrong)*
+                probability_power(marker*interval_probability(retained,error,options.fec),intervals)*
+                static_cast<double>(std::max(0.L,1-premature));
+        };
+        result.success_probability=draft_probability(probability.acquired_correct,probability.acquired_wrong,
+            probability.retained_correct,probability.retained_wrong);
+        result.coherent_success_probability=draft_probability(probability.coherent_acquired_correct,probability.coherent_acquired_wrong,
+            probability.coherent_retained_correct,probability.coherent_retained_wrong);
+        result.success_probability=std::clamp(result.success_probability,0.,1.);
+        // Diagnostic coherent energy uses the joint frequency/diffusion mean;
+        // the success calculation uses individual path statistics above.
+        const auto joint=expected_correlation_coherence(parameters.seconds,parameters.diffusion_degrees,
+            parameters.residual_frequency)*parameters.timing_coherence;
+        result.modeled_symbol_snr_db=joint>0?static_cast<double>(symbol_db)+10*std::log10(joint):-300;
+        return result;
+    }
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));
     const auto bit_error=.5*std::exp(-energy/2);
     // Keep the eligible coherent reference with the two-detector choice cost.

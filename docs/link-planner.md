@@ -2,8 +2,9 @@
 
 Set transmit power, path loss and noise in the top bar, then open **Link
 planner**, immediately after **Console**. Its headline shows the preview's RX
-estimate, RX reference or clock/RAM limit. Below it are the power budget's margin
-or shortfall and the modeled loss from phase drift. The power field accepts watts,
+estimate or clock/RAM limit. A limited fallback model is labeled **RX reference**.
+Below it are the power budget's margin or shortfall and whole-bit phase loss.
+The power field accepts watts,
 milliwatts, microwatts or dBm.
 
 The timing preview starts at −8 dB in 1 Hz, independently of the current
@@ -23,7 +24,7 @@ Manual RX lists and explicit planner Apply retain their exact-input behavior.
 
 The top-bar **Simulation** choice is **Yes / No**. Editable power, path-loss and
 noise dropdowns stay beside it in both modes, sharing their values with the
-planner and RX success estimate. RX success remains available without sampled
+planner and RX estimate. The estimate remains available without sampled
 simulation; CPU/GPU computation estimates appear only with **Yes**. The planner
 does not repeat the input controls, and the estimate row takes no space with
 **No**. Changes to the budget in live mode update estimates without restarting
@@ -77,20 +78,22 @@ The bounded search checks sample-aligned timings and changes in clock-search
 and FFT geometry; other usable timings may remain undiscovered.
 
 Memory and clock coverage are separate from successful reception.
+The three GPSDO choices share a 0.0001 ppm residual-frequency assumption, so
+their clock/RAM coverage is identical; their phase-diffusion assumptions differ.
+This channel model does not simulate GPS phase corrections.
 The planner preview checks one matching RX profile, rather than the currently
 unapplied receive-target list. More profiles or keys can require additional
 workspace; the transmit dropdowns include those banks when choosing a fit.
 
-The planner's **RX estimate** includes the model's signal strength,
-whole-bit phase loss, residual frequency and timing error, acquisition and RAM
-checks. It estimates reception of every wire bit before error correction;
-the top-bar estimate uses the actual configured draft, receive bank and FEC.
-For eligible long patterns, **RX reference** labels the coherent-branch estimate,
-including the cost of trying the additional four-section detector. The latter's
-reception gain is not yet quantified; this reference is not a proven lower bound.
-The phase-loss readout retains the whole-bit penalty; the estimator separately
-reports section loss without substituting it into the probability. Neither
-value establishes measured sensitivity.
+The planner's **RX estimate** includes signal strength, phase drift, residual
+frequency and timing error, acquisition and RAM checks. Eligible long patterns
+model both coherent and four-section reception, including their shared noise,
+competing bit patterns and detector-choice penalty. It estimates reception of
+every wire bit before error correction; the top-bar estimate uses the actual
+configured draft, receive bank and FEC. Expanded **Model limits** includes a
+coherent-only comparison from the same statistical model, plus section phase
+loss. The primary phase readout describes the whole-bit coherent loss, not the
+combined detector's complete penalty. Neither value is measured sensitivity.
 
 The dense low-target timings existed before the planner found them. At 1 Hz,
 the nearby 3,162,277- and 3,162,278-second symbols both fit the 4 GiB/hobby-GPSDO
@@ -107,8 +110,10 @@ match remains available, and the score accounts for both the extra fitting
 freedom and trying two detectors.
 This changes neither the waveform nor the exact wire-bit count.
 Compact banks retain the coherent-only path if the added section state cannot
-fit RAM. The planner describes eligible geometry; the RX reference keeps the
-choice penalty even when that fallback would avoid it.
+fit RAM. **RX reference** labels a limited model when a combined estimate is
+unavailable; it is not a proven lower bound. The statistical estimate uses 4096
+deterministic matched-statistic trials, without generating audio or executing
+the complete adaptive receiver search.
 
 Each quarter must still retain useful coherence. Four sections do not make a
 37-day bit equivalent to repeated 100-second comparisons, and there is no special

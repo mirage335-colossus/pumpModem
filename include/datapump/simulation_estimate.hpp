@@ -30,15 +30,22 @@ struct Estimate {
     // Eligible geometry can additionally combine four section fits. These
     // fields describe that policy, not a live receiver's allocation: compact
     // banks retain the coherent-only path if the added state cannot fit.
-    // Numeric success remains the coherent-branch engineering reference,
-    // including the detector-choice penalty; its section-branch gain and
-    // cross-branch bit comparisons are not modeled, nor is it a lower bound.
-    // The reference retains the choice penalty even on that compact fallback.
+    // True only when eligible geometry uses the limited coherent reference
+    // instead of the combined statistical model. That reference retains the
+    // detector-choice penalty even on compact fallback; it is not a lower bound.
     bool coherent_reference_only = false;
+    // Fixed matched-statistic trials modeled both branches, correlated noise,
+    // phase paths and competing bits. This does not run the adaptive receiver.
+    bool drift_model_available = false;
+    // Same modeled scenario using only the original coherent score, without
+    // the extra detector-choice penalty. Requires drift_model_available and
+    // confidence_available; it is a comparison, not a measured receiver run.
+    double coherent_success_probability = 0;
     std::size_t drift_sections = 1;
     double drift_section_seconds = 0;
     // Phase loss within the longest implemented section, diagnostic only.
-    // It does not replace whole-symbol loss in success_probability.
+    // The combined model samples phase paths rather than substituting this
+    // scalar loss into the original coherent probability formula.
     double section_phase_coherence_loss_db = 0;
     double carrier_offset_hz = 0;
     // Requested search span. If receiver_workspace_supported is false, live
@@ -66,11 +73,14 @@ struct Estimate {
 // span means that same profile; otherwise supply the independently configured
 // receive bank. receive_key_count scales bank cost, not success probability.
 // raw_bits covers both exact binary drafts and the fixed short dictionary.
+// compute_probability=false returns search/workspace and compute estimates
+// without probability trials; confidence_available then remains false.
 // Details, assumed reference throughput and limitations:
 // docs/simulation-estimates.md.
 Estimate estimate(const transfer::Estimate& transmission,
                   const transfer::Options& options, bool raw_bits,
                   const modem::ChannelConfig& channel,
                   std::span<const modem::Config> receive_profiles = {},
-                  std::size_t receive_key_count = 1);
+                  std::size_t receive_key_count = 1,
+                  bool compute_probability = true);
 }

@@ -322,7 +322,7 @@ struct Controller::Impl {
     void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu,bool coherent_reference=false) {
         if(!link_inputs_valid())confidence=cpu=gpu="Check link inputs";
         const auto target=short_draft()?short_target:long_target;
-        std::ostringstream label;label<<(coherent_reference?"RX reference · ":"RX success · ")<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
+        std::ostringstream label;label<<(coherent_reference?"RX reference · ":"RX estimate · ")<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
         f(UiField::simulation_confidence).text=label.str()+std::move(confidence);
         f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
         f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);

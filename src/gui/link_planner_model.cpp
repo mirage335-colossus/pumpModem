@@ -50,7 +50,7 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // banks, not payload length. This analytical one-symbol estimate allocates
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
-    const auto estimate=simulation::estimate(one,options,true,channel,profiles);
+    const auto estimate=simulation::estimate(one,options,true,channel,profiles,1,false);
     return {estimate.carrier_in_search,estimate.receiver_workspace_supported};
 }
 
@@ -445,6 +445,8 @@ Model build(const Inputs& inputs) {
         result.success_probability=result.confidence_available?receiver.success_probability:0;
         result.phase_coherence_loss_db=receiver.phase_coherence_loss_db;
         result.coherent_reference_only=receiver.coherent_reference_only;
+        result.drift_model_available=receiver.drift_model_available&&result.confidence_available;
+        result.coherent_success_probability=result.confidence_available?receiver.coherent_success_probability:0;
         result.section_phase_coherence_loss_db=receiver.section_phase_coherence_loss_db;
         if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
         if(!receiver.receiver_workspace_supported) {
