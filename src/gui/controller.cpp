@@ -272,7 +272,7 @@ struct Controller::Impl {
         simulation_estimate_text(state,state,state);
     }
     void lpi_estimate_status(const std::string& state) {
-        f(UiField::lpi_estimate).text="LPI energy-detection advisory\n"+state;
+        f(UiField::lpi_estimate).text="LPI relative observation advisory\n"+state;
     }
     void encryption_changed() {
         if(tone())f(UiField::key).selected="none";
@@ -647,8 +647,6 @@ struct Controller::Impl {
             request.options.modem=transmit_config();
             if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
-            if(settings.simulation)request.received_cn0_db_hz=settings.simulation_snr_db+
-                10*std::log10(static_cast<double>(request.options.modem.sample_rate)/2);
             start_worker([request=std::move(request),simulation_settings=settings](Prepared& value,std::stop_token) {
                 value.inspection=std::make_shared<const Inspection>(inspect(request));
                 if(!simulation_settings.simulation)return;

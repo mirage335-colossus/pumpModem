@@ -63,7 +63,7 @@ class StreamCLI(unittest.TestCase):
         self.assertTrue(public['lpi']['hypothetical_encryption'])
         self.assertIn('Encryption is off',public['lpi']['warning'])
         self.assertIn('current timing',public['lpi']['warning'])
-        self.assertEqual(public['lpi']['burst_exposure_basis'],'current_draft_airtime')
+        self.assertEqual(public['lpi']['burst_exposure_basis'],'current_draft_airtime_at_receiver_reference')
         self.assertEqual(public['wire_bits'],3)
         public_strong=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)['lpi']
         self.assertEqual(public_strong['status'],'outside_weak_signal_model')
@@ -89,23 +89,37 @@ class StreamCLI(unittest.TestCase):
             self.assertIsNone(model['warning'])
             self.assertEqual(model['equivalent_wire_symbols'],public['lpi']['equivalent_wire_symbols'])
             self.assertEqual(model['detection_seconds'],public['lpi']['detection_seconds'])
-            self.assertEqual(model['cn0_basis'],'assumed_tx_target')
+            self.assertEqual(model['model'],'relative_weak_signal_radiometer')
+            self.assertEqual(model['cn0_basis'],'receiver_one_symbol_reference')
+            self.assertEqual(model['receiver_reference_symbol_snr_db'],18)
+            self.assertFalse(model['receiver_reference_is_calibrated'])
+            self.assertNotIn('cn0_db_hz',model)
             self.assertFalse(model['safe_traffic_limit'])
             self.assertEqual(model['detection_probability'],.9)
             self.assertEqual(model['false_alarm_probability_per_window'],.01)
-            self.assertTrue(math.isclose(model['detection_seconds'],3257.3126172241587,rel_tol=1e-12))
-            self.assertTrue(math.isclose(model['equivalent_wire_symbols'],19.881058454737296,rel_tol=1e-12))
+            self.assertTrue(math.isclose(model['reference_cn0_db_hz'],-4.144199392957368,rel_tol=1e-12))
+            self.assertTrue(math.isclose(model['detection_seconds'],5509.6971517094125,rel_tol=1e-12))
+            self.assertTrue(math.isclose(model['equivalent_wire_symbols'],33.62852265447639,rel_tol=1e-12))
+            self.assertEqual(model['observation_ratio'],model['equivalent_wire_symbols'])
+            self.assertTrue(math.isclose(model['additional_wire_symbols'],model['observation_ratio']-1,rel_tol=1e-12))
             self.assertTrue(math.isclose(model['burst_exposure_ratio'],value['total_seconds']/model['detection_seconds'],rel_tol=1e-12))
             # Manual keyed transfer automatically selects private Scrambler patterns.
-            manual=json.loads(self.run_pump('analyze-link','--bits','001',*AUDIO,
+            manual=json.loads(self.run_pump('analyze-link','--bits','001',*AUDIO,'--symbol-seconds','2',
                 '--keyfile',key,'--simulation','3dBm -170dB','--trials','10').stdout)
             self.assertEqual(manual['lpi']['status'],'available')
             analysis=json.loads(self.run_pump('analyze-link','--bits','001',*geometry,
                 '--simulation','3dBm -170dB','--trials','10').stdout)
             self.assertEqual(analysis['transmission']['wire_bits'],3)
-            self.assertEqual(analysis['lpi']['cn0_basis'],'simulated_link')
-            self.assertEqual(analysis['lpi']['cn0_db_hz'],-3)
-            self.assertEqual(analysis['lpi']['detection_seconds'],model['detection_seconds'])
+            self.assertEqual(analysis['lpi'],model)
+            # LPI is relative at the one-symbol reference. Actual power, noise,
+            # oscillator and RX search targets still affect link analysis only.
+            for channel in (('--simulation','3dBm -60dB'),('--simulation','50dBm -270dB'),
+                            ('--tx-dbm','20','--attenuation-db','-160','--noise-figure-db','3',
+                             '--oscillator','gpsdo-ocxo','--receive-targets','-3,32')):
+                changed=json.loads(self.run_pump('analyze-link','--bits','001',*geometry,
+                    *channel,'--trials','10').stdout)
+                self.assertEqual(changed['lpi'],model)
+                self.assertNotEqual(changed['link']['cn0_db_hz'],analysis['link']['cn0_db_hz'])
             strong=json.loads(self.run_pump('estimate','--text','e','--keyfile',key,*AUDIO).stdout)
             self.assertEqual(strong['lpi']['status'],'outside_weak_signal_model')
             self.assertIsNone(strong['lpi']['detection_seconds'])

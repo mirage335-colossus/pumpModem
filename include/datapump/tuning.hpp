@@ -18,6 +18,9 @@ std::string_view pattern_mode_name(PatternMode mode);
 std::span<const PatternMode> pattern_modes();
 bool tone_mode(PatternMode mode);
 inline constexpr double default_receive_target_db_hz = 32;
+// Existing one-symbol integration design reference, not a measured admission
+// threshold or a calibrated probability of receiving one bit.
+inline constexpr double pattern_target_symbol_snr_db = 18;
 inline constexpr std::size_t maximum_receive_targets = 16;
 inline constexpr std::size_t maximum_receive_target_text = 512;
 struct ReceiveTargets {

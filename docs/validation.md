@@ -4,6 +4,46 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Relative LPI observation against one receiver bit — 17 September 2026
+
+The advisory now compares total observer bit durations with the receiver's
+one-symbol design reference. Both listeners use the same received C/N0,
+normalized so one sampled symbol has the existing 18 dB Es/N0 planning
+reference. It is explicitly uncalibrated. Simulation/live link power and
+oscillator presets no longer enter the LPI estimator. TX targets affect the
+ratio only through selected waveform geometry. GUI details and CLI JSON
+distinguish total N:1 observation, N-1 additional durations, normalized C/N0,
+and the supplemental current-draft exposure comparison. The encryption-off
+hypothetical warning remains, including for tone and unavailable numbers.
+No waveform, wire format, receiver admission, physical completion or pending
+progress behavior changed; the tuning reference retains its existing value.
+
+Both Release builds succeeded (GCC/FLTK and Clang/Rev). GCC `cli` passed in
+30.84 seconds. The final estimator and eight shared GUI checks passed in
+11.71 seconds: application, inspection, inspection page, layout, contract,
+link boundary, adapter boundary and boundary regression. The seven selected
+Rev checks passed in 1.58 seconds: estimator, application, inspection,
+inspection page, layout, contract and link boundary. An initial fixture for
+equal time-bandwidth products used an explicit decimal duration that rounded
+up one sample; the corrected fixture uses exact spreading geometry. The separate
+sample-rounding regression remains. Fixed numerical references, duration and
+bandwidth scaling, unchanged keyless/keyed ratios, invalid input and numerical
+limits passed. CLI assertions compare identical LPI objects under different
+channel power, noise figure, oscillator and RX search settings.
+
+The remaining 17 non-controller development-contract suites passed in 179.24
+seconds. The isolated controller suite passed in 71.68 seconds, including
+identical LPI summaries and details across every simulation and oscillator
+preset, geometry-dependent TX changes, fixed-geometry target changes,
+encryption/tone transitions and exact 001/1,216-bit draft endpoints. Together
+the 28 selected GCC suites include all 21 development-contract suites.
+`git diff --check` passed.
+
+Native window rendering and physical reception were not tested. This remains
+a relative Gaussian energy-detector model, not a measured reception threshold,
+interference measurement or guaranteed hidden-traffic allowance. See
+[the model and its limitations](lpi-estimates.md).
+
 ## Hypothetical LPI estimates without encryption — 17 September 2026
 
 The advisory now computes the encrypted private-pattern scenario without a

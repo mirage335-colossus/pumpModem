@@ -1,11 +1,20 @@
-# Low-probability-of-intercept exposure estimate
+# Low-probability-of-intercept relative observation estimate
 
-The LPI estimate describes how much on-air observation an **unkeyed energy
-detector** would need to reach a modeled 90% detection probability, with a 1%
-false-alarm probability for one known observation window. Both listeners are
-assumed to receive the same signal power and noise density. The result is an
-advisory comparison, not a safe message length, a decryption estimate or a
-measurement of an adversary's capabilities.
+The LPI estimate compares the on-air observation an **unkeyed energy detector**
+would need with the intended receiver's **one-symbol design reference**. A
+result of `N:1` means N total wire-bit durations for the observer versus one
+for the receiver, or `N - 1` additional durations. The observer's criterion is
+modeled 90% detection with a 1% false-alarm probability for one known window.
+Both listeners have the same signal power and noise density, normalized so one
+receiver symbol has **18 dB Es/N0**, the existing pattern-planning reference.
+This is an uncalibrated design reference, not a measured reception threshold,
+a safe message length or a measurement of an adversary's capabilities.
+
+The comparison is strictly relative. Simulation on/off, channel power, noise
+figure, link attenuation and oscillator presets do not enter it. The reference
+does not mean that only one of N transmitted bits would be accepted: it compares
+observation durations, not a 1-in-N reception success rate. Predicting successful
+admissions requires the receiver's search, coherence and evidence behavior.
 
 Knowing a private waveform lets the intended receiver correlate against it.
 An observer without that waveform can still measure the extra received energy.
@@ -30,8 +39,9 @@ result. Actual public patterns and tones can be easier to detect; these figures
 do not describe their detection performance.
 
 This hypothetical calculation keeps the current sample, chip and symbol timing
-and received C/N0. For a tone, it uses the corresponding private pattern's
-observation band with that timing, not the actual tone's spectrum. It does not
+and uses the same normalized one-symbol reference. For a tone, it uses the
+corresponding private pattern's observation band with that timing, not the
+actual tone's spectrum. It does not
 select the encrypted automatic profile, supply a key, enable Scrambler or DSSS,
 re-encode the draft with authentication, or change a transmission setting.
 Selecting encryption later may change the automatic profile and fixed-interval
@@ -46,21 +56,25 @@ unkeyed observer's knowledge, but neither adds a separate processing-gain
 multiplier to this calculation. Bandwidth and actual symbol duration account
 for spreading once.
 
-Numerical detection times are restricted to an assumed observation-band SNR of
+Numerical detection times are restricted to a normalized observation-band SNR of
 at most **-10 dB**. Stronger signals are reported as outside this weak-signal
 model, without a claimed protection interval. This restriction also keeps the
 time-bandwidth product large enough for the Gaussian approximation below.
 An estimate exceeding the numerical range is unavailable, not infinite
 protection.
 
-The GUI uses the simulation preset's actual received C/N0 while simulation is
-enabled. With simulation off, it explicitly assumes the selected TX design
-target is the received C/N0 at both listeners; a design target is not a measured
-link condition. Short and long draft profiles can have different targets and
-symbol durations. CLI `estimate` and `analyze-link` expose the same advisory
-model in their `lpi` result.
+The selected TX target can affect the ratio by changing the automatic symbol
+geometry. Short and long draft profiles can therefore give different ratios.
+At fixed waveform geometry, TX/RX target labels and simulation/live link
+conditions leave the result unchanged. CLI `estimate` and `analyze-link` expose
+the same model in their `lpi` result: `model` is
+`relative_weak_signal_radiometer`, `cn0_basis` is
+`receiver_one_symbol_reference`, and `receiver_reference_symbol_snr_db` is 18.
+`reference_cn0_db_hz` is derived from that reference, not taken from a channel
+preset or live measurement. `observation_ratio` and `equivalent_wire_symbols`
+both give N; `additional_wire_symbols` gives `max(0, N - 1)`.
 
-## Observation bandwidth and power
+## Observation bandwidth and receiver reference
 
 Let `F` be the internal sample rate and `R` the nominal Rate setting, in hertz.
 The actual chip duration is sample-quantized:
@@ -81,20 +95,24 @@ limiting, sidelobes and spectral weighting can change a real detector's result.
 The model treats all nominal signal power as lying within the chosen band.
 
 `C/N0` is signal power divided by one-sided noise density, expressed in dB-Hz.
-The linear signal-to-noise ratio in the observer's band is
+Normalize both listeners to the existing one-symbol design energy. The linear
+signal-to-noise ratio in the observer's band then follows from geometry:
 
 ```text
-c = 10^(C/N0_dBHz / 10)
-rho = c / B
-in_band_snr_db = C/N0_dBHz - 10 log10(B)
+E_ref = 10^(18 / 10)
+reference_cn0_db_hz = 18 - 10 log10(T_s)
+c_ref = E_ref / T_s
+rho = c_ref / B = E_ref / (B T_s)
+in_band_snr_db = reference_cn0_db_hz - 10 log10(B)
 noise_rise_db = 10 log10(1 + rho)
 ```
 
-The noise-rise value describes the modeled average power increase in that
-band. It does not establish harmless interference to another receiver.
-The simulator's sample SNR uses a different noise bandwidth, `F/2`; converting
-that SNR back to C/N0 requires adding `10 log10(F/2)`. Feeding sample SNR or
-the nominal-band SNR directly into this model would be incorrect.
+The noise-rise value describes the average power increase in that band **at
+the normalized reference**, not measured interference on the actual link.
+It does not establish harmless interference to another receiver. The simulator
+expresses sample SNR over its `F/2` noise bandwidth; that channel SNR and the
+separate whole-draft simulation probability model are not inputs here. The LPI
+noise assumptions remain the same whether simulation is enabled or disabled.
 
 ## Radiometer approximation
 
@@ -111,7 +129,9 @@ The normal approximation therefore gives
 z_fa = 2.3263478740408408    # standard-normal 99th percentile
 z_d  = 1.2815515655446004    # standard-normal 90th percentile
 T_90 = ((z_fa + (1 + rho) * z_d) / rho)^2 / B
-equivalent_symbols = T_90 / T_s
+N = T_90 / T_s
+  = (z_fa + (1 + rho) * z_d)^2 / (B T_s rho^2)
+additional_symbols = max(0, N - 1)
 ```
 
 This is the noise-like random-signal model. A fixed-energy deterministic signal
@@ -122,12 +142,12 @@ transmitted waveform. The Gaussian radiometer analysis and its low-SNR
 approximation are developed in [Tandra's dissertation, chapter 2, equations
 2.5–2.7](https://digicoll.lib.berkeley.edu/record/137682/files/EECS-2009-192.pdf).
 
-At very low SNR the expression simplifies to
-`T_90 ≈ 13.0169383662 / (B * rho^2)`. With received C/N0 held fixed this is
-`13.0169383662 * B / c^2`. Doubling the observation bandwidth approximately
-doubles the required energy-observation time; reducing received power by
-10 dB approximately multiplies that time by 100. These relationships hold
-within this model, without crediting encryption with a reduction in power.
+At very low SNR the relative expression simplifies to
+`N ≈ 13.0169383662 * B * T_s / E_ref^2`. Doubling the observation bandwidth
+or the symbol duration approximately doubles the observation ratio. Increasing
+symbol duration also lowers the normalized received power to keep the same
+one-symbol energy reference. These relationships do not credit encryption with
+a reduction in actual transmitted power.
 
 ## Symbols, whole bursts and examples
 
@@ -138,20 +158,23 @@ dictionary endpoint, and explicit binary input retains exactly its entered
 bits. No new header, padding or symbol is transmitted for this estimate.
 
 The symbol result is fractional because an energy detector can accumulate
-evidence within a modem symbol. It is not a promise that the preceding whole
-number of symbols is undetectable. The modeled 90% detection point is also
-not the first possible detection time.
+evidence within a modem symbol. N is the total observer-to-receiver observation
+ratio; the additional count subtracts the receiver's first duration and is
+clamped at zero. Neither count promises that the preceding whole number of
+symbols is undetectable. The modeled 90% detection point is also not the first
+possible detection time.
 
 The whole-burst exposure ratio is
-`transmission.total_seconds / T_90`. It includes settling, filter tails and
-suppression waveforms as an **equal-power approximation**; those waveforms
+`transmission.total_seconds / T_90`, at the same normalized reference. It
+includes settling, filter tails and suppression waveforms as an
+**equal-power approximation**; those waveforms
 also radiate energy even though they carry no additional message bits. Filter
 transients do not actually have constant power, so this ratio is approximate.
 Idle time and the receiver's post-transmission absent-symbol observation are
 excluded. A ratio of one means the modeled exposure duration equals `T_90`;
-the ratio itself is not a detection probability. Repeated traffic can provide
-additional evidence when the observer can identify and combine its on-air
-windows.
+the ratio itself is not a detection probability or an actual link-budget
+estimate. Repeated traffic can provide additional evidence when the observer
+can identify and combine its on-air windows.
 
 When encryption is off, this ratio compares the **current draft's actual
 duration** with the hypothetical private-pattern detection time. It does not
@@ -159,16 +182,17 @@ include any extra intervals or different timing that enabling encryption might
 require. Tone drafts keep their actual tone airtime, including their absence
 of shaped pulse tails; only the detection model assumes the private waveform.
 
-These examples assume a selected key, an automatic shaped pattern and the
-same received C/N0 at both listeners. Rate and C/N0 are separate quantities;
-the third row deliberately has a design target different from its actual
-received C/N0.
+These examples use automatic shaped patterns and the normalized 18 dB
+one-symbol reference at both listeners. The TX target selects symbol geometry;
+reference C/N0 is then calculated from the actual sampled duration. They give
+the same numbers with simulation enabled or disabled, regardless of its preset.
+With no key, the same numbers carry the hypothetical-encryption warning.
 
-| Nominal Rate | TX target, dB-Hz | Received C/N0, dB-Hz | Assumed B | Actual seconds/symbol | Modeled T_90 | Equivalent wire symbols |
+| Nominal Rate | TX target, dB-Hz | Reference C/N0, dB-Hz | Assumed B | Actual seconds/symbol | Observer : receiver | Additional bit durations |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 100 Hz | -3 | -3 | 62.5 Hz | 163.84 | 3,257.31 s | 19.88 |
-| 100 Hz | -6 | -6 | 62.5 Hz | 327.68 | 12,930.88 s | 39.46 |
-| 1,200 Hz | -10 | -3 | 750 Hz | 630.9575 | 38,884.48 s | 61.63 |
+| 100 Hz | -3 | -4.1442 | 62.5 Hz | 163.84 | 33.63 : 1 | 32.63 |
+| 100 Hz | -6 | -7.1545 | 62.5 Hz | 327.68 | 67.11 : 1 | 66.11 |
+| 1,200 Hz | -10 | -10.000001 | 750 Hz | 630.9575 | 1,547.43 : 1 | 1,546.43 |
 
 All three use a 6,000 Hz internal clock, with 120 samples/chip at 100 Hz
 and 10 samples/chip at 1,200 Hz. Symbol durations use the actual sample count,
@@ -177,12 +201,11 @@ rounding and do not assert that the intended receiver can sustain the required
 coherence or acquire the waveform.
 
 The GUI initially selects no key, so its default estimate is explicitly
-hypothetical. Assuming the default short target of 32 dB-Hz at the default
-3.6 kHz Rate gives an observer
-bandwidth of 2,250 Hz and about -1.52 dB in-band SNR. That falls outside the
-weak-signal model, with or without a key. Using a weak received C/N0 permits a
-numerical hypothetical estimate without enabling encryption. Encryption alone
-must not turn the strong-signal case into a large apparent LPI gain.
+hypothetical. A short profile can put the normalized in-band SNR outside the
+weak-signal model, with or without a key. Changing simulated attenuation cannot
+make that profile eligible: the relative reference does not use the channel's
+power. A longer symbol or wider observation band can lower its normalized SNR.
+Encryption alone must not create an apparent processing-gain multiplier.
 
 ## What this model cannot establish
 

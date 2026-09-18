@@ -19,11 +19,9 @@ std::string compression_description(const StreamLayout& layout) {
     return "Off (fixed 9-bit validity and byte cells)";
 }
 std::string lpi_symbols(double value) {
-    if(value<1)return "<1 symbol";
     std::ostringstream output;
-    if(value<1e9)output<<std::fixed<<std::setprecision(0)<<std::ceil(value);
-    else output<<std::setprecision(3)<<std::ceil(value);
-    return "~"+output.str()+" equivalent wire bits/symbols";
+    output<<std::setprecision(3)<<value;
+    return "~"+output.str();
 }
 std::string lpi_duration(double seconds) {
     if(seconds>=86400)return number(seconds/86400)+" days";
@@ -31,16 +29,15 @@ std::string lpi_duration(double seconds) {
     if(seconds>=60)return number(seconds/60)+" min";
     return number(seconds)+" s";
 }
-void lpi_presentation(Inspection& result,const InspectionRequest& request,const transfer::Options& options) {
-    result.lpi_estimate=lpi::estimate(result.estimate,options,request.received_cn0_db_hz.value_or(request.target_snr));
+void lpi_presentation(Inspection& result,const transfer::Options& options) {
+    result.lpi_estimate=lpi::estimate(result.estimate,options);
     const auto& model=result.lpi_estimate;
-    const auto basis=request.received_cn0_db_hz?
-        (request.simulation?"Simulated C/N0":"Supplied received C/N0"):"Assumed C/N0 (TX target; not measured)";
-    const auto cn0=std::string(basis)+": "+number(model.cn0_db_hz)+" dB-Hz";
+    const auto reference="RX 1 bit at "+number(lpi::receiver_reference_symbol_snr_db)+" dB Es/N0 design reference";
+    const auto cn0=number(model.reference_cn0_db_hz)+" dB-Hz (normalized to RX 1 bit; not measured link power)";
     std::string threshold;
     switch(model.status) {
     case lpi::Status::available:
-        threshold=lpi_symbols(model.equivalent_symbols)+" / ~"+lpi_duration(model.detection_seconds);break;
+        threshold="Observer "+lpi_symbols(model.equivalent_symbols)+" bit durations : RX 1 bit";break;
     case lpi::Status::outside_weak_signal_model:
         threshold="Unavailable: in-band SNR above -10 dB";break;
     case lpi::Status::numeric_limit:
@@ -48,22 +45,24 @@ void lpi_presentation(Inspection& result,const InspectionRequest& request,const 
     }
     const std::string warning="Warning: encryption off; hypothetical only";
     const auto scenario=model.hypothetical_encryption?
-        warning+"; assumes encrypted private patterns at current timing and C/N0":"Encrypted private patterns";
-    result.lpi_summary="LPI energy detection (90% detection / 1% false alarm): "+threshold+"\n"+
-        (model.hypothetical_encryption?warning+" | "+cn0+"; no hidden-traffic guarantee.":
-            cn0+" | Ideal equal-observation model; no hidden-traffic guarantee.");
+        warning+"; assumes encrypted private patterns at current timing and RX one-bit reference":"Encrypted private patterns";
+    result.lpi_summary="LPI relative (90% detection / 1% false alarm): "+threshold+"\n"+
+        (model.hypothetical_encryption?warning+" | ":"")+reference+"; no hidden-traffic guarantee.";
     if(model.hypothetical_encryption)
-        result.lpi_description=warning+". Figures assume encrypted private patterns with the current sample, chip and symbol timing and received C/N0. The actual public pattern or tone can be easier to detect; these figures do not describe it. The draft exposure uses only the current draft's duration, without selecting an encrypted automatic profile or adding interval authentication. No key, waveform or transmission setting is changed. ";
-    result.lpi_description+="An unkeyed energy detector with the receiver's received C/N0 and observation opportunity is assumed to know the occupied band, on-air window and stationary Gaussian noise power. The estimate targets 90% detection with 1% false alarm per known window; unknown searches, other detectors and changing noise are not modeled. Numerical times apply only at in-band SNR <= -10 dB. Counts are equivalent wire bits (one symbol each), not source bits or a safe traffic quota. Detection can occur before a complete symbol, and repeated traffic accumulates exposure. Encryption does not reduce transmitted power or physical interference. There is no guaranteed hidden traffic.";
-    result.fields.insert(result.fields.end(),{{"LPI scenario",scenario},{"LPI detection estimate",threshold},
-        {"LPI C/N0 basis",cn0},
+        result.lpi_description=warning+". Figures assume encrypted private patterns with the current sample, chip and symbol timing at the normalized receiver reference. The actual public pattern or tone can be easier to detect; these figures do not describe it. The draft exposure uses only the current draft's duration, without selecting an encrypted automatic profile or adding interval authentication. No key, waveform or transmission setting is changed. ";
+    result.lpi_description+="This relative model normalizes received power so one receiver symbol has "+number(lpi::receiver_reference_symbol_snr_db)+" dB Es/N0, the existing pattern design reference. It is not a calibrated reception threshold, guaranteed reception, or one accepted bit out of N transmitted bits. An unkeyed energy detector has the same received C/N0 and observation opportunity and is assumed to know the occupied band, on-air window and stationary Gaussian noise power. The ratio compares its total on-air observation with the receiver's one bit duration; additional durations subtract that first duration. The estimate targets 90% detection with 1% false alarm per known window; unknown searches, other detectors and changing noise are not modeled. Simulation on/off, simulated power and oscillator presets do not enter this comparison. TX targets affect it only through changed symbol geometry. Numerical times apply only at normalized in-band SNR <= -10 dB. Counts are equivalent wire bits (one symbol each), not source bits or a safe traffic quota; repeated traffic accumulates exposure. Encryption does not reduce transmitted power or physical interference. There is no guaranteed hidden traffic.";
+    result.fields.insert(result.fields.end(),{{"LPI scenario",scenario},{"LPI observer : receiver",threshold},
+        {"LPI receiver reference",reference+"; not a calibrated reception threshold"},
+        {"LPI reference C/N0",cn0},
         {"LPI observation band",number(model.observation_bandwidth_hz)+" Hz (modeled occupied band)"},
-        {"LPI in-band SNR",number(model.in_band_snr_db)+" dB"},
-        {"LPI noise rise",number(model.noise_rise_db)+" dB (added received power)"},
+        {"LPI reference in-band SNR",number(model.in_band_snr_db)+" dB at RX one-bit reference"},
+        {"LPI reference noise rise",number(model.noise_rise_db)+" dB at RX one-bit reference"},
         {"LPI detection criterion","90% detection / 1% false alarm per known observation window"},
+        {"LPI additional bit durations",model.status==lpi::Status::available?lpi_symbols(model.additional_symbols)+" beyond the receiver's first bit duration":"Unavailable"},
+        {"LPI reference observation time",model.status==lpi::Status::available?"Observer ~"+lpi_duration(model.detection_seconds)+" : RX "+lpi_duration(model.symbol_seconds):"Unavailable"},
         {"LPI draft exposure",number(result.estimate.total_seconds)+" s including settling, pulse tails and suppression (equal-power approximation)"+
             (model.hypothetical_encryption?"; current draft duration under hypothetical encrypted model":"")+
-            (model.status==lpi::Status::available?" / "+number(model.burst_exposure_ratio)+" times modeled detection duration; not a probability or safe quota":"; detection-duration comparison unavailable")}});
+            (model.status==lpi::Status::available?" / "+number(model.burst_exposure_ratio)+" times normalized observer duration; not an actual link budget, probability or safe quota":"; detection-duration comparison unavailable")}});
 }
 }
 
@@ -144,7 +143,7 @@ Inspection inspect(const InspectionRequest& request) {
             {"Transmitted bits",count(transmitted)}});
     }
     result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
-    lpi_presentation(result,request,options);
+    lpi_presentation(result,options);
     result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
         {"Source encoding",source_encoding},
         {"Fixed interval coding",raw?"Raw bits have no byte codec.":"Fill the fixed data area, append the keyed HMAC when enabled, then add systematic Reed-Solomon parity to complete 128 coded bytes.",raw?InspectionState::off:InspectionState::active},

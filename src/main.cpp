@@ -48,7 +48,7 @@ const char* usage="Data Pump " DATAPUMP_VERSION R"HELP( — civilian audio text 
 Usage: pump COMMAND [OPTIONS]
   simulate     Free-running sampled channel and blind receiver acquisition
   listen       Continuous live receiver (or noise/loopback with --simulation)
-  estimate     Exact airtime and advisory LPI model (assumes TX target C/N0)
+  estimate     Exact airtime and relative LPI model (one-bit RX reference)
   analyze-link Bounded statistical link analysis as JSON; no PCM or decoder
   tx           Encode text/file to WAV (--output) or live audio (--device)
   rx           Decode a WAV (--input) or record live audio (--device --seconds)
@@ -537,24 +537,25 @@ Bytes status_bits(const Args& a,const std::optional<Crypto>& k,std::uint64_t tim
 void json_number(long double value) {
     if(std::isfinite(value))std::cout<<value;else std::cout<<"null";
 }
-void report_lpi(const transfer::Estimate& transmission,const transfer::Options& options,
-                double cn0_db_hz,bool simulated) {
-    const auto model=lpi::estimate(transmission,options,cn0_db_hz);
+void report_lpi(const transfer::Estimate& transmission,const transfer::Options& options) {
+    const auto model=lpi::estimate(transmission,options);
     const bool available=model.status==lpi::Status::available;
     const char* status=available?"available":
         model.status==lpi::Status::outside_weak_signal_model?"outside_weak_signal_model":"numeric_limit";
-    std::cout<<"{\"model\":\"ideal_weak_signal_radiometer\",\"status\":\""<<status
-        <<"\",\"cn0_basis\":\""<<(simulated?"simulated_link":"assumed_tx_target")
-        <<"\",\"hypothetical_encryption\":"<<(model.hypothetical_encryption?"true":"false")
+    std::cout<<"{\"model\":\"relative_weak_signal_radiometer\",\"status\":\""<<status
+        <<"\",\"cn0_basis\":\"receiver_one_symbol_reference\""
+        <<",\"hypothetical_encryption\":"<<(model.hypothetical_encryption?"true":"false")
         <<",\"warning\":";
     if(model.hypothetical_encryption)
         std::cout<<"\"Encryption is off: hypothetical private patterns at the current timing; actual public or tone transmission may be detected sooner.\"";
     else std::cout<<"null";
-    std::cout<<",\"burst_exposure_basis\":\"current_draft_airtime\""
+    std::cout<<",\"burst_exposure_basis\":\"current_draft_airtime_at_receiver_reference\""
         <<",\"equal_received_cn0\":true,\"known_band_window_and_noise\":true"
+        <<",\"receiver_reference_symbol_snr_db\":"<<lpi::receiver_reference_symbol_snr_db
+        <<",\"receiver_reference_is_calibrated\":false"
         <<",\"safe_traffic_limit\":false,\"detection_probability\":"<<lpi::detection_probability
         <<",\"false_alarm_probability_per_window\":"<<lpi::false_alarm_probability
-        <<",\"cn0_db_hz\":";json_number(model.cn0_db_hz);
+        <<",\"reference_cn0_db_hz\":";json_number(model.reference_cn0_db_hz);
     std::cout<<",\"observation_bandwidth_hz\":";json_number(model.observation_bandwidth_hz);
     std::cout<<",\"in_band_snr_db\":";json_number(model.in_band_snr_db);
     std::cout<<",\"noise_rise_db\":";json_number(model.noise_rise_db);
@@ -563,6 +564,10 @@ void report_lpi(const transfer::Estimate& transmission,const transfer::Options& 
     if(available)json_number(model.detection_seconds);else std::cout<<"null";
     std::cout<<",\"equivalent_wire_symbols\":";
     if(available)json_number(model.equivalent_symbols);else std::cout<<"null";
+    std::cout<<",\"observation_ratio\":";
+    if(available)json_number(model.equivalent_symbols);else std::cout<<"null";
+    std::cout<<",\"additional_wire_symbols\":";
+    if(available)json_number(model.additional_symbols);else std::cout<<"null";
     std::cout<<",\"burst_exposure_ratio\":";
     if(available)json_number(model.burst_exposure_ratio);else std::cout<<"null";
     std::cout<<'}';
@@ -695,7 +700,7 @@ void analyze_link(const Args& a,transfer::Options options) {
     json_number(current.cpu_seconds);std::cout<<",\"gpu_seconds\":";json_number(current.gpu_seconds);
     std::cout<<",\"tracking_seconds\":";json_number(current.tracking_seconds);
     std::cout<<",\"tracking_symbol_windows\":";json_number(current.tracking_symbol_windows);
-    std::cout<<"},\"lpi\":";report_lpi(transmission,options,link.snr_db_hz,true);
+    std::cout<<"},\"lpi\":";report_lpi(transmission,options);
     std::cout<<",\"reference_assumptions\":{\"search_hypotheses\":";json_number(experiment.search_hypotheses);
     std::cout<<",\"false_alarm_probability\":";json_number(experiment.false_alarm_probability);
     std::cout<<",\"noise_pair_union_bound\":";
@@ -881,7 +886,7 @@ int main(int argc,char** argv) {
                     <<",\"symbol_seconds\":"<<modem::symbol_seconds(c)
                     <<",\"target_supported\":"<<(plan.target_supported?"true":"false");
             }
-            std::cout<<",\"lpi\":";report_lpi(result,settings,a.number("target-snr",32),false);
+            std::cout<<",\"lpi\":";report_lpi(result,settings);
             std::cout<<"}\n";
             return 0;
         }

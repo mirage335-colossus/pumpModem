@@ -67,31 +67,40 @@ the draft and exact wire format, and follows the Simulation dropdown's busy
 lock. Other modem edits retain the choice; invalid or stale choices do not
 reconfigure a running or closed session.
 
-The persistent **LPI energy detection** advisory below the oscillator shows the
-modeled observation duration and equivalent wire bits/symbols for an unkeyed
-energy detector at **90% detection / 1% false alarm per known window**. Keyed
+The persistent **LPI relative observation** advisory below the oscillator shows
+the unkeyed energy detector's total observation relative to the receiver's
+one-bit design reference, at **90% detection / 1% false alarm per known window**.
+Both listeners are normalized to **18 dB Es/N0 for one receiver symbol**,
+the existing uncalibrated pattern-planning reference. A ratio of N:1 means N
+total observer bit durations versus one receiver duration; additional durations
+are `max(0, N - 1)`. This does not mean one accepted bit out of N transmissions
+and does not establish a calibrated reception threshold. Keyed
 pattern transmission enables the private pattern. With encryption off, including
 tone experiments, the same advisory assumes encrypted private patterns at the
-current sample, chip and symbol timing and C/N0. Its second line starts with
+current sample, chip and symbol timing at that normalized reference. Its second
+line starts with
 **Warning: encryption off; hypothetical only**, including when numerical results
 are unavailable. Actual public patterns and tones can be easier to detect and
 are not described by these figures. No key or waveform setting is changed.
-Numerical estimates apply only at in-band SNR of
--10 dB or lower. The observation model assumes the receiver's C/N0, a known band
-and on-air window, and stationary Gaussian noise of known power. Simulation uses
-its actual channel C/N0. With Simulation off, the active short/long draft TX
-target is explicitly labelled **Assumed C/N0 (TX target; not measured)**.
-Local RX target choices do not change the observer model.
+Numerical estimates apply only at normalized in-band SNR of -10 dB or lower.
+The model assumes equal C/N0 for both listeners, a known band and on-air window,
+and stationary Gaussian noise of known power. Reference C/N0 is derived as
+`18 - 10 log10(symbol_seconds)` dB-Hz. Simulation on/off, channel power,
+attenuation, noise figure and oscillator presets do not enter the comparison.
+TX targets affect it only when they change chip or symbol geometry; local RX
+target choices do not change it.
 
 Flow and Transmission inspection share the advisory and its assumptions.
-Transmission fields show the observation bandwidth, in-band SNR, noise rise and
-full draft airtime relative to the modeled detection duration, including settling,
-pulse tails and suppression. This exposure ratio is neither a probability nor a
-safe traffic quota. Hypothetical exposure uses the current draft's duration; it
-does not select an encrypted automatic profile or re-encode for authentication.
+Transmission fields show the receiver reference, observation bandwidth,
+reference in-band SNR and noise rise, total and additional observer bit durations,
+and full draft airtime relative to the normalized detection duration, including
+settling, pulse tails and suppression. This exposure ratio is neither an actual
+link-budget estimate, a probability nor a safe traffic quota. Hypothetical
+exposure uses the current draft's duration; it does not select an encrypted
+automatic profile or re-encode for authentication.
 The scenario is also explicit in inspection fields and model details.
-Counts below a symbol say **<1 symbol**: an energy detector
-can detect within a modem symbol. Repeated traffic accumulates exposure, encryption
+Ratios retain fractional durations because an energy detector can accumulate
+evidence within a modem symbol. Repeated traffic accumulates exposure, encryption
 does not reduce power or interference, and there is no guaranteed hidden traffic.
 Invalid drafts/settings and recalculation withdraw stale advisory numbers. See
 [the LPI model](lpi-estimates.md) for its equations and limitations.

@@ -23,7 +23,6 @@ constexpr std::array<std::string_view,19> names{
     "tone-1","tone-2","tone-3","tone-4","tone-8","tone-32","tone-128","tone-1024","tone-4096","tone-16384"};
 constexpr std::array<unsigned,19> lengths{0,0,0,3,4,6,8,12,16,1,2,3,4,8,32,128,1024,4096,16384};
 constexpr std::array<unsigned,11> automatic_lengths{16,32,64,128,256,512,1024,2048,4096,8192,16384};
-constexpr double pattern_target_symbol_snr_db=18;
 unsigned minimum_pattern_chips(const modem::Config& config,double target_snr_db_hz,bool tone) {
     // A high C/N0 is only a fast-link target relative to the selected band.
     // Preserve the previous weak-signal and tone plans. Shorter patterns need

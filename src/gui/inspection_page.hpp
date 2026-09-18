@@ -204,7 +204,7 @@ inline Page build(const Inspection* model,bool flow,float width,std::size_t firs
     paragraph(root,flow?"Configured modem flow":"Proposed transmission",22,Tone::text,true,8);
     if(!model) {paragraph(root,std::move(pending),14);return page;}
     paragraph(root,model->title,14,Tone::accent,true,6);paragraph(root,model->summary);
-    note(root,"LPI energy-detection advisory",model->lpi_summary+"\n"+model->lpi_description);
+    note(root,"LPI relative observation advisory",model->lpi_summary+"\n"+model->lpi_description);
     if(flow) {
         for(const auto& lane:model->lanes)steps(root,lane);
         if(!model->constellations.empty()&&model->pattern_space&&root.width>=800) {

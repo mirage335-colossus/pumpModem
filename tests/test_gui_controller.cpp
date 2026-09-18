@@ -158,14 +158,28 @@ void lpi_estimate_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     const auto text=[&] {return controller.field(F::lpi_estimate).text;};
-    controller.edit(F::message,"e");controller.select(F::simulation,"3dBm -170dB");prepare(controller);
+    const auto same_advisory=[&](const Inspection& expected) {
+        const auto actual=controller.inspection();
+        check(actual&&actual->lpi_summary==expected.lpi_summary&&actual->lpi_description==expected.lpi_description&&
+              text()==expected.lpi_summary,"Link or oscillator settings changed the relative LPI advisory");
+        for(const auto& item:expected.fields)if(item.name.starts_with("LPI ")) {
+            const auto found=std::find_if(actual->fields.begin(),actual->fields.end(),[&](const auto& field) {
+                return field.name==item.name;
+            });
+            check(found!=actual->fields.end()&&found->value==item.value,
+                  "Link or oscillator settings changed relative LPI inspection details");
+        }
+    };
+    controller.edit(F::message,"e");controller.edit(F::snr,"0");
+    controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
           text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
-          text().find("Simulated C/N0")!=std::string::npos&&
+          text().find("bit durations : RX 1 bit")!=std::string::npos&&
+          text().find("18 dB Es/N0 design reference")!=std::string::npos&&
           controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
-          "Unkeyed GUI must show a warned hypothetical estimate while preserving its public waveform and exact short endpoint");
+          "Unkeyed GUI must show a warned relative estimate while preserving its public waveform and exact short endpoint");
     struct TemporaryKeyring {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
             ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -182,58 +196,77 @@ void lpi_estimate_controls() {
     }
     check(controller.settings().transfer.key.has_value()&&controller.estimate().has_value(),"LPI fixture keyfile failed to load");
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
-    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          !controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos&&
-          std::abs(controller.inspection()->lpi_estimate.cn0_db_hz+3)<1e-10&&
-          text()==controller.inspection()->lpi_summary&&text().find("no hidden-traffic guarantee")!=std::string::npos,
-          "Private GUI estimate must use the actual weak simulated channel and shared inspection model");
-    const auto detection_seconds=controller.inspection()->lpi_estimate.detection_seconds;
-    controller.edit(F::snr,"0");
+    const auto reference=controller.inspection();
+    check(reference->lpi_estimate.status==lpi::Status::available&&
+          !reference->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos&&
+          std::abs(reference->lpi_estimate.reference_cn0_db_hz-
+              (18-10*std::log10(reference->lpi_estimate.symbol_seconds)))<1e-10&&
+          text()==reference->lpi_summary&&text().find("no hidden-traffic guarantee")!=std::string::npos,
+          "Private GUI estimate must use the one-bit receiver reference and shared inspection model");
+    for(const auto& preset:tuning::simulation_presets()) {
+        controller.select(F::simulation,std::string(preset.name));prepare(controller);
+        check(controller.settings().simulation==preset.enabled&&
+              controller.estimate()->waveform_samples==reference->estimate.waveform_samples,
+              "Simulation selection changed the reference waveform geometry");
+        same_advisory(*reference);
+    }
+    for(const auto& preset:tuning::oscillator_presets()) {
+        controller.select(F::simulation_oscillator,std::string(preset.id));prepare(controller);
+        same_advisory(*reference);
+    }
+    controller.edit(F::snr,"-3");
     check(text().ends_with("Calculating..."),"TX plan change left stale LPI numbers visible");
     prepare(controller);
-    check(std::abs(controller.inspection()->lpi_estimate.cn0_db_hz+3)<1e-10&&
-          controller.inspection()->lpi_estimate.detection_seconds==detection_seconds,
-          "TX target changed simulated received power or energy-detector duration");
-    const auto advisory=text();
+    check(controller.inspection()->lpi_estimate.symbol_seconds>reference->lpi_estimate.symbol_seconds&&
+          controller.inspection()->lpi_estimate.equivalent_symbols>reference->lpi_estimate.equivalent_symbols,
+          "A longer automatic symbol failed to improve the relative observer-to-receiver ratio");
+    controller.edit(F::snr,"0");prepare(controller);same_advisory(*reference);
     controller.edit(F::short_bits,"001");prepare(controller);
-    check(controller.estimate()->wire_bits==3&&text()==advisory,
-          "Exact three-bit draft changed short-symbol advisory or wire endpoint");
+    check(controller.estimate()->wire_bits==3,"Exact three-bit draft changed the wire endpoint");
+    same_advisory(*reference);
     controller.edit(F::receive_snr,"-100, 55");
     const auto rx_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
     while((controller.settings().transfer.receive_targets_db_hz!=std::vector<double>{-100,55}||!controller.estimate())&&
           std::chrono::steady_clock::now()<rx_deadline) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
-    check(controller.estimate()&&text()==advisory,"Independent local RX targets changed the LPI observer estimate");
+    check(controller.estimate().has_value(),"RX target edits did not prepare an estimate");
+    same_advisory(*reference);
     controller.edit(F::short_bits,"001x");
     check(text().ends_with("Unavailable"),"Invalid raw draft retained the previous LPI number");
     controller.edit(F::message,"e");controller.edit(F::bandwidth,"invalid");
     check(text().ends_with("Invalid settings"),"Invalid modem settings retained the previous LPI number");
     controller.edit(F::bandwidth,"3.6 kHz");
     controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));prepare(controller);
-    check(!controller.settings().simulation&&controller.inspection()->lpi_estimate.cn0_db_hz==0&&
-          text().find("Assumed C/N0 (TX target; not measured): 0 dB-Hz")!=std::string::npos,
-          "Simulation off must label the active TX target as an assumption, not measured receive power");
-    controller.edit(F::long_snr,"10");controller.edit(F::message,std::string(17,'e'));prepare(controller);
-    check(controller.inspection()->lpi_estimate.cn0_db_hz==10&&controller.estimate()->wire_bits==1216,
-          "Long draft failed to select its own assumed C/N0 while retaining fixed interval geometry");
+    check(!controller.settings().simulation,"Simulation-off selection did not reach settings");
+    same_advisory(*reference);
+    controller.edit(F::long_snr,"0");controller.edit(F::message,std::string(17,'e'));prepare(controller);
+    check(controller.estimate()->wire_bits==1216&&text()==reference->lpi_summary&&
+          controller.inspection()->lpi_estimate.burst_exposure_ratio>reference->lpi_estimate.burst_exposure_ratio,
+          "Fixed-interval draft must change exposure but not the same-geometry receiver-one-bit ratio");
+    controller.edit(F::long_snr,"10");prepare(controller);
+    check(controller.estimate()->wire_bits==1216&&
+          controller.inspection()->lpi_estimate.equivalent_symbols<reference->lpi_estimate.equivalent_symbols,
+          "Long draft must retain fixed interval bits and use its selected symbol geometry for the relative estimate");
+    const auto long_reference=controller.inspection();
     controller.select(F::simulation,"3dBm -120dB");prepare(controller);
+    same_advisory(*long_reference);
+    controller.edit(F::long_snr,"55");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           text().find("Unavailable: in-band SNR above -10 dB")!=std::string::npos,
-          "Strong simulated signals must withdraw unsupported detection-time estimates");
+          "Short symbol geometry outside the normalized weak-signal model must withdraw unsupported numbers");
     controller.select(F::key,"none");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
           text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
           !controller.settings().transfer.key,
-          "Turning encryption off must restore the hypothetical warning even with unavailable strong-signal numbers");
-    controller.select(F::simulation,"3dBm -170dB");prepare(controller);
+          "Turning encryption off must restore the hypothetical warning even outside the relative weak-signal model");
+    controller.edit(F::long_snr,"0");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
           text().find("Warning: encryption off; hypothetical only")!=std::string::npos,
-          "Weak public experiments must retain numerical estimates after encryption is turned off");
+          "Public experiments must retain numerical relative estimates after encryption is turned off");
     controller.select(F::key,"key:LPI estimate");prepare(controller);
-    check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&
-          text().find("hypothetical")==std::string::npos,
+    check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos,
           "Restoring encryption must clear the hypothetical warning");
     controller.edit(F::short_bits,"001");controller.edit(F::carrier,"2.7 kHz");
     controller.select(F::pattern,"auto-tone");prepare(controller);
@@ -244,6 +277,12 @@ void lpi_estimate_controls() {
           controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
           "Tone selection must restore the hypothetical warning without enabling encryption or changing exact bits");
+    controller.select(F::pattern,"pattern-16");prepare(controller);
+    const auto fixed_geometry=controller.inspection();
+    controller.edit(F::snr,"55");prepare(controller);
+    check(controller.estimate()->waveform_samples==fixed_geometry->estimate.waveform_samples,
+          "Manual pattern fixture did not retain identical symbol geometry");
+    same_advisory(*fixed_geometry);
 }
 void revised_reception_ingestion() {
     const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {

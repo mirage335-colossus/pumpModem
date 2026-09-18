@@ -102,10 +102,16 @@ void static_pattern_binding() {
 void lpi_advisory() {
     gui::InspectionRequest request;request.message.data=Bytes{'e'};request.target_snr=0;
     request.options.modem=tuning::resolve(3600,0,tuning::PatternMode::auto_pattern,false).config;
+    const auto same_advisory=[](const gui::Inspection& actual,const gui::Inspection& expected) {
+        check(actual.lpi_summary==expected.lpi_summary&&actual.lpi_description==expected.lpi_description,
+              "Non-geometric settings changed relative LPI summary or explanation");
+        for(const auto& item:expected.fields)if(item.name.starts_with("LPI "))
+            check(field(actual,item.name)==item.value,"Non-geometric settings changed relative LPI detail");
+    };
     const auto public_pattern=gui::inspect(request);
     check(public_pattern.lpi_estimate.status==lpi::Status::available&&public_pattern.lpi_estimate.hypothetical_encryption&&
           public_pattern.lpi_summary.find("\nWarning: encryption off; hypothetical only")!=std::string::npos&&
-          field(public_pattern,"LPI scenario").find("current timing and C/N0")!=std::string::npos&&
+          field(public_pattern,"LPI scenario").find("current timing and RX one-bit reference")!=std::string::npos&&
           public_pattern.lpi_description.find("actual public pattern or tone can be easier to detect")!=std::string::npos&&
           public_pattern.lpi_description.find("No key, waveform or transmission setting is changed")!=std::string::npos&&
           field(public_pattern,"Data encryption")=="Off"&&!request.options.key&&
@@ -119,60 +125,64 @@ void lpi_advisory() {
           private_pattern.lpi_summary.find("hypothetical")==std::string::npos,
           "Key selection must retain the same fixed-timing model and remove the hypothetical warning");
     request.options.modem.scramble=true;request.options.modem.dsss=true;
-    const auto assumed=gui::inspect(request);
-    check(assumed.lpi_estimate.status==lpi::Status::available&&
-          field(assumed,"LPI C/N0 basis")=="Assumed C/N0 (TX target; not measured): 0 dB-Hz"&&
-          assumed.lpi_summary.find("90% detection / 1% false alarm")!=std::string::npos&&
-          assumed.lpi_summary.find("wire bits/symbols")!=std::string::npos&&
-          assumed.estimate.wire_bits==3&&assumed.estimate.waveform_samples==public_pattern.estimate.waveform_samples,
-          "Private LPI advisory must qualify assumed C/N0 and preserve exact short wire/airtime");
-    check(field(assumed,"LPI draft exposure").find("including settling, pulse tails and suppression")!=std::string::npos&&
-          std::abs(assumed.lpi_estimate.burst_exposure_ratio-
-              assumed.estimate.total_seconds/assumed.lpi_estimate.detection_seconds)<1e-12&&
-          assumed.lpi_description.find("repeated traffic accumulates")!=std::string::npos&&
-          assumed.lpi_description.find("Encryption does not reduce transmitted power or physical interference")!=std::string::npos,
-          "LPI exposure must account for full airtime and explain accumulation and unchanged interference");
-    request.received_cn0_db_hz=-3;request.simulation=true;
-    const auto simulated=gui::inspect(request);
-    check(simulated.lpi_estimate.cn0_db_hz==-3&&field(simulated,"LPI C/N0 basis")=="Simulated C/N0: -3 dB-Hz"&&
-          simulated.lpi_estimate.detection_seconds>assumed.lpi_estimate.detection_seconds,
-          "Supplied simulation C/N0 must replace the TX target assumption");
+    const auto reference=gui::inspect(request);
+    const auto& model=reference.lpi_estimate;
+    check(model.status==lpi::Status::available&&
+          std::abs(model.reference_cn0_db_hz-(18-10*std::log10(model.symbol_seconds)))<1e-10&&
+          field(reference,"LPI receiver reference").find("18 dB Es/N0 design reference")!=std::string::npos&&
+          field(reference,"LPI reference C/N0").find("normalized to RX 1 bit; not measured link power")!=std::string::npos&&
+          reference.lpi_summary.find("90% detection / 1% false alarm")!=std::string::npos&&
+          reference.lpi_summary.find("bit durations : RX 1 bit")!=std::string::npos&&
+          reference.estimate.wire_bits==3&&reference.estimate.waveform_samples==public_pattern.estimate.waveform_samples,
+          "Private LPI advisory must show the one-bit relative reference and preserve exact short wire/airtime");
+    check(field(reference,"LPI draft exposure").find("including settling, pulse tails and suppression")!=std::string::npos&&
+          field(reference,"LPI draft exposure").find("not an actual link budget")!=std::string::npos&&
+          std::abs(model.burst_exposure_ratio-reference.estimate.total_seconds/model.detection_seconds)<1e-12&&
+          std::abs(model.additional_symbols-(model.equivalent_symbols-1))<1e-12&&
+          field(reference,"LPI additional bit durations").find("beyond the receiver's first bit duration")!=std::string::npos&&
+          field(reference,"LPI reference observation time").find(" : RX ")!=std::string::npos&&
+          reference.lpi_description.find("not a calibrated reception threshold")!=std::string::npos&&
+          reference.lpi_description.find("one accepted bit out of N")!=std::string::npos&&
+          reference.lpi_description.find("repeated traffic accumulates")!=std::string::npos&&
+          reference.lpi_description.find("Encryption does not reduce transmitted power or physical interference")!=std::string::npos,
+          "LPI must distinguish total/additional observation and normalized draft exposure from reception or traffic guarantees");
+    request.simulation=true;
+    same_advisory(gui::inspect(request),reference);
+    request.target_snr=80;
+    same_advisory(gui::inspect(request),reference);
     request.options.receive_targets_db_hz={-100,55};request.options.automatic_receive_profiles=true;
-    const auto different_rx=gui::inspect(request);
-    check(different_rx.lpi_summary==simulated.lpi_summary&&
-          different_rx.lpi_estimate.burst_exposure_ratio==simulated.lpi_estimate.burst_exposure_ratio,
-          "Local RX profile configuration changed the unkeyed observer estimate");
+    same_advisory(gui::inspect(request),reference);
     request.binary=Bytes{0,0,1};
     const auto raw=gui::inspect(request);
-    check(raw.estimate.wire_bits==3&&raw.lpi_summary==simulated.lpi_summary&&
-          field(raw,"Byte-boundary recovery")=="0 bits"&&field(raw,"Symbol padding")=="0 bits",
+    same_advisory(raw,reference);
+    check(raw.estimate.wire_bits==3&&field(raw,"Byte-boundary recovery")=="0 bits"&&field(raw,"Symbol padding")=="0 bits",
           "Raw three-bit draft must retain exact endpoint and the equivalent three-bit text advisory");
-    request.options.modem.integration_seconds=86400;request.received_cn0_db_hz=20;
-    const auto fractional=gui::inspect(request);
-    check(fractional.lpi_estimate.status==lpi::Status::available&&fractional.lpi_estimate.equivalent_symbols<1&&
-          fractional.lpi_summary.find("<1 symbol")!=std::string::npos&&
-          fractional.lpi_description.find("before a complete symbol")!=std::string::npos,
-          "A radiometer's within-symbol detection must not display zero bits or imply a safe whole symbol");
-    request.options.modem.integration_seconds=0;request.received_cn0_db_hz=55;
+    request.binary=Bytes{0};
+    const auto one_bit=gui::inspect(request);
+    check(one_bit.estimate.wire_bits==1&&one_bit.lpi_summary==reference.lpi_summary&&
+          one_bit.lpi_estimate.equivalent_symbols==model.equivalent_symbols&&
+          one_bit.lpi_estimate.burst_exposure_ratio<model.burst_exposure_ratio,
+          "Draft bit count must change only exposure, not the receiver-one-bit observation ratio");
+    request.binary=Bytes{0,0,1};request.options.modem.integration_seconds=86400;
+    const auto long_symbol=gui::inspect(request);
+    check(long_symbol.lpi_estimate.status==lpi::Status::available&&
+          long_symbol.lpi_estimate.equivalent_symbols>model.equivalent_symbols&&
+          long_symbol.lpi_estimate.reference_cn0_db_hz<model.reference_cn0_db_hz&&
+          long_symbol.lpi_estimate.detection_seconds>model.detection_seconds,
+          "Longer symbol geometry must improve the relative ratio at the normalized one-bit receiver reference");
+    request.options.modem=tuning::resolve(3600,55,tuning::PatternMode::auto_pattern,true).config;
     const auto strong=gui::inspect(request);
     check(strong.lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
           field(strong,"LPI draft exposure").find("comparison unavailable")!=std::string::npos,
-          "Strong signals must not receive unsupported weak-signal detection times");
+          "Insufficient processing gain at the one-bit reference must not receive unsupported weak-signal times");
     request.options.key.reset();request.options.modem.scramble=false;request.options.modem.dsss=false;
     const auto hypothetical_strong=gui::inspect(request);
     check(hypothetical_strong.lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           hypothetical_strong.lpi_estimate.hypothetical_encryption&&
           hypothetical_strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
           hypothetical_strong.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos,
-          "Strong unencrypted signals must retain the hypothetical warning when the number is unavailable");
-    request.received_cn0_db_hz=-1e6;
-    const auto limited=gui::inspect(request);
-    check(limited.lpi_estimate.status==lpi::Status::numeric_limit&&limited.lpi_estimate.hypothetical_encryption&&
-          limited.lpi_summary.find("Unavailable: numeric limit")!=std::string::npos&&
-          limited.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos,
-          "Numerical overflow must not remove the hypothetical encryption warning");
-    request.received_cn0_db_hz=-3;
+          "Unencrypted settings outside the relative model must retain the hypothetical warning");
     request.options.modem=tuning::resolve(3600,0,tuning::PatternMode::auto_tone,false).config;
     const auto actual_tone=transfer::estimate_binary(*request.binary,request.options);
     const auto tone=gui::inspect(request);

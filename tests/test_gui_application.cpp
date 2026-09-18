@@ -669,12 +669,15 @@ void lpi_declaration() {
     const std::string_view help=advisory.help;
     check(advisory.kind==ui::Kind::label&&advisory.persistent&&advisory.font_size==12&&
           help.find("90% detection and 1% false alarm per known window")!=help.npos&&
-          help.find("not a measurement")!=help.npos&&help.find("within one symbol")!=help.npos&&
+          help.find("not a measurement or calibrated reception threshold")!=help.npos&&
+          help.find("18 dB Es/N0 pattern design reference")!=help.npos&&
+          help.find("one accepted bit out of N")!=help.npos&&
+          help.find("Simulation on/off, power and oscillator presets do not affect this estimate")!=help.npos&&
           help.find("hypothetical encrypted private pattern")!=help.npos&&
           help.find("warning remains when a number is unavailable")!=help.npos&&
           help.find("No key or waveform setting is changed")!=help.npos&&
           help.find("does not reduce power or interference")!=help.npos,
-          "LPI advisory needs a persistent shared label with explicit observer and power assumptions");
+          "LPI advisory needs a persistent shared label with explicit relative reference and observer assumptions");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
         check(app.control(advisory).visible,"LPI advisory disappeared on another shared page");

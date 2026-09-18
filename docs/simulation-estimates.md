@@ -6,10 +6,14 @@ confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
 
-The separate [LPI exposure advisory](lpi-estimates.md) estimates how much
-on-air observation an unkeyed energy detector needs under an equal-received-C/N0
-model. Its detection target is distinct from this whole-draft decoding
-probability and from the receiver's admission thresholds.
+The separate [LPI relative observation advisory](lpi-estimates.md) compares an
+unkeyed energy detector's total observation with a one-symbol receiver design
+reference. It normalizes both listeners to 18 dB Es/N0 in that one symbol, an
+uncalibrated planning reference. Simulation on/off, the channel link budget and
+oscillator presets do not change that ratio at fixed waveform geometry. Its
+detection target is distinct from this whole-draft decoding probability and
+from the receiver's admission thresholds; it does not predict a 1-in-N bit
+acceptance rate.
 
 The probability is conditional on finishing receiver computation; it does not
 predict completion within a time limit. During computation, the GUI labels

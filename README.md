@@ -95,18 +95,22 @@ a projection; simulation currently executes on the CPU. These rough estimates
 update with the draft and settings. A simulated carrier outside the receiver's
 frequency search shows an explanation instead of a numeric probability; see the
 [model and its assumptions](docs/simulation-estimates.md).
-The **LPI energy detection** advisory estimates listening time and equivalent
-wire bits/symbols for an unkeyed energy detector at the same received C/N0.
-It uses 90% detection and 1% false alarms per known observation window, with
-explicit weak-signal assumptions; it is not a safe traffic limit. Simulation
-supplies received C/N0; otherwise the TX target is labeled as an assumption.
+The **LPI relative observation** advisory compares an unkeyed energy detector's
+total observation with the receiver's one-bit design reference: N:1 means N
+total wire-bit durations, or N-1 additional durations. Both listeners are
+normalized to 18 dB Es/N0 in one receiver symbol, an uncalibrated planning
+reference. Simulation/live link budgets and oscillator presets do not change
+the ratio at fixed waveform geometry. It uses 90% detection and 1% false alarms
+per known window, with explicit weak-signal assumptions; it is not a safe
+traffic limit or a claim that only one in N transmitted bits is accepted.
 With encryption off, including tone experiments, a warning marks the estimate
-as a hypothetical encrypted private pattern at the current timing and C/N0.
+as a hypothetical encrypted private pattern at the current timing and
+normalized reference.
 Actual public waveforms can be easier to detect. The estimate does not enable
 encryption or change the transmitted draft.
 The same model appears in CLI `estimate` and `analyze-link` JSON. See
-[LPI exposure estimates](docs/lpi-estimates.md) for bandwidth, noise rise,
-examples and limitations.
+[LPI relative observation estimates](docs/lpi-estimates.md) for bandwidth,
+reference noise rise, examples and limitations.
 For extreme links, `pump analyze-link` compares bounded statistical detector
 experiments and extrapolated processing costs without generating PCM. See
 [fast weak-link planning](docs/weak-link-planning.md) for the 3 dBm/-200 dB

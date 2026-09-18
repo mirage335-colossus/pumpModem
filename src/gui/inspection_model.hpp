@@ -48,9 +48,6 @@ struct InspectionRequest {
     transfer::Options options;
     std::string requested_pattern;
     double target_snr=0;
-    // Actual assumed received C/N0 at both listeners. Without a supplied
-    // channel value the TX design target is explicitly labelled an assumption.
-    std::optional<double> received_cn0_db_hz;
     bool simulation=false;
     std::string device;
 };
