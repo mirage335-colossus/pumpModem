@@ -4,6 +4,53 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## LPI energy-detection advisory — 17 September 2026
+
+Added a shared GUI advisory and `lpi` JSON results to CLI `estimate` and
+`analyze-link`. The weak-signal radiometer model reports the listening time and
+equivalent wire symbols for 90% detection and 1% false alarm per known window,
+assuming equal received C/N0, a known band and known stationary noise power.
+Simulation supplies its link C/N0; otherwise the TX target is explicitly an
+assumption. Inspection also shows the assumed bandwidth, noise rise and
+whole-burst exposure, with settling/filter/suppression as an equal-power
+approximation. See [the model](lpi-estimates.md) for equations and limits.
+
+The model uses sample-quantized geometry, accounts for shaped bandwidth, and
+does not multiply the gain for the independent DSSS layer. Eligibility follows
+transfer's existing automatic private scrambling for every keyed non-tone
+transmission, including manual CLI profiles. Strong signals and numeric limits
+have no numerical protection interval. Sub-symbol detection is explicit;
+neither the count nor the exposure ratio is a safe traffic quota.
+
+Both Release builds succeeded (GCC/FLTK and Clang/Rev). The 11 focused GCC
+checks passed in 27.86 seconds: `lpi_estimate`, `cli`, `gui_layout`,
+`gui_contract`, `gui_link_boundary`, `gui_inspection`, `gui_inspection_page`,
+`gui_application`, `gui_self_check`, `gui_adapter_boundary` and
+`gui_boundary_regression`. The remaining 17 non-controller development-contract
+checks passed in 184.32 seconds. The controller suite passed separately in
+67.78 seconds, covering key loading, actual versus assumed C/N0, stale-estimate
+withdrawal, short/long target selection, and existing pending reception behavior.
+Together these cover all 21 required development-contract suites and eight
+additional suites. Final wording was rebuilt and its two affected inspection
+and application suites passed again. After the final numerical range guard,
+the estimator, controller and CLI suites passed together in 97.05 seconds.
+
+The eight selected Rev checks passed in 35.41 seconds: `lpi_estimate`,
+`gui_layout`, `gui_contract`, `gui_application`, `gui_inspection`,
+`gui_inspection_page`, `gui_link_boundary` and `gui_self_check`. Final wording
+was rebuilt with the affected two suites passing again; the final numerical
+range guard was rebuilt with `lpi_estimate` passing again. Tests include fixed
+numerical references, signal-strength and symbol-duration scaling, no duplicate
+DSSS gain, private manual CLI profiles, fractional-symbol estimates, numerical
+limits, exact three-bit short/raw equivalence, and unchanged 1,216-bit interval
+geometry. `git diff --check` passed.
+
+No transport, waveform, receiver-admission, physical-end or pending-bit logic
+changed. Native windows were not rendered: this environment has no display or
+Xvfb. Shared layout tests and both backend builds do not establish native pixel
+conformance. No physical-link or adversarial-detector measurement was performed;
+the new probabilities remain an idealized model rather than calibration data.
+
 ## 1.2 kHz feasibility and tracking cost — 17 September 2026
 
 The fixed-laptop compute estimate now includes serial continuation of one

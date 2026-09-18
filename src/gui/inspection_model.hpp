@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/transfer.hpp"
+#include "datapump/lpi_estimate.hpp"
 #include "pattern_space.hpp"
 #include <complex>
 #include <optional>
@@ -37,6 +38,8 @@ struct Inspection {
     std::optional<inspection::PatternSpace> pattern_space;
     std::string preamble_description,chip_description;
     transfer::Estimate estimate;
+    lpi::Estimate lpi_estimate;
+    std::string lpi_summary,lpi_description;
     std::optional<StreamLayout> stream_layout;
 };
 struct InspectionRequest {
@@ -45,6 +48,9 @@ struct InspectionRequest {
     transfer::Options options;
     std::string requested_pattern;
     double target_snr=0;
+    // Actual assumed received C/N0 at both listeners. Without a supplied
+    // channel value the TX design target is explicitly labelled an assumption.
+    std::optional<double> received_cn0_db_hz;
     bool simulation=false;
     std::string device;
 };

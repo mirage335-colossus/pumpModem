@@ -4,16 +4,17 @@
 #include <cstddef>
 
 namespace datapump::gui::ui {
-inline constexpr int default_width = 1180, default_height = 1000;
-inline constexpr int min_width = 1030, min_height = 920;
+inline constexpr int default_width = 1180, default_height = 1048;
+inline constexpr int min_width = 1030, min_height = 968;
 inline constexpr int oscillator_row_height = 48;
+inline constexpr int lpi_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
 enum class Slot {
     none, header, mode, clear, callsign, grid, repeatable, simulation,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, simulation_oscillator_detail, key_actions,
+    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, key_actions,
     key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
@@ -32,6 +33,7 @@ inline constexpr bool persistent_slot(Slot slot) {
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
     case Slot::simulation_oscillator: case Slot::simulation_oscillator_detail:
+    case Slot::lpi_estimate:
     case Slot::key_actions: case Slot::key_path: case Slot::key:
     case Slot::device: case Slot::mono: case Slot::bandwidth: case Slot::carrier: case Slot::snr: case Slot::long_snr: case Slot::receive_snr: case Slot::pattern:
     case Slot::fec: case Slot::dsp_workspace: case Slot::diagnostics: case Slot::status: return true;
@@ -57,7 +59,7 @@ struct DesktopLayout {
     explicit DesktopLayout(int width = default_width, int height = default_height,
                            bool transmit_scope_visible = true) {
         auto& out = *this;
-        const int content_height = height - oscillator_row_height;
+        const int content_height = height - oscillator_row_height - lpi_row_height;
         out[Slot::header] = {margin, 10, 220, 32};
         out[Slot::mode] = {235, 13, width - 420, 28};
         out[Slot::clear] = {width - 153, 12, 137, 28};
@@ -81,6 +83,7 @@ struct DesktopLayout {
         out[Slot::simulation_gpu_time] = {gpu_x, 89, width - margin - gpu_x, 43};
         out[Slot::simulation_oscillator] = {margin, 153, 320, field_height};
         out[Slot::simulation_oscillator_detail] = {346, 137, width - margin - 346, 43};
+        out[Slot::lpi_estimate] = {margin, 185, width - 2 * margin, 43};
         out[Slot::tabs] = {margin, 137, width - 2 * margin, content_height - 296};
         out[Slot::page] = {margin, 169, width - 2 * margin, content_height - 328};
 
@@ -216,10 +219,10 @@ struct DesktopLayout {
         out[Slot::mono] = {margin, content_height - 56, 74, 22};
         out[Slot::diagnostics] = {margin + 82, content_height - 56, width - 2 * margin - 82, 22};
         out[Slot::status] = {margin, content_height - 31, width - 2 * margin, 24};
-        // Reserve one oscillator row above every page. Shift the complete
+        // Reserve oscillator and LPI rows above every page. Shift the complete
         // content and lower settings together, preserving their allocations.
         for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<slots.size();++index)
-            slots[index].y+=oscillator_row_height;
+            slots[index].y+=oscillator_row_height+lpi_row_height;
     }
 };
 }

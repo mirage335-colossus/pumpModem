@@ -154,6 +154,69 @@ void oscillator_controls() {
           controller.field(F::simulation_oscillator).selected=="gpsdo-ocxo",
           "A stale oscillator callback reconfigured a closing application");
 }
+void lpi_estimate_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    const auto text=[&] {return controller.field(F::lpi_estimate).text;};
+    controller.edit(F::message,"e");prepare(controller);
+    check(text().find("Unavailable: public waveform")!=std::string::npos&&
+          text().find("Simulated C/N0")!=std::string::npos,
+          "Unkeyed GUI must identify public waveforms without a numeric private detection estimate");
+    struct TemporaryKeyring {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~TemporaryKeyring(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    create_keyring(fixture.path,{"LPI estimate"});
+    controller.activate(C::open_keyfile);
+    const auto requests=controller.take_services();
+    check(requests.size()==1,"LPI fixture did not open its keyfile chooser");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(10);
+    while((!controller.settings().transfer.key||!controller.estimate())&&std::chrono::steady_clock::now()<deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.settings().transfer.key.has_value()&&controller.estimate().has_value(),"LPI fixture keyfile failed to load");
+    controller.select(F::simulation,"3dBm -170dB");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          std::abs(controller.inspection()->lpi_estimate.cn0_db_hz+3)<1e-10&&
+          text()==controller.inspection()->lpi_summary&&text().find("no hidden-traffic guarantee")!=std::string::npos,
+          "Private GUI estimate must use the actual weak simulated channel and shared inspection model");
+    const auto detection_seconds=controller.inspection()->lpi_estimate.detection_seconds;
+    controller.edit(F::snr,"0");
+    check(text().ends_with("Calculating..."),"TX plan change left stale LPI numbers visible");
+    prepare(controller);
+    check(std::abs(controller.inspection()->lpi_estimate.cn0_db_hz+3)<1e-10&&
+          controller.inspection()->lpi_estimate.detection_seconds==detection_seconds,
+          "TX target changed simulated received power or energy-detector duration");
+    const auto advisory=text();
+    controller.edit(F::short_bits,"001");prepare(controller);
+    check(controller.estimate()->wire_bits==3&&text()==advisory,
+          "Exact three-bit draft changed short-symbol advisory or wire endpoint");
+    controller.edit(F::receive_snr,"-100, 55");
+    const auto rx_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(5);
+    while((controller.settings().transfer.receive_targets_db_hz!=std::vector<double>{-100,55}||!controller.estimate())&&
+          std::chrono::steady_clock::now()<rx_deadline) {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    check(controller.estimate()&&text()==advisory,"Independent local RX targets changed the LPI observer estimate");
+    controller.edit(F::short_bits,"001x");
+    check(text().ends_with("Unavailable"),"Invalid raw draft retained the previous LPI number");
+    controller.edit(F::message,"e");controller.edit(F::bandwidth,"invalid");
+    check(text().ends_with("Invalid settings"),"Invalid modem settings retained the previous LPI number");
+    controller.edit(F::bandwidth,"3.6 kHz");
+    controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));prepare(controller);
+    check(!controller.settings().simulation&&controller.inspection()->lpi_estimate.cn0_db_hz==0&&
+          text().find("Assumed C/N0 (TX target; not measured): 0 dB-Hz")!=std::string::npos,
+          "Simulation off must label the active TX target as an assumption, not measured receive power");
+    controller.edit(F::long_snr,"10");controller.edit(F::message,std::string(17,'e'));prepare(controller);
+    check(controller.inspection()->lpi_estimate.cn0_db_hz==10&&controller.estimate()->wire_bits==1216,
+          "Long draft failed to select its own assumed C/N0 while retaining fixed interval geometry");
+    controller.select(F::simulation,"3dBm -120dB");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
+          text().find("Unavailable: in-band SNR above -10 dB")!=std::string::npos,
+          "Strong simulated signals must withdraw unsupported detection-time estimates");
+}
 void revised_reception_ingestion() {
     const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {
         live::Snapshot snapshot;
@@ -1779,6 +1842,7 @@ int main(int argc,char** argv) {
         datapump::gui::controller_self_check();
         simulation_estimate_controls();
         oscillator_controls();
+        lpi_estimate_controls();
         revised_reception_ingestion();
         rate_carrier_controls();
         sub_hertz_controls();

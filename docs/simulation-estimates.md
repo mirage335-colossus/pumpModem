@@ -6,6 +6,11 @@ confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
 
+The separate [LPI exposure advisory](lpi-estimates.md) estimates how much
+on-air observation an unkeyed energy detector needs under an equal-received-C/N0
+model. Its detection target is distinct from this whole-draft decoding
+probability and from the receiver's admission thresholds.
+
 The probability is conditional on finishing receiver computation; it does not
 predict completion within a time limit. During computation, the GUI labels
 the percentage as generated **audio**, with a separate elapsed wall time that

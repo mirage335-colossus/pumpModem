@@ -662,6 +662,30 @@ void oscillator_declaration() {
     check(!app.control(oscillator).enabled&&app.field(oscillator.field).selected=="gpsdo-ocxo",
           "A stale oscillator callback changed a closing facade");
 }
+void lpi_declaration() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& advisory=control(F::lpi_estimate);
+    const std::string_view help=advisory.help;
+    check(advisory.kind==ui::Kind::label&&advisory.persistent&&advisory.font_size==12&&
+          help.find("90% detection and 1% false alarm per known window")!=help.npos&&
+          help.find("not a measurement")!=help.npos&&help.find("within one symbol")!=help.npos&&
+          help.find("does not reduce power or interference")!=help.npos,
+          "LPI advisory needs a persistent shared label with explicit observer and power assumptions");
+    for(const auto& page:ui::pages()) {
+        app.select_page(page.id);
+        check(app.control(advisory).visible,"LPI advisory disappeared on another shared page");
+        for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+            const auto geometry=app.control_layout(advisory,size.w,size.h);
+            const auto oscillator=app.control_layout(control(F::simulation_oscillator_detail),size.w,size.h);
+            const ui::DesktopLayout layout(size.w,size.h);
+            check(geometry.has_label&&geometry.label==geometry.widget&&geometry.widget.w==size.w-2*ui::margin&&
+                  geometry.widget.h>=2*16&&geometry.frame.y>oscillator.frame.y+oscillator.frame.h&&
+                  geometry.frame.y+geometry.frame.h<layout[ui::Slot::tabs].y,
+                  "LPI label must retain two full-width lines clear of the oscillator and tab viewport");
+        }
+    }
+}
 void declared_submission() {
     Application app({.simulation=true});
     app.edit(ui::Field::binary,"001");
@@ -995,6 +1019,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

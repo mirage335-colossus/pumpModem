@@ -27,6 +27,10 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::simulation_oscillator||slot==Slot::simulation_oscillator_detail)
         control.help="Illustrative effective TX/RX residual clock mismatch and random-walk phase diffusion used by both sampled simulation and model estimates. GPS lock does not imply phase coherence. Hobbyist XO and TCXO choices have no oven and retain more phase noise than the OCXO model. These are scenario assumptions, not measured product specifications or a full GPS control-loop model. This choice does not discipline audio hardware or control a physical oscillator.";
     if(slot==Slot::simulation_oscillator_detail)control.font_size=12;
+    if(slot==Slot::lpi_estimate) {
+        control.font_size=12;
+        control.help="Advisory energy-detector time and equivalent wire bits/symbols at 90% detection and 1% false alarm per known window. Assumes an unkeyed observer with the receiver's C/N0, known occupied band and on-air window, and stationary Gaussian noise of known power. Simulation uses its actual channel C/N0; otherwise the active draft's TX target is only an assumed C/N0, not a measurement. Keyed pattern transmission enables the private Pattern; public pattern and tone modes have no private-waveform estimate. Numerical times apply only at or below -10 dB in-band SNR. Detection can occur within one symbol and repeated traffic accumulates. Encryption does not reduce power or interference. No guaranteed hidden traffic or safe quota. Transmission details show the full model and draft exposure including settling and suppression.";
+    }
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
     if(control.multiline) {
@@ -120,6 +124,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::simulation_gpu_time,Command::none,Bitmap::none,Page::console,2,"GPU / RTX 4090 Laptop (projected)"}, Slot::simulation_gpu_time),
         placed({Kind::choice,Field::simulation_oscillator,Command::none,Bitmap::none,Page::console,3,"Oscillator model"}, Slot::simulation_oscillator),
         placed({Kind::label,Field::simulation_oscillator_detail,Command::none,Bitmap::none,Page::console,3,""}, Slot::simulation_oscillator_detail),
+        placed({Kind::label,Field::lpi_estimate,Command::none,Bitmap::none,Page::console,3,""}, Slot::lpi_estimate),
         placed({Kind::action,Field::count,Command::open_keyfile,Bitmap::none,Page::console,2,"Open keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::generate_keyfile,Bitmap::none,Page::console,2,"Generate keyfile"}, Slot::key_actions, Menu::keyfile),
         placed({Kind::action,Field::count,Command::show_key_folder,Bitmap::none,Page::console,2,"Show key folder"}, Slot::key_actions, Menu::keyfile),

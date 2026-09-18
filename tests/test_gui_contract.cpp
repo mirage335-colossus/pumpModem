@@ -42,6 +42,7 @@ static_assert(ui::persistent_slot(ui::Slot::simulation_cpu_time));
 static_assert(ui::persistent_slot(ui::Slot::simulation_gpu_time));
 static_assert(ui::persistent_slot(ui::Slot::simulation_oscillator));
 static_assert(ui::persistent_slot(ui::Slot::simulation_oscillator_detail));
+static_assert(ui::persistent_slot(ui::Slot::lpi_estimate));
 static_assert(ui::Field::simulation_confidence!=ui::Field::simulation_cpu_time&&
               ui::Field::simulation_cpu_time!=ui::Field::simulation_gpu_time);
 

@@ -57,6 +57,38 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['filename'],'')
         self.assertEqual(value['recovery']['state'],'none')
         self.assertEqual(value['recovery']['attempts'],0)
+    def test_lpi_advisory_estimates(self):
+        public=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)
+        self.assertEqual(public['lpi']['status'],'public_waveform')
+        self.assertIsNone(public['lpi']['equivalent_wire_symbols'])
+        with tempfile.TemporaryDirectory() as directory:
+            key=pathlib.Path(directory)/'lpi.key'
+            self.run_pump('keygen','--output',key)
+            geometry=('--bw','100','--target-snr','-3','--keyfile',key)
+            value=json.loads(self.run_pump('estimate','--text','e',*geometry).stdout)
+            model=value['lpi']
+            self.assertEqual(value['wire_bits'],3)
+            self.assertEqual(model['status'],'available')
+            self.assertEqual(model['cn0_basis'],'assumed_tx_target')
+            self.assertFalse(model['safe_traffic_limit'])
+            self.assertEqual(model['detection_probability'],.9)
+            self.assertEqual(model['false_alarm_probability_per_window'],.01)
+            self.assertTrue(math.isclose(model['detection_seconds'],3257.3126172241587,rel_tol=1e-12))
+            self.assertTrue(math.isclose(model['equivalent_wire_symbols'],19.881058454737296,rel_tol=1e-12))
+            self.assertTrue(math.isclose(model['burst_exposure_ratio'],value['total_seconds']/model['detection_seconds'],rel_tol=1e-12))
+            # Manual keyed transfer automatically selects private Scrambler patterns.
+            manual=json.loads(self.run_pump('analyze-link','--bits','001',*AUDIO,
+                '--keyfile',key,'--simulation','3dBm -170dB','--trials','10').stdout)
+            self.assertEqual(manual['lpi']['status'],'available')
+            analysis=json.loads(self.run_pump('analyze-link','--bits','001',*geometry,
+                '--simulation','3dBm -170dB','--trials','10').stdout)
+            self.assertEqual(analysis['transmission']['wire_bits'],3)
+            self.assertEqual(analysis['lpi']['cn0_basis'],'simulated_link')
+            self.assertEqual(analysis['lpi']['cn0_db_hz'],-3)
+            self.assertEqual(analysis['lpi']['detection_seconds'],model['detection_seconds'])
+            strong=json.loads(self.run_pump('estimate','--text','e','--keyfile',key,*AUDIO).stdout)
+            self.assertEqual(strong['lpi']['status'],'outside_weak_signal_model')
+            self.assertIsNone(strong['lpi']['detection_seconds'])
     def test_sub_hertz_estimate(self):
         for bandwidth in ('0.01', '0.1Hz', '0.5'):
             numeric=float(bandwidth.removesuffix('Hz'))

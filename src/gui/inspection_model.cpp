@@ -1,5 +1,6 @@
 #include "inspection_model.hpp"
 #include "datapump/pattern_pulse.hpp"
+#include <cmath>
 #include <iomanip>
 #include <sstream>
 
@@ -16,6 +17,48 @@ std::string compression_description(const StreamLayout& layout) {
     if(layout.compressed)return "Raw LZMA2 preset 9e ("+count(layout.source_bytes)+" source bytes; "+
         count(layout.encoded_source_bytes)+" bytes including interval padding)";
     return "Off (fixed 9-bit validity and byte cells)";
+}
+std::string lpi_symbols(double value) {
+    if(value<1)return "<1 symbol";
+    std::ostringstream output;
+    if(value<1e9)output<<std::fixed<<std::setprecision(0)<<std::ceil(value);
+    else output<<std::setprecision(3)<<std::ceil(value);
+    return "~"+output.str()+" equivalent wire bits/symbols";
+}
+std::string lpi_duration(double seconds) {
+    if(seconds>=86400)return number(seconds/86400)+" days";
+    if(seconds>=3600)return number(seconds/3600)+" h";
+    if(seconds>=60)return number(seconds/60)+" min";
+    return number(seconds)+" s";
+}
+void lpi_presentation(Inspection& result,const InspectionRequest& request,const transfer::Options& options) {
+    result.lpi_estimate=lpi::estimate(result.estimate,options,request.received_cn0_db_hz.value_or(request.target_snr));
+    const auto& model=result.lpi_estimate;
+    const auto basis=request.received_cn0_db_hz?
+        (request.simulation?"Simulated C/N0":"Supplied received C/N0"):"Assumed C/N0 (TX target; not measured)";
+    const auto cn0=std::string(basis)+": "+number(model.cn0_db_hz)+" dB-Hz";
+    std::string threshold;
+    switch(model.status) {
+    case lpi::Status::available:
+        threshold=lpi_symbols(model.equivalent_symbols)+" / ~"+lpi_duration(model.detection_seconds);break;
+    case lpi::Status::public_waveform:
+        threshold="Unavailable: public waveform";break;
+    case lpi::Status::outside_weak_signal_model:
+        threshold="Unavailable: in-band SNR above -10 dB";break;
+    case lpi::Status::numeric_limit:
+        threshold="Unavailable: numeric limit";break;
+    }
+    result.lpi_summary="LPI energy detection (90% detection / 1% false alarm): "+threshold+
+        "\n"+cn0+" | Ideal equal-observation model; no hidden-traffic guarantee.";
+    result.lpi_description="An unkeyed energy detector with the receiver's received C/N0 and observation opportunity is assumed to know the occupied band, on-air window and stationary Gaussian noise power. The estimate targets 90% detection with 1% false alarm per known window; unknown searches, other detectors and changing noise are not modeled. Numerical times apply only at in-band SNR <= -10 dB. Counts are equivalent wire bits (one symbol each), not source bits or a safe traffic quota. Detection can occur before a complete symbol, and repeated traffic accumulates exposure. Encryption does not reduce transmitted power or physical interference. There is no guaranteed hidden traffic.";
+    result.fields.insert(result.fields.end(),{{"LPI detection estimate",threshold},
+        {"LPI C/N0 basis",cn0},
+        {"LPI observation band",number(model.observation_bandwidth_hz)+" Hz (modeled occupied band)"},
+        {"LPI in-band SNR",number(model.in_band_snr_db)+" dB"},
+        {"LPI noise rise",number(model.noise_rise_db)+" dB (added received power)"},
+        {"LPI detection criterion","90% detection / 1% false alarm per known observation window"},
+        {"LPI draft exposure",number(result.estimate.total_seconds)+" s including settling, pulse tails and suppression (equal-power approximation)"+
+            (model.status==lpi::Status::available?" / "+number(model.burst_exposure_ratio)+" times modeled detection duration; not a probability or safe quota":"; detection-duration comparison unavailable")}});
 }
 }
 
@@ -96,6 +139,7 @@ Inspection inspect(const InspectionRequest& request) {
             {"Transmitted bits",count(transmitted)}});
     }
     result.pattern_space=inspection::inspect_pattern_space(config,request.target_snr,config.scramble || config.dsss);
+    lpi_presentation(result,request,options);
     result.lanes.push_back({"Transmit • pattern symbols",{{"Hardware settling",result.preamble_description,hardware_samples?InspectionState::active:InspectionState::off},
         {"Source encoding",source_encoding},
         {"Fixed interval coding",raw?"Raw bits have no byte codec.":"Fill the fixed data area, append the keyed HMAC when enabled, then add systematic Reed-Solomon parity to complete 128 coded bytes.",raw?InspectionState::off:InspectionState::active},

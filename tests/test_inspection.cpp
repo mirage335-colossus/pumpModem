@@ -99,6 +99,58 @@ void static_pattern_binding() {
     check(keyed.pattern_space->codewords==other_key.pattern_space->codewords,
           "static keyed illustration retained actual private epoch material");
 }
+void lpi_advisory() {
+    gui::InspectionRequest request;request.message.data=Bytes{'e'};request.target_snr=0;
+    request.options.modem=tuning::resolve(3600,0,tuning::PatternMode::auto_pattern,false).config;
+    const auto public_pattern=gui::inspect(request);
+    check(public_pattern.lpi_estimate.status==lpi::Status::public_waveform&&
+          public_pattern.lpi_summary.find("Unavailable: public waveform")!=std::string::npos,
+          "Public pattern must not advertise a private-waveform detection time");
+    request.options.key.emplace(Bytes(32,0x31));
+    check(gui::inspect(request).lpi_estimate.status==lpi::Status::available,
+          "Selected key must follow the transport's automatically enabled private pattern");
+    request.options.modem.scramble=true;request.options.modem.dsss=true;
+    const auto assumed=gui::inspect(request);
+    check(assumed.lpi_estimate.status==lpi::Status::available&&
+          field(assumed,"LPI C/N0 basis")=="Assumed C/N0 (TX target; not measured): 0 dB-Hz"&&
+          assumed.lpi_summary.find("90% detection / 1% false alarm")!=std::string::npos&&
+          assumed.lpi_summary.find("wire bits/symbols")!=std::string::npos&&
+          assumed.estimate.wire_bits==3&&assumed.estimate.waveform_samples==public_pattern.estimate.waveform_samples,
+          "Private LPI advisory must qualify assumed C/N0 and preserve exact short wire/airtime");
+    check(field(assumed,"LPI draft exposure").find("including settling, pulse tails and suppression")!=std::string::npos&&
+          std::abs(assumed.lpi_estimate.burst_exposure_ratio-
+              assumed.estimate.total_seconds/assumed.lpi_estimate.detection_seconds)<1e-12&&
+          assumed.lpi_description.find("repeated traffic accumulates")!=std::string::npos&&
+          assumed.lpi_description.find("Encryption does not reduce transmitted power or physical interference")!=std::string::npos,
+          "LPI exposure must account for full airtime and explain accumulation and unchanged interference");
+    request.received_cn0_db_hz=-3;request.simulation=true;
+    const auto simulated=gui::inspect(request);
+    check(simulated.lpi_estimate.cn0_db_hz==-3&&field(simulated,"LPI C/N0 basis")=="Simulated C/N0: -3 dB-Hz"&&
+          simulated.lpi_estimate.detection_seconds>assumed.lpi_estimate.detection_seconds,
+          "Supplied simulation C/N0 must replace the TX target assumption");
+    request.options.receive_targets_db_hz={-100,55};request.options.automatic_receive_profiles=true;
+    const auto different_rx=gui::inspect(request);
+    check(different_rx.lpi_summary==simulated.lpi_summary&&
+          different_rx.lpi_estimate.burst_exposure_ratio==simulated.lpi_estimate.burst_exposure_ratio,
+          "Local RX profile configuration changed the unkeyed observer estimate");
+    request.binary=Bytes{0,0,1};
+    const auto raw=gui::inspect(request);
+    check(raw.estimate.wire_bits==3&&raw.lpi_summary==simulated.lpi_summary&&
+          field(raw,"Byte-boundary recovery")=="0 bits"&&field(raw,"Symbol padding")=="0 bits",
+          "Raw three-bit draft must retain exact endpoint and the equivalent three-bit text advisory");
+    request.options.modem.integration_seconds=86400;request.received_cn0_db_hz=20;
+    const auto fractional=gui::inspect(request);
+    check(fractional.lpi_estimate.status==lpi::Status::available&&fractional.lpi_estimate.equivalent_symbols<1&&
+          fractional.lpi_summary.find("<1 symbol")!=std::string::npos&&
+          fractional.lpi_description.find("before a complete symbol")!=std::string::npos,
+          "A radiometer's within-symbol detection must not display zero bits or imply a safe whole symbol");
+    request.options.modem.integration_seconds=0;request.received_cn0_db_hz=55;
+    const auto strong=gui::inspect(request);
+    check(strong.lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
+          strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
+          field(strong,"LPI draft exposure").find("comparison unavailable")!=std::string::npos,
+          "Strong signals must not receive unsupported weak-signal detection times");
+}
 void raw_and_short_sources() {
     gui::InspectionRequest request;request.binary=Bytes{0,0,1};
     request.target_snr=40;request.options.modem=tuning::resolve(1200,40,tuning::PatternMode::auto_pattern,false).config;
@@ -167,4 +219,4 @@ void raw_and_short_sources() {
     check_airtime(marked);
 }
 }
-int main(){try{fixed_stream_layout();tone_protection();static_pattern_binding();raw_and_short_sources();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}
+int main(){try{fixed_stream_layout();tone_protection();static_pattern_binding();lpi_advisory();raw_and_short_sources();std::cout<<"inspection tests passed\n";}catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

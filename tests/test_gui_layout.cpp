@@ -15,27 +15,27 @@ bool contains(Rect outer, Rect inner) {
 }
 void established_default() {
     const DesktopLayout layout;
-    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1000 &&
-          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 920,
+    check(DesktopLayout::default_width == 1180 && DesktopLayout::default_height == 1048 &&
+          DesktopLayout::min_width == 1030 && DesktopLayout::min_height == 968,
           "desktop default or minimum size changed");
-    check(layout[Slot::tabs] == Rect{16, 185, 1148, 656}, "tab viewport moved");
-    check(layout[Slot::page] == Rect{16, 217, 1148, 624}, "page viewport moved");
-    check(layout[Slot::message] == Rect{16, 243, 785, 78}, "compact message composition size changed");
-    check(layout[Slot::paste_previous] == Rect{561, 221, 240, 20}, "previous-message button moved");
-    check(layout[Slot::binary] == Rect{815, 243, 220, 78}, "binary editor moved");
-    check(layout[Slot::qr] == Rect{1049, 243, 115, 115}, "QR preview must span the editor and action rows");
-    check(layout[Slot::transmit_scope] == Rect{16, 380, 1148, 206}, "generation scope size changed");
-    check(layout[Slot::profile_reference] == Rect{884, 742, 280, 91}, "profile reference must share the plot row at the right edge");
-    check(layout[Slot::signals] == Rect{16, 609, 882, 110}, "received signals size changed");
-    check(layout[Slot::files] == Rect{912, 609, 252, 74}, "received files size changed");
-    check(layout[Slot::waterfall] == Rect{16, 742, 205, 91}, "waterfall size changed");
-    check(layout[Slot::device] == Rect{16, 865, 220, 27}, "persistent modem controls moved");
-    check(layout[Slot::bandwidth] == Rect{246, 865, 127, 27} &&
-          layout[Slot::carrier] == Rect{383, 865, 135, 27}, "Rate and Carrier editors lost their reserved widths");
-    check(layout[Slot::snr] == Rect{16, 908, 260, 27} &&
-          layout[Slot::long_snr] == Rect{286, 908, 260, 27} &&
-          layout[Slot::receive_snr] == Rect{556, 908, 608, 27}, "separate transmit targets lost their persistent row");
-    check(layout[Slot::status] == Rect{16, 969, 1148, 24}, "persistent status moved");
+    check(layout[Slot::tabs] == Rect{16, 233, 1148, 656}, "tab viewport moved");
+    check(layout[Slot::page] == Rect{16, 265, 1148, 624}, "page viewport moved");
+    check(layout[Slot::message] == Rect{16, 291, 785, 78}, "compact message composition size changed");
+    check(layout[Slot::paste_previous] == Rect{561, 269, 240, 20}, "previous-message button moved");
+    check(layout[Slot::binary] == Rect{815, 291, 220, 78}, "binary editor moved");
+    check(layout[Slot::qr] == Rect{1049, 291, 115, 115}, "QR preview must span the editor and action rows");
+    check(layout[Slot::transmit_scope] == Rect{16, 428, 1148, 206}, "generation scope size changed");
+    check(layout[Slot::profile_reference] == Rect{884, 790, 280, 91}, "profile reference must share the plot row at the right edge");
+    check(layout[Slot::signals] == Rect{16, 657, 882, 110}, "received signals size changed");
+    check(layout[Slot::files] == Rect{912, 657, 252, 74}, "received files size changed");
+    check(layout[Slot::waterfall] == Rect{16, 790, 205, 91}, "waterfall size changed");
+    check(layout[Slot::device] == Rect{16, 913, 220, 27}, "persistent modem controls moved");
+    check(layout[Slot::bandwidth] == Rect{246, 913, 127, 27} &&
+          layout[Slot::carrier] == Rect{383, 913, 135, 27}, "Rate and Carrier editors lost their reserved widths");
+    check(layout[Slot::snr] == Rect{16, 956, 260, 27} &&
+          layout[Slot::long_snr] == Rect{286, 956, 260, 27} &&
+          layout[Slot::receive_snr] == Rect{556, 956, 608, 27}, "separate transmit targets lost their persistent row");
+    check(layout[Slot::status] == Rect{16, 1017, 1148, 24}, "persistent status moved");
 }
 void document_widths() {
     for(const auto viewport:{480,1000,1400}) {
@@ -89,6 +89,10 @@ void supported_sizes() {
               detail.y==oscillator.y-label_height&&detail.y+detail.h==oscillator.y+oscillator.h&&
               detail.x+detail.w==size.w-margin&&oscillator.y+oscillator.h<layout[Slot::tabs].y,
               "Oscillator choice and numeric model detail must fit below estimates without crowding any page");
+        const auto lpi=layout[Slot::lpi_estimate];
+        check(persistent_slot(Slot::lpi_estimate)&&lpi.x==margin&&lpi.w==size.w-2*margin&&
+              lpi.h>=2*16&&lpi.y>detail.y+detail.h&&lpi.y+lpi.h<layout[Slot::tabs].y,
+              "LPI advisory needs a full-width persistent two-line row clear of oscillator and tabs");
         const auto key_action=layout[Slot::key_actions],key_path=layout[Slot::key_path],key=layout[Slot::key];
         check(layout[Slot::repeatable].x+layout[Slot::repeatable].w<key_action.x&&
               key_action.x+key_action.w<key_path.x&&key_path.x+key_path.w<key.x&&

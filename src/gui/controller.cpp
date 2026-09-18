@@ -12,6 +12,7 @@
 #include "datapump/tuning.hpp"
 #include <array>
 #include <cctype>
+#include <cmath>
 #include <ctime>
 #include <fstream>
 #include <iomanip>
@@ -255,6 +256,7 @@ struct Controller::Impl {
         refresh_transmit_target();
         ++revision; estimate.reset(); inspection.reset(); estimate_requested=Clock::now(); pattern_first=0;
         simulation_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
+        lpi_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         f(UiField::airtime).text="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
         f(UiField::flow_detail).text.clear(); f(UiField::transmission_detail).text.clear();
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
@@ -268,6 +270,9 @@ struct Controller::Impl {
     void simulation_estimate_status(std::string state) {
         if(!tuning::parse_simulation_preset(f(UiField::simulation).selected).enabled)state="Simulation off";
         simulation_estimate_text(state,state,state);
+    }
+    void lpi_estimate_status(const std::string& state) {
+        f(UiField::lpi_estimate).text="LPI energy-detection advisory\n"+state;
     }
     void encryption_changed() {
         if(tone())f(UiField::key).selected="none";
@@ -332,11 +337,12 @@ struct Controller::Impl {
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
             settings=std::move(next); settings_valid=true;
             simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
+            lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             short_plan=plan; long_plan=longer_plan; short_target=short_snr; long_target=long_snr;
             displayed_short_target.reset(); refresh_transmit_target();
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
-        } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
+        } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -641,6 +647,8 @@ struct Controller::Impl {
             request.options.modem=transmit_config();
             if(!attachment&&composer.raw_bits()) request.binary=*composer.raw_bits();
             request.requested_pattern=f(UiField::pattern).selected; request.target_snr=short_draft()?short_target:long_target; request.simulation=settings.simulation; request.device=settings.device;
+            if(settings.simulation)request.received_cn0_db_hz=settings.simulation_snr_db+
+                10*std::log10(static_cast<double>(request.options.modem.sample_rate)/2);
             start_worker([request=std::move(request),simulation_settings=settings](Prepared& value,std::stop_token) {
                 value.inspection=std::make_shared<const Inspection>(inspect(request));
                 if(!simulation_settings.simulation)return;
@@ -682,7 +690,7 @@ struct Controller::Impl {
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
         if(!result.error.empty()) {
             if(result.kind==PrepKind::keys) { key_failed=true; f(UiField::key_path).text=result.created?"Keyfile saved; load failed":"Keyfile operation failed"; }
-            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; simulation_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
+            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
             return;
         }
@@ -705,6 +713,7 @@ struct Controller::Impl {
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
+            f(UiField::lpi_estimate).text=inspection->lpi_summary;
             if(!settings.simulation)simulation_estimate_status("Simulation off");
             else if(receive_targets_due)simulation_estimate_status("Calculating...");
             else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");

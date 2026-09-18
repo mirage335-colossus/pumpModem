@@ -67,6 +67,27 @@ the draft and exact wire format, and follows the Simulation dropdown's busy
 lock. Other modem edits retain the choice; invalid or stale choices do not
 reconfigure a running or closed session.
 
+The persistent **LPI energy detection** advisory below the oscillator shows the
+modeled observation duration and equivalent wire bits/symbols for an unkeyed
+energy detector at **90% detection / 1% false alarm per known window**. Keyed
+pattern transmission enables the private pattern; public patterns and tone modes
+show an unavailable status. Numerical estimates apply only at in-band SNR of
+-10 dB or lower. The observation model assumes the receiver's C/N0, a known band
+and on-air window, and stationary Gaussian noise of known power. Simulation uses
+its actual channel C/N0. With Simulation off, the active short/long draft TX
+target is explicitly labelled **Assumed C/N0 (TX target; not measured)**.
+Local RX target choices do not change the observer model.
+
+Flow and Transmission inspection share the advisory and its assumptions.
+Transmission fields show the observation bandwidth, in-band SNR, noise rise and
+full draft airtime relative to the modeled detection duration, including settling,
+pulse tails and suppression. This exposure ratio is neither a probability nor a
+safe traffic quota. Counts below a symbol say **<1 symbol**: an energy detector
+can detect within a modem symbol. Repeated traffic accumulates exposure, encryption
+does not reduce power or interference, and there is no guaranteed hidden traffic.
+Invalid drafts/settings and recalculation withdraw stale advisory numbers. See
+[the LPI model](lpi-estimates.md) for its equations and limitations.
+
 The persistent **DSP workspace** choice selects 25%, 50% (default), or 75% of
 available RAM. Its display includes the resolved MiB/GiB ceiling. The value is
 sampled at controller startup and when the percentage changes; other modem edits
@@ -340,12 +361,12 @@ and transmitted constellation display the generated signal from those stages.
 
 ## Layout and documents
 
-`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1000 logical
-pixels, with a 1030 by 920 minimum. A persistent simulation row holds the
+`desktop_layout.hpp` defines the desktop arrangement at 1180 by 1048 logical
+pixels, with a 1030 by 968 minimum. A persistent simulation row holds the
 dropdown, modeled receive probability and reference CPU/GPU compute estimates.
 The following persistent row holds the oscillator dropdown and selected model
-values. The extra row preserves the existing composition, reception and plot
-allocations rather than narrowing the estimate labels.
+values. A third persistent row gives the LPI advisory two full-width text lines.
+The added rows preserve the existing composition, reception and plot allocations.
 `control_layout.hpp` computes frame, label,
 editor, preset, caption and footer rectangles once. Both adapters apply these
 rectangles and convert logical to physical coordinates using their display
