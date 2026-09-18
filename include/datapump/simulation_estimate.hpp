@@ -24,6 +24,9 @@ struct Estimate {
     double tracking_symbol_windows = 0;
     double simulated_seconds = 0;
     double modeled_symbol_snr_db = 0;
+    // Nonnegative loss from random phase drift during one complete coherent
+    // symbol. Pattern reversals do not reset the carrier's phase history.
+    double phase_coherence_loss_db = 0;
     double carrier_offset_hz = 0;
     // Requested search span. If receiver_workspace_supported is false, live
     // reception may use a narrower local fallback; no probability models it.

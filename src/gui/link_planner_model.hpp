@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/transfer.hpp"
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -34,6 +35,7 @@ struct Model {
     bool shaped_band=false;
     bool clock_search_supported=false;
     bool receiver_workspace_supported=false;
+    bool confidence_available=false;
     double bit_seconds=0;
     double send_seconds=0;
     // Earliest modeled finish: whole burst plus fully scored absent symbols.
@@ -42,6 +44,11 @@ struct Model {
     double received_dbm=0;
     double actual_cn0_db_hz=0;
     double margin_db=0;
+    // Rough, conditional raw wire-bit preview at the actual link budget;
+    // requires confidence_available and completed receiver computation.
+    // No interval FEC/source context is available; the full draft is separate.
+    double success_probability=0;
+    double phase_coherence_loss_db=0;
     double occupied_bandwidth_hz=0;
     double low_audio_hz=0;
     double high_audio_hz=0;
@@ -61,5 +68,16 @@ struct Model {
 };
 // Bounded analytical planning only; no sampled audio or transmission occurs.
 Model build(const Inputs& inputs);
+struct ReceiveBanks {
+    bool plaintext=false;
+    // Distinct key material, including the selected transmit key if present.
+    std::size_t private_keys=0;
+};
+// Keep a usable request; otherwise prefer the nearest checked weaker target,
+// falling back to a stronger fit. Companion targets share the receiver budget
+// and are not changed. Omitted banks means one matching waveform family.
+// An empty result means no fitting candidate was found.
+std::optional<double> nearest_fit_target(const Inputs& inputs,
+    std::span<const double> companion_targets={},std::optional<ReceiveBanks> banks=std::nullopt);
 std::string duration(double seconds);
 }

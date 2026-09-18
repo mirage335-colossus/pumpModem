@@ -177,6 +177,19 @@ Tone profiles omit the pattern smear term. These are analytical approximations
 to the sampled channel; they do not reproduce adaptive tracking or the exact
 public/private codeword correlations.
 
+`phase_coherence_loss_db` exposes the phase penalty already used by the
+probability calculation. It describes the whole symbol: known pattern phase
+reversals are removed before the receiver sums the complex correlation.
+The final squared magnitude (or equivalent two-real-basis fit) cancels an
+unknown constant phase; phase wandering during the symbol still reduces the
+score. The differential constellation points are diagnostics and do not feed
+this score. Increasing transition frequency does not restart the oscillator's
+phase error, and there is no special 0.01 Hz transition threshold. GPS discipline alone does not
+make separate oscillators phase coherent; the selected residual phase diffusion
+still applies. Accumulating energies from shorter coherent sections would need
+a different detector, including its additional noise and acquisition costs;
+it is not credited to the current receiver.
+
 With the remaining linear energy `g`, the assumed bit error rate is
 `0.5 exp(-g/2)`, the noncoherent orthogonal binary AWGN model. Symbol admission
 uses a Gaussian energy-statistic approximation with mean `g` and variance

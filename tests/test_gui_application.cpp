@@ -629,6 +629,57 @@ void target_snr_declarations() {
     check(app.field(F::snr).text=="31.5" && app.field(F::long_snr).text=="54.5",
           "Stale target callbacks changed a closing application");
 }
+void fitted_target_editing() {
+    using F=ui::Field;
+    Application app({.simulation=true});
+    for(const auto field:{F::snr,F::long_snr}) {
+        const auto& declaration=control(field);
+        for(const auto* text:{"-","-6","-60","-60.","-60.5"}) {
+            app.edit(declaration,text);
+            check(app.field(field).text==text,"Fitting a weak target replaced a native keystroke buffer");
+        }
+        check(app.field(F::status).text.find("target SNR must be a number")==std::string::npos,
+              "A valid target retained the validation notice from an incomplete numeric prefix");
+        const auto adjusted=app.field(field).display_text;
+        const auto label=app.control(declaration).label;
+        check(!adjusted.empty()&&label.starts_with(field==F::snr?"Short ≤16 B · ":"Long / file · ")&&
+              label.ends_with(adjusted+" dB-Hz"),
+              "An adjusted target must show its effective value without replacing the edit buffer");
+        const auto receive_targets=app.field(F::receive_snr).text;
+        check(!app.submit(declaration,true,false)&&!app.submit(declaration,false,true)&&
+              app.field(field).text=="-60.5",
+              "Modified Enter unexpectedly committed the target edit");
+        check(app.submit(declaration,false,false)&&app.field(field).text!="-60.5"&&
+              app.field(field).display_text.empty()&&app.control(declaration).label==declaration.label&&
+              app.field(F::receive_snr).text==receive_targets,
+              "Plain Enter must display the exact fitted target without rebuilding the receive targets");
+        app.preset(declaration,"-60");
+        check(app.field(field).text!="-60"&&app.field(field).display_text.empty(),
+              "A target preset must immediately display its fitted value");
+
+        app.report_error("Keep this unrelated notice");
+        app.edit(declaration,"-60.5");
+        check(app.field(F::status).text=="Keep this unrelated notice",
+              "A valid target edit cleared an unrelated notice");
+        app.set_service_active(true);
+        app.preset(declaration,"20");app.submit(declaration,false,false);
+        check(app.field(field).text=="-60.5"&&!app.field(field).display_text.empty(),
+              "A blocked input surface committed or replaced a target edit");
+        app.set_service_active(false);
+        auto hidden=declaration;hidden.persistent=false;hidden.page=ui::Page::flow;
+        app.preset(hidden,"20");app.submit(hidden,false,false);
+        auto stale=declaration;stale.surface=999;
+        app.preset(stale,"20");app.submit(stale,false,false);
+        check(app.field(field).text=="-60.5"&&!app.field(field).display_text.empty(),
+              "A hidden page or stale overlay callback committed a target edit");
+    }
+    app.close();
+    for(const auto field:{F::snr,F::long_snr}) {
+        const auto& declaration=control(field);
+        app.preset(declaration,"20");app.submit(declaration,false,false);
+        check(app.field(field).text=="-60.5","A closing application committed a target edit");
+    }
+}
 void mono_declaration() {
     Application app({.simulation=true});
     const auto& mono=control(ui::Field::mono);
@@ -1064,6 +1115,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

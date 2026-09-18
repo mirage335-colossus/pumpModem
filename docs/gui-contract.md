@@ -62,9 +62,25 @@ recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform, runs no receiver and starts no worker or transmission.
 Immutable documents and plots are cached across unchanged presentation polls.
 
-The planner opens with a verdict comparing the actual link budget to the
-selected target and checking clock/RAM support. Its power/path/noise input
-controls appear once, in the shared top bar. The **Simulation** dropdown offers
+In automatic modes, edits to either transmit-target dropdown below −20 dB-Hz
+select an exact clock/RAM fit, preferring the nearest checked weaker target and
+falling back stronger if needed. Already fitting values remain exact. The
+search includes the other effective transmit target and the same deduplicated
+plaintext/key families as the configured RX estimate. It leaves the other
+target unchanged. If no fitting candidate is found, settings become unavailable
+and stale reception estimates are cleared. Values at or above −20 and fixed
+modes are unchanged.
+Typing retains the user's edit buffer; an adjusted label shows the effective
+value. Presets and plain Enter commit full precision without retuning or
+rebuilding the draft. Matched RX targets use effective values, not edit buffers.
+Manual RX lists and explicit planner Apply remain exact.
+
+The planner opens with the preview's RX estimate or a clock/RAM limit, followed
+by budget margin and phase-drift loss. Its probability assumes every wire bit
+correct before FEC and one matching RX profile; top-bar RX confidence retains
+the actual configured draft and receive-bank model. Pattern reversals do not
+create an unimplemented segmented or phase-tracking receiver. Its power/path/noise
+input controls appear once, in the shared top bar. The **Simulation** dropdown offers
 only **Yes / No**, and the editable budget dropdowns stay visible in both modes.
 CPU/GPU computation estimates appear only with **Yes**; RX success is estimated
 in either mode. The CPU/GPU row collapses with **No**, moving the tabs and page

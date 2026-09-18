@@ -9,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 
 using namespace datapump;
@@ -83,6 +84,50 @@ void workload_and_impairments() {
     const auto impaired=simulation::estimate(value,options,true,channel);
     check(impaired.modeled_symbol_snr_db<base.modeled_symbol_snr_db &&
           impaired.success_probability<base.success_probability,"phase diffusion must reduce model confidence");
+}
+void whole_symbol_phase_coherence() {
+    transfer::Options options;
+    options.modem=tuning::resolve(1,0,tuning::PatternMode::auto_pattern,false,1500).config;
+    options.modem.integration_seconds=86400;
+    options.dsp_workspace_bytes=std::size_t{16}*1024*1024*1024;
+    auto channel=clean_channel();
+    channel.snr_db=30-10*std::log10(static_cast<double>(modem::symbol_sample_count(options.modem))/2.);
+    const auto clean=simulation::estimate(wire(1,options.modem),options,true,channel);
+    near(clean.phase_coherence_loss_db,0,"zero phase diffusion must have zero coherent loss");
+    // For Brownian phase whose correlation falls to 1/e across the whole
+    // symbol, the integrated power fraction is independently 2/e.
+    channel.phase_noise_degrees_per_sqrt_second=180/std::numbers::pi*std::sqrt(2./86400);
+    const auto one_exponent=simulation::estimate(wire(1,options.modem),options,true,channel);
+    near(one_exponent.phase_coherence_loss_db,10*std::log10(std::exp(1.)/2),
+         "whole-symbol phase loss must agree with the independent 2/e reference");
+    near(clean.modeled_symbol_snr_db-one_exponent.modeled_symbol_snr_db,one_exponent.phase_coherence_loss_db,
+         "exposed phase penalty must be the same loss already used by receive confidence");
+    for(const auto rate:{.01,.02,.1,1.}) {
+        options.modem=tuning::resolve(rate,0,tuning::PatternMode::auto_pattern,false,1500).config;
+        options.modem.integration_seconds=86400;
+        const auto cadence=simulation::estimate(wire(1,options.modem),options,true,channel);
+        near(cadence.phase_coherence_loss_db,one_exponent.phase_coherence_loss_db,
+             "known chip reversals across 0.01 Hz cannot reset whole-symbol phase drift");
+    }
+    options.modem.integration_seconds=3000000;
+    channel.snr_db=30-10*std::log10(static_cast<double>(modem::symbol_sample_count(options.modem))/2.);
+    channel.phase_noise_degrees_per_sqrt_second=0;
+    const auto long_clean=simulation::estimate(wire(1,options.modem),options,true,channel);
+    double previous_loss=0;
+    for(const auto diffusion:{.005,.05,.5}) {
+        channel.phase_noise_degrees_per_sqrt_second=diffusion;
+        const auto gpsdo=simulation::estimate(wire(1,options.modem),options,true,channel);
+        check(gpsdo.confidence_available&&gpsdo.phase_coherence_loss_db>previous_loss,
+              "GPSDO phase models must retain progressively greater loss over a long coherent symbol");
+        previous_loss=gpsdo.phase_coherence_loss_db;
+        if(diffusion==.5)check(gpsdo.phase_coherence_loss_db>17&&
+                gpsdo.success_probability<long_clean.success_probability,
+                "GPSDO XO phase drift can materially reduce long-symbol confidence despite clock coverage");
+    }
+    options.dsp_workspace_bytes=1024;
+    const auto unsupported=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(!unsupported.confidence_available&&unsupported.phase_coherence_loss_db>17,
+          "phase loss should remain visible when insufficient RAM prevents a numeric receive estimate");
 }
 void established_tracking_workload() {
     transfer::Options options;
@@ -346,7 +391,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();whole_symbol_phase_coherence();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

@@ -40,7 +40,8 @@ struct ReceiverSupport {
     bool clock=false,workspace=false;
     bool fits() const {return clock&&workspace;}
 };
-ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& config) {
+ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& config,
+        std::span<const modem::Config> profiles={}) {
     auto options=inputs.options;options.modem=config;
     auto channel=inputs.channel;
     channel.snr_db=std::clamp(inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-
@@ -49,7 +50,7 @@ ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& confi
     // banks, not payload length. This analytical one-symbol estimate allocates
     // neither a draft, a transfer probe, nor PCM inside the bounded search.
     transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
-    const auto estimate=simulation::estimate(one,options,true,channel);
+    const auto estimate=simulation::estimate(one,options,true,channel,profiles);
     return {estimate.carrier_in_search,estimate.receiver_workspace_supported};
 }
 
@@ -119,7 +120,9 @@ class ClockSearch {
     std::uint64_t alignment;
     std::vector<std::uint64_t> divisors;
     std::vector<double> targets;
-    std::map<std::uint64_t,ReceiverSupport> support_cache;
+    std::map<std::pair<std::uint64_t,double>,ReceiverSupport> support_cache;
+    std::span<const double> companion_targets;
+    std::optional<ReceiveBanks> receive_banks;
 
     void add(double target) {
         if(std::isfinite(target)&&target>=minimum&&target<=maximum)targets.push_back(target);
@@ -148,8 +151,27 @@ class ClockSearch {
         const auto config=try_resolve(inputs,target);
         if(!config)return {};
         const auto samples=modem::symbol_sample_count(*config);
-        if(const auto found=support_cache.find(samples);found!=support_cache.end())return found->second;
-        return support_cache.emplace(samples,receiver_support(inputs,*config)).first->second;
+        // Mixed public/private families can cross different short-profile
+        // floors at the same selected sample count, so retain target identity
+        // when an explicit receive-bank context is supplied.
+        const auto cache_key=std::pair{samples,receive_banks?target:0.};
+        if(const auto found=support_cache.find(cache_key);found!=support_cache.end())return found->second;
+        std::vector<modem::Config> profiles;
+        if(!companion_targets.empty()||receive_banks) {
+            std::vector<double> combined(companion_targets.begin(),companion_targets.end());
+            combined.push_back(target);
+            const auto append=[&](bool keyed,std::size_t count) {
+                if(!count)return;
+                const auto family=tuning::receive_profiles(inputs.options.modem,combined,inputs.mode,keyed);
+                for(std::size_t key=0;key<count;++key)profiles.insert(profiles.end(),family.begin(),family.end());
+            };
+            if(receive_banks) {
+                append(false,receive_banks->plaintext?1:0);
+                append(true,receive_banks->private_keys);
+                if(profiles.empty())return {};
+            } else append(inputs.options.key.has_value(),1);
+        }
+        return support_cache.emplace(cache_key,receiver_support(inputs,*config,profiles)).first->second;
     }
     void sort_targets() {
         std::sort(targets.begin(),targets.end());
@@ -192,7 +214,9 @@ class ClockSearch {
         return std::nullopt;
     }
 public:
-    ClockSearch(const Inputs& value,double low,double high):inputs(value),minimum(low),maximum(high) {
+    ClockSearch(const Inputs& value,double low,double high,
+            std::span<const double> companions={},std::optional<ReceiveBanks> banks=std::nullopt):
+        inputs(value),minimum(low),maximum(high),companion_targets(companions),receive_banks(banks) {
         const auto chip=modem::pattern_chip_samples(inputs.options.modem);
         alignment=std::gcd(chip,std::max<std::uint64_t>(1,chip/2));
         // Divisor work is bounded by the validated rate/sample-clock geometry,
@@ -293,6 +317,35 @@ public:
         result.stronger=step(true);result.weaker=step(false);
         return result;
     }
+    std::optional<double> nearest() {
+        const auto requested=inputs.target_db_hz;
+        if(requested>=minimum&&requested<=maximum&&check(requested).fits())return requested;
+        if(!automatic(inputs.mode))return std::nullopt;
+        (void)run();
+        const auto choose=[&]() -> std::optional<double> {
+            const auto split=std::upper_bound(targets.begin(),targets.end(),requested);
+            for(auto candidate=split;candidate!=targets.begin();) {
+                --candidate;
+                if(check(*candidate).fits())return *candidate;
+            }
+            for(auto candidate=split;candidate!=targets.end();++candidate)
+                if(check(*candidate).fits())return *candidate;
+            return std::nullopt;
+        };
+        auto result=choose();
+        if(!result)return std::nullopt;
+        // Refine larger coverage gaps, then inspect both sides of every local
+        // divisor grid. The retained target always resolves to a checked
+        // sample count; nominal decimal rounding cannot recreate a RAM gap.
+        if(std::abs(*result-requested)>.001) {
+            const auto edge=refine(std::clamp(requested,minimum,maximum),*result);
+            add(edge);
+            if(const auto config=try_resolve(inputs,edge))
+                near_samples(modem::symbol_sample_count(*config),true);
+            sort_targets();result=choose();
+        }
+        return result;
+    }
 };
 std::string number(double value,int precision=3) {
     std::ostringstream out;out.imbue(std::locale::classic());
@@ -304,6 +357,27 @@ std::uint64_t add_samples(std::uint64_t first,std::uint64_t second) {
         throw Error("planned duration exceeds the modem sample counter");
     return first+second;
 }
+}
+
+std::optional<double> nearest_fit_target(const Inputs& inputs,
+        std::span<const double> companion_targets,std::optional<ReceiveBanks> banks) {
+    try {
+        if(!std::isfinite(inputs.target_db_hz)||inputs.target_db_hz< -200||inputs.target_db_hz>200||
+           !std::isfinite(inputs.tx_dbm)||!std::isfinite(inputs.path_loss_db)||inputs.path_loss_db<0||
+           !std::isfinite(inputs.noise_density_dbm_hz)||
+           companion_targets.size()>=tuning::maximum_receive_targets)return std::nullopt;
+        // Match the live limit of 128 receive keys plus a selected key. Empty
+        // explicit bank sets must not fall back to an implicit receiver.
+        if(banks&&((!banks->plaintext&&!banks->private_keys)||banks->private_keys>129))return std::nullopt;
+        modem::validate(inputs.options.modem);
+        // Search independently of the requested duration: a target can exceed
+        // the sample counter while a nearby practical fallback remains usable.
+        const auto maximum_seconds=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())/
+            (4.L*inputs.options.modem.sample_rate);
+        const auto minimum=std::max(-200.,tuning::pattern_target_symbol_snr_db-
+            10*std::log10(static_cast<double>(maximum_seconds)));
+        return ClockSearch(inputs,minimum,200,companion_targets,banks).nearest();
+    } catch(const Error&) {return std::nullopt;}
 }
 
 Model build(const Inputs& inputs) {
@@ -361,12 +435,15 @@ Model build(const Inputs& inputs) {
         auto channel=inputs.channel;
         const auto sample_snr=result.actual_cn0_db_hz-10*std::log10(config.sample_rate/2.);
         // The existing simulator accepts only -300..300 dB. Clamping its
-        // strength input does not alter the search or workspace checks used
-        // here; no success probability is displayed by the planner.
+        // strength input does not alter search or workspace checks. Keep
+        // confidence unavailable outside the estimator's supported range.
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
         const auto receiver=simulation::estimate(transmission,options,true,channel);
         result.clock_search_supported=receiver.carrier_in_search;
         result.receiver_workspace_supported=receiver.receiver_workspace_supported;
+        result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
+        result.success_probability=result.confidence_available?receiver.success_probability:0;
+        result.phase_coherence_loss_db=receiver.phase_coherence_loss_db;
         if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
         if(!receiver.receiver_workspace_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";

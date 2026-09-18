@@ -3525,3 +3525,57 @@ in 64.12 seconds. Together with the corrected planner rerun, all 16 selected Rev
 GUI suites passed. `git diff --check` passed. Full native transmission workflows
 and physical audio were not rerun; the previously recorded Rev workflow timeout
 remains an existing validation limit.
+
+
+### Fitted target entry and phase-aware planner reception (2026-09-18)
+
+Automatic short/long target entry below −20 dB-Hz now keeps an already fitting
+value or chooses a checked nearby Clock/RAM fit, preferring weaker targets.
+The check includes the unchanged companion target and deduplicated public/key
+receive banks. Typed text remains editable while the label shows the effective
+value; Enter and presets commit full precision without retuning. Explicit
+planner Apply and manual RX lists keep their exact-input behavior. Tests cover
+weaker and stronger fallback, sample-counter overflow recovery, shared bank
+budgets, typing/commit eligibility, and unchanged exact short/raw wire counts.
+
+Link planner now displays the preview's modeled RX probability and the existing
+whole-symbol phase-coherence penalty. The estimator's probability formula and
+production receiver are unchanged. Tests independently check the 2/e coherent
+energy reference, zero-diffusion loss, transition cadences around 0.01 Hz,
+GPSDO-model loss, and the distinction between a RAM fit and actual link power.
+The preview uses one matching receiver and requires every wire bit correct;
+the top-bar estimate retains the actual draft, receive bank and FEC model.
+
+Both complete Release builds succeeded (GCC/FLTK and Clang/Rev). The initial
+34-suite GCC run passed 33 suites; the numerical-anchor controller fixture
+attempted planner Apply while deliberately invalid modem text was still active.
+It now restores the original valid target before applying the exact anchor;
+the invalid-edit preservation assertion and numerical anchor remain unchanged.
+The corrected controller suite passed in 64.78 seconds. The final 16 other GCC
+GUI suites passed in 9.77 seconds. Together, all 21 development-contract suites
+and all 17 selected GUI suites passed, with four suites shared between them.
+
+The final Rev selection passed 16/17 suites before its planner test's literal
+expectation was updated to the refined explanation of relative-phase section
+comparisons. That corrected planner rerun passed in 5.50 seconds; all 16 selected
+Rev GUI suites and the simulation-estimate suite therefore passed. The existing
+bitmap size-comparison compiler warning remains unrelated to these edits.
+
+Native FLTK checks exercised real −60.5 keystrokes, Enter and preset callbacks.
+The edit buffer stayed intact; commits displayed the exact fitted target. A
+stale numeric-prefix validation notice found during inspection was fixed and
+verified to clear after successful configuration while preserving unrelated
+notices. At 1 Hz/GPSDO and this host's 50% RAM allowance, planner previews showed
+above 99.9% RX at 170 dB path loss and below 0.1% at 214 dB, with phase loss near
+18 dB visible in both. These are model outputs, not sampled reception results.
+Default and minimum layouts were inspected; the private display exited normally.
+
+A read-only receiver audit confirmed that the explicit adjacent-phase products
+feed constellation diagnostics only. Production detection fits one common
+complex amplitude/phase across a complete symbol; constant phase is tolerated,
+but within-symbol phase wander is not independently tracked. The experimental
+segmented detector sums section energies and does not test differential or
+phase-state combining. Its results cannot establish a limit on those methods.
+No multi-day PCM reception, physical RF link or full native transmission workflow
+was tested. The previously recorded Rev workflow timeout remains a validation
+limit. `git diff --check` passed.

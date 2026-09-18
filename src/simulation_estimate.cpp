@@ -259,6 +259,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto carrier_loss=std::abs(angle)<1e-10L?1.L:std::pow(std::sin(angle)/angle,2);
     const auto diffusion=channel.phase_noise_degrees_per_sqrt_second*std::numbers::pi_v<long double>/180;
     const auto phase_loss=phase_coherence(.5L*diffusion*diffusion*seconds);
+    result.phase_coherence_loss_db=static_cast<double>(std::max(0.L,-10*std::log10(phase_loss)));
     auto residual_clock_ppm=std::abs(static_cast<long double>(channel.clock_error_ppm));
     if(coupled)residual_clock_ppm=std::min(residual_clock_ppm,
         std::abs(channel.clock_error_ppm-nearest/config.carrier_hz*1e6L));

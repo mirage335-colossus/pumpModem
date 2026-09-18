@@ -90,9 +90,13 @@ void Application::edit(const ui::Control& declaration,std::string text) {
     edit(declaration.field,std::move(text));
 }
 void Application::preset(const ui::Control& declaration,const std::string& id) {
+    if(declaration.kind!=ui::Kind::text||!accepts_input(declaration))return;
     const auto& options=control(declaration).state.options;
     const auto found=std::find_if(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
-    if(found!=options.end())edit(declaration,found->id);
+    if(found!=options.end()) {
+        edit(declaration,found->id);
+        impl_->controller.commit_target(declaration.field);
+    }
 }
 void Application::select(ui::Field field,std::string id) {
     if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.select(field,std::move(id));
@@ -187,6 +191,11 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     }
     view.enabled=view.enabled&&accepts_surface(declaration.surface);
     if(declaration.kind==ui::Kind::label&&declaration.field!=ui::Field::count)view.label=state.text;
+    if(declaration.kind==ui::Kind::text&&!state.display_text.empty()) {
+        const auto effective=(state.display_text.size()>6?"":"using ")+state.display_text+" dB-Hz";
+        if(declaration.field==ui::Field::snr)view.label="Short ≤16 B · "+effective;
+        else if(declaration.field==ui::Field::long_snr)view.label="Long / file · "+effective;
+    }
     if(declaration.kind==ui::Kind::action) {
         const auto current=command_label(declaration.command);
         if(!current.empty())view.label=current;
@@ -228,6 +237,10 @@ void Application::select_page(ui::Page page) {
 ui::Page Application::page() const { return impl_->page; }
 bool Application::smoke_passed() const { return impl_->passed; }
 bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
+    if(control.kind==ui::Kind::text&&(control.field==ui::Field::snr||control.field==ui::Field::long_snr)&&!ctrl&&!shift) {
+        if(accepts_input(control))impl_->controller.commit_target(control.field);
+        return true;
+    }
     if(control.submit==ui::Command::none||shift)return false;
     const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
     if(ctrl!=wants_ctrl)return false;

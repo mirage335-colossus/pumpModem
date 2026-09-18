@@ -1,14 +1,25 @@
 # Link planner
 
 Set transmit power, path loss and noise in the top bar, then open **Link
-planner**, immediately after **Console**. Its headline shows whether that budget
-meets the selected target, its margin or shortfall, and any receiver clock/RAM
-limit. The power field accepts watts, milliwatts, microwatts or dBm.
+planner**, immediately after **Console**. Its headline shows the preview's RX
+estimate or its clock/RAM limit. Below it are the power budget's margin or
+shortfall and the modeled loss from phase drift. The power field accepts watts,
+milliwatts, microwatts or dBm.
 
 The timing preview starts at −8 dB in 1 Hz, independently of the current
 transmit targets. Rate, carrier, waveform, key, oscillator and DSP
 allowance follow the shared controls. Choose **Use target for short messages**
 or **Use target for long messages** to apply a preview.
+
+The short and long target dropdowns automatically align entries below −20 dB-Hz
+in automatic modes. An already fitting value stays exact; otherwise selection
+prefers the nearest checked weaker target, with a stronger fallback when needed.
+The check includes the other transmit target and all active plaintext/key banks.
+It checks clock coverage and RAM, independently of the RX probability.
+Preset selections display the exact fitted value immediately. While typing,
+your text stays intact and the label shows the value in use; Enter displays its
+full precision. The matched RX list always uses the exact effective values.
+Manual RX lists and explicit planner Apply retain their exact-input behavior.
 
 The top-bar **Simulation** choice is **Yes / No**. Editable power, path-loss and
 noise dropdowns stay beside it in both modes, sharing their values with the
@@ -66,9 +77,33 @@ The bounded search checks sample-aligned timings and changes in clock-search
 and FFT geometry; other usable timings may remain undiscovered.
 
 Memory and clock coverage are separate from successful reception.
-The check assumes one matching RX profile,
-rather than the currently unapplied receive-target list. More profiles or keys
-can require additional workspace.
+The planner preview checks one matching RX profile, rather than the currently
+unapplied receive-target list. More profiles or keys can require additional
+workspace; the transmit dropdowns include those banks when choosing a fit.
+
+The planner's **RX estimate** includes the existing model's signal strength,
+whole-bit phase loss, residual frequency and timing error, acquisition and RAM
+checks. It estimates reception of every wire bit before error correction;
+the top-bar estimate uses the actual configured draft, receive bank and FEC.
+The phase-loss readout exposes the existing calculation without changing its
+probability formula. A power-budget margin therefore need not imply a good RX
+estimate. Neither estimate establishes measured sensitivity.
+
+The dense low-target timings existed before the planner found them. At 1 Hz,
+the nearby 3,162,277- and 3,162,278-second symbols both fit the 4 GiB/hobby-GPSDO
+check; their target levels differ by about 0.00000137 dB. They are discrete
+sample timings. The latter lasts about 37 days and loses about 17.8 dB to phase
+diffusion in that oscillator model. Known pattern reversals help identify the
+waveform, but the current receiver combines each complete bit coherently.
+Its score tolerates an unknown constant phase, not arbitrary phase changes
+within the bit. Relative phase values shown in the live constellation are
+diagnostics; the decoder does not accumulate those displayed differences.
+There is no special 0.01 Hz transition threshold. Relative phase changes can still be detected by comparing
+neighboring sections and accumulating their evidence, without resolving each
+change individually or preserving absolute phase for days. That requires a
+different detector and its noise model. Accumulating energies from shorter
+matched sections is the separate [experimental detector](weak-link-planning.md),
+not a production receive path.
 
 **Observer / receiver time** uses the existing [relative LPI model](lpi-estimates.md).
 Each graph point holds the intended receiver's bit energy relative to noise at

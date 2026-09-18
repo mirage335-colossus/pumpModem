@@ -62,6 +62,43 @@ diffusion tenfold to 0.05 degrees/sqrt(second) raises that uninterrupted model
 to 99.65% (99.51–99.75%). This comparison shows why oscillator stability and
 tracking matter at least as much as making the configured bandwidth smaller.
 
+## Relative phase across shorter sections
+
+Loss of whole-symbol coherence does not erase every useful phase transition.
+A differential receiver can compare neighboring matched sections; a receiver
+that models phase drift can use relationships between several nearby sections.
+Neither approach requires a reliable decision on each individual transition.
+These are different statistics from both the current whole-symbol correlation
+and the experimental sum of section energies. The latter discards relationships
+between section phases, so its results do not bound a differential receiver.
+See the primary study of
+[differential combining for weak GPS acquisition](https://www.sciencedirect.com/science/article/abs/pii/S0165168406002696).
+
+For illustration, the hobby-GPSDO phase model (0.5 degrees/√second) produces
+5 degrees RMS random phase change over 100 seconds. That is small relative to
+a 180-degree reversal, even though absolute phase can wander greatly over days.
+At actual C/N0 of −47 dB-Hz, however, a 100-second section has only −27 dB
+Es/N0. Accumulation must account for that noise, residual carrier error, timing,
+competing patterns and the search's false-alarm budget. Clock stability alone
+does not give a reception probability. GPS discipline improves long-term time
+and frequency accuracy; short-interval stability also depends on the local
+oscillator and control loop ([NIST](https://www.nist.gov/publications/measurement-transient-environmental-effects-gps-disciplined-clocks)).
+
+The current pattern score fits a constant unknown carrier phase across each
+complete bit. Its squared magnitude already contains relationships between
+pattern phases, but it does not reweight them according to their separation in
+time or track phase within the bit. The adjacent-phase values in the live
+constellation are display diagnostics only. A different detector could improve
+phase tolerance; these planner changes do not implement or credit that gain.
+
+The same fit uses the full expected amplitude pattern, but has no separate
+adjacent-amplitude difference/ratio accumulator or varying-gain model. Scaling
+all received samples, including their noise, by one constant leaves the
+normalized score unchanged; increasing signal power against fixed noise still
+improves SNR. Positive gain changes within a bit mismatch its expected envelope,
+without the vector cancellation caused by phase wander. The live constellation
+shows phase differences and current amplitude, not amplitude differences.
+
 ## Run an analysis
 
 ```sh

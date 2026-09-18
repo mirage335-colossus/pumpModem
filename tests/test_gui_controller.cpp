@@ -28,6 +28,16 @@ void prepare(Controller& controller) {
     }
     check(controller.estimate().has_value(),"Payload estimate was not prepared");
 }
+void apply_exact_target(Controller& controller,const std::string& target) {
+    // Deliberately unsupported geometry remains available through explicit
+    // planner Apply; dropdown edits now select a nearby clock/RAM fit.
+    controller.activate(ui::Command::planner_target);
+    const auto requests=controller.take_services();
+    check(requests.size()==1,"Exact target fixture needs the planner prompt");
+    controller.complete_service({requests.front().id,false,target,{}});
+    controller.activate(ui::Command::planner_apply_short);
+    check(controller.field(ui::Field::snr).text==target,"Explicit target fixture changed its numerical anchor");
+}
 void simulation_estimate_controls() {
     using F=ui::Field;
     Controller controller({true,true});
@@ -89,7 +99,7 @@ void simulation_estimate_controls() {
     check(text(F::simulation_confidence).find('%')!=std::string::npos,
           "Returning to supported carrier coverage did not restore the modeled percentage");
     controller.edit(F::bandwidth,"100 Hz");
-    controller.edit(F::snr,"-61");
+    apply_exact_target(controller,"-61");
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
           "100 Hz with a -61 target must not show the old low numeric probability");
@@ -188,7 +198,7 @@ void oscillator_controls() {
     check(controller.revision()==revision&&controller.field(F::simulation_oscillator).selected==accepted,
           "Unknown oscillator IDs changed accepted simulation settings");
     controller.select(F::simulation_oscillator,"crystal");
-    controller.edit(F::bandwidth,"100 Hz");controller.edit(F::snr,"-30");prepare(controller);
+    controller.edit(F::bandwidth,"100 Hz");apply_exact_target(controller,"-30");prepare(controller);
     check(controller.field(F::simulation_confidence).text.ends_with("Carrier outside RX search"),
           "Long-symbol oscillator fixture must expose the default clock's uncovered carrier");
     controller.select(F::simulation_oscillator,"gpsdo-ocxo");prepare(controller);
@@ -733,7 +743,8 @@ void shannon_capacity_display() {
     expect_capacity("5.17 kbit/s");
     controller.edit(F::snr,"unfinished");
     expect_capacity("5.17 kbit/s"); // Invalid drafts preserve the active settings.
-    controller.edit(F::snr,"-60");
+    controller.edit(F::snr,"40"); // Planner Apply requires valid modem settings.
+    apply_exact_target(controller,"-60");
     expect_capacity("1.44e-06 bit/s");
     controller.close();
 }
@@ -1687,15 +1698,18 @@ void receive_target_controls() {
           "bandwidth changes must preserve custom receive targets");
     controller.edit(F::receive_snr,"20,");
     controller.edit(F::snr,"-23");
-    check(controller.field(F::receive_snr).text=="-23, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    const auto fitted_targets=controller.settings().transfer.receive_targets_db_hz;
+    const auto fitted_text=controller.field(F::receive_snr).text;
+    check(fitted_targets.size()==2&&fitted_targets[1]==55&&
+          fitted_targets[0]!=55&&controller.field(F::snr).text=="-23"&&
+          tuning::parse_receive_targets(fitted_text).values==fitted_targets,
           "changing short TX SNR must immediately replace pending receive edits with both matching targets");
     std::this_thread::sleep_for(std::chrono::milliseconds(775));controller.poll();
-    check(controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    check(controller.settings().transfer.receive_targets_db_hz==fitted_targets,
           "a pending receive edit must not overwrite the target selected by TX SNR");
     controller.edit(F::snr,"-");
-    check(controller.field(F::receive_snr).text=="-23, 55" &&
-          controller.settings().transfer.receive_targets_db_hz==std::vector<double>({-23,55}),
+    check(controller.field(F::receive_snr).text==fitted_text &&
+          controller.settings().transfer.receive_targets_db_hz==fitted_targets,
           "an incomplete TX SNR edit must preserve the last valid receive target");
     controller.edit(F::snr,"80");
     check(controller.field(F::receive_snr).text=="80, 55" &&

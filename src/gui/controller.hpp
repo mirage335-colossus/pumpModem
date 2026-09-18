@@ -23,6 +23,8 @@ public:
     bool closing() const;
     bool ready_to_close() const;
     void edit(ui::Field field, std::string text);
+    // Finish a target edit without changing its already accepted sample timing.
+    void commit_target(ui::Field field);
     void select(ui::Field field, std::string option_id);
     void toggle(ui::Field field, bool value);
     void activate(ui::Command command);

@@ -58,6 +58,16 @@ double number(const std::string& text,const char* name) {
     if(used!=text.size() || !std::isfinite(value)) throw Error(std::string(name)+" must be a finite number");
     return value;
 }
+planner::ReceiveBanks receive_banks(const live::Settings& settings) {
+    std::vector<Bytes> tags;
+    const auto add=[&](const Crypto& key) {
+        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
+        if(std::find(tags.begin(),tags.end(),tag)==tags.end())tags.push_back(std::move(tag));
+    };
+    if(settings.transfer.key)add(*settings.transfer.key);
+    for(const auto& key:settings.receive_keys)add(key);
+    return {settings.permits_plaintext(),tags.size()};
+}
 double frequency(std::string value,const char* name) {
     value.erase(std::remove(value.begin(),value.end(),' '),value.end()); double scale=1;
     if(value.ends_with("MHz")) { scale=1000000; value.resize(value.size()-3); }
@@ -163,6 +173,9 @@ struct Controller::Impl {
     double zoom=1,channel_snr=0,cpu_percent=0,shannon_capacity_bps=0;
     std::optional<tuning::Plan> short_plan,long_plan;
     double short_target=32,long_target=55;
+    struct TargetEdit {std::string requested;double effective;};
+    std::array<std::optional<TargetEdit>,2> target_edits;
+    bool target_input_notice=false;
     std::optional<bool> displayed_short_target;
     std::string draft_error,tuning_explanation,estimate_error;
     std::vector<KeyEntry> keys;
@@ -266,7 +279,7 @@ struct Controller::Impl {
         else value.data=composer.bytes();
         return value;
     }
-    void notice(std::string text,double seconds=4) { f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
+    void notice(std::string text,double seconds=4) { target_input_notice=false;f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
     bool short_draft() const {
         return !attachment && (composer.raw_bits().has_value() || composer.bytes().size()<=transfer::short_message_bytes);
     }
@@ -396,7 +409,23 @@ struct Controller::Impl {
         const auto center=frequency_text(rate/2);
         if(center!=carrier.text)carrier.options.push_back({center,center});
     }
-    void configure(bool match_receive_target=false,bool match_carrier=false) {
+    static std::size_t target_index(UiField field) {return field==UiField::snr?0:1;}
+    double effective_target(UiField field) const {
+        const auto& edited=target_edits[target_index(field)];
+        if(edited&&edited->requested==f(field).text)return edited->effective;
+        return number(f(field).text,field==UiField::snr?"Short target SNR":"Long target SNR");
+    }
+    void target_labels() {
+        for(const auto field:{UiField::snr,UiField::long_snr}) {
+            auto& display=f(field).display_text;display.clear();
+            const auto& edited=target_edits[target_index(field)];
+            if(settings_valid&&edited&&edited->requested==f(field).text) {
+                std::ostringstream out;out<<std::setprecision(4)<<edited->effective;display=out.str();
+            }
+        }
+    }
+    void configure(bool match_receive_target=false,bool match_carrier=false,
+                   std::optional<UiField> align_target=std::nullopt) {
         receive_targets_due.reset();
         dirty();
         f(UiField::profile_reference).records.clear();
@@ -406,18 +435,11 @@ struct Controller::Impl {
             const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
             const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
             if(match_carrier)reset_carrier(rate);
-            const auto short_snr=number(f(UiField::snr).text,"Short target SNR");
-            const auto long_snr=number(f(UiField::long_snr).text,"Long target SNR");
+            auto short_snr=effective_target(UiField::snr);
+            auto long_snr=effective_target(UiField::long_snr);
             const auto carrier=frequency(f(UiField::carrier).text,"Carrier");
-            const auto plan=tuning::resolve(rate,short_snr,mode,encrypted(),carrier);
-            const auto longer_plan=tuning::resolve(rate,long_snr,mode,encrypted(),carrier);
-            const auto targets=tuning::parse_receive_targets(match_receive_target?
-                f(UiField::snr).text+", "+f(UiField::long_snr).text:f(UiField::receive_snr).text);
-            f(UiField::receive_snr).text=targets.canonical;
-            next.transfer.modem=plan.config; next.transfer.timestamp=0;
-            next.long_message_modem=longer_plan.config;
+            next.transfer.timestamp=0;
             next.transfer.automatic_receive_profiles=true;
-            next.transfer.receive_targets_db_hz=targets.values;
             next.transfer.receive_pattern_mode=mode;
             if(options.smoke) next.transfer.search_seconds=0;
             next.transfer.fec=f(UiField::fec).selected=="rs20"?FecMode::rs20:f(UiField::fec).selected=="rs60"?FecMode::rs60:FecMode::off;
@@ -426,7 +448,6 @@ struct Controller::Impl {
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             next.mono=f(UiField::mono).checked;
             next.simulation=f(UiField::simulation).selected=="yes";
-            update_link_channel(next);
             const auto oscillator=tuning::parse_oscillator_preset(f(UiField::simulation_oscillator).selected);
             next.simulation_clock_error_ppm=oscillator.clock_error_ppm;
             next.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
@@ -442,14 +463,49 @@ struct Controller::Impl {
             next.content_limit=default_memory_limit; next.dsp_workspace_bytes=dsp_workspace_bytes;
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
             f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
+
+            std::optional<TargetEdit> adjustment;
+            if(align_target) {
+                auto& target=*align_target==UiField::snr?short_snr:long_snr;
+                target=number(f(*align_target).text,"Target SNR");
+                if(target< -200||target>200)throw Error("Target SNR must be -200 to 200 dB-Hz");
+                if(target< -20&&(mode==tuning::PatternMode::auto_pattern||
+                    mode==tuning::PatternMode::auto_keystream||mode==tuning::PatternMode::auto_tone)) {
+                    // A representable base also permits recovery from an
+                    // entered duration beyond the modem's sample counter.
+                    next.transfer.modem=tuning::resolve(rate,-20,mode,encrypted(),carrier).config;
+                    planner::Inputs input;input.options=next.transfer;input.mode=mode;input.target_db_hz=target;
+                    input.channel.clock_error_ppm=oscillator.clock_error_ppm;
+                    input.channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
+                    const std::array companions{*align_target==UiField::snr?long_snr:short_snr};
+                    const auto fitted=planner::nearest_fit_target(input,companions,receive_banks(next));
+                    if(!fitted)throw Error("No clock/RAM fit found for this target.");
+                    if(*fitted!=target)adjustment=TargetEdit{f(*align_target).text,*fitted};
+                    target=*fitted;
+                }
+            }
+            const auto plan=tuning::resolve(rate,short_snr,mode,encrypted(),carrier);
+            const auto longer_plan=tuning::resolve(rate,long_snr,mode,encrypted(),carrier);
+            const auto targets=tuning::parse_receive_targets(match_receive_target?
+                planner_number(short_snr)+", "+planner_number(long_snr):f(UiField::receive_snr).text);
+            next.transfer.modem=plan.config;next.long_message_modem=longer_plan.config;
+            next.transfer.receive_targets_db_hz=targets.values;
+            update_link_channel(next);
+            f(UiField::receive_snr).text=targets.canonical;
             settings=std::move(next); settings_valid=true;
+            if(target_input_notice) {
+                target_input_notice=false;notice_until={};
+                f(UiField::status).text=snapshot.error.empty()?snapshot.status:snapshot.error;
+            }
+            if(align_target)target_edits[target_index(*align_target)]=std::move(adjustment);
             short_plan=plan; long_plan=longer_plan; short_target=short_snr; long_target=long_snr;
+            target_labels();
             displayed_short_target.reset(); refresh_transmit_target();
             simulation_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
-        } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
+        } catch(...) { settings_valid=false;target_labels();simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
     }
     const std::shared_ptr<const planner::Model>& link_plan() const {
         if(planner_model)return planner_model;
@@ -811,21 +867,15 @@ struct Controller::Impl {
                     channel.seed=simulation_settings.simulation_seed;
                     const auto& base=simulation_settings.transfer;
                     // Match the live bank's deduplication of identical key material.
-                    std::vector<Bytes> key_tags;
-                    const auto add_key=[&](const Crypto& key) {
-                        auto tag=key.mac(Bytes{'D','P','-','R','X','-','B','A','N','K'});
-                        if(std::find(key_tags.begin(),key_tags.end(),tag)==key_tags.end())key_tags.push_back(std::move(tag));
-                    };
-                    if(base.key)add_key(*base.key);
-                    for(const auto& key:simulation_settings.receive_keys)add_key(key);
+                    const auto banks=receive_banks(simulation_settings);
                     std::vector<modem::Config> profiles;
                     const auto add_profiles=[&](bool keyed) {
                         const auto family=tuning::receive_profiles(base.modem,base.receive_targets_db_hz,
                             base.receive_pattern_mode,keyed);
                         profiles.insert(profiles.end(),family.begin(),family.end());
                     };
-                    if(simulation_settings.permits_plaintext())add_profiles(false);
-                    for(std::size_t key=0;key<key_tags.size();++key)add_profiles(true);
+                    if(banks.plaintext)add_profiles(false);
+                    for(std::size_t key=0;key<banks.private_keys;++key)add_profiles(true);
                     value.simulation_estimate=simulation::estimate(value.inspection->estimate,request.options,
                         value.inspection->binary||transfer::uses_raw_message(request.message),channel,profiles);
                 } catch(const std::exception&) { value.simulation_estimate.reset(); }
@@ -993,6 +1043,7 @@ struct Controller::Impl {
         case Command::planner_power_30uw: set_link_budget(UiField::link_power,10*std::log10(.03));break;
         case Command::planner_power_1uw: set_link_budget(UiField::link_power,-30);break;
         case Command::planner_apply_short: case Command::planner_apply_long:
+            target_edits[target_index(command==Command::planner_apply_short?UiField::snr:UiField::long_snr)].reset();
             f(command==Command::planner_apply_short?UiField::snr:UiField::long_snr).text=planner_number(planner_inputs.target_db_hz);
             configure(true);notice(command==Command::planner_apply_short?"Planner target applied to short messages.":"Planner target applied to long messages and files.");break;
         case Command::transmit_short_bits:
@@ -1133,6 +1184,7 @@ bool Controller::ready_to_close() const { return impl_->closing&&!impl_->prepari
 void Controller::edit(UiField field,std::string text) {
     auto& p=*impl_; if(!p.f(field).enabled||(p.f(field).text==text&&
         field!=UiField::link_power&&field!=UiField::link_loss&&field!=UiField::link_noise&&
+        field!=UiField::snr&&field!=UiField::long_snr&&
         !(field==UiField::message&&(!p.draft_error.empty()||p.composer.raw_bits()))&&
         !(field==UiField::short_bits&&(!p.composer.raw_bits()||!p.draft_error.empty())))) return;
     try {
@@ -1155,13 +1207,25 @@ void Controller::edit(UiField field,std::string text) {
             p.receive_targets_due=Clock::now()+std::chrono::milliseconds(750);
             p.simulation_estimate_status("Calculating...");
         }
-        else if(field==UiField::snr||field==UiField::long_snr) p.configure(true);
+        else if(field==UiField::snr||field==UiField::long_snr) p.configure(true,false,field);
         else if(field==UiField::bandwidth) p.configure(false,true);
         else if(field==UiField::device||field==UiField::carrier) p.configure();
         else if(field==UiField::callsign||field==UiField::grid) { if(untouched&&!p.attachment&&!p.file_loading)p.seed_composer(); }
         else p.dirty();
-    } catch(const std::exception& e) { p.notice(e.what(),10); }
+    } catch(const std::exception& e) {
+        p.notice(e.what(),10);
+        p.target_input_notice=field==UiField::snr||field==UiField::long_snr;
+    }
     p.controls();
+}
+void Controller::commit_target(UiField field) {
+    if(field!=UiField::snr&&field!=UiField::long_snr)return;
+    auto& p=*impl_;
+    if(p.closing||!p.settings_valid||!p.f(field).enabled)return;
+    auto& edited=p.target_edits[Impl::target_index(field)];
+    if(!edited||edited->requested!=p.f(field).text)return;
+    p.f(field).text=Impl::planner_number(edited->effective);edited.reset();
+    p.target_labels();p.controls();
 }
 void Controller::select(UiField field,std::string id) {
     auto& p=*impl_; auto& state=p.f(field); if(!state.enabled) return;
