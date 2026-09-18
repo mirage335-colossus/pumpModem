@@ -32,6 +32,11 @@ struct ReceivePoint {
     bool clock_supported=false;
     bool workspace_supported=false;
 };
+struct CpuPoint {
+    double target_db_hz=0;
+    double realtime_ratio=0;
+    bool available=false;
+};
 struct Model {
     Inputs inputs;
     std::vector<Point> points;
@@ -39,6 +44,9 @@ struct Model {
     // graph gap, never a prediction of zero; intermediate values interpolate
     // bounded statistical samples, with extra samples near the transition.
     std::vector<ReceivePoint> receive_points;
+    // Receiver CPU time per second of one-bit simulated audio. Uses the same
+    // checked target sweep; unsupported Clock/RAM geometry leaves graph gaps.
+    std::vector<CpuPoint> cpu_points;
     bool available=false;
     bool automatic_mode=true;
     bool observer_available=false;

@@ -8,8 +8,9 @@ The power field accepts watts,
 milliwatts, microwatts or dBm.
 
 The timing preview starts at −8 dB in 1 Hz, independently of the current
-transmit targets. Edit **Planner target** beside the oscillator selector; this
-native dropdown replaces the numeric clock notes while the planner is open.
+transmit targets. Edit **Target SNR (dB-Hz)** in the page's **Stronger / Weaker**
+controls row. This native dropdown scrolls with the planner; the top-bar
+oscillator's numeric clock notes remain hidden while the planner is open.
 Rate, carrier, waveform, key, oscillator and DSP allowance follow the shared
 controls. Choose **Use target for short messages** or **Use target for long
 messages** to apply a preview.
@@ -59,6 +60,13 @@ receive targets can consume additional headroom. RX probability remains
 conditional on completing the work. Expanded details also compare the complete
 one-bit simulation CPU time, including synthetic channel generation, with the
 bit's transmit duration.
+
+A compact CPU graph sits to the right of the target controls. It uses the same
+stronger-to-weaker target range as **Time per bit**, with a logarithmic vertical
+scale of processing seconds per audio second. The reference line marks one
+second of work per second of audio; higher values indicate falling behind on
+the reference computer. The selected marker matches the headline. Clock/RAM
+gaps stay visible, and the curve uses the same one-bit assumptions at every target.
 
 At 3.6 kHz rate and a 1.5 kHz carrier, the automatic shaped pattern gives:
 

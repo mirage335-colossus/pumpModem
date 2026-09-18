@@ -50,6 +50,16 @@ inline ControlLayout control_content_layout(const Control& c,const FieldState& s
     layout_bitmap_content(c,out);
     return out;
 }
+// Document bounds include the label, unlike desktop widget slots.
+inline ControlLayout document_control_layout(const Control& c,const FieldState& state,Rect outer) {
+    auto widget=outer;
+    const bool label=c.kind!=Kind::label&&c.kind!=Kind::action&&c.kind!=Kind::toggle&&c.label[0];
+    const int inset=label?std::min(label_height,outer.h):0;
+    widget.y+=inset;widget.h-=inset;
+    auto result=control_content_layout(c,state,widget);result.frame=outer;
+    if(label)result.label={outer.x,outer.y,outer.w,inset};
+    return result;
+}
 inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height) {
     width=std::max(0,width);height=std::max(0,height);
     const int left=std::clamp(p.left,0,width),top=std::clamp(p.top,0,height);
@@ -85,7 +95,7 @@ inline ControlLayout control_layout(const Control& c,const FieldState& state,int
         };
         for(std::size_t i=0;i<controls.size();++i) {
             const auto& sibling=controls[i];
-            if(sibling.surface!=c.surface||sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
+            if(sibling.document_only||sibling.surface!=c.surface||sibling.page!=c.page||sibling.row!=c.row||sibling.slot!=Slot::none||menu_continuation(controls,i))continue;
             total+=sibling.stretch;
             if(matches(sibling))found=true;
             else if(!found)before+=sibling.stretch;

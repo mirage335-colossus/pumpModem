@@ -802,6 +802,71 @@ void extension_controls() {
     require(std::string(toggle->label())==app.application.control(declarations[3]).label,"Native toggle retained a stale shared label");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
+void inline_document_editor() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Inline control fixture has no native window");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(140);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    app.application.select_page(ui::Page::planner);refresh();
+    NativeInput* editor=nullptr;NativeMenuButton* presets=nullptr;FltkDocumentView* document=nullptr;
+    const std::function<void(Fl_Group&)> find=[&](Fl_Group& group) {
+        if(auto* view=dynamic_cast<FltkDocumentView*>(&group);view&&view->visible_r())document=view;
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(document&&document->contains(child)) {
+                if(auto* input=dynamic_cast<NativeInput*>(child))editor=input;
+                if(auto* menu=dynamic_cast<NativeMenuButton*>(child))presets=menu;
+            }
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find(*nested);
+        }
+    };
+    find(*window);
+    require(document&&editor&&presets&&presets->size()>2&&editor->visible_r(),
+        "Scrollable planner did not construct its ordinary native editor and preset dropdown");
+    require(editor->y()>=app.application.page_bounds(window->w(),window->h()).y&&editor->take_focus(),
+        "Inline editor remained in the persistent header or could not take focus");
+    const auto key=Fl::e_keysym,state=Fl::e_state,length=Fl::e_length;auto* event_text=Fl::e_text;
+    char tab_text[]={'\t',0};
+    const auto tab=[&](bool reverse) {
+        Fl::e_keysym=FL_Tab;Fl::e_state=reverse?FL_SHIFT:0;Fl::e_text=tab_text;Fl::e_length=1;Fl::handle(FL_KEYDOWN,window);
+    };
+    tab(false);require(Fl::focus()==presets,"Inline Tab did not move from editor to presets");
+    tab(false);require(Fl::focus()==find_button(*document,"Stronger"),"Inline Tab skipped the adjacent Stronger action");
+    tab(false);require(Fl::focus()==find_button(*document,"Weaker"),"Inline Tab skipped the adjacent Weaker action");
+    tab(true);tab(true);tab(true);require(Fl::focus()==editor,"Inline reverse Tab did not restore document visual order");
+    Fl::e_keysym=key;Fl::e_state=state;Fl::e_text=event_text;Fl::e_length=length;
+    const auto* original=editor;editor->value("-");editor->do_callback();refresh();
+    find(*window);
+    require(editor==original&&Fl::focus()==editor&&std::string(editor->value())=="-"&&
+        app.application.field(ui::Field::planner_target).text=="-",
+        "Invalid typed prefix was replaced or lost focus during a document rebuild");
+    editor->value("-18");editor->insert_position(2,1);editor->do_callback();refresh();
+    require(Fl::focus()==editor&&editor->insert_position()==2&&editor->mark()==1&&std::string(editor->value())=="-18",
+        "Ordinary inline typing lost its cursor, selection or edit buffer");
+    require(editor->submit(false,false),"Inline editor did not preserve ordinary Enter submission");refresh();
+    require(std::string(editor->value())==app.application.field(ui::Field::planner_target).text&&
+        app.application.field(ui::Field::planner_target).display_text.empty(),
+        "Inline Enter did not display the exact accepted target");
+    const auto before=std::string(editor->value());
+    presets->picked(presets->menu()+2);refresh();
+    require(std::string(editor->value())!=before&&app.application.field(ui::Field::planner_target).display_text.empty(),
+        "Inline preset failed to edit and commit through the ordinary native control callback");
+    editor->take_focus();const int old_y=editor->y();
+    app.application.dispatch(ui::Command::planner_toggle_details);refresh();find(*window);
+    require(editor==original&&Fl::focus()==editor,"Adding document details replaced the inline editor or stole focus");
+    auto* scroll=dynamic_cast<Fl_Scroll*>(document->parent()->parent());require(scroll,"Inline editor has no native scroll host");
+    scroll->scroll_to(0,230);refresh();
+    require(editor->y()<old_y&&!editor->visible_r()&&Fl::focus()!=editor&&!editor->take_focus(),
+        "Scrolling the inline editor out of the viewport retained visible input or keyboard focus");
+    scroll->scroll_to(0,0);refresh();
+    require(editor->visible_r()&&editor->take_focus(),"Scrolling the inline editor back did not restore input");
+    app.application.select_page(ui::Page::console);refresh();
+    require(!editor->visible_r()&&Fl::focus()!=editor,"Hiding the document page retained native editor focus");
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
+
 void policy_lifecycle() {
     auto declarations=datapump::gui::test::policy_lifecycle_controls();
     Launch launch;launch.simulation=true;NativeApp app(launch,declarations);Fl::check();
@@ -853,8 +918,8 @@ void layout_lifecycle() {
     NativeInput* editor=nullptr;NativeBitmap* bitmap=nullptr;
     const std::function<void(Fl_Group&)> locate=[&](Fl_Group& parent) {
         for(int i=0;i<parent.children();++i) {
-            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i)))editor=input;
-            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i)))bitmap=image;
+            if(auto* input=dynamic_cast<NativeInput*>(parent.child(i));input&&input->visible_r())editor=input;
+            if(auto* image=dynamic_cast<NativeBitmap*>(parent.child(i));image&&image->visible_r())bitmap=image;
             if(auto* group=dynamic_cast<Fl_Group*>(parent.child(i)))locate(*group);
         }
     };
@@ -1058,6 +1123,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

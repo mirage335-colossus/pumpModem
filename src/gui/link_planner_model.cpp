@@ -408,6 +408,11 @@ ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bo
     return {target,estimate.success_probability,estimate.confidence_available&&numerical_range,
         estimate.carrier_in_search,estimate.receiver_workspace_supported};
 }
+CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
+    const auto ratio=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
+    return {target,ratio,estimate.carrier_in_search&&estimate.receiver_workspace_supported&&
+        std::isfinite(ratio)&&ratio>0};
+}
 void receive_curve(Model& model,const simulation::Estimate& selected_one) {
     if(model.points.empty())return;
     const auto& inputs=model.inputs;
@@ -415,16 +420,22 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
     constexpr unsigned expensive_limit=12,coarse_limit=6,refinement_limit=32;
     unsigned expensive=0;
     std::map<double,ReceivePoint> output;
+    std::map<double,CpuPoint> cpu_output;
     const auto evaluate=[&](double target,bool permit_expensive) -> bool {
         if(target<low||target>high||output.contains(target))return false;
         const auto geometry=try_resolve(inputs,target);
-        if(!geometry){output.emplace(target,ReceivePoint{target});return true;}
+        if(!geometry){
+            output.emplace(target,ReceivePoint{target});cpu_output.emplace(target,CpuPoint{target});return true;
+        }
         auto options=inputs.options;options.modem=*geometry;
         auto channel=inputs.channel;
         const auto sample_snr=model.actual_cn0_db_hz-10*std::log10(geometry->sample_rate/2.);
         const bool numerical_range=sample_snr>=-300&&sample_snr<=300;
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
         auto& entry=curve_entry(options,channel);
+        // Receiver work is already available from the cheap support check;
+        // the denser CPU curve adds no statistical trials or sampled audio.
+        cpu_output.emplace(target,cpu_point(target,entry.estimate));
         if(!entry.estimate.carrier_in_search||!entry.estimate.receiver_workspace_supported||!numerical_range) {
             output.emplace(target,receive_point(target,entry.estimate,numerical_range));return true;
         }
@@ -455,8 +466,9 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
                     const auto snr=model.actual_cn0_db_hz-10*std::log10(aligned->config.sample_rate/2.);
                     channel.snr_db=std::clamp(snr,-300.,300.);
                     const auto& support=curve_entry(options,channel).estimate;
-                    if(snr>=-300&&snr<=300&&support.carrier_in_search&&support.receiver_workspace_supported)
-                        output.erase(target);
+                    if(snr>=-300&&snr<=300&&support.carrier_in_search&&support.receiver_workspace_supported) {
+                        output.erase(target);cpu_output.erase(target);
+                    }
                 }
             }
         }
@@ -465,6 +477,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
     // The selected one-bit probability comes from the already evaluated
     // headline, including when that headline describes a longer draft.
     output.emplace(inputs.target_db_hz,receive_point(inputs.target_db_hz,selected_one,model.confidence_available));
+    cpu_output.emplace(inputs.target_db_hz,cpu_point(inputs.target_db_hz,selected_one));
     // Check every existing graph sample cheaply. Unsupported geometry breaks
     // the overlay; short/coherent profiles can be evaluated analytically here.
     for(const auto& point:model.points)probe(point.target_db_hz,false);
@@ -494,6 +507,8 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
     }
     model.receive_points.reserve(output.size());
     for(const auto& [target,point]:output){(void)target;model.receive_points.push_back(point);}
+    model.cpu_points.reserve(cpu_output.size());
+    for(const auto& [target,point]:cpu_output){(void)target;model.cpu_points.push_back(point);}
 }
 }
 

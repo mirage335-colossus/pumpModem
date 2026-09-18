@@ -1031,7 +1031,7 @@ void all_target_dropdowns_and_native_planner_editor() {
     const auto active=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::snr;});
     const auto receive=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::receive_snr;});
     check(editor!=screen.end()&&active!=screen.end()&&receive!=screen.end()&&editor->kind==ui::Kind::text&&
-          editor->persistent&&std::string_view(editor->label).starts_with("Planner target")&&
+          !editor->persistent&&editor->document_only&&editor->slot==ui::Slot::none&&std::string_view(editor->label)=="Target SNR (dB-Hz)"&&
           app.field(F::planner_target).options.size()==app.field(F::snr).options.size()&&
           !app.field(F::receive_snr).options.empty(),
           "Planner and receive targets must have actual shared editable preset controls in both adapters");
@@ -1041,10 +1041,17 @@ void all_target_dropdowns_and_native_planner_editor() {
               "The independent planner target editor must appear only on its tab");
     }
     app.select_page(ui::Page::planner);
-    const auto geometry=app.control_layout(*editor,ui::min_width,ui::min_height);
-    check(geometry.has_label&&geometry.has_suggestions&&geometry.widget.w>250&&geometry.suggestions.w>0&&
-          geometry.frame.y+geometry.frame.h<app.page_bounds(ui::min_width,ui::min_height).y,
-          "Planner target must use a visible native textbox and dropdown above the page, not a document action");
+    const auto document=app.document(ui::Page::planner,900);
+    std::vector<const ui::DocumentNode*> nodes;flatten(*document,nodes);
+    const auto native=std::find_if(nodes.begin(),nodes.end(),[](const auto* node) {
+        return node->kind==ui::DocumentKind::control&&node->control&&node->control->field==F::planner_target;
+    });
+    check(native!=nodes.end(),"Planner target must be a native control in the scrollable document");
+    const auto geometry=ui::document_control_layout(*editor,app.field(F::planner_target),{0,0,240,ui::label_height+28});
+    check(geometry.has_label&&geometry.has_suggestions&&geometry.widget.w>200&&geometry.suggestions.w>0&&
+          geometry.label.y==geometry.frame.y&&geometry.widget.y==ui::label_height&&
+          geometry.widget.y+geometry.widget.h==geometry.frame.h,
+          "Inline planner target must include its native label, textbox and presets inside its document bounds");
     const auto short_text=app.field(F::snr).text,long_text=app.field(F::long_snr).text,rx_text=app.field(F::receive_snr).text;
     app.edit(*editor,"-18");
     check(app.field(F::planner_target).text=="-18"&&!app.field(F::planner_target).display_text.empty(),
@@ -1056,8 +1063,23 @@ void all_target_dropdowns_and_native_planner_editor() {
     app.edit(*editor,"-");
     check(app.field(F::planner_target).text=="-"&&contains_text(*app.document(ui::Page::planner,900),"Check planner target"),
           "An incomplete planner target must retain the edit and suppress stale calculations");
+    check(app.field(F::status).text.find("Planner target must be a number")!=std::string::npos,
+          "An incomplete planner number must identify its input error");
+    app.edit(*editor,"-8.0");
+    check(app.field(F::status).text.find("Planner target must be a number")==std::string::npos,
+          "A valid planner target must immediately clear its previous input error");
+    app.edit(*editor,"-");
+    const auto callsign=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::callsign;});
+    check(callsign!=screen.end(),"Callsign field missing from notice-ownership fixture");
+    app.edit(*callsign,std::string(1,static_cast<char>(0xff)));
+    const auto unrelated_notice=app.field(F::status).text;
+    app.edit(*editor,"-8.0");
+    check(app.field(F::status).text==unrelated_notice,
+          "Recovering the planner must preserve a newer unrelated input notice");
+    app.edit(*editor,"-");
     app.preset(*editor,"-20");
     check(app.field(F::planner_target).text!="-20"&&app.field(F::planner_target).display_text.empty()&&
+          app.field(F::status).text.find("Planner target must be a number")==std::string::npos&&
           app.field(F::snr).text==short_text&&app.field(F::long_snr).text==long_text&&app.field(F::receive_snr).text==rx_text,
           "Planner preset selection must recover, reveal the checked target and preserve active TX/RX settings");
     app.preset(*receive,"-20");
@@ -1144,10 +1166,10 @@ void receiver_overlay_and_cpu_status() {
     check(contains_text(unsupported,"CPU estimate unavailable")&&!contains_text(unsupported,"CPU estimate: headroom"),
           "An unsupported receiver must not advertise CPU feasibility");
     model.receiver_workspace_supported=true;
-    const auto render=[&](const planner::Model& input,PixelFormat format) {
+    const auto render=[&](const planner::Model& input,PixelFormat format,std::string_view name="planner/bit-time") {
         const auto page=planner_page::build(input,900,false,false);
         const auto flat=nodes(page);
-        const auto plot=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->plot_name=="planner/bit-time";});
+        const auto plot=std::find_if(flat.begin(),flat.end(),[&](const auto* node){return node->plot_name==name;});
         check(plot!=flat.end(),"Time/receive comparison needs its stable shared plot");
         BitmapImage result(319,167,format);
         (*plot)->plot.paint(full_bitmap_request(319,167,format==PixelFormat::mono1,format==PixelFormat::rgb24),
@@ -1170,6 +1192,20 @@ void receiver_overlay_and_cpu_status() {
         model.receive_points[1]={0,.5,true,true,true};
         const auto connected=render(model,format);
         check(connected.pixels()!=empty.pixels(),"The RX curve must remain visible in color, grayscale and monochrome");
+
+        model.cpu_points.clear();const auto cpu_empty=render(model,format,"planner/cpu-pace");
+        model.cpu_points={{25,.1,true},{0,0,false},{-35,10,true}};
+        const auto cpu_gap=render(model,format,"planner/cpu-pace");
+        check(cpu_gap.pixels()!=cpu_empty.pixels(),"Supported CPU points must remain visible beside unavailable regions");
+        for(unsigned y=0;y<167;++y)for(unsigned x=130;x<141;++x) {
+            const auto begin=y*stride+(format==PixelFormat::mono1?x/8:format==PixelFormat::rgb24?3*x:x);
+            for(unsigned component=0;component<(format==PixelFormat::rgb24?3u:1u);++component)
+                check(cpu_gap.pixels()[begin+component]==cpu_empty.pixels()[begin+component],
+                      "CPU curve must not bridge an unavailable Clock/RAM region");
+        }
+        model.cpu_points[1]={0,1,true};
+        check(render(model,format,"planner/cpu-pace").pixels()!=cpu_gap.pixels(),
+              "CPU pace must be a visible line in every supported pixel format");
     }
 }
 void document_semantics_layout_and_plots() {
@@ -1188,7 +1224,8 @@ void document_semantics_layout_and_plots() {
         check(!contains_text(document,"safely hidden")&&!contains_text(document,"safe bits"),
               "Observer time must not be presented as a count of safely hidden bits");
         check(contains_text(document,"1-bit RX · right axis")&&contains_text(document,"100%")&&
-              contains_text(document,"50%")&&contains_text(document,"0%")&&contains_text(document,"CPU estimate"),
+              contains_text(document,"50%")&&contains_text(document,"0%")&&contains_text(document,"CPU estimate")&&
+              contains_text(document,"Processing seconds per second of audio")&&contains_text(document,"1 = real-time limit"),
               "Planner must label its probability axis and CPU feasibility alongside reception");
         check(std::none_of(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;}),
               "Native planner dropdown must replace the former target prompt button");
@@ -1221,6 +1258,27 @@ void document_semantics_layout_and_plots() {
             }
         };
         within(within,layout.root);
+        const auto editor=std::find_if(flat.begin(),flat.end(),[](const auto* node) {
+            return node->kind==ui::DocumentKind::control&&node->control&&node->control->field==ui::Field::planner_target;
+        });
+        check(editor!=flat.end(),"Planner target must be a native editor within its scrollable document");
+        if(width>=820) {
+            ui::DocumentRect editor_rect,stronger_rect,weaker_rect,cpu_rect;
+            const auto locate=[&](auto&& self,const ui::DocumentNode& node,const ui::DocumentBox& box,int x,int y)->void {
+                const auto& bounds=box.bounds;x+=bounds.x;y+=bounds.y;
+                const ui::DocumentRect rect{x,y,bounds.width,bounds.height};
+                if(&node==*editor)editor_rect=rect;
+                if(node.command==ui::Command::planner_stronger)stronger_rect=rect;
+                if(node.command==ui::Command::planner_weaker)weaker_rect=rect;
+                if(node.plot_name=="planner/cpu-pace")cpu_rect=rect;
+                for(std::size_t i=0;i<node.children.size();++i)self(self,node.children[i],box.children[i],x,y);
+            };
+            locate(locate,document,layout.root,0,0);
+            check(editor_rect.y+ui::label_height==stronger_rect.y&&stronger_rect.y==weaker_rect.y&&
+                  editor_rect.x+editor_rect.width<=stronger_rect.x&&
+                  cpu_rect.x>weaker_rect.x+weaker_rect.width&&cpu_rect.y<weaker_rect.y+100,
+                  "Target and step buttons must share a row, with the compact CPU graph beside their control group");
+        }
     }
     const auto detailed=planner_page::build(model,900,true,false);
     check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Quick references")&&
@@ -1242,7 +1300,7 @@ void document_semantics_layout_and_plots() {
     std::size_t plot_count=0;
     for(const auto* node:flat)if(node->kind==ui::DocumentKind::bitmap) {
         ++plot_count;
-        check(node->plot_name=="planner/bit-time"||node->plot_name=="planner/observer-time",
+        check(node->plot_name=="planner/bit-time"||node->plot_name=="planner/observer-time"||node->plot_name=="planner/cpu-pace",
               "Planner graph lost its stable native bitmap identity");
         for(const auto format:{PixelFormat::gray8,PixelFormat::rgb24,PixelFormat::mono1}) {
             constexpr unsigned width=319,height=167;
@@ -1262,7 +1320,7 @@ void document_semantics_layout_and_plots() {
             check(!painted,"Zero-area planner damage must not paint");
         }
     }
-    check(plot_count==2,"Planner must include its two time-comparison graphs");
+    check(plot_count==3,"Planner must include two time-comparison graphs and the compact CPU curve");
     auto invalid=model;invalid.available=false;invalid.error="Current draft pending";
     const auto unavailable=planner_page::build(invalid,220,true,true);
     check(contains_text(unavailable,"Current draft pending")&&!contains_text(unavailable,"Send current draft"),

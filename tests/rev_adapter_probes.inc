@@ -1,4 +1,98 @@
 // Included inside RevApp only by the native conformance executable.
+    void verify_inline_document_editor() {
+        select_page(ui::Page::planner);
+        const auto settle=[&] {
+            for(unsigned frame=0;frame<4;++frame){apply();native_frame();}
+        };
+        settle();
+        const auto find_host=[&]() -> DocumentControlHost* {
+            for(auto* host:document_control_bindings)if(host->control.field==ui::Field::planner_target)return host;
+            throw std::runtime_error("Rev inline document fixture has no retained planner control");
+        };
+        auto* host=find_host();auto* editor=host->bindings.front().editor;
+        auto* presets=host->bindings.front().suggestions;auto* document=documents.at(ui::Page::planner);
+        if(!editor||!presets||presets->params.options.size()<3||!allows_input(editor)||
+           editor->rect.y<application.page_bounds(details.size.width,details.size.height).y||
+           document->tab_elements().empty()||document->tab_elements().front()!=host->element())
+            throw std::runtime_error("Rev inline editor/presets did not use the first document control position: editor="+
+                std::to_string(editor!=nullptr)+" presets="+std::to_string(presets?presets->params.options.size():0)+
+                " input="+std::to_string(editor&&allows_input(editor))+" y="+std::to_string(editor?editor->rect.y:0)+
+                " page_y="+std::to_string(application.page_bounds(details.size.width,details.size.height).y)+
+                " tab_first="+std::to_string(!document->tab_elements().empty()&&document->tab_elements().front()==host->element()));
+        if(std::any_of(bindings.begin(),bindings.end(),[](const auto& binding){return binding.control.field==ui::Field::planner_target;}))
+            throw std::runtime_error("Rev document-only editor was duplicated in the persistent desktop");
+        show_help(host->control.help,host->bindings.front().element);help_timing.enter(help_now()-2);update_help();native_frame();
+        if(help_text->resolved.hidden)throw std::runtime_error("Rev inline popup tooltip fixture did not become visible");
+        presets->openMenu();update_help();native_frame();
+        if(!presets->open||!help_text->resolved.hidden||help_owner)
+            throw std::runtime_error("Rev native preset menu remained obscured by its previous hover tooltip");
+        presets->closeMenu();native_frame();
+        focus_control(editor);editor->apply("-");editor->changed("-");settle();
+        if(find_host()!=host||host->bindings.front().editor!=editor||!editor->targetFlags.focus||
+           editor->content.get()!="-"||application.field(ui::Field::planner_target).text!="-")
+            throw std::runtime_error("Rev invalid inline prefix replaced the native editor or lost focus/text");
+        editor->apply("-18");editor->cursor=2;editor->selectAnchor=1;editor->selectEnd=2;editor->changed("-18");settle();
+        if(!editor->targetFlags.focus||editor->cursor!=2||editor->selectAnchor!=1||editor->selectEnd!=2)
+            throw std::runtime_error("Rev document replacement changed the inline editor caret or selection");
+        re::Event enter;enter.keyboard.enter.id=1;
+        if(!editor->submit_event(enter))throw std::runtime_error("Rev inline editor did not retain Enter submission");
+        settle();
+        if(editor->content.get()!=application.field(ui::Field::planner_target).text||
+           !application.field(ui::Field::planner_target).display_text.empty())
+            throw std::runtime_error("Rev inline Enter failed to display the accepted target");
+        const auto before=editor->content.get();
+        const auto option=std::find_if(presets->params.options.begin(),presets->params.options.end(),
+            [&](const auto& item){return item.value!=before;});
+        if(option==presets->params.options.end())throw std::runtime_error("Rev inline preset fixture has no alternate value");
+        presets->params.value=option->value;re::Event picked;presets->onChange(picked);settle();
+        if(editor->content.get()==before||!application.field(ui::Field::planner_target).display_text.empty())
+            throw std::runtime_error("Rev inline preset did not edit and commit through its normal binding");
+        focus_control(editor);re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
+        if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev inline editor Tab order skipped its preset control");
+        if(document->tab_elements().size()<3)throw std::runtime_error("Rev inline document lacks the adjacent target actions");
+        tab.propagate=true;keyDown(tab);
+        if(!document->tab_elements()[1]->targetFlags.focus)throw std::runtime_error("Rev inline preset Tab order skipped the next document action");
+        tab.propagate=true;keyDown(tab);
+        if(!document->tab_elements()[2]->targetFlags.focus)throw std::runtime_error("Rev document actions did not retain their visual Tab order");
+        tab.keyboard.shift.id=1;tab.propagate=true;keyDown(tab);tab.propagate=true;keyDown(tab);
+        if(!presets->dropdown->targetFlags.focus)throw std::runtime_error("Rev reverse Tab order skipped the inline preset control");
+        focus_control(editor);application.dispatch(ui::Command::planner_toggle_details);settle();
+        if(find_host()!=host||!editor->targetFlags.focus)
+            throw std::runtime_error("Rev document details replaced the inline editor or stole focus");
+        const auto old_y=editor->rect.y;auto* page=pages.at(ui::Page::planner);
+        page->resolved.scroll.y=230;shared->layoutDirty=true;settle();
+        if(editor->rect.y>=old_y||allows_input(editor)||editor->targetFlags.focus)
+            throw std::runtime_error("Rev scrolled-out inline editor remained interactive or focused");
+        page->resolved.scroll.y=0;shared->layoutDirty=true;settle();focus_control(editor);
+        if(!allows_input(editor)||!editor->targetFlags.focus)
+            throw std::runtime_error("Rev scrolling back did not restore the retained inline editor");
+        // A visible label must not leave its completely clipped editor active.
+        ui::DocumentNode clipped;clipped.height=ui::label_height;
+        ui::DocumentNode input;input.kind=ui::DocumentKind::control;input.height=45;input.control=host->control;
+        clipped.children.push_back(input);document->apply(std::make_shared<const ui::DocumentNode>(clipped));
+        for(unsigned frame=0;frame<3;++frame){document->update();native_frame();}
+        if(allows_input(editor)||editor->targetFlags.focus)
+            throw std::runtime_error("Rev label-only document clip retained editable input or focus");
+        settle();host=find_host();editor=host->bindings.front().editor;focus_control(editor);
+        const auto stale_edit=editor->changed;const auto saved=application.field(ui::Field::planner_target).text;
+        const auto previous_count=document_control_bindings.size();
+        auto empty=std::make_shared<const ui::DocumentNode>();
+        {
+            NativeCallback callback(native_callback_depth);document->apply(empty);
+            if(document_control_bindings.size()!=previous_count||allows_input(editor)||editor->targetFlags.focus)
+                throw std::runtime_error("Rev document retirement destroyed an active callback or retained input");
+        }
+        document->apply(empty);
+        if(document_control_bindings.size()+1!=previous_count)
+            throw std::runtime_error("Rev absent document control was not reclaimed and unregistered");
+        stale_edit("-99");
+        if(application.field(ui::Field::planner_target).text!=saved)
+            throw std::runtime_error("Rev retired document control accepted a queued edit");
+        settle();editor=find_host()->bindings.front().editor;focus_control(editor);
+        select_page(ui::Page::console);settle();
+        if(allows_input(editor)||editor->targetFlags.focus)
+            throw std::runtime_error("Rev hidden document page retained inline editor input or focus");
+    }
     void native_frame() {
         // refresh queues an OS paint; an immediate pump can observe no event
         // until that request has completed its native round trip. Preserve the

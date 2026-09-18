@@ -178,6 +178,7 @@ struct Controller::Impl {
     struct ReceiveTargetEdit {std::string requested,canonical;};
     std::optional<ReceiveTargetEdit> receive_target_edit;
     bool planner_target_valid=true;
+    bool planner_input_notice=false;
     bool target_input_notice=false;
     std::optional<bool> displayed_short_target;
     std::string draft_error,tuning_explanation,estimate_error;
@@ -283,7 +284,7 @@ struct Controller::Impl {
         else value.data=composer.bytes();
         return value;
     }
-    void notice(std::string text,double seconds=4) { target_input_notice=false;f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
+    void notice(std::string text,double seconds=4) { target_input_notice=false;planner_input_notice=false;f(UiField::status).text=std::move(text); notice_until=Clock::now()+std::chrono::milliseconds(static_cast<long long>(seconds*1000)); }
     bool short_draft() const {
         return !attachment && (composer.raw_bits().has_value() || composer.bytes().size()<=transfer::short_message_bytes);
     }
@@ -575,6 +576,10 @@ struct Controller::Impl {
             }
         }
         planner_inputs.target_db_hz=value;planner_model.reset();planner_target_valid=true;
+        if(planner_input_notice) {
+            planner_input_notice=false;notice_until={};
+            f(UiField::status).text=snapshot.error.empty()?snapshot.status:snapshot.error;
+        }
         auto& field=f(UiField::planner_target);field.display_text.clear();
         if(!preserve_text)field.text=planner_number(value);
         else if(value!=requested) {std::ostringstream out;out<<std::setprecision(4)<<value;field.display_text=out.str();}
@@ -1272,6 +1277,7 @@ void Controller::edit(UiField field,std::string text) {
     } catch(const std::exception& e) {
         p.notice(e.what(),10);
         p.target_input_notice=field==UiField::snr||field==UiField::long_snr;
+        p.planner_input_notice=field==UiField::planner_target;
     }
     p.controls();
 }

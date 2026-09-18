@@ -20,13 +20,25 @@ namespace datapump::gui {
 class FltkDocumentView : public Fl_Group {
 public:
     using Action=std::function<void(ui::Command)>;
-    FltkDocumentView(int x,int y,int width,int height,Action action={})
-        :Fl_Group(x,y,width,height),action_(std::move(action)) {box(FL_NO_BOX);end();}
+    struct ControlHost {
+        virtual ~ControlHost()=default;
+        virtual void present(const ui::Control&,ui::DocumentRect bounds,ui::DocumentRect clip,bool enabled)=0;
+        virtual void hide()=0;
+        virtual Fl_Widget& widget()=0;
+        virtual bool busy() const {return false;}
+    };
+    using ControlFactory=std::function<std::unique_ptr<ControlHost>(Fl_Group&,const ui::Control&)>;
+    FltkDocumentView(int x,int y,int width,int height,Action action={},ControlFactory controls={})
+        :Fl_Group(x,y,width,height),action_(std::move(action)),control_factory_(std::move(controls)) {box(FL_NO_BOX);end();}
 
     void update(const ui::DocumentNode& document) {
         const auto focus=focused_action();
+        // Keep native editors alive while their surrounding immutable tree is
+        // replaced. Reattachment below restores ordinary native Tab order.
+        for(auto& control:controls_)add(control.host->widget());
         presentation_.reset(std::make_shared<const ui::DocumentNode>(document));
         native_.clear();reconcile(root_,this,*presentation_.root());
+        insert(*root_->widget,0);
         layout(w());
         if(focus) {
             const auto restored=presentation_.actions().restore_focus(focus);
@@ -40,6 +52,7 @@ public:
     void set_document(const ui::DocumentNode& document) {update(document);}
     void action(Action callback) {action_=std::move(callback);}
     int content_height() const {return content_height_;}
+    void viewport(ui::DocumentRect value) {viewport_=value;}
 
     // Explicit dimensions in a document are logical widget units. The caller
     // supplies a new width-dependent document when its grouping must change.
@@ -53,7 +66,30 @@ public:
         }
         content_height_=std::max(1,content_height_);
         Fl_Widget::resize(x(),y(),width,content_height_);
-        for(const auto& placement:geometry.nodes)place(*native_.at(placement.node),placement);
+        for(auto& control:controls_)control.used=false;
+        for(const auto& placement:geometry.nodes) {
+            place(*native_.at(placement.node),placement);
+            const auto& node=*placement.node->source;
+            if(node.kind==Kind::control&&node.control&&ui::document_control_supported(*node.control)&&control_factory_) {
+                const auto id=ui::document_control_identity(*node.control);
+                auto found=std::find_if(controls_.begin(),controls_.end(),[&](const auto& entry){return entry.identity==id;});
+                if(found==controls_.end()) {
+                    controls_.push_back({id,control_factory_(*this,*node.control),false});found=std::prev(controls_.end());
+                }
+                found->used=true;
+                auto* parent=static_cast<Fl_Group*>(native_.at(placement.node));
+                if(found->host->widget().parent()!=parent)parent->add(found->host->widget());
+                const auto clip=viewport_?ui::document_intersection(placement.clip,*viewport_):placement.clip;
+                found->host->present(*node.control,placement.absolute,clip,placement.enabled);
+                // Reattachment beneath an already hidden ancestor does not
+                // emit FL_HIDE for the retained editor. Clear stale focus
+                // explicitly after applying all inherited input eligibility.
+                auto* focus=Fl::focus();
+                if(focus&&found->host->widget().contains(focus)&&(!focus->visible_r()||!focus->active_r()))Fl::focus(nullptr);
+            }
+        }
+        for(auto& control:controls_)if(!control.used)control.host->hide();
+        std::erase_if(controls_,[](const auto& control){return !control.used&&!control.host->busy();});
         for(auto item=geometry.nodes.rbegin();item!=geometry.nodes.rend();++item)
             if(auto* group=dynamic_cast<Fl_Group*>(native_.at(item->node)))group->init_sizes();
         init_sizes();
@@ -144,6 +180,14 @@ private:
     ui::DocumentPresentation presentation_;
     std::unique_ptr<Item> root_;
     std::unordered_map<const ui::DocumentPresentation::Node*,Fl_Widget*> native_;
+    struct RetainedControl {
+        decltype(ui::document_control_identity(ui::Control{})) identity;
+        std::unique_ptr<ControlHost> host;
+        bool used=false;
+    };
+    ControlFactory control_factory_;
+    std::optional<ui::DocumentRect> viewport_;
+    std::vector<RetainedControl> controls_;
     int content_height_=1;
 
     static int extent(float value) {return ui::document_extent(value);}
@@ -162,7 +206,7 @@ private:
             item=std::make_unique<Item>();item->owner=this;
             auto* previous=Fl_Group::current();Fl_Group::current(parent);
             switch(node.kind) {
-            case Kind::column:case Kind::row:item->widget=new Group;break;
+            case Kind::column:case Kind::row:case Kind::control:item->widget=new Group;break;
             case Kind::text:item->widget=new Text;break;
             case Kind::bitmap:item->widget=new Bitmap;break;
             case Kind::action:item->widget=new Button;item->widget->callback(activated,item.get());break;

@@ -644,7 +644,8 @@ public:
                 page.scroll=new Fl_Scroll(0,0,1,1);page.scroll->type(Fl_Scroll::VERTICAL_ALWAYS);
                 page.group=page.scroll;
                 page.document_frame=new Fl_Group(0,0,1,1);
-                page.document=new FltkDocumentView(0,0,1,1,[this](ui::Command command){application.dispatch(command);});
+                page.document=new FltkDocumentView(0,0,1,1,[this](ui::Command command){application.dispatch(command);},
+                    [this](Fl_Group& parent,const ui::Control& control){return document_control(parent,control);});
                 page.document_frame->end();
                 page.scroll->end();
             } else {page.group=new Fl_Group(0,0,1,1);page.group->end();}
@@ -724,7 +725,9 @@ private:
         });
         widget.callback([](Fl_Widget*,void* context){(*static_cast<std::function<void()>*>(context))();},value.get());(owner?owner->callbacks:callbacks).push_back(std::move(value));
     }
-    void bind_control(Binding& owner,Fl_Widget& widget,std::function<void()> callback) {bind(widget,std::move(callback),&owner);}
+    void bind_control(Binding& owner,Fl_Widget& widget,std::function<void()> callback) {
+        bind(widget,[&widget,callback=std::move(callback)] {if(widget.visible_r()&&widget.active_r())callback();},&owner);
+    }
     static void place(Fl_Widget* widget,ui::Rect bounds) {if(widget)widget->resize(bounds.x,bounds.y,std::max(0,bounds.w),std::max(0,bounds.h));}
     static void label(Fl_Widget* widget,const std::string& value) {if(widget&&(!widget->label()||value!=widget->label()))widget->copy_label(value.c_str());}
     static void enabled(Fl_Widget* widget,bool value) {if(widget) {if(value&&!widget->active())widget->activate();else if(!value&&widget->active())widget->deactivate();}}
@@ -732,6 +735,7 @@ private:
     void create_controls(std::span<const ui::Control> controls,std::vector<std::unique_ptr<Binding>>& destination,Fl_Group* surface=nullptr) {
         for(const auto& declaration:ui::control_groups(controls)) {
             const auto& control=*declaration.control;
+            if(control.document_only&&!surface)continue;
             auto binding=std::make_unique<Binding>();auto& b=*binding;b.control=&control;b.declarations=controls;
             auto* parent=surface?surface:control.persistent?background:pages.at(control.page).group;parent->begin();
             b.group=new NativeControlGroup(control);b.group->dispatch=[this,c=&control](ui::Command command){application.gesture(*c,command);};b.group->begin();
@@ -746,13 +750,13 @@ private:
             case ui::Kind::text:
                 if(control.multiline) {
                     b.editor=new NativeEditor;b.editor->textsize(control.font_size);
-                    b.editor->changed=[this,c=&control](std::string text){application.edit(*c,std::move(text));};
-                    b.editor->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
+                    b.editor->changed=[this,c=&control,widget=b.editor](std::string text){if(widget->visible_r()&&widget->active_r())application.edit(*c,std::move(text));};
+                    b.editor->submit=[this,c=&control,widget=b.editor](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.editor->byte_limit=control.byte_limit;
                     b.editor->error=[this](std::string error){application.report_error(std::move(error));};
                 } else {
                     b.input=new NativeInput;b.input->textsize(control.font_size);b.input->when(FL_WHEN_CHANGED);
-                    b.input->submit=[this,c=&control](bool ctrl,bool shift){return application.submit(*c,ctrl,shift);};
+                    b.input->submit=[this,c=&control,widget=b.input](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.input->byte_limit=control.byte_limit;
                     b.input->error=[this](std::string error){application.report_error(std::move(error));};
                     bind_control(b,*b.input,[this,p=&b]{application.edit(*p->control,p->input->value());});
@@ -792,6 +796,103 @@ private:
         for(const auto& binding:overlay_bindings)result.push_back(binding.get());
         return result;
     }
+    std::unique_ptr<FltkDocumentView::ControlHost> document_control(Fl_Group& parent,const ui::Control& control) {
+        struct Clip : Fl_Group {
+            Clip():Fl_Group(0,0,1,1) {box(FL_NO_BOX);end();}
+            void draw() override {fl_push_clip(x(),y(),w(),h());draw_children();fl_pop_clip();}
+            int handle(int event) override {
+                if((event==FL_PUSH||event==FL_MOUSEWHEEL)&&!Fl::event_inside(this))return 0;
+                return Fl_Group::handle(event);
+            }
+        };
+        struct Host : FltkDocumentView::ControlHost {
+            ui::Control declaration;
+            std::unique_ptr<Clip> clip;
+            std::vector<std::unique_ptr<Binding>> bindings;
+            std::function<void(Host&,ui::DocumentRect,ui::DocumentRect,bool)> update;
+            std::function<bool()> occupied;
+            ~Host() override {clip.reset();}
+            void present(const ui::Control& control,ui::DocumentRect bounds,ui::DocumentRect crop,bool enabled) override {
+                declaration=control;update(*this,bounds,crop,enabled);
+            }
+            void hide() override {clip->hide();clip->deactivate();}
+            Fl_Widget& widget() override {return *clip;}
+            bool busy() const override {return occupied();}
+        };
+        auto host=std::make_unique<Host>();host->declaration=control;
+        auto* previous=Fl_Group::current();parent.begin();host->clip=std::make_unique<Clip>();parent.end();
+        create_controls(std::span<const ui::Control>(&host->declaration,1),host->bindings,host->clip.get());
+        theme::apply_widgets(*host->clip);Fl_Group::current(previous);
+        host->occupied=[this]{return Fl::grab()!=nullptr||callback_depth!=0;};
+        host->update=[this](Host& owner,ui::DocumentRect bounds,ui::DocumentRect clip,bool allowed) {
+            auto& b=*owner.bindings.front();auto presentation=application.control(owner.declaration);
+            presentation.enabled=presentation.enabled&&allowed;presentation.visible=presentation.visible&&clip.width>0&&clip.height>0;
+            auto geometry=ui::document_control_layout(owner.declaration,presentation.state,{bounds.x,bounds.y,bounds.width,bounds.height});
+            auto view=resolve_binding(owner.declaration,std::move(presentation),geometry);
+            const auto intersects=[&](ui::Rect rect) {
+                const auto visible=ui::document_intersection({rect.x,rect.y,rect.w,rect.h},clip);
+                return visible.width>0&&visible.height>0;
+            };
+            view.widget_visible=view.widget_visible&&intersects(geometry.widget);
+            view.label_visible=view.label_visible&&intersects(geometry.label);
+            view.suggestions_visible=view.suggestions_visible&&intersects(geometry.suggestions);
+            // Resize only the clipping group: moving its children implicitly
+            // would disturb editor geometry before the shared layout applies.
+            owner.clip->Fl_Widget::resize(clip.x,clip.y,clip.width,clip.height);
+            visible(owner.clip.get(),view.visible);enabled(owner.clip.get(),view.enabled);
+            apply_binding(b,view);layout_binding(b,view);owner.clip->init_sizes();
+        };
+        return host;
+    }
+    void layout_binding(Binding& b,const BindingPresentation& view) {
+        const auto& c=*b.control;
+        const auto& geometry=view.geometry;
+        b.presentation.applied_layout(geometry,c.font_size);
+        if(b.choice)b.choice->popup_upward=geometry.popup_upward;
+        for(auto* menu:{b.menu,b.suggestions})if(menu)menu->popup_upward=geometry.popup_upward;
+        visible(b.group,view.visible);
+        for(auto* widget:std::initializer_list<Fl_Widget*>{b.label,b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.suggestions})
+            if(widget&&widget->labelsize()!=c.font_size)widget->labelsize(c.font_size);
+        if(b.input&&b.input->textsize()!=c.font_size)b.input->textsize(c.font_size);
+        if(b.editor&&b.editor->textsize()!=c.font_size)b.editor->textsize(c.font_size);
+        for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.menu,b.suggestions})
+            if(menu&&menu->textsize()!=c.font_size)menu->textsize(c.font_size);
+        place(b.group,geometry.frame);place(b.label,geometry.label);
+        for(auto* widget:std::initializer_list<Fl_Widget*>{b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.records,b.bitmap}) {
+            place(widget,geometry.widget);visible(widget,view.widget_visible);
+        }
+        visible(b.label,view.label_visible);
+        place(b.suggestions,geometry.suggestions);visible(b.suggestions,view.suggestions_visible);
+        place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption&&ui::drawable(geometry.caption));
+        b.group->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);
+    }
+    void apply_binding(Binding& b,const BindingPresentation& view) {
+        const auto& c=*b.control;
+        const auto& state=view.control.state;
+        visible(b.group,view.visible);enabled(b.group,view.enabled);
+        for(int i=0;i<b.group->children();++i) {
+            auto* child=b.group->child(i);
+            if(!child->tooltip()||std::string_view(child->tooltip())!=c.help)child->copy_tooltip(c.help);
+        }
+        if(b.label)label(b.label,view.control.label);
+        if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
+        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text,state.text_cursor_end_revision);}
+        if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
+            for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
+                if(menu)populate(*menu,b.presentation.options());
+        }
+        if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
+        if(b.choice)b.choice->apply_display(state.display_text);
+        if(b.toggle) {
+            // value() also resets FLTK's press baseline. Preserve its
+            // pending toggle until release, including drag cancellation.
+            if(Fl::pushed()!=b.toggle)b.toggle->value(state.checked);
+            label(b.toggle,view.control.label);
+        }
+        if(b.records){b.records->configure(c);b.records->apply(state);}
+        if(b.button) {enabled(b.button,view.enabled);label(b.button,view.control.label);}
+        if(b.menu)label(b.menu,view.control.label);
+    }
     void layout() {
         background->resize(0,0,window->w(),window->h());
         if(overlay_surface)overlay_surface->resize(0,0,window->w(),window->h());
@@ -804,25 +905,7 @@ private:
         for(auto* item:current_bindings()) {
             auto& b=*item;const auto& c=*b.control;
             const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),b.declarations);
-            const auto& geometry=view.geometry;
-            b.presentation.applied_layout(geometry,c.font_size);
-            if(b.choice)b.choice->popup_upward=geometry.popup_upward;
-            for(auto* menu:{b.menu,b.suggestions})if(menu)menu->popup_upward=geometry.popup_upward;
-            visible(b.group,view.visible);
-            for(auto* widget:std::initializer_list<Fl_Widget*>{b.label,b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.suggestions})
-                if(widget&&widget->labelsize()!=c.font_size)widget->labelsize(c.font_size);
-            if(b.input&&b.input->textsize()!=c.font_size)b.input->textsize(c.font_size);
-            if(b.editor&&b.editor->textsize()!=c.font_size)b.editor->textsize(c.font_size);
-            for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.menu,b.suggestions})
-                if(menu&&menu->textsize()!=c.font_size)menu->textsize(c.font_size);
-            place(b.group,geometry.frame);place(b.label,geometry.label);
-            for(auto* widget:std::initializer_list<Fl_Widget*>{b.input,b.editor,b.choice,b.toggle,b.button,b.menu,b.records,b.bitmap}) {
-                place(widget,geometry.widget);visible(widget,view.widget_visible);
-            }
-            visible(b.label,view.label_visible);
-            place(b.suggestions,geometry.suggestions);visible(b.suggestions,view.suggestions_visible);
-            place(b.caption,geometry.caption);visible(b.caption,geometry.has_caption&&ui::drawable(geometry.caption));
-            b.group->box(geometry.border?FL_DOWN_BOX:FL_NO_BOX);
+            layout_binding(b,view);
         }
         update_documents();apply_layers();window->redraw();
     }
@@ -830,6 +913,7 @@ private:
         const auto bounds=application.page_bounds(window->w(),window->h());
         for(auto& [id,page]:pages)if(page.document) {
             const int width=ui::document_content_width(bounds.w,Fl::scrollbar_size());
+            page.document->viewport({bounds.x,bounds.y,bounds.w,bounds.h});
             const auto source=application.document(id,width);
             if(source!=page.source) {page.source=source;page.document->update(*source);}
             const auto scroll=std::max(0,page.scroll->yposition());
@@ -856,31 +940,8 @@ private:
         for(auto* item:current_bindings()) {
             auto& b=*item;const auto& c=*b.control;
             const auto view=binding_presentation(application,c,b.menu_items,window->w(),window->h(),b.declarations);
-            const auto& state=view.control.state;
             relayout=relayout||b.presentation.needs_layout(view.geometry,c.font_size);
-            visible(b.group,view.visible);enabled(b.group,view.enabled);
-            for(int i=0;i<b.group->children();++i) {
-                auto* child=b.group->child(i);
-                if(!child->tooltip()||std::string_view(child->tooltip())!=c.help)child->copy_tooltip(c.help);
-            }
-            if(b.label)label(b.label,view.control.label);
-            if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
-            if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text,state.text_cursor_end_revision);}
-            if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
-                for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
-                    if(menu)populate(*menu,b.presentation.options());
-            }
-            if(b.choice&&!Fl::grab()) {const auto index=b.presentation.option_index(state.selected);if(b.choice->value()!=index)b.choice->value(index);}
-            if(b.choice)b.choice->apply_display(state.display_text);
-            if(b.toggle) {
-                // value() also resets FLTK's press baseline. Preserve its
-                // pending toggle until release, including drag cancellation.
-                if(Fl::pushed()!=b.toggle)b.toggle->value(state.checked);
-                label(b.toggle,view.control.label);
-            }
-            if(b.records){b.records->configure(c);b.records->apply(state);}
-            if(b.button) {enabled(b.button,view.enabled);label(b.button,view.control.label);}
-            if(b.menu)label(b.menu,view.control.label);
+            apply_binding(b,view);
         }
         if(relayout)layout();else update_documents();
         update_bitmaps();show_page();apply_layers();apply_focus();Fl_Group::current(previous_group);

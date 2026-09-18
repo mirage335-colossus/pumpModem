@@ -336,6 +336,13 @@ Below it, FFT batches and competing searches can still delay reception or
 overrun a live capture queue. This is a planning comparison, not a real-time
 pass/fail guarantee. RX probability remains conditional on completing the work;
 CPU pace does not change the waveform, LPI model or receiver admission rules.
+The planner's compact CPU graph uses this same one-bit ratio across the time
+graph's target range. Work estimates are cheap enough to evaluate at every
+sampled target, including selected and refined RX points, without additional
+probability trials. The vertical scale is logarithmic, and the reference line
+marks equal processing and incoming audio durations. Unsupported Clock/RAM
+targets leave gaps; independently checked fits within 0.001 dB handle tiny
+rounding gaps just as on the RX curve.
 
 The model counts full-rate waveform/channel samples, receiver projection work,
 FFT acquisition, established-stream tracking or bounded streaming correlation lanes. It reflects half-chip

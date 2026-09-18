@@ -18,7 +18,7 @@ public:
     };
     struct Placement {
         const Node* node=nullptr;
-        DocumentRect relative,absolute,content;
+        DocumentRect relative,absolute,content,clip;
         bool allocated=false,enabled=false;
     };
     struct Layout {int height=0;std::vector<Placement> nodes;};
@@ -66,7 +66,7 @@ private:
         // it must not retain keyboard focus or accept a queued activation.
         const auto clip=intersect(absolute,parent_clip);
         const bool allocated=clip.width>0&&clip.height>0;
-        layout.nodes.push_back({&node,relative,absolute,box.content,allocated,node.enabled&&allocated});
+        layout.nodes.push_back({&node,relative,absolute,box.content,clip,allocated,node.enabled&&allocated});
         for(std::size_t index=0;index<node.children.size();++index)
             append(layout,node.children[index],box.children[index],0,0,absolute.x,absolute.y,clip);
     }

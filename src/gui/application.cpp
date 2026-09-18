@@ -197,7 +197,7 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
         const auto effective=(state.display_text.size()>6?"":"using ")+state.display_text+" dB-Hz";
         if(declaration.field==ui::Field::snr)view.label="Short ≤16 B · "+effective;
         else if(declaration.field==ui::Field::long_snr)view.label="Long / file · "+effective;
-        else if(declaration.field==ui::Field::planner_target)view.label="Planner target · "+effective;
+        else if(declaration.field==ui::Field::planner_target)view.label="Target · "+effective;
         else if(declaration.field==ui::Field::receive_snr)view.label="RX targets · adjusted; Enter to show";
     }
     if(declaration.kind==ui::Kind::action) {

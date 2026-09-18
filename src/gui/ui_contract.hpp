@@ -104,6 +104,7 @@ struct Control {
     // controls with its generation so delayed native callbacks remain scoped.
     std::uint64_t surface=0;
     OverlayPlacement placement;
+    bool document_only = false; // Materialized only by a document control node.
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

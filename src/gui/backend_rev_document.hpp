@@ -6,24 +6,39 @@
 #include <functional>
 #include <cmath>
 #include <memory>
+#include <map>
 #include <optional>
 #include <unordered_map>
+#include <utility>
 
 namespace datapump::gui {
+// The backend supplies ordinary native bindings; the document renderer owns
+// their retained hosts and their shared placement, independent of page content.
+class RevDocumentControl {
+public:
+    virtual ~RevDocumentControl()=default;
+    virtual Rev::Element::Element* element() const=0;
+    virtual void apply(const ui::Control&,const ui::DocumentPresentation::Placement&)=0;
+    virtual void hide()=0;
+    virtual bool busy() const {return false;}
+};
 // A toolkit adapter for ordinary document nodes. Application state, model
 // mapping, document invalidation and navigation remain outside this renderer.
 class RevDocumentView : public theme::RevBox {
 public:
     using BitmapFactory=std::function<Rev::Element::Element*(Rev::Element::Element*,const BitmapSource&)>;
+    using ControlFactory=std::function<std::unique_ptr<RevDocumentControl>(Rev::Element::Element*,const ui::Control&)>;
     using Action=std::function<void(ui::Command)>;
-    RevDocumentView(Rev::Element::Element* parent,bool color,BitmapFactory factory,Action action)
-        :theme::RevBox(parent,{},"Document"),color_(color),bitmap_factory_(std::move(factory)),action_(std::move(action)) {
+    RevDocumentView(Rev::Element::Element* parent,bool color,BitmapFactory factory,Action action,ControlFactory controls={})
+        :theme::RevBox(parent,{},"Document"),color_(color),bitmap_factory_(std::move(factory)),
+         control_factory_(std::move(controls)),action_(std::move(action)) {
         using namespace Rev::Appearance;
         style->layout={Axis::Vertical,Align::Start,Align::Start,Wrap::False};
         style->size.width=100_pct;
     }
     ~RevDocumentView() override {
         // Native style subscriptions must be removed before their owned colors.
+        controls_.clear();
         while(!children.empty())delete children.back();
     }
     void apply(std::shared_ptr<const ui::DocumentNode> document) {
@@ -33,8 +48,14 @@ public:
         if(presentation_.reset(std::move(document))) {
             // Preserve native action focus when a new immutable description
             // retains the same shared action identity (for example after resize).
-            labels_.clear();buttons_.clear();native_.clear();
-            while(!children.empty())delete children.back();
+            labels_.clear();buttons_.clear();native_.clear();native_controls_.clear();tab_order_.clear();
+            for(auto& [identity,control]:controls_){(void)identity;control.used=false;}
+            const auto previous_children=children;
+            for(auto* child:previous_children) {
+                const bool retained=std::any_of(controls_.begin(),controls_.end(),
+                    [&](const auto& item){return item.second.host->element()==child;});
+                if(!retained)delete child;
+            }
             action_fills_.clear();
             if(presentation_.root())materialize(this,*presentation_.root());
             if(const auto restored=presentation_.actions().restore_focus(focus);restored && accepts_input()) {
@@ -47,8 +68,17 @@ public:
             }
             shared->layoutDirty=true;
         }
+        // A document can be replaced during its native callback. Hide removed
+        // controls immediately, then reclaim them at the first safe refresh.
+        for(auto at=controls_.begin();at!=controls_.end();) {
+            if(at->second.used){++at;continue;}
+            at->second.host->hide();
+            if(at->second.host->busy()){++at;continue;}
+            at=controls_.erase(at);
+        }
         update();
     }
+    const std::vector<Rev::Element::Element*>& tab_elements() const {return tab_order_;}
     void update() {
         using namespace Rev::Appearance;
         for(auto* ancestor=static_cast<Rev::Element::Element*>(this);ancestor;ancestor=ancestor->parent) {
@@ -60,7 +90,27 @@ public:
         const int top=ui::document_extent(resolved.pad.t.val),bottom=ui::document_extent(resolved.pad.b.val);
         const auto geometry=presentation_.layout(std::max(0,ui::document_extent(rect.w)-left-right),
             [this](const ui::DocumentNode& node,int width) {return measure_text(node,width);},left,top);
-        for(const auto& placement:geometry.nodes)apply_geometry(*native_.at(placement.node),placement);
+        for(const auto& placement:geometry.nodes) {
+            const auto control=native_controls_.find(placement.node);
+            if(control!=native_controls_.end()) {
+                auto visible=placement;
+                // Retained controls are direct children, so reproduce every
+                // native scroll-pane clip in the document's coordinate space.
+                for(auto* ancestor=parent;ancestor;ancestor=ancestor->parent) {
+                    if(ancestor->resolved.style.overflow==Overflow::Hide) {
+                        const auto& bounds=ancestor->rect;
+                        visible.clip=intersect(visible.clip,{
+                            static_cast<int>(std::ceil(bounds.x-rect.x)),static_cast<int>(std::ceil(bounds.y-rect.y)),
+                            ui::document_extent(bounds.w),ui::document_extent(bounds.h)});
+                    }
+                    if(ancestor==ancestor->parent)break;
+                }
+                visible.allocated=visible.clip.width>0&&visible.clip.height>0;
+                visible.enabled=visible.enabled&&visible.allocated;
+                control->second->apply(*placement.node->source->control,visible);
+            }
+            else apply_geometry(*native_.at(placement.node),placement);
+        }
         const auto height=Px(geometry.height+top+bottom);
         style->size.height=height;style->size.min.height=height;style->size.max.height=height;
 
@@ -68,12 +118,25 @@ public:
 private:
     bool color_;
     BitmapFactory bitmap_factory_;
+    ControlFactory control_factory_;
     Action action_;
     ui::DocumentPresentation presentation_;
     std::unordered_map<const ui::DocumentPresentation::Node*,Rev::Element::Element*> native_;
     std::unordered_map<const ui::DocumentNode*,Rev::Element::Text*> labels_;
     std::vector<std::pair<Rev::Element::Button*,ui::DocumentActionIdentity>> buttons_;
     std::vector<std::unique_ptr<Rev::Appearance::Style>> action_fills_;
+    using ControlIdentity=decltype(ui::document_control_identity(std::declval<const ui::Control&>()));
+    struct RetainedControl {std::unique_ptr<RevDocumentControl> host;bool used=false;};
+    std::map<ControlIdentity,RetainedControl> controls_;
+    std::unordered_map<const ui::DocumentPresentation::Node*,RevDocumentControl*> native_controls_;
+    std::vector<Rev::Element::Element*> tab_order_;
+
+    static ui::DocumentRect intersect(ui::DocumentRect first,ui::DocumentRect second) {
+        const auto x=std::max(first.x,second.x),y=std::max(first.y,second.y);
+        const auto right=std::min(static_cast<long long>(first.x)+first.width,static_cast<long long>(second.x)+second.width);
+        const auto bottom=std::min(static_cast<long long>(first.y)+first.height,static_cast<long long>(second.y)+second.height);
+        return {x,y,static_cast<int>(std::max(0LL,right-x)),static_cast<int>(std::max(0LL,bottom-y))};
+    }
 
     bool accepts_input(Rev::Element::Element* target=nullptr) {
         for(auto* ancestor=target?target:static_cast<Rev::Element::Element*>(this);ancestor;ancestor=ancestor->parent) {
@@ -130,6 +193,17 @@ private:
         }
         case Kind::bitmap:
             element=bitmap_factory_(parent,node.plot);element->name=node.plot_name;break;
+        case Kind::control: {
+            if(node.control&&ui::document_control_supported(*node.control)&&control_factory_) {
+                const auto identity=ui::document_control_identity(*node.control);
+                auto [found,inserted]=controls_.try_emplace(identity);
+                if(inserted)found->second.host=control_factory_(this,*node.control);
+                auto& retained=found->second;retained.used=true;
+                native_controls_[&presented]=retained.host.get();tab_order_.push_back(retained.host->element());
+                return;
+            }
+            element=new theme::RevBox(parent);break;
+        }
         case Kind::action: {
             auto* button=new theme::RevButton(parent,re::Button::Params::Secondary(node.text));element=button;
             button->styles.add(&theme::rev_disabled_control);button->labelText->styles.add(&theme::rev_disabled_text);
@@ -145,7 +219,7 @@ private:
             button->onClick([this,button,identity](re::Event&){
                 if(presentation_.actions().enabled(identity) && accepts_input(button) && action_)action_(identity.command);
             });
-            buttons_.emplace_back(button,identity);break;
+            buttons_.emplace_back(button,identity);tab_order_.push_back(button);break;
         }
         case Kind::column:case Kind::row:
             element=new theme::RevBox(parent);

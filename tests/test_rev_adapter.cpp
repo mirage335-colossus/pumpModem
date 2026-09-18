@@ -14,6 +14,9 @@ int run_native_probes() {
     Launch launch;launch.color=false;launch.simulation=true;launch.page=ui::pages().front().id;
     configure_theme(launch.color);std::vector<void*> windows;
     {
+        RevApp probe(windows,launch);probe.verify_inline_document_editor();
+    }
+    {
         auto declarations=test::extension_controls();
         RevApp probe(windows,launch,declarations);probe.verify_extension_contract();
         test::relabel_extension_controls(declarations);probe.apply();probe.verify_updated_labels();probe.verify_service_shutdown();

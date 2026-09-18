@@ -3,6 +3,7 @@
 #include "document_geometry_fixture.hpp"
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_Scroll.H>
+#include <FL/Fl_Input.H>
 #include <iostream>
 #include <stdexcept>
 
@@ -33,11 +34,57 @@ Fl_Button* find_button(Fl_Group& group) {
     }
     return nullptr;
 }
+void retained_controls() {
+    unsigned created=0,destroyed=0;Fl_Input* editor=nullptr;
+    struct Host : FltkDocumentView::ControlHost {
+        std::unique_ptr<Fl_Group> group;
+        Fl_Input* input=nullptr;unsigned& destroyed;
+        explicit Host(Fl_Group& parent,unsigned& count):destroyed(count) {
+            auto* previous=Fl_Group::current();parent.begin();group=std::make_unique<Fl_Group>(0,0,1,1);
+            input=new Fl_Input(0,0,1,1);group->end();parent.end();Fl_Group::current(previous);
+        }
+        ~Host() override {++destroyed;}
+        void present(const ui::Control&,ui::DocumentRect bounds,ui::DocumentRect clip,bool enabled) override {
+            group->Fl_Widget::resize(clip.x,clip.y,clip.width,clip.height);
+            input->resize(bounds.x,bounds.y+16,bounds.width,std::max(0,bounds.height-16));
+            if(clip.width>0&&clip.height>0)group->show();else group->hide();
+            if(enabled)group->activate();else group->deactivate();
+        }
+        void hide() override {group->hide();}
+        Fl_Widget& widget() override {return *group;}
+    };
+    Fl_Double_Window window(400,240,"Retained native document controls");
+    auto* view=new FltkDocumentView(10,10,360,1,{},[&](Fl_Group& parent,const ui::Control&) {
+        ++created;auto result=std::make_unique<Host>(parent,destroyed);editor=result->input;return result;
+    });
+    window.end();window.show();Fl::check();
+    ui::DocumentNode control;control.kind=ui::DocumentKind::control;control.width=240;
+    control.control=ui::Control{ui::Kind::text,ui::Field::snr};control.control->document_only=true;
+    ui::DocumentNode document;document.children={control};view->update(document);
+    auto* initial=editor;editor->value("-");editor->insert_position(1,0);require(editor->take_focus(),"Inline fixture could not focus its editor");
+    document.children.insert(document.children.begin(),label("Inserted heading",360));view->update(document);
+    require(created==1&&destroyed==0&&editor==initial&&Fl::focus()==editor&&std::string(editor->value())=="-"&&editor->insert_position()==1&&editor->mark()==0,
+        "Replacing/reordering the document rebuilt its native editor or lost input/selection");
+    document.height=1;view->update(document);
+    require(created==1&&destroyed==0&&!editor->visible_r()&&Fl::focus()!=editor,
+        "Clipping removed a retained native editor or left it focused");
+    document.height=0;view->update(document);require(editor->take_focus(),"Restoring a clipped editor did not restore focus eligibility");
+    view->viewport({0,0,400,5});view->layout(360);
+    require(!editor->visible_r()&&Fl::focus()!=editor,"Viewport clipping retained offscreen native input focus");
+    view->viewport({0,0,400,240});view->layout(360);require(editor->take_focus(),"Restoring the viewport did not restore its editor");
+    document.children.clear();view->update(document);
+    require(created==1&&destroyed==1&&Fl::focus()!=initial,"Removing a control retained its native allocation or dangling focus");
+    document.children={control};view->update(document);
+    require(created==2&&destroyed==1&&Fl::focus()!=editor,"A new control silently inherited a removed editor's focus");
+    document.children.clear();view->update(document);require(destroyed==2,"Retained control identities accumulated after removal");
+    window.hide();
+}
+
 }
 
 int main() {
     try {
-        datapump::gui::theme::apply_palette();
+        datapump::gui::theme::apply_palette();retained_controls();
         Fl_Double_Window window(450,250,"FLTK generic document regression");
         Fl_Scroll scroll(10,10,430,230);scroll.type(Fl_Scroll::VERTICAL);
         unsigned actions=0;

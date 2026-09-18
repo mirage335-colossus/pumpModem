@@ -37,9 +37,10 @@ no detection-threshold or optimum meaning. The separate observer graph retains
 its logarithmic ratio scale and existing normalized LPI calculation.
 Both graphs follow actual sampled automatic-profile steps.
 
-The native **Planner target** editable dropdown sits beside the oscillator
-selector, replacing its numeric clock notes only on this tab. It offers the
-same target presets as the transmit controls and changes only the preview.
+The native **Target SNR (dB-Hz)** editable dropdown sits in the page's **Stronger /
+Weaker** controls row and scrolls with the document. It offers the same target
+presets as the transmit controls and changes only the preview. The numeric
+oscillator notes remain hidden while this tab is selected.
 Native buttons move to a stronger or weaker usable target, select the −8/+23 examples,
 or select the one-bit/second, one-day/bit and combined clock/RAM search edges.
 Milestones are derived from the current rate, carrier, pattern and key geometry;
@@ -101,6 +102,12 @@ not guarantee per-bit latency. Expanded details separately compare complete
 one-bit simulation CPU time, including channel generation, with bit duration.
 This indicator remains visible in both simulation modes and does not alter RX
 probability or the LPI warning.
+A compact CPU plot appears to the right of the target controls, sharing the
+time graph's target-SNR horizontal range. Its logarithmic vertical scale shows
+receiver processing seconds per audio second, with an explicit equal-pace
+reference line. It models one bit at fixed link/clock settings regardless of the
+draft; the selected point equals the headline ratio. Clock/RAM failures leave
+gaps, with the same checked 0.001 dB rounding-gap substitutions as the RX curve.
 
 The headline probability assumes every wire bit
 correct before FEC and one matching RX profile; top-bar RX confidence retains
@@ -170,8 +177,8 @@ The persistent **Oscillator model** dropdown below the Simulation estimates
 offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO
 (no oven)**, **GPSDO: TCXO (no oven)** and **GPSDO: OCXO**. A neighboring label
 shows the selected effective TX/RX clock mismatch in ppm and phase diffusion
-in degrees per square-root second on other tabs; Link planner uses that space
-for its independent Planner target editor. These are illustrative residual scenarios,
+in degrees per square-root second on other tabs; Link planner hides that detail
+and places its independent target editor inside the page. These are illustrative residual scenarios,
 not measured specifications for products: GPS lock does not establish phase
 coherence, and low-cost non-oven oscillators retain more short-term instability
 than the OCXO scenario. The settings do not control physical clock hardware.
@@ -511,7 +518,15 @@ When space is exhausted, shared editor, preset and bitmap subrectangles stay
 nonnegative. Empty native allocations are not drawn and cannot take keyboard focus
 or request synthetic bitmap pixels.
 
-`ui::DocumentNode` is a generic tree of columns, rows, text, actions and bitmaps.
+`ui::DocumentNode` is a generic tree of columns, rows, text, controls, actions
+and bitmaps. `DocumentKind::control` carries a native text/preset or choice
+control declaration in the node's optional `control` member;
+`document_control_supported` rejects other kinds and named menus. Actions and
+bitmaps retain their existing document nodes. A `document_only` control is omitted
+from the desktop factories and hosted by its document instead; it retains the
+shared edit, preset, submit and validation rules. Native editors scroll and clip
+with that document, and unchanged presentation updates preserve their edit
+buffer and keyboard focus.
 Nodes carry widths, optional fixed heights, margins/padding, semantic tone/fill,
 emphasis, borders and equal-row-height intent. `document_layout.hpp` computes
 all document rectangles. Toolkit callbacks measure glyph height; adapters apply

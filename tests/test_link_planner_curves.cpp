@@ -28,6 +28,13 @@ void same_curve(const gui::planner::Model& a,const gui::planner::Model& b) {
               x.workspace_supported==y.workspace_supported,"cached curve changed its coverage gaps");
         near(x.success_probability,y.success_probability,"cached one-bit probability changed");
     }
+    check(a.cpu_points.size()==b.cpu_points.size(),"one-bit CPU sampling must not change on repaint or draft edits");
+    for(std::size_t i=0;i<a.cpu_points.size();++i) {
+        const auto& x=a.cpu_points[i];const auto& y=b.cpu_points[i];
+        near(x.target_db_hz,y.target_db_hz,"CPU target changed while its physical inputs stayed fixed");
+        near(x.realtime_ratio,y.realtime_ratio,"cached receiver CPU/audio ratio changed");
+        check(x.available==y.available,"cached CPU curve changed its coverage gaps");
+    }
 }
 void verify_point(const gui::planner::Inputs& input,const gui::planner::ReceivePoint& point) {
     auto options=input.options;
@@ -42,6 +49,20 @@ void verify_point(const gui::planner::Inputs& input,const gui::planner::ReceiveP
           "curve confidence must describe its actual target and current link inputs");
     if(point.confidence_available)near(point.success_probability,estimate.one_bit_success_probability,
         "curve probability must equal an independent one-bit estimate at the same exact target");
+}
+void verify_cpu_point(const gui::planner::Inputs& input,const gui::planner::CpuPoint& point) {
+    auto options=input.options;
+    const std::array targets{point.target_db_hz};
+    options.modem=tuning::receive_profiles(options.modem,targets,input.mode,options.key.has_value()).front();
+    auto channel=input.channel;
+    channel.snr_db=input.tx_dbm-input.path_loss_db-input.noise_density_dbm_hz-
+        10*std::log10(options.modem.sample_rate/2.);
+    constexpr std::array<std::uint8_t,1> bit{0};
+    const auto estimate=simulation::estimate(transfer::estimate_binary(bit,options),options,true,channel,{},1,false);
+    check(point.available==(estimate.carrier_in_search&&estimate.receiver_workspace_supported),
+          "CPU graph must preserve independently checked Clock/RAM limits at its exact target");
+    near(point.realtime_ratio,estimate.receiver_cpu_seconds/estimate.simulated_seconds,
+         "CPU graph must use receiver work per second of complete one-bit audio");
 }
 void transition_and_cpu() {
     auto input=example();
@@ -75,6 +96,30 @@ void transition_and_cpu() {
     check(low&&high&&middle&&gap&&selected,
           "default overlay must resolve the reception transition, selected point, and genuine Clock/RAM gaps");
     check(connected_transition,"independently checked nearby RAM fits must preserve a visible transition curve");
+    check(!model.cpu_points.empty()&&model.cpu_points.size()<=model.points.size()*2+64,
+          "CPU sweep must retain bounded planning data");
+    check(std::is_sorted(model.cpu_points.begin(),model.cpu_points.end(),
+        [](const auto& a,const auto& b){return a.target_db_hz<b.target_db_hz;}),"CPU curve targets must be sorted");
+    bool cpu_selected=false,cpu_gap=false,cpu_fast=false,cpu_slow=false;
+    for(std::size_t i=0;i<model.cpu_points.size();++i) {
+        const auto& point=model.cpu_points[i];
+        check(std::isfinite(point.realtime_ratio)&&point.realtime_ratio>=0,"CPU ratios must be finite nonnegative values");
+        cpu_gap|=!point.available;
+        cpu_fast|=point.available&&point.realtime_ratio<1;
+        cpu_slow|=point.available&&point.realtime_ratio>1;
+        if(i%17==0)verify_cpu_point(input,point);
+        if(point.target_db_hz==input.target_db_hz) {
+            cpu_selected=point.available;
+            near(point.realtime_ratio,model.cpu_realtime_ratio,"selected CPU graph point must match the headline exactly");
+        }
+    }
+    check(cpu_selected&&cpu_gap&&cpu_fast&&cpu_slow,
+          "CPU curve must include the selected target, genuine gaps, and both sides of the real-time limit");
+    for(const auto& point:model.receive_points)if(!point.clock_supported||!point.workspace_supported) {
+        const auto cpu=std::find_if(model.cpu_points.begin(),model.cpu_points.end(),
+            [&](const auto& value){return value.target_db_hz==point.target_db_hz;});
+        check(cpu!=model.cpu_points.end()&&!cpu->available,"unsupported receiver geometry must also break the CPU line");
+    }
     const auto repeated=gui::planner::build(input);same_curve(model,repeated);
     input.wire_bits=100;
     const auto draft=gui::planner::build(input);same_curve(model,draft);
@@ -131,6 +176,9 @@ void cache_invalidation() {
     check(constrained.available&&std::any_of(constrained.receive_points.begin(),constrained.receive_points.end(),
         [](const auto& point){return !point.workspace_supported&&!point.confidence_available;}),
         "a lower RAM budget must invalidate cached confidence and retain visible gaps");
+    check(std::any_of(constrained.cpu_points.begin(),constrained.cpu_points.end(),
+        [](const auto& point){return !point.available;}),"a lower RAM budget must also invalidate CPU curve coverage");
+    for(std::size_t i=0;i<constrained.cpu_points.size();i+=29)verify_cpu_point(input,constrained.cpu_points[i]);
     // These independent key/noise/phase/budget curves exceed the 512-entry
     // cache. Eviction must affect work only, never the selected graph points.
     input=original.inputs;

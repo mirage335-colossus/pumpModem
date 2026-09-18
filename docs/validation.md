@@ -3777,3 +3777,49 @@ line as processing seconds per audio second, both builds and planner suites
 passed again (15.51 seconds GCC, 17.73 seconds Rev), and all four window captures
 were refreshed and checked. No physical audio/RF or full native transmission
 workflow was rerun. `git diff --check` passed.
+
+### Inline planner target and CPU graph (2026-09-18)
+
+The Planner target now belongs to the scrollable planner document, in the same
+row as Stronger/Weaker. A shared native text/choice control node reuses each
+backend's ordinary bindings. Controls retain identity, edit buffers and cursor
+selection across replacement or reordering; clipping clears input focus, and
+removed controls release their native allocations outside active callbacks.
+Native tests cover presets, Enter, forward/reverse Tab, hidden pages, viewport
+and ancestor clipping, removal, and stale callbacks. A successful planner edit
+now clears its own previous input error immediately without clearing a newer
+unrelated notice.
+
+A compact CPU graph sits beside the controls, using exactly the time graph's
+target range. Its logarithmic ordinate is receiver processing seconds per
+audio second, with a marked equal-pace limit and the selected preview point.
+It reuses existing one-bit workload calculations without additional probability
+trials. Tests independently check plotted CPU values, draft/cache invariance,
+unsupported gaps, shared layout, all pixel formats and clipped damage repaint.
+The CPU curve uses the existing reference processor model; no local benchmark
+or receiver/LPI formula was introduced.
+
+Both complete Release builds passed. GCC's shared GUI/estimate selection
+passed 27/27 suites in 79.62 seconds. After the final label, vocabulary and
+notice-recovery changes, its 11 affected shared suites passed in 14.86 seconds.
+The FLTK heading-lifecycle fixture was corrected to find its visible extension
+editor rather than the newly present hidden planner editor. A native clipping
+regression also exposed a focus edge when attaching a retained editor beneath
+an already hidden ancestor; the renderer now clears that ineligible focus.
+The assertions were retained. Synthetic Tab events now provide their own text
+instead of reusing stale event data; actual keyboard navigation was also tested.
+
+The final Clang/Rev shared selection passed 26/26 suites in 32.56 seconds.
+Final FLTK native adapter/document conformance passed 2/2 in 45.36 seconds.
+Rev's native adapter suite passed with the inline-editor probes; platform and
+1×/2× coordinate conformance passed 3/3 in 16.64 seconds. Real keyboard probes
+also exercised partial typing, Enter, presets, forward/reverse Tab and scrolling.
+Default/minimum layouts were visually inspected in both backends. The target
+and step buttons align, the CPU graph fits beside them, and the existing
+document scroll exposes lower graphs at smaller window sizes.
+
+A final real-menu check exposed hover help overlapping the Rev preset popup.
+Opening a popup now hides that help; the rebuilt native adapter suite and a
+real hover-to-popup check both passed. Final default/minimum captures were
+checked in both backends. No physical audio/RF or full native transmission
+workflow was rerun for these view/control changes. `git diff --check` passed.

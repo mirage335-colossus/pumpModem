@@ -109,6 +109,7 @@ struct Chart {
     double selected_target = 0, selected_value = 0;
     double selected_probability = 0;
     bool receive_available = false;
+    bool cpu = false;
 };
 double y_fraction(const Chart& chart, double value) {
     return (chart.high_log - std::log10(value)) / (chart.high_log - chart.low_log);
@@ -168,6 +169,34 @@ Chart chart_data(const planner::Model& model, bool observer) {
     return chart;
 }
 
+Chart cpu_chart_data(const planner::Model& model) {
+    // Use exactly the time plot's target range, including selected and checked
+    // aligned targets. CPU work has its own logarithmic vertical scale.
+    const auto time=chart_data(model,false);
+    Chart chart;chart.strong=time.strong;chart.weak=time.weak;chart.cpu=true;
+    chart.selected_target=model.inputs.target_db_hz;
+    chart.selected_value=model.one_bit_cpu_available&&model.clock_search_supported&&model.receiver_workspace_supported?
+        model.cpu_realtime_ratio:0;
+    double minimum=.1,maximum=10;
+    for(const auto& point:model.cpu_points) {
+        if(!std::isfinite(point.target_db_hz))continue;
+        const auto value=point.available&&std::isfinite(point.realtime_ratio)&&point.realtime_ratio>0?
+            point.realtime_ratio:std::numeric_limits<double>::quiet_NaN();
+        chart.points.emplace_back(point.target_db_hz,value);
+        if(std::isfinite(value)){minimum=std::min(minimum,value);maximum=std::max(maximum,value);}
+    }
+    if(chart.selected_value>0){minimum=std::min(minimum,chart.selected_value);maximum=std::max(maximum,chart.selected_value);}
+    std::sort(chart.points.begin(),chart.points.end(),[](const auto& a,const auto& b){return a.first>b.first;});
+    const auto high=std::max(-std::floor(std::log10(minimum)),std::ceil(std::log10(maximum))),low=-high;
+    chart.low_log=low-.12;chart.high_log=high+.12;
+    const auto upper=std::pow(10.,high);
+    const auto upper_label=upper>=1e9?number(upper/1e9)+"B":upper>=1e6?number(upper/1e6)+"M":
+        upper>=1e3?number(upper/1e3)+"k":number(upper);
+    chart.y_ticks={{upper,upper_label},{1,"1"},
+        {std::pow(10.,low),number(std::pow(10.,low))}};
+    return chart;
+}
+
 // Only geometry enters the raster. Labels, controls and explanations stay native.
 // A paint retains three line/point spans and one output pixel per damaged column;
 // storage never scales with bitmap area or planned transmission duration.
@@ -205,8 +234,10 @@ BitmapSource chart_bitmap(Chart chart) {
         };
         for (std::size_t i = 1; i < chart.points.size(); ++i) {
             const auto& a = chart.points[i - 1]; const auto& b = chart.points[i];
+            if(!std::isfinite(a.second)||!std::isfinite(b.second)||a.second<=0||b.second<=0)continue;
             const double ax = x_at(a.first), ay = y_at(a.second), bx = x_at(b.first), by = y_at(b.second);
-            stroke(spans,ax, ay, bx, ay); stroke(spans,bx, ay, bx, by);
+            if(chart.cpu)stroke(spans,ax,ay,bx,by);
+            else {stroke(spans,ax, ay, bx, ay);stroke(spans,bx, ay, bx, by);}
         }
         for(std::size_t i=1;i<chart.receive_points.size();++i) {
             const auto& a=chart.receive_points[i-1];const auto& b=chart.receive_points[i];
@@ -223,6 +254,13 @@ BitmapSource chart_bitmap(Chart chart) {
             const auto x=x_at(point.first),y=p_at(point.second);
             stroke(receive_markers,x,y,x,y);
         }
+        if(chart.cpu)for(std::size_t i=0;i<chart.points.size();++i) {
+            const auto& point=chart.points[i];
+            if(!std::isfinite(point.second)||point.second<=0)continue;
+            if(i&&i+1<chart.points.size()&&std::isfinite(chart.points[i-1].second)&&
+               std::isfinite(chart.points[i+1].second))continue;
+            const auto x=x_at(point.first),y=y_at(point.second);stroke(receive_markers,x,y,x,y);
+        }
         std::vector<double> grid;
         for (const auto& tick : chart.y_ticks) grid.push_back(y_at(tick.value));
         const double selected_x = x_at(chart.selected_target);
@@ -232,6 +270,9 @@ BitmapSource chart_bitmap(Chart chart) {
         std::vector<unsigned char> pixels(pixel_row_bytes(damage.width, format));
         for (unsigned y = damage.y; y < damage.y + damage.height; ++y) {
             std::fill(pixels.begin(), pixels.end(), 0);
+            const auto cpu_log=chart.high_log-(bottom>top?(y-top)/(bottom-top):.5)*(chart.high_log-chart.low_log);
+            const auto data_ink=chart.cpu&&color?(cpu_log>=0?theme::negative_tint:
+                cpu_log>=std::log10(.5)?theme::caution_tint:theme::positive_tint):theme::data_rgb(color);
             for (unsigned x = damage.x; x < damage.x + damage.width; ++x) {
                 auto ink = theme::grayscale(theme::surface);
                 const bool within = x >= left && x <= right && y >= top && y <= bottom;
@@ -243,14 +284,15 @@ BitmapSource chart_bitmap(Chart chart) {
                 if (within && std::abs(x - selected_x) <= .7 && y % 7 < 4)
                     ink = theme::grayscale(theme::muted);
                 const auto& span = spans[x - damage.x];
-                if (within && y >= span.first && y <= span.second) ink = theme::data_rgb(color);
+                if(chart.cpu&&within&&std::abs(y-y_at(1))<=.6&&x%8<4)ink=theme::grayscale(theme::text);
+                if (within && y >= span.first && y <= span.second) ink = data_ink;
                 const auto& receive_span=receive_spans[x-damage.x];
                 if(within&&y>=receive_span.first&&y<=receive_span.second&&((x+y)/5)%2==0)
                     ink=theme::comparison_rgb(color);
                 const auto& marker=receive_markers[x-damage.x];
-                if(within&&y>=marker.first&&y<=marker.second)ink=theme::comparison_rgb(color);
+                if(within&&y>=marker.first&&y<=marker.second)ink=chart.cpu?data_ink:theme::comparison_rgb(color);
                 const double dx = (x - selected_x) * request.sample_aspect_ratio, dy = y - selected_y;
-                if (selected && dx * dx + dy * dy <= 16) ink = theme::data_rgb(color);
+                if (selected && dx * dx + dy * dy <= 16) ink = data_ink;
                 const double diamond=std::abs(dx)+std::abs(y-selected_p);
                 if(chart.receive_available&&diamond>=3&&diamond<=5)ink=theme::comparison_rgb(color);
                 const auto offset = static_cast<std::size_t>(x - damage.x);
@@ -262,6 +304,28 @@ BitmapSource chart_bitmap(Chart chart) {
             sink(damage.x, y, {damage.width, 1, pixels.size(), format, pixels.data()});
         }
     });
+}
+
+Node target_axis(const Chart& chart,float inner,float plot_width,float label_width) {
+    auto axis=row(inner);
+    const unsigned count=plot_width>=300?5:3;
+    std::vector<std::string> labels;
+    std::vector<float> starts;
+    const float left=std::min(18.f,(plot_width-1)/4),right=plot_width-1-left;
+    for(unsigned i=0;i<count;++i) {
+        const double target=chart.strong+(chart.weak-chart.strong)*i/(count-1);
+        auto label=db(target);
+        const float glyph_width=6*static_cast<float>(label.size());
+        const float center=left+(right-left)*static_cast<float>(i)/static_cast<float>(count-1);
+        starts.push_back(std::clamp(center-glyph_width/2,0.f,std::max(0.f,plot_width-glyph_width)));
+        labels.push_back(std::move(label));
+    }
+    axis.children.push_back(text("",label_width+starts.front(),10));
+    for(unsigned i=0;i<count;++i) {
+        const float cell=(i+1<count?starts[i+1]:plot_width)-starts[i];
+        axis.children.push_back(text(std::move(labels[i]),cell,10));
+    }
+    axis.bottom=4;return axis;
 }
 
 Node graph(const planner::Model& model, bool observer, float width) {
@@ -300,28 +364,67 @@ Node graph(const planner::Model& model, bool observer, float width) {
         body.children.push_back(std::move(percentages));
     }
     n.children.push_back(std::move(body));
-    auto axis = row(inner);
-    const unsigned count = plot_width >= 300 ? 5 : 3;
-    std::vector<std::string> x_labels;
-    std::vector<float> x_starts;
-    const float left = std::min(18.0f, (plot_width - 1) / 4), right = plot_width - 1 - left;
-    for (unsigned i = 0; i < count; ++i) {
-        const double target = chart.strong + (chart.weak - chart.strong) * i / (count - 1);
-        auto label = db(target);
-        const float glyph_width = 6 * static_cast<float>(label.size());
-        const float center = left + (right - left) * static_cast<float>(i) / static_cast<float>(count - 1);
-        x_starts.push_back(std::clamp(center - glyph_width / 2, 0.0f, std::max(0.0f, plot_width - glyph_width)));
-        x_labels.push_back(std::move(label));
-    }
-    axis.children.push_back(text("", label_width + x_starts.front(), 10));
-    for (unsigned i = 0; i < count; ++i) {
-        const float cell = (i + 1 < count ? x_starts[i + 1] : plot_width) - x_starts[i];
-        axis.children.push_back(text(std::move(x_labels[i]), cell, 10));
-    }
-    axis.bottom = 4; n.children.push_back(std::move(axis));
+    n.children.push_back(target_axis(chart,inner,plot_width,label_width));
     paragraph(n, "Stronger → weaker · dB in 1 Hz", 10, Tone::muted, false, observer?0.f:3.f);
     if(!observer)paragraph(n,"RX gaps: clock/RAM limit or unavailable estimate.",10,Tone::muted,false,0);
     return n;
+}
+
+Node cpu_graph(const planner::Model& model,float width) {
+    auto n=card(width);n.padding=8;
+    const float inner=width-2*n.padding,label_width=38,height=86,plot_width=inner-label_width;
+    paragraph(n,"CPU estimate",13,Tone::text,true,2);
+    paragraph(n,"Processing seconds per second of audio",10,Tone::muted,false,4);
+    const auto chart=cpu_chart_data(model);
+    auto body=row(inner);auto labels=column(label_width);labels.height=height;
+    float previous=0;
+    for(const auto& tick:chart.y_ticks) {
+        const float position=8+static_cast<float>(y_fraction(chart,tick.value))*(height-17)-7;
+        auto label=text(tick.label,label_width,10);label.height=14;label.top=position-previous;
+        previous=position+14;labels.children.push_back(std::move(label));
+    }
+    body.children.push_back(std::move(labels));
+    auto plot=column(plot_width);plot.kind=Kind::bitmap;plot.height=height;
+    plot.plot_name="planner/cpu-pace";plot.plot=chart_bitmap(chart);
+    body.children.push_back(std::move(plot));n.children.push_back(std::move(body));
+    n.children.push_back(target_axis(chart,inner,plot_width,label_width));
+    paragraph(n,"Target dB in 1 Hz · 1 = real-time limit",10,Tone::muted,false,0);
+    return n;
+}
+
+void planner_controls(Node& root,const planner::Model& model,bool show_details,bool use_draft) {
+    const bool side_by_side=root.width>=820;
+    const float chart_width=std::min(340.f,root.width*.36f);
+    const float controls_width=side_by_side?root.width-chart_width-12:root.width;
+    auto group=side_by_side?row(root.width):column(root.width);
+    auto controls=column(controls_width);controls.right=side_by_side?12:0;
+    const auto& declarations=ui::console_screen();
+    const auto declaration=std::find_if(declarations.begin(),declarations.end(),
+        [](const auto& control){return control.field==ui::Field::planner_target;});
+    auto first=row(controls_width);
+    auto target=column(std::min(240.f,controls_width));target.kind=Kind::control;
+    target.control=*declaration;target.height=ui::label_height+28;
+    const bool one_row=controls_width>=430;
+    target.right=one_row?8:0;first.children.push_back(std::move(target));
+    if(one_row) {
+        auto stronger=action("Stronger",Command::planner_stronger,86,model.stronger_fit_target.has_value());
+        auto weaker=action("Weaker",Command::planner_weaker,77,model.weaker_fit_target.has_value());
+        stronger.top=weaker.top=ui::label_height;stronger.height=weaker.height=28;stronger.right=8;
+        first.children.push_back(std::move(stronger));first.children.push_back(std::move(weaker));
+    }
+    first.bottom=6;controls.children.push_back(std::move(first));
+    if(!one_row)buttons(controls,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
+        {"Weaker",Command::planner_weaker,model.weaker_fit_target.has_value()}});
+    buttons(controls,{{"−8 example",Command::planner_example_short},{"+23 LPI example",Command::planner_example_lpi},
+        {use_draft?"Plan 1 bit":"Use current draft",Command::planner_toggle_draft}});
+    if(model.available&&model.automatic_mode)
+        paragraph(controls,"Stronger / Weaker skip clock and RAM gaps.",11,Tone::muted,false,6);
+    if(model.available)buttons(controls,{{"Use target for short messages",Command::planner_apply_short},
+        {"Use target for long messages",Command::planner_apply_long}});
+    buttons(controls,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
+    controls.bottom=side_by_side?0:8;group.children.push_back(std::move(controls));
+    if(model.available)group.children.push_back(cpu_graph(model,side_by_side?chart_width:root.width));
+    group.bottom=6;root.children.push_back(std::move(group));
 }
 
 void notable_points(Node& root, const planner::Model& model) {
@@ -439,23 +542,14 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
         "  ·  " + (crystal ? "Free-running crystal" : "Clock mismatch " + number(channel.clock_error_ppm) + " ppm") +
         "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
         number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
-    buttons(root, {{"Stronger", Command::planner_stronger, model.stronger_fit_target.has_value()},
-                   {"Weaker", Command::planner_weaker, model.weaker_fit_target.has_value()},
-                   {"−8 example", Command::planner_example_short}, {"+23 LPI example", Command::planner_example_lpi},
-                   {use_draft ? "Plan 1 bit" : "Use current draft", Command::planner_toggle_draft}});
-    if (model.available && model.automatic_mode)
-        paragraph(root, "Stronger / Weaker skip clock and RAM gaps.", 11, Tone::muted, false, 6);
+    planner_controls(root,model,show_details,use_draft);
     if (error.empty()) error = model.error;
     if (!error.empty()) paragraph(root, std::move(error), 12, Tone::accent, true);
     if (!model.available) {
         paragraph(root, "Adjust the target or modem settings to calculate this link.", 13, Tone::text);
-        buttons(root, {{show_details ? "Hide details" : "Model limits and references", Command::planner_toggle_details}});
         if (show_details) details(root,model);
         return root;
     }
-    buttons(root, {{"Use target for short messages", Command::planner_apply_short},
-                   {"Use target for long messages", Command::planner_apply_long},
-                   {show_details ? "Hide details" : "Model limits and references", Command::planner_toggle_details}});
     const bool wide = root.width >= 460;
     auto headline = wide ? row(root.width, true) : column(root.width);
     const float headline_width = wide ? (root.width - 12) / 2 : root.width;
