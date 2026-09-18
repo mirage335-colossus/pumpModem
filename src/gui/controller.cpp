@@ -135,7 +135,7 @@ struct Controller::Impl {
     std::optional<tuning::Plan> short_plan,long_plan;
     double short_target=32,long_target=55;
     std::optional<bool> displayed_short_target;
-    std::string draft_error,tuning_explanation;
+    std::string draft_error,tuning_explanation,estimate_error;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
     std::filesystem::path attachment_path,key_path;
@@ -144,6 +144,9 @@ struct Controller::Impl {
     std::vector<std::string> pending_names;
     std::optional<transfer::Estimate> estimate;
     std::shared_ptr<const Inspection> inspection;
+    planner::Inputs planner_inputs;
+    mutable std::shared_ptr<const planner::Model> planner_model;
+    bool planner_details=false,planner_draft=false;
     std::uint64_t revision=0,estimated_revision=0,service_id=0,attachment_revision=0;
     Clock::time_point estimate_requested=Clock::now(),notice_until{},cpu_time=Clock::now();
     std::clock_t cpu_clock=std::clock();
@@ -164,7 +167,8 @@ struct Controller::Impl {
     std::jthread worker;
     std::mutex mutex;
     std::optional<Prepared> prepared;
-    enum class Purpose { open_key,generate_names,generate_path,attach,save,clipboard,folder };
+    enum class Purpose { open_key,generate_names,generate_path,attach,save,clipboard,folder,
+        planner_target,planner_power,planner_loss,planner_noise };
     struct Pending { Purpose purpose; std::shared_ptr<const Bytes> bytes; std::vector<std::string> names; std::uint64_t attachment_revision=0; };
     std::map<std::uint64_t,Pending> pending_services;
     std::vector<ui::ServiceRequest> services;
@@ -254,7 +258,8 @@ struct Controller::Impl {
         // Only the draft's transmit presentation changes here. Reconfiguring
         // live reception would discard a pending symbol when crossing 16 bytes.
         refresh_transmit_target();
-        ++revision; estimate.reset(); inspection.reset(); estimate_requested=Clock::now(); pattern_first=0;
+        ++revision; estimate.reset(); inspection.reset(); estimate_error.clear(); estimate_requested=Clock::now(); pattern_first=0;
+        planner_model.reset();
         simulation_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         lpi_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         f(UiField::airtime).text="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
@@ -343,6 +348,29 @@ struct Controller::Impl {
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
         } catch(...) { settings_valid=false; simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
+    }
+    const std::shared_ptr<const planner::Model>& link_plan() const {
+        if(planner_model)return planner_model;
+        auto input=planner_inputs;
+        input.options=settings.transfer;
+        input.mode=settings.transfer.receive_pattern_mode;
+        input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
+        input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
+        input.wire_bits=planner_draft&&estimate?estimate->wire_bits:1;
+        if(!settings_valid || (planner_draft&&(!estimate||estimated_revision!=revision))) {
+            auto model=std::make_shared<planner::Model>();model->inputs=std::move(input);
+            model->error=!settings_valid?"Fix the modem settings to continue planning.":
+                (!draft_error.empty()?draft_error:!estimate_error.empty()?estimate_error:"Calculating the current draft...");
+            planner_model=std::move(model);
+        } else planner_model=std::make_shared<const planner::Model>(planner::build(input));
+        return planner_model;
+    }
+    void planner_target(double value) {
+        if(!std::isfinite(value)||value< -200||value>200)throw Error("Planner target must be -200 to 200 dB in 1 Hz");
+        planner_inputs.target_db_hz=value;planner_model.reset();
+    }
+    static std::string planner_number(double value) {
+        std::ostringstream out;out<<std::setprecision(12)<<value;return out.str();
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -538,6 +566,13 @@ struct Controller::Impl {
         if(closing) return false;
         const bool busy=transmit_requested || snapshot.transmitting;
         switch(command) {
+        case Command::planner_apply_short: case Command::planner_apply_long:
+            return !busy&&!key_loading&&!key_failed&&settings_valid&&link_plan()->available;
+        case Command::planner_fast: return link_plan()->available&&link_plan()->fast_target.has_value();
+        case Command::planner_day: return link_plan()->available&&link_plan()->day_target.has_value();
+        case Command::planner_clock: return link_plan()->available&&link_plan()->clock_target.has_value();
+        case Command::planner_stronger: return planner_inputs.target_db_hz<200;
+        case Command::planner_weaker: return planner_inputs.target_db_hz> -200;
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
@@ -688,7 +723,7 @@ struct Controller::Impl {
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
         if(!result.error.empty()) {
             if(result.kind==PrepKind::keys) { key_failed=true; f(UiField::key_path).text=result.created?"Keyfile saved; load failed":"Keyfile operation failed"; }
-            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
+            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; estimate_error=result.error; if(planner_draft)planner_model.reset(); simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
             return;
         }
@@ -711,6 +746,7 @@ struct Controller::Impl {
             auto& state=f(UiField::device); state.options={{"default","default"}}; for(const auto& device:result.devices) if(device.id!="default") state.options.push_back({device.id,device.id});
         } else if(result.kind==PrepKind::estimate&&result.revision==revision) {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
+            if(planner_draft)planner_model.reset();
             f(UiField::lpi_estimate).text=inspection->lpi_summary;
             if(!settings.simulation)simulation_estimate_status("Simulation off");
             else if(receive_targets_due)simulation_estimate_status("Calculating...");
@@ -814,6 +850,34 @@ struct Controller::Impl {
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
+        case Command::planner_target:
+            request(Purpose::planner_target,ui::ServiceKind::prompt,"Plan for signal level (dB in 1 Hz)",planner_number(planner_inputs.target_db_hz));break;
+        case Command::planner_stronger: planner_target(std::min(200.,planner_inputs.target_db_hz+1));break;
+        case Command::planner_weaker: planner_target(std::max(-200.,planner_inputs.target_db_hz-1));break;
+        case Command::planner_example_short: planner_target(-8);break;
+        case Command::planner_example_weak: planner_target(-23);break;
+        case Command::planner_fast: {const auto value=*link_plan()->fast_target;planner_target(value);break;}
+        case Command::planner_day: {const auto value=*link_plan()->day_target;planner_target(value);break;}
+        case Command::planner_clock: {const auto value=*link_plan()->clock_target;planner_target(value);break;}
+        case Command::planner_toggle_details: planner_details=!planner_details;break;
+        case Command::planner_toggle_draft: planner_draft=!planner_draft;planner_model.reset();break;
+        case Command::planner_power:
+            request(Purpose::planner_power,ui::ServiceKind::prompt,"Average transmit power (dBm)",planner_number(planner_inputs.tx_dbm));break;
+        case Command::planner_loss:
+            request(Purpose::planner_loss,ui::ServiceKind::prompt,"Path loss (positive dB)",planner_number(planner_inputs.path_loss_db));break;
+        case Command::planner_noise:
+            request(Purpose::planner_noise,ui::ServiceKind::prompt,"Receiver noise density (dBm/Hz)",planner_number(planner_inputs.noise_density_dbm_hz));break;
+        case Command::planner_power_100w: planner_inputs.tx_dbm=50;planner_model.reset();break;
+        case Command::planner_power_4w: planner_inputs.tx_dbm=10*std::log10(4000.);planner_model.reset();break;
+        case Command::planner_power_1w: planner_inputs.tx_dbm=30;planner_model.reset();break;
+        case Command::planner_power_100mw: planner_inputs.tx_dbm=20;planner_model.reset();break;
+        case Command::planner_power_2mw: planner_inputs.tx_dbm=10*std::log10(2.);planner_model.reset();break;
+        case Command::planner_power_1mw: planner_inputs.tx_dbm=0;planner_model.reset();break;
+        case Command::planner_power_30uw: planner_inputs.tx_dbm=10*std::log10(.03);planner_model.reset();break;
+        case Command::planner_power_1uw: planner_inputs.tx_dbm=-30;planner_model.reset();break;
+        case Command::planner_apply_short: case Command::planner_apply_long:
+            f(command==Command::planner_apply_short?UiField::snr:UiField::long_snr).text=planner_number(planner_inputs.target_db_hz);
+            configure(true);notice(command==Command::planner_apply_short?"Planner target applied to short messages.":"Planner target applied to long messages and files.");break;
         case Command::transmit_short_bits:
         case Command::transmit: {
             // Keep the accepted bytes available for retry, including arbitrary
@@ -912,6 +976,22 @@ struct Controller::Impl {
         if(pending.purpose==Purpose::attach&&pending.attachment_revision!=attachment_revision) return;
         if(!result.error.empty()) throw Error(result.error);
         switch(pending.purpose) {
+        case Purpose::planner_target: planner_target(number(result.value,"Planner target"));break;
+        case Purpose::planner_power: {
+            const auto value=number(result.value,"Transmit power");
+            if(value< -200||value>100)throw Error("Transmit power must be -200 to 100 dBm");
+            planner_inputs.tx_dbm=value;planner_model.reset();break;
+        }
+        case Purpose::planner_loss: {
+            const auto value=number(result.value,"Path loss");
+            if(value<0||value>500)throw Error("Path loss must be 0 to 500 dB");
+            planner_inputs.path_loss_db=value;planner_model.reset();break;
+        }
+        case Purpose::planner_noise: {
+            const auto value=number(result.value,"Noise density");
+            if(value< -250||value>0)throw Error("Noise density must be -250 to 0 dBm/Hz");
+            planner_inputs.noise_density_dbm_hz=value;planner_model.reset();break;
+        }
         case Purpose::open_key: begin_key(path_from_text(result.value)); break;
         case Purpose::generate_names: request(Purpose::generate_path,ui::ServiceKind::save_file,"Save new encryption keyfile","shared.key",{},key_entry_names(result.value)); break;
         case Purpose::generate_path: begin_key(path_from_text(result.value),std::move(pending.names)); break;
@@ -1025,6 +1105,9 @@ const Inbox& Controller::inbox() const { return impl_->inbox; }
 const Signals& Controller::signals() const { return impl_->signals; }
 const std::shared_ptr<const Inspection>& Controller::inspection() const { return impl_->inspection; }
 const std::optional<transfer::Estimate>& Controller::estimate() const { return impl_->estimate; }
+const std::shared_ptr<const planner::Model>& Controller::link_plan() const { return impl_->link_plan(); }
+bool Controller::planner_details() const { return impl_->planner_details; }
+bool Controller::planner_uses_draft() const { return impl_->planner_draft; }
 PlotUpdate Controller::plot_update() const { const auto value=impl_->plot_update; impl_->plot_update={}; return value; }
 std::uint64_t Controller::revision() const { return impl_->revision; }
 const Bytes& Controller::message_bytes() const { return impl_->composer.bytes(); }

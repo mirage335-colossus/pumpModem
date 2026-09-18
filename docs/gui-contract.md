@@ -25,6 +25,45 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+**Link planner** is a shared document tab. It previews a target independently of
+the live transmit/receive targets, with **Time per bit**, **Observer / receiver
+time**, send time and an earliest completion estimate. The two logarithmic
+graphs follow actual sampled automatic-profile steps. Native buttons edit the
+target through a numeric prompt, step it by one dB, select the −8/−23 examples,
+or select the one-bit/second, one-day/bit and long-duration clock-search edges.
+Milestones are derived from the current rate, carrier, pattern and key geometry;
+fixed modes omit target-dependent boundaries. The selected receiver check uses
+one matching receive profile and the configured oscillator/DSP allowance.
+
+The initial preview is one exact raw bit at −8 dB-Hz. **Use current draft** uses
+the accepted transfer estimate's exact wire-bit count, including the short
+dictionary endpoint or fixed-interval markers/FEC. An edited draft immediately
+withdraws its stale planner estimate. Pending, failed and unsupported drafts
+retain **Plan 1 bit**. All timing includes the existing transfer waveform
+overhead; completion additionally requires complete absent symbols covering six
+seconds. The displayed finish time excludes processing delay.
+
+**Use target for short messages** and **Use target for long messages** explicitly
+apply the preview through the existing target/RX-list update. All other planner
+actions preserve the draft, modem configuration and live reception. Preview
+recalculation is bounded in sample count and independent of transmission time;
+it generates no waveform, runs no receiver and starts no worker or transmission.
+Immutable documents and plots are cached across unchanged presentation polls.
+
+**Power, path and model limits** expands native editing actions for average
+transmit power, positive path loss and receiver noise density. Power presets run
+from 100 W to 1 µW. The initial budget is +3 dBm, 170 dB loss and −164 dBm/Hz
+noise, yielding −167 dBm received and −3 dB-Hz actual C/N0. These inputs affect
+the actual budget separately from the target-driven timing and the existing
+normalized observer comparison. Propagation names do not supply unverified
+path-loss presets. The details retain the SSB/FT8 references and assumptions in
+[link planning](link-planner.md).
+
+The tab uses one general LPI warning: **LPI is not guaranteed. See model limits.**
+Its private-pattern hypothetical state is a short qualifier. While this tab is
+selected, the persistent current-draft LPI advisory is hidden so it cannot be
+confused with the preview; it remains unchanged on every other tab.
+
 **Transmit noise** appears beside the transmit controls on Console and
 Compression. It starts the regular encrypted pattern modulation with fresh
 temporary keys and dummy bits, independently of draft/attachment validity or

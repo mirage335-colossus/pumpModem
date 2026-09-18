@@ -680,7 +680,8 @@ void lpi_declaration() {
           "LPI advisory needs a persistent shared label with explicit relative reference and observer assumptions");
     for(const auto& page:ui::pages()) {
         app.select_page(page.id);
-        check(app.control(advisory).visible,"LPI advisory disappeared on another shared page");
+        check(app.control(advisory).visible==(page.id!=ui::Page::planner),
+              "Current-draft LPI advisory must stay on existing pages and yield to the planner's own reference");
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto geometry=app.control_layout(advisory,size.w,size.h);
             const auto oscillator=app.control_layout(control(F::simulation_oscillator_detail),size.w,size.h);

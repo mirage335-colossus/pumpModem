@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace datapump::gui::ui {
-enum class Page { console, compression, flow, transmission, count };
+enum class Page { console, compression, flow, transmission, planner, count };
 enum class Field {
     callsign, grid, repeatable, simulation, simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, simulation_oscillator_detail, lpi_estimate,
@@ -23,7 +23,12 @@ enum class Command {
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
     transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
-    resume_recovery, cancel_recovery
+    resume_recovery, cancel_recovery,
+    planner_target, planner_stronger, planner_weaker, planner_example_short, planner_example_weak,
+    planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
+    planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
+    planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
+    planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,

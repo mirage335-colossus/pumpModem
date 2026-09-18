@@ -3318,3 +3318,48 @@ seed, not the displayed model's population success rate, private-key behavior,
 real-time throughput or a physical audio link. End-to-end computation remains
 long at this setting; the roughly 23% reduced-benchmark saving is not a measured
 full-profile speedup.
+
+### Shared Link planner (2026-09-18)
+
+The new native document tab shares the existing tuning, transfer, LPI and
+receiver-workspace models across FLTK and Rev. Preview targets and link-budget
+inputs remain separate from live settings until the operator applies a short-
+or long-message target. Draft planning retains the existing exact wire count;
+completion timing adds fully scored absence. No transport, framing, receiver
+progress or physical-end behavior changed.
+
+The dedicated `gui_link_planner` suite checks independent numerical anchors at
+−8 and −23 dB-Hz, sample quantization, the one-second and one-day transitions,
+fixed modes, bounded curves and duration overflow. Controller/application cases
+cover preview isolation, explicit apply, prompt cancellation and invalid input,
+exact short/raw/interval draft counts, stale-estimate withdrawal and asynchronous
+estimate failure/recovery. Native document checks cover narrow and wide layouts,
+actions, one general LPI warning, and identical full/tiled chart damage in RGB,
+grayscale and monochrome. The existing application regression explicitly hides
+the current-draft LPI advisory on this new tab while retaining it on every
+pre-existing page.
+
+Release builds succeeded with GCC/FLTK and Clang/Rev. All 21 development-contract
+suites passed; the initial 29-suite run required the new-tab advisory expectation
+above, then `gui_application` passed on rerun. Final focused shared GUI checks
+passed 9/9 for FLTK and 8/8 for Rev, including the planner, application, document
+layout and adapter-boundary checks. No physical radio/audio link was tested.
+
+On an isolated Xvfb display, FLTK `gui_adapter_conformance` and
+`gui_document_conformance` passed. The full `gui_workflow` initially reached its
+unchanged 300-second smoke limit while other builds/tests ran; an isolated rerun
+passed in 225.21 seconds without changing the workflow, receiver or timeout.
+The compact planner was also inspected in native FLTK and Rev windows: headline
+times, both charts, all four milestones and Apply actions fit the default view.
+After final wording corrections, both Release builds and both
+`gui_link_planner`/`gui_application` pairs passed again (2/2 per backend).
+
+Rev's full native `gui_workflow` did not pass: under software OpenGL on Xvfb it
+reached the unchanged 300-second smoke limit in phase 17 while transmitting
+sampled audio to the independent receiver. Its screen was still reporting
+simulation progress. This run does not establish a completed Rev workflow or
+whether the timeout differs from the baseline; no timeout or assertion was
+relaxed to claim success.
+Rev's `gui_adapter_conformance`, `gui_platform_conformance`,
+`gui_coordinates_1x` and `gui_coordinates_2x` all passed on the same private
+display (4/4). `git diff --check` passed.

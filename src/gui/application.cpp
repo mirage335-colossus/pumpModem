@@ -3,6 +3,7 @@
 #include "bitmap_sources.hpp"
 #include "gui_smoke.hpp"
 #include "inspection_page.hpp"
+#include "link_planner_page.hpp"
 #include "text_policy.hpp"
 #include "screen_overlay.hpp"
 #include "datapump/tuning.hpp"
@@ -36,6 +37,12 @@ struct Application::Impl {
         std::string pending;
     };
     std::map<ui::Page,Document> documents;
+    struct PlannerDocument {
+        std::shared_ptr<const planner::Model> model;
+        std::shared_ptr<const ui::DocumentNode> root;
+        int width=0;
+        bool details=false,draft=false,closing=false,can_apply=false;
+    } planner_document;
 };
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
     impl_->page=launch.page;
@@ -163,6 +170,9 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     static const ui::FieldState empty;
     const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
+    // The planner owns its concise LPI reference and single model warning.
+    // The current-draft advisory remains unchanged on the other pages.
+    if(!declaration.surface&&declaration.field==ui::Field::lpi_estimate&&page()==ui::Page::planner)view.visible=false;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
@@ -237,6 +247,23 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
     const auto definition=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return p.id==page;});
     if(definition==ui::pages().end()||!definition->document)return {};
     width=std::max(ui::document_min_content_width,width);
+    if(page==ui::Page::planner) {
+        auto& cached=impl_->planner_document;
+        const auto model=impl_->controller.link_plan();
+        const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
+        const bool closing=impl_->controller.closing(),can_apply=impl_->controller.enabled(ui::Command::planner_apply_short);
+        if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
+            cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply) {
+            auto root=planner_page::build(*model,static_cast<float>(width),details,draft);
+            std::function<void(ui::DocumentNode&)> enable=[&](auto& node) {
+                if(node.kind==ui::DocumentKind::action)node.enabled=node.enabled&&impl_->controller.enabled(node.command);
+                for(auto& child:node.children)enable(child);
+            };
+            enable(root);
+            cached={model,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply};
+        }
+        return cached.root;
+    }
     auto& cached=impl_->documents[page];
     const auto model=impl_->controller.inspection();
     const auto first=impl_->controller.pattern_first();

@@ -106,7 +106,8 @@ const std::vector<PageDefinition>& pages() {
         {Page::console,"console","Console",false,86},
         {Page::compression,"compression","Compression / raw bits",false,200},
         {Page::flow,"flow","Modem flow",true,114},
-        {Page::transmission,"transmission","Transmission layout",true,204}
+        {Page::transmission,"transmission","Transmission layout",true,204},
+        {Page::planner,"planner","Link planner",true,128}
     };
     return definitions;
 }

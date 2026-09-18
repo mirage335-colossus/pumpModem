@@ -32,6 +32,7 @@ removed.
 | `controller.cpp` | Authoritative drafts, validation, settings, workers, commands, key/file state, reception and eligibility. |
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
+| `link_planner_model.*`, `link_planner_page.*` | Bounded link previews, native planner controls and labels, logarithmic plot snapshots and model details. |
 | `bitmap_sources.hpp`, `plot_render.cpp` | Shared snapshots, captions, error overlays, invalidation and pixel producers. |
 | `application.cpp` | Control/menu presentation and dispatch, validated edits/presets, launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
 | `gui_smoke.cpp` | The same application workflow checks for both native backends and the headless harness. |

@@ -2,6 +2,7 @@
 #include "ui_contract.hpp"
 #include "state.hpp"
 #include "inspection_model.hpp"
+#include "link_planner_model.hpp"
 #include "datapump/live.hpp"
 #include <memory>
 
@@ -36,6 +37,9 @@ public:
     const Signals& signals() const;
     const std::shared_ptr<const Inspection>& inspection() const;
     const std::optional<transfer::Estimate>& estimate() const;
+    const std::shared_ptr<const planner::Model>& link_plan() const;
+    bool planner_details() const;
+    bool planner_uses_draft() const;
     // Consumes accumulated invalidation flags once for all bitmap producers.
     PlotUpdate plot_update() const;
     std::uint64_t revision() const;
