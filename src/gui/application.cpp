@@ -159,7 +159,16 @@ void Application::navigate(ui::Page page) {if(accepts_surface(0))select_page(pag
 ui::ControlLayout Application::control_layout(const ui::Control& declaration,int width,int height,
         std::span<const ui::Control> declarations) const {
     return ui::control_layout(declaration,control(declaration).state,width,height,declarations,
-                              field(ui::Field::transmit_scope).visible);
+                              field(ui::Field::transmit_scope).visible,field(ui::Field::simulation_cpu_time).visible);
+}
+ui::Rect Application::page_bounds(int width,int height) const {
+    return ui::page_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
+}
+ui::Rect Application::tabs_bounds(int width,int height) const {
+    return ui::tabs_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
+}
+std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
+    return ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
     if(!accepts_surface(declaration.surface)||(!declaration.surface&&!declaration.persistent&&declaration.page!=page()))return false;

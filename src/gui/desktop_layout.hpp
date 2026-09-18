@@ -9,6 +9,7 @@ inline constexpr int min_width = 1030, min_height = 968;
 inline constexpr int oscillator_row_height = 48;
 // The concise LPI reference shares the clock row instead of reserving a row.
 inline constexpr int lpi_row_height = 0;
+inline constexpr int simulation_estimate_row_height = 48;
 inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
@@ -60,9 +61,11 @@ struct DesktopLayout {
     static constexpr int default_width = ui::default_width, default_height = ui::default_height;
     static constexpr int min_width = ui::min_width, min_height = ui::min_height;
     explicit DesktopLayout(int width = default_width, int height = default_height,
-                           bool transmit_scope_visible = true) {
+                           bool transmit_scope_visible = true, bool simulation_estimates_visible = true) {
         auto& out = *this;
-        const int content_height = height - oscillator_row_height - lpi_row_height;
+        const int header_rows = oscillator_row_height + lpi_row_height +
+            (simulation_estimates_visible ? simulation_estimate_row_height : 0);
+        const int content_height = height - header_rows;
         out[Slot::header] = {margin, 10, 220, 32};
         out[Slot::mode] = {235, 13, width - 420, 28};
         out[Slot::clear] = {width - 153, 12, 137, 28};
@@ -72,10 +75,9 @@ struct DesktopLayout {
         out[Slot::key_actions] = {366, 62, 92, field_height};
         out[Slot::key_path] = {466, 62, std::max(90, width - 732), field_height};
         out[Slot::key] = {width - 248, 62, 232, field_height};
-        // Simulation is a compact Yes/No choice. The adjacent region shows
-        // editable link assumptions for hardware use, or CPU/GPU estimates
-        // during simulation; shared FieldState visibility selects the group.
-        // RX success stays in the same right-hand position in both modes.
+        // Link assumptions and RX success stay beside the compact Simulation
+        // Yes/No choice in both modes. Simulation-only computation estimates
+        // have a separate row so they never displace the editable inputs.
         const int simulation_extra = std::max(0, width - min_width);
         const int confidence_width = 320 + simulation_extra / 5;
         const int confidence_x = width - margin - confidence_width;
@@ -90,13 +92,13 @@ struct DesktopLayout {
         out[Slot::link_loss] = {loss_x, 105, loss_width, field_height};
         out[Slot::link_noise] = {noise_x, 105, confidence_x - group_gap - noise_x, field_height};
         out[Slot::simulation_confidence] = {confidence_x, 89, confidence_width, 43};
-        const int cpu_width = assumption_width * 42 / 100;
-        out[Slot::simulation_cpu_time] = {assumption_x, 89, cpu_width, 43};
-        const int gpu_x = assumption_x + cpu_width + group_gap;
-        out[Slot::simulation_gpu_time] = {gpu_x, 89, confidence_x - group_gap - gpu_x, 43};
         out[Slot::simulation_oscillator] = {margin, 153, 320, field_height};
         out[Slot::simulation_oscillator_detail] = {346, 137, width - margin - 346, 21};
         out[Slot::lpi_estimate] = {346, 160, width - margin - 346, 21};
+        const int cpu_width = (width - 2 * margin - group_gap) * 42 / 100;
+        out[Slot::simulation_cpu_time] = {margin, 185, cpu_width, simulation_estimates_visible ? 43 : 0};
+        const int gpu_x = margin + cpu_width + group_gap;
+        out[Slot::simulation_gpu_time] = {gpu_x, 185, width - margin - gpu_x, simulation_estimates_visible ? 43 : 0};
         out[Slot::tabs] = {margin, 137, width - 2 * margin, content_height - 296};
         out[Slot::page] = {margin, 169, width - 2 * margin, content_height - 328};
 
@@ -232,10 +234,10 @@ struct DesktopLayout {
         out[Slot::mono] = {margin, content_height - 56, 74, 22};
         out[Slot::diagnostics] = {margin + 82, content_height - 56, width - 2 * margin - 82, 22};
         out[Slot::status] = {margin, content_height - 31, width - 2 * margin, 24};
-        // Reserve the clock row and its adjacent LPI reference above every
-        // page. Lower settings remain anchored to the window's bottom edge.
+        // Reserve clock and computation rows above every page. Lower settings
+        // remain anchored to the window's bottom edge.
         for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<slots.size();++index)
-            slots[index].y+=oscillator_row_height+lpi_row_height;
+            slots[index].y+=header_rows;
     }
 };
 }

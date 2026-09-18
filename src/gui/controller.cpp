@@ -684,8 +684,8 @@ struct Controller::Impl {
         case Command::planner_fast: return link_plan()->available&&link_plan()->fast_target.has_value();
         case Command::planner_day: return link_plan()->available&&link_plan()->day_target.has_value();
         case Command::planner_clock: return link_plan()->available&&link_plan()->clock_target.has_value();
-        case Command::planner_stronger: return planner_inputs.target_db_hz<200;
-        case Command::planner_weaker: return planner_inputs.target_db_hz> -200;
+        case Command::planner_stronger: return link_plan()->available&&link_plan()->stronger_fit_target.has_value();
+        case Command::planner_weaker: return link_plan()->available&&link_plan()->weaker_fit_target.has_value();
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return !empty_draft() && !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
@@ -737,7 +737,7 @@ struct Controller::Impl {
         const bool busy=transmit_requested||snapshot.transmitting||closing;
         for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         const bool simulation=f(UiField::simulation).selected=="yes";
-        for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=!simulation;
+        for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
         f(UiField::simulation_cpu_time).visible=f(UiField::simulation_gpu_time).visible=simulation;
         f(UiField::simulation_confidence).visible=true;
         if(key_loading || tone()) f(UiField::key).enabled=false;
@@ -969,8 +969,8 @@ struct Controller::Impl {
         switch(command) {
         case Command::planner_target:
             request(Purpose::planner_target,ui::ServiceKind::prompt,"Plan for signal level (dB in 1 Hz)",planner_number(planner_inputs.target_db_hz));break;
-        case Command::planner_stronger: planner_target(std::min(200.,planner_inputs.target_db_hz+1));break;
-        case Command::planner_weaker: planner_target(std::max(-200.,planner_inputs.target_db_hz-1));break;
+        case Command::planner_stronger: {const auto value=*link_plan()->stronger_fit_target;planner_target(value);break;}
+        case Command::planner_weaker: {const auto value=*link_plan()->weaker_fit_target;planner_target(value);break;}
         case Command::planner_example_short: planner_target(-8);break;
         case Command::planner_example_lpi: planner_target(23);break;
         case Command::planner_fast: {const auto value=*link_plan()->fast_target;planner_target(value);break;}

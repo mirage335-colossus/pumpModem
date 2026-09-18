@@ -3,7 +3,11 @@
 #include "document_layout.hpp"
 #include "link_planner_model.hpp"
 #include "link_planner_page.hpp"
+#include "datapump/pattern_code.hpp"
+#include "datapump/pattern_search.hpp"
+#include "datapump/simulation_estimate.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -133,6 +137,137 @@ void clock_and_ram_milestones() {
               "Returned clock/RAM milestone must itself fit the selected search and byte allowance");
     }
 }
+planner::Inputs gpsdo_islands() {
+    planner::Inputs inputs;
+    inputs.options.modem=tuning::resolve(1,-47,tuning::PatternMode::auto_pattern,false,1500).config;
+    inputs.options.dsp_workspace_bytes=4096ULL*1024*1024;
+    inputs.channel.clock_error_ppm=.1;
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.5;
+    inputs.target_db_hz=-47;
+    return inputs;
+}
+modem::Config planned_config(const planner::Inputs& inputs,double target) {
+    const std::array targets{target};
+    return tuning::receive_profiles(inputs.options.modem,targets,inputs.mode,inputs.options.key.has_value()).front();
+}
+simulation::Estimate independently_check_receiver(const planner::Inputs& inputs,double target) {
+    auto options=inputs.options;options.modem=planned_config(inputs,target);
+    transfer::Estimate one;one.wire_bits=1;
+    one.total_seconds=static_cast<double>(modem::symbol_sample_count(options.modem))/options.modem.sample_rate;
+    return simulation::estimate(one,options,true,inputs.channel);
+}
+void sampled_clock_ram_islands() {
+    auto inputs=gpsdo_islands();
+    const auto nominal=planned_config(inputs,-47);
+    const auto search=modem::default_pattern_frequency_search(nominal);
+    check(nominal.sample_rate==6000&&modem::pattern_chip_samples(nominal)==12000&&
+          modem::symbol_sample_count(nominal)==18973665962ULL&&
+          modem::pattern_projection_bin_samples(nominal,search.half_width_hz)==2,
+          "The exact -47 dB target must retain its independent sample-rounded geometry");
+    const auto selected=planner::build(inputs);
+    check(selected.available&&selected.clock_search_supported&&!selected.receiver_workspace_supported,
+          "A GPSDO's clock coverage must not hide the exact -47 dB target's RAM gap");
+    struct Anchor {std::uint64_t samples,bin;bool clock,ram;};
+    for(const auto anchor:{Anchor{18973661999ULL,1,true,false},
+                              {18973662000ULL,6000,true,true},
+                              {18973662001ULL,1,true,false},
+                              {18973668000ULL,6000,true,true},
+                              {20479998000ULL,6000,true,true},
+                              {20480004000ULL,6000,false,true}}) {
+        // A point inside each sample's rounding interval, calculated without
+        // the planner's grid search. Its neighboring samples have different
+        // exact projection bins even though their displayed dB values agree.
+        inputs.target_db_hz=static_cast<double>(18-10*std::log10((static_cast<long double>(anchor.samples)-.5L)/6000));
+        const auto config=planned_config(inputs,inputs.target_db_hz);
+        const auto frequencies=modem::default_pattern_frequency_search(config);
+        check(modem::symbol_sample_count(config)==anchor.samples&&
+              modem::pattern_projection_bin_samples(config,frequencies.half_width_hz)==anchor.bin,
+              "One-sample GPSDO island fixtures no longer have their independent projection-bin geometry");
+        const auto receiver=independently_check_receiver(inputs,inputs.target_db_hz);
+        const auto model=planner::build(inputs);
+        check(receiver.carrier_in_search==anchor.clock&&receiver.receiver_workspace_supported==anchor.ram&&
+              model.available&&model.clock_search_supported==anchor.clock&&model.receiver_workspace_supported==anchor.ram,
+              "Planner support must agree with the independent estimator on both usable islands and adjacent gaps");
+    }
+    check(selected.clock_target.has_value(),"GPSDO planning must locate a checked long-duration edge despite narrow RAM islands");
+    const auto edge=planned_config(inputs,*selected.clock_target);
+    // The capped frequency bank covers +/-512/T Hz. A .1 ppm error at
+    // 1500 Hz permits 3,413,333 whole seconds, but not 3,413,334 seconds.
+    check(modem::symbol_sample_count(edge)==20479998000ULL&&selected.clock_limit_reason=="Clock",
+          "The GPSDO clock milestone stopped before the independently derived last fitting whole-second geometry");
+    // A larger allowance admits a finer divisor near the same clock cap.
+    // Searching only complete native bins misses this weaker usable island.
+    inputs=gpsdo_islands();inputs.options.dsp_workspace_bytes=16384ULL*1024*1024;
+    const auto finer_target=static_cast<double>(18-10*std::log10((20479999500.L-.5L)/6000));
+    const auto finer=planned_config(inputs,finer_target);
+    const auto finer_search=modem::default_pattern_frequency_search(finer);
+    const auto receiver=independently_check_receiver(inputs,finer_target);
+    check(modem::symbol_sample_count(finer)==20479999500ULL&&
+          modem::pattern_projection_bin_samples(finer,finer_search.half_width_hz)==1500&&
+          receiver.carrier_in_search&&receiver.receiver_workspace_supported,
+          "The 16 GiB fixture must independently admit the finer 1500-sample projection grid");
+    const auto larger=planner::build(inputs);
+    check(larger.clock_target&&modem::symbol_sample_count(planned_config(inputs,*larger.clock_target))>=20479999500ULL,
+          "The clock/RAM search missed a weaker fitting divisor island near the clock cap");
+    const auto discovered=independently_check_receiver(inputs,*larger.clock_target);
+    check(discovered.carrier_in_search&&discovered.receiver_workspace_supported,
+          "The larger-budget edge must independently fit both receiver checks");
+}
+void checked_clock_ram_navigation() {
+    auto inputs=gpsdo_islands();
+    auto current=planner::build(inputs);
+    const auto verify=[&](const planner::Model& model,const std::optional<double>& target,bool stronger) {
+        check(target.has_value()&&std::isfinite(*target)&&*target>=-200&&*target<=200&&
+              (stronger?*target>model.inputs.target_db_hz:*target<model.inputs.target_db_hz),
+              "Clock/RAM navigation must advertise a finite target strictly in its requested direction");
+        const auto receiver=independently_check_receiver(model.inputs,*target);
+        check(receiver.carrier_in_search&&receiver.receiver_workspace_supported,
+              "A navigation step advertised a target in a clock or RAM gap");
+    };
+    verify(current,current.stronger_fit_target,true);
+    check(*current.stronger_fit_target>-46.01&&*current.stronger_fit_target<-45.99,
+          "Stronger navigation should advance about one dB instead of crawling between adjacent sample endpoints");
+    verify(current,current.weaker_fit_target,false);
+    check(*current.weaker_fit_target>-48&&current.clock_target&&
+          modem::symbol_sample_count(planned_config(inputs,*current.weaker_fit_target))==
+          modem::symbol_sample_count(planned_config(inputs,*current.clock_target)),
+          "Weaker navigation must retain the last fitting edge when a full one-dB step would skip it");
+    inputs.target_db_hz=*current.weaker_fit_target;current=planner::build(inputs);
+    check(!current.weaker_fit_target,"The weakest checked clock edge must disable further weaker steps");
+    for(unsigned step=0;step<4;++step) {
+        verify(current,current.stronger_fit_target,true);
+        check(*current.stronger_fit_target-current.inputs.target_db_hz>.99,
+              "Repeated stronger navigation regressed into one-sample stepping");
+        inputs.target_db_hz=*current.stronger_fit_target;current=planner::build(inputs);
+        verify(current,current.weaker_fit_target,false);
+        check(current.inputs.target_db_hz-*current.weaker_fit_target>.99,
+              "Repeated weaker navigation regressed into one-sample stepping");
+    }
+    inputs.target_db_hz=200;const auto strongest=planner::build(inputs);
+    check(strongest.available&&!strongest.stronger_fit_target,"The finite upper target limit must not advertise a stronger step");
+    inputs.target_db_hz=-200;const auto unavailable=planner::build(inputs);
+    check(!unavailable.available&&!unavailable.stronger_fit_target&&!unavailable.weaker_fit_target,
+          "An unrepresentable sampled duration must not advertise unchecked navigation targets");
+    inputs=gpsdo_islands();inputs.mode=tuning::PatternMode::pattern_16;
+    const auto fixed=planner::build(inputs);
+    check(fixed.available&&!fixed.stronger_fit_target&&!fixed.weaker_fit_target,
+          "A fixed-duration profile must not advertise target-driven timing navigation");
+    // One MiB satisfies the transfer API's 256 KiB minimum, but cannot hold
+    // even this rate's fastest expanded receiver bank and retained evidence.
+    inputs=gpsdo_islands();inputs.options.dsp_workspace_bytes=1024*1024;
+    const auto fastest_receiver=independently_check_receiver(inputs,200);
+    check(fastest_receiver.carrier_in_search&&!fastest_receiver.receiver_workspace_supported,
+          "The valid no-fit fixture must independently reject even its fastest receiver geometry on RAM");
+    const auto no_workspace=planner::build(inputs);
+    check(no_workspace.available&&!no_workspace.receiver_workspace_supported&&!no_workspace.clock_target&&
+          !no_workspace.stronger_fit_target&&!no_workspace.weaker_fit_target,
+          "A bounded search with no affordable receiver geometry must return no unchecked targets");
+    inputs.options.dsp_workspace_bytes=1;
+    const auto invalid_workspace=planner::build(inputs);
+    check(!invalid_workspace.available&&!invalid_workspace.error.empty()&&!invalid_workspace.clock_target&&
+          !invalid_workspace.stronger_fit_target&&!invalid_workspace.weaker_fit_target,
+          "A budget below the transfer API minimum must be unavailable and advertise no navigation targets");
+}
 void separate_link_budget_and_observer_model() {
     auto inputs=example();const auto reference=planner::build(inputs);
     inputs.tx_dbm=50;inputs.path_loss_db=200;inputs.noise_density_dbm_hz=-170;
@@ -193,6 +328,55 @@ void prepare(Controller& controller) {
         controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
     check(controller.estimate().has_value(),"Current-draft estimate was not prepared");
+}
+void controller_checked_navigation() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller;
+    controller.edit(F::bandwidth,"1 Hz");controller.edit(F::carrier,"1500 Hz");
+    controller.select(F::simulation_oscillator,"gpsdo-xo");controller.edit(F::message,"e");prepare(controller);
+    const auto inspection=controller.inspection();
+    const auto waveform=controller.estimate()->waveform_samples;
+    const auto receive_targets=controller.settings().transfer.receive_targets_db_hz;
+    const auto initial=controller.link_plan();
+    check(initial->clock_target.has_value(),"Controller GPSDO fixture must have a usable clock/RAM edge");
+    controller.activate(C::planner_clock);
+    const auto edge=controller.link_plan();
+    check(edge->available&&edge->clock_search_supported&&edge->receiver_workspace_supported&&
+          !controller.enabled(C::planner_weaker)&&controller.enabled(C::planner_stronger),
+          "Controller navigation enablement must reflect its checked edge and available direction");
+    for(unsigned read=0;read<256;++read)
+        check(controller.link_plan()==edge,"Repeated planner presentation reads must reuse the bounded search result");
+    const auto next=edge->stronger_fit_target;
+    controller.activate(C::planner_stronger);
+    const auto stepped=controller.link_plan();
+    check(next&&stepped!=edge&&stepped->inputs.target_db_hz==*next,
+          "Stronger action must use the exact checked target advertised by the cached model");
+    auto receiver=independently_check_receiver(stepped->inputs,stepped->inputs.target_db_hz);
+    check(receiver.carrier_in_search&&receiver.receiver_workspace_supported&&
+          controller.inspection()==inspection&&controller.estimate()->waveform_samples==waveform&&
+          controller.settings().transfer.receive_targets_db_hz==receive_targets&&controller.message_bytes()==Bytes{'e'},
+          "Checked preview navigation must preserve the live receiver and exact existing draft estimate");
+    check(controller.enabled(C::planner_weaker)&&stepped->weaker_fit_target,
+          "A stronger usable point must offer its checked weaker return path");
+    const auto weaker=*stepped->weaker_fit_target;
+    controller.activate(C::planner_weaker);
+    const auto selected=controller.link_plan();
+    check(selected->inputs.target_db_hz==weaker&&selected->clock_search_supported&&selected->receiver_workspace_supported,
+          "Weaker action must preserve the exact target used to check its clock/RAM fit");
+    controller.activate(C::planner_target);const auto requests=controller.take_services();
+    check(requests.size()==1,"Checked navigation target must remain editable through its native prompt");
+    controller.complete_service({requests.front().id,false,requests.front().value,{}});
+    check(controller.link_plan()->inputs.target_db_hz==weaker,
+          "A displayed checked target lost its sample-sensitive precision during prompt round-trip");
+    const auto samples=modem::symbol_sample_count(planned_config(selected->inputs,weaker));
+    controller.activate(C::planner_apply_short);prepare(controller);
+    check(modem::symbol_sample_count(controller.settings().transfer.modem)==samples&&
+          std::find(controller.settings().transfer.receive_targets_db_hz.begin(),
+                    controller.settings().transfer.receive_targets_db_hz.end(),weaker)!=
+                    controller.settings().transfer.receive_targets_db_hz.end()&&
+          controller.message_bytes()==Bytes{'e'}&&controller.estimate()->wire_bits==3,
+          "Applying a checked GPSDO island must preserve its exact sampled endpoint and three-bit dictionary source");
+    controller.close();
 }
 void current_draft_and_modem_isolation() {
     using F=ui::Field;using C=ui::Command;
@@ -373,8 +557,8 @@ void shared_link_controls_visibility() {
         for(const auto field:{F::link_power,F::link_loss,F::link_noise}) {
             const auto& control=declaration(field);
             check(control.kind==ui::Kind::text&&control.persistent&&!app.field(field).options.empty()&&
-                  app.control(control).visible==!simulated,
-                  "Editable link presets must remain native and visible on every page with Simulation No");
+                  app.control(control).visible,
+                  "Editable link presets must remain native and visible on every page with either Simulation choice");
         }
         check(app.control(declaration(F::simulation_confidence)).visible,
               "RX confidence must remain visible with either Simulation choice");
@@ -561,8 +745,9 @@ void application_prompt_roundtrips() {
     check(lpi_document!=document&&contains_text(*lpi_document,"5.85 sec"),
           "Changing the target must replace the shared document with the positive LPI example's real duration");
     app.activate(C::planner_toggle_details);
-    check(contains_text(*app.document(ui::Page::planner,900),"Power, path and noise"),
-          "Model details action did not expose its native shared controls");
+    check(contains_text(*app.document(ui::Page::planner,900),"Model limits")&&
+          contains_text(*app.document(ui::Page::planner,900),"Quick references"),
+          "Model details action did not expose its assumptions and references");
     app.activate(C::planner_example_short);check(value(C::planner_target)=="-8","Short example action did not reach the shared facade");
     edit(C::planner_target,"-12.5");check(value(C::planner_target)=="-12.5","Planner target prompt did not round-trip");
     edit(C::planner_power,"20");
@@ -614,10 +799,13 @@ void document_semantics_layout_and_plots() {
                       return node->kind==ui::DocumentKind::action&&node->command==command;
                   }),"Planner milestone and editing affordances must use native shared actions");
         const auto target=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->command==ui::Command::planner_target;});
+        const auto verdict=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->text.starts_with("Meets target");});
+        check(verdict!=flat.end()&&verdict<target,"Planner must put the link verdict before its target controls");
         for(const auto command:{ui::Command::planner_power,ui::Command::planner_loss,ui::Command::planner_noise}) {
-            const auto budget=std::find_if(flat.begin(),flat.end(),[&](const auto* node){return node->command==command;});
-            check(budget!=flat.end()&&budget<target,"Planner must put its always-visible link budget before the target controls");
+            check(std::none_of(flat.begin(),flat.end(),[&](const auto* node){return node->command==command;}),
+                  "Planner must not duplicate the shared top-bar budget controls");
         }
+        check(!contains_text(document,"Quick references"),"Rough propagation references must remain collapsed by default");
         const auto layout=ui::layout_document(document,static_cast<int>(width),[](const auto& node,int available) {
             const auto lines=std::max(1.,std::ceil(node.text.size()*node.font_size*.55/std::max(1,available)));
             return lines*node.font_size*1.2;
@@ -634,9 +822,12 @@ void document_semantics_layout_and_plots() {
         within(within,layout.root);
     }
     const auto detailed=planner_page::build(model,900,true,false);
-    check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Power, path and noise")&&
+    check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Quick references")&&
           contains_text(detailed,"90% detection")&&contains_text(detailed,"1% false alarm")&&
           contains_text(detailed,"FT8 reference"),"Expandable model details lost their assumptions and familiar reference");
+    check(contains_text(detailed,"Groundwave · 1 MHz · 150 miles: 180 dB path loss.")&&
+          contains_text(detailed,"Groundwave · 30 MHz · 150 miles: 210 dB path loss."),
+          "Groundwave references must use path loss in dB, not received power in dBm");
     auto wide_band=example();
     wide_band.options.modem=tuning::resolve(10000,-8,tuning::PatternMode::auto_pattern,false).config;
     const auto wide_document=planner_page::build(planner::build(wide_band),900,false,false);
@@ -675,8 +866,8 @@ void document_semantics_layout_and_plots() {
     const auto unavailable=planner_page::build(invalid,220,true,true);
     check(contains_text(unavailable,"Current draft pending")&&!contains_text(unavailable,"Send current draft"),
           "Unavailable planner must withdraw stale numerical results and explain its pending state");
-    check(contains_text(unavailable,"Power, path and noise")&&!contains_text(unavailable,"Received:"),
-          "Unavailable model must retain editable inputs while hiding stale derived link strength");
+    check(contains_text(unavailable,"Link estimate unavailable")&&!contains_text(unavailable,"Received:"),
+          "Unavailable model must hide stale derived link strength");
     const auto pending_nodes=nodes(unavailable);
     check(std::any_of(pending_nodes.begin(),pending_nodes.end(),[](const auto* node) {
               return node->kind==ui::DocumentKind::action&&node->command==ui::Command::planner_toggle_draft&&node->enabled;
@@ -686,9 +877,10 @@ void document_semantics_layout_and_plots() {
 int main() {
     try {
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
-        clock_and_ram_milestones();
+        clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
         current_draft_and_modem_isolation();application_prompt_roundtrips();
+        controller_checked_navigation();
         failed_draft_estimate_and_recovery();one_warning_on_planner_page();
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();

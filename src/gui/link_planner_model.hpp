@@ -53,6 +53,11 @@ struct Model {
     // A checked usable edge from the long-duration side: clock search AND RAM.
     // Sample rounding and short-profile policy can create other coverage gaps.
     std::optional<double> clock_target;
+    // Checked useful steps, normally about 1 dB, skipping clock/RAM gaps.
+    // A remaining end point may be nearer than 1 dB. Never a promise that all
+    // intervening sample-quantized profiles fit or that every island is known.
+    std::optional<double> stronger_fit_target;
+    std::optional<double> weaker_fit_target;
 };
 // Bounded analytical planning only; no sampled audio or transmission occurs.
 Model build(const Inputs& inputs);

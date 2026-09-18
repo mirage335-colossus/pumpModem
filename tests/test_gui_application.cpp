@@ -164,6 +164,41 @@ void transmission_scope_reflow() {
     }
     app.close();
 }
+void simulation_header_reflow() {
+    using F=ui::Field;using S=ui::Slot;
+    Application app({});
+    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
+                         ui::Rect{0,0,ui::default_width,ui::default_height},ui::Rect{0,0,1920,1080}}) {
+        std::optional<ui::Rect> compact_page;
+        for(const auto* mode:{"no","yes","no"}) {
+            app.select(F::simulation,mode);
+            const bool simulated=std::string_view(mode)=="yes";
+            const ui::DesktopLayout expected(size.w,size.h,app.field(F::transmit_scope).visible,simulated);
+            const auto page=app.page_bounds(size.w,size.h),tabs=app.tabs_bounds(size.w,size.h);
+            check(page==expected[S::page]&&tabs.x==expected[S::tabs].x&&tabs.y==expected[S::tabs].y&&tabs.h==28,
+                  "The facade must place native pages and navigation using the same visible header rows");
+            const auto navigation=app.tab_layout(size.w,size.h);
+            check(navigation.size()==ui::pages().size(),"Simulation toggle changed the native tab set");
+            for(std::size_t index=0;index<navigation.size();++index)
+                check(navigation[index].page==ui::pages()[index].id&&navigation[index].frame.y==tabs.y&&
+                      navigation[index].frame.h==tabs.h,
+                      "Native tab placement must follow the facade's conditional header geometry");
+            for(const auto field:{F::message,F::short_bits,F::link_power,F::link_loss,F::link_noise,
+                                 F::simulation_cpu_time,F::simulation_gpu_time,F::device}) {
+                const auto& declaration=control(field);
+                check(app.control_layout(declaration,size.w,size.h).frame==expected[declaration.slot],
+                      "A native control used a different header allowance from its page viewport");
+            }
+            if(!simulated) {
+                if(compact_page)check(page==*compact_page,"Returning to Simulation No retained a blank computation row");
+                compact_page=page;
+            } else check(compact_page&&page.y==compact_page->y+ui::simulation_estimate_row_height&&
+                         page.h+ui::simulation_estimate_row_height==compact_page->h,
+                         "Simulation Yes must reserve only its computation-estimate row");
+        }
+    }
+    app.close();
+}
 void records() {
     Signals signals;
     SignalLine pending;pending.id=81;pending.frequency_hz=1499.6;pending.text="pending \xc3\xa9";
@@ -1029,6 +1064,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {transmission_scope_records();transmission_scope_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -63,9 +63,9 @@ inline Rect overlay_control_rect(const OverlayPlacement& p,int width,int height)
 // meaning of a slot or independently reserves space for application controls.
 inline ControlLayout control_layout(const Control& c,const FieldState& state,int width,int height,
                                     std::span<const Control> controls=console_screen(),
-                                    bool transmit_scope_visible=true) {
+                                    bool transmit_scope_visible=true,bool simulation_estimates_visible=true) {
     if(c.surface)return control_content_layout(c,state,overlay_control_rect(c.placement,width,height));
-    const DesktopLayout desktop(width,height,transmit_scope_visible);
+    const DesktopLayout desktop(width,height,transmit_scope_visible,simulation_estimates_visible);
     ControlLayout out;
     out.popup_upward=c.open_upward;
     out.frame=desktop[c.slot];
@@ -121,11 +121,16 @@ template<class Measure> int record_content_width(const Record& record,int minimu
     }
     return width;
 }
-inline Rect page_rect(int width,int height) { return DesktopLayout(width,height)[Slot::page]; }
-inline Rect tabs_rect(int width,int height) { auto rect=DesktopLayout(width,height)[Slot::tabs];rect.h=28;return rect; }
+inline Rect page_rect(int width,int height,bool simulation_estimates_visible=true) {
+    return DesktopLayout(width,height,true,simulation_estimates_visible)[Slot::page];
+}
+inline Rect tabs_rect(int width,int height,bool simulation_estimates_visible=true) {
+    auto rect=DesktopLayout(width,height,true,simulation_estimates_visible)[Slot::tabs];rect.h=28;return rect;
+}
 struct TabLayout {Page page;Rect frame;};
-inline std::vector<TabLayout> tab_layout(int width,int height,std::span<const PageDefinition> definitions=pages()) {
-    const auto bounds=tabs_rect(width,height);int x=bounds.x;
+inline std::vector<TabLayout> tab_layout(int width,int height,std::span<const PageDefinition> definitions=pages(),
+                                       bool simulation_estimates_visible=true) {
+    const auto bounds=tabs_rect(width,height,simulation_estimates_visible);int x=bounds.x;
     std::vector<TabLayout> result;result.reserve(definitions.size());
     for(const auto& page:definitions) {
         result.push_back({page.id,{x,bounds.y,page.tab_width,bounds.h}});x+=page.tab_width;

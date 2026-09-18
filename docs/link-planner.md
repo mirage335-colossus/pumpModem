@@ -1,20 +1,22 @@
 # Link planner
 
-Open **Link planner**, immediately after **Console**, to start with transmit
-power, path loss and noise. The headline shows whether that budget meets the
-selected target, its margin or shortfall, and any receiver clock/RAM limit.
-Transmit power is shown in watts, milliwatts or microwatts alongside dBm.
+Set transmit power, path loss and noise in the top bar, then open **Link
+planner**, immediately after **Console**. Its headline shows whether that budget
+meets the selected target, its margin or shortfall, and any receiver clock/RAM
+limit. The power field accepts watts, milliwatts, microwatts or dBm.
 
 The timing preview starts at −8 dB in 1 Hz, independently of the current
 transmit targets. Rate, carrier, waveform, key, oscillator and DSP
 allowance follow the shared controls. Choose **Use target for short messages**
 or **Use target for long messages** to apply a preview.
 
-The top-bar **Simulation** choice is **Yes / No**. With **No**, editable power,
-path-loss and noise dropdowns appear beside it. They share their values with the
+The top-bar **Simulation** choice is **Yes / No**. Editable power, path-loss and
+noise dropdowns stay beside it in both modes, sharing their values with the
 planner and RX success estimate. RX success remains available without sampled
-simulation; CPU/GPU computation estimates appear only with **Yes**. Changes to
-the budget in live mode update estimates without restarting reception.
+simulation; CPU/GPU computation estimates appear only with **Yes**. The planner
+does not repeat the input controls, and the estimate row takes no space with
+**No**. Changes to the budget in live mode update estimates without restarting
+reception.
 
 The graphs use a logarithmic vertical scale: equally spaced steps represent
 multiples of time. Weaker targets generally need longer bits; automatic profile
@@ -47,8 +49,24 @@ allowance, including the 75% option. The milestone names the limiting condition;
 the selected target reports **Wide RX search exceeds RAM** when appropriate.
 The clock-only long-duration edge is near −17.33 at this geometry, but available
 RAM can require a stronger target. Short profiles and sampled projection sizes
-can have separate coverage or memory gaps. Memory and clock coverage are
-separate from successful reception. The check assumes one matching RX profile,
+can have separate coverage or memory gaps.
+
+**Stronger** and **Weaker** select usable targets, normally about 1 dB apart,
+and skip targets that fail either check. If less than 1 dB remains, the final
+usable edge is still selectable. A disabled button means no usable point was
+found in that direction. The target prompt remains available for manual entry.
+Selections and Apply preserve the exact target even when its label is rounded.
+
+These gaps can be extremely narrow. At 1 Hz rate, a 1.5 kHz carrier, the hobby
+GPSDO model and 4 GiB DSP allowance, exact −47 dB uses a timing that exceeds RAM.
+A target only about 0.000001 dB stronger can fit, because the receiver can average
+many more samples before searching. The hidden model details explain this
+without adding another graph or more numbers to the main view.
+The bounded search checks sample-aligned timings and changes in clock-search
+and FFT geometry; other usable timings may remain undiscovered.
+
+Memory and clock coverage are separate from successful reception.
+The check assumes one matching RX profile,
 rather than the currently unapplied receive-target list. More profiles or keys
 can require additional workspace.
 
@@ -68,14 +86,13 @@ modes such as FT8 and SSB do not themselves determine path loss.
 **Model limits and references** contains the detailed oscillator and LPI
 assumptions and the following rough reference examples. These are illustrative
 inputs supplied for comparison, not propagation predictions or automatic
-presets. The groundwave figures specify power rather than path loss; the
-moonbounce entry uses the confirmed interpretation of 220 dB path loss.
+presets. Groundwave and moonbounce figures use path loss in dB.
 
 | Example | Reference |
 | --- | --- |
 | Sub-9 kHz, 200 ft antenna, 10 kW | 0 dBm power reference; 200 dB path loss |
-| Groundwave, 1 MHz, 150 miles | −180 dBm power reference |
-| Groundwave, 30 MHz, 150 miles | −210 dBm power reference |
+| Groundwave, 1 MHz, 150 miles | 180 dB path loss |
+| Groundwave, 30 MHz, 150 miles | 210 dB path loss |
 | Skywave, 1–30 MHz, SSB voice | 130 dB path loss |
 | Skywave, 1–30 MHz, FT8 | 160 dB path loss |
 | Meteor burst | 150 dB path loss |

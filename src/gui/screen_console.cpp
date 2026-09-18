@@ -17,7 +17,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
     if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
     if(slot==Slot::simulation)
-        control.help="Yes runs the modem through a simulated radio link. No uses audio hardware and shows editable link assumptions. RX success is a noise-model estimate in either mode. Link assumptions do not set hardware output power.";
+        control.help="Yes runs the modem through a simulated radio link. No uses audio hardware. Power, path loss and noise remain editable in either mode. RX success is a noise-model estimate; link assumptions do not set hardware output power.";
     if(slot==Slot::link_power)
         control.help="Average transmit power for the shared link budget and RX estimate. Choose a preset or enter power in W, mW, uW, µW or dBm. This is a planning assumption; adjust the radio's output power separately.";
     if(slot==Slot::link_loss)

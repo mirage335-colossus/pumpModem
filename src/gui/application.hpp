@@ -67,6 +67,9 @@ public:
     void navigate(ui::Page page);
     ui::ControlLayout control_layout(const ui::Control& control,int width,int height,
         std::span<const ui::Control> declarations=ui::console_screen()) const;
+    ui::Rect page_bounds(int width,int height) const;
+    ui::Rect tabs_bounds(int width,int height) const;
+    std::vector<ui::TabLayout> tab_layout(int width,int height) const;
     ControlPresentation control(const ui::Control& control) const;
     MenuPresentation menu(std::span<const ui::Control* const> items) const;
     void select_menu(std::span<const ui::Control* const> items,const std::string& id);

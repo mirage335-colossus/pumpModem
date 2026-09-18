@@ -449,6 +449,11 @@ void expanded_bitmap_clicks() {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
         while(Clock::now()<until)Fl::wait(.005);
     };
+    const auto await_ready=[](const auto& ready,const char* failure) {
+        const auto deadline=Clock::now()+std::chrono::seconds(5);
+        while(!ready()&&Clock::now()<deadline)Fl::wait(.005);
+        require(ready(),failure);
+    };
     const auto click=[&](int px,int py) {
         Fl::e_keysym=FL_Button+FL_LEFT_MOUSE;Fl::e_x=px;Fl::e_y=py;Fl::e_state=FL_BUTTON1;
         Fl::handle(FL_PUSH,window);Fl::e_state=0;Fl::handle(FL_RELEASE,window);
@@ -486,7 +491,13 @@ void expanded_bitmap_clicks() {
     app.application.select(ui::Field::qr_brightness,"normal");refresh();
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->resize(43,61,size.first,size.second);refresh();
-        auto* previous_focus=find_button(*window,"Transmit");require(previous_focus,"Expanded fixture has no focus target");previous_focus->take_focus();
+        auto* previous_focus=find_button(*window,"Transmit");require(previous_focus,"Expanded fixture has no focus target");
+        // Draft edits debounce for 120 ms before an asynchronous estimate.
+        // A fixed presentation wait does not establish focus eligibility.
+        await_ready([&]{return app.application.enabled(ui::Command::transmit)&&previous_focus->active_r();},
+            "Expanded fixture Transmit focus target did not become enabled before opening");
+        require(previous_focus->take_focus()&&Fl::focus()==previous_focus,
+            "Expanded fixture could not establish its original keyboard focus");
         const ui::Rect original{window->x(),window->y(),window->w(),window->h()};
         const auto original_windows=window_count();const auto original_border=window->border();const std::string original_title=window->label();
         const auto geometry=ui::control_layout(*declared,app.application.control(*declared).state,window->w(),window->h());
@@ -517,6 +528,10 @@ void expanded_bitmap_clicks() {
         window->size(original.w+77,original.h+59);refresh();
         require(overlay->w()==window->w()&&overlay->h()==window->h()&&view->w()==window->w()&&view->h()==window->h()&&
             window_count()==original_windows,"Expanded bitmap did not follow an app window resize");
+        // The overlay intentionally deactivates the native background. Check
+        // shared eligibility so dismissal has a ready target to restore.
+        await_ready([&]{return app.application.enabled(ui::Command::transmit);},
+            "Expanded fixture updated draft did not restore Transmit eligibility before dismissal");
         click(window->w()/2,window->h()/2);refresh();
         require(!expanded()&&!app.application.overlay()&&window->shown()&&window_count()==original_windows,
             "Second bitmap click did not restore the existing app view");

@@ -923,10 +923,10 @@ public:
         }
     }
     void layout_desktop() {
-        const auto viewport=ui::page_rect(details.size.width,details.size.height);
-        const auto tab_bounds=ui::tabs_rect(details.size.width,details.size.height);
+        const auto viewport=application.page_bounds(details.size.width,details.size.height);
+        const auto tab_bounds=application.tabs_bounds(details.size.width,details.size.height);
         place(navigation,tab_bounds);
-        for(const auto& tab:ui::tab_layout(details.size.width,details.size.height)) {
+        for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
             auto frame=tab.frame;frame.x-=tab_bounds.x;frame.y-=tab_bounds.y;
             place(tabs.at(tab.page),frame);place(pages.at(tab.page),viewport);
         }
@@ -938,7 +938,7 @@ public:
         update_documents();shared->layoutDirty=true;refresh(event);
     }
     void layout_controls(std::vector<Binding>& target,std::span<const ui::Control> controls) {
-        const auto viewport=ui::page_rect(details.size.width,details.size.height);
+        const auto viewport=application.page_bounds(details.size.width,details.size.height);
         for(auto& binding:target) {
             const auto& c=binding.control;
             const auto view=binding_presentation(application,c,binding.menu_items,details.size.width,details.size.height,controls);
@@ -979,7 +979,7 @@ public:
         }
     }
     void update_documents() {
-        const auto viewport=ui::page_rect(details.size.width,details.size.height);
+        const auto viewport=application.page_bounds(details.size.width,details.size.height);
         for(const auto& [page,view]:documents)view->apply(application.document(page,ui::document_content_width(viewport.w)));
     }
     void sync_overlay() {

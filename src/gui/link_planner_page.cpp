@@ -289,18 +289,8 @@ void notable_points(Node& root, const planner::Model& model) {
     }
 }
 
-std::string watts(double dbm) {
-    const double value = std::pow(10., (dbm - 30) / 10);
-    if (value >= 1) return number(value) + " W";
-    if (value >= .001) return number(value * 1000) + " mW";
-    return number(value * 1000000) + " µW";
-}
 void link_budget(Node& root, const planner::Model& model) {
     auto n = card(root.width); n.padding = 8; n.bottom = 8;
-    paragraph(n, "Power, path and noise", 15, Tone::text, true, 6);
-    buttons(n, {{"Transmit: " + watts(model.inputs.tx_dbm) + " (" + db(model.inputs.tx_dbm) + " dBm)", Command::planner_power},
-                {"Path loss: " + number(model.inputs.path_loss_db) + " dB", Command::planner_loss},
-                {"Noise: " + db(model.inputs.noise_density_dbm_hz) + " dBm/Hz", Command::planner_noise}});
     if (model.available) {
         const bool search_fits = model.clock_search_supported && model.receiver_workspace_supported;
         const auto verdict = !search_fits ? model.receiver_status : model.margin_db < 0 ?
@@ -318,14 +308,15 @@ void details(Node& root) {
     paragraph(n, "Link budget. Average transmit power minus path loss gives received power. Noise then sets signal strength; the selected target sets bit duration. Meeting the target is a planning estimate.");
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
     paragraph(n, "Receiver search must cover the clock mismatch and fit the selected RAM allowance. One matching receive target; phase stability is unverified. Oscillator values are illustrative residual models; GPS lock does not imply phase coherence.");
+    paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
     paragraph(n, "Quick references", 15, Tone::text, true, 8);
     paragraph(n, "Rough examples; antennas, propagation and noise change the result. Power (dBm) and path loss (dB) are separate quantities.");
     paragraph(n, "Sub-9 kHz · 200 ft antenna · 10 kW: 0 dBm power reference; 200 dB path loss.");
-    paragraph(n, "Groundwave · 1 MHz · 150 miles: −180 dBm power reference.");
-    paragraph(n, "Groundwave · 30 MHz · 150 miles: −210 dBm power reference.");
+    paragraph(n, "Groundwave · 1 MHz · 150 miles: 180 dB path loss.");
+    paragraph(n, "Groundwave · 30 MHz · 150 miles: 210 dB path loss.");
     paragraph(n, "Skywave · 1–30 MHz: SSB voice, 130 dB path loss; FT8, 160 dB path loss.");
     paragraph(n, "Meteor burst: 150 dB path loss.");
     paragraph(n, "Earth–Moon–Earth · 5.8 GHz: −30 dBm transmit power; 220 dB path loss.", 12, Tone::muted, false, 0);
@@ -345,9 +336,12 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
         "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
         number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
     buttons(root, {{"Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", Command::planner_target},
-                   {"Stronger +1 dB", Command::planner_stronger}, {"Weaker −1 dB", Command::planner_weaker},
+                   {"Stronger", Command::planner_stronger, model.stronger_fit_target.has_value()},
+                   {"Weaker", Command::planner_weaker, model.weaker_fit_target.has_value()},
                    {"−8 example", Command::planner_example_short}, {"+23 LPI example", Command::planner_example_lpi},
                    {use_draft ? "Plan 1 bit" : "Use current draft", Command::planner_toggle_draft}});
+    if (model.available && model.automatic_mode)
+        paragraph(root, "Stronger / Weaker skip clock and RAM gaps.", 11, Tone::muted, false, 6);
     if (error.empty()) error = model.error;
     if (!error.empty()) paragraph(root, std::move(error), 12, Tone::accent, true);
     if (!model.available) {

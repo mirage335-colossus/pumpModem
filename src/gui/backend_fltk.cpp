@@ -795,8 +795,8 @@ private:
     void layout() {
         background->resize(0,0,window->w(),window->h());
         if(overlay_surface)overlay_surface->resize(0,0,window->w(),window->h());
-        const auto page_bounds=ui::page_rect(window->w(),window->h());
-        for(const auto& tab:ui::tab_layout(window->w(),window->h())) {
+        const auto page_bounds=application.page_bounds(window->w(),window->h());
+        for(const auto& tab:application.tab_layout(window->w(),window->h())) {
             const auto found=std::find_if(tabs.begin(),tabs.end(),[&](const auto& item){return item.first==tab.page;});
             place(found->second,tab.frame);
         }
@@ -827,7 +827,7 @@ private:
         update_documents();apply_layers();window->redraw();
     }
     void update_documents() {
-        const auto bounds=ui::page_rect(window->w(),window->h());
+        const auto bounds=application.page_bounds(window->w(),window->h());
         for(auto& [id,page]:pages)if(page.document) {
             const int width=ui::document_content_width(bounds.w,Fl::scrollbar_size());
             const auto source=application.document(id,width);

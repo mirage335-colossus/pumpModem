@@ -3,6 +3,7 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
+#include "datapump/pattern_search.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <algorithm>
 #include <array>
@@ -10,6 +11,7 @@
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <map>
 #include <numeric>
 #include <sstream>
 
@@ -66,6 +68,25 @@ std::optional<double> duration_boundary(const Inputs& inputs,double minimum,doub
 }
 struct ClockBoundary {double target;std::string reason;};
 struct ClockCandidate {double target;modem::Config config;};
+std::optional<ClockCandidate> sample_candidate(const Inputs& inputs,std::uint64_t samples) {
+    if(samples<4)return std::nullopt;
+    const auto duration=(static_cast<long double>(samples)-.5L)/inputs.options.modem.sample_rate;
+    auto target=tuning::pattern_target_symbol_snr_db-10*std::log10(static_cast<double>(duration));
+    // Center the target inside one sample's rounding interval, then verify the
+    // tuner really selected that count. A few adjacent doubles cover roundoff
+    // near long durations; never publish a merely approximate sample match.
+    for(unsigned attempt=0;attempt<8;++attempt) {
+        if(target< -200 || target>200)return std::nullopt;
+        auto config=try_resolve(inputs,target);
+        if(!config)return std::nullopt;
+        const auto actual=modem::symbol_sample_count(*config);
+        if(actual==samples)return ClockCandidate{target,std::move(*config)};
+        if(!config->integration_seconds)return std::nullopt;
+        target=std::nextafter(target,actual>samples?std::numeric_limits<double>::infinity():
+            -std::numeric_limits<double>::infinity());
+    }
+    return std::nullopt;
+}
 std::optional<ClockCandidate> clock_candidate(const Inputs& inputs,double target) {
     auto config=try_resolve(inputs,target);
     if(!config)return std::nullopt;
@@ -82,51 +103,197 @@ std::optional<ClockCandidate> clock_candidate(const Inputs& inputs,double target
         if(aligned>alignment && (static_cast<long double>(aligned)-.5L)/config->sample_rate>
                 config->integration_seconds)aligned-=alignment;
         if(aligned>=4) {
-            const auto duration=(static_cast<long double>(aligned)-.5L)/config->sample_rate;
-            const auto adjusted=tuning::pattern_target_symbol_snr_db-10*std::log10(static_cast<double>(duration));
-            if(adjusted>=target && adjusted<=200) {
-                auto candidate=try_resolve(inputs,adjusted);
-                if(candidate && modem::symbol_sample_count(*candidate)%alignment==0)
-                    return ClockCandidate{adjusted,std::move(*candidate)};
-            }
+            auto candidate=sample_candidate(inputs,aligned);
+            if(candidate && candidate->target>=target)return candidate;
         }
     }
     return ClockCandidate{target,std::move(*config)};
 }
-std::optional<ClockBoundary> clock_boundary(const Inputs& inputs,double minimum,double maximum) {
-    // Search from the longest durations. Short-profile policy and quantized
-    // projection bins make coverage nonmonotonic. Always retain a checked
-    // fitting endpoint; this is a usable edge, not a claim that every stronger
-    // target fits. The byte allowance is the caller's actual selected budget.
-    constexpr unsigned steps=192;
-    auto previous=minimum;
-    const auto first=clock_candidate(inputs,previous);
-    if(first)previous=first->target;
-    auto previous_support=first?receiver_support(inputs,first->config):ReceiverSupport{};
-    if(previous_support.fits())return std::nullopt;
-    for(unsigned i=1;i<=steps;++i) {
-        const auto target=minimum+(maximum-minimum)*i/steps;
-        const auto config=clock_candidate(inputs,target);
-        const auto support=config?receiver_support(inputs,config->config):ReceiverSupport{};
-        if(support.fits()) {
-            auto high=config->target,low=previous;
-            auto failed=previous_support;
-            for(unsigned j=0;j<48;++j) {
-                const auto middle=(low+high)/2;
-                const auto candidate=clock_candidate(inputs,middle);
-                if(candidate && candidate->target>=high)break;
-                const auto check=candidate?receiver_support(inputs,candidate->config):ReceiverSupport{};
-                if(check.fits())high=candidate->target;
-                else {low=candidate?candidate->target:middle;failed=check;}
-            }
-            const auto selected=try_resolve(inputs,high);
-            if(!selected || !receiver_support(inputs,*selected).fits())return std::nullopt;
-            return ClockBoundary{high,!failed.clock?(!failed.workspace?"Clock + RAM":"Clock"):"RAM"};
-        }
-        previous=config?config->target:target;previous_support=support;
+struct ClockChoices {
+    std::optional<ClockBoundary> boundary;
+    std::optional<double> stronger,weaker;
+};
+class ClockSearch {
+    const Inputs& inputs;
+    double minimum,maximum;
+    std::uint64_t alignment;
+    std::vector<std::uint64_t> divisors;
+    std::vector<double> targets;
+    std::map<std::uint64_t,ReceiverSupport> support_cache;
+
+    void add(double target) {
+        if(std::isfinite(target)&&target>=minimum&&target<=maximum)targets.push_back(target);
     }
-    return std::nullopt;
-}
+    void add_sample(std::uint64_t samples) {
+        if(const auto candidate=sample_candidate(inputs,samples))add(candidate->target);
+    }
+    void near_samples(long double value,bool all_divisors=false) {
+        if(value<4 || value>=static_cast<long double>(std::numeric_limits<std::uint64_t>::max())-alignment)return;
+        const auto samples=static_cast<std::uint64_t>(value);
+        for(const auto sample:{samples-1,samples,samples+1})add_sample(sample);
+        const auto adjacent=[&](std::uint64_t divisor) {
+            const auto lower=samples-samples%divisor;
+            add_sample(lower);add_sample(lower+divisor);
+        };
+        if(all_divisors)for(const auto divisor:divisors)adjacent(divisor);
+        else adjacent(alignment);
+    }
+    void near_target(double target,bool all_divisors=false) {
+        add(target);
+        if(const auto config=try_resolve(inputs,std::clamp(target,minimum,maximum));
+           config&&config->integration_seconds>0)
+            near_samples(modem::symbol_sample_count(*config),all_divisors);
+    }
+    ReceiverSupport check(double target) {
+        const auto config=try_resolve(inputs,target);
+        if(!config)return {};
+        const auto samples=modem::symbol_sample_count(*config);
+        if(const auto found=support_cache.find(samples);found!=support_cache.end())return found->second;
+        return support_cache.emplace(samples,receiver_support(inputs,*config)).first->second;
+    }
+    void sort_targets() {
+        std::sort(targets.begin(),targets.end());
+        targets.erase(std::unique(targets.begin(),targets.end()),targets.end());
+    }
+    // Refine a known fitting endpoint without assuming all profiles inside a
+    // bracket are usable. Every retained endpoint is checked by the estimator.
+    double refine(double failed,double fitting) {
+        for(unsigned i=0;i<48;++i) {
+            const auto middle=(failed+fitting)/2;
+            const auto candidate=clock_candidate(inputs,middle);
+            if(!candidate || candidate->target<=std::min(failed,fitting) ||
+               candidate->target>=std::max(failed,fitting))break;
+            if(check(candidate->target).fits())fitting=candidate->target;
+            else failed=candidate->target;
+        }
+        return fitting;
+    }
+    std::optional<double> step(bool stronger) {
+        constexpr double direction_tolerance=1e-8;
+        const auto current=inputs.target_db_hz;
+        const auto desired=std::clamp(current+(stronger?1:-1),minimum,maximum);
+        const auto correct_direction=[&](double target) {
+            return stronger?target>current+direction_tolerance:target<current-direction_tolerance;
+        };
+        if(!correct_direction(desired))return std::nullopt;
+        if(check(desired).fits())return desired;
+        std::optional<double> beyond,remaining;
+        for(const auto target:targets) {
+            if(!correct_direction(target)||!check(target).fits())continue;
+            if(stronger?target>=desired:target<=desired) {
+                if(!beyond || (stronger?target<*beyond:target>*beyond))beyond=target;
+            } else if(!remaining || (stronger?target>*remaining:target<*remaining))remaining=target;
+        }
+        // Normally move about 1 dB, continuing across unsupported regions.
+        // Only a last checked edge may shorten the remaining step.
+        auto result=beyond?beyond:remaining;
+        if(beyond&&std::abs(*beyond-desired)>.001)result=refine(desired,*beyond);
+        if(result&&correct_direction(*result)&&check(*result).fits())return result;
+        return std::nullopt;
+    }
+public:
+    ClockSearch(const Inputs& value,double low,double high):inputs(value),minimum(low),maximum(high) {
+        const auto chip=modem::pattern_chip_samples(inputs.options.modem);
+        alignment=std::gcd(chip,std::max<std::uint64_t>(1,chip/2));
+        // Divisor work is bounded by the validated rate/sample-clock geometry,
+        // never by the number of bits or their simulated duration.
+        for(std::uint64_t divisor=1;divisor<=alignment/divisor;++divisor)if(alignment%divisor==0) {
+            divisors.push_back(divisor);
+            if(divisor!=alignment/divisor)divisors.push_back(alignment/divisor);
+        }
+        std::sort(divisors.begin(),divisors.end());
+    }
+    ClockChoices run() {
+        constexpr unsigned cover_steps=128;
+        for(unsigned i=0;i<=cover_steps;++i)near_target(minimum+(maximum-minimum)*i/cover_steps);
+        near_target(inputs.target_db_hz,true);
+        near_target(inputs.target_db_hz+1,true);near_target(inputs.target_db_hz-1,true);
+        const auto fs=static_cast<long double>(inputs.options.modem.sample_rate);
+        const auto& base=inputs.options.modem;
+        for(const auto duration:{16.L,60.L})near_samples(duration*fs);
+        // Named automatic profiles and confidence floors introduce their own
+        // target steps. The tuner remains authoritative at every candidate.
+        for(unsigned factor=16;factor<=16384;factor*=2) {
+            const auto target=tuning::pattern_target_symbol_snr_db-10*std::log10(2.*factor/base.bandwidth_hz);
+            for(const auto value:{std::nextafter(target,-std::numeric_limits<double>::infinity()),target,
+                    std::nextafter(target,std::numeric_limits<double>::infinity())})near_target(value);
+        }
+        for(const auto floor:{24.,30.})near_target(floor+10*std::log10(base.bandwidth_hz));
+        const auto offset=std::abs(static_cast<long double>(inputs.channel.frequency_offset_hz)+
+            base.carrier_hz*static_cast<long double>(inputs.channel.clock_error_ppm)*1e-6L);
+        constexpr auto bank_steps=(modem::maximum_pattern_frequency_hypotheses-1)/2;
+        if(offset>0) {
+            near_samples(.5L*fs/offset,true);
+            near_samples(.25L*bank_steps*fs/offset,true);
+        }
+        // FFT powers and the compact-transform 4/5 boundary are candidate
+        // events, not grounds for assuming memory use is monotonic.
+        for(unsigned power=2;power<64;++power) {
+            const auto samples=std::ldexp(static_cast<long double>(alignment),static_cast<int>(power));
+            near_samples(samples);near_samples(.8L*samples);near_samples(samples-4*alignment);
+        }
+        if(!tuning::tone_mode(inputs.mode)) {
+            const auto reference=clock_candidate(inputs,std::clamp(-40.,minimum,maximum));
+            if(reference) {
+                const auto requested=base.carrier_hz*modem::default_clock_uncertainty_ppm*1e-6L;
+                const auto headroom=static_cast<long double>(modem::pattern_frequency_offset_limit(reference->config));
+                const auto span=std::min(requested,headroom);
+                if(span>0) {
+                    near_samples(bank_steps*fs/(4*span));
+                    const bool ceil_bank=headroom>requested;
+                    for(const auto divisor:divisors) {
+                        near_samples(static_cast<long double>(bank_steps)*divisor);
+                        const auto ratio=4*span*divisor/fs;
+                        if(ceil_bank?ratio>1:ratio<1)continue;
+                        const auto difference=std::abs(1-ratio);
+                        const auto count=difference==0?bank_steps:static_cast<std::size_t>(
+                            std::min(static_cast<long double>(bank_steps),std::ceil(1/difference)+1));
+                        for(std::size_t step=3;step<=count;++step) {
+                            near_samples(static_cast<long double>(step)*divisor);
+                            near_samples(step*fs/(4*span));
+                        }
+                    }
+                    // A clock just outside requested coverage can fit the
+                    // small overshoot at an uncapped ceil-bank transition.
+                    if(ceil_bank&&offset>span&&offset<=headroom) {
+                        const auto count=static_cast<std::size_t>(std::min(static_cast<long double>(bank_steps),
+                            std::ceil(offset/(offset-span))+1));
+                        for(std::size_t step=3;step<=count;++step)near_samples(step*fs/(4*span));
+                    }
+                }
+            }
+        }
+        sort_targets();
+        ClockChoices result;
+        auto first=std::find_if(targets.begin(),targets.end(),[&](double target){return check(target).fits();});
+        if(first!=targets.end()) {
+            auto edge=*first;
+            if(edge>minimum+1e-8) {
+                // Include the old coarse bracket's useful extent, then probe
+                // all divisor grids around the retained endpoint. This also
+                // finds terminal islands finer than the full native-bin grid.
+                const auto failed=std::max(minimum,edge-(maximum-minimum)/cover_steps);
+                if(!check(failed).fits())edge=refine(failed,edge);
+                if(const auto config=try_resolve(inputs,edge))near_samples(modem::symbol_sample_count(*config),true);
+                add(edge);sort_targets();
+                first=std::find_if(targets.begin(),targets.end(),[&](double target){return check(target).fits();});
+                edge=*first;
+                const auto config=try_resolve(inputs,edge);
+                auto failed_support=ReceiverSupport{};
+                if(config) {
+                    const auto samples=modem::symbol_sample_count(*config);
+                    const auto next=samples-samples%alignment+alignment;
+                    if(const auto weaker=sample_candidate(inputs,next))failed_support=check(weaker->target);
+                }
+                const auto reason=!failed_support.clock?(!failed_support.workspace?"Clock + RAM":"Clock"):
+                    !failed_support.workspace?"RAM":"Clock / RAM gaps";
+                result.boundary=ClockBoundary{edge,reason};
+            }
+        }
+        result.stronger=step(true);result.weaker=step(false);
+        return result;
+    }
+};
 std::string number(double value,int precision=3) {
     std::ostringstream out;out.imbue(std::locale::classic());
     out<<std::setprecision(precision)<<value;
@@ -218,9 +385,12 @@ Model build(const Inputs& inputs) {
         if(result.automatic_mode) {
             result.fast_target=duration_boundary(inputs,minimum_target,maximum_target,1);
             result.day_target=duration_boundary(inputs,minimum_target,maximum_target,seconds_per_day);
-            if(const auto boundary=clock_boundary(inputs,minimum_target,maximum_target)) {
-                result.clock_target=boundary->target;result.clock_limit_reason=boundary->reason;
+            const auto choices=ClockSearch(inputs,minimum_target,maximum_target).run();
+            if(choices.boundary) {
+                result.clock_target=choices.boundary->target;result.clock_limit_reason=choices.boundary->reason;
             }
+            result.stronger_fit_target=choices.stronger;
+            result.weaker_fit_target=choices.weaker;
         }
         auto low=std::min(-35.,inputs.target_db_hz-3),high=std::max(25.,inputs.target_db_hz+3);
         for(const auto boundary:{result.fast_target,result.day_target,result.clock_target})if(boundary) {

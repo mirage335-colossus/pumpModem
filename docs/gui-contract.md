@@ -29,7 +29,8 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 target independently of the live transmit/receive targets, with **Time per bit**, **Observer / receiver
 time**, send time and an earliest completion estimate. The two logarithmic
 graphs follow actual sampled automatic-profile steps. Native buttons edit the
-target through a numeric prompt, step it by one dB, select the −8/+23 examples,
+target through a numeric prompt, move to a stronger or weaker usable target,
+select the −8/+23 examples,
 or select the one-bit/second, one-day/bit and combined clock/RAM search edges.
 Milestones are derived from the current rate, carrier, pattern and key geometry;
 fixed modes omit target-dependent boundaries. The selected receiver check uses
@@ -38,6 +39,12 @@ The clock/RAM milestone must satisfy both carrier coverage and wide-search
 workspace availability under the selected RAM percentage, including 75%.
 Its reason identifies the limiting condition. Band edges use plain decimal
 Hz or kHz; ordinary audio frequencies never use scientific notation.
+**Stronger** and **Weaker** select targets that pass both checks, normally about
+one dB apart, skipping clock/RAM gaps. A final usable edge remains reachable
+when it is less than one dB away. Buttons are disabled when no usable target is
+found in that direction. Exact target precision survives selection and Apply;
+rounded labels must not change sample timing. The hidden model details explain
+why adjacent symbol lengths can have very different RAM requirements.
 
 The initial preview is one exact raw bit at −8 dB-Hz. **Use current draft** uses
 the accepted transfer estimate's exact wire-bit count, including the short
@@ -55,13 +62,14 @@ recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform, runs no receiver and starts no worker or transmission.
 Immutable documents and plots are cached across unchanged presentation polls.
 
-**Power, path and noise** leads the planner, with editable average transmit
-power, positive path loss and receiver noise density. Its verdict compares the
-actual budget to the selected target and checks clock/RAM support. The
-top-bar **Simulation** dropdown offers only **Yes / No**. With **No**, editable
-power/path/noise dropdowns appear beside it and share the planner's values;
-with **Yes**, CPU/GPU computation estimates occupy that space. RX success is
-estimated in either mode. Power presets run from 100 W to 1 µW.
+The planner opens with a verdict comparing the actual link budget to the
+selected target and checking clock/RAM support. Its power/path/noise input
+controls appear once, in the shared top bar. The **Simulation** dropdown offers
+only **Yes / No**, and the editable budget dropdowns stay visible in both modes.
+CPU/GPU computation estimates appear only with **Yes**; RX success is estimated
+in either mode. The CPU/GPU row collapses with **No**, moving the tabs and page
+up without moving the top-bar inputs or bottom modem settings. Power presets
+run from 100 W to 1 µW.
 Typing preserves the entered text; incomplete or invalid values show **Check
 link inputs** instead of a stale RX or planner result. Valid edits and presets
 restore estimates using the shared accepted budget.

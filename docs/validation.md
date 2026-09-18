@@ -3434,3 +3434,94 @@ Rev native adapter/platform and 1×/2× coordinate conformance passed (4/4,
 58.86 seconds). `git diff --check` passed. Full native transmission workflows
 and physical audio were not rerun; the previously recorded Rev workflow timeout
 remains an unclosed validation limit.
+
+### Persistent link inputs and reference units (2026-09-18)
+
+The shared top bar now owns the only visible power/path/noise controls, in both
+Simulation Yes and No. Link planner starts with the link verdict and derived
+received strength. Groundwave references now specify 180 dB path loss at 1 MHz
+and 210 dB at 30 MHz, both at 150 miles. No timing, link-budget arithmetic,
+wire encoding or receiver behavior changed.
+
+Simulation-only CPU/GPU estimates use a separate 48-pixel row. With Simulation
+No, shared geometry collapses that row and moves tabs, page frames and their
+controls together; top-bar inputs and bottom modem settings stay fixed. Both
+native adapters obtain page/tab/control geometry from the same application
+facade. Regression coverage checks both modes, minimum/default/wide sizes,
+visible/hidden transmit scope, header-label overlap and mode-switch round trips.
+
+Both Release builds succeeded. The 17 focused GCC/FLTK GUI suites passed in
+64.31 seconds, including controller, pending reception, planner, application,
+layout, chrome, bindings, overlay and boundary checks. Rev passed the 16 matching
+suites excluding the duplicated controller run in 12.08 seconds. Native windows
+were visually inspected with Simulation Yes and No in both backends, including
+the expanded header at minimum size; no controls overlap, and the planner has
+no duplicate budget buttons.
+
+Rev native adapter/platform and 1×/2× coordinate conformance passed (4/4,
+58.39 seconds). FLTK document conformance passed; its adapter run reproduced the
+previous bitmap-overlay focus failure. That fixture now waits for the draft's
+Transmit target to become enabled before acquiring focus and before dismissing
+the overlay, and explicitly checks initial focus acquisition. While the overlay
+is open, readiness uses the underlying command state because the native
+background is intentionally disabled. The original final restoration assertion
+and suite timeout are unchanged; the new readiness waits are bounded.
+
+After rebuilding the fixture, FLTK adapter conformance passed in 47.17 seconds.
+`git diff --check` passed. Full native transmission workflows and physical audio
+were not rerun for this presentation change; the previously recorded Rev
+workflow timeout remains a validation limit.
+
+### Sample-sensitive Clock/RAM navigation (2026-09-18)
+
+Link planner's Stronger and Weaker actions now select checked clock/RAM fits,
+normally about one dB apart, with a final-edge step when less than one dB
+remains. The native target prompt and explicit application retain full numeric
+precision. The main view has one short navigation hint; sample averaging and
+the effect of rounded target labels are explained in the hidden model details.
+
+The independent 1 Hz / 1500 Hz hobby-GPSDO fixture uses 4 GiB DSP RAM. Exact
+−47 dB resolves to 18,973,665,962 samples and two-sample projection bins: clock
+coverage fits, but RAM does not. The nearby 18,973,662,000-sample symbol uses
+6,000-sample bins and fits both checks. Moving one sample to either side loses
+that fit. These checks use the existing analytical receiver estimator; they
+do not transmit a waveform or establish successful reception.
+
+The search now checks projection-divisor alignments, clock-search caps,
+automatic-profile transitions and FFT geometry events alongside a bounded
+target sweep. Each offered endpoint is independently resolved and checked;
+neither clock coverage nor memory use is assumed to be globally monotonic.
+At 16 GiB, the 20,479,999,500-sample endpoint exposes an additional fitting
+1,500-sample projection grid beyond the old 6,000-sample-aligned edge.
+
+Both Release builds succeeded. An isolated 145-case probe covered practical
+rates, all four oscillator presets, keyed and tone modes, profile transitions,
+and the full bank-event case at 1 Hz / 1250 Hz. Every offered target passed an
+independent profile resolution and receiver-estimator check, with finite bounds
+and the correct navigation direction. The matrix took 1.93 seconds; its slowest
+planner build took 35.6 ms on this host. Separate 0.01 Hz probes took about
+40 ms. These are observed timings, not performance guarantees.
+
+Native FLTK inspection at 1 Hz/GPSDO and the current 50% RAM allowance showed
+the exact −47 dB RAM failure, a fitting Weaker selection, and the disabled
+Weaker action at the discovered edge. The Clock/RAM milestone selected the same
+precise value. Default and minimum window sizes remained legible without
+overlap; minimum size scrolls to the milestones. The private display and
+temporary capture harness were stopped afterward.
+
+The initial Rev GUI run passed 15/16 suites; its new no-fit fixture used a
+one-byte DSP budget, below the transfer API's 256 KiB minimum, so planning was
+correctly unavailable before the intended RAM check. The fixture now uses a
+valid 1 MiB budget and independently checks the fastest profile's RAM failure;
+the one-byte input separately verifies rejection. The corrected planner suite
+passed on GCC and Clang/Rev (3.48 seconds for the Rev CTest run). No production
+behavior or existing compatibility assertion was changed for this correction.
+
+The first broader GCC run was externally interrupted with SIGTERM after the
+weak-signal suite passed; no cause was established. Its complete rerun passed
+34/34 suites in 232.21 seconds, including all 21 development-contract suites
+and 17 GUI suites (with four overlapping suites). The controller suite passed
+in 64.12 seconds. Together with the corrected planner rerun, all 16 selected Rev
+GUI suites passed. `git diff --check` passed. Full native transmission workflows
+and physical audio were not rerun; the previously recorded Rev workflow timeout
+remains an existing validation limit.
