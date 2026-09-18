@@ -7,9 +7,9 @@
 namespace datapump::lpi {
 Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,double cn0_db_hz) {
     auto config=options.modem;
-    // Match transfer::effective_options without deriving or examining keys.
-    // Manual keyed callers also transmit private patterns; tone clears keys
-    // and private layers before validation in the transfer API.
+    const bool private_transmission=options.key.has_value() && config.spreading_mode==modem::SpreadingMode::pattern;
+    // Validate the actual effective transport without deriving/examining keys.
+    // Tone clears private layers before validation in the transfer API.
     if(config.spreading_mode==modem::SpreadingMode::tone) {
         config.scramble=false;config.dsss=false;config.data_key.reset();
     } else if(options.key)config.scramble=true;
@@ -17,6 +17,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     if(!std::isfinite(cn0_db_hz) || !std::isfinite(transmission.total_seconds) || transmission.total_seconds<0)
         throw Error("invalid LPI estimate input");
     Estimate result;
+    result.hypothetical_encryption=!private_transmission;
+    // The advisory always compares a private pattern at the current timing.
+    // This local copy changes neither actual tone/public modulation nor keys,
+    // source encoding, automatic profile selection or current draft airtime.
+    config.spreading_mode=modem::SpreadingMode::pattern;
+    config.scramble=true;
     result.cn0_db_hz=cn0_db_hz;
     result.symbol_seconds=static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate;
     // Intended RRC support, not the nominal Rate (which is twice chip rate).
@@ -32,8 +38,6 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.noise_rise_db=log_snr>0?
         result.in_band_snr_db+static_cast<double>(10/std::numbers::ln10_v<long double>*std::log1p(std::exp(-log_snr))):
         static_cast<double>(10/std::numbers::ln10_v<long double>*std::log1p(std::exp(log_snr)));
-    if(!options.key || config.spreading_mode!=modem::SpreadingMode::pattern)
-        return result;
     // A normal approximation to average Gaussian signal-plus-noise power.
     // At this cutoff B*T90 exceeds 1,395 independent complex samples; the
     // small-sample/high-SNR case is deliberately not extrapolated.

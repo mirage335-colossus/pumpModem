@@ -103,12 +103,21 @@ void lpi_advisory() {
     gui::InspectionRequest request;request.message.data=Bytes{'e'};request.target_snr=0;
     request.options.modem=tuning::resolve(3600,0,tuning::PatternMode::auto_pattern,false).config;
     const auto public_pattern=gui::inspect(request);
-    check(public_pattern.lpi_estimate.status==lpi::Status::public_waveform&&
-          public_pattern.lpi_summary.find("Unavailable: public waveform")!=std::string::npos,
-          "Public pattern must not advertise a private-waveform detection time");
+    check(public_pattern.lpi_estimate.status==lpi::Status::available&&public_pattern.lpi_estimate.hypothetical_encryption&&
+          public_pattern.lpi_summary.find("\nWarning: encryption off; hypothetical only")!=std::string::npos&&
+          field(public_pattern,"LPI scenario").find("current timing and C/N0")!=std::string::npos&&
+          public_pattern.lpi_description.find("actual public pattern or tone can be easier to detect")!=std::string::npos&&
+          public_pattern.lpi_description.find("No key, waveform or transmission setting is changed")!=std::string::npos&&
+          field(public_pattern,"Data encryption")=="Off"&&!request.options.key&&
+          !request.options.modem.scramble&&!request.options.modem.dsss,
+          "Unencrypted pattern must show a hypothetical encrypted estimate without enabling private settings");
     request.options.key.emplace(Bytes(32,0x31));
-    check(gui::inspect(request).lpi_estimate.status==lpi::Status::available,
-          "Selected key must follow the transport's automatically enabled private pattern");
+    const auto private_pattern=gui::inspect(request);
+    check(private_pattern.lpi_estimate.status==lpi::Status::available&&!private_pattern.lpi_estimate.hypothetical_encryption&&
+          private_pattern.lpi_estimate.equivalent_symbols==public_pattern.lpi_estimate.equivalent_symbols&&
+          private_pattern.lpi_estimate.detection_seconds==public_pattern.lpi_estimate.detection_seconds&&
+          private_pattern.lpi_summary.find("hypothetical")==std::string::npos,
+          "Key selection must retain the same fixed-timing model and remove the hypothetical warning");
     request.options.modem.scramble=true;request.options.modem.dsss=true;
     const auto assumed=gui::inspect(request);
     check(assumed.lpi_estimate.status==lpi::Status::available&&
@@ -150,6 +159,30 @@ void lpi_advisory() {
           strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
           field(strong,"LPI draft exposure").find("comparison unavailable")!=std::string::npos,
           "Strong signals must not receive unsupported weak-signal detection times");
+    request.options.key.reset();request.options.modem.scramble=false;request.options.modem.dsss=false;
+    const auto hypothetical_strong=gui::inspect(request);
+    check(hypothetical_strong.lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
+          hypothetical_strong.lpi_estimate.hypothetical_encryption&&
+          hypothetical_strong.lpi_summary.find("Unavailable: in-band SNR above -10 dB")!=std::string::npos&&
+          hypothetical_strong.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos,
+          "Strong unencrypted signals must retain the hypothetical warning when the number is unavailable");
+    request.received_cn0_db_hz=-1e6;
+    const auto limited=gui::inspect(request);
+    check(limited.lpi_estimate.status==lpi::Status::numeric_limit&&limited.lpi_estimate.hypothetical_encryption&&
+          limited.lpi_summary.find("Unavailable: numeric limit")!=std::string::npos&&
+          limited.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos,
+          "Numerical overflow must not remove the hypothetical encryption warning");
+    request.received_cn0_db_hz=-3;
+    request.options.modem=tuning::resolve(3600,0,tuning::PatternMode::auto_tone,false).config;
+    const auto actual_tone=transfer::estimate_binary(*request.binary,request.options);
+    const auto tone=gui::inspect(request);
+    check(tone.lpi_estimate.status==lpi::Status::available&&tone.lpi_estimate.hypothetical_encryption&&
+          tone.lpi_summary.find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          tone.estimate.wire_bits==3&&tone.estimate.waveform_samples==actual_tone.waveform_samples&&
+          field(tone,"Pulse tails")=="0 s / 0 payload bits"&&
+          field(tone,"LPI draft exposure").find("current draft duration under hypothetical encrypted model")!=std::string::npos&&
+          request.options.modem.spreading_mode==modem::SpreadingMode::tone&&!request.options.key,
+          "Tone experiments must show hypothetical private-pattern estimates while preserving actual exact-bit tone airtime");
 }
 void raw_and_short_sources() {
     gui::InspectionRequest request;request.binary=Bytes{0,0,1};

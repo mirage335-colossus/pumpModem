@@ -100,6 +100,10 @@ wire bits/symbols for an unkeyed energy detector at the same received C/N0.
 It uses 90% detection and 1% false alarms per known observation window, with
 explicit weak-signal assumptions; it is not a safe traffic limit. Simulation
 supplies received C/N0; otherwise the TX target is labeled as an assumption.
+With encryption off, including tone experiments, a warning marks the estimate
+as a hypothetical encrypted private pattern at the current timing and C/N0.
+Actual public waveforms can be easier to detect. The estimate does not enable
+encryption or change the transmitted draft.
 The same model appears in CLI `estimate` and `analyze-link` JSON. See
 [LPI exposure estimates](docs/lpi-estimates.md) for bandwidth, noise rise,
 examples and limitations.

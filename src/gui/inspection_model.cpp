@@ -41,23 +41,28 @@ void lpi_presentation(Inspection& result,const InspectionRequest& request,const 
     switch(model.status) {
     case lpi::Status::available:
         threshold=lpi_symbols(model.equivalent_symbols)+" / ~"+lpi_duration(model.detection_seconds);break;
-    case lpi::Status::public_waveform:
-        threshold="Unavailable: public waveform";break;
     case lpi::Status::outside_weak_signal_model:
         threshold="Unavailable: in-band SNR above -10 dB";break;
     case lpi::Status::numeric_limit:
         threshold="Unavailable: numeric limit";break;
     }
-    result.lpi_summary="LPI energy detection (90% detection / 1% false alarm): "+threshold+
-        "\n"+cn0+" | Ideal equal-observation model; no hidden-traffic guarantee.";
-    result.lpi_description="An unkeyed energy detector with the receiver's received C/N0 and observation opportunity is assumed to know the occupied band, on-air window and stationary Gaussian noise power. The estimate targets 90% detection with 1% false alarm per known window; unknown searches, other detectors and changing noise are not modeled. Numerical times apply only at in-band SNR <= -10 dB. Counts are equivalent wire bits (one symbol each), not source bits or a safe traffic quota. Detection can occur before a complete symbol, and repeated traffic accumulates exposure. Encryption does not reduce transmitted power or physical interference. There is no guaranteed hidden traffic.";
-    result.fields.insert(result.fields.end(),{{"LPI detection estimate",threshold},
+    const std::string warning="Warning: encryption off; hypothetical only";
+    const auto scenario=model.hypothetical_encryption?
+        warning+"; assumes encrypted private patterns at current timing and C/N0":"Encrypted private patterns";
+    result.lpi_summary="LPI energy detection (90% detection / 1% false alarm): "+threshold+"\n"+
+        (model.hypothetical_encryption?warning+" | "+cn0+"; no hidden-traffic guarantee.":
+            cn0+" | Ideal equal-observation model; no hidden-traffic guarantee.");
+    if(model.hypothetical_encryption)
+        result.lpi_description=warning+". Figures assume encrypted private patterns with the current sample, chip and symbol timing and received C/N0. The actual public pattern or tone can be easier to detect; these figures do not describe it. The draft exposure uses only the current draft's duration, without selecting an encrypted automatic profile or adding interval authentication. No key, waveform or transmission setting is changed. ";
+    result.lpi_description+="An unkeyed energy detector with the receiver's received C/N0 and observation opportunity is assumed to know the occupied band, on-air window and stationary Gaussian noise power. The estimate targets 90% detection with 1% false alarm per known window; unknown searches, other detectors and changing noise are not modeled. Numerical times apply only at in-band SNR <= -10 dB. Counts are equivalent wire bits (one symbol each), not source bits or a safe traffic quota. Detection can occur before a complete symbol, and repeated traffic accumulates exposure. Encryption does not reduce transmitted power or physical interference. There is no guaranteed hidden traffic.";
+    result.fields.insert(result.fields.end(),{{"LPI scenario",scenario},{"LPI detection estimate",threshold},
         {"LPI C/N0 basis",cn0},
         {"LPI observation band",number(model.observation_bandwidth_hz)+" Hz (modeled occupied band)"},
         {"LPI in-band SNR",number(model.in_band_snr_db)+" dB"},
         {"LPI noise rise",number(model.noise_rise_db)+" dB (added received power)"},
         {"LPI detection criterion","90% detection / 1% false alarm per known observation window"},
         {"LPI draft exposure",number(result.estimate.total_seconds)+" s including settling, pulse tails and suppression (equal-power approximation)"+
+            (model.hypothetical_encryption?"; current draft duration under hypothetical encrypted model":"")+
             (model.status==lpi::Status::available?" / "+number(model.burst_exposure_ratio)+" times modeled detection duration; not a probability or safe quota":"; detection-duration comparison unavailable")}});
 }
 }

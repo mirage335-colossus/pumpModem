@@ -4,6 +4,39 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Hypothetical LPI estimates without encryption — 17 September 2026
+
+The advisory now computes the encrypted private-pattern scenario without a
+selected key, including tone experiments. It preserves the current sample,
+chip and symbol timing and C/N0; tone experiments use the corresponding
+private pattern's modeled bandwidth. The GUI prominently labels encryption-off
+results as hypothetical, and CLI JSON exposes `hypothetical_encryption` and a
+warning. The warning persists when the existing strong-signal or numerical
+limits prevent a number. Current draft exposure stays a duration comparison;
+the advisory neither selects a different automatic profile nor re-encodes
+authentication overhead. No key generation, encryption enablement, waveform
+change or receiver change occurs.
+
+Both Release builds succeeded (GCC/FLTK and Clang/Rev). GCC `lpi_estimate` and
+`cli` passed in 27.91 seconds, followed by eight shared GUI checks in 10.36
+seconds: application, inspection, inspection page, layout, contract, link
+boundary, adapter boundary and boundary regression. The corresponding seven
+selected Rev checks passed in 1.57 seconds: estimator, application, inspection,
+inspection page, layout, contract and link boundary. Added assertions compare
+keyless and keyed numerical results at identical geometry, cover tone and
+model-limit warnings, and preserve the independent exact `001` wire endpoint
+and actual transmission settings. `git diff --check` passed.
+
+The remaining 17 non-controller development-contract suites passed in 174.60
+seconds, and the controller suite passed separately in 68.88 seconds. The
+controller assertions cover encryption off/on/off/on/tone transitions, numerical
+availability, warning withdrawal/restoration and exact draft bits. Together the
+28 selected GCC suites include all 21 development-contract suites.
+
+Native window rendering and physical reception were not tested; adapters and
+desktop geometry are unchanged. The hypothetical result describes private
+patterns under the existing model, not the actual public or tone waveform.
+
 ## LPI energy-detection advisory — 17 September 2026
 
 Added a shared GUI advisory and `lpi` JSON results to CLI `estimate` and

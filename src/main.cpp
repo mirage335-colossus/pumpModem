@@ -541,11 +541,17 @@ void report_lpi(const transfer::Estimate& transmission,const transfer::Options& 
                 double cn0_db_hz,bool simulated) {
     const auto model=lpi::estimate(transmission,options,cn0_db_hz);
     const bool available=model.status==lpi::Status::available;
-    const char* status=available?"available":model.status==lpi::Status::public_waveform?"public_waveform":
+    const char* status=available?"available":
         model.status==lpi::Status::outside_weak_signal_model?"outside_weak_signal_model":"numeric_limit";
     std::cout<<"{\"model\":\"ideal_weak_signal_radiometer\",\"status\":\""<<status
         <<"\",\"cn0_basis\":\""<<(simulated?"simulated_link":"assumed_tx_target")
-        <<"\",\"equal_received_cn0\":true,\"known_band_window_and_noise\":true"
+        <<"\",\"hypothetical_encryption\":"<<(model.hypothetical_encryption?"true":"false")
+        <<",\"warning\":";
+    if(model.hypothetical_encryption)
+        std::cout<<"\"Encryption is off: hypothetical private patterns at the current timing; actual public or tone transmission may be detected sooner.\"";
+    else std::cout<<"null";
+    std::cout<<",\"burst_exposure_basis\":\"current_draft_airtime\""
+        <<",\"equal_received_cn0\":true,\"known_band_window_and_noise\":true"
         <<",\"safe_traffic_limit\":false,\"detection_probability\":"<<lpi::detection_probability
         <<",\"false_alarm_probability_per_window\":"<<lpi::false_alarm_probability
         <<",\"cn0_db_hz\":";json_number(model.cn0_db_hz);

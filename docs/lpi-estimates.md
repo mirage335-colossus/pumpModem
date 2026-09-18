@@ -17,11 +17,26 @@ to detect even though its individual chips remain weak.
 
 ## When the estimate applies
 
-A numerical estimate requires a selected key and a private pattern waveform.
-The transfer layer enables private scrambling for every keyed non-tone
-transmission, including callers whose original configuration left Scrambler
-off. Data masking by itself would not make a public acquisition pattern
-private. Tone modes and public patterns do not receive an LPI symbol allowance.
+The estimate assumes encrypted private patterns. The transfer layer enables
+private scrambling for every keyed non-tone transmission, including callers
+whose original configuration left Scrambler off. Data masking by itself would
+not make a public acquisition pattern private.
+
+With encryption disabled, the estimate still shows the hypothetical encrypted
+case for experimentation. The GUI displays **Warning: encryption off;
+hypothetical only**, and CLI results mark `hypothetical_encryption: true`.
+The warning remains when the weak-signal or numerical limits prevent a numeric
+result. Actual public patterns and tones can be easier to detect; these figures
+do not describe their detection performance.
+
+This hypothetical calculation keeps the current sample, chip and symbol timing
+and received C/N0. For a tone, it uses the corresponding private pattern's
+observation band with that timing, not the actual tone's spectrum. It does not
+select the encrypted automatic profile, supply a key, enable Scrambler or DSSS,
+re-encode the draft with authentication, or change a transmission setting.
+Selecting encryption later may change the automatic profile and fixed-interval
+source capacity, so the result is a controlled comparison at the current
+timing, not a preview of all settings that a real key selection would produce.
 
 The ordinary encrypted automatic profile enables the private Scrambler. Its
 many noise-like chips already spread one transmitted bit across a pattern.
@@ -56,7 +71,8 @@ chip_rate = F / chip_samples
 T_s = symbol_sample_count / F
 ```
 
-For a shaped pattern, the assumed observer bandwidth is
+For a shaped pattern (including the private pattern assumed in a hypothetical
+tone experiment), the assumed observer bandwidth is
 `B = (1 + 0.25) * chip_rate`, the ideal full passband support of the
 root-raised-cosine pulse. It is approximately `0.625 R`, rather than `R`.
 For rectangular patterns the model uses `B = R`. These are assumed ideal
@@ -137,6 +153,12 @@ the ratio itself is not a detection probability. Repeated traffic can provide
 additional evidence when the observer can identify and combine its on-air
 windows.
 
+When encryption is off, this ratio compares the **current draft's actual
+duration** with the hypothetical private-pattern detection time. It does not
+include any extra intervals or different timing that enabling encryption might
+require. Tone drafts keep their actual tone airtime, including their absence
+of shaped pulse tails; only the detection model assumes the private waveform.
+
 These examples assume a selected key, an automatic shaped pattern and the
 same received C/N0 at both listeners. Rate and C/N0 are separate quantities;
 the third row deliberately has a design target different from its actual
@@ -154,12 +176,13 @@ including rounding for the third row. These calculations omit no symbol
 rounding and do not assert that the intended receiver can sustain the required
 coherence or acquire the waveform.
 
-The GUI initially selects no key, so its default public waveform has no
-numerical private-waveform estimate. Even after selecting a key, assuming the
-default short target of 32 dB-Hz at the default 3.6 kHz Rate gives an observer
+The GUI initially selects no key, so its default estimate is explicitly
+hypothetical. Assuming the default short target of 32 dB-Hz at the default
+3.6 kHz Rate gives an observer
 bandwidth of 2,250 Hz and about -1.52 dB in-band SNR. That falls outside the
-weak-signal model. Encryption alone must not turn this strong-signal case into
-a large apparent LPI gain.
+weak-signal model, with or without a key. Using a weak received C/N0 permits a
+numerical hypothetical estimate without enabling encryption. Encryption alone
+must not turn the strong-signal case into a large apparent LPI gain.
 
 ## What this model cannot establish
 

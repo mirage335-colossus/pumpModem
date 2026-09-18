@@ -58,9 +58,25 @@ class StreamCLI(unittest.TestCase):
         self.assertEqual(value['recovery']['state'],'none')
         self.assertEqual(value['recovery']['attempts'],0)
     def test_lpi_advisory_estimates(self):
-        public=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)
-        self.assertEqual(public['lpi']['status'],'public_waveform')
-        self.assertIsNone(public['lpi']['equivalent_wire_symbols'])
+        public=json.loads(self.run_pump('estimate','--text','e','--bw','100','--target-snr','-3').stdout)
+        self.assertEqual(public['lpi']['status'],'available')
+        self.assertTrue(public['lpi']['hypothetical_encryption'])
+        self.assertIn('Encryption is off',public['lpi']['warning'])
+        self.assertIn('current timing',public['lpi']['warning'])
+        self.assertEqual(public['lpi']['burst_exposure_basis'],'current_draft_airtime')
+        self.assertEqual(public['wire_bits'],3)
+        public_strong=json.loads(self.run_pump('estimate','--text','e',*AUDIO).stdout)['lpi']
+        self.assertEqual(public_strong['status'],'outside_weak_signal_model')
+        self.assertTrue(public_strong['hypothetical_encryption'])
+        self.assertIsNotNone(public_strong['warning'])
+        self.assertIsNone(public_strong['equivalent_wire_symbols'])
+        tone=json.loads(self.run_pump('analyze-link','--bits','001','--bw','100','--target-snr','-3',
+            '--pattern','auto-tone','--simulation','3dBm -170dB','--trials','10').stdout)
+        self.assertEqual(tone['lpi']['status'],'available')
+        self.assertTrue(tone['lpi']['hypothetical_encryption'])
+        self.assertIn('tone',tone['lpi']['warning'])
+        self.assertEqual(tone['transmission']['wire_bits'],3)
+        self.assertEqual(tone['lpi']['detection_seconds'],public['lpi']['detection_seconds'])
         with tempfile.TemporaryDirectory() as directory:
             key=pathlib.Path(directory)/'lpi.key'
             self.run_pump('keygen','--output',key)
@@ -69,6 +85,10 @@ class StreamCLI(unittest.TestCase):
             model=value['lpi']
             self.assertEqual(value['wire_bits'],3)
             self.assertEqual(model['status'],'available')
+            self.assertFalse(model['hypothetical_encryption'])
+            self.assertIsNone(model['warning'])
+            self.assertEqual(model['equivalent_wire_symbols'],public['lpi']['equivalent_wire_symbols'])
+            self.assertEqual(model['detection_seconds'],public['lpi']['detection_seconds'])
             self.assertEqual(model['cn0_basis'],'assumed_tx_target')
             self.assertFalse(model['safe_traffic_limit'])
             self.assertEqual(model['detection_probability'],.9)

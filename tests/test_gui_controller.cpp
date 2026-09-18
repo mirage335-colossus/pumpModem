@@ -158,10 +158,14 @@ void lpi_estimate_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
     const auto text=[&] {return controller.field(F::lpi_estimate).text;};
-    controller.edit(F::message,"e");prepare(controller);
-    check(text().find("Unavailable: public waveform")!=std::string::npos&&
-          text().find("Simulated C/N0")!=std::string::npos,
-          "Unkeyed GUI must identify public waveforms without a numeric private detection estimate");
+    controller.edit(F::message,"e");controller.select(F::simulation,"3dBm -170dB");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          controller.inspection()->lpi_estimate.hypothetical_encryption&&
+          text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          text().find("Simulated C/N0")!=std::string::npos&&
+          controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
+          !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
+          "Unkeyed GUI must show a warned hypothetical estimate while preserving its public waveform and exact short endpoint");
     struct TemporaryKeyring {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
             ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -179,6 +183,7 @@ void lpi_estimate_controls() {
     check(controller.settings().transfer.key.has_value()&&controller.estimate().has_value(),"LPI fixture keyfile failed to load");
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          !controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos&&
           std::abs(controller.inspection()->lpi_estimate.cn0_db_hz+3)<1e-10&&
           text()==controller.inspection()->lpi_summary&&text().find("no hidden-traffic guarantee")!=std::string::npos,
           "Private GUI estimate must use the actual weak simulated channel and shared inspection model");
@@ -216,6 +221,29 @@ void lpi_estimate_controls() {
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           text().find("Unavailable: in-band SNR above -10 dB")!=std::string::npos,
           "Strong simulated signals must withdraw unsupported detection-time estimates");
+    controller.select(F::key,"none");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
+          controller.inspection()->lpi_estimate.hypothetical_encryption&&
+          text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          !controller.settings().transfer.key,
+          "Turning encryption off must restore the hypothetical warning even with unavailable strong-signal numbers");
+    controller.select(F::simulation,"3dBm -170dB");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          text().find("Warning: encryption off; hypothetical only")!=std::string::npos,
+          "Weak public experiments must retain numerical estimates after encryption is turned off");
+    controller.select(F::key,"key:LPI estimate");prepare(controller);
+    check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&
+          text().find("hypothetical")==std::string::npos,
+          "Restoring encryption must clear the hypothetical warning");
+    controller.edit(F::short_bits,"001");controller.edit(F::carrier,"2.7 kHz");
+    controller.select(F::pattern,"auto-tone");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          controller.inspection()->lpi_estimate.hypothetical_encryption&&
+          text().find("Warning: encryption off; hypothetical only")!=std::string::npos&&
+          controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
+          controller.settings().transfer.modem.spreading_mode==modem::SpreadingMode::tone&&
+          !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
+          "Tone selection must restore the hypothetical warning without enabling encryption or changing exact bits");
 }
 void revised_reception_ingestion() {
     const auto complete=[](std::uint64_t row,std::uint64_t revision,MessageKind kind,std::uint8_t byte) {

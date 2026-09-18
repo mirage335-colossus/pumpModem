@@ -22,7 +22,8 @@ void reference_and_scaling() {
     auto options=private_options();
     const auto transmission=transfer::estimate_binary(Bytes{0,0,1},options);
     const auto result=lpi::estimate(transmission,options,-3);
-    check(result.status==lpi::Status::available,"private weak signal must receive a model estimate");
+    check(result.status==lpi::Status::available && !result.hypothetical_encryption,
+          "private weak signal must receive an actual-waveform model estimate");
     // Independent fixed reference values for the Gaussian radiometer model.
     near(result.observation_bandwidth_hz,62.5,"shaped signal must use intended RRC band, not nominal Rate");
     near(result.symbol_seconds,163.84,"symbol conversion must follow transmitted sample geometry");
@@ -66,13 +67,21 @@ void eligibility_and_limits() {
     check(lpi::estimate(transmission,options,-3).status==lpi::Status::available,
           "transfer always enables private scrambling for a non-tone key, even with manual settings");
     options.modem.scramble=true;options.key.reset();
-    check(lpi::estimate(transmission,options,-3).status==lpi::Status::public_waveform,
-          "publicly configured seeds must not imply a secret waveform");
+    const auto public_seed=lpi::estimate(transmission,options,-3);
+    check(public_seed.status==lpi::Status::available && public_seed.hypothetical_encryption,
+          "publicly configured seeds must show a hypothetical encrypted estimate");
     options.modem.scramble=false;options.modem.data_key.emplace(Bytes(32,0x37));
-    check(lpi::estimate(transmission,options,-3).status==lpi::Status::public_waveform,
-          "low-level Data masking alone must not imply a private transmitted waveform");
+    const auto data_only=lpi::estimate(transmission,options,-3);
+    check(data_only.status==lpi::Status::available && data_only.hypothetical_encryption,
+          "low-level Data masking alone must leave the private-waveform estimate hypothetical");
     options=private_options();options.modem.spreading_mode=modem::SpreadingMode::tone;
-    check(lpi::estimate(transmission,options,-3).status==lpi::Status::public_waveform,"tones cannot advertise LPI gain");
+    const auto tone=lpi::estimate(transmission,options,-3);
+    check(tone.status==lpi::Status::available && tone.hypothetical_encryption,
+          "tone estimate must remain hypothetical even when its input supplies a key");
+    near(tone.observation_bandwidth_hz,62.5,"hypothetical tone scenario must use the corresponding shaped pattern band");
+    near(tone.detection_seconds,baseline.detection_seconds,"tone experiment changed the encrypted scenario's geometry");
+    check(options.modem.spreading_mode==modem::SpreadingMode::tone && options.key && options.modem.scramble,
+          "hypothetical tone scenario must not mutate caller options");
     options=private_options();options.modem.pulse_shaping=false;
     check(lpi::estimate(transmission,options,10).status==lpi::Status::available,
           "inclusive -10 dB weak-signal endpoint changed");
@@ -100,6 +109,41 @@ void eligibility_and_limits() {
     check(lpi::estimate(huge_burst,options,30).status==lpi::Status::numeric_limit,
           "unrepresentable exposure must not report a finite available estimate");
 }
+void hypothetical_scenarios() {
+    auto options=private_options();
+    const auto keyed=lpi::estimate(transfer::estimate_binary(Bytes{0,0,1},options),options,-3);
+    options.key.reset();options.modem.scramble=false;
+    Message message;message.data=Bytes{'e'};
+    const auto before=transfer::estimate(message,options);
+    const auto wire_before=transfer::message_wire_bits(message,options);
+    const auto hypothetical=lpi::estimate(before,options,-3);
+    check(hypothetical.status==lpi::Status::available && hypothetical.hypothetical_encryption,
+          "keyless experimentation must retain a numerical encrypted scenario");
+    near(hypothetical.detection_seconds,keyed.detection_seconds,"keyless and keyed scenarios differ at the same timing/power");
+    near(hypothetical.equivalent_symbols,keyed.equivalent_symbols,"keyless estimate changed equivalent symbols");
+    const auto after=transfer::estimate(message,options);
+    check(!options.key && !options.modem.data_key && !options.modem.scramble && !options.modem.dsss &&
+          wire_before==Bytes({0,0,1}) && transfer::message_wire_bits(message,options)==wire_before &&
+          after.waveform_samples==before.waveform_samples,
+          "advisory experimentation must not enable encryption or alter the exact public transmission");
+    const auto strong=lpi::estimate(before,options,47);
+    check(strong.status==lpi::Status::outside_weak_signal_model && strong.hypothetical_encryption,
+          "strong keyless scenario must keep both model-limit status and hypothetical warning");
+    const auto extreme=lpi::estimate(before,options,-1e308);
+    check(extreme.status==lpi::Status::numeric_limit && extreme.hypothetical_encryption,
+          "numeric limit must not discard the hypothetical scenario flag");
+    options.modem.spreading_mode=modem::SpreadingMode::tone;
+    const auto tone_before=transfer::estimate(message,options);
+    const auto tone=lpi::estimate(tone_before,options,-3);
+    check(tone.hypothetical_encryption && tone.status==lpi::Status::available,
+          "tone-only experimentation requires no keyfile");
+    near(tone.detection_seconds,keyed.detection_seconds,"hypothetical tone must assume private patterns at current timing");
+    near(tone.burst_exposure_ratio,tone_before.total_seconds/tone.detection_seconds,
+         "tone exposure must compare the current draft airtime, without inventing encrypted overhead");
+    check(transfer::estimate(message,options).waveform_samples==tone_before.waveform_samples &&
+          options.modem.spreading_mode==modem::SpreadingMode::tone,
+          "hypothetical estimate changed the actual tone waveform");
+}
 void framing_unchanged() {
     auto options=private_options();Message message;message.data=Bytes{'e'};
     const auto before=transfer::estimate(message,options);
@@ -123,6 +167,6 @@ void framing_unchanged() {
 }
 }
 int main() {
-    try {reference_and_scaling();eligibility_and_limits();framing_unchanged();std::cout<<"LPI estimate tests passed\n";}
+    try {reference_and_scaling();eligibility_and_limits();hypothetical_scenarios();framing_unchanged();std::cout<<"LPI estimate tests passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

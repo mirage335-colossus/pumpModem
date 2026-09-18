@@ -70,8 +70,13 @@ reconfigure a running or closed session.
 The persistent **LPI energy detection** advisory below the oscillator shows the
 modeled observation duration and equivalent wire bits/symbols for an unkeyed
 energy detector at **90% detection / 1% false alarm per known window**. Keyed
-pattern transmission enables the private pattern; public patterns and tone modes
-show an unavailable status. Numerical estimates apply only at in-band SNR of
+pattern transmission enables the private pattern. With encryption off, including
+tone experiments, the same advisory assumes encrypted private patterns at the
+current sample, chip and symbol timing and C/N0. Its second line starts with
+**Warning: encryption off; hypothetical only**, including when numerical results
+are unavailable. Actual public patterns and tones can be easier to detect and
+are not described by these figures. No key or waveform setting is changed.
+Numerical estimates apply only at in-band SNR of
 -10 dB or lower. The observation model assumes the receiver's C/N0, a known band
 and on-air window, and stationary Gaussian noise of known power. Simulation uses
 its actual channel C/N0. With Simulation off, the active short/long draft TX
@@ -82,7 +87,10 @@ Flow and Transmission inspection share the advisory and its assumptions.
 Transmission fields show the observation bandwidth, in-band SNR, noise rise and
 full draft airtime relative to the modeled detection duration, including settling,
 pulse tails and suppression. This exposure ratio is neither a probability nor a
-safe traffic quota. Counts below a symbol say **<1 symbol**: an energy detector
+safe traffic quota. Hypothetical exposure uses the current draft's duration; it
+does not select an encrypted automatic profile or re-encode for authentication.
+The scenario is also explicit in inspection fields and model details.
+Counts below a symbol say **<1 symbol**: an energy detector
 can detect within a modem symbol. Repeated traffic accumulates exposure, encryption
 does not reduce power or interference, and there is no guaranteed hidden traffic.
 Invalid drafts/settings and recalculation withdraw stale advisory numbers. See
