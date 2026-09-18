@@ -104,10 +104,10 @@ const char* window_title() {return "Data Pump";}
 const std::vector<PageDefinition>& pages() {
     static const std::vector<PageDefinition> definitions{
         {Page::console,"console","Console",false,86},
+        {Page::planner,"planner","Link planner",true,128},
         {Page::compression,"compression","Compression / raw bits",false,200},
         {Page::flow,"flow","Modem flow",true,114},
-        {Page::transmission,"transmission","Transmission layout",true,204},
-        {Page::planner,"planner","Link planner",true,128}
+        {Page::transmission,"transmission","Transmission layout",true,204}
     };
     return definitions;
 }

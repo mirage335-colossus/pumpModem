@@ -24,7 +24,7 @@ enum class Command {
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
     transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
     resume_recovery, cancel_recovery,
-    planner_target, planner_stronger, planner_weaker, planner_example_short, planner_example_weak,
+    planner_target, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
     planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
     planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
     planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,

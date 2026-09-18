@@ -1,7 +1,8 @@
 # Link planner
 
-Open **Link planner** to compare bit duration, transmission time and observer
-observation time. The preview starts at −8 dB in 1 Hz, independently of the
+Open **Link planner**, immediately after **Console**, to compare bit duration,
+transmission time and observer observation time. The preview starts at −8 dB in
+1 Hz, independently of the
 current transmit targets. Rate, carrier, waveform, key, oscillator and DSP
 allowance follow the shared controls. Choose **Use target for short messages**
 or **Use target for long messages** to apply a preview.
@@ -15,7 +16,7 @@ At 3.6 kHz rate and a 1.5 kHz carrier, the automatic shaped pattern gives:
 | Reference | Result |
 | --- | --- |
 | −8 dB-Hz | 398.107 seconds per bit; 401.116 seconds sending one bit |
-| −23 dB-Hz | 12,589.254 seconds per bit, about 3.5 hours |
+| +23 dB-Hz LPI example | 569 milliseconds per bit; modeled observer/receiver time about 4.33× |
 | One bit per second | Automatic profile transition near +20.45 dB-Hz |
 | One day per bit | Near −31.365 dB-Hz |
 | Ideal shaped passband | 375–2,625 Hz, 2.25 kHz wide |
@@ -28,11 +29,16 @@ wire count: exact short dictionary/raw bits, or fixed 192-bit markers and
 
 The illustrative free-running crystal has a 100 ppm relative clock offset and
 0.5 degrees/√second phase diffusion. At the default carrier its 0.15 Hz shift
-fits the current receiver search at −8, but exceeds it at −23. The long-duration
-search edge is near −17.33 at this geometry; short profiles can have separate
-coverage gaps. Memory and clock coverage are separate from successful reception.
-The check assumes one matching RX profile, rather than the currently unapplied
-receive-target list. More profiles or keys can require additional workspace.
+fits the current receiver search at −8. **Clock / RAM limit** finds a target
+whose receiver search covers the clock offset and fits the selected DSP RAM
+allowance, including the 75% option. The milestone names the limiting condition;
+the selected target reports **Wide RX search exceeds RAM** when appropriate.
+The clock-only long-duration edge is near −17.33 at this geometry, but available
+RAM can require a stronger target. Short profiles and sampled projection sizes
+can have separate coverage or memory gaps. Memory and clock coverage are
+separate from successful reception. The check assumes one matching RX profile,
+rather than the currently unapplied receive-target list. More profiles or keys
+can require additional workspace.
 
 **Observer / receiver time** uses the existing [relative LPI model](lpi-estimates.md).
 Each graph point holds the intended receiver's bit energy relative to noise at

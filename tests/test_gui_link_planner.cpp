@@ -60,6 +60,15 @@ void independent_reference_values() {
     near(weak.finish_seconds,25181.517222222225,"Weak example completed without a whole absent symbol");
     near(weak.observer_ratio,92617.28706819766,"Weak observer/receiver time anchor changed");
     check(short_bit.receiver_status!=weak.receiver_status,"Free-running crystal limit did not distinguish the two examples");
+    auto lpi_inputs=inputs;lpi_inputs.target_db_hz=23;
+    const auto lpi_example=planner::build(lpi_inputs);
+    check(lpi_example.available&&lpi_example.observer_available,"Positive 23 dB LPI example must be available");
+    // At +23 dB the automatic profile is 1024 chips; settling uses four
+    // additional symbols and absence uses eleven complete failed symbols.
+    near(lpi_example.bit_seconds,.5688888888888889,"Positive LPI example must retain its subsecond bit");
+    near(lpi_example.send_seconds,5.8533333333333335,"Positive LPI example lost its complete waveform overhead");
+    near(lpi_example.finish_seconds,12.11111111111111,"Positive LPI example lost its complete-symbol silence check");
+    near(lpi_example.observer_ratio,4.333069879228238,"Positive LPI observer/receiver time anchor changed");
 }
 void exact_geometry_and_physical_finish() {
     auto inputs=example();const auto one=planner::build(inputs);
@@ -90,7 +99,7 @@ void timing_milestones() {
     // The one-day boundary instead uses continuous integration rounded to PCM.
     near(*model.fast_target,20.449725484634943,"Fast milestone ignored the automatic code-length step");
     near(*model.day_target,-31.365137424788934,"One-day milestone changed its 18 dB energy reference");
-    for(const auto milestone:{std::pair{*model.fast_target,1.},std::pair{*model.day_target,86400.}}) {
+    for(const auto& milestone:{std::pair{*model.fast_target,1.},std::pair{*model.day_target,86400.}}) {
         inputs.target_db_hz=milestone.first;const auto selected=planner::build(inputs);
         check(selected.available&&selected.bit_seconds<=milestone.second,
               "A milestone must select an available sampled duration at or below its limit");
@@ -102,6 +111,27 @@ void timing_milestones() {
     near(planner::build(inputs).bit_seconds,1024./1800,"Fast milestone must preserve its discrete 1024-chip duration");
     inputs.target_db_hz=*model.day_target;
     near(planner::build(inputs).bit_seconds,86400,"Day milestone must select one day per bit");
+}
+void clock_and_ram_milestones() {
+    // Fixed analytical allowances avoid dependence on the host's free memory.
+    // Both budgets cover the crystal offset at -8; only 1 GiB covers its FFT
+    // workspace. No allocation scales to these planning limits.
+    for(const std::size_t mib:{512,1024}) {
+        auto inputs=example();inputs.options.dsp_workspace_bytes=mib*1024*1024;
+        inputs.dsp_workspace_percent=75;
+        const auto selected=planner::build(inputs);
+        check(selected.available&&selected.clock_search_supported&&
+              selected.receiver_workspace_supported==(mib==1024),
+              "Clock coverage alone must not qualify a plan whose selected DSP allowance cannot hold its search");
+        if(mib==512)check(selected.receiver_status.find("Wide RX search exceeds RAM (75%)")!=std::string::npos,
+                          "RAM failure must identify the selected workspace percentage");
+        check(selected.clock_target&&selected.clock_limit_reason=="RAM",
+              "Memory-constrained clock milestone must identify RAM as its limiting condition");
+        inputs.target_db_hz=*selected.clock_target;
+        const auto milestone=planner::build(inputs);
+        check(milestone.available&&milestone.clock_search_supported&&milestone.receiver_workspace_supported,
+              "Returned clock/RAM milestone must itself fit the selected search and byte allowance");
+    }
 }
 void separate_link_budget_and_observer_model() {
     auto inputs=example();const auto reference=planner::build(inputs);
@@ -174,9 +204,9 @@ void current_draft_and_modem_isolation() {
     const auto receive_targets=controller.settings().transfer.receive_targets_db_hz;
     const auto modem=controller.settings().transfer.modem;
     const auto estimate=controller.estimate();
-    controller.activate(C::planner_example_weak);
-    check(controller.link_plan()->inputs.target_db_hz==-23&&controller.link_plan()->inputs.wire_bits==1,
-          "Weak example must begin with exactly one raw bit");
+    controller.activate(C::planner_example_lpi);
+    check(controller.link_plan()->inputs.target_db_hz==23&&controller.link_plan()->inputs.wire_bits==1,
+          "LPI example must begin with exactly one raw bit");
     controller.activate(C::planner_toggle_draft);
     check(controller.planner_uses_draft()&&controller.link_plan()->available&&controller.link_plan()->inputs.wire_bits==3,
           "Current draft must use the fixed dictionary's three-bit e endpoint");
@@ -239,8 +269,50 @@ void failed_draft_estimate_and_recovery() {
           "Successful corrected preparation must restore the exact current-draft plan");
     controller.close();
 }
+void selected_workspace_reaches_planner() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::bandwidth,"3600");controller.edit(F::carrier,"1500");
+    const auto initial=controller.link_plan();
+    check(initial->inputs.dsp_workspace_percent==50&&
+          initial->inputs.options.dsp_workspace_bytes==controller.settings().transfer.dsp_workspace_bytes,
+          "Planner must receive the initial selected workspace percentage and actual byte allowance");
+    controller.select(F::dsp_workspace,"ram-75");
+    const auto selected=controller.link_plan();
+    const auto allowance=controller.settings().dsp_workspace_bytes;
+    check(controller.field(F::dsp_workspace).selected=="ram-75"&&selected!=initial&&
+          selected->inputs.dsp_workspace_percent==75&&
+          selected->inputs.options.dsp_workspace_bytes==allowance&&
+          allowance==controller.settings().transfer.dsp_workspace_bytes,
+          "Selecting 75% DSP workspace must invalidate the plan and forward its actual configured allowance");
+    near(selected->bit_seconds,initial->bit_seconds,"Changing DSP memory must not change the selected bit duration");
+    if(selected->clock_target) {
+        controller.activate(C::planner_clock);
+        const auto milestone=controller.link_plan();
+        check(milestone->inputs.target_db_hz==*selected->clock_target&&milestone->available&&
+              milestone->clock_search_supported&&milestone->receiver_workspace_supported,
+              "A 75% workspace milestone must fit both the clock search and the selected memory allowance");
+        controller.activate(C::planner_target);const auto requests=controller.take_services();
+        check(requests.size()==1,"Clock/RAM target must remain editable through the normal prompt");
+        controller.complete_service({requests.front().id,false,requests.front().value,{}});
+        check(controller.link_plan()->inputs.target_db_hz==milestone->inputs.target_db_hz,
+              "A clock/RAM boundary must survive its displayed prompt value without changing a sampled endpoint");
+        controller.activate(C::planner_apply_short);
+        const auto& applied=controller.settings().transfer;
+        const auto& config=applied.modem;
+        check(std::find(applied.receive_targets_db_hz.begin(),applied.receive_targets_db_hz.end(),
+                        milestone->inputs.target_db_hz)!=applied.receive_targets_db_hz.end(),
+              "Applying a clock/RAM boundary must retain its exact target in matching receive profiles");
+        near(static_cast<double>(modem::symbol_sample_count(config))/config.sample_rate,milestone->bit_seconds,
+             "Applying a clock/RAM boundary changed its sampled symbol duration");
+    }
+    controller.close();
+}
 void one_warning_on_planner_page() {
-    Application app({.simulation=true});
+    Launch launch;launch.simulation=true;Application app(launch);
+    const auto& pages=ui::pages();
+    check(pages.size()>1&&pages[0].id==ui::Page::console&&pages[1].id==ui::Page::planner,
+          "Link planner must be the second tab immediately after Console");
     const auto& screen=ui::console_screen();
     const auto found=std::find_if(screen.begin(),screen.end(),[](const auto& control) {
         return control.field==ui::Field::lpi_estimate;
@@ -259,7 +331,7 @@ void one_warning_on_planner_page() {
 }
 void application_prompt_roundtrips() {
     using F=ui::Field;using C=ui::Command;
-    Application app({.simulation=true});
+    Launch launch;launch.simulation=true;Application app(launch);
     app.edit(F::bandwidth,"3600");app.edit(F::carrier,"1500");app.edit(F::message,"e");
     const auto short_target=app.field(F::snr).text,long_target=app.field(F::long_snr).text;
     const auto receive_targets=app.field(F::receive_snr).text;
@@ -278,10 +350,10 @@ void application_prompt_roundtrips() {
     const auto edit=[&](C command,const std::string& entered) {
         const auto request=prompt(command);app.complete_service({request.id,false,entered,{}});
     };
-    app.activate(C::planner_example_weak);check(value(C::planner_target)=="-23","Weak example action did not reach the shared facade");
-    const auto weak_document=app.document(ui::Page::planner,900);
-    check(weak_document!=document&&contains_text(*weak_document,"3 hr 30 min"),
-          "Changing the target must replace the shared document with the weak example's real duration");
+    app.activate(C::planner_example_lpi);check(value(C::planner_target)=="23","Positive 23 dB LPI example did not reach the shared facade");
+    const auto lpi_document=app.document(ui::Page::planner,900);
+    check(lpi_document!=document&&contains_text(*lpi_document,"5.85 sec"),
+          "Changing the target must replace the shared document with the positive LPI example's real duration");
     app.activate(C::planner_toggle_details);
     check(contains_text(*app.document(ui::Page::planner,900),"Power, path and noise"),
           "Model details action did not expose its native shared controls");
@@ -317,6 +389,7 @@ void document_semantics_layout_and_plots() {
         const auto document=planner_page::build(model,width,false,false);
         const auto flat=nodes(document);
         check(contains_text(document,"Time per bit")&&contains_text(document,"Observer / receiver time")&&
+              contains_text(document,"Clock / RAM limit")&&
               contains_text(document,"Stronger → weaker · dB in 1 Hz")&&contains_text(document,"1 sec")&&
               contains_text(document,"1 min")&&contains_text(document,"1 hr")&&contains_text(document,"1 day"),
               "Planner labels and logarithmic time axes must remain native text");
@@ -326,7 +399,7 @@ void document_semantics_layout_and_plots() {
         check(!contains_text(document,"safely hidden")&&!contains_text(document,"safe bits"),
               "Observer time must not be presented as a count of safely hidden bits");
         for(const auto command:{ui::Command::planner_target,ui::Command::planner_example_short,
-                                ui::Command::planner_example_weak,ui::Command::planner_fast,
+                                ui::Command::planner_example_lpi,ui::Command::planner_fast,
                                 ui::Command::planner_day,ui::Command::planner_clock,
                                 ui::Command::planner_toggle_draft,ui::Command::planner_toggle_details})
             check(std::any_of(flat.begin(),flat.end(),[&](const auto* node) {
@@ -351,6 +424,15 @@ void document_semantics_layout_and_plots() {
     check(contains_text(detailed,"Model limits")&&contains_text(detailed,"Power, path and noise")&&
           contains_text(detailed,"90% detection")&&contains_text(detailed,"1% false alarm")&&
           contains_text(detailed,"FT8 reference"),"Expandable model details lost their assumptions and familiar reference");
+    auto wide_band=example();
+    wide_band.options.modem=tuning::resolve(10000,-8,tuning::PatternMode::auto_pattern,false).config;
+    const auto wide_document=planner_page::build(planner::build(wide_band),900,false,false);
+    const auto wide_nodes=nodes(wide_document);
+    const auto band=std::find_if(wide_nodes.begin(),wide_nodes.end(),[](const auto* node) {
+        return node->text.starts_with("Ideal signal:");
+    });
+    check(band!=wide_nodes.end()&&(*band)->text=="Ideal signal: 4.375–10.625 kHz",
+          "A 10 kHz rate must show exact plain-decimal band endpoints, without scientific notation");
     const auto flat=nodes(detailed);
     std::size_t plot_count=0;
     for(const auto* node:flat)if(node->kind==ui::DocumentKind::bitmap) {
@@ -391,9 +473,11 @@ void document_semantics_layout_and_plots() {
 int main() {
     try {
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
+        clock_and_ram_milestones();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
         current_draft_and_modem_isolation();application_prompt_roundtrips();
         failed_draft_estimate_and_recovery();one_warning_on_planner_page();
+        selected_workspace_reaches_planner();
         document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}

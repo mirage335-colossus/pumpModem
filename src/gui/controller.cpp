@@ -353,6 +353,7 @@ struct Controller::Impl {
         if(planner_model)return planner_model;
         auto input=planner_inputs;
         input.options=settings.transfer;
+        input.dsp_workspace_percent=dsp_workspace_percent;
         input.mode=settings.transfer.receive_pattern_mode;
         input.channel.clock_error_ppm=settings.simulation_clock_error_ppm;
         input.channel.phase_noise_degrees_per_sqrt_second=settings.simulation_phase_noise_degrees_per_sqrt_second;
@@ -370,7 +371,7 @@ struct Controller::Impl {
         planner_inputs.target_db_hz=value;planner_model.reset();
     }
     static std::string planner_number(double value) {
-        std::ostringstream out;out<<std::setprecision(12)<<value;return out.str();
+        std::ostringstream out;out<<std::setprecision(std::numeric_limits<double>::max_digits10)<<value;return out.str();
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -855,7 +856,7 @@ struct Controller::Impl {
         case Command::planner_stronger: planner_target(std::min(200.,planner_inputs.target_db_hz+1));break;
         case Command::planner_weaker: planner_target(std::max(-200.,planner_inputs.target_db_hz-1));break;
         case Command::planner_example_short: planner_target(-8);break;
-        case Command::planner_example_weak: planner_target(-23);break;
+        case Command::planner_example_lpi: planner_target(23);break;
         case Command::planner_fast: {const auto value=*link_plan()->fast_target;planner_target(value);break;}
         case Command::planner_day: {const auto value=*link_plan()->day_target;planner_target(value);break;}
         case Command::planner_clock: {const auto value=*link_plan()->clock_target;planner_target(value);break;}

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <iomanip>
 #include <limits>
+#include <locale>
 #include <sstream>
 #include <stdexcept>
 #include <utility>
@@ -24,8 +25,23 @@ std::string number(double value, int precision = 3) {
     return out.str();
 }
 std::string db(double value) { return (value > 0 ? "+" : "") + number(value); }
+std::string decimal(double value) {
+    if (!std::isfinite(value)) return "Unavailable";
+    std::ostringstream out; out.imbue(std::locale::classic());
+    out << std::fixed << std::setprecision(3) << value;
+    auto result = out.str();
+    while (result.back() == '0') result.pop_back();
+    if (result.back() == '.') result.pop_back();
+    return result == "-0" ? "0" : result;
+}
 std::string frequency(double value) {
-    return value >= 1000 ? number(value / 1000) + " kHz" : number(value) + " Hz";
+    if (value >= 1000000) return decimal(value / 1000000) + " MHz";
+    return value >= 1000 ? decimal(value / 1000) + " kHz" : decimal(value) + " Hz";
+}
+std::string band_span(double low, double high) {
+    const bool khz = std::max(std::abs(low), std::abs(high)) >= 10000;
+    const double scale = khz ? 1000 : 1;
+    return decimal(low / scale) + "–" + decimal(high / scale) + (khz ? " kHz" : " Hz");
 }
 std::string ratio(double value) {
     if (!std::isfinite(value) || value <= 0) return "Outside model range";
@@ -243,22 +259,24 @@ void notable_points(Node& root, const planner::Model& model) {
     const std::size_t columns = root.width >= 880 ? 4 : root.width >= 460 ? 2 : 1;
     const float width = (root.width - 10 * static_cast<float>(columns - 1)) / static_cast<float>(columns);
     std::vector<Node> values;
-    const auto point = [&](const std::string& name, std::optional<double> target, Command command) {
+    const auto point = [&](const std::string& name, std::optional<double> target, Command command,
+                           const std::string& reason = std::string{}) {
         auto n = card(width); n.padding = 8;
         auto button = action(name, command, width - 2 * n.padding, target.has_value()); button.bottom = 4;
         n.children.push_back(std::move(button));
-        paragraph(n, target ? db(*target) + " dB in 1 Hz" : "Unavailable for this pattern", 11, Tone::muted, false, 0);
+        paragraph(n, target ? db(*target) + " dB in 1 Hz" + (reason.empty() ? "" : " · " + reason) :
+            "Unavailable for this pattern", 11, Tone::muted, false, 0);
         values.push_back(std::move(n));
     };
     point("1 bit / sec", model.fast_target, Command::planner_fast);
     point("1 day / bit", model.day_target, Command::planner_day);
-    point("Clock search limit", model.clock_target, Command::planner_clock);
+    point("Clock / RAM limit", model.clock_target, Command::planner_clock, model.clock_limit_reason);
     auto passband = card(width); passband.padding = 8;
     const bool fits = model.low_audio_hz >= 300 && model.high_audio_hz <= 2700 && model.occupied_bandwidth_hz > 0;
     paragraph(passband, model.shaped_band ? (fits ? "Fits 300–2700 Hz" : "Outside 300–2700 Hz") :
         "Check radio passband", 12, Tone::text, true, 4);
-    paragraph(passband, model.shaped_band ? "Ideal signal: " + number(model.low_audio_hz, 4) + "–" +
-        number(model.high_audio_hz, 4) + " Hz" : "Nominal rate: " + frequency(model.inputs.options.modem.bandwidth_hz),
+    paragraph(passband, model.shaped_band ? "Ideal signal: " + band_span(model.low_audio_hz, model.high_audio_hz) :
+        "Nominal rate: " + frequency(model.inputs.options.modem.bandwidth_hz),
         11, Tone::muted, false, 0);
     values.push_back(std::move(passband));
     for (std::size_t first = 0; first < values.size(); first += columns) {
@@ -288,7 +306,7 @@ void details(Node& root, const planner::Model& model) {
     paragraph(n, "Automatic targets set bit duration. Average power, path loss and noise set received strength.", 12, Tone::muted, false, 14);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
     paragraph(n, "Timing. Uses the selected modem profile, exact wire-bit count and waveform overhead. Finish adds complete absent symbols covering at least six seconds; processing takes extra time. No reception is tested here.");
-    paragraph(n, "Clock search uses the selected clock mismatch; phase stability is unverified. The search check assumes one matching receive target. DSP RAM is a memory ceiling, not extra signal strength.");
+    paragraph(n, "Receiver search must cover the clock mismatch and fit the selected RAM allowance. One matching receive target; phase stability is unverified.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
@@ -305,10 +323,11 @@ ui::DocumentNode build(const planner::Model& model, float width, bool show_detai
     const bool crystal = channel.clock_error_ppm == 100 && channel.phase_noise_degrees_per_sqrt_second == .5;
     paragraph(root, "Rate " + frequency(config.bandwidth_hz) + "  ·  Carrier " + frequency(config.carrier_hz) +
         "  ·  " + (crystal ? "Free-running crystal" : "Clock mismatch " + number(channel.clock_error_ppm) + " ppm") +
-        "  ·  DSP " + number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
+        "  ·  DSP " + (model.inputs.dsp_workspace_percent ? std::to_string(model.inputs.dsp_workspace_percent) + "% RAM · " : "") +
+        number(static_cast<double>(model.inputs.options.dsp_workspace_bytes) / (1024 * 1024 * 1024)) + " GiB", 11, Tone::muted, false, 6);
     buttons(root, {{"Target: " + db(model.inputs.target_db_hz) + " dB in 1 Hz", Command::planner_target},
                    {"Stronger +1 dB", Command::planner_stronger}, {"Weaker −1 dB", Command::planner_weaker},
-                   {"−8 example", Command::planner_example_short}, {"−23 example", Command::planner_example_weak},
+                   {"−8 example", Command::planner_example_short}, {"+23 LPI example", Command::planner_example_lpi},
                    {use_draft ? "Plan 1 bit" : "Use current draft", Command::planner_toggle_draft}});
     if (error.empty()) error = model.error;
     if (!error.empty()) paragraph(root, std::move(error), 12, Tone::accent, true);

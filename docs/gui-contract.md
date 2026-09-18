@@ -25,15 +25,19 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
-**Link planner** is a shared document tab. It previews a target independently of
-the live transmit/receive targets, with **Time per bit**, **Observer / receiver
+**Link planner** is the second tab, immediately after **Console**. It previews a
+target independently of the live transmit/receive targets, with **Time per bit**, **Observer / receiver
 time**, send time and an earliest completion estimate. The two logarithmic
 graphs follow actual sampled automatic-profile steps. Native buttons edit the
-target through a numeric prompt, step it by one dB, select the −8/−23 examples,
-or select the one-bit/second, one-day/bit and long-duration clock-search edges.
+target through a numeric prompt, step it by one dB, select the −8/+23 examples,
+or select the one-bit/second, one-day/bit and combined clock/RAM search edges.
 Milestones are derived from the current rate, carrier, pattern and key geometry;
 fixed modes omit target-dependent boundaries. The selected receiver check uses
 one matching receive profile and the configured oscillator/DSP allowance.
+The clock/RAM milestone must satisfy both carrier coverage and wide-search
+workspace availability under the selected RAM percentage, including 75%.
+Its reason identifies the limiting condition. Band edges use plain decimal
+Hz or kHz; ordinary audio frequencies never use scientific notation.
 
 The initial preview is one exact raw bit at −8 dB-Hz. **Use current draft** uses
 the accepted transfer estimate's exact wire-bit count, including the short

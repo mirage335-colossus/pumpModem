@@ -3,7 +3,6 @@
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_pulse.hpp"
 #include "datapump/pattern_receiver.hpp"
-#include "datapump/pattern_search.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <algorithm>
 #include <array>
@@ -11,6 +10,7 @@
 #include <iomanip>
 #include <limits>
 #include <locale>
+#include <numeric>
 #include <sstream>
 
 namespace datapump::gui::planner {
@@ -34,10 +34,21 @@ std::optional<modem::Config> try_resolve(const Inputs& inputs,double target) {
     try { return resolve(inputs,target); }
     catch(const Error&) { return std::nullopt; }
 }
-bool clock_fits(const Inputs& inputs,const modem::Config& config) {
-    const auto offset=inputs.channel.frequency_offset_hz+
-        config.carrier_hz*inputs.channel.clock_error_ppm*1e-6;
-    return std::abs(offset)<=modem::default_pattern_frequency_search(config).half_width_hz;
+struct ReceiverSupport {
+    bool clock=false,workspace=false;
+    bool fits() const {return clock&&workspace;}
+};
+ReceiverSupport receiver_support(const Inputs& inputs,const modem::Config& config) {
+    auto options=inputs.options;options.modem=config;
+    auto channel=inputs.channel;
+    channel.snr_db=std::clamp(inputs.tx_dbm-inputs.path_loss_db-inputs.noise_density_dbm_hz-
+        10*std::log10(config.sample_rate/2.),-300.,300.);
+    // Workspace and clock coverage depend on the selected geometry and local
+    // banks, not payload length. This analytical one-symbol estimate allocates
+    // neither a draft, a transfer probe, nor PCM inside the bounded search.
+    transfer::Estimate one;one.wire_bits=1;one.total_seconds=seconds(config);
+    const auto estimate=simulation::estimate(one,options,true,channel);
+    return {estimate.carrier_in_search,estimate.receiver_workspace_supported};
 }
 
 // All searches have fixed iteration counts. Preserve discrete tuner steps:
@@ -53,27 +64,66 @@ std::optional<double> duration_boundary(const Inputs& inputs,double minimum,doub
     }
     return maximum;
 }
-std::optional<double> clock_boundary(const Inputs& inputs,double minimum,double maximum) {
-    // Search from the longest durations. Short profiles switch search policy
-    // at 16 seconds, so coverage is not globally monotonic in target C/N0.
+struct ClockBoundary {double target;std::string reason;};
+struct ClockCandidate {double target;modem::Config config;};
+std::optional<ClockCandidate> clock_candidate(const Inputs& inputs,double target) {
+    auto config=try_resolve(inputs,target);
+    if(!config)return std::nullopt;
+    if(config->integration_seconds>0) {
+        // Adjacent sampled durations can use different projection bins. Seek
+        // complete native bins so a RAM milestone does not stop arbitrarily
+        // at an odd-sample gap while substantially longer symbols still fit.
+        // This selects a real, slightly stronger tuner target; it does not
+        // change the modem's sample rounding or its workspace model.
+        const auto chip=modem::pattern_chip_samples(*config);
+        const auto alignment=std::gcd(chip,std::max<std::uint64_t>(1,chip/2));
+        const auto symbol=modem::symbol_sample_count(*config);
+        auto aligned=symbol-symbol%alignment;
+        if(aligned>alignment && (static_cast<long double>(aligned)-.5L)/config->sample_rate>
+                config->integration_seconds)aligned-=alignment;
+        if(aligned>=4) {
+            const auto duration=(static_cast<long double>(aligned)-.5L)/config->sample_rate;
+            const auto adjusted=tuning::pattern_target_symbol_snr_db-10*std::log10(static_cast<double>(duration));
+            if(adjusted>=target && adjusted<=200) {
+                auto candidate=try_resolve(inputs,adjusted);
+                if(candidate && modem::symbol_sample_count(*candidate)%alignment==0)
+                    return ClockCandidate{adjusted,std::move(*candidate)};
+            }
+        }
+    }
+    return ClockCandidate{target,std::move(*config)};
+}
+std::optional<ClockBoundary> clock_boundary(const Inputs& inputs,double minimum,double maximum) {
+    // Search from the longest durations. Short-profile policy and quantized
+    // projection bins make coverage nonmonotonic. Always retain a checked
+    // fitting endpoint; this is a usable edge, not a claim that every stronger
+    // target fits. The byte allowance is the caller's actual selected budget.
     constexpr unsigned steps=192;
     auto previous=minimum;
-    const auto first=try_resolve(inputs,previous);
-    if(first && clock_fits(inputs,*first))return std::nullopt;
+    const auto first=clock_candidate(inputs,previous);
+    if(first)previous=first->target;
+    auto previous_support=first?receiver_support(inputs,first->config):ReceiverSupport{};
+    if(previous_support.fits())return std::nullopt;
     for(unsigned i=1;i<=steps;++i) {
         const auto target=minimum+(maximum-minimum)*i/steps;
-        const auto config=try_resolve(inputs,target);
-        if(config && clock_fits(inputs,*config)) {
-            auto high=target,low=previous;
+        const auto config=clock_candidate(inputs,target);
+        const auto support=config?receiver_support(inputs,config->config):ReceiverSupport{};
+        if(support.fits()) {
+            auto high=config->target,low=previous;
+            auto failed=previous_support;
             for(unsigned j=0;j<48;++j) {
                 const auto middle=(low+high)/2;
-                const auto candidate=try_resolve(inputs,middle);
-                if(candidate && clock_fits(inputs,*candidate))high=middle;
-                else low=middle;
+                const auto candidate=clock_candidate(inputs,middle);
+                if(candidate && candidate->target>=high)break;
+                const auto check=candidate?receiver_support(inputs,candidate->config):ReceiverSupport{};
+                if(check.fits())high=candidate->target;
+                else {low=candidate?candidate->target:middle;failed=check;}
             }
-            return high;
+            const auto selected=try_resolve(inputs,high);
+            if(!selected || !receiver_support(inputs,*selected).fits())return std::nullopt;
+            return ClockBoundary{high,!failed.clock?(!failed.workspace?"Clock + RAM":"Clock"):"RAM"};
         }
-        previous=target;
+        previous=config?config->target:target;previous_support=support;
     }
     return std::nullopt;
 }
@@ -148,12 +198,15 @@ Model build(const Inputs& inputs) {
         // here; no success probability is displayed by the planner.
         channel.snr_db=std::clamp(sample_snr,-300.,300.);
         const auto receiver=simulation::estimate(transmission,options,true,channel);
+        result.clock_search_supported=receiver.carrier_in_search;
+        result.receiver_workspace_supported=receiver.receiver_workspace_supported;
         if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
         if(!receiver.receiver_workspace_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";
-            result.receiver_status+="More memory needed";
+            result.receiver_status+="Wide RX search exceeds RAM";
+            if(inputs.dsp_workspace_percent)result.receiver_status+=" ("+std::to_string(inputs.dsp_workspace_percent)+"%)";
         }
-        if(result.receiver_status.empty())result.receiver_status="Clock search fits · reception unverified";
+        if(result.receiver_status.empty())result.receiver_status="Clock and RAM fit · reception unverified";
 
         // Leave sample-counter headroom for one symbol of physical absence
         // and the fixed waveform overhead even at the graph's weakest end.
@@ -165,7 +218,9 @@ Model build(const Inputs& inputs) {
         if(result.automatic_mode) {
             result.fast_target=duration_boundary(inputs,minimum_target,maximum_target,1);
             result.day_target=duration_boundary(inputs,minimum_target,maximum_target,seconds_per_day);
-            result.clock_target=clock_boundary(inputs,minimum_target,maximum_target);
+            if(const auto boundary=clock_boundary(inputs,minimum_target,maximum_target)) {
+                result.clock_target=boundary->target;result.clock_limit_reason=boundary->reason;
+            }
         }
         auto low=std::min(-35.,inputs.target_db_hz-3),high=std::max(25.,inputs.target_db_hz+3);
         for(const auto boundary:{result.fast_target,result.day_target,result.clock_target})if(boundary) {

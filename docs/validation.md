@@ -3363,3 +3363,29 @@ relaxed to claim success.
 Rev's `gui_adapter_conformance`, `gui_platform_conformance`,
 `gui_coordinates_1x` and `gui_coordinates_2x` all passed on the same private
 display (4/4). `git diff --check` passed.
+
+### Planner order, units and clock/RAM limit (2026-09-18)
+
+Link planner now follows Console. Frequency labels use plain decimal Hz/kHz/MHz,
+and the corrected LPI example selects +23 dB-Hz: 0.568889 seconds per bit,
+5.853333 seconds sending one bit, and a modeled observer/receiver ratio of
+4.33307. The −23 case remains independent long-duration regression coverage.
+
+The clock milestone now requires both carrier-search coverage and the existing
+simulation estimator's wide-search workspace support. It uses the selected DSP
+byte allowance, reports its 25/50/75% metadata, and identifies Clock or RAM as the
+limiting condition. Complete native projection-bin candidates avoid arbitrary
+one-sample memory gaps; every returned target is independently rechecked. The
+controller preserves full floating-point precision through prompting/applying
+these sample-sensitive targets. No sampled receiver or wire behavior changed.
+
+New regression cases cover 512 MiB versus 1 GiB at −8, fitting returned
+milestones, 75% selection propagation, exact prompt/apply round trips, second-tab
+order, +23 numeric anchors, and `4.375–10.625 kHz` endpoint formatting. Both
+Release backends rebuilt successfully. Rev's eight focused shared GUI suites
+passed. The updated FLTK window was visually checked on a private Xvfb display;
+the navigation, controls, milestones and graphs fit the default window.
+All 29 GCC/FLTK headless checks passed in 242.03 seconds, including every one of
+the 21 development-contract suites. `git diff --check` passed. Native end-to-end
+workflows and physical audio were not rerun for this planner-only correction;
+the earlier Rev workflow timeout remains an unclosed validation limit.
