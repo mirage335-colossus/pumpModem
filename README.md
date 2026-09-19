@@ -14,17 +14,31 @@ RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
 
-The transport sends one bit per pattern symbol. Pattern evidence alone admits
+Regular mode sends one bit per pattern symbol. Pattern evidence alone admits
 timing, carrier and keystream candidates. Nonempty text of up to 16 source bytes and
 explicit bit drafts use raw transmission. Longer byte streams use a fixed 128-byte coding
 interval after each alignment marker, with no packet header, received length,
-or metadata parser. Legacy APSK and packet APIs have been removed; peers must use
+or metadata parser. Legacy APSK and packet APIs have been removed; regular peers must use
 the same local source/FEC profile. Short text uses the fixed bit dictionary.
 
 **Development requirement:** preserve tiny dictionary/raw-bit messages, fixed
 intervals and per-bit pending reception. Each bit may cost hours or longer;
 neither added framing nor waiting for a whole message is harmless. See the
 [message behavior contract and regression checks](docs/development.md).
+
+**Fast mode** is an independent encrypted APSK file-transfer interface, selected
+by the **Fast** toggle beside **DATA PUMP**. It uses fixed 256-byte coded intervals,
+real-time constellation tracking, AES-256-CBC/HMAC, convolutional coding and
+interleaved Reed–Solomon. Wire, SSB, FM and acoustic profiles offer QPSK through
+256-APSK. Regular waveform, encryption and short/pending-message behavior remain
+unchanged. See [Fast operation, format and measured limits](docs/fast-mode.md)
+and the earlier [design and code-path audit](docs/fast-mode-plan.md).
+
+The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast always
+requires a key and has no LPI claim. Its separate SNR regression executable is
+built only for testing. A sampled 2 MiB transfer achieved 44.14 kbit/s; physical
+audio/radio qualification remains outstanding. The following regular-mode
+description and its settings do not apply to Fast.
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.

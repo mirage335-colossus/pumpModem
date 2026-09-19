@@ -1,0 +1,178 @@
+#include "datapump/fast/session.hpp"
+#include "datapump/fast/codec.hpp"
+#include "datapump/fast/modem.hpp"
+#include "datapump/audio.hpp"
+#include <algorithm>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
+
+namespace datapump::fast {
+namespace {
+using Clock=std::chrono::steady_clock;
+void check_settings(const Settings& s) {
+    validate(s.profile);
+    if(s.device.empty())throw Error("Select a fast audio device");
+    if(s.quota_bytes<65536||s.quota_bytes>16ULL*1024*1024*1024)
+        throw Error("Fast storage quota must be 64 KiB..16 GiB");
+}
+void check_format(const Settings& s,const audio::StreamFormat& f) {
+    const auto high=s.profile.carrier_hz+s.profile.symbol_rate*(1+s.profile.rolloff)/2;
+    if(high>f.usable_passband_hz)throw Error("Fast waveform exceeds this audio device's usable passband");
+}
+}
+struct Session::Impl {
+    mutable std::mutex mutex;
+    Settings settings;
+    Snapshot current;
+    std::jthread worker;
+    bool closing=false;
+    Clock::time_point started{};
+
+    ~Impl() {worker.request_stop();if(worker.joinable())worker.join();}
+    template<class F> void update(F action) {
+        std::lock_guard lock(mutex);action(current);
+        current.elapsed_seconds=std::chrono::duration<double>(Clock::now()-started).count();
+        current.goodput_bps=current.elapsed_seconds>0?8.0*static_cast<double>(current.source_bytes)/current.elapsed_seconds:0;
+        ++current.revision;
+    }
+    void receive(std::stop_token stop,const Settings& s) {
+        StreamDecoder decoder(s.profile,*s.key,s.quota_bytes);
+        Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);});
+        std::mutex queue_mutex;std::condition_variable_any changed;
+        std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
+        bool done=false,overrun=false;std::string capture_error;
+        std::jthread capture([&](std::stop_token capture_stop) {
+            try {
+                audio::capture(s.profile.sample_rate,s.device,[&](std::span<const float> samples) {
+                    std::lock_guard lock(queue_mutex);
+                    // One second is a fixed local queue bound. Capture never
+                    // waits for DSP/disk and never silently concatenates a gap.
+                    if(samples.size()>s.profile.sample_rate-queued_samples) {
+                        overrun=true;changed.notify_all();return false;
+                    }
+                    queue.emplace_back(samples.begin(),samples.end());queued_samples+=samples.size();
+                    changed.notify_all();return !stop.stop_requested();
+                },capture_stop,[&](const auto& format){check_format(s,format);});
+            } catch(const std::exception& e) {
+                std::lock_guard lock(queue_mutex);if(!capture_stop.stop_requested()&&!stop.stop_requested())capture_error=e.what();
+            }
+            {std::lock_guard lock(queue_mutex);done=true;}changed.notify_all();
+        });
+        std::stop_callback cancel_capture(stop,[&]{capture.request_stop();changed.notify_all();});
+        while(!stop.stop_requested()) {
+            std::vector<float> samples;
+            {
+                std::unique_lock lock(queue_mutex);
+                changed.wait(lock,stop,[&]{return done||overrun||!queue.empty();});
+                if(stop.stop_requested())break;
+                if(overrun)throw Error("Fast capture overrun: missing sample time; transfer incomplete");
+                if(queue.empty()) {
+                    if(!capture_error.empty())throw Error(capture_error);
+                    if(done)break;
+                    continue;
+                }
+                samples=std::move(queue.front());queue.pop_front();queued_samples-=samples.size();
+            }
+            receiver.push(samples);
+            const auto dsp=receiver.progress();const auto coding=decoder.snapshot();
+            update([&](auto& out) {
+                out.intervals=coding.intervals;out.authenticated_groups=coding.authenticated_groups;
+                out.corrected_bytes=coding.corrected_bytes;out.erased_bytes=coding.erased_bytes;
+                out.evm=dsp.evm;out.carrier_error_hz=dsp.carrier_error_hz;out.clock_error_ppm=dsp.clock_error_ppm;
+                out.status=dsp.acquired?"Receiving fast stream; file pending":"Listening for fast APSK training";
+            });
+            if(dsp.physical_complete)break;
+        }
+        capture.request_stop();capture.join();
+        receiver.finish();
+        const bool end=!stop.stop_requested()&&receiver.progress().physical_complete;
+        decoder.finish(end);
+        const auto result=decoder.snapshot();
+        update([&](auto& out) {
+            out.physical_complete=end;out.complete=result.complete;out.source_bytes=result.source_bytes;
+            out.file=decoder.result();out.status=result.status;
+            if(end&&!result.complete)out.error=result.status;
+        });
+    }
+    void send(std::stop_token stop,const Settings& s,const std::filesystem::path& path) {
+        std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
+        if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
+        if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
+        auto input=file_source(path);std::uint64_t read_bytes=0;
+        StreamEncoder encoder(s.profile,*s.key,[&](std::span<std::uint8_t> bytes) {
+            const auto count=input(bytes);
+            if(count>s.quota_bytes-read_bytes)throw Error("Fast source grew beyond local storage quota");
+            read_bytes+=count;return count;
+        });
+        Transmitter transmitter(s.profile,[&](std::span<std::uint8_t> bits) {
+            if(stop.stop_requested())return false;
+            return encoder.next_interval(bits);
+        });
+        // The playback producer is bounded; unlike capture it can wait for the
+        // source reader. No full source, waveform or bit-vector is retained.
+        auto silence=static_cast<std::uint64_t>(s.profile.sample_rate)*25/4;
+        audio::playback(s.profile.sample_rate,s.device,[&](std::span<float> output) {
+            if(stop.stop_requested())return std::size_t{0};
+            auto count=transmitter.read(output);
+            if(!count&&silence) {
+                count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),silence));
+                std::fill_n(output.begin(),count,0);silence-=count;
+            }
+            update([&](auto& out) {
+                out.source_bytes=encoder.source_bytes();out.intervals=encoder.intervals_emitted();
+                out.status="Transmitting fast encrypted file";
+            });
+            return count;
+        },stop,[&](const auto& format){check_format(s,format);},s.mono);
+        update([&](auto& out) {
+            out.status=stop.stop_requested()?"Transmission cancelled":"Transmission sent; receiver observes physical absence";
+            // A sender cannot claim remote reception or authentication.
+            out.complete=false;
+        });
+    }
+    void launch(bool tx,const std::filesystem::path& path={}) {
+        Settings s;
+        {
+            std::lock_guard lock(mutex);
+            if(closing)throw Error("Fast session is closing");
+            if(current.active)throw Error("Fast audio is already active");
+            check_settings(settings);if(!settings.key)throw Error("Fast mode requires an encryption key");
+            s=settings;
+            const auto revision=current.revision+1;current={};current.revision=revision;
+            current.active=true;current.transmitting=tx;current.listening=!tx;
+            current.status=tx?"Preparing fast file transmission":"Opening fast audio input";started=Clock::now();
+        }
+        if(worker.joinable())worker.join();
+        worker=std::jthread([this,s=std::move(s),tx,path](std::stop_token stop) {
+            try {if(tx)send(stop,s,path);else receive(stop,s);}
+            catch(const std::exception& e) {update([&](auto& out){if(!stop.stop_requested())out.error=e.what();out.status="Fast transfer incomplete";});}
+            update([&](auto& out) {
+                out.cancelled=stop.stop_requested();
+                if(out.cancelled){out.complete=false;out.file.reset();out.status="Cancelled; transfer incomplete";}
+                out.active=false;out.transmitting=false;out.listening=false;
+            });
+        });
+    }
+};
+Session::Session():impl_(std::make_unique<Impl>()){}
+Session::~Session()=default;
+void Session::configure(const Settings& s) {
+    check_settings(s);std::lock_guard lock(impl_->mutex);
+    if(impl_->current.active)throw Error("Stop fast audio before changing its settings");
+    impl_->settings=s;
+}
+void Session::transmit(const std::filesystem::path& source){impl_->launch(true,source);}
+void Session::listen(){impl_->launch(false);}
+void Session::cancel(){impl_->worker.request_stop();}
+Snapshot Session::poll() const {std::lock_guard lock(impl_->mutex);return impl_->current;}
+void Session::save(const std::filesystem::path& destination) const {
+    auto result=poll();if(!result.complete||!result.file)throw Error("No complete fast file is available");
+    result.file->save(destination);
+}
+bool Session::active() const {std::lock_guard lock(impl_->mutex);return impl_->current.active;}
+void Session::close(){std::lock_guard lock(impl_->mutex);impl_->closing=true;impl_->worker.request_stop();}
+bool Session::ready_to_close() const{return !active();}
+}

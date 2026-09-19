@@ -25,6 +25,9 @@ public:
     void start();
     void poll();
     void close();
+    // Idle-only audio handoff for the mode host; pending reception is retained.
+    bool try_suspend_capture();
+    void resume_capture();
     bool closing() const;
     bool ready_to_close() const;
     void edit(ui::Field field, std::string text);

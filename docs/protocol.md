@@ -1,5 +1,9 @@
 # Fixed-interval pattern stream
 
+This document specifies regular mode. The independent
+[Fast APSK stream](fast-mode.md) has its own fixed geometry and IV cipher;
+it does not change any wire behavior specified here.
+
 The modem transports opaque source bytes using one bit per pattern symbol.
 There are no packets, received integer lengths, variable modem headers, packet
 IDs, repeat flags, bootstrap CRCs, or whole-stream integrity footers. An optional

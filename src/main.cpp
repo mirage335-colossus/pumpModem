@@ -1,4 +1,5 @@
 #include "datapump/audio.hpp"
+#include "datapump/fast/cli.hpp"
 #include "datapump/channel.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <array>
@@ -58,6 +59,10 @@ Usage: pump COMMAND [OPTIONS]
   status-tx    Transmit exact few-bit callsign to WAV, without stream overhead
   status-rx    Discover raw pattern bits in WAV, then compare --bits; no MAC
   qr           Generate optical transfer QR Level L (--format svg|pbm)
+  fast-info    Separate fast APSK profiles and fixed-interval geometry
+  fast-tx      Stream encrypted files to WAV or audio (--help for fast options)
+  fast-rx      Receive an encrypted fast WAV; physical absence required
+  fast-listen  Receive an encrypted fast stream from live audio
 
 Input/output:
   --text TEXT           Text to send (otherwise --input FILE or - for stdin)
@@ -851,6 +856,7 @@ int main(int argc,char** argv) {
 #ifdef _WIN32
         _setmode(_fileno(stdin),_O_BINARY);_setmode(_fileno(stdout),_O_BINARY);
 #endif
+        if(argc>1&&std::string_view(argv[1]).starts_with("fast-"))return fast::cli_main(argc,argv);
         Args a(argc,argv);
         if(a.has("version")) {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<'\n';return 0;}
         if(a.has("help") || a.command.empty()) {std::cout<<usage;return 0;}

@@ -15,7 +15,7 @@ int run_native_probes() {
     Launch launch;launch.color=false;launch.simulation=true;launch.page=ui::pages().front().id;
     configure_theme(launch.color);std::vector<void*> windows;
     {
-        RevApp probe(windows,launch);probe.verify_developer_mode_visibility();
+        RevApp probe(windows,launch);probe.verify_fast_mode_visibility();probe.verify_developer_mode_visibility();
     }
     {
         RevApp probe(windows,launch);probe.verify_document_editor_scrolling();probe.verify_launch_command_editor();probe.verify_inline_document_editor();

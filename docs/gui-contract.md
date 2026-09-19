@@ -25,6 +25,25 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+**Fast**, beside **DATA PUMP** at the upper left, switches the full interface
+between the regular controller and the separate `src/gui/fast` controller.
+Shared declarations carry regular/Fast/shared scope; native adapters contain
+no mode-specific behavior. The default is regular. Its draft, selected page,
+keys, settings and received rows survive a round trip through Fast, and admitted
+pending reception continues to be polled while hidden. Hidden controls cannot
+dispatch edits/actions; asynchronous native service replies retain their owner
+and mode generation and are cancelled if stale.
+
+Fast exposes file, key, channel, constellation, convolutional and RS settings,
+audio routing, transmit/listen/cancel/save and transfer metrics/history.
+Completed authentication and physical end are required before saving. Its
+regression simulator has no GUI control. Starting Fast obtains idle audio
+ownership without cancelling a pending regular reception. Active Fast work
+continues if the view changes back, with regular controls disabled until it
+finishes. See [Fast operation and audio ownership](fast-mode.md).
+
+The controls and message presentation described below belong to regular mode.
+
 **Developer mode** is a persistent checkbox immediately left of **Clear received**
 and starts unchecked. It hides Pattern / tone, Error correction, DSP workspace,
 RX targets, Pattern steps, Callsign, Grid and Repeatable in place, together with

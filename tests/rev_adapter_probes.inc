@@ -1,4 +1,28 @@
 // Included inside RevApp only by the native conformance executable.
+    void verify_fast_mode_visibility() {
+        const auto require=[](bool value,const char* message) {if(!value)throw std::runtime_error(message);};
+        const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
+        const auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& b){return b.control.field==ui::Field::fast_mode;});
+        require(found!=bindings.end()&&found->toggle,"Rev Fast toggle was not materialized");
+        auto* toggle=found->toggle;application.edit(ui::Field::binary,"001");settle();
+        for(bool fast:{true,false,true,false}) {
+            re::Event click;toggle->checkbox->click(click);settle();
+            require(application.field(ui::Field::fast_mode).checked==fast&&allows_input(toggle),"Rev Fast toggle callback failed or hid itself");
+            for(auto& b:bindings) {
+                if(b.control.scope==ui::ScreenScope::fast) {
+                    require(b.element->resolved.hidden==!fast,"Rev Fast surface did not reconcile complete control visibility");
+                    if(fast)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
+                        b.element->rect.x+b.element->rect.w<=details.size.width&&b.element->rect.y+b.element->rect.h<=details.size.height,
+                        "Rev Fast native control escaped its viewport");
+                    else if(b.button) {re::Event stale;b.button->click(stale);}
+                } else if(fast&&b.control.scope==ui::ScreenScope::regular)
+                    require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
+            }
+            if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden,"Rev Fast retained regular tabs");
+            require(application.field(ui::Field::binary).text=="001"&&application.take_services().empty(),
+                "Rev mode switching or stale callbacks changed the regular source or opened a service");
+        }
+    }
     void verify_developer_mode_visibility() {
         const auto require=[](bool condition,const char* message) {if(!condition)throw std::runtime_error(message);};
         const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
@@ -1190,7 +1214,12 @@
             if(overlay_view->element->parent!=this||overlay_view->element->shared!=shared||overlay_view->element->rect.x!=0||overlay_view->element->rect.y!=0||
                overlay_view->element->rect.w!=details.size.width||overlay_view->element->rect.h!=details.size.height||
                overlay_bitmap().bitmap->width!=static_cast<unsigned>(width)||overlay_bitmap().bitmap->height!=static_cast<unsigned>(height))
-                throw std::runtime_error("Rev expanded bitmap does not fill the existing app client area");
+                throw std::runtime_error("Rev expanded bitmap does not fill the existing app client area: overlay="+
+                    std::to_string(overlay_view->element->rect.x)+","+std::to_string(overlay_view->element->rect.y)+","+
+                    std::to_string(overlay_view->element->rect.w)+","+std::to_string(overlay_view->element->rect.h)+
+                    " client="+std::to_string(details.size.width)+","+std::to_string(details.size.height)+
+                    " bitmap="+std::to_string(overlay_bitmap().bitmap->width)+","+std::to_string(overlay_bitmap().bitmap->height)+
+                    " expected="+std::to_string(width)+","+std::to_string(height));
         };
         const auto verify_visible_pixels=[&](const char* phase) {
             auto& binding=overlay_bitmap();auto* bitmap=binding.bitmap;

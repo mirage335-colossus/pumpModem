@@ -342,6 +342,41 @@ void estimate_warning_colors() {
     }
     theme::apply_palette();
 }
+void fast_mode_visibility() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Fast fixture has no native window");
+    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Fast"));
+    auto* choose=find_button(*window,"Choose file…");auto* transmit=find_button(*window,"Transmit file");
+    auto* listen=find_button(*window,"Listen");auto* regular=find_button(*window,"Transmit");
+    require(toggle&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+        Fl::flush();
+    };
+    app.application.edit(ui::Field::binary,"001");
+    for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);refresh();
+        toggle->value(1);toggle->do_callback();refresh();
+        require(app.application.field(ui::Field::fast_mode).checked&&toggle->visible_r()&&choose->visible_r()&&
+            transmit->visible_r()&&listen->visible_r()&&!listen->active_r()&&!regular->visible_r(),
+            "Fast click did not replace the native interface or enforce its encryption gate");
+        for(const auto& page:ui::pages())require(!find_button(*window,page.title)->visible_r(),"Fast view retained a regular native tab");
+        require(choose->x()+choose->w()<=window->w()&&choose->y()+choose->h()<=window->h(),"Fast native file control escaped the viewport");
+        const auto draft=app.application.field(ui::Field::binary).text;
+        regular->do_callback();refresh();
+        require(app.application.field(ui::Field::binary).text==draft,"Hidden regular native action changed its exact draft");
+        // Render the entire replacement surface with the native drawing path.
+        Fl_Image_Surface surface(window->w(),window->h());Fl_Surface_Device::push_current(&surface);
+        surface.draw(window);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
+        require(image&&image->w()==window->w()&&image->h()==window->h(),"Fast native surface failed to render");
+        toggle->value(0);toggle->do_callback();refresh();
+        require(!choose->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
+            "Returning from Fast did not restore the native regular interface and source");
+        choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
+    }
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void developer_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=Fl::first_window();require(window,"Developer mode fixture has no native window");
@@ -1246,6 +1281,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

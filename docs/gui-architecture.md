@@ -12,6 +12,7 @@ removed.
 | Shared module | Responsibility |
 | --- | --- |
 | `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
+| `application.cpp`, `fast/controller.*`, `fast/screen.*` | Shared mode host and independent Fast state/screen. Both engines remain polled; native service routes retain owner/generation and idle audio ownership prevents overlap. Regular waveform and pending-reception policy remain in the existing controller/service. |
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |

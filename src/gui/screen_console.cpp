@@ -1,4 +1,5 @@
 #include "ui_contract.hpp"
+#include "fast/screen.hpp"
 namespace datapump::gui::ui {
 namespace {
 Control placed(Control control, Slot slot, Menu menu=Menu::none) {
@@ -15,7 +16,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.menu_label="Recovery";control.font_size=11;
         control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
     }
-    if(slot==Slot::header)control.font_size=22;
+    if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
+    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Switch between the independent regular and fast interfaces. Active transfers continue in their original mode.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -127,8 +129,10 @@ const std::vector<PageDefinition>& pages() {
     return definitions;
 }
 const std::vector<Control>& console_screen() {
-    static const std::vector<Control> controls{
+    static const std::vector<Control> controls=[] {
+      std::vector<Control> result{
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::console,0,"DATA PUMP"}, Slot::header),
+        placed({Kind::toggle,Field::fast_mode,Command::none,Bitmap::none,Page::console,0,"Fast"}, Slot::fast_mode),
         placed({Kind::label,Field::mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::mode),
         placed({Kind::toggle,Field::developer_mode,Command::none,Bitmap::none,Page::console,0,"Developer mode"}, Slot::developer_mode),
         placed({Kind::action,Field::count,Command::clear_received,Bitmap::none,Page::console,0,"Clear received"}, Slot::clear),
@@ -218,7 +222,10 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::resume_recovery,Bitmap::none,Page::compression,5,"Resume search"}, Slot::raw_recovery_actions, Menu::recovery),
         placed({Kind::action,Field::count,Command::cancel_recovery,Bitmap::none,Page::compression,5,"Cancel search"}, Slot::raw_recovery_actions, Menu::recovery),
         placed({Kind::label,Field::received_raw_bits,Command::none,Bitmap::none,Page::compression,6,""}, Slot::received_raw_bits),
-    };
+      };
+      const auto& fast=fast_ui::screen();result.insert(result.end(),fast.begin(),fast.end());
+      return result;
+    }();
     return controls;
 }
 }

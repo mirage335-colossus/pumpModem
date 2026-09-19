@@ -14,7 +14,7 @@ inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
 enum class Slot {
-    none, header, mode, developer_mode, clear, callsign, grid, repeatable, simulation,
+    none, header, fast_mode, mode, developer_mode, clear, callsign, grid, repeatable, simulation,
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, simulation_oscillator_detail, lpi_estimate, key_actions,
@@ -28,11 +28,15 @@ enum class Slot {
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
+    fast_heading, fast_profile, fast_constellation, fast_coding, fast_fec, fast_device, fast_mono,
+    fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_file, fast_choose_file,
+    fast_transmit, fast_listen, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
+    fast_correction, fast_auth, fast_detail, fast_history, fast_status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
     switch (slot) {
-    case Slot::header: case Slot::mode: case Slot::developer_mode: case Slot::clear:
+    case Slot::header: case Slot::fast_mode: case Slot::mode: case Slot::developer_mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::link_power: case Slot::link_loss: case Slot::link_noise:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
@@ -66,10 +70,40 @@ struct DesktopLayout {
         const int header_rows = oscillator_row_height + lpi_row_height +
             (simulation_estimates_visible ? simulation_estimate_row_height : 0);
         const int content_height = height - header_rows;
-        out[Slot::header] = {margin, 10, 220, 32};
-        out[Slot::mode] = {235, 13, width - 558, 28};
+        out[Slot::header] = {margin, 10, 145, 32};
+        out[Slot::fast_mode] = {169, 12, 70, 28};
+        out[Slot::mode] = {247, 13, width - 570, 28};
         out[Slot::developer_mode] = {width - 313, 12, 150, 28};
         out[Slot::clear] = {width - 153, 12, 137, 28};
+        // Fast controls occupy their own full desktop surface. Their visibility
+        // is selected by the shared application; neither adapter knows modes.
+        const int fast_gap=18,fast_width=width-2*margin;
+        const int fast_column=(fast_width-3*fast_gap)/4;
+        out[Slot::fast_heading]={margin,61,fast_width,44};
+        out[Slot::fast_profile]={margin,137,fast_column,field_height};
+        out[Slot::fast_constellation]={margin+fast_column+fast_gap,137,fast_column,field_height};
+        out[Slot::fast_coding]={margin+2*(fast_column+fast_gap),137,fast_column,field_height};
+        out[Slot::fast_fec]={margin+3*(fast_column+fast_gap),137,fast_column,field_height};
+        out[Slot::fast_device]={margin,196,2*fast_column+fast_gap,field_height};
+        out[Slot::fast_mono]={margin+2*(fast_column+fast_gap),195,fast_column,28};
+        out[Slot::fast_key]={margin,255,2*fast_column+fast_gap,field_height};
+        out[Slot::fast_open_key]={margin+2*(fast_column+fast_gap),254,fast_column,action_height};
+        out[Slot::fast_generate_key]={margin+3*(fast_column+fast_gap),254,fast_column,action_height};
+        out[Slot::fast_key_path]={margin,291,fast_width,24};
+        out[Slot::fast_file]={margin,344,fast_width-fast_column-fast_gap,field_height};
+        out[Slot::fast_choose_file]={margin+3*(fast_column+fast_gap),343,fast_column,action_height};
+        out[Slot::fast_transmit]={margin,397,fast_column,action_height};
+        out[Slot::fast_listen]={margin+fast_column+fast_gap,397,fast_column,action_height};
+        out[Slot::fast_cancel]={margin+2*(fast_column+fast_gap),397,fast_column,action_height};
+        out[Slot::fast_save]={margin+3*(fast_column+fast_gap),397,fast_column,action_height};
+        out[Slot::fast_progress]={margin,453,fast_width,36};
+        out[Slot::fast_rate]={margin,501,fast_width,28};
+        out[Slot::fast_tracking]={margin,541,fast_width,28};
+        out[Slot::fast_correction]={margin,581,fast_width,28};
+        out[Slot::fast_auth]={margin,621,fast_width,28};
+        out[Slot::fast_detail]={margin,670,fast_width,64};
+        out[Slot::fast_history]={margin,766,fast_width,std::max(90,height-826)};
+        out[Slot::fast_status]={margin,height-43,fast_width,27};
         out[Slot::callsign] = {margin, 62, 115, field_height};
         out[Slot::grid] = {142, 62, 85, field_height};
         out[Slot::repeatable] = {238, 61, 119, 28};
@@ -239,7 +273,7 @@ struct DesktopLayout {
         out[Slot::status] = {margin, content_height - 31, width - 2 * margin, 24};
         // Reserve clock and computation rows above every page. Lower settings
         // remain anchored to the window's bottom edge.
-        for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<slots.size();++index)
+        for(std::size_t index=static_cast<std::size_t>(Slot::tabs);index<static_cast<std::size_t>(Slot::fast_heading);++index)
             slots[index].y+=header_rows;
     }
 };

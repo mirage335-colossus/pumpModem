@@ -4,6 +4,127 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Independent Fast APSK mode — 19 September 2026
+
+Fast is implemented in a separate codec, sampled modem, streaming session and
+GUI controller. The [Fast specification](fast-mode.md) records the actual
+fixed 256-byte coded intervals, crypto domains, coding cycles, source endpoint,
+channel profiles, commands and limits. Production build/CTest dependency guards
+reject cross-imports between regular and Fast DSP. Regular short-message wire
+vectors, encryption streams, symbol admission and pending/end rules are unchanged.
+The regular live service adds explicit idle-device suspension; sampled tests
+show that a pending regular `001` reception refuses suspension and remains
+pending, and that acknowledgment waits for actual capture closure.
+
+New codec coverage includes independently generated K=7/puncturing vectors,
+CBC/HKDF/HMAC known answers and a complete independent wire fingerprint, all
+coding rates and RS choices, canonical source boundaries, errors/erasures,
+wrong keys, changed IV/ciphertext/tags, lost/reordered intervals, physical-end
+gating and exact combined-spool quota limits. A 2 MiB streamed codec test passed
+in 4.41 seconds at approximately 11,004 KiB process peak RSS. The codec also
+passed AddressSanitizer/UndefinedBehaviorSanitizer; LeakSanitizer was disabled
+because leak checking is unavailable under this container's tracing environment.
+
+Sampled DSP and integrated file tests cover all four profiles and constellations,
+fractional start timing, 44.1 kHz samples, chunk-size invariance, 100 ppm clock
+offset, AWGN, hum/harmonics/narrowband interference, phase slips, noise/tone
+rejection, exact encrypted binary files, EOF without sufficient absence and
+missing final intervals. Selected 1/10/50 ms erasure fixtures and a 10 ms additive
+sound effect recover; a destructive 500 ms interruption fails closed. Intermediate
+100/250 ms cases must either return exact authenticated bytes or no completed file.
+This does not establish recovery from arbitrary interference.
+
+Production-random S16 WAV tests cover empty/binary sources, trailing zeros,
+wrong keys, malformed/bounded RIFF input, trimmed silence, quota/cancellation
+cleanup and exclusive output creation. CLI tests use an actual production-size
+128 MiB keyring, two named keys, all profile/constellation/rate choices, invalid
+settings, encrypted WAV transfer, wrong-key rejection and overwrite refusal.
+No test keys or fixture entropy enter production settings.
+
+The SNR tool uses measured waveform power and in-band AWGN normalized to the
+declared RRC bandwidth. It runs independently of regular simulation and emits
+all 23 levels from 10 to 120 dB in 5 dB steps. Recorded seed-417, 1,024-byte
+results are checked in as [wire](validation-data/fast/wire.csv),
+[SSB](validation-data/fast/ssb.csv), [FM](validation-data/fast/fm.csv) and
+[acoustic](validation-data/fast/acoustic.csv). Wire/SSB default 16-APSK recover
+22/23 exactly (10 dB fails closed); FM/acoustic QPSK recover 23/23. These 92
+samples are regression fixtures, not statistically qualified error-rate curves.
+The registered `fast_snr` CTest passed in 148.47 seconds, checking the full
+92-case matrix, numeric bounds, option-order independence and exact completion.
+
+The [2 MiB sampled transfer](validation-data/fast/wire-2m.csv) uses wire,
+256-APSK, rate 7/8, robust RS, depth 16, seed 417 and 60 dB SNR. All 15,941
+intervals and every source byte recovered exactly. File goodput including
+six seconds of physical absence was **44,139.9 bit/s** over about 381 seconds
+of audio; execution took 33.82 seconds wall/33.67 seconds CPU in this environment.
+Reported modem plus soft-buffer workspace was 313,944 bytes and combined spool
+storage 4,456,960 bytes. The former excludes other codec/device allocations and
+is not total process RSS. Some 509-sample receive calls exceeded their 10.6 ms
+audio duration (maximum 22.4 ms, 838 occurrences), so average throughput alone
+does not establish a hard real-time callback guarantee. The live capture queue
+separates these decode bursts from audio capture and fails explicitly on overrun.
+
+A separate [production 16-bit WAV run](validation-data/fast/wire-2m-s16.json)
+transferred 2 MiB containing every byte value through `pump fast-tx` and
+`fast-rx`, with an actual keyring and production-random salt/IVs. The source and
+saved destination SHA-256 values matched. At 256-APSK/rate 7/8 it recovered all
+15,941 intervals, corrected one byte, and measured 44,132 bit/s source goodput;
+the TX-plus-RX command pair took 23.20 seconds and produced a 36,512,846-byte
+S16 WAV. `fast_files` now retains a 32 KiB version of this dense S16 regression
+in addition to its QPSK/error tests; that final suite passed in 0.67 seconds.
+
+Both Release GUI builds succeeded. Shared Fast tests cover view switching,
+regular draft/page retention, ongoing hidden regular simulation, encryption
+gating, stale callbacks/service replies, and fixed control layout. FLTK adapter
+and document conformance pass. Rev adapter conformance passes at scale 1;
+platform/clipboard and the standard coordinate suites pass at scales 1 and 2.
+Default/minimum-size Fast screenshots were reviewed for fit and readability.
+After final GUI refinements, `gui_fast`, `gui_application`, `gui_controller`
+and `fast_boundary` passed 4/4 in 74.03 seconds.
+An additional full Rev adapter run at scale 2 reached an existing planner
+document clipping assertion and failed; no baseline comparison established its
+cause. The standard scale-2 coordinate test passed, and no assertion was weakened.
+An earlier unforced fractional-DPI Rev run failed the exact-size QR probe;
+the standard scale-1 run passed with explicit `REV_SCALE=1`.
+
+The FLTK production workflow initially reached its unchanged 300-second limit
+in phase 17 while the long calibration and other GUI work competed for CPU.
+After all other tests stopped, the isolated workflow passed without source or
+timeout changes, covering key generation/reload, text/file transfer and saves,
+binary editing, cancellation, retained results, plots and page switching.
+The subsequent isolated Rev workflow at scale 1 completed keys, text and
+attachment receive/save, then reached the unchanged 300-second limit in phase
+17 while transmitting sampled audio to the independent receiver. Existing
+validation history reports the same phase, but no baseline rerun establishes
+causality for this attempt. Rev's full production workflow remains a validation
+limit despite passing standard adapter/platform/coordinate conformance.
+Evidence was retained in `/tmp/datapump-fast-fltk-isolated-final` and
+`/tmp/datapump-fast-rev-isolated-final`; all test processes exited.
+
+Reproduction commands (display-dependent tests require a private X display):
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DDATAPUMP_TEST_NATIVE_GUI=ON
+cmake --build build --parallel 3
+ctest --test-dir build --output-on-failure -j 3 \
+  -E '^(gui_workflow|gui_adapter_conformance|gui_document_conformance)$'
+./build/fast_regression --profile wire --bytes 1024 --seed 417
+./build/fast_regression --profile ssb --bytes 1024 --seed 417
+./build/fast_regression --profile fm --bytes 1024 --seed 417
+./build/fast_regression --profile acoustic --bytes 1024 --seed 417
+./build/fast_regression --profile wire --apsk 256 --code-rate 7/8 \
+  --bytes 2097152 --snr 60 --seed 417 --require-success
+```
+
+The full headless run passed **86/86** in 1,487.80 seconds, including every
+development-contract suite. The unchanged differential receiver probability
+calibration took 1,192.80 seconds. Together with the subsequently registered
+`fast_snr`, all 87 distinct headless checks pass. Native workflow limitations
+are recorded above separately. Physical DAC/ADC, IC-7100/FM/SSB radio, loudspeaker paths, RF masks,
+and Windows audio/native GUI execution have not been qualified by these tests.
+Whole-stream replay is not prevented; no adversarial-security certification is
+claimed. Fast has no LPI claim and does not modify regular private waveforms.
+
 ## Joint differential reception probability — 19 September 2026
 
 The selected estimate now samples all eligible detector branches jointly. It

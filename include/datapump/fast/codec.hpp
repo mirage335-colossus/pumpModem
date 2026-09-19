@@ -1,0 +1,97 @@
+#pragma once
+
+#include "datapump/crypto.hpp"
+#include "datapump/fast/profile.hpp"
+#include <cstdint>
+#include <filesystem>
+#include <functional>
+#include <memory>
+#include <span>
+#include <string>
+
+namespace datapump::fast {
+
+using SourceReader = std::function<std::size_t(std::span<std::uint8_t>)>;
+class StreamEncoder;
+namespace testing {
+// Reproducible regression waveform only. Never selected by production settings.
+StreamEncoder deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t seed);
+}
+// Readers return zero only at EOF. They never receive a remotely chosen size.
+SourceReader file_source(const std::filesystem::path&);
+std::size_t cycle_intervals(const Profile&);
+std::size_t ciphertext_bytes(const Profile&);
+
+class ReceivedFile {
+public:
+    ~ReceivedFile();
+    std::uint64_t size() const;
+    Bytes preview(std::size_t maximum = 4096) const;
+    // Exclusive creation: an existing destination is never overwritten.
+    void save(const std::filesystem::path&) const;
+private:
+    struct Impl;
+    std::shared_ptr<Impl> impl_;
+    explicit ReceivedFile(std::shared_ptr<Impl>);
+    friend class StreamDecoder;
+};
+
+struct DecodeSnapshot {
+    bool physical_end = false, complete = false, failed = false;
+    std::uint64_t intervals = 0, authenticated_groups = 0, source_bytes = 0;
+    std::uint64_t corrected_bytes = 0, erased_bytes = 0, spool_bytes = 0;
+    std::string status = "Waiting for fast stream";
+};
+
+class StreamEncoder {
+public:
+    StreamEncoder(Profile, const Crypto&, SourceReader);
+    ~StreamEncoder();
+    StreamEncoder(StreamEncoder&&) noexcept;
+    StreamEncoder& operator=(StreamEncoder&&) noexcept;
+    bool next_interval(std::span<std::uint8_t> bits);
+    std::uint64_t source_bytes() const;
+    std::uint64_t intervals_emitted() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+    StreamEncoder(Profile,const Crypto&,SourceReader,std::function<Bytes(std::size_t)>);
+    friend StreamEncoder testing::deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t);
+};
+
+class StreamDecoder {
+public:
+    StreamDecoder(Profile, const Crypto&, std::uint64_t spool_quota = 1024ULL*1024*1024);
+    ~StreamDecoder();
+    StreamDecoder(StreamDecoder&&) noexcept;
+    StreamDecoder& operator=(StreamDecoder&&) noexcept;
+    // Positive soft values mean one; zero means an unknown timed position.
+    void push_interval(std::span<const float> soft_bits);
+    // Only the DSP's observed six-second absence event may pass true here.
+    // EOF/cancellation pass false and cannot make a source available.
+    void finish(bool physical_end);
+    DecodeSnapshot snapshot() const;
+    std::shared_ptr<const ReceivedFile> result() const;
+private:
+    struct Impl;
+    std::unique_ptr<Impl> impl_;
+};
+
+namespace coding {
+// K=7, generators 0171 then 0133, MSB-first bytes, six zero tail bits.
+// Puncture pairs: 1/2 [11], 3/4 [11,10,01], 7/8 [11,10,10,10,01,01,01].
+// Each cycle restarts at state/phase zero and pads with zero coded bits.
+Bytes encode(std::span<const std::uint8_t> bytes, CodeRate);
+struct Decoded { Bytes bytes, unreliable; };
+Decoded decode(std::span<const float> soft, std::size_t source_bytes, CodeRate);
+}
+
+namespace testing {
+// Deterministic wire-vector hooks; production always obtains salt/IV from RAND.
+Bytes seal_group(const Profile&, const Crypto&, std::span<const std::uint8_t> salt,
+    std::uint64_t ordinal, std::span<const std::uint8_t> iv,
+    std::span<const std::uint8_t> plaintext);
+Bytes open_group(const Profile&, const Crypto&, std::span<const std::uint8_t> salt,
+    std::uint64_t ordinal, std::span<const std::uint8_t> systematic);
+}
+}

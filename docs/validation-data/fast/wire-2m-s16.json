@@ -1,0 +1,24 @@
+{
+  "profile": "wire",
+  "apsk": 256,
+  "code_rate": "7/8",
+  "rs": "robust",
+  "interleave_depth": 16,
+  "sample_rate": 48000,
+  "source_fixture": "bytes 0..255 repeated 8192 times",
+  "source_bytes": 2097152,
+  "wav_bytes": 36512846,
+  "entropy": "production OpenSSL random salt and IVs",
+  "exact_sha256_match": true,
+  "wall_seconds": 23.201158130075783,
+  "receive": {
+    "complete": true,
+    "physical_complete": true,
+    "intervals": 15941,
+    "authenticated_groups": 13408,
+    "corrected_bytes": 1,
+    "erased_bytes": 0,
+    "evm": 0.00463201,
+    "goodput_bps": 44132
+  }
+}

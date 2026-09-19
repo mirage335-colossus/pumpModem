@@ -10,8 +10,12 @@ remain usable. These paths and per-bit pending reception are
 [Test execution results](validation.md) distinguish measured results from design
 and source-level checks.
 
+Unless a row explicitly names Fast, the modem/transport descriptions below
+describe regular mode. Its compatibility requirements remain unchanged.
+
 | Requirement | Implemented behavior / current boundary |
 | --- | --- |
+| Independent Fast mode | Upper-left Fast toggle replaces the regular interface with encrypted file transfer. Independent APSK DSP, CBC/HMAC codec, fixed 2,048-coded-bit intervals, convolutional/RS/interleaved coding, bounded streaming audio/files and four local channel profiles. Separate SNR-only regression tool. No received lengths, packet parser, regular search/recovery dependency, adaptive rate negotiation or LPI claim. See [Fast format and validation limits](fast-mode.md). |
 | Portable compiled modem | C++20 CLI and default FLTK GUI share the transfer/streaming service and OpenSSL 3. Optional Rev uses C++23 and the shared controller/bitmap boundary; its Linux software-OpenGL profile is tested. Linux ALSA is dynamically optional; Windows uses WinMM. No Python or Tk runtime dependency. See [Rev boundaries](rev-backend.md); Windows hardware validation remains separate. |
 | Offline installation transfer | CMake/CPack collects compiled executables and native libraries. Bundled FLTK, OpenSSL and release C++ runtimes default to static linking. Moving a release needs no interpreter or package download. OS/CPU/glibc compatibility limits are in [offline-installation.md](offline-installation.md). |
 | Portable CI binaries | GitHub Actions builds and tests Linux and MSVC Windows archives, with static CRT/OpenSSL, relocation, checksum and GUI checks. Linux CI targets glibc 2.35 and checks downloaded copies on Ubuntu 22.04/24.04, rejecting GTK/GLib dependencies. Hosted results require an actual successful workflow run; local newer-glibc builds do not inherit that baseline. |

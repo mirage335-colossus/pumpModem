@@ -17,7 +17,9 @@ enum class Field {
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
-    developer_mode, count
+    developer_mode, fast_mode, fast_profile, fast_constellation, fast_coding, fast_fec,
+    fast_device, fast_mono, fast_key, fast_key_path, fast_file, fast_status,
+    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, count
 };
 enum class Command {
     none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -30,12 +32,14 @@ enum class Command {
     planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
     planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
     planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
-    planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw
+    planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
+    fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
     pattern_evidence, payload_alphabet, reference_alphabet
 };
+enum class ScreenScope { regular, fast, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
 enum class Menu { none, keyfile, recovery };
 enum class TextTone { normal, muted, data, inverse, negative };
@@ -108,6 +112,7 @@ struct Control {
     bool document_only = false; // Materialized only by a document control node.
     bool tab_navigation = false; // Multiline editors may reserve Tab for focus.
     bool developer_only = false; // Hide in place without changing the bound value.
+    ScreenScope scope = ScreenScope::regular;
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

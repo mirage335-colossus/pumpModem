@@ -171,6 +171,11 @@ public:
     // Apply output routing to the next playback without interrupting reception
     // or changing audio already being transmitted.
     void set_mono(bool mono);
+    // Release only idle hardware capture for another local engine. Refuses
+    // pending RX/TX; repeated polls acknowledge actual device closure. Does
+    // not cancel recovery, complete a reception, or change saved settings.
+    bool try_suspend_capture();
+    void resume_capture();
     void transmit(const Message& message);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no interval coding, preamble or FEC. Raw

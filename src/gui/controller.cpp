@@ -1336,6 +1336,12 @@ void Controller::poll() {
     p.controls();
 }
 void Controller::close() { auto& p=*impl_; p.closing=true; p.session.stop(); p.worker.request_stop(); p.pending_services.clear(); p.services.clear(); p.controls(); }
+bool Controller::try_suspend_capture() {
+    auto& p=*impl_;
+    if(p.transmit_requested||p.snapshot.transmitting||p.closing)return false;
+    return !p.started||p.session.try_suspend_capture();
+}
+void Controller::resume_capture() {if(impl_->started&&!impl_->closing)impl_->session.resume_capture();}
 bool Controller::closing() const { return impl_->closing; }
 bool Controller::ready_to_close() const { return impl_->closing&&!impl_->preparing; }
 void Controller::edit(UiField field,std::string text) {

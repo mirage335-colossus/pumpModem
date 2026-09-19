@@ -277,6 +277,7 @@ struct Session::Impl {
     std::array<std::uint8_t,16> reception_namespace{};
     std::atomic<std::uint64_t> pattern_score_observation_id{0};
     bool tx_busy = false;
+    bool capture_suspended=false,source_active=false,receive_pending=false;
     std::optional<Clock::time_point> simulation_compute_started;
     Clock::time_point next_hardware_send{};
     using Transmission = std::variant<Message, Bytes, modem::Noise>;
@@ -368,6 +369,7 @@ struct Session::Impl {
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
     void enqueue(Transmission transmission) {
+        if(capture_suspended)throw Error("Audio is reserved by the other mode");
         if (current.transmitting_noise) throw Error("stop noise before transmitting a message");
         const bool noise = std::holds_alternative<modem::Noise>(transmission);
         if (noise && (tx_busy || !queued.empty())) throw Error("wait for transmission to finish before starting noise");
@@ -492,6 +494,7 @@ struct Session::Impl {
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop();
         decode_stop = std::stop_source{};
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
+        receive_pending=false;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
         input_bytes = receiver_bytes = received_bytes = audio_bytes = 0;
         auto unavailable=unavailable_recovery_events();invalidate_recoveries();
@@ -595,7 +598,7 @@ struct Session::Impl {
     }
     void enqueue_audio(std::span<const float> samples, std::uint64_t version) {
         std::lock_guard lock(mutex);
-        if (!current.running || generation != version) return;
+        if (!current.running || generation != version || capture_suspended) return;
         const auto bytes = samples.size_bytes();
         const auto queue_limit = settings.dsp_workspace_bytes / 8;
         if (bytes > queue_limit) { current.error = "audio callback exceeds streaming workspace"; return; }
@@ -1160,6 +1163,9 @@ struct Session::Impl {
         const auto observation_id = pattern_score_observation_id.load(std::memory_order_relaxed);
         std::lock_guard lock(mutex);
         if (current.running && generation == version && !stop.stop_requested()) {
+            receive_pending=std::any_of(bank.receivers.begin(),bank.receivers.end(),[](const auto& receiver) {
+                return receiver.modem->synchronized();
+            });
             if (simulation_wave) {
                 simulation_wave->pattern_scores = std::move(pattern_scores);
                 simulation_wave->pattern_score_observations = std::move(pattern_observations);
@@ -1265,7 +1271,7 @@ struct Session::Impl {
             bool new_burst = false;
             {
                 std::unique_lock lock(mutex);
-                changed.wait(lock, stop, [this] { return current.running && decoder_generation == generation; });
+                changed.wait(lock, stop, [this] { return current.running && !capture_suspended && decoder_generation == generation; });
                 if (stop.stop_requested()) break;
                 advance_replay(replay_clock());
                 value = settings; version = generation; processing_token = decode_stop.get_token();
@@ -1286,7 +1292,12 @@ struct Session::Impl {
                         value.simulation ? "Transmitting sampled audio to an independent receiver" : "Transmitting; audio input paused";
                 }
                 capture_stop = std::stop_source{}; capture_token = capture_stop.get_token();
+                source_active=true;
             }
+            const auto release_activity=[this](Impl*) {
+                std::lock_guard lock(mutex);source_active=false;changed.notify_all();
+            };
+            const std::unique_ptr<Impl,decltype(release_activity)> activity(this,release_activity);
             try {
                 const auto& transmit_modem = wave ? wave->modem : value.transfer.modem;
                 if (value.simulation) {
@@ -1425,7 +1436,7 @@ struct Session::Impl {
                     publish(plot_window, value.transfer.modem, version, last_plot);
                     enqueue_audio(chunk, version);
                     std::lock_guard lock(mutex);
-                    return current.running && generation == version && !ready;
+                    return current.running && generation == version && !ready && !capture_suspended;
                 }, capture_token, [&](const auto& format) { audio_format(format, version); });
             } catch (const std::exception& exception) {
                 const auto cancelled_transmission = wave && wave->stop.stop_requested();
@@ -1435,7 +1446,7 @@ struct Session::Impl {
                 if (current.running && generation == version && !capture_token.stop_requested() && !processing_token.stop_requested() && !cancelled_transmission) {
                     current.error = exception.what(); current.status = value.simulation ? "Simulation paused after channel error" : "Audio input unavailable; retrying";
                     changed.wait_for(lock, stop, std::chrono::seconds(2), [this, version] {
-                        return !current.running || generation != version || ready;
+                        return !current.running || generation != version || ready || capture_suspended;
                     });
                 }
             }
@@ -1621,6 +1632,29 @@ void Session::configure(const Settings& settings) { impl_->configure(settings); 
 void Session::set_mono(bool mono) {
     std::lock_guard lock(impl_->mutex);
     impl_->settings.mono = mono;
+}
+bool Session::try_suspend_capture() {
+    std::lock_guard lock(impl_->mutex);
+    if(impl_->settings.simulation)return true;
+    if(!impl_->capture_suspended) {
+        if(impl_->tx_busy||impl_->current.transmitting||!impl_->queued.empty()||impl_->ready||
+           impl_->receive_pending||impl_->decoding_bytes||!impl_->input.empty())return false;
+        impl_->capture_suspended=true;
+        impl_->capture_stop.request_stop();
+        impl_->current.status="Regular audio paused while Fast mode owns the device";
+        ++impl_->current.sequence;impl_->changed.notify_all();
+    }
+    return !impl_->source_active;
+}
+void Session::resume_capture() {
+    std::lock_guard lock(impl_->mutex);
+    if(!impl_->capture_suspended)return;
+    impl_->capture_suspended=false;
+    // No admitted reception was suspended. Discontinuous idle samples must not
+    // be concatenated into a hypothetical symbol on the next device opening.
+    ++impl_->receive_revision;impl_->receive_pending=false;
+    impl_->current.status=impl_->idle_status();++impl_->current.sequence;
+    impl_->changed.notify_all();
 }
 bool Session::resume_recovery(std::uint64_t signal_id) {
     std::lock_guard lock(impl_->mutex);
