@@ -59,6 +59,12 @@ struct PatternSearch {
     // and detector-choice penalty; the waveform and completion rule stay fixed.
     // False retains the coherent reference detector for comparisons.
     bool drift_tolerant = true;
+    // Long patterns additionally compare independent pairs of local matched
+    // windows. Their duration is independent of the full symbol, rounded up
+    // to whole chips and at least sixteen chips; 256 complete windows are
+    // required. Zero retains the historical coherent/four-section comparison.
+    // This is receiver-local configuration and never changes the waveform.
+    double differential_window_seconds = 100;
     // A finite, explicit frequency bank. Empty preserves the five-bin local
     // search unless expand_clock_search is enabled by the application.
     std::vector<double> frequency_offsets_hz;
@@ -130,7 +136,7 @@ public:
     // Shared per-sample carrier projection for a bank with one carrier/clock.
     // projected[i] is raw[i] * exp(-j*carrier_phase[i]); an arbitrary fixed
     // projection phase is fitted by the pattern score. Both spans must match.
-    // Sample-resolution Gram fits reconstruct the carrier from raw samples
+    // Sample-resolution and local differential Gram fits reconstruct the carrier from raw samples
     // to keep their real basis matrix independent of that arbitrary rotation.
     void push(std::span<const float>,std::span<const std::complex<double>> projected,std::stop_token = {});
     // Flush available decisions as incomplete; capture EOF is not stream end.

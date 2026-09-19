@@ -109,21 +109,37 @@ double pattern_evidence(Complex dot,double energy,double template_energy,double 
     // assume independent Gaussian input samples, with unknown common variance.
     return -(real_rank?(count-2)/2:count-1)*std::log1p(-fraction);
 }
+double pattern_projection_image_ratio(std::uint64_t bin_samples,double carrier_hz,std::uint32_t sample_rate) {
+    const auto omega=tau*carrier_hz/sample_rate;
+    const auto sine=std::sin(omega);
+    return std::abs(sine)>1e-12?std::sin(static_cast<double>(bin_samples)*omega)/(static_cast<double>(bin_samples)*sine):
+        std::cos(static_cast<double>(bin_samples-1)*omega);
+}
+Complex pattern_differential_whiten(Complex dot,double norm,Complex square,double image_ratio) {
+    const auto image=square*image_ratio;
+    // dot=sum(y*conj(p)) uses the negative sine convention. Reverse it to
+    // match the real cosine/sine Gram represented by sum(p*p*carrier^2).
+    return differential_whiten(dot.real(),-dot.imag(),.5*(norm+image.real()),
+                              .5*(norm-image.real()),.5*image.imag());
+}
 
 FftSearchBatch::~FftSearchBatch() {
     OPENSSL_cleanse(geometry.pattern.spreading_seed.data(),geometry.pattern.spreading_seed.size());
     OPENSSL_cleanse(geometry.pattern.dsss_seed.data(),geometry.pattern.dsss_seed.size());
 }
-FftSearchWorkspace::FftSearchWorkspace(const Config& config,std::size_t transform,bool needs_code,std::size_t drift_starts)
-    :product(transform),drift(drift_starts) {
+FftSearchWorkspace::FftSearchWorkspace(const Config& config,std::size_t transform,bool needs_code,std::size_t drift_starts,
+                                     std::size_t differential_starts)
+    :product(transform),drift(drift_starts),differential(differential_starts) {
     if(needs_code)code=std::make_unique<PatternCode>(config,config.stream_epoch);
 }
 std::size_t FftSearchWorkspace::working_bytes() const {
-    return (code?code->working_bytes():0)+product.capacity()*sizeof(FftComplex)+drift.capacity()*sizeof(FftDriftAccumulator);
+    return (code?code->working_bytes():0)+product.capacity()*sizeof(FftComplex)+drift.capacity()*sizeof(FftDriftAccumulator)+
+        differential.capacity()*sizeof(DifferentialAccumulator);
 }
 void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& job,
                              std::span<FftSearchScore> scores,std::span<FftComplex> product,
-                             std::span<FftDriftAccumulator> scratch,PatternCode& code,std::stop_token stop) {
+                             std::span<FftDriftAccumulator> scratch,PatternCode& code,std::stop_token stop,
+                             std::span<DifferentialAccumulator> differential) {
     const auto& g=batch.geometry;
     const auto transform=batch.spectrum.size();
     const auto length=static_cast<std::size_t>(g.bins_per_symbol);
@@ -135,7 +151,11 @@ void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& jo
        (!batch.nominal_reference.empty() && batch.nominal_reference.size()!=length) ||
        !std::isfinite(job.frequency_hz) || !std::isfinite(g.carrier_hz) ||
        !std::isfinite(job.clock_ratio) || job.clock_ratio<=0 ||
-       scores.size()<batch.starts || scratch.size()<batch.starts || product.size()!=transform)
+       scores.size()<batch.starts || scratch.size()<batch.starts || product.size()!=transform ||
+       (g.differential_window_samples && (differential.size()<batch.starts ||
+        g.pattern.symbol_samples/g.differential_window_samples<256 ||
+        g.differential_window_samples/g.pattern.chip_samples<16 ||
+        g.differential_window_samples%g.pattern.chip_samples)))
         throw Error("invalid drift search geometry");
     code.set_stream_phase_samples(job.phase);
     std::array<std::size_t,5> edges{};edges.back()=length;
@@ -206,6 +226,61 @@ void execute_drift_search_job(const FftSearchBatch& batch,const FftSearchJob& jo
             const auto score=combine_drift_evidence(coherent,drift,g.drift_sections);
             if(bit==0)scores[j].zero=score;else scores[j].one=score;
         }
+        if(!g.differential_window_samples)continue;
+        std::fill_n(differential.begin(),batch.starts,DifferentialAccumulator{});
+        const auto window=g.differential_window_samples;
+        const auto windows=g.pattern.symbol_samples/window;
+        const auto image_ratio=pattern_projection_image_ratio(g.bin_samples,g.carrier_hz,g.pattern.sample_rate);
+        const auto inverse_origin=std::conj(carrier_square(g,0));
+        // A few short-window fits are cheaper than hundreds of full-sized
+        // transforms. Keep the crossover deterministic and reuse the already
+        // budgeted section dots after publishing their complete-bit scores.
+        const auto direct_limit=static_cast<long double>(windows)*std::log2(static_cast<double>(transform));
+        const bool direct_differential=batch.observations.size()>=length+batch.starts-1 &&
+            batch.starts<=std::max(4.L,direct_limit);
+        const auto boundary=[&](std::uint64_t position) {
+            const auto bin=std::ceil((static_cast<long double>(position)/job.clock_ratio-(g.bin_samples-1)/2.L)/g.bin_samples);
+            return std::max(0.L,bin);
+        };
+        std::size_t begin=0;
+        for(std::uint64_t k=0;k<windows;++k) {
+            cancelled(stop);
+            const auto edge=boundary((k+1)*window);
+            if(edge>length)break; // A truncated local fit cannot enter a pair.
+            const auto end=static_cast<std::size_t>(edge);
+            double norm=0;Complex square{};
+            const auto add=[&](std::size_t j,Complex dot) {
+                const auto gram=square*carrier_square(g,batch.first_bin+j)*inverse_origin;
+                differential[j].add(pattern_differential_whiten(dot,norm,gram,image_ratio),k,
+                                    g.pattern.symbol_samples,window);
+            };
+            if(direct_differential) {
+                for(std::size_t j=0;j<batch.starts;++j)scratch[j].dot={};
+                for(auto i=begin;i<end;++i) {
+                    if((i&4095U)==0)cancelled(stop);
+                    const auto p=template_value(code,g,job,i,bit,batch.nominal_reference);
+                    norm+=std::norm(p);square+=p*p*carrier_square(g,i);
+                    for(std::size_t j=0;j<batch.starts;++j)scratch[j].dot+=batch.observations[j+i]*std::conj(p);
+                }
+                for(std::size_t j=0;j<batch.starts;++j)add(j,scratch[j].dot);
+            } else {
+                std::fill(product.begin(),product.end(),Complex{});
+                for(auto i=begin;i<end;++i) {
+                    if((i&4095U)==0)cancelled(stop);
+                    const auto p=template_value(code,g,job,i,bit,batch.nominal_reference);
+                    product[length-1-i]=std::conj(p);norm+=std::norm(p);square+=p*p*carrier_square(g,i);
+                }
+                pattern_fft(product,false,stop);
+                for(std::size_t i=0;i<product.size();++i)product[i]*=batch.spectrum[i];
+                pattern_fft(product,true,stop);
+                for(std::size_t j=0;j<batch.starts;++j)add(j,product[length-1+j]);
+            }
+            begin=end;
+        }
+        for(std::size_t j=0;j<batch.starts;++j) {
+            auto& score=bit==0?scores[j].zero:scores[j].one;
+            score=combine_differential_evidence(score,differential[j].score(),true);
+        }
     }
 }
 void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearchJob> jobs,
@@ -221,6 +296,7 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
        batch.starts>transform-length+1 || batch.score_stride<batch.starts ||
        jobs.size()>scores.size()/batch.score_stride || batch.energy_prefix.size()<length+batch.starts ||
        (!batch.nominal_reference.empty() && batch.nominal_reference.size()!=length) ||
+       (geometry.differential_window_samples && geometry.drift_sections!=4) ||
        (geometry.sample_fit && geometry.drift_sections<=1 && batch.carrier_square.size()<batch.starts))
         throw Error("invalid pattern FFT batch geometry");
     const bool generates=std::any_of(jobs.begin(),jobs.end(),[](const auto& job) {
@@ -243,7 +319,7 @@ void execute_fft_search_cpu(const FftSearchBatch& batch,std::span<const FftSearc
             if(geometry.drift_sections>1) {
                 if(!workspace.code)throw Error("drift search requires a pattern cache");
                 execute_drift_search_job(batch,job,scores.subspan(job_index*batch.score_stride,batch.starts),
-                    workspace.product,workspace.drift,*workspace.code,stop);
+                    workspace.product,workspace.drift,*workspace.code,stop,workspace.differential);
                 continue;
             }
             const FftPreparedTemplate* prepared=nullptr;

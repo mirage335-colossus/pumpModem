@@ -302,10 +302,93 @@ void drift_direct_fft_and_real_gram() {
         check(rejected(),"serial section scorer accepted a non-power-of-two transform");
     }
 }
+
+void differential_direct_fft_and_real_gram() {
+    // Exercise both raw real samples and disjoint projected bins. This symbol
+    // has 256 complete short windows and a partial final chip/window; neither
+    // path may incorporate the incomplete window in differential evidence.
+    for(const std::size_t bin:{1U,4U}) {
+        Config config;config.sample_rate=64;config.bandwidth_hz=32;config.carrier_hz=bin==1?16:15.3;
+        config.integration_seconds=256.046875;config.scramble=bin==1;config.pulse_shaping=bin==4;
+        config.stream_epoch=1789312671;config.spreading_seed[2]=91;
+        PatternCode code(config,config.stream_epoch);code.set_stream_phase_samples(7);
+        FftSearchBatch batch;auto& g=batch.geometry;
+        g.pattern={config.stream_epoch,code.chip_samples(),code.chips_per_symbol(),code.symbol_samples(),
+            config.sample_rate,static_cast<std::uint32_t>(config.spreading_mode),bin==4?1U:0U,bin==1?1U:0U,0,
+            config.spreading_seed,config.dsss_seed};
+        const auto length=static_cast<std::size_t>((code.symbol_samples()+bin-1)/bin+3);
+        g.bins_per_symbol=length;g.bin_samples=bin;g.carrier_hz=config.carrier_hz;
+        g.evidence_count=bin==1?4.*length/code.chip_samples():static_cast<double>(length);
+        g.sample_fit=g.real_rank=bin==1;g.drift_sections=4;g.extended_clock_window=1;
+        const auto window=differential_window_samples(code.symbol_samples(),code.chip_samples(),config.sample_rate,1.);
+        check(window==64,"differential FFT fixture must have sixteen-chip local windows");
+        batch.first_bin=37;batch.starts=3;batch.score_stride=5;
+        std::size_t transform=1;while(transform<length+batch.starts-1)transform*=2;
+        std::vector<FftComplex> observations(transform),spectrum;
+        std::vector<double> energy(transform+1);
+        for(std::size_t i=0;i<transform;++i) {
+            const auto position=static_cast<double>(i*bin)+static_cast<double>(bin-1)/2;
+            const auto carrier=2*std::numbers::pi*config.carrier_hz*
+                (static_cast<double>((batch.first_bin+i)*bin)+static_cast<double>(bin-1)/2)/config.sample_rate;
+            const auto x=std::sin(.19*i)+.7*std::cos(.13*i);
+            FftComplex signal{};
+            if(position<code.symbol_samples()) {
+                const auto chip=static_cast<std::uint64_t>(position/code.chip_samples());
+                signal=config.pulse_shaping?code.shaped_value(3*code.chips_per_symbol(),0,position):
+                    code.value(3*code.chips_per_symbol()+chip,0,position/code.chip_samples()-chip);
+                signal*=std::polar(1.,.73+.3*position/window);
+            }
+            observations[i]=bin==1?(.15*x+(signal*std::polar(1.,carrier)).real())*std::polar(1.,-carrier):
+                signal+.15*FftComplex{x,std::cos(.17*i)};
+            energy[i+1]=energy[i]+std::norm(observations[i]);
+        }
+        spectrum=observations;pattern_fft(spectrum,false,{});
+        batch.spectrum=spectrum;batch.observations=observations;batch.energy_prefix=energy;
+        std::array<FftSearchJob,2> jobs{};
+        for(std::size_t j=0;j<jobs.size();++j) {
+            jobs[j].symbol=3;jobs[j].phase=7;jobs[j].clock_ratio=1.+static_cast<double>(j)*.00005;
+            jobs[j].frequency_hz=static_cast<double>(j)*.0001;
+        }
+        std::vector<FftSearchWorkspace> workers;
+        workers.emplace_back(config,transform,true,batch.starts,batch.starts);
+        std::vector<FftSearchScore> baseline(jobs.size()*batch.score_stride,untouched),direct(baseline),fft(baseline);
+        execute_fft_search_cpu(batch,jobs,baseline,workers);
+        g.differential_window_samples=window;
+        execute_fft_search_cpu(batch,jobs,direct,workers);
+        batch.observations={};
+        execute_fft_search_cpu(batch,jobs,fft,workers);
+        check(direct[0].zero>30 && direct[0].zero>baseline[0].zero+20,
+              "local differential fixture did not improve on the four-section baseline");
+        for(std::size_t job=0;job<jobs.size();++job)for(std::size_t start=0;start<batch.score_stride;++start) {
+            const auto a=direct[job*batch.score_stride+start],b=fft[job*batch.score_stride+start];
+            if(start>=batch.starts)check(equal(a,untouched)&&equal(b,untouched),
+                "local differential scorer overwrote job padding");
+            else check(std::abs(a.zero-b.zero)<=1e-8*std::max({1.,a.zero,b.zero}) &&
+                       std::abs(a.one-b.one)<=1e-8*std::max({1.,a.one,b.one}),
+                "direct and FFT local fits disagree with clock offsets, real Gram phase or partial windows");
+        }
+        std::vector<FftComplex> product(transform);
+        std::vector<FftDriftAccumulator> scratch(batch.starts);
+        std::vector<DifferentialAccumulator> local(batch.starts);
+        const auto rejected=[&](std::span<DifferentialAccumulator> supplied) {
+            try {execute_drift_search_job(batch,jobs[0],direct,product,scratch,code,{},supplied);}
+            catch(const Error&){return true;}
+            return false;
+        };
+        check(rejected(std::span(local).first(batch.starts-1)),
+              "local differential scorer accepted insufficient bounded scratch");
+        g.differential_window_samples=code.chip_samples();
+        check(rejected(local),"local differential scorer accepted fewer than sixteen chips per window");
+        g.differential_window_samples=window+1;
+        check(rejected(local),"local differential scorer accepted a fractional-chip window");
+        g.differential_window_samples=window*2;
+        check(rejected(local),"local differential scorer accepted fewer than 256 complete windows");
+    }
+}
 } // namespace
 int main() {
     try {flat_batch_tiling_and_order();prepared_template_and_cancellation();public_nominal_reference_exactness();
-        drift_rank_and_partition();drift_direct_fft_and_real_gram();}
+        drift_rank_and_partition();drift_direct_fft_and_real_gram();differential_direct_fft_and_real_gram();}
     catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
     std::cout<<"pattern FFT batch tests passed\n";
 }

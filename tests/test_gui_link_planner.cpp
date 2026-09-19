@@ -369,12 +369,39 @@ void nearest_target_shares_receiver_budget() {
 void phase_loss_and_receiver_confidence() {
     auto inputs=gpsdo_islands();
     inputs.target_db_hz=static_cast<double>(18-10*std::log10((18973668000.L-.5L)/6000));
+    const auto local=planner::build(inputs);
+    check(local.available&&local.clock_search_supported&&local.receiver_workspace_supported&&
+          local.differential_windows>=256&&local.differential_window_seconds==100&&
+          !local.confidence_available&&!local.drift_model_available&&!local.coherent_reference_only,
+          "Eligible local phase comparisons must withhold the unsupported receive probability while retaining search facts");
+    near(local.phase_coherence_loss_db,17.832566385,"The hobby-GPSDO phase-loss anchor changed");
+    const auto local_page=planner_page::build(local,900,true,false);
+    check(contains_text(local_page,"RX estimate unavailable")&&
+          contains_text(local_page,"Whole-bit phase loss: 17.8 dB")&&
+          contains_text(local_page,"Local phase comparisons: 100")&&
+          contains_text(local_page,"256 windows")&&
+          !contains_text(local_page,"Coherent-only comparison:"),
+          "Long-bit details must describe local windows without presenting the old probability as current");
+    inputs.tx_dbm=-100;
+    check(!planner::build(inputs).confidence_available,
+          "Changing link power must not make an unmodeled local detector probability available");
+
+    // Below the local detector's eligibility threshold, retain the original
+    // four-quarter probability checks. Scale diffusion to retain the same
+    // phase-loss stress while exercising a shorter complete symbol. More
+    // chips retain the high-power fixture's ample independent observations.
+    inputs.options.modem.bandwidth_hz=16;
+    inputs.target_db_hz=18-10*std::log10(16384.-.5/6000);
+    const auto shorter=planned_config(inputs,inputs.target_db_hz);
+    const auto seconds=static_cast<double>(modem::symbol_sample_count(shorter))/shorter.sample_rate;
+    const auto diffusion_scale=std::sqrt(local.bit_seconds/seconds);
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.5*diffusion_scale;
     // Compare actual received C/N0 with the timing target. Fitting the clock
     // and RAM does not supply the energy lost to whole-symbol phase drift.
     inputs.tx_dbm=inputs.target_db_hz+inputs.path_loss_db+inputs.noise_density_dbm_hz;
     const auto weak=planner::build(inputs);
     check(weak.available&&weak.clock_search_supported&&weak.receiver_workspace_supported&&weak.confidence_available&&
-          weak.success_probability<.001,
+          weak.differential_windows==0&&weak.success_probability<.001,
           "A clock/RAM-compatible long symbol must retain its poor modeled reception when phase loss consumes its energy");
     near(weak.phase_coherence_loss_db,17.832566385,"The hobby-GPSDO phase-loss anchor changed");
     check(weak.drift_model_available&&!weak.coherent_reference_only&&weak.section_phase_coherence_loss_db>0&&
@@ -387,15 +414,15 @@ void phase_loss_and_receiver_confidence() {
           !contains_text(weak_page,"Meets target")&&!contains_text(weak_page,"Pattern transitions."),
           "The primary planner must show weak reception and phase loss without presenting clock/RAM fit as successful reception");
     for(const auto diffusion:{.5,.05,.005,0.}) {
-        inputs.channel.phase_noise_degrees_per_sqrt_second=diffusion;
+        inputs.channel.phase_noise_degrees_per_sqrt_second=diffusion*diffusion_scale;
         const auto model=planner::build(inputs);
-        const auto retained=simulation::expected_correlation_coherence(model.bit_seconds,diffusion,0);
+        const auto retained=simulation::expected_correlation_coherence(model.bit_seconds,diffusion*diffusion_scale,0);
         near(model.phase_coherence_loss_db,-10*std::log10(retained),
              "Planner phase loss must use the complete symbol duration, independently checked by the coherent reference");
         check(model.clock_search_supported&&model.receiver_workspace_supported&&model.confidence_available,
               "Changing phase diffusion must not silently change clock coverage or the sampled RAM geometry");
     }
-    inputs.channel.phase_noise_degrees_per_sqrt_second=.5;inputs.tx_dbm=3;
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.5*diffusion_scale;inputs.tx_dbm=3;
     const auto stronger_link=planner::build(inputs);
     check(stronger_link.confidence_available&&stronger_link.success_probability>.999&&
           stronger_link.success_probability>weak.success_probability,
@@ -406,9 +433,9 @@ void phase_loss_and_receiver_confidence() {
     check(contains_text(stronger_page,"RX estimate: >99.9%")&&contains_text(stronger_page,"Whole-bit phase loss: 17.8 dB"),
           "The reception headline must respond to actual link power while retaining the same phase loss");
     const auto detailed_page=planner_page::build(weak,900,true,false);
-    check(contains_text(detailed_page,"Pattern transitions.")&&contains_text(detailed_page,"four fixed sections")&&
-          contains_text(detailed_page,"separate gain and phase")&&contains_text(detailed_page,"extra decision penalty")&&
-          contains_text(detailed_page,"Sections must still be coherent")&&
+    check(contains_text(detailed_page,"Pattern transitions.")&&contains_text(detailed_page,"four sections")&&
+          contains_text(detailed_page,"separate gain and phase")&&contains_text(detailed_page,"local windows")&&
+          contains_text(detailed_page,"Probability is unavailable when the additional local comparisons are eligible")&&
           contains_text(detailed_page,"Coherent-only comparison:")&&
           contains_text(detailed_page,"Phase loss within a section:"),
           "Expanded details must explain implemented section fits and retain the coherent comparison");
@@ -416,7 +443,7 @@ void phase_loss_and_receiver_confidence() {
     // This intermediate phase case has both acquisition and continuation
     // failures; otherwise all continuation trials can pass and one/three-bit
     // probabilities legitimately coincide at the model's finite resolution.
-    inputs.channel.phase_noise_degrees_per_sqrt_second=.1;inputs.wire_bits=3;
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.1*diffusion_scale;inputs.wire_bits=3;
     const auto three=planner::build(inputs);
     auto options=inputs.options;options.modem=planned_config(inputs,inputs.target_db_hz);
     auto channel=inputs.channel;

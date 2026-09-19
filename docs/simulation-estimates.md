@@ -5,10 +5,12 @@ two **rough compute-time estimates**. They are planning aids, not measured
 confidence, certified error rates, observed hardware performance, or guarantees.
 They change when the draft, channel preset, transmit geometry or receive search
 changes. Nothing in this model changes transmission or receiver admission.
-For eligible long patterns, **RX estimate** models both the original coherent
-match and the four-section detector. Expanded details retain the coherent-only
-comparison. **RX reference** identifies a limited fallback model when the
-combined statistical estimate is unavailable.
+For patterns eligible for four-section fitting, **RX estimate** models the
+original coherent match and that detector. Expanded details retain the
+coherent-only comparison. **RX reference** identifies a limited fallback model.
+Still longer patterns can enable local differential matching, which these
+probability trials do not model. Their receive percentage remains unavailable;
+coverage, phase-loss diagnostics and compute estimates remain visible.
 
 The separate [LPI relative observation advisory](lpi-estimates.md) compares an
 unkeyed energy detector's total observation with a one-symbol receiver design
@@ -103,8 +105,9 @@ duration are different quantities. UI replay pacing is excluded.
 ## Probability model
 
 Numeric probability is available only when a matching receive profile covers
-the simulated carrier shift and the expanded FFT core fits its modeled
-workspace allowance. The application enables an expanded carrier/clock
+the simulated carrier shift, the expanded FFT core fits its modeled
+workspace allowance, and the default local differential branch is ineligible.
+The application enables an expanded carrier/clock
 search for pattern symbols lasting at least 16 sample-quantized seconds. Its
 frequency lattice has spacing `0.25/T`, where `T` is the actual sampled symbol
 duration. It retains the original local offsets when those suffice; otherwise
@@ -201,6 +204,26 @@ the coherent score
 and uses `max(coherent, section) - ln(2)`, clipped at zero, to account for trying
 both detectors. Ineligible profiles keep their original score.
 
+In addition, sufficiently long pattern symbols use local differential soft
+products. The receiver-local window defaults to 100 seconds, rounded upward
+to whole chips with at least 16 chips. At least 256 complete windows are
+required, so an ordinary dense pattern becomes eligible at 25,600 seconds.
+Very narrow bandwidths require longer windows. Disjoint neighboring pairs
+retain phase relationships; their statistic has its own finite-noise bound,
+strongest-quarter removal and an additional `ln(2)` detector-choice cost.
+See [the actual score](pattern-constellation.md#local-differential-evidence).
+
+The existing four-quarter Monte Carlo model does not sample these products,
+their correlations between candidate patterns, or the new choice penalty.
+Consequently `differential_windows > 0` makes `confidence_available` false,
+and neither the full-draft, one-bit nor coherent-comparison field is a numeric
+prediction. `differential_window_seconds` gives the actual rounded duration;
+both differential fields are zero for ineligible geometry. They describe
+default eligibility, not a live memory allocation. Confidence remains
+unavailable even if a particular compact receiver would fall back under a
+tighter memory budget. No unvalidated probability is inferred from that
+fallback. Shorter profiles continue to use the existing models below.
+
 `drift_sections` and `drift_section_seconds` identify this geometry;
 `section_phase_coherence_loss_db` describes phase loss in the longest quarter.
 `drift_model_available` reports that the combined statistical model ran;
@@ -272,7 +295,9 @@ independently checked fit within 0.001 dB. Wider unsupported gaps break the RX l
 Intermediate values interpolate the sampled estimates.
 
 Sections must still be coherent; four quarters do not provide arbitrary drift
-tracking over a days-long bit. Pattern transitions do not reset oscillator
+tracking over a days-long bit. Differential windows can preserve shorter phase
+relationships, but their gain and losses are not modeled by the four-quarter
+probability calculation. Pattern transitions do not reset oscillator
 phase error. This channel omits GPS servo corrections, which can constrain
 long-term phase error in a real locked device. There is no special 0.01 Hz threshold.
 The differential constellation points remain display diagnostics. All admission,
@@ -438,6 +463,19 @@ reducing the affordable FFT worker count. Time-scaled clock hypotheses keep
 their own waveform generation. The engineering estimate retains its ordinary
 generation allowance; it does not promise a cache hit or its measured speedup.
 
+For eligible differential patterns, acquisition includes an additional full
+template-generation pass and window transforms for both bit alternatives.
+The same input FFT is reused. Small batches use direct full-symbol matches
+when their start count is at most `max(4, window_count * log2(FFT_size))`;
+broad batches pay the many-window FFT cost. Tracking adds local accumulation
+and product evaluation while retaining the existing one-stream allowance.
+The compact estimate includes the additional active local fit work. FFT
+workspace includes a fixed differential accumulator for every batch start,
+and the compact budget includes the paired active fits and summaries.
+There is no per-lane array proportional to the number of local windows.
+These additions can be substantial; the existing four-quarter compute figure
+does not represent a many-window differential search.
+
 The fixed engineering budgets are:
 
 | Assumption | Value |
@@ -451,6 +489,7 @@ The fixed engineering budgets are:
 | Tracking template-pair generation | 40 equivalent operations/projected bin |
 | Tracking paired fit | 32 equivalent operations/projected bin; 64 for exact-real Gram fits |
 | Tracking evidence calculation | 64 equivalent operations/fit |
+| Differential local product/score allowance | 128 equivalent operations/window |
 | CPU startup allowance | 30 ms |
 | GPU path startup allowance, including CPU startup | 110 ms |
 
@@ -508,6 +547,9 @@ withholding unsupported confidence. Tracking regressions check exact bit-count
 scaling, nominal complete-symbol absence, empty drafts, matching profiles,
 unrelated keys and avoiding duplicate correlator work. CLI checks retain the
 exact one-bit and three-bit wire paths while exposing the tracking breakdown.
+Differential boundary regressions retain the four-quarter model immediately
+below eligibility, withhold unsupported probabilities above it, preserve
+phase/search diagnostics, and include the additional FFT and tracking work.
 These checks validate model mechanics, not its empirical
 calibration. The independent protocol and physical-completion regressions remain
 the authority for actual transport behavior.

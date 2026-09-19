@@ -73,6 +73,8 @@ struct Model {
     bool drift_model_available=false;
     double coherent_success_probability=0;
     double section_phase_coherence_loss_db=0;
+    std::uint64_t differential_windows=0;
+    double differential_window_seconds=0;
     // One exact bit plus its full waveform and absence processing, regardless
     // of draft length. The receiver ratio excludes synthetic channel creation
     // and divides receiver work by all received audio, including absence.

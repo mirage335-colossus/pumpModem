@@ -22,6 +22,7 @@ void cancelled(std::stop_token stop) { if (stop.stop_requested()) throw Error("p
 using Projection=detail::CorrelationProjection;
 using Fit=detail::CorrelationFit;
 using DriftFit=detail::CorrelationDriftFit;
+using DifferentialFit=detail::CorrelationDifferentialFit;
 struct Bank {
     double frequency=0;
     std::vector<Projection> prefix;
@@ -41,6 +42,7 @@ struct PatternCorrelator::Impl {
     std::size_t alternate_groups=0;
     std::size_t block_samples=block_size;
     unsigned drift_sections=1;
+    std::uint64_t differential_window=0;
     bool finished=false,shaped=false;
     struct Hypothesis {
         long double origin=0,rate=1;
@@ -70,6 +72,7 @@ struct PatternCorrelator::Impl {
     // Allocated only for eligible long patterns; one active section per bit
     // and schedule, independent of symbol duration and input chunk length.
     std::vector<std::array<DriftFit,2>> drift_fits;
+    std::vector<std::array<DifferentialFit,2>> differential_fits;
     std::vector<Bank> banks;
     std::vector<PatternEvidence> history;
     std::vector<PatternBurst> bursts;
@@ -80,6 +83,10 @@ struct PatternCorrelator::Impl {
     Impl(Config c,PatternSearch options,std::size_t bytes):config(c),search(std::move(options)),code(c,c.stream_epoch),budget(bytes) {
         validate(c);
         drift_sections=detail::drift_section_count(c,search.drift_tolerant);
+        require(std::isfinite(search.differential_window_seconds) && search.differential_window_seconds>=0,
+                "invalid differential window duration");
+        if(drift_sections>1)differential_window=detail::differential_window_samples(
+            code.symbol_samples(),code.chip_samples(),c.sample_rate,search.differential_window_seconds);
         if(search.compact_clock_search) {
             search.candidate_limit=std::min<std::size_t>(search.candidate_limit,32);
             block_samples=32;
@@ -146,6 +153,12 @@ struct PatternCorrelator::Impl {
                 drift_reserved=static_cast<std::size_t>(extra);fixed+=extra;
             } else drift_sections=1;
         }
+        if(drift_sections==1)differential_window=0;
+        if(differential_window) {
+            const auto extra=total*(alternate_groups+1)*sizeof(std::array<DifferentialFit,2>);
+            if(fixed+extra+denominator<=bytes)fixed+=extra;
+            else differential_window=0;
+        }
         const auto remaining=bytes-static_cast<std::size_t>(std::ceil(fixed));
         bit_limit=std::min(search.bit_limit,remaining/denominator);
         require(bit_limit>0,"clock-search workspace cannot retain symbol evidence");
@@ -155,6 +168,7 @@ struct PatternCorrelator::Impl {
         require(!alternate_groups || count<=std::numeric_limits<std::size_t>::max()/alternate_groups,
                 "pattern phase fits exceed address space");
         alternate_fits.resize(count*alternate_groups);
+        if(differential_window)differential_fits.resize(count*(alternate_groups+1));
         if(drift_sections>1) {
             require(count<=std::numeric_limits<std::size_t>::max()/(alternate_groups+1),
                     "pattern drift fits exceed address space");
@@ -217,6 +231,7 @@ struct PatternCorrelator::Impl {
             emissions.capacity()*sizeof(Emission)+
             alternate_fits.capacity()*sizeof(decltype(alternate_fits)::value_type)+
             drift_fits.capacity()*sizeof(decltype(drift_fits)::value_type)+
+            differential_fits.capacity()*sizeof(decltype(differential_fits)::value_type)+
             points.capacity()*sizeof(Complex)+
             history.capacity()*sizeof(PatternEvidence)+bursts.capacity()*sizeof(PatternBurst)+
             (search.frequency_offsets_hz.capacity()+search.clock_errors_ppm.capacity())*sizeof(double);
@@ -280,6 +295,9 @@ struct PatternCorrelator::Impl {
     }
     std::array<DriftFit,2>& section_fits(std::size_t hypothesis,std::size_t group) {
         return drift_fits[hypothesis*(alternate_groups+1)+group];
+    }
+    std::array<DifferentialFit,2>& local_fits(std::size_t hypothesis,std::size_t group) {
+        return differential_fits[hypothesis*(alternate_groups+1)+group];
     }
     Emission& output_stream(Hypothesis& h) {
         const auto same_clock=[&](long double origin,double frequency) {
@@ -426,6 +444,11 @@ struct PatternCorrelator::Impl {
                 a=detail::combine_drift_evidence(a,drift[0].score(fit[0],drift_sections,code.chip_samples()),drift_sections);
                 b=detail::combine_drift_evidence(b,drift[1].score(fit[1],drift_sections,code.chip_samples()),drift_sections);
             }
+            if(differential_window) {
+                const auto& local=local_fits(hypothesis,group);
+                a=detail::combine_differential_evidence(a,local[0].score(code.symbol_samples(),differential_window),true);
+                b=detail::combine_differential_evidence(b,local[1].score(code.symbol_samples(),differential_window),true);
+            }
             if(std::max(a,b)>e.score) {
                 e={h.observed_start,end,h.index,config.carrier_hz+search.frequency_offsets_hz[h.frequency],
                     std::max(a,b),std::min(a,b),b>a?1U:0U,groups[group].lower};
@@ -508,6 +531,8 @@ struct PatternCorrelator::Impl {
             alternate_fits[hypothesis*alternate_groups+group]={};
         if(drift_sections>1)for(std::size_t group=0;group<=alternate_groups;++group)
             section_fits(hypothesis,group)={};
+        if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
+            local_fits(hypothesis,group)={};
         require(h.index<std::numeric_limits<std::uint64_t>::max(),"pattern stream symbol counter overflow");++h.index;
     }
     std::uint64_t initial_cursor(const Hypothesis& h,std::uint64_t end) const {
@@ -527,6 +552,7 @@ struct PatternCorrelator::Impl {
             pattern.set_stream_phase_samples(groups[group].lower);
             auto& fit=fits(h,hypothesis,group);
             auto* drift=!drift_fits.empty()?&section_fits(hypothesis,group):nullptr;
+            auto* differential=differential_window?&local_fits(hypothesis,group):nullptr;
             auto observed=cursor;
             while(observed<segment_end) {
                 const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*h.rate);
@@ -535,6 +561,10 @@ struct PatternCorrelator::Impl {
                     for(auto& item:*drift)item.advance(observed,symbol_start,h.rate,code.symbol_samples(),drift_sections);
                     section_end=symbol_start+static_cast<long double>(detail::drift_boundary(
                         (*drift)[0].section+1,code.symbol_samples(),drift_sections))/h.rate;
+                }
+                if(differential) {
+                    for(auto& item:*differential)item.advance(observed,symbol_start,h.rate,code.symbol_samples(),differential_window);
+                    section_end=std::min(section_end,(*differential)[0].boundary(symbol_start,h.rate,code.symbol_samples(),differential_window));
                 }
                 if(shaped) {
                     require(h.index<=std::numeric_limits<std::uint64_t>::max()/code.chips_per_symbol(),
@@ -550,6 +580,7 @@ struct PatternCorrelator::Impl {
                         const auto phase=pattern.shaped_value(first_chip,bit,static_cast<double>(within));
                         fit[bit].add(projection,phase,1);
                         if(drift)(*drift)[bit].active.add(projection,phase,1);
+                        if(differential)(*differential)[bit].active.add(projection,phase,1);
                     }
                     ++observed;continue;
                 }
@@ -572,6 +603,7 @@ struct PatternCorrelator::Impl {
                     const auto projection=bank.prefix[right]-bank.prefix[left];
                     fit[bit].add(projection,phase,right-left);
                     if(drift)(*drift)[bit].active.add(projection,phase,right-left);
+                    if(differential)(*differential)[bit].active.add(projection,phase,right-left);
                 }
                 observed=until;
             }
@@ -649,7 +681,7 @@ struct PatternCorrelator::Impl {
              config.sample_rate,search.frequency_offsets_hz.size(),config.carrier_hz,shaped,
              config.spreading_mode==SpreadingMode::tone,
              {static_cast<std::uint32_t>(config.spreading_mode),config.scramble,config.dsss,
-              config.spreading_seed,config.dsss_seed},drift_fits.empty()?1:drift_sections},
+              config.spreading_seed,config.dsss_seed},drift_fits.empty()?1:drift_sections,differential_window},
             {blocks.get(),block_count},{projections.get(),row_offset},{frequencies.get(),banks.size()},search.frequency_offsets_hz};
         // Numeric tiles contain no PatternBurst, heap-owned input, or references
         // to peer admission state. Device implementations can operate on these
@@ -665,6 +697,8 @@ struct PatternCorrelator::Impl {
                     lane.fits[group+1]=alternate_fits[(first+i)*alternate_groups+group];
                 if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
                     lane.drift_fits[group]=section_fits(first+i,group);
+                if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
+                    lane.differential_fits[group]=local_fits(first+i,group);
             }
             detail::accumulate_correlator_cpu(batch,{lanes.get(),count},worker_codes,stop);
             for(std::size_t i=0;i<count;++i) {
@@ -674,6 +708,8 @@ struct PatternCorrelator::Impl {
                     alternate_fits[(first+i)*alternate_groups+group]=lane.fits[group+1];
                 if(!drift_fits.empty())for(std::size_t group=0;group<=alternate_groups;++group)
                     section_fits(first+i,group)=lane.drift_fits[group];
+                if(differential_window)for(std::size_t group=0;group<=alternate_groups;++group)
+                    local_fits(first+i,group)=lane.differential_fits[group];
             }
             first+=count;
         }
@@ -793,6 +829,11 @@ bool PatternCorrelator::drift_tolerant()const{return impl_->drift_sections>1;}
 std::size_t PatternCorrelator::working_bytes()const{return sizeof(PatternCorrelator)+impl_->working_bytes();}
 void PatternCorrelator::set_workspace_bytes(std::size_t bytes) {
     if(bytes<working_bytes())impl_->drop_workers();
+    if(impl_->differential_window && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
+        decltype(impl_->differential_fits)().swap(impl_->differential_fits);
+        impl_->differential_window=0;
+        impl_->accounted_bytes=impl_->working_bytes()+impl_->drift_reserved;
+    }
     if(impl_->drift_sections>1 && bytes<sizeof(PatternCorrelator)+impl_->accounted_bytes) {
         // Whole-symbol coherent fits have always been retained; reducing an
         // optional detector's reservation never resets physical reception.

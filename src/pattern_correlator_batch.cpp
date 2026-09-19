@@ -54,6 +54,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
             pattern.set_stream_phase_samples(groups[group].lower);
             auto& fit=lane.fits[group];
             auto* drift=g.drift_sections>1?&lane.drift_fits[group]:nullptr;
+            auto* differential=g.differential_window_samples?&lane.differential_fits[group]:nullptr;
             auto observed=cursor;
             while(observed<end) {
                 const auto within=std::max(0.L,(static_cast<long double>(observed)-symbol_start)*lane.rate);
@@ -62,6 +63,10 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     for(auto& item:*drift)item.advance(observed,symbol_start,lane.rate,g.symbol_samples,g.drift_sections);
                     section_end=symbol_start+static_cast<long double>(drift_boundary(
                         (*drift)[0].section+1,g.symbol_samples,g.drift_sections))/lane.rate;
+                }
+                if(differential) {
+                    for(auto& item:*differential)item.advance(observed,symbol_start,lane.rate,g.symbol_samples,g.differential_window_samples);
+                    section_end=std::min(section_end,(*differential)[0].boundary(symbol_start,lane.rate,g.symbol_samples,g.differential_window_samples));
                 }
                 if(g.shaped) {
                     require(lane.index<=std::numeric_limits<std::uint64_t>::max()/g.chips_per_symbol,
@@ -74,6 +79,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                         const auto phase=pattern.shaped_value(first_chip,bit,static_cast<double>(within));
                         fit[bit].add(projection,phase,1);
                         if(drift)(*drift)[bit].active.add(projection,phase,1);
+                        if(differential)(*differential)[bit].active.add(projection,phase,1);
                     }
                     ++observed;continue;
                 }
@@ -102,6 +108,7 @@ void accumulate_lane(const CorrelationBatch& batch,CorrelationLane& lane,Pattern
                     const auto projection=batch.projections[row+right]-batch.projections[row+left];
                     fit[bit].add(projection,phase,right-left);
                     if(drift)(*drift)[bit].active.add(projection,phase,right-left);
+                    if(differential)(*differential)[bit].active.add(projection,phase,right-left);
                 }
                 observed=until;
             }
@@ -120,6 +127,8 @@ void accumulate_correlator_cpu(const CorrelationBatch& batch,std::span<Correlati
     const auto& g=batch.geometry;
     require(g.symbol_samples && g.chip_samples && g.chips_per_symbol && g.phase_step && g.sample_rate &&
             (g.drift_sections==1 || (g.drift_sections==4 && !g.tone)) &&
+            (!g.differential_window_samples || (!g.tone && g.symbol_samples/g.differential_window_samples>=256 &&
+                g.differential_window_samples/g.chip_samples>=16 && g.differential_window_samples%g.chip_samples==0)) &&
             g.phase_step<=g.sample_rate && std::isfinite(g.carrier_hz) &&
             g.frequency_count && g.frequency_count<=65 && g.frequency_count==batch.frequency_offsets.size() &&
             batch.bank_frequencies.size()>=g.frequency_count &&

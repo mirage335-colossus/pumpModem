@@ -603,6 +603,8 @@ Model build(const Inputs& inputs) {
         result.drift_model_available=receiver.drift_model_available&&result.confidence_available;
         result.coherent_success_probability=result.confidence_available?receiver.coherent_success_probability:0;
         result.section_phase_coherence_loss_db=receiver.section_phase_coherence_loss_db;
+        result.differential_windows=receiver.differential_windows;
+        result.differential_window_seconds=receiver.differential_window_seconds;
         auto single_receiver=inputs.wire_bits==1?receiver:
             simulation::estimate(single_transmission,options,true,channel,{},1,false);
         // Draft length changes continuation and total work, but acquisition

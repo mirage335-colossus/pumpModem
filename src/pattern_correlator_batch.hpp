@@ -2,6 +2,7 @@
 
 #include "datapump/pattern_code.hpp"
 #include "pattern_drift.hpp"
+#include "pattern_differential.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -72,12 +73,55 @@ struct CorrelationDriftFit {
                               std::min(count,4*count/static_cast<double>(chip_samples)),sections,true);
     }
 };
+// One local matched window and a fixed-size differential accumulator, not
+// a retained array of windows or a sequence of per-window phase decisions.
+struct CorrelationDifferentialFit {
+    CorrelationFit active;
+    DifferentialAccumulator evidence;
+    std::uint64_t window_index=0,expected_count=0;
+    bool initialized=false;
+    void finish(std::uint64_t total,std::uint64_t width) {
+        if(!initialized || window_index>=total/width)return;
+        const auto z=active.count==expected_count && expected_count>2?
+            differential_whiten(active.xc,active.xs,active.cc,active.ss,active.cs):std::complex<double>{};
+        evidence.add(z,window_index,total,width);
+    }
+    void advance(std::uint64_t observed,long double start,long double rate,
+                 std::uint64_t total,std::uint64_t width) {
+        const auto position=std::max(0.L,(static_cast<long double>(observed)-start)*rate);
+        auto next=static_cast<std::uint64_t>(std::min(
+            std::floor(position/width),static_cast<long double>(total/width)));
+        // Use the same ceil-to-observed-sample rule as accumulation. Correct
+        // the inverse coordinate if multiplication and division rounded on
+        // opposite sides of an exactly sampled clock-warped boundary.
+        while(next<total/width && static_cast<long double>(observed)>=
+                std::ceil(start+static_cast<long double>((next+1)*width)/rate))++next;
+        while(next && static_cast<long double>(observed)<
+                std::ceil(start+static_cast<long double>(next*width)/rate))--next;
+        if(initialized && next==window_index)return;
+        if(initialized)finish(total,width);
+        active={};window_index=next;initialized=true;expected_count=0;
+        if(window_index<total/width) {
+            const auto begin=std::ceil(start+static_cast<long double>(window_index*width)/rate);
+            const auto end=std::ceil(start+static_cast<long double>((window_index+1)*width)/rate);
+            expected_count=static_cast<std::uint64_t>(end-begin);
+        }
+    }
+    long double boundary(long double start,long double rate,std::uint64_t total,std::uint64_t width) const {
+        const auto end=window_index<total/width?(window_index+1)*width:total;
+        return start+static_cast<long double>(end)/rate;
+    }
+    double score(std::uint64_t total,std::uint64_t width) const {
+        auto complete=*this;complete.finish(total,width);return complete.evidence.score();
+    }
+};
 struct CorrelationLane {
     long double origin=0,rate=1;
     std::uint64_t index=0,observed_start=0,phase_lower=0,phase_upper=0;
     std::size_t frequency=0,rate_index=0;
     std::array<std::array<CorrelationFit,2>,3> fits{};
     std::array<std::array<CorrelationDriftFit,2>,3> drift_fits{};
+    std::array<std::array<CorrelationDifferentialFit,2>,3> differential_fits{};
 };
 struct CorrelationBlock {
     std::uint64_t sample=0;
@@ -99,6 +143,7 @@ struct CorrelationGeometry {
     bool shaped=false,tone=false;
     CorrelationPatternParameters pattern;
     unsigned drift_sections=1;
+    std::uint64_t differential_window_samples=0;
 };
 struct CorrelationBatch {
     ~CorrelationBatch();
@@ -113,6 +158,7 @@ struct CorrelationBatch {
 static_assert(std::is_trivially_copyable_v<CorrelationProjection> && std::is_standard_layout_v<CorrelationProjection>);
 static_assert(std::is_trivially_copyable_v<CorrelationFit> && std::is_standard_layout_v<CorrelationFit>);
 static_assert(std::is_trivially_copyable_v<CorrelationDriftFit> && std::is_standard_layout_v<CorrelationDriftFit>);
+static_assert(std::is_trivially_copyable_v<CorrelationDifferentialFit> && std::is_standard_layout_v<CorrelationDifferentialFit>);
 static_assert(std::is_trivially_copyable_v<CorrelationLane> && std::is_standard_layout_v<CorrelationLane>);
 static_assert(std::is_trivially_copyable_v<CorrelationBlock> && std::is_standard_layout_v<CorrelationBlock>);
 static_assert(std::is_trivially_copyable_v<CorrelationGeometry> && std::is_standard_layout_v<CorrelationGeometry>);

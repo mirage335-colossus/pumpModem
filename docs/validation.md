@@ -4,6 +4,58 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Local differential receiver — 19 September 2026
+
+Added a differential detector to both the streaming correlator and FFT
+acquisition/tracking paths. Compact receivers enable its optional state when
+workspace permits; FFT receivers include its scratch in their required budget.
+It matches local windows and
+accumulates soft products of disjoint neighboring pairs. The default window
+is 100 seconds, rounded upward to whole chips and at least sixteen chips;
+256 complete windows are required. Local duration is independent of complete
+bit duration. The previous coherent and four-quarter detectors remain in the
+comparison, with an additional detector-selection penalty. Transmitted samples,
+wire bits, pending publication and full-symbol physical absence are unchanged.
+
+Real-sample quadratures are whitened using their deterministic local Gram
+matrix. Eight fixed product-phase directions use a conditional Gaussian-noise
+tail bound, and the strongest positive quarter contribution is removed to
+prevent evidence confined to one fixed quarter from supplying a whole bit.
+This is a reference
+noise bound, not a calibrated false-alarm guarantee for a physical front end.
+
+The Release build and six detector-focused suites passed. The broader selection
+also passed all 33 suites covering the development contract, receiver,
+estimator, CLI and shared GUI. Its first run passed 32; the planner regression
+still expected the older probability model for eligible local comparisons.
+After updating that expectation, its rerun passed. The existing weak/strong
+link and exact-bit-count probability checks remain at shorter supported
+geometry, with the original phase-loss stress retained.
+
+Sampled public and
+private `001` captures with 32 phase rotations per bit plus a varying phase
+component decode through both receiver paths at approximately -6.8 and -6.7 dB
+sample SNR; the same captures fail the old coherent/four-quarter comparison.
+Coverage includes seeded noise, wrong keys, unrelated carriers, isolated
+quarters, EOF, partial symbols, immediate bit publication, complete absent
+symbols, scalar/worker/chunk consistency, and releasing optional local state
+without changing already accumulated legacy evidence. Compact constructor
+checks show equal allocated state for 100-hour and 1,000-hour symbols.
+
+Independent numerical tests cover weak individual matched windows, thousands
+of seeded circular-noise trials, extreme Gram scaling, geometry/overflow,
+skipped windows, and direct/FFT equivalence with nonorthogonal projections,
+clock offsets and partial final windows. The 100-hour CLI analysis reports
+3,600 local windows of 100 seconds and a null current-receiver probability.
+The planner deliberately withholds its old probability model when the new
+branch is eligible; timing, search, phase and compute diagnostics remain.
+
+Wide FFT acquisition can cost substantially more because it evaluates many
+local templates. Small start batches use direct matching; compact accumulation
+retains constant state per hypothesis. Compute estimates include the extra
+work. These checks use generated PCM and mathematical fixtures; no 100-hour RF
+link, hardware oscillator or native display workflow was measured.
+
 ## Developer mode visibility — 18 September 2026
 
 Added an initially unchecked Developer mode checkbox immediately left of Clear

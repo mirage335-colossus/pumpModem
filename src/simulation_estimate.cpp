@@ -5,6 +5,8 @@
 #include "datapump/pattern_receiver.hpp"
 #include "datapump/pattern_search.hpp"
 #include "pattern_drift.hpp"
+#include "pattern_differential.hpp"
+#include "pattern_correlator_batch.hpp"
 #include "receiver_probability.hpp"
 #include "datapump/correlation_experiment.hpp"
 #include <algorithm>
@@ -28,6 +30,7 @@ constexpr long double template_pair_operations_per_bin = 40;
 constexpr long double tracking_pair_operations_per_bin = 32;
 constexpr long double tracking_real_pair_operations_per_bin = 64;
 constexpr long double tracking_evidence_operations_per_fit = 64;
+constexpr long double differential_operations_per_window = 128;
 constexpr long double model_implementation_loss_db = 3;
 
 double finite_seconds(long double value) {
@@ -96,6 +99,10 @@ Work receiver_work(const modem::Config& config,long double samples,
                    std::size_t established_stream_bits) {
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto drift_sections=modem::detail::drift_section_count(config);
+    const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
+        modem::detail::differential_window_samples(symbol,chip,config.sample_rate,
+            modem::PatternSearch{}.differential_window_seconds):0;
+    const auto differential_windows=differential_window?symbol/differential_window:0;
     const bool private_pattern=config.scramble || config.dsss;
     const auto epochs=private_pattern?2.L*options.search_seconds+1+
         (options.timestamp?0:std::ceil((static_cast<long double>(modem::training_sample_count(config))+
@@ -133,7 +140,8 @@ Work receiver_work(const modem::Config& config,long double samples,
     const auto fft_core_bytes=transform*16*5+(4*length+2*hop)*16+
         (separate_tracking_reference?2*length*16:0)+(transform+1)*8+
         frequencies*(2*24+2*8+2*16+18*8+2*8)+
-        4096*16+4096*sizeof(modem::PatternEvidence)+(drift_sections>1?48*hop:0);
+        4096*16+4096*sizeof(modem::PatternEvidence)+(drift_sections>1?48*hop:0)+
+        (differential_window?hop*sizeof(modem::detail::DifferentialAccumulator):0);
     const auto fft_bytes=fft_core_bytes+2*frequencies*transform*16;
     // Live reserves at least half of the total for peer receivers, transmit
     // work and plots even when there is only one requested receive bank.
@@ -145,7 +153,7 @@ Work receiver_work(const modem::Config& config,long double samples,
     // Live banks stream expanded template rows when several profiles, keys or
     // epochs share the budget, so early banks cannot consume it with caches.
     const bool streamed_templates=!correlator &&
-        (drift_sections>1 || fft_bytes>allowance || (coupled && banks*profiles>1));
+        (drift_sections>1 || differential_window || fft_bytes>allowance || (coupled && banks*profiles>1));
     const auto starts=std::ceil(2.L*(options.search_seconds+1.L)*config.sample_rate/
                                std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
     const auto phase_groups=private_pattern&&symbol%config.sample_rate!=0?(symbol>=config.sample_rate?2.L:3.L):1.L;
@@ -169,7 +177,8 @@ Work receiver_work(const modem::Config& config,long double samples,
     // Compact layout is not allocated by the planner. Use a deliberately
     // generous per-lane upper allowance before crediting optional section
     // state; tighter compact budgets retain the coherent reference.
-    const auto compact_bound=starts*frequencies*phase_groups*4096+2*1024*1024;
+    const auto compact_bound=starts*frequencies*phase_groups*(4096+
+        (differential_window?sizeof(std::array<modem::detail::CorrelationDifferentialFit,2>):0))+2*1024*1024;
     result.drift_supported=drift_sections>1&&result.workspace_supported&&
         (!correlator||compact_bound<=allowance)&&result.noise_dimensions>=16;
     result.serial=samples*projection_operations_per_sample*banks;
@@ -182,8 +191,10 @@ Work receiver_work(const modem::Config& config,long double samples,
         const auto observations=std::ceil(samples/std::min(32.L,static_cast<long double>(chip)));
         // Eligible lanes retain the coherent fit and one active section fit;
         // completed sections contribute only fixed-size summary statistics.
-        result.parallel=observations*starts*frequencies*phase_groups*64*
-            (drift_sections>1?2:1)*banks;
+        result.parallel=(observations*starts*frequencies*phase_groups*64*
+            (1+(drift_sections>1?1:0)+(differential_window?1:0))+
+            (differential_window?samples/symbol*differential_windows*starts*frequencies*phase_groups*
+                differential_operations_per_window:0))*banks;
     } else {
         auto blocks=std::ceil(samples/(bin*hop));
         auto scored_starts=blocks*hop;
@@ -221,6 +232,24 @@ Work receiver_work(const modem::Config& config,long double samples,
                 jobs*(12*transform+(generate_templates?template_pair_operations_per_bin*length:0)))+
                 jobs*40*scored_starts)*banks;
         }
+        if(differential_window) {
+            const auto direct_limit=std::max(4.L,static_cast<long double>(differential_windows)*fft_log);
+            const auto direct_blocks=blocks>0?(hop<=direct_limit?blocks:(initial_batch<=direct_limit?1.L:0.L)):0.L;
+            const auto direct_starts=hop<=direct_limit?scored_starts:(direct_blocks>0?initial_batch:0.L);
+            const auto fit_operations=sample_fit?tracking_real_pair_operations_per_bin:
+                tracking_pair_operations_per_bin;
+            // Each complete local window uses its own template transforms,
+            // reusing the input spectrum and a bounded per-start accumulator.
+            // Allow a second full template-generation pass; optional waveform
+            // caching is not credited as a guaranteed saving.
+            // Batches below the window-count/log-size crossover instead make
+            // one additional full-symbol dot pass per fully observed start.
+            result.parallel+=((blocks-direct_blocks)*jobs*differential_windows*
+                (20*transform*fft_log+12*transform)+
+                blocks*jobs*length*template_pair_operations_per_bin+
+                direct_starts*jobs*length*fit_operations+
+                jobs*differential_operations_per_window*differential_windows*scored_starts)*banks;
+        }
         if(established_stream_bits) {
             // Acquisition supplies the first bit. An established track then
             // scores each remaining bit and complete absent symbols covering
@@ -240,6 +269,8 @@ Work receiver_work(const modem::Config& config,long double samples,
             result.tracking_serial=result.tracking_windows*(length*(
                 generated_pairs*template_pair_operations_per_bin+fits*fit_operations)+
                 fits*tracking_evidence_operations_per_fit*(drift_sections>1?drift_sections+1:1));
+            if(differential_window)result.tracking_serial+=result.tracking_windows*fits*
+                (length*fit_operations+differential_windows*differential_operations_per_window);
         }
     }
     return result;
@@ -264,6 +295,12 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     const auto section_samples=samples_per_symbol/result.drift_sections+
         (samples_per_symbol%result.drift_sections!=0);
     result.drift_section_seconds=static_cast<double>(section_samples)/config.sample_rate;
+    const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
+        modem::detail::differential_window_samples(samples_per_symbol,modem::pattern_chip_samples(config),
+            config.sample_rate,modem::PatternSearch{}.differential_window_seconds):0;
+    result.differential_windows=differential_window?samples_per_symbol/differential_window:0;
+    result.differential_window_seconds=static_cast<double>(differential_window)/config.sample_rate;
+    if(differential_window)result.coherent_reference_only=false;
     const auto chip_seconds=static_cast<long double>(modem::pattern_chip_samples(config))/config.sample_rate;
     // The sampled transport adds this complete-symbol absence and lookahead
     // after the exact waveform, including its settling and suppression noise.
@@ -345,7 +382,11 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // regime. Do not extrapolate a numeric probability beyond the bank, nor
     // claim zero: some out-of-bank signals can still produce admitted fits.
     if(!result.profile_matches || !result.carrier_in_search || !result.receiver_workspace_supported)return result;
-    if(!compute_probability)return result;
+    // The four-quarter trials do not reproduce local differential products,
+    // their candidate correlations or the added detector-choice penalty.
+    // Keep energy, coverage and work diagnostics without advertising a
+    // probability for a detector that this model has not sampled.
+    if(!compute_probability || differential_window)return result;
     result.confidence_available=true;
     if(matching_work.drift_supported) {
         detail::ReceiverProbabilityParameters parameters;

@@ -5,10 +5,10 @@ running the receiver, or benchmarking the computer. It combines exact wire
 size and airtime with the existing fixed-laptop compute model and a bounded
 Monte Carlo experiment on matched-correlation statistics. Work depends on the
 requested trial count, not the number of audio samples or coherent segments.
-The production receiver now has a fixed four-section option in addition to its
-coherent match. The experiments below still describe separate reference
-detectors with user-chosen segment lengths; they are not measurements of that
-implementation.
+The production receiver keeps its coherent match, four-section fit, and an
+additional local differential detector for sufficiently long patterns. The
+experiments below describe separate reference detectors with user-chosen
+segment lengths; they are not measurements of those implementations.
 
 The [1.2 kHz case study](1200hz-weak-link-planning.md) compares the requested
 3 dBm/-170 dB mode with -200 dB and -230 dB, including a conditional day-long
@@ -103,20 +103,38 @@ their RAM allowance.
 
 Four sections still require useful coherence within each quarter. With the
 0.5-degree/√second model, a quarter of a 37-day bit has roughly 447 degrees RMS
-phase movement; this receiver does not supply arbitrary 100-second comparisons
-over that duration. More flexible differential and channel-tracking detectors
-remain distinct possibilities. The live constellation shows phase differences
-and current amplitude for display; its plotted values are not decoder inputs.
+phase movement. The additional differential branch instead obtains local soft
+matches in 100-second windows, rounded upward to whole chips with at least
+16 chips per window. It is eligible only with at least 256 complete windows.
+It combines disjoint neighboring products across the complete symbol, charges
+its phase-direction search and detector choice, and removes an isolated
+strongest-quarter contribution. No local window requires a hard decision.
+The implementation and evidence assumptions are described in
+[local differential evidence](pattern-constellation.md#local-differential-evidence).
+The local `PatternSearch.differential_window_seconds` setting can change that
+duration; zero disables only the differential branch.
+
+Local products still need enough integrated signal and useful phase
+relationships. They do not make 100 seconds universally optimal or establish
+a particular hours-per-bit sensitivity. Arbitrary phase/clock trajectories
+remain outside the finite search. The live constellation shows phase
+differences and current amplitude for display; its plotted values are not
+decoder inputs.
 
 Power changes can reduce a coherent match without the vector cancellation that
 phase changes can cause. The new separate section gains accommodate some of
 these variations, but neither detector permits arbitrary independent gain and
 phase at every chip: that would absorb the transitions distinguishing the bits.
-Numeric **RX estimate** values for eligible long patterns model both branches,
+Numeric **RX estimate** values for four-quarter patterns below differential
+eligibility model the coherent and quarter branches,
 including correlated noise, finite pattern correlation, the strongest-quarter
 removal and detector-choice penalty. The coherent-only comparison remains in
 expanded details. These bounded statistical trials do not reproduce the full
 adaptive receiver search; a limited fallback is labeled **RX reference**.
+For default differential-eligible patterns, the current estimator withholds
+numeric receive probability because it does not model the new statistic.
+Coherent/quarter phase diagnostics and the expanded compute estimate remain
+available. The reference experiment's percentages cannot fill that gap.
 
 ## Run an analysis
 
@@ -175,8 +193,10 @@ produce identical draws across compiler libraries.
   `tracking_seconds` is the modeled serial continuation component included in
   both CPU/GPU totals, and `tracking_symbol_windows` includes fully scored
   absence. Competing/noise tracks and reacquisition are not upper-bounded.
-  For eligible long patterns, its numeric probability is the coherent reference,
-  while compute costs include the implemented four-section work.
+  Below differential eligibility, four-quarter patterns use the existing
+  combined model where supported. Default differential-eligible patterns have
+  no numeric receive probability; compute includes the many-window scoring
+  work, and local-window geometry remains available as a diagnostic.
 - `ideal_coherent` assumes perfect phase stability and zero residual carrier
   error across the whole symbol.
 - `coherent_phase_model` applies the selected phase diffusion and residual
@@ -184,7 +204,7 @@ produce identical draws across compiler libraries.
 - `segmented_phase_model` accumulates energy from shorter coherent segments.
   Its arbitrary segment count, prescribed template correlation and statistical
   threshold remain a separate experiment, not a simulation of the production
-  four-section detector.
+  four-section or differential detector.
 
 The experiments condition on matched symbol timing and sample-clock rate.
 Their duration is the nominal transmitted symbol duration.
@@ -272,8 +292,9 @@ waveform-dependent Gram matrices and the modem's adaptive decisions.
 [ESA's acquisition discussion](https://gssc.esa.int/navipedia/index.php/Baseband_Processing)
 describes the coherent/noncoherent integration tradeoff and squaring loss.
 
-The implemented fixed four-section fit is a bounded first step. Shorter or
-adaptive sections and explicit clock/drift trajectories need their own scoring,
-resource limits and sampled signal/noise validation. This planning command
+The implemented four-section and local differential fits have distinct
+bounded scores and resource requirements. Adaptive sections and explicit
+clock/drift trajectories need their own scoring, resource limits and sampled
+signal/noise validation. This planning command
 does not change transmission, symbol admission, pending-bit progress or
 physical completion.

@@ -703,6 +703,8 @@ void analyze_link(const Args& a,transfer::Options options) {
     std::cout
         <<",\"drift_sections\":"<<current.drift_sections<<",\"drift_section_seconds\":";
     json_number(current.drift_section_seconds);
+    std::cout<<",\"differential_windows\":"<<current.differential_windows<<",\"differential_window_seconds\":";
+    json_number(current.differential_window_seconds);
     std::cout<<",\"phase_coherence_loss_db\":";json_number(current.phase_coherence_loss_db);
     std::cout<<",\"section_phase_coherence_loss_db\":";json_number(current.section_phase_coherence_loss_db);
     std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu

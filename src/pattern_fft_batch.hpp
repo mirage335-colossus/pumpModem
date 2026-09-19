@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/pattern_code.hpp"
+#include "pattern_differential.hpp"
 #include <array>
 #include <limits>
 #include <type_traits>
@@ -36,6 +37,7 @@ struct FftSearchGeometry {
     double carrier_hz = 0, evidence_count = 0, noise_condition = 1;
     std::uint32_t real_rank = 0, sample_fit = 0, extended_clock_window = 0;
     std::uint32_t drift_sections = 1;
+    std::uint64_t differential_window_samples = 0;
 };
 static_assert(std::is_trivially_copyable_v<FftSearchJob> && std::is_standard_layout_v<FftSearchJob>);
 static_assert(std::is_trivially_copyable_v<FftSearchScore> && std::is_standard_layout_v<FftSearchScore>);
@@ -77,7 +79,9 @@ struct FftSearchWorkspace {
     std::unique_ptr<PatternCode> code;
     std::vector<FftComplex> product;
     std::vector<FftDriftAccumulator> drift;
-    FftSearchWorkspace(const Config&,std::size_t transform,bool needs_code,std::size_t drift_starts=0);
+    std::vector<DifferentialAccumulator> differential;
+    FftSearchWorkspace(const Config&,std::size_t transform,bool needs_code,std::size_t drift_starts=0,
+                       std::size_t differential_starts=0);
     std::size_t working_bytes() const;
 };
 
@@ -93,7 +97,8 @@ void execute_fft_search_cpu(const FftSearchBatch&,std::span<const FftSearchJob>,
 // No allocation, admission or partial-symbol publication occurs here.
 void execute_drift_search_job(const FftSearchBatch&,const FftSearchJob&,
                              std::span<FftSearchScore>,std::span<FftComplex> product,
-                             std::span<FftDriftAccumulator>,PatternCode&,std::stop_token = {});
+                             std::span<FftDriftAccumulator>,PatternCode&,std::stop_token = {},
+                             std::span<DifferentialAccumulator> = {});
 
 // Build exactly the unmodulated public-pattern values used by nominal-clock
 // jobs. The caller owns and budgets the complete supplied reference span.
@@ -106,5 +111,11 @@ double pattern_evidence(FftComplex dot,double energy,double template_energy,doub
                         FftComplex template_square = {});
 double pattern_explained(FftComplex dot,double template_energy,double condition,
                         bool exact_real,FftComplex template_square = {});
+
+// Whitening uses the exact quadrature covariance of the disjoint real-sample
+// projection bins. The common input-noise variance cancels in the detector.
+double pattern_projection_image_ratio(std::uint64_t bin_samples,double carrier_hz,std::uint32_t sample_rate);
+FftComplex pattern_differential_whiten(FftComplex dot,double template_energy,
+                                      FftComplex template_square,double projection_image_ratio);
 
 } // namespace datapump::modem::detail

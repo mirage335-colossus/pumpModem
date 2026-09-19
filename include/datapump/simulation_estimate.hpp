@@ -54,6 +54,12 @@ struct Estimate {
     // The combined model samples phase paths rather than substituting this
     // scalar loss into the original coherent probability formula.
     double section_phase_coherence_loss_db = 0;
+    // Default receiver-local differential geometry. Zero means ineligible.
+    // The existing probability model does not model this additional detector:
+    // confidence_available remains false whenever differential_windows > 0.
+    // Counts describe eligible geometry, not an actual live allocation.
+    std::uint64_t differential_windows = 0;
+    double differential_window_seconds = 0;
     double carrier_offset_hz = 0;
     // Requested search span. If receiver_workspace_supported is false, live
     // reception may use a narrower local fallback; no probability models it.

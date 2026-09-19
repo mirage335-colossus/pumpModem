@@ -99,7 +99,9 @@ probability and estimated computation times for a fixed **Intel Core i9-13900H**
 and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure is
 a projection; simulation currently executes on the CPU. These rough estimates
 update with the draft and settings. A simulated carrier outside the receiver's
-frequency search shows an explanation instead of a numeric probability; see the
+frequency search shows an explanation instead of a numeric probability.
+Very long patterns eligible for local differential matching also withhold the
+percentage because that detector has no supported probability model; see the
 [model and its assumptions](docs/simulation-estimates.md).
 The **LPI relative observation** advisory compares an unkeyed energy detector's
 total observation with the receiver's one-bit design reference: N:1 means N
@@ -538,6 +540,12 @@ For weak-signal operation, see [integration, clock search and practical link
 budgets](docs/weak-signal.md). Rate is a bandwidth parameter, not payload bits/s.
 Long pattern searches include carrier and sample-clock alternatives; extra
 integration is useful only while their finite coverage and phase coherence hold.
+For sufficiently long patterns, an additional detector combines soft phase
+relationships between local windows, defaulting to 100 seconds rounded to at
+least 16 whole chips and requiring 256 complete windows. It still admits only
+complete payload symbols and preserves the exact raw/status wire bits.
+See [local differential evidence](docs/pattern-constellation.md#local-differential-evidence)
+for its bounded statistic and compute limitations.
 
 Hardware sample rates do not set the modem's bandwidth or symbol rate. Audio
 endpoints negotiate a supported clock and use a bounded band-limited converter

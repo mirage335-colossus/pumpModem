@@ -148,17 +148,66 @@ void whole_symbol_phase_coherence() {
     for(const auto diffusion:{.005,.05,.5}) {
         channel.phase_noise_degrees_per_sqrt_second=diffusion;
         const auto gpsdo=simulation::estimate(wire(1,options.modem),options,true,channel);
-        check(gpsdo.confidence_available&&gpsdo.phase_coherence_loss_db>previous_loss,
+        check(!gpsdo.confidence_available&&gpsdo.differential_windows>=256&&
+              gpsdo.phase_coherence_loss_db>previous_loss,
               "GPSDO phase models must retain progressively greater loss over a long coherent symbol");
         previous_loss=gpsdo.phase_coherence_loss_db;
         if(diffusion==.5)check(gpsdo.phase_coherence_loss_db>17&&
-                gpsdo.success_probability<long_clean.success_probability,
-                "GPSDO XO phase drift can materially reduce long-symbol confidence despite clock coverage");
+                gpsdo.modeled_symbol_snr_db<long_clean.modeled_symbol_snr_db,
+                "GPSDO XO phase drift must still reduce coherent energy when differential confidence is unavailable");
     }
     options.dsp_workspace_bytes=1024;
     const auto unsupported=simulation::estimate(wire(1,options.modem),options,true,channel);
     check(!unsupported.confidence_available&&unsupported.phase_coherence_loss_db>17,
           "phase loss should remain visible when insufficient RAM prevents a numeric receive estimate");
+}
+void differential_model_limits() {
+    transfer::Options options;
+    options.modem.sample_rate=256;options.modem.carrier_hz=64;
+    options.modem.bandwidth_hz=8;options.modem.pulse_shaping=false;
+    options.modem.integration_seconds=25500;
+    options.search_seconds=0;
+    options.dsp_workspace_bytes=std::size_t{16}*1024*1024*1024;
+    auto channel=clean_channel();channel.snr_db=-20;
+    const auto below=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(below.differential_windows==0 && below.differential_window_seconds==0 &&
+          below.confidence_available && below.drift_model_available,
+          "fewer than 256 complete default local windows must retain the existing four-quarter model");
+    options.modem.integration_seconds=25600-1./256;
+    const auto incomplete=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(incomplete.differential_windows==0,
+          "one missing sample cannot complete the 256th local differential window");
+    options.modem.integration_seconds=25600;
+    const auto eligible=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(eligible.differential_windows==256 && eligible.differential_window_seconds==100,
+          "default differential model coverage must start at 256 complete hundred-second windows");
+    check(eligible.profile_matches && eligible.carrier_in_search && eligible.receiver_workspace_supported &&
+          !eligible.confidence_available && !eligible.drift_model_available && !eligible.coherent_reference_only &&
+          eligible.success_probability==0 && eligible.one_bit_success_probability==0 &&
+          eligible.coherent_success_probability==0,
+          "an unmodeled differential detector must not claim old two-detector probabilities or a fallback reference");
+    check(eligible.cpu_seconds>10*below.cpu_seconds && eligible.tracking_seconds>below.tracking_seconds &&
+          std::isfinite(eligible.receiver_cpu_seconds) && std::isfinite(eligible.gpu_seconds),
+          "many-window FFT scoring and tracking must appear in the finite work estimates");
+    channel.phase_noise_degrees_per_sqrt_second=.5;
+    const auto drifting=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(!drifting.confidence_available && drifting.phase_coherence_loss_db>0 &&
+          drifting.section_phase_coherence_loss_db<drifting.phase_coherence_loss_db,
+          "withholding differential probability must preserve coherent and quarter phase diagnostics");
+    const auto support=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    near(support.cpu_seconds,drifting.cpu_seconds,"support-only planning must include identical differential work");
+    options.modem.integration_seconds+=99;
+    const auto partial=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(partial.differential_windows==256,
+          "an incomplete final local window must not count as a complete differential observation");
+    options.modem.bandwidth_hz=.01;options.modem.integration_seconds=256*3200;
+    const auto sparse=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(sparse.differential_windows==256 && sparse.differential_window_seconds==3200,
+          "very narrow profiles must extend the local duration to at least sixteen whole chips");
+    options.modem.spreading_mode=modem::SpreadingMode::tone;
+    const auto tone=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
+    check(tone.differential_windows==0 && tone.differential_window_seconds==0,
+          "tone profiles must not acquire differential pattern work or eligibility");
 }
 void drift_receiver_estimate() {
     transfer::Options options;
@@ -593,7 +642,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();whole_symbol_phase_coherence();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();whole_symbol_phase_coherence();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}
