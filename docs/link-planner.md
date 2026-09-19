@@ -180,13 +180,17 @@ unavailable; it is not a proven lower bound. The statistical estimate uses 4096
 deterministic matched-statistic trials, without generating audio or executing
 the complete adaptive receiver search.
 
-Each quarter must still retain useful coherence. Four sections do not make a
-37-day bit equivalent to repeated 100-second comparisons, and there is no special
-0.01 Hz transition threshold. The live constellation's relative-phase values
-remain display diagnostics. More flexible differential or drift-tracking
-detectors, and the arbitrary segment lengths in the
-[statistical experiments](weak-link-planning.md), are separate from this fixed
-four-section implementation.
+Each quarter must still retain useful coherence. Eligible longer symbols also
+use local differential soft products: by default, 100-second windows rounded
+up to whole chips and at least sixteen chips, with at least 256 windows. The
+planner states the resulting count and duration and whether the estimate
+includes this branch. Supported geometry uses a joint noisy-statistic model;
+unsupported geometry states a reason. The selected estimate uses 4096 trials,
+curve locations use 512, and details report a 95% sampling interval and finite
+carrier-search approximations. These intervals exclude model and physical-link
+error. The local branch can help without requiring coherence across a whole
+quarter; it still requires useful short-window signal energy. See the
+[model and coverage limits](simulation-estimates.md#probability-model).
 
 **Observer / receiver time** uses the existing [relative LPI model](lpi-estimates.md).
 Each graph point holds the intended receiver's bit energy relative to noise at

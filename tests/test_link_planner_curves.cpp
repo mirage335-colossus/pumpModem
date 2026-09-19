@@ -46,7 +46,8 @@ void verify_point(const gui::planner::Inputs& input,const gui::planner::ReceiveP
     channel.snr_db=input.tx_dbm-input.path_loss_db-input.noise_density_dbm_hz-
         10*std::log10(options.modem.sample_rate/2.);
     constexpr std::array<std::uint8_t,1> bit{0};
-    const auto estimate=simulation::estimate(transfer::estimate_binary(bit,options),options,true,channel);
+    const auto estimate=simulation::estimate(transfer::estimate_binary(bit,options),options,true,channel,
+        {},1,true,100,point.probability_trials?point.probability_trials:4096);
     check(estimate.confidence_available==point.confidence_available,
           "curve confidence must describe its actual target and current link inputs");
     if(point.confidence_available)near(point.success_probability,estimate.one_bit_success_probability,

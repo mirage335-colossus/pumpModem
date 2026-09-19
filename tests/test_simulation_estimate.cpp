@@ -182,24 +182,46 @@ void differential_model_limits() {
     check(eligible.differential_windows==256 && eligible.differential_window_seconds==100,
           "default differential model coverage must start at 256 complete hundred-second windows");
     check(eligible.profile_matches && eligible.carrier_in_search && eligible.receiver_workspace_supported &&
-          !eligible.confidence_available && !eligible.drift_model_available && !eligible.coherent_reference_only &&
-          eligible.success_probability==0 && eligible.one_bit_success_probability==0 &&
-          eligible.coherent_success_probability==0,
-          "an unmodeled differential detector must not claim old two-detector probabilities or a fallback reference");
+          eligible.confidence_available && eligible.drift_model_available && eligible.differential_model_available &&
+          !eligible.coherent_reference_only && eligible.probability_trials==4096 &&
+          eligible.probability_interval_available && eligible.success_probability>.99 &&
+          eligible.success_probability_low<eligible.success_probability && eligible.success_probability_high<=1,
+          "eligible differential geometry must sample all detector branches and expose finite-trial uncertainty");
     check(eligible.cpu_seconds>10*below.cpu_seconds && eligible.tracking_seconds>below.tracking_seconds &&
           std::isfinite(eligible.receiver_cpu_seconds) && std::isfinite(eligible.gpu_seconds),
           "many-window FFT scoring and tracking must appear in the finite work estimates");
     channel.phase_noise_degrees_per_sqrt_second=.5;
     const auto drifting=simulation::estimate(wire(1,options.modem),options,true,channel);
-    check(!drifting.confidence_available && drifting.phase_coherence_loss_db>0 &&
+    check(drifting.confidence_available && drifting.differential_model_available && drifting.phase_coherence_loss_db>0 &&
           drifting.section_phase_coherence_loss_db<drifting.phase_coherence_loss_db,
-          "withholding differential probability must preserve coherent and quarter phase diagnostics");
+          "joint differential probability must preserve coherent and quarter phase diagnostics");
     const auto support=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
     near(support.cpu_seconds,drifting.cpu_seconds,"support-only planning must include identical differential work");
+    check(!support.confidence_available && support.probability_trials==0,
+          "support-only planning must not run probability trials");
+    const auto disabled=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,true,0);
+    check(disabled.confidence_available && !disabled.differential_model_available && disabled.differential_windows==0,
+          "an explicitly disabled receiver-local detector must use the corresponding older model");
+    const auto curve=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,true,100,512);
+    check(curve.confidence_available && curve.probability_trials==512 &&
+          curve.success_probability_low<drifting.success_probability_low,
+          "reduced curve sampling must retain its actual trial count and wider sampling interval");
+    auto compact_options=options;
+    compact_options.modem.sample_rate=64;compact_options.modem.carrier_hz=16;
+    compact_options.modem.bandwidth_hz=32;compact_options.modem.integration_seconds=512;
+    compact_options.dsp_workspace_bytes=8*1024*1024;
+    const auto compact=simulation::estimate(wire(3,compact_options.modem),compact_options,true,channel,{},1,true,1);
+    check(!compact.confidence_available && compact.one_bit_confidence_available && compact.differential_model_available &&
+          !compact.probability_interval_available && compact.probability_model_limit.find("timing ownership")!=std::string::npos,
+          "unmodeled compact timing ownership must suppress draft confidence while retaining the modeled first bit");
     options.modem.integration_seconds+=99;
     const auto partial=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
     check(partial.differential_windows==256,
           "an incomplete final local window must not count as a complete differential observation");
+    const auto unsupported=simulation::estimate(wire(1,options.modem),options,true,channel);
+    check(!unsupported.confidence_available && !unsupported.probability_model_limit.empty() &&
+          unsupported.probability_trials==0,
+          "unsupported partial geometry must state the limit instead of reporting another detector's probability");
     options.modem.bandwidth_hz=.01;options.modem.integration_seconds=256*3200;
     const auto sparse=simulation::estimate(wire(1,options.modem),options,true,channel,{},1,false);
     check(sparse.differential_windows==256 && sparse.differential_window_seconds==3200,

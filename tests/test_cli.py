@@ -200,11 +200,34 @@ class StreamCLI(unittest.TestCase):
         self.assertTrue(receiver['confidence_available'])
         self.assertTrue(receiver['drift_model_available'])
         self.assertFalse(receiver['coherent_reference_only'])
+        self.assertEqual(receiver['probability_trials'],4096)
+        self.assertFalse(receiver['differential_model_available'])
+        self.assertLessEqual(receiver['success_probability_sampling_low'],receiver['success_probability'])
+        self.assertGreaterEqual(receiver['success_probability_sampling_high'],receiver['success_probability'])
         for field in ('success_probability','coherent_success_probability'):
             self.assertGreaterEqual(receiver[field],0)
             self.assertLessEqual(receiver[field],1)
         repeat=json.loads(self.run_pump(*args,timeout=10).stdout)
         self.assertEqual(receiver,repeat['current_receiver'])
+        self.assertFalse(value['pcm_generated'])
+        self.assertFalse(value['production_decoder_run'])
+    def test_link_analysis_differential_receiver_estimate(self):
+        args=('analyze-link','--bits','0','--bw','0.01','--target-snr','-44.25748830262745',
+              '--pattern','auto-pattern','--time','1800000000','--tx-dbm','0',
+              '--attenuation-db','-200','--noise-figure-db','10','--oscillator','gpsdo-tcxo',
+              '--dsp-mb','1024','--trials','100')
+        value=json.loads(self.run_pump(*args,timeout=30).stdout)
+        receiver=value['current_receiver']
+        self.assertTrue(receiver['confidence_available'])
+        self.assertTrue(receiver['differential_model_available'])
+        self.assertEqual(receiver['differential_windows'],1024)
+        self.assertEqual(receiver['differential_window_seconds'],3200)
+        self.assertEqual(receiver['probability_trials'],4096)
+        self.assertTrue(receiver['probability_search_approximation'])
+        self.assertGreater(receiver['probability_carrier_candidates'],0)
+        self.assertLess(receiver['success_probability_sampling_low'],receiver['success_probability'])
+        self.assertGreaterEqual(receiver['success_probability_sampling_high'],receiver['success_probability'])
+        self.assertEqual(receiver['probability_model_limit'],'')
         self.assertFalse(value['pcm_generated'])
         self.assertFalse(value['production_decoder_run'])
     def test_link_analysis_bounded_extreme_duration(self):

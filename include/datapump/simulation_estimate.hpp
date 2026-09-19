@@ -1,6 +1,7 @@
 #pragma once
 #include "datapump/transfer.hpp"
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace datapump::simulation {
@@ -15,8 +16,18 @@ struct Estimate {
     // success_probability is meaningful only when confidence_available is true.
     double success_probability = 0;
     // First raw bit in the same geometry, independent of draft length/FEC.
-    // Shares confidence_available with the complete-draft probability.
+    // Can remain supported when complete-draft tracking is outside coverage.
     double one_bit_success_probability = 0;
+    bool one_bit_confidence_available = false;
+    // Monte Carlo sampling uncertainty, conditional on the channel/model.
+    // These intervals do not include model error or physical-link uncertainty.
+    std::size_t probability_trials = 0;
+    double one_bit_probability_low = 0, one_bit_probability_high = 1;
+    double success_probability_low = 0, success_probability_high = 1;
+    bool probability_interval_available = false;
+    bool probability_search_approximation = false;
+    std::size_t probability_carrier_candidates = 0;
+    std::string probability_model_limit;
     double cpu_seconds = 0;
     // Receive projection, search and tracking only; excludes synthetic channel
     // generation. Divide by simulated_seconds for a rough real-time workload,
@@ -41,7 +52,7 @@ struct Estimate {
     // instead of the combined statistical model. That reference retains the
     // detector-choice penalty even on compact fallback; it is not a lower bound.
     bool coherent_reference_only = false;
-    // Fixed matched-statistic trials modeled both branches, correlated noise,
+    // Fixed matched-statistic trials modeled eligible branches, correlated noise,
     // phase paths and competing bits. This does not run the adaptive receiver.
     bool drift_model_available = false;
     // Same modeled scenario using only the original coherent score, without
@@ -54,12 +65,13 @@ struct Estimate {
     // The combined model samples phase paths rather than substituting this
     // scalar loss into the original coherent probability formula.
     double section_phase_coherence_loss_db = 0;
-    // Default receiver-local differential geometry. Zero means ineligible.
-    // The existing probability model does not model this additional detector:
-    // confidence_available remains false whenever differential_windows > 0.
-    // Counts describe eligible geometry, not an actual live allocation.
+    // Receiver-local differential geometry. Zero means ineligible. Counts
+    // describe eligible geometry, not an actual live allocation; the model
+    // also checks the workspace allowance before crediting this detector.
     std::uint64_t differential_windows = 0;
     double differential_window_seconds = 0;
+    bool differential_model_available = false;
+    double differential_added_detection_probability = 0;
     double carrier_offset_hz = 0;
     // Requested search span. If receiver_workspace_supported is false, live
     // reception may use a narrower local fallback; no probability models it.
@@ -88,6 +100,9 @@ struct Estimate {
 // raw_bits covers both exact binary drafts and the fixed short dictionary.
 // compute_probability=false returns search/workspace and compute estimates
 // without probability trials; confidence_available then remains false.
+// differential_window_seconds must match the receiver-local PatternSearch
+// setting. Zero disables that detector; the default matches production use.
+// probability_trials controls only Monte Carlo precision, not receiver policy.
 // Details, assumed reference throughput and limitations:
 // docs/simulation-estimates.md.
 Estimate estimate(const transfer::Estimate& transmission,
@@ -95,5 +110,7 @@ Estimate estimate(const transfer::Estimate& transmission,
                   const modem::ChannelConfig& channel,
                   std::span<const modem::Config> receive_profiles = {},
                   std::size_t receive_key_count = 1,
-                  bool compute_probability = true);
+                  bool compute_probability = true,
+                  double differential_window_seconds = 100,
+                  std::size_t probability_trials = 4096);
 }

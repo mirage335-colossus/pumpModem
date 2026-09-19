@@ -92,16 +92,19 @@ struct Work {
     double projection_bin_chips=0;
     double following_search_ratio=0;
     bool drift_supported=false;
+    bool differential_supported=false;
+    bool compact=false;
+    std::uint64_t bin_samples=1;
     bool workspace_supported=true;
 };
 Work receiver_work(const modem::Config& config,long double samples,
                    const transfer::Options& options,std::size_t profiles,std::size_t keys,
-                   std::size_t established_stream_bits) {
+                   std::size_t established_stream_bits,double local_window_seconds) {
     const auto symbol=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
     const auto drift_sections=modem::detail::drift_section_count(config);
     const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
         modem::detail::differential_window_samples(symbol,chip,config.sample_rate,
-            modem::PatternSearch{}.differential_window_seconds):0;
+            local_window_seconds):0;
     const auto differential_windows=differential_window?symbol/differential_window:0;
     const bool private_pattern=config.scramble || config.dsss;
     const auto epochs=private_pattern?2.L*options.search_seconds+1+
@@ -158,6 +161,7 @@ Work receiver_work(const modem::Config& config,long double samples,
                                std::max(1.L,std::floor(chip/(2.L*(1+maximum_clock_ratio)))))+1;
     const auto phase_groups=private_pattern&&symbol%config.sample_rate!=0?(symbol>=config.sample_rate?2.L:3.L):1.L;
     Work result;
+    result.compact=correlator;result.bin_samples=bin;
     result.workspace_supported=!coupled || fft_core_bytes<=allowance;
     const auto real_rank=static_cast<long double>(bin)-image<=1e-10L*bin;
     const auto count=static_cast<double>(length);
@@ -169,11 +173,15 @@ Work receiver_work(const modem::Config& config,long double samples,
     result.noise_condition=correlator||real_rank?1:(static_cast<double>(bin)+image)/(static_cast<double>(bin)-image);
     result.timing_uncertainty_chips=correlator?.25:static_cast<double>(bin)/(2*static_cast<double>(chip));
     result.projection_bin_chips=correlator||bin==1?0:static_cast<double>(bin)/static_cast<double>(chip);
-    const auto initial_symbols=private_pattern?4.L:1.L;
+    // Only the FFT path searches four initial private stream templates.
+    // Compact lanes follow their absolute stream address and charge each
+    // completed phase group once, using the correlator's own alpha spending.
+    const auto initial_symbols=private_pattern&&!correlator?4.L:1.L;
     const auto acquisition_trials=(correlator?starts:initial_batch)*frequencies*phase_groups*initial_symbols;
-    result.acquisition_threshold=static_cast<double>(-std::log(1e-10L)+2*std::log(acquisition_trials+1)+
-        std::log(2*frequencies*initial_symbols));
-    result.following_search_ratio=correlator?0:static_cast<double>(nominal_length/initial_batch);
+    result.acquisition_threshold=static_cast<double>(-std::log(1e-10L)+
+        (correlator?std::log(acquisition_trials)+std::log(acquisition_trials+1)+std::log(2.L):
+         2*std::log(acquisition_trials+1)+std::log(2*frequencies*initial_symbols)));
+    result.following_search_ratio=correlator?1:static_cast<double>(nominal_length/initial_batch);
     // Compact layout is not allocated by the planner. Use a deliberately
     // generous per-lane upper allowance before crediting optional section
     // state; tighter compact budgets retain the coherent reference.
@@ -181,6 +189,7 @@ Work receiver_work(const modem::Config& config,long double samples,
         (differential_window?sizeof(std::array<modem::detail::CorrelationDifferentialFit,2>):0))+2*1024*1024;
     result.drift_supported=drift_sections>1&&result.workspace_supported&&
         (!correlator||compact_bound<=allowance)&&result.noise_dimensions>=16;
+    result.differential_supported=differential_window&&result.drift_supported;
     result.serial=samples*projection_operations_per_sample*banks;
     // Admission thresholds belong to one receiver; unrelated keys and
     // waveform profiles add compute work, not evidence against this signal.
@@ -275,13 +284,122 @@ Work receiver_work(const modem::Config& config,long double samples,
     }
     return result;
 }
+
+// Build the same nominal local template statistics used by FFT matching.
+// This work is bounded by projected observations, never represented PCM time.
+// Compact receivers use a bounded per-chip quadrature for shaped templates.
+// Unsupported cases keep their timing/resource diagnostics without inventing
+// a reception percentage from a different detector.
+bool differential_statistics(const transfer::Options& options,const Work& work,
+                             std::uint64_t window,detail::ReceiverProbabilityParameters& p) {
+    const auto& config=options.modem;
+    const auto total=modem::symbol_sample_count(config),chip=modem::pattern_chip_samples(config);
+    const auto windows=total/window;
+    if(windows>4096 || total%window || windows%4)return false;
+    // Private raw-bin FFT fits use a different trace-only legacy score scale;
+    // the joint model currently supports compact raw fits or complex FFT bins.
+    if(!work.compact&&work.bin_samples==1&&(config.scramble||config.dsss))return false;
+    auto step=work.compact?std::max<std::uint64_t>(1,chip/16):work.bin_samples;
+    if(!modem::pattern_pulse_enabled(config)&&work.compact)step=chip;
+    const auto quadrature=modem::pattern_pulse_enabled(config)&&!work.compact?
+        std::min<std::uint64_t>(step,4):1;
+    constexpr std::uint64_t maximum_observations=524288;
+    if(!step || total/step>maximum_observations/quadrature || total%step || window%step)return false;
+    auto configured=config;
+    if(options.timestamp)configured.stream_epoch=options.timestamp;
+    if(options.key)configured=transfer::seeded_config(options,configured.stream_epoch);
+    modem::PatternCode code(configured,configured.stream_epoch);
+    p.differential_windows=static_cast<std::uint32_t>(windows);
+    p.differential_window_seconds=static_cast<double>(window)/config.sample_rate;
+    p.differential_weights.assign(static_cast<std::size_t>(windows),0);
+    p.differential_correlations.assign(static_cast<std::size_t>(windows),{});
+    p.differential_signal_coefficients.assign(static_cast<std::size_t>(windows),{});
+    std::vector<double> other(static_cast<std::size_t>(windows));
+    std::vector<std::array<std::complex<double>,3>> pseudo(static_cast<std::size_t>(windows));
+    const bool real_sample_fits=work.compact||work.bin_samples==1;
+    // Compact fits whiten a real-sample Gram matrix. Circular-complex model
+    // draws are accurate only if the local image term is small. Integrate the
+    // carrier exactly across each quadrature block, keeping template work
+    // bounded even for hours-long chips.
+    const auto omega=2*std::numbers::pi*config.carrier_hz/config.sample_rate;
+    const auto image=std::abs(std::sin(omega))<1e-12?1.:
+        std::sin(static_cast<double>(step)*omega)/(static_cast<double>(step)*std::sin(omega));
+    const auto amplitude=std::sqrt(2*modem::nominal_signal_power);
+    double source_energy=0;
+    for(std::uint64_t at=0;at<total;at+=step) {
+        const auto position=static_cast<long double>(at)+(step-1)/2.L;
+        const auto index=static_cast<std::uint64_t>(position/chip);
+        const auto fraction=static_cast<double>(position/chip-index);
+        const auto a=modem::pattern_pulse_enabled(config)?code.shaped_value(0,0,static_cast<double>(position)):
+            code.value(index,0,fraction);
+        const auto b=modem::pattern_pulse_enabled(config)?code.shaped_value(0,1,static_cast<double>(position)):
+            code.value(index,1,fraction);
+        const auto local=static_cast<std::size_t>(at/window);
+        auto source=a;
+        if(modem::pattern_pulse_enabled(config)) {
+            source={};
+            for(std::uint64_t node=0;node<quadrature;++node) {
+                const auto sample=static_cast<double>(at)+
+                    (static_cast<double>(node)+.5)*static_cast<double>(step)/static_cast<double>(quadrature)-.5;
+                source+=modem::pattern_limit_pcm(amplitude*code.shaped_value(0,0,sample))/amplitude;
+            }
+            source/=static_cast<double>(quadrature);
+        }
+        source_energy+=std::norm(source);
+        p.differential_signal_coefficients[local][0]+=source*std::conj(a);
+        p.differential_signal_coefficients[local][1]+=source*std::conj(b);
+        p.differential_weights[local]+=std::norm(a);other[local]+=std::norm(b);
+        p.differential_correlations[local]+=a*std::conj(b);
+        if(real_sample_fits) {
+            const auto rotation=image*std::polar(1.,2*omega*static_cast<double>(position));
+            pseudo[local][0]+=a*a*rotation;pseudo[local][1]+=b*b*rotation;pseudo[local][2]+=a*b*rotation;
+        }
+    }
+    const auto sum=std::accumulate(p.differential_weights.begin(),p.differential_weights.end(),0.);
+    const auto other_sum=std::accumulate(other.begin(),other.end(),0.);
+    if(!(sum>0)||!(other_sum>0)||!(source_energy>0))return false;
+    // Retain actual finite-code power, radial limiting and projected-bin
+    // averaging. Signal fits can differ from the unmodified receive templates;
+    // the joint model retains their unfitted energy in the denominator.
+    p.signal_energy*=source_energy/static_cast<double>(total/step);
+    p.differential_alternative_weights=other;
+    p.weights.fill(0);p.correlations.fill(0);
+    for(std::size_t i=0;i<windows;++i) {
+        const auto denominator=std::sqrt(p.differential_weights[i]*other[i]);
+        if(!(denominator>0))return false;
+        p.differential_signal_coefficients[i][0]/=std::sqrt(p.differential_weights[i]*source_energy);
+        p.differential_signal_coefficients[i][1]/=std::sqrt(other[i]*source_energy);
+        if(real_sample_fits&&(std::abs(pseudo[i][0])>.01*p.differential_weights[i] ||
+            std::abs(pseudo[i][1])>.01*other[i] || std::abs(pseudo[i][2])>.01*denominator))return false;
+        p.differential_correlations[i]/=denominator;
+        if(std::abs(p.differential_correlations[i])>=.999999)return false;
+        p.differential_weights[i]/=sum;
+        p.differential_alternative_weights[i]/=other_sum;
+        const auto quarter=std::min<std::size_t>(3,i*4/windows);
+        p.weights[quarter]+=p.differential_weights[i];
+        p.correlations[quarter]+=p.differential_weights[i]*p.differential_correlations[i].real();
+    }
+    for(unsigned j=0;j<4;++j)p.correlations[j]/=p.weights[j];
+    return true;
+}
+
+std::array<double,2> sampling_interval(double probability,std::size_t trials,double z=1.959963984540054) {
+    if(!trials)return {0,1};
+    // Wilson interval for the fixed Monte Carlo draws only. Model mismatch
+    // and physical oscillator/propagation uncertainty are separate limits.
+    const auto n=static_cast<double>(trials),denominator=1+z*z/n;
+    const auto center=(probability+z*z/(2*n))/denominator;
+    const auto radius=z/denominator*std::sqrt(probability*(1-probability)/n+z*z/(4*n*n));
+    return {probability<=0?0:std::max(0.,center-radius),probability>=1?1:std::min(1.,center+radius)};
+}
 }
 
 Estimate estimate(const transfer::Estimate& transmission,const transfer::Options& options,bool raw_bits,
                   const modem::ChannelConfig& channel,std::span<const modem::Config> profiles,std::size_t keys,
-                  bool compute_probability) {
+                  bool compute_probability,double local_window_seconds,std::size_t probability_trials) {
     modem::validate(options.modem);modem::validate_channel(options.modem,channel);
-    if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys)
+    if(!std::isfinite(transmission.total_seconds) || transmission.total_seconds<0 || !keys ||
+       !std::isfinite(local_window_seconds) || local_window_seconds<0)
         throw Error("invalid simulation estimate input");
     if(profiles.empty())profiles=std::span(&options.modem,1);
     Estimate result;result.receiver_profiles=profiles.size();
@@ -297,7 +415,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     result.drift_section_seconds=static_cast<double>(section_samples)/config.sample_rate;
     const auto differential_window=config.pattern_symbols && config.spreading_mode==modem::SpreadingMode::pattern?
         modem::detail::differential_window_samples(samples_per_symbol,modem::pattern_chip_samples(config),
-            config.sample_rate,modem::PatternSearch{}.differential_window_seconds):0;
+            config.sample_rate,local_window_seconds):0;
     result.differential_windows=differential_window?samples_per_symbol/differential_window:0;
     result.differential_window_seconds=static_cast<double>(differential_window)/config.sample_rate;
     if(differential_window)result.coherent_reference_only=false;
@@ -319,7 +437,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         const auto matches=same_profile(config,profile);
         result.profile_matches|=matches;
         const auto work=receiver_work(profile,media*profile.sample_rate,options,profiles.size(),keys,
-                                      matches?transmission.wire_bits:0);
+                                      matches?transmission.wire_bits:0,local_window_seconds);
         serial+=work.serial;parallel+=work.parallel;
         tracking_serial+=work.tracking_serial;tracking_windows+=work.tracking_windows;
         if(matches) {
@@ -382,14 +500,15 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // regime. Do not extrapolate a numeric probability beyond the bank, nor
     // claim zero: some out-of-bank signals can still produce admitted fits.
     if(!result.profile_matches || !result.carrier_in_search || !result.receiver_workspace_supported)return result;
-    // The four-quarter trials do not reproduce local differential products,
-    // their candidate correlations or the added detector-choice penalty.
-    // Keep energy, coverage and work diagnostics without advertising a
-    // probability for a detector that this model has not sampled.
-    if(!compute_probability || differential_window)return result;
+    if(!compute_probability)return result;
+    if(differential_window&&!matching_work.differential_supported) {
+        result.probability_model_limit="Local detector allocation is outside the modeled workspace allowance";
+        return result;
+    }
     result.confidence_available=true;
     if(matching_work.drift_supported) {
         detail::ReceiverProbabilityParameters parameters;
+        parameters.requested_trials=probability_trials;
         parameters.signal_energy=static_cast<double>(std::pow(10.L,symbol_db/10));
         parameters.seconds=static_cast<double>(seconds);
         parameters.diffusion_degrees=channel.phase_noise_degrees_per_sqrt_second;
@@ -439,7 +558,23 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
             const auto weight=std::accumulate(parameters.weights.begin(),parameters.weights.end(),0.);
             for(auto& section_weight:parameters.weights)section_weight/=weight;
         }
+        if(differential_window&&!differential_statistics(options,matching_work,differential_window,parameters)) {
+            result.confidence_available=false;
+            result.probability_model_limit="Local template geometry exceeds the bounded probability model";
+            return result;
+        }
         const auto probability=detail::receiver_probability(parameters);
+        if(!probability.available) {
+            result.confidence_available=false;
+            result.probability_model_limit=probability.unsupported_reason;
+            return result;
+        }
+        result.probability_trials=probability.trials;
+        result.one_bit_confidence_available=true;
+        result.probability_search_approximation=probability.frequency_search_approximation;
+        result.probability_carrier_candidates=probability.frequency_candidates;
+        result.differential_model_available=probability.differential_model;
+        result.differential_added_detection_probability=probability.differential_acquired_correct;
         result.drift_model_available=true;result.coherent_reference_only=false;
         result.one_bit_success_probability=probability.acquired_correct;
         const auto count=static_cast<long double>(transmission.wire_bits);
@@ -460,11 +595,42 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
         result.coherent_success_probability=draft_probability(probability.coherent_acquired_correct,probability.coherent_acquired_wrong,
             probability.coherent_retained_correct,probability.coherent_retained_wrong);
         result.success_probability=std::clamp(result.success_probability,0.,1.);
+        const auto one_interval=sampling_interval(probability.acquired_correct,probability.trials);
+        result.one_bit_probability_low=one_interval[0];result.one_bit_probability_high=one_interval[1];
+        if(raw_bits&&probability.trials) {
+            // Simultaneous 95% intervals for acquisition and continuation
+            // (Bonferroni for multi-bit drafts), propagated under the same
+            // independent-bit assumption as the draft probability above.
+            const auto z=count>1?2.241402727604947:1.959963984540054;
+            const auto acquired=sampling_interval(probability.acquired_correct,probability.trials,z);
+            const auto retained=sampling_interval(probability.retained_correct,probability.trials,z);
+            result.success_probability_low=acquired[0]*probability_power(retained[0],count-1);
+            result.success_probability_high=acquired[1]*probability_power(retained[1],count-1);
+            result.probability_interval_available=true;
+        }
         // Diagnostic coherent energy uses the joint frequency/diffusion mean;
         // the success calculation uses individual path statistics above.
         const auto joint=expected_correlation_coherence(parameters.seconds,parameters.diffusion_degrees,
             parameters.residual_frequency)*parameters.timing_coherence;
-        result.modeled_symbol_snr_db=joint>0?static_cast<double>(symbol_db)+10*std::log10(joint):-300;
+        double fitted_fraction=1;
+        if(!parameters.differential_signal_coefficients.empty()) {
+            std::complex<double> fitted{};
+            for(std::size_t i=0;i<parameters.differential_windows;++i)
+                fitted+=std::sqrt(parameters.differential_weights[i])*parameters.differential_signal_coefficients[i][0];
+            fitted_fraction=std::norm(fitted);
+        }
+        const auto modeled_energy=parameters.signal_energy*joint*fitted_fraction;
+        result.modeled_symbol_snr_db=modeled_energy>0?10*std::log10(modeled_energy):-300;
+        if(differential_window&&matching_work.compact&&transmission.wire_bits>1) {
+            // Compact reception keeps the first admitted timing lane, which
+            // can precede the nearest lane. Subsequent success is conditional
+            // on that choice; independent nearest-lane bit probabilities
+            // measurably overestimate complete drafts in sampled captures.
+            result.confidence_available=false;result.probability_interval_available=false;
+            result.success_probability=result.coherent_success_probability=0;
+            result.success_probability_low=0;result.success_probability_high=1;
+            result.probability_model_limit="Compact multi-bit timing ownership is not modeled; the first-bit estimate remains available";
+        }
         return result;
     }
     const auto energy=static_cast<double>(std::pow(10.L,std::clamp(effective_db/10,-30.L,12.L)));
@@ -498,6 +664,7 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     // runs a second time. Interval FEC can otherwise conceal a physical end.
     if(!raw_bits)probability*=static_cast<double>(std::max(0.L,1-premature));
     result.success_probability=result.profile_matches?std::clamp(probability,0.,1.):0;
+    result.one_bit_confidence_available=result.confidence_available;
     return result;
 }
 }

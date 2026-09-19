@@ -406,7 +406,7 @@ CurveEntry& curve_entry(const transfer::Options& options,const modem::ChannelCon
 }
 ReceivePoint receive_point(double target,const simulation::Estimate& estimate,bool numerical_range) {
     return {target,estimate.success_probability,estimate.confidence_available&&numerical_range,
-        estimate.carrier_in_search,estimate.receiver_workspace_supported};
+        estimate.carrier_in_search,estimate.receiver_workspace_supported,estimate.probability_trials};
 }
 CpuPoint cpu_point(double target,const simulation::Estimate& estimate) {
     const auto ratio=estimate.simulated_seconds>0?estimate.receiver_cpu_seconds/estimate.simulated_seconds:0;
@@ -445,7 +445,9 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
         // identical inputs produce an identical curve on every repaint.
         if(costly)++expensive;
         if(!entry.probability_computed) {
-            entry.estimate=simulation::estimate(one_bit_estimate(*geometry),options,true,channel);
+            // Curve locations are illustrative; the selected estimate uses
+            // 4096 draws and exposes its own sampling interval separately.
+            entry.estimate=simulation::estimate(one_bit_estimate(*geometry),options,true,channel,{},1,true,100,512);
             entry.probability_computed=true;
         }
         output.emplace(target,receive_point(target,entry.estimate,numerical_range));return true;
@@ -476,7 +478,7 @@ void receive_curve(Model& model,const simulation::Estimate& selected_one) {
     };
     // The selected one-bit probability comes from the already evaluated
     // headline, including when that headline describes a longer draft.
-    output.emplace(inputs.target_db_hz,receive_point(inputs.target_db_hz,selected_one,model.confidence_available));
+    output.emplace(inputs.target_db_hz,receive_point(inputs.target_db_hz,selected_one,model.one_bit_confidence_available));
     cpu_output.emplace(inputs.target_db_hz,cpu_point(inputs.target_db_hz,selected_one));
     // Check every existing graph sample cheaply. Unsupported geometry breaks
     // the overlay; short/coherent profiles can be evaluated analytically here.
@@ -596,8 +598,18 @@ Model build(const Inputs& inputs) {
         result.clock_search_supported=receiver.carrier_in_search;
         result.receiver_workspace_supported=receiver.receiver_workspace_supported;
         result.confidence_available=receiver.confidence_available&&sample_snr>=-300&&sample_snr<=300;
+        result.one_bit_confidence_available=receiver.one_bit_confidence_available&&sample_snr>=-300&&sample_snr<=300;
         result.success_probability=result.confidence_available?receiver.success_probability:0;
-        result.one_bit_success_probability=result.confidence_available?receiver.one_bit_success_probability:0;
+        result.one_bit_success_probability=result.one_bit_confidence_available?receiver.one_bit_success_probability:0;
+        result.probability_trials=receiver.probability_trials;
+        result.success_probability_low=receiver.success_probability_low;
+        result.success_probability_high=receiver.success_probability_high;
+        result.one_bit_probability_low=receiver.one_bit_probability_low;
+        result.one_bit_probability_high=receiver.one_bit_probability_high;
+        result.probability_interval_available=receiver.probability_interval_available;
+        result.probability_search_approximation=receiver.probability_search_approximation;
+        result.probability_carrier_candidates=receiver.probability_carrier_candidates;
+        result.probability_model_limit=receiver.probability_model_limit;
         result.phase_coherence_loss_db=receiver.phase_coherence_loss_db;
         result.coherent_reference_only=receiver.coherent_reference_only;
         result.drift_model_available=receiver.drift_model_available&&result.confidence_available;
@@ -605,12 +617,15 @@ Model build(const Inputs& inputs) {
         result.section_phase_coherence_loss_db=receiver.section_phase_coherence_loss_db;
         result.differential_windows=receiver.differential_windows;
         result.differential_window_seconds=receiver.differential_window_seconds;
+        result.differential_model_available=receiver.differential_model_available;
+        result.differential_added_detection_probability=receiver.differential_added_detection_probability;
         auto single_receiver=inputs.wire_bits==1?receiver:
             simulation::estimate(single_transmission,options,true,channel,{},1,false);
         // Draft length changes continuation and total work, but acquisition
         // already supplies this one-bit probability without another trial run.
         single_receiver.success_probability=receiver.one_bit_success_probability;
-        single_receiver.confidence_available=receiver.confidence_available;
+        single_receiver.confidence_available=receiver.one_bit_confidence_available;
+        single_receiver.probability_trials=receiver.probability_trials;
         single_receiver.drift_model_available=receiver.drift_model_available;
         single_receiver.coherent_reference_only=receiver.coherent_reference_only;
         result.one_bit_cpu_seconds=single_receiver.cpu_seconds;
@@ -621,8 +636,9 @@ Model build(const Inputs& inputs) {
         result.one_bit_cpu_available=single_receiver.receiver_workspace_supported&&
             std::isfinite(result.one_bit_cpu_seconds)&&std::isfinite(result.receiver_cpu_seconds)&&
             std::isfinite(result.cpu_realtime_ratio)&&result.one_bit_cpu_seconds>0&&single_receiver.simulated_seconds>0;
-        auto& selected_cache=curve_entry(options,channel);
-        selected_cache.estimate=single_receiver;selected_cache.probability_computed=true;
+        // The selected marker already receives single_receiver directly.
+        // Keep its 4096-trial result out of the 512-trial curve cache so a
+        // previously selected target cannot change a later curve's precision.
         if(!receiver.carrier_in_search)result.receiver_status="Clock outside RX search";
         if(!receiver.receiver_workspace_supported) {
             if(!result.receiver_status.empty())result.receiver_status+=" · ";

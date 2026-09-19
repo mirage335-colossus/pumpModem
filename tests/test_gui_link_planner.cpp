@@ -366,6 +366,38 @@ void nearest_target_shares_receiver_budget() {
     check(receiver.carrier_in_search&&receiver.receiver_workspace_supported,
           "The private rounded endpoint must fit the independently configured full receive bank");
 }
+void narrow_band_differential_model() {
+    // The two user-reported target/rate combinations, with a fixed allowance
+    // independent of this test host's physical RAM. Oscillator class never
+    // gates either receiver branch; sample geometry and modeled drift do.
+    auto inputs=example();
+    inputs.tx_dbm=0;inputs.path_loss_db=200;inputs.noise_density_dbm_hz=-164;
+    inputs.target_db_hz=-38.092699609758306;
+    inputs.options.modem=tuning::resolve(.01,inputs.target_db_hz,inputs.mode,false,1500).config;
+    inputs.options.dsp_workspace_bytes=2ULL*1024*1024*1024;
+    inputs.channel.clock_error_ppm=.0001;
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.005;
+    const auto shorter=planner::build(inputs);
+    near(shorter.bit_seconds,409600,"The shorter narrow-band command changed exact bit duration");
+    check(shorter.confidence_available && shorter.differential_windows==0 && !shorter.differential_model_available,
+          "128 local windows must retain the appropriate older receiver probability");
+    check(contains_text(planner_page::build(shorter,900,false,false),"local differential geometry not eligible"),
+          "The shorter command must explain why local comparisons are absent from its estimate");
+    inputs.target_db_hz=-44.25748830262745;
+    inputs.options.modem=tuning::resolve(.01,inputs.target_db_hz,inputs.mode,false,1500).config;
+    inputs.channel.phase_noise_degrees_per_sqrt_second=.05;
+    const auto longer=planner::build(inputs);
+    near(longer.bit_seconds,3276800,"The TCXO narrow-band command changed exact bit duration");
+    check(longer.confidence_available && longer.differential_model_available && longer.differential_windows==1024 &&
+          longer.differential_window_seconds==3200 && longer.probability_trials==4096 &&
+          longer.probability_interval_available && longer.success_probability_low<longer.success_probability &&
+          longer.probability_search_approximation && longer.probability_carrier_candidates>0,
+          "The TCXO command must include the new detector and expose finite-sampling/search limits");
+    const auto page=planner_page::build(longer,900,true,false);
+    check(contains_text(page,"1024 windows") && contains_text(page,"included in RX estimate") &&
+          contains_text(page,"95% sampling interval") && contains_text(page,"sampling uncertainty only"),
+          "Supported local reception must disclose its detector geometry and model uncertainty");
+}
 void phase_loss_and_receiver_confidence() {
     auto inputs=gpsdo_islands();
     inputs.target_db_hz=static_cast<double>(18-10*std::log10((18973668000.L-.5L)/6000));
@@ -378,7 +410,7 @@ void phase_loss_and_receiver_confidence() {
     const auto local_page=planner_page::build(local,900,true,false);
     check(contains_text(local_page,"RX estimate unavailable")&&
           contains_text(local_page,"Whole-bit phase loss: 17.8 dB")&&
-          contains_text(local_page,"Local phase comparisons: 100")&&
+          contains_text(local_page,"Differential detector:")&&contains_text(local_page,"Estimate coverage:")&&
           contains_text(local_page,"256 windows")&&
           !contains_text(local_page,"Coherent-only comparison:"),
           "Long-bit details must describe local windows without presenting the old probability as current");
@@ -408,7 +440,7 @@ void phase_loss_and_receiver_confidence() {
           weak.section_phase_coherence_loss_db<weak.phase_coherence_loss_db,
           "Long-pattern probability must identify the combined model and retain finite section phase loss");
     const auto weak_page=planner_page::build(weak,900,false,false);
-    check(contains_text(weak_page,"RX estimate: <0.1%")&&contains_text(weak_page,"Whole-bit phase loss: 17.8 dB")&&
+    check(contains_text(weak_page,"RX estimate: <1%")&&contains_text(weak_page,"Whole-bit phase loss: 17.8 dB")&&
           !contains_text(weak_page,"Extra drift-tolerant gain is not yet estimated")&&
           !contains_text(weak_page,"Coherent-only comparison:")&&
           !contains_text(weak_page,"Meets target")&&!contains_text(weak_page,"Pattern transitions."),
@@ -430,12 +462,12 @@ void phase_loss_and_receiver_confidence() {
     near(stronger_link.phase_coherence_loss_db,weak.phase_coherence_loss_db,
          "Extra received power must not erase the modeled oscillator phase loss");
     const auto stronger_page=planner_page::build(stronger_link,900,false,false);
-    check(contains_text(stronger_page,"RX estimate: >99.9%")&&contains_text(stronger_page,"Whole-bit phase loss: 17.8 dB"),
+    check(contains_text(stronger_page,"RX estimate: >99%")&&contains_text(stronger_page,"Whole-bit phase loss: 17.8 dB"),
           "The reception headline must respond to actual link power while retaining the same phase loss");
     const auto detailed_page=planner_page::build(weak,900,true,false);
     check(contains_text(detailed_page,"Pattern transitions.")&&contains_text(detailed_page,"four sections")&&
           contains_text(detailed_page,"separate gain and phase")&&contains_text(detailed_page,"local windows")&&
-          contains_text(detailed_page,"Probability is unavailable when the additional local comparisons are eligible")&&
+          contains_text(detailed_page,"Supported estimates include all eligible detector scores")&&
           contains_text(detailed_page,"Coherent-only comparison:")&&
           contains_text(detailed_page,"Phase loss within a section:"),
           "Expanded details must explain implemented section fits and retain the coherent comparison");
@@ -1248,7 +1280,7 @@ void receiver_overlay_and_cpu_status() {
 void estimate_warning_thresholds() {
     planner::Model model;model.inputs=example();model.available=true;
     model.clock_search_supported=model.receiver_workspace_supported=true;
-    model.confidence_available=model.observer_available=true;
+    model.confidence_available=model.one_bit_confidence_available=model.observer_available=true;
     model.bit_seconds=model.send_seconds=60;model.finish_seconds=120;
     const auto tone_for=[&](const ui::DocumentNode& page,std::string_view prefix) {
         const auto flat=nodes(page);
@@ -1278,7 +1310,12 @@ void estimate_warning_thresholds() {
                   "Observer values must turn red strictly below 8x, before display rounding");
         }
     }
-    model.confidence_available=model.observer_available=false;
+    model.confidence_available=false;model.one_bit_success_probability=.79;
+    const auto first_bit_only=planner_page::build(model,900,false,true);
+    check(tone_for(first_bit_only,"RX estimate unavailable")!=ui::DocumentTone::negative&&
+          tone_for(first_bit_only,"┄ 1-bit RX")==ui::DocumentTone::negative,
+          "An unsupported draft must preserve its separately supported first-bit estimate");
+    model.confidence_available=model.one_bit_confidence_available=model.observer_available=false;
     model.success_probability=model.one_bit_success_probability=model.observer_ratio=0;
     const auto unavailable=planner_page::build(model,900,false,false);
     check(tone_for(unavailable,"RX estimate unavailable")!=ui::DocumentTone::negative&&
@@ -1448,7 +1485,7 @@ int main() {
         independent_reference_values();exact_geometry_and_physical_finish();timing_milestones();
         clock_and_ram_milestones();sampled_clock_ram_islands();checked_clock_ram_navigation();
         nearest_usable_targets();nearest_target_shares_receiver_budget();
-        phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
+        narrow_band_differential_model();phase_loss_and_receiver_confidence();gpsdo_phase_does_not_change_clock_coverage();
         separate_link_budget_and_observer_model();quantization_fixed_modes_and_limits();
         current_draft_and_modem_isolation();application_prompt_roundtrips();all_target_dropdowns_and_native_planner_editor();
         controller_checked_navigation();

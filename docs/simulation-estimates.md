@@ -8,9 +8,10 @@ changes. Nothing in this model changes transmission or receiver admission.
 For patterns eligible for four-section fitting, **RX estimate** models the
 original coherent match and that detector. Expanded details retain the
 coherent-only comparison. **RX reference** identifies a limited fallback model.
-Still longer patterns can enable local differential matching, which these
-probability trials do not model. Their receive percentage remains unavailable;
-coverage, phase-loss diagnostics and compute estimates remain visible.
+Still longer patterns can enable local differential matching. Supported local
+geometries use a joint model of all three detector branches. Unsupported
+geometries retain timing, search and compute diagnostics, with an explicit
+coverage reason instead of a probability from a different detector.
 
 The separate [LPI relative observation advisory](lpi-estimates.md) compares an
 unkeyed energy detector's total observation with a one-symbol receiver design
@@ -106,7 +107,7 @@ duration are different quantities. UI replay pacing is excluded.
 
 Numeric probability is available only when a matching receive profile covers
 the simulated carrier shift, the expanded FFT core fits its modeled
-workspace allowance, and the default local differential branch is ineligible.
+workspace allowance, and every eligible detector lies within model coverage.
 The application enables an expanded carrier/clock
 search for pattern symbols lasting at least 16 sample-quantized seconds. Its
 frequency lattice has spacing `0.25/T`, where `T` is the actual sampled symbol
@@ -213,16 +214,61 @@ retain phase relationships; their statistic has its own finite-noise bound,
 strongest-quarter removal and an additional `ln(2)` detector-choice cost.
 See [the actual score](pattern-constellation.md#local-differential-evidence).
 
-The existing four-quarter Monte Carlo model does not sample these products,
-their correlations between candidate patterns, or the new choice penalty.
-Consequently `differential_windows > 0` makes `confidence_available` false,
-and neither the full-draft, one-bit nor coherent-comparison field is a numeric
-prediction. `differential_window_seconds` gives the actual rounded duration;
-both differential fields are zero for ineligible geometry. They describe
-default eligibility, not a live memory allocation. Confidence remains
-unavailable even if a particular compact receiver would fall back under a
-tighter memory budget. No unvalidated probability is inferred from that
-fallback. Shorter profiles continue to use the existing models below.
+The local model samples a continuous Brownian phase path and correlated complex
+noise in every complete window. Both bit patterns, the full coherent fit,
+four-section fit and local products share the same observations and received
+energy. It calls the production `DifferentialAccumulator` score, including its
+eight phase directions, strongest-quarter guard and both detector-choice costs.
+No local hard bit decisions or noiseless phase differences are substituted.
+The two projected templates supply their actual local energies and complex
+cross-correlations; shaped alternatives retain separate normalization weights.
+Finite code power, transmitter radial limiting, and bounded quadrature of
+shaped FFT projection bins determine the signal coefficients. Fitted and
+unfitted signal both remain in the received-energy denominator.
+Within-window phase integration uses bounded quadrature, with its second moment
+corrected to the analytical coherent-energy mean. Template weighting within a
+wandering window remains an approximation.
+
+The supported local envelope is 256–4096 complete windows, with no partial tail
+and boundaries aligned to the four sections. Projected-template integration is
+capped at 524,288 observations; locally singular templates, appreciably
+noncircular projected noise, local phase variance above 0.5 radian², or unresolved
+local carrier rotation have no numeric probability. These are model limits,
+not new receiver restrictions. The same receiver-local window helper and
+workspace checks select the detector. `differential_model_available` states
+whether its probability was included; `probability_model_limit` explains a
+coverage failure. `differential_windows` and `differential_window_seconds`
+describe eligible geometry, not a guaranteed live allocation.
+
+Carrier candidates use the actual frequency lattice and shared noisy fits.
+Banks of at most 17 candidates are evaluated in full when their local rotation
+is resolved. Larger banks use a bounded neighborhood around nominal frequency
+and the phase-path slope; omitted candidates set
+`probability_search_approximation`. The actual search bank still determines the
+admission threshold. This improves on selecting a signal-only best frequency
+before adding noise, but does not reproduce full adaptive acquisition, clock
+arbitration, interference or competing tracks. There is no hardware-class gate:
+oscillator inputs are frequency error and phase diffusion.
+
+The default estimate uses 4096 fixed trials; graph locations use 512. Returned
+trial counts and 95% Wilson intervals describe **Monte Carlo sampling uncertainty
+only**, not model error or physical-link reliability. Zero observed failures do
+not establish perfect reception. For supported raw multi-bit cases, intervals propagate simultaneous
+acquisition/continuation bounds under the existing independent-bit approximation;
+no full-draft interval is claimed for the nonlinear FEC calculation. Headline
+percentages use whole-percent precision. `differential_added_detection_probability`
+reports first-bit admissions supplied by the local branch when the older two
+branches fail in the same trials; it can be zero even though the branch is active.
+Independent sampled multi-bit tests exposed a specific coverage limit: the
+compact receiver retains the earliest admitted timing lane, even if a later,
+closer lane has a stronger match. Later bits depend on that choice. A product
+of independent nearest-lane probabilities overestimates some complete drafts.
+Until this conditional timing selection is modeled, compact differential
+multi-bit drafts have no numeric whole-draft probability. Their independently
+modeled first-bit probability remains available through
+`one_bit_confidence_available`, the one-bit graph, and its sampling interval.
+This exclusion changes no receiver admission, pending bits or completion.
+Shorter profiles continue to use the existing models below.
 
 `drift_sections` and `drift_section_seconds` identify this geometry;
 `section_phase_coherence_loss_db` describes phase loss in the longest quarter.
@@ -233,7 +279,7 @@ can retain coherent-only scoring when section state cannot fit; the reference
 conservatively keeps `ln(2)` even if that fallback would omit it. Runtime
 `PatternReceiver::drift_tolerant()` and `PatternCorrelator::drift_tolerant()`
 report the selected detector policy.
-The combined probability model uses 4096 deterministic matched-statistic trials.
+The coherent/four-quarter model below uses 4096 deterministic matched-statistic trials for the selected estimate.
 It models correlated noise and a shared whole-symbol energy denominator, finite
 correlation between bit patterns, and continuous Brownian phase drift through
 four section means using bounded quadrature and a mixing approximation. Each
@@ -288,7 +334,7 @@ model, not a second measured receiver run. The CLI reports this comparison as
 planner searches bypass probability trials. The Link planner
 curve shows one-bit reception at the fixed power, path, noise and clock settings;
 it does not replace the whole-draft headline. Each build adds at most twelve
-new four-section estimates, reuses a bounded cache and refines around probability
+new statistical estimates of 512 trials, reuses a bounded cache and refines around probability
 changes. Short coherent estimates use the cheaper analytical model. Clock/RAM
 checks cover the existing graph samples; an unusable rounded target may use an
 independently checked fit within 0.001 dB. Wider unsupported gaps break the RX line.
@@ -296,8 +342,8 @@ Intermediate values interpolate the sampled estimates.
 
 Sections must still be coherent; four quarters do not provide arbitrary drift
 tracking over a days-long bit. Differential windows can preserve shorter phase
-relationships, but their gain and losses are not modeled by the four-quarter
-probability calculation. Pattern transitions do not reset oscillator
+relationships; the joint local model above includes their noisy products and
+penalties where supported. Pattern transitions do not reset oscillator
 phase error. This channel omits GPS servo corrections, which can constrain
 long-term phase error in a real locked device. There is no special 0.01 Hz threshold.
 The differential constellation points remain display diagnostics. All admission,
@@ -530,6 +576,10 @@ waveform geometry, not the secret key's validity or successful authentication.
 
 ## Verification
 
+See the [dated validation record](validation.md) for measured discrepancies and
+coverage. Passing a finite set of synthetic captures does not certify the
+whole parameter range, adaptive carrier search, or a physical RF link.
+
 `simulation_estimate` checks deterministic reference estimates, SNR and draft
 length response, fixed-interval FEC versus unprotected short input, incompatible
 receive profiles, additional receiver work, phase noise and full four-hour
@@ -548,8 +598,14 @@ scaling, nominal complete-symbol absence, empty drafts, matching profiles,
 unrelated keys and avoiding duplicate correlator work. CLI checks retain the
 exact one-bit and three-bit wire paths while exposing the tracking breakdown.
 Differential boundary regressions retain the four-quarter model immediately
-below eligibility, withhold unsupported probabilities above it, preserve
-phase/search diagnostics, and include the additional FFT and tracking work.
+below eligibility, exercise the joint model above it, withhold probabilities
+outside model coverage, preserve phase/search diagnostics, and include the
+additional FFT and tracking work. The full sampled differential matrix carries
+the CTest `calibration` label; its pulse-shaped captures are substantially slower
+than matched-statistic tests. `differential_probability` checks the joint
+statistic against an independent noncentral-beta coherent limit and weak-product
+controls. `differential_receiver_probability` compares predictions with
+independent sampled channel captures through the production receiver.
 These checks validate model mechanics, not its empirical
 calibration. The independent protocol and physical-completion regressions remain
 the authority for actual transport behavior.

@@ -705,6 +705,24 @@ void analyze_link(const Args& a,transfer::Options options) {
     json_number(current.drift_section_seconds);
     std::cout<<",\"differential_windows\":"<<current.differential_windows<<",\"differential_window_seconds\":";
     json_number(current.differential_window_seconds);
+    std::cout<<",\"differential_model_available\":"<<(current.differential_model_available?"true":"false")
+        <<",\"differential_added_detection_probability\":";
+    if(current.differential_model_available)json_number(current.differential_added_detection_probability);else std::cout<<"null";
+    std::cout<<",\"probability_trials\":"<<current.probability_trials
+        <<",\"probability_search_approximation\":"<<(current.probability_search_approximation?"true":"false")
+        <<",\"probability_carrier_candidates\":"<<current.probability_carrier_candidates
+        <<",\"probability_model_limit\":\""<<json_escape(current.probability_model_limit)<<"\""
+        <<",\"one_bit_success_probability\":";
+    if(current.one_bit_confidence_available)json_number(current.one_bit_success_probability);else std::cout<<"null";
+    std::cout<<",\"one_bit_confidence_available\":"<<(current.one_bit_confidence_available?"true":"false");
+    std::cout<<",\"one_bit_probability_sampling_low\":";
+    if(current.probability_trials)json_number(current.one_bit_probability_low);else std::cout<<"null";
+    std::cout<<",\"one_bit_probability_sampling_high\":";
+    if(current.probability_trials)json_number(current.one_bit_probability_high);else std::cout<<"null";
+    std::cout<<",\"success_probability_sampling_low\":";
+    if(current.probability_interval_available)json_number(current.success_probability_low);else std::cout<<"null";
+    std::cout<<",\"success_probability_sampling_high\":";
+    if(current.probability_interval_available)json_number(current.success_probability_high);else std::cout<<"null";
     std::cout<<",\"phase_coherence_loss_db\":";json_number(current.phase_coherence_loss_db);
     std::cout<<",\"section_phase_coherence_loss_db\":";json_number(current.section_phase_coherence_loss_db);
     std::cout<<",\"cpu_reference\":\""<<simulation::reference_cpu<<"\",\"gpu_reference\":\""<<simulation::reference_gpu

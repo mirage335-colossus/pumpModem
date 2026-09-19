@@ -26,9 +26,9 @@ std::string number(double value, int precision = 3) {
 }
 std::string db(double value) { return (value > 0 ? "+" : "") + number(value); }
 std::string probability(double value) {
-    if (value < .001) return "<0.1%";
-    if (value > .999) return ">99.9%";
-    std::ostringstream out;out << std::fixed << std::setprecision(1) << 100 * value << '%';
+    if (value < .01) return "<1%";
+    if (value > .99) return ">99%";
+    std::ostringstream out;out << std::fixed << std::setprecision(0) << 100 * value << '%';
     return "≈ " + out.str();
 }
 std::string decimal(double value) {
@@ -119,7 +119,7 @@ Chart chart_data(const planner::Model& model, bool observer) {
     chart.selected_target = model.inputs.target_db_hz;
     chart.selected_value = observer ? (model.observer_available ? model.observer_ratio : 0) : model.bit_seconds;
     if(!observer) {
-        chart.receive_available=model.confidence_available;
+        chart.receive_available=model.one_bit_confidence_available;
         chart.selected_probability=model.one_bit_success_probability;
         for(const auto& point:model.receive_points) {
             if(!std::isfinite(point.target_db_hz))continue;
@@ -337,8 +337,8 @@ Node graph(const planner::Model& model, bool observer, float width) {
             Tone::negative : Tone::accent, true, 6);
     if(!observer) {
         paragraph(n,"━ Bit time · left axis",11,Tone::accent,false,2);
-        paragraph(n,"┄ 1-bit RX · right axis"+(model.confidence_available?" · "+probability(model.one_bit_success_probability):""),
-            11,model.confidence_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
+        paragraph(n,"┄ 1-bit RX · right axis"+(model.one_bit_confidence_available?" · "+probability(model.one_bit_success_probability):""),
+            11,model.one_bit_confidence_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
     }
     const auto chart = chart_data(model, observer);
     const float label_width = 44,right_label_width=observer?0.f:36.f;
@@ -522,15 +522,41 @@ void link_budget(Node& root, const planner::Model& model) {
         paragraph(n, "Budget: " + number(std::abs(model.margin_db)) + (model.margin_db < 0 ? " dB short" : " dB margin") +
             "  ·  Whole-bit phase loss: " + (model.phase_coherence_loss_db < .1 ? "<0.1" : number(model.phase_coherence_loss_db)) +
             " dB", 11, Tone::muted, false, 0);
+        if(model.differential_windows)
+            paragraph(n,"Differential detector: "+std::to_string(model.differential_windows)+" windows × "+
+                planner::duration(model.differential_window_seconds)+
+                (model.differential_model_available?
+                    (model.confidence_available?" · included in RX estimate":" · included in first-bit estimate"):
+                    " · probability outside model coverage"),
+                11,Tone::muted,false,0);
+        else if(model.drift_model_available)
+            paragraph(n,"Detector model: coherent and four-section fits · local differential geometry not eligible",
+                11,Tone::muted,false,0);
     } else paragraph(n, "Link estimate unavailable", 13, Tone::text, true, 0);
     root.children.push_back(std::move(n));
 }
 void details(Node& root,const planner::Model& model) {
     auto n = card(root.width);
     paragraph(n, "Model limits", 15, Tone::text, true, 8);
-    if(model.differential_windows)
-        paragraph(n,"Local phase comparisons: "+number(model.differential_window_seconds)+
-            " seconds per window. Reception probability is unavailable for this additional detector; the four-section estimate does not model it.");
+    if(!model.probability_model_limit.empty())paragraph(n,"Estimate coverage: "+model.probability_model_limit+".");
+    if(model.one_bit_confidence_available&&model.probability_trials) {
+        const auto interval=model.probability_interval_available?
+            " Draft's 95% sampling interval: "+number(100*model.success_probability_low,4)+"–"+
+            number(100*model.success_probability_high,4)+"%.":
+            " First bit's 95% sampling interval: "+number(100*model.one_bit_probability_low,4)+"–"+
+            number(100*model.one_bit_probability_high,4)+"%.";
+        paragraph(n,"Monte Carlo: "+std::to_string(model.probability_trials)+" shared-noise trials."+interval+
+            " This interval covers sampling uncertainty only; channel and model error can be larger.");
+        if(model.probability_search_approximation)
+            paragraph(n,"Carrier search is approximated"+
+                (model.probability_carrier_candidates?" with "+std::to_string(model.probability_carrier_candidates)+
+                    " nearby candidates":std::string{})+
+                "; acquisition thresholds still account for the configured search bank.");
+    }
+    if(model.differential_model_available)
+        paragraph(n,"Local phase comparisons are included jointly with coherent and four-section scores. In "+
+            number(100*model.differential_added_detection_probability,3)+
+            "% of all trials, local comparisons supplied a correct first bit that the older detectors did not admit. This counts new recoveries, not net improvement after the extra detector-choice penalty.");
     if(model.drift_model_available&&model.confidence_available)
         paragraph(n,"Coherent-only comparison: "+probability(model.coherent_success_probability)+
             ". Phase loss within a section: "+number(model.section_phase_coherence_loss_db)+" dB.");
@@ -542,7 +568,7 @@ void details(Node& root,const planner::Model& model) {
             " per bit. The CPU indicator counts receiver work only, averaged over incoming audio including the final silence check. Green: below 0.5× real time; yellow: 0.5–1×; red: 1× or more. Search bursts, extra receive targets and slower computers can need more headroom. This is an estimate, not a measurement of this computer.");
     paragraph(n,"Graph. Solid line: time per bit on the left logarithmic axis. Dashed line: one-bit reception probability on the right percentage axis, using the selected power, path and noise. Both use the same target scale; their visual crossing is not a detection threshold. Gaps have no supported estimate.");
     paragraph(n, "Reception. The estimate includes signal strength, phase drift, clock and timing mismatch, acquisition and RAM. It assumes one matching receive target and every wire bit correct, before any error correction. The top-bar RX estimate uses the actual configured draft and receive bank. Oscillator values are illustrative; GPS phase corrections are not modeled.");
-    paragraph(n, "Pattern transitions. Long patterns fit four sections with separate gain and phase. Eligible longer patterns also compare nearby local windows, allowing phase to change throughout a bit. One isolated strong quarter cannot carry that detector's match. The local window defaults to 100 seconds, rounded up to whole chips and at least sixteen chips; at least 256 windows are required. RX estimates model the original and four-section fits using 4096 statistical trials. Probability is unavailable when the additional local comparisons are eligible. Small RAM budgets may retain fewer detector branches.");
+    paragraph(n, "Pattern transitions. Long patterns fit four sections with separate gain and phase. Eligible longer patterns also compare nearby local windows, allowing phase to change throughout a bit. One isolated strong quarter cannot carry that detector's match. The local window defaults to 100 seconds, rounded up to whole chips and at least sixteen chips; at least 256 windows are required. Supported estimates include all eligible detector scores, their shared noise and detector-choice penalties. Curves use 512 draws per sampled location; the selected estimate uses 4096. Unsupported geometries show a gap. Small RAM budgets may retain fewer detector branches.");
     paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
     paragraph(n, "Red indicators. RX estimates below 80% and observer / receiver times below 8× are red. Observer results outside the model range, unavailable results and errors are also red; calculating is neutral. The 8× cutoff is a listening guideline, not a validated acoustic threshold.");

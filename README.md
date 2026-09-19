@@ -100,8 +100,9 @@ and **RTX 4090 Laptop GPU** reference. No local benchmark runs. The GPU figure i
 a projection; simulation currently executes on the CPU. These rough estimates
 update with the draft and settings. A simulated carrier outside the receiver's
 frequency search shows an explanation instead of a numeric probability.
-Very long patterns eligible for local differential matching also withhold the
-percentage because that detector has no supported probability model; see the
+Supported long-pattern estimates include the local differential detector and
+report Monte Carlo sampling uncertainty. Geometries outside the supported model
+range show a coverage reason instead of a percentage; see the
 [model and its assumptions](docs/simulation-estimates.md).
 The **LPI relative observation** advisory compares an unkeyed energy detector's
 total observation with the receiver's one-bit design reference: N:1 means N

@@ -31,6 +31,7 @@ struct ReceivePoint {
     bool confidence_available=false;
     bool clock_supported=false;
     bool workspace_supported=false;
+    std::size_t probability_trials=0;
 };
 struct CpuPoint {
     double target_db_hz=0;
@@ -55,6 +56,7 @@ struct Model {
     bool clock_search_supported=false;
     bool receiver_workspace_supported=false;
     bool confidence_available=false;
+    bool one_bit_confidence_available=false;
     double bit_seconds=0;
     double send_seconds=0;
     // Earliest modeled finish: whole burst plus fully scored absent symbols.
@@ -68,6 +70,13 @@ struct Model {
     // No interval FEC/source context is available; the full draft is separate.
     double success_probability=0;
     double one_bit_success_probability=0;
+    std::size_t probability_trials=0;
+    double success_probability_low=0,success_probability_high=1;
+    double one_bit_probability_low=0,one_bit_probability_high=1;
+    bool probability_interval_available=false;
+    bool probability_search_approximation=false;
+    std::size_t probability_carrier_candidates=0;
+    std::string probability_model_limit;
     double phase_coherence_loss_db=0;
     bool coherent_reference_only=false;
     bool drift_model_available=false;
@@ -75,6 +84,8 @@ struct Model {
     double section_phase_coherence_loss_db=0;
     std::uint64_t differential_windows=0;
     double differential_window_seconds=0;
+    bool differential_model_available=false;
+    double differential_added_detection_probability=0;
     // One exact bit plus its full waveform and absence processing, regardless
     // of draft length. The receiver ratio excludes synthetic channel creation
     // and divides receiver work by all received audio, including absence.

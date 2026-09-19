@@ -122,10 +122,10 @@ std::string seconds_text(double seconds) {
     return text.str();
 }
 std::string probability_text(double probability) {
-    if(probability<.001)return "<0.1%";
-    if(probability>.999)return ">99.9%";
+    if(probability<.01)return "<1%";
+    if(probability>.99)return ">99%";
     std::ostringstream text;
-    text<<"~"<<std::fixed<<std::setprecision(1)<<100*probability<<'%';
+    text<<"~"<<std::fixed<<std::setprecision(0)<<100*probability<<'%';
     return text.str();
 }
 std::string elapsed_text(double seconds) {

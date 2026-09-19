@@ -115,7 +115,7 @@ void simulation_estimate_controls() {
     check(controller.settings().simulation_snr_db==preset_snr,
           "Changing the TX design target must not change simulated channel SNR");
     controller.select(F::simulation,"3dBm -120dB");prepare(controller);
-    check(text(F::simulation_confidence).ends_with(">99.9%"),
+    check(text(F::simulation_confidence).ends_with(">99%"),
           "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
     check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
           "An RX estimate above 80% must retain the normal foreground");

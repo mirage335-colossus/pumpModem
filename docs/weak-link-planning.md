@@ -131,10 +131,11 @@ including correlated noise, finite pattern correlation, the strongest-quarter
 removal and detector-choice penalty. The coherent-only comparison remains in
 expanded details. These bounded statistical trials do not reproduce the full
 adaptive receiver search; a limited fallback is labeled **RX reference**.
-For default differential-eligible patterns, the current estimator withholds
-numeric receive probability because it does not model the new statistic.
-Coherent/quarter phase diagnostics and the expanded compute estimate remain
-available. The reference experiment's percentages cannot fill that gap.
+For supported differential-eligible patterns, the estimator jointly samples
+local soft products and the two older scores, including shared noise, guards
+and choice penalties. Unsupported local geometry retains an explicit coverage
+reason. Trial counts and sampling intervals do not include model error; the
+reference experiment's percentages are still separate from this receiver model.
 
 ## Run an analysis
 
@@ -194,9 +195,12 @@ produce identical draws across compiler libraries.
   both CPU/GPU totals, and `tracking_symbol_windows` includes fully scored
   absence. Competing/noise tracks and reacquisition are not upper-bounded.
   Below differential eligibility, four-quarter patterns use the existing
-  combined model where supported. Default differential-eligible patterns have
-  no numeric receive probability; compute includes the many-window scoring
-  work, and local-window geometry remains available as a diagnostic.
+  combined model where supported. Differential-eligible patterns use the joint
+  local model within its documented coverage. The JSON reports detector status,
+  actual trial count, sampling intervals, carrier-search approximation and any
+  coverage limit; compute includes the many-window scoring work. Compact
+  differential multi-bit tracking currently has no validated draft probability;
+  its independently modeled first-bit estimate remains available.
 - `ideal_coherent` assumes perfect phase stability and zero residual carrier
   error across the whole symbol.
 - `coherent_phase_model` applies the selected phase diffusion and residual

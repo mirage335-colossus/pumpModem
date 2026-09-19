@@ -202,6 +202,8 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
        !std::isfinite(p.acquisition_threshold) || p.acquisition_threshold<0 ||
        !std::isfinite(p.continuation_threshold) || p.continuation_threshold<0)
         throw Error("invalid receiver probability geometry");
+    if(p.requested_trials<256 || p.requested_trials>trials)
+        throw Error("receiver probability trial count must be within 256..4096");
     double weight_sum=0;
     for(std::size_t j=0;j<4;++j) {
         if(!(p.weights[j]>0) || !std::isfinite(p.correlations[j]) || std::abs(p.correlations[j])>=1)
@@ -210,8 +212,13 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
     }
     if(std::abs(weight_sum-1)>1e-8)throw Error("receiver probability weights must sum to one");
     const PhaseModel phase(p);
-    ReceiverProbability result;result.trials=trials;
-    for(const auto& draw:random_draws()) {
+    ReceiverProbability result;result.trials=p.requested_trials;
+    // The legacy phase model chooses a small carrier neighborhood by signal
+    // fit before matched noise is applied. Do not present that approximation
+    // as an exact finite-bank receiver search in shared planner diagnostics.
+    result.frequency_search_approximation=p.frequency_step_hz>0&&p.frequency_bin_min!=p.frequency_bin_max;
+    for(std::size_t trial=0;trial<p.requested_trials;++trial) {
+        const auto& draw=random_draws()[trial];
         const auto phasors=phase.sample(draw);
         const auto timing_offset=p.timing_uncertainty_chips*.5*std::erfc(-draw[phase_draws+19]/std::sqrt(2.));
         auto timing_amplitude=1-timing_offset;
@@ -264,10 +271,11 @@ ReceiverProbability calculate(const ReceiverProbabilityParameters& p) {
         result.coherent_retained_correct+=accepted(coherent[0][0],coherent[1][0],p.continuation_threshold);
         result.coherent_retained_wrong+=accepted(coherent[1][0],coherent[0][0],p.continuation_threshold);
     }
-    result.acquired_correct/=trials;result.acquired_wrong/=trials;
-    result.retained_correct/=trials;result.retained_wrong/=trials;
-    result.coherent_acquired_correct/=trials;result.coherent_retained_correct/=trials;
-    result.coherent_acquired_wrong/=trials;result.coherent_retained_wrong/=trials;
+    const auto sampled=static_cast<double>(p.requested_trials);
+    result.acquired_correct/=sampled;result.acquired_wrong/=sampled;
+    result.retained_correct/=sampled;result.retained_wrong/=sampled;
+    result.coherent_acquired_correct/=sampled;result.coherent_retained_correct/=sampled;
+    result.coherent_acquired_wrong/=sampled;result.coherent_retained_wrong/=sampled;
     return result;
 }
 } // namespace
@@ -277,7 +285,24 @@ ReceiverProbability receiver_probability(const ReceiverProbabilityParameters& p)
     struct Entry {ReceiverProbabilityParameters parameters;ReceiverProbability result;};
     thread_local std::vector<Entry> cache;
     for(const auto& entry:cache)if(entry.parameters==p)return entry.result;
-    const auto result=calculate(p);
+    auto result=p.differential_windows?differential_receiver_probability(p):calculate(p);
+    // Rejected geometry can contain arbitrarily sized caller-owned vectors.
+    // Do not copy those into the bounded cache merely to remember a cheap
+    // coverage failure; only supported geometries have bounded model storage.
+    if(!result.available)return result;
+    if(result.available&&result.trials) {
+        const auto interval=[&](double probability) {
+            constexpr double z=1.959963984540054;
+            const auto n=static_cast<double>(result.trials),denominator=1+z*z/n;
+            const auto center=(probability+z*z/(2*n))/denominator;
+            const auto radius=z*std::sqrt(probability*(1-probability)/n+z*z/(4*n*n))/denominator;
+            return std::array{probability==0?0.:std::max(0.,center-radius),
+                              probability==1?1.:std::min(1.,center+radius)};
+        };
+        const auto acquired=interval(result.acquired_correct),retained=interval(result.retained_correct);
+        result.acquired_correct_lower=acquired[0];result.acquired_correct_upper=acquired[1];
+        result.retained_correct_lower=retained[0];result.retained_correct_upper=retained[1];
+    }
     if(cache.size()==8)cache.erase(cache.begin());
     cache.push_back({p,result});return result;
 }

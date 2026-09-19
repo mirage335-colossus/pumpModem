@@ -4,6 +4,117 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Joint differential reception probability — 19 September 2026
+
+The selected estimate now samples all eligible detector branches jointly. It
+calls the production differential accumulator on correlated noisy local fits,
+shares observations with coherent/four-quarter fits, and retains their guards,
+choice penalties, competing-bit margin and whole-symbol energy denominator.
+It accounts for finite template power, shaped transmitter limiting, projection
+averaging, separate alternative-template norms and finite carrier selection.
+The compact receiver now uses its actual threshold accounting rather than
+being charged for FFT-only initial private stream templates.
+
+The model runs 4096 fixed draws for the selected estimate and 512 per curve
+location. The CLI and shared GUI expose detector geometry, actual trial count,
+95% sampling intervals, carrier-search approximation and explicit coverage
+limits. Curve caching separates the selected estimate from lower-precision
+curve points. Intervals exclude model error and physical-link uncertainty;
+headline probabilities no longer imply tenths-of-a-percent reliability.
+
+The main independent production-receiver matrix retains 15 conditions with
+64 captures each. Thirteen one-bit conditions (832 captures) span public/private
+patterns, stable phase, 10/25/40 degrees/sqrt(second) phase diffusion, weak
+signals and detection transitions. At 64 samples/second each 512-second bit
+contains 512 local one-second windows of sixteen chips; local duration is
+scaled for repeated PCM testing. No channel noise seed or phase trajectory is
+shared with the probability model. The compact receiver runs actual waveform
+acquisition, exact-bit delivery and whole-symbol absence completion.
+Predictions have RMS error **0.0289727** and maximum error **0.0695801** against the
+observed proportions. Predeclared per-case `0.10 + 3*binomial_SE` and RMS `0.07`
+gates remain unchanged. The two stronger drifting conditions recover 128/128
+captures with the differential branch versus 92/128 with the older detectors
+on the same audio: 36 additional recoveries. The two multi-bit conditions
+(128 more captures) retain the explicit limitation described below.
+
+Two additional full-receiver shaped conditions retain a separate RMS gate,
+so they cannot dilute the original matrix's error target. Their natural
+carrier-edge geometry uses the default one-frequency bank and compact engine;
+512 eight-second windows each contain 128 chips, satisfying the local
+real-quadrature covariance guard. Both use 28 dB nominal Es/N0 and
+8.838835 degrees/sqrt(second) diffusion:
+
+| Full shaped receiver case | Predicted | Observed |
+| --- | ---: | ---: |
+| Public pattern | 0.626953 | 41/64 = 0.640625 |
+| Private pattern | 0.633301 | 38/64 = 0.593750 |
+
+Shaped RMS error is **0.0295904**, maximum **0.0395508**. All per-case and
+aggregate gates pass. Including the two tracking-limit cases, null/key controls
+and default-duration captures below, the full new receiver suite completes
+**1,124 PCM captures**, plus 128 comparisons using the older detector on the
+same audio. The main matrix took 289 seconds and the two shaped cases 765
+seconds in this run; four captures run concurrently with separate receiver
+states. The CTest `calibration` label identifies this longer suite.
+
+Independent shaped real-PCM statistic tests use 128 captures each, actual
+radially limited transmission, sampled Brownian phase/noise, real Gram fits,
+and production detector scoring. They do not run adaptive acquisition:
+
+| Shaped statistic case | Predicted | Observed |
+| --- | ---: | ---: |
+| Stable, nominal Es/N0 = 40 linear | 0.782471 | 97/128 = 0.757813 |
+| 25 degrees/sqrt(second), nominal Es/N0 = 500 linear | 0.815674 | 106/128 = 0.828125 |
+
+Accounting for the actual finite shaped waveform reduced the stable-case
+prediction error from 0.0886 to 0.0247. Independent noncentral-beta coherent
+limits, zero-signal controls, weak noisy products, a useful drifting regime,
+finite-trial interval endpoints and bounded unsupported geometry also pass.
+
+The held-out compact `001` captures exposed an additional limitation rather
+than supporting the old independent-bit formula: the earliest admitted timing
+lane can retain a stream even when a later, closer lane is stronger. One
+private case produced 54/64 exact completed receptions against a roughly 99.9%
+independent-bit prediction. The new model explicitly withholds the aggregate
+compact differential multi-bit percentage while retaining the first-bit
+estimate. Both multi-bit fixtures and their physical-completion checks remain;
+no numeric-error tolerance was relaxed to admit this discrepancy.
+
+All 32 additional noise-only/wrong-key controls rejected unrelated input.
+Four sampled 14.2-hour bits using the actual default 100-second windows also
+completed with exact bits and a full absent symbol: public captures assert the
+FFT path and private captures assert the compact path. These four are engine
+and duration coverage, not a population reliability estimate. Existing FFT
+batch/local-score parity and receiver differential regression suites also pass.
+
+The exact reported GPSDO-TCXO command (0 dBm, 200 dB loss, -164 dBm/Hz,
+0.01 Hz, target -44.25748830262745, 1500 Hz carrier) was reproduced through the
+shared GUI controller and CLI. It selects 1,024 local windows of 3,200 seconds
+and a 3,276,800-second bit (37.93 days). The joint model is active; all 4096
+draws admit the bit, with a 99.9063–100% sampling interval and a labeled
+17-candidate approximation to the 4,097-frequency bank. The local branch
+supplies no unique recoveries in this mild-diffusion scenario; the older fits
+already succeed. The earlier -38.092699609758306 target selects 409,600 seconds
+and only 128 local windows, correctly retaining the older detector model.
+Neither path is gated by an OCXO requirement. CPU-time figures remain the
+existing unbenchmarked reference-work heuristic. In particular, the additional
+shaped compact PCM captures perform expensive interpolation across timing
+lanes; their wall-clock cost is not calibrated by the probability model.
+
+The Release build, development-contract receiver/transport regressions,
+estimator, CLI and shared GUI tests passed. Initial shared-GUI failures were
+expectations about the previous unavailable model and shared availability/
+curve-precision fields; the corrected semantic tests pass without changing
+physical receiver assertions. `git diff --check` passes.
+
+These are synthetic-channel and matched-statistic checks. The wide coupled
+FFT bank in the 37.93-day example is not empirically calibrated by short
+compact captures. Local covariance/phase/geometry guards bound model coverage;
+full adaptive search, physical oscillator behavior, VLF noise, antenna
+performance and RF propagation are not established by these tests. No wire
+format, transmitter, receiver admission, bit progress or physical completion
+behavior changed.
+
 ## Local differential receiver — 19 September 2026
 
 Added a differential detector to both the streaming correlator and FFT
