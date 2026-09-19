@@ -50,6 +50,21 @@ if(NOT MSVC)
   # do not imply a requirement to modify vendored, independently tested code.
   set_source_files_properties(third_party/qrcodegen/qrcodegen.cpp PROPERTIES COMPILE_OPTIONS "-Wno-conversion")
 endif()
+# Independent legacy radio-text DSP. Only the unchanged hardware API is shared.
+add_library(datapump_legacy STATIC src/legacy/modem.cpp src/legacy/psk.cpp
+  src/legacy/olivia.cpp src/legacy/session.cpp)
+target_include_directories(datapump_legacy PUBLIC include)
+target_link_libraries(datapump_legacy PRIVATE datapump)
+add_custom_target(datapump_legacy_boundary
+  COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/legacy_boundary.cmake
+  COMMENT "Checking Legacy modem isolation" VERBATIM)
+add_dependencies(datapump_legacy datapump_legacy_boundary)
+if(MSVC)
+  target_compile_options(datapump_legacy PRIVATE /W4 /permissive-)
+else()
+  target_compile_options(datapump_legacy PRIVATE -Wall -Wextra -Wpedantic)
+endif()
 add_executable(pump src/main.cpp)
 target_link_libraries(pump PRIVATE datapump)
 add_library(datapump_fast STATIC src/fast/profile.cpp src/fast/codec.cpp
@@ -82,6 +97,21 @@ if(DATAPUMP_BUILD_GUI)
 endif()
 if(BUILD_TESTING)
   include(cmake/GuiShared.cmake)
+  foreach(component psk olivia session simulation)
+    add_executable(test_legacy_${component} tests/test_legacy_${component}.cpp)
+    target_link_libraries(test_legacy_${component} PRIVATE datapump_legacy)
+    add_test(NAME legacy_${component} COMMAND test_legacy_${component})
+  endforeach()
+  add_test(NAME legacy_boundary COMMAND ${CMAKE_COMMAND} -DROOT=${CMAKE_CURRENT_SOURCE_DIR}
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/legacy_boundary.cmake)
+  add_executable(test_gui_legacy tests/test_gui_legacy.cpp)
+  target_link_libraries(test_gui_legacy PRIVATE datapump_gui_application datapump_legacy datapump)
+  add_test(NAME gui_legacy COMMAND test_gui_legacy)
+  set_tests_properties(gui_legacy PROPERTIES LABELS "gui")
+  add_executable(test_gui_legacy_live tests/test_gui_legacy_live.cpp)
+  target_link_libraries(test_gui_legacy_live PRIVATE datapump_gui_application datapump_legacy)
+  add_test(NAME gui_legacy_live COMMAND test_gui_legacy_live)
+  set_tests_properties(gui_legacy_live PROPERTIES LABELS "gui")
   foreach(component codec modem files session transfer telemetry)
     add_executable(test_fast_${component} tests/test_fast_${component}.cpp)
     target_link_libraries(test_fast_${component} PRIVATE datapump_fast datapump)

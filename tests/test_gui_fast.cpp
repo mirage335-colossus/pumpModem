@@ -25,7 +25,7 @@ void presentation_and_retention() {
     const auto& mode=control(F::fast_mode);
     check(mode.kind==ui::Kind::choice&&mode.persistent&&mode.scope==ui::ScreenScope::shared&&app.field(F::fast_mode).selected=="robust",
           "Modem choice must default to Robust Modem in the shared header");
-    check(app.field(F::fast_mode).options.size()==2&&app.field(F::fast_mode).options[0].label=="Robust Modem"&&
+    check(app.field(F::fast_mode).options.size()==3&&app.field(F::fast_mode).options[0].label=="Robust Modem"&&
         app.field(F::fast_mode).options[1].label=="Fast Modem","Modem selector labels changed");
     app.toggle(F::developer_mode,true);app.select_page(ui::Page::compression);
     app.edit(F::binary,"001");const auto bits=app.field(F::binary).text;
@@ -33,7 +33,7 @@ void presentation_and_retention() {
     app.select(mode,"fast");
     check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
     for(const auto& c:ui::console_screen()) {
-        if(c.scope==ui::ScreenScope::regular)check(!app.control(c).visible,"Regular controls leaked into the fast interface");
+        if(c.scope==ui::ScreenScope::regular||c.scope==ui::ScreenScope::legacy)check(!app.control(c).visible,"Other modem controls leaked into the fast interface");
         else check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
     }
     for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))check(!tab.visible,"Regular tabs leaked into fast interface");

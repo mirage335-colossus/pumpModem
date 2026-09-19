@@ -238,8 +238,10 @@ public:
     std::function<void(std::string)> changed;
     std::function<bool(bool,bool)> submit;
     std::size_t byte_limit=1024*1024;
+    bool read_only=false;
     std::function<void(std::string)> error;
     bool paste(std::string_view text) {
+        if(read_only)return false;
         int start=insert_position(),end=start;buffer_.selection_position(&start,&end);
         const auto edit=propose(text,start,end);if(!edit)return false;
         const std::string inserted(text);buffer_.replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));
@@ -260,6 +262,14 @@ public:
         }
     }
     int handle(int event) override {
+        if(read_only) {
+            if(event==FL_PASTE)return 1;
+            if(event==FL_KEYDOWN&&(Fl::event_state()&(FL_CTRL|FL_COMMAND))) {
+                if(Fl::event_key()=='c')return kf_copy(0,this);
+                if(Fl::event_key()=='a') {buffer_.select(0,buffer_.length());return 1;}
+            }
+            return Fl_Text_Display::handle(event);
+        }
         if(event==FL_PASTE) {
             if(!Fl::event_text()) {if(error)error("Clipboard text is unavailable");return 1;}
             paste({Fl::event_text(),static_cast<std::size_t>(Fl::event_length())});return 1;
@@ -305,6 +315,7 @@ public:
         }
     }
     bool paste(std::string_view text) {
+        if(readonly())return false;
         const auto edit=propose(text);if(!edit)return false;
         const std::string inserted(text);replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));return true;
     }
@@ -878,8 +889,8 @@ private:
             label(b.label,view.control.label);
             if(c.kind==ui::Kind::label)b.label->labelcolor(text_color(state.text_tone,view.enabled));
         }
-        if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
-        if(b.editor){b.editor->byte_limit=c.byte_limit;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision);}
+        if(b.input){b.input->byte_limit=c.byte_limit;b.input->readonly(c.read_only);b.input->apply(state.text,state.text_cursor_end_revision);}
+        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->read_only=c.read_only;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision);}
         if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
             for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                 if(menu)populate(*menu,b.presentation.options());

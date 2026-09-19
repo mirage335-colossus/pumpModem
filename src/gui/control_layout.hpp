@@ -41,7 +41,7 @@ inline ControlLayout control_content_layout(const Control& c,const FieldState& s
     out.label=c.kind==Kind::label?out.frame:out.frame.label_above(
         c.kind==Kind::bitmap||c.kind==Kind::list?23:label_height);
     if(c.footer_height)out.widget=out.widget.without_footer(c.footer_height);
-    if(c.kind==Kind::text&&!state.options.empty()) {
+    if(c.kind==Kind::text&&!c.read_only&&!state.options.empty()) {
         out.has_suggestions=true;
         const int suggestions_width=std::min(23,out.widget.w);
         out.suggestions={out.widget.x+out.widget.w-suggestions_width,out.widget.y,suggestions_width,out.widget.h};

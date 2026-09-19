@@ -1,0 +1,28 @@
+#include "screen.hpp"
+namespace datapump::gui::legacy_ui {
+using namespace ui;
+namespace {
+Control placed(Kind kind,Field field,const char* label,Slot slot) {
+    Control c{kind,field,Command::none,Bitmap::none,Page::console,0,label};
+    c.slot=slot;c.persistent=true;c.scope=ScreenScope::legacy;return c;
+}
+}
+bool owns(Field field) {return field>=Field::legacy_profile&&field<=Field::legacy_status;}
+bool owns(Command command) {return command==Command::legacy_transmit;}
+const std::vector<Control>& screen() {
+    static const std::vector<Control> controls{
+        placed(Kind::choice,Field::legacy_profile,"Modulation",Slot::legacy_profile),
+        [] {auto c=placed(Kind::text,Field::legacy_carrier,"Carrier (Hz)",Slot::legacy_carrier);c.byte_limit=32;return c;}(),
+        [] {auto c=placed(Kind::text,Field::legacy_transcript,"Received and transmitted text",Slot::legacy_transcript);
+            c.multiline=true;c.read_only=true;c.font_size=16;c.byte_limit=65536;return c;}(),
+        [] {auto c=placed(Kind::text,Field::legacy_text,"Text to transmit",Slot::legacy_text);
+            c.multiline=true;c.tab_navigation=true;c.follow_tail=true;c.font_size=16;c.byte_limit=32768;
+            c.help="Enter inserts a newline. Sent text clears after successful audio playback; you can keep typing.";return c;}(),
+        [] {auto c=placed(Kind::action,Field::count,"Transmit",Slot::legacy_transmit);c.command=Command::legacy_transmit;return c;}(),
+        [] {auto c=placed(Kind::bitmap,Field::count,"Waterfall",Slot::legacy_waterfall);c.bitmap=Bitmap::legacy_waterfall;
+            c.help="Live audio from 0 to 4 kHz; newest row at the top. Reception pauses during transmission.";return c;}(),
+        placed(Kind::label,Field::legacy_status,"",Slot::legacy_status)
+    };
+    return controls;
+}
+}

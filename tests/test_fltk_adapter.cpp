@@ -348,7 +348,7 @@ void fast_mode_visibility() {
     const std::function<NativeChoice*(Fl_Group&)> mode_choice=[&](Fl_Group& group) -> NativeChoice* {
         for(int i=0;i<group.children();++i) {
             auto* child=group.child(i);
-            if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->size()==3&&
+            if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->size()==4&&
                 literal_menu_text(choice->text(0))=="Robust Modem"&&literal_menu_text(choice->text(1))=="Fast Modem")return choice;
             if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* choice=mode_choice(*nested))return choice;
         }
@@ -442,6 +442,17 @@ void fast_mode_visibility() {
         for(const auto* plot:plots)require(!plot->visible_r(),"Fast signal plot remained visible in Robust Modem");
         choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
     }
+    selector->picked(selector->menu()+2);refresh();
+    auto* transcript=field_widget.template operator()<NativeEditor>("Received and transmitted text");
+    auto* legacy_draft=field_widget.template operator()<NativeEditor>("Text to transmit");
+    auto* legacy_carrier=field_widget.template operator()<NativeInput>("Carrier (Hz)");
+    require(app.application.field(ui::Field::fast_mode).selected=="legacy"&&transcript&&legacy_draft&&legacy_carrier&&
+        transcript->visible_r()&&transcript->active_r()&&transcript->read_only&&legacy_draft->visible_r()&&!legacy_draft->read_only&&
+        std::string(legacy_carrier->value())=="1500","Legacy native text terminal failed to materialize");
+    require(!choose->visible_r()&&!text->visible_r()&&!regular->visible_r(),"Legacy retained Fast or Robust native controls");
+    transcript->apply("Received text\nSent text");
+    require(!transcript->paste("unwanted")&&buffer_text(*transcript->buffer())=="Received text\nSent text",
+        "Legacy transcript accepted a native edit");
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 void developer_mode_visibility() {
@@ -1132,6 +1143,15 @@ void policy_lifecycle() {
             "Retained native control ignored adding or removing shared gestures");
     }
     Fl::e_keysym=button;Fl::e_x=x;Fl::e_y=y;Fl::e_dy=dy;
+    for(bool readonly:{true,false}) {
+        datapump::gui::test::read_only_stage(declarations,readonly);
+        const auto until=Clock::now()+std::chrono::milliseconds(130);while(Clock::now()<until)Fl::wait(.005);
+        input->apply("");editor->apply("");
+        require(input->active_r()&&editor->active_r()&&bool(input->readonly())==readonly&&editor->read_only==readonly,
+            "Read-only editors must retain native selection/focus without disabling the widget");
+        require(input->paste("a")==!readonly&&editor->paste("a")==!readonly,
+            "Retained native text controls ignored adding/removing read-only policy");
+    }
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
 void layout_lifecycle() {
@@ -1267,6 +1287,7 @@ void clipboard_shortcuts() {
     unsigned changes=0,errors=0;
     target->changed=[&](std::string){++changes;};target->error=[&](std::string){++errors;};
     source->apply("01000001 01000010");source->buffer()->select(0,8);source->insert_position(8);source->take_focus();
+    source->read_only=true;
     shortcut(*source,'c',FL_CTRL);
     target->apply("00000000 11111111");target->buffer()->select(9,17);target->insert_position(17);target->take_focus();
     shortcut(*target,'v',FL_CTRL);

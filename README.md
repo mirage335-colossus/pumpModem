@@ -26,8 +26,14 @@ intervals and per-bit pending reception. Each bit may cost hours or longer;
 neither added framing nor waiting for a whole message is harmless. See the
 [message behavior contract and regression checks](docs/development.md).
 
+**Legacy Modem** adds a separate simplex radio-text console for BPSK31,
+BPSK125 and Olivia-4/2k. It has live receive/transmit text, a send draft,
+a waterfall and an editable carrier (1500 Hz by default). Its modulation,
+settings and regression-only fixed-SNR channel are independent of Robust and
+Fast. See [Legacy Modem](docs/legacy-modem.md).
+
 **Fast Modem** is an independent APSK text and file-transfer interface, selected
-from the **Robust Modem / Fast Modem** dropdown beside **DATA PUMP**. It includes
+from the **Modem** dropdown beside **DATA PUMP**. It includes
 live waveform, waterfall and constellation plots and uses fixed 256-byte coded intervals,
 real-time constellation tracking, optional AES-256-CBC/HMAC, convolutional coding and
 interleaved Reed–Solomon. Wire, SSB, FM and acoustic profiles offer QPSK through

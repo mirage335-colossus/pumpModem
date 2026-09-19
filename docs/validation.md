@@ -4405,3 +4405,75 @@ monochrome. FLTK adapter conformance passed in 49.90 seconds and Rev adapter
 conformance passed in 68.57 seconds, each on a private X display.
 `git diff --check` passed. This changes presentation only; modem behavior and
 estimate calculations are unchanged.
+
+### Independent Legacy radio-text modem (2026-09-19)
+
+Legacy is a third Modem choice with a separate library, settings, audio session,
+text presentation and waterfall. It implements BPSK31, BPSK125 and Olivia-4/2k
+without importing the existing modem, transport, compression, crypto or link
+models. Existing Robust/Fast DSP, wire algorithms, encryption and weak-signal/LPI
+models were not edited. Shared changes are confined to mode hosting and a
+read-only editor flag which defaults off for existing controls.
+
+Independent interoperability checks passed both PCM directions against the
+installed FLDigi 4.2.06 application for BPSK31 and BPSK125, and against the pinned
+upstream FLDigi Olivia codec for four tones/2000 Hz. The PSK recordings were
+reproduced byte-for-byte using an isolated configuration and fake audio backend.
+Pinned recordings, hashes, independent wire vectors, provenance and optional
+reproduction runners are retained under `tests/fixtures/legacy`. Olivia's
+reference receiver used SyncThreshold=8; its default threshold also produced
+startup/shutdown extras in the upstream-to-upstream control. These checks did
+not use physical audio/RF links or establish fading-channel performance.
+
+Legacy regressions cover immediate decoded/generated text, arbitrary PCM
+chunks, partial-codeword and mid-conversation PSK acquisition, carrier changes,
+noise and steady-carrier rejection, UTF-8 presentation, bounded snapshots and
+waterfall retention, exclusive simplex audio, asynchronous cancellation and
+mode ownership. Playback failure retains the draft; successful playback clears
+only its submitted prefix, preserving new or replacement text. The sampled
+regression channel uses the FLDigi LinSim 400–3400 Hz noise convention and a
+fixed −25..+25 dB sweep in 5 dB steps. Its −5/+5 dB PSK125 failure/success
+bracket is asserted separately. No production simulation path is added.
+
+Both Release GUI builds succeeded. The final focused Legacy/Fast GUI and
+Legacy DSP/session/simulation/isolation group passed 9/9. Shared GUI boundary,
+layout, binding, editor, record and presentation checks passed; an additional
+11 GUI/LPI checks also passed. The source-boundary checker was separately
+challenged with forbidden old-DSP, crypto, Fast, simulation and reverse imports,
+all correctly rejected. PSK and Olivia standalone ASan/UBSan checks passed with
+leak detection disabled because LeakSanitizer is unsupported under this
+sandbox's ptrace configuration.
+
+FLTK native adapter/document conformance passed 2/2 in 54.93 seconds. Rev native
+adapter, platform/clipboard and 1×/2× coordinates passed 4/4 in 171.34 seconds
+on a managed private display with REV_SCALE=1 and two CPU cores. Native probes
+cover the actual Legacy controls and read-only editor selection/copy/update
+behavior. Default and minimum layouts were captured and visually inspected in
+both backends without overlap. Windows runtime and physical radio/audio-link
+validation remain separate requirements.
+
+The existing development-contract, Fast and security regression group passed
+39/40 suites. `differential_receiver_probability` exceeded CTest's 1500-second
+limit while still computing; its completed unshaped calibration matrix passed.
+That test, its core implementation and its binary's linked components do not
+include Legacy changes. This run does not establish a complete calibration
+pass, and no assertion or timeout was weakened.
+
+The FLTK production GUI smoke passed with its supported `--smoke-timeout 600`
+option. Its standard 300-second run timed out in phase 15; the original HEAD
+GUI, rebuilt without Legacy and run on a separate private display, reproduced
+the same phase-15 timeout after 300.408 seconds. The longer run preserved all
+existing smoke assertions covering text, files, binary editing, cancellation,
+retained saves, live plots, keys and page switching.
+
+Rev's initial production smoke exceeded the 300-second budget in phase 11.
+A 600-second run restricted to two CPU cores reached that phase's replay
+assertion but displayed nine frames instead of the required ten. Its diagnostic
+`dropped` counter refers to omitted plot measurements, not lost source text.
+The final retry without CPU affinity restrictions passed that replay check,
+then exceeded the 600-second budget in phase 17 while transmitting sampled
+audio to the independent receiver (600.264 seconds total). Thus Rev native
+control conformance passed, but this environment did not complete its full
+production workflow within the tested budgets. No existing modem, replay or
+smoke assertion was changed to accommodate these results. All private displays
+were closed after validation, and `git diff --check` passed.

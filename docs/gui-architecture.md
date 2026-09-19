@@ -12,7 +12,7 @@ removed.
 | Shared module | Responsibility |
 | --- | --- |
 | `application.hpp` | Backend-facing facade; controller, workers and bitmap producers are private to its implementation. |
-| `application.cpp`, `fast/controller.*`, `fast/screen.*` | Shared mode host and independent Fast state/screen. Both engines remain polled; native service routes retain owner/generation and idle audio ownership prevents overlap. Regular waveform and pending-reception policy remain in the existing controller/service. |
+| `application.cpp`, `fast/controller.*`, `fast/screen.*`, `legacy/*` | Shared mode host and independent Fast/Legacy state and screens. Existing engines remain polled; native service routes retain owner/generation and idle audio ownership prevents overlap. Legacy owns its auto-listen/simplex text workflow. Regular waveform and pending-reception policy remain in the existing controller/service. |
 | `ui_contract.hpp` | Control, page, field, command, record and service vocabulary. |
 | `ui_document.hpp`, `bitmap.hpp` | Generic document nodes and opaque `BitmapSource` pixel handles, without domain factories. |
 | `control_binding.hpp` | Declaration-order control groups and menu identity by page or persistent scope, plus instance. |
@@ -56,6 +56,11 @@ these checks.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
+
+Legacy's upper transcript is a generic `Control.read_only` multiline editor:
+it remains selectable and scrollable while rejecting edits and paste. The
+flag defaults to false, preserving all existing editors. Native adapters share
+the same Legacy declarations, text presentation and waterfall snapshots.
 
 The planner command editor is an ordinary document-only multiline control.
 Its shared declaration makes Enter insert a newline and Tab navigate to the

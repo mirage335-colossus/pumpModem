@@ -19,7 +19,8 @@ enum class Field {
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
     developer_mode, fast_mode, fast_profile, fast_constellation, fast_coding, fast_fec,
     fast_device, fast_mono, fast_encryption, fast_key, fast_key_path, fast_source, fast_source_detail, fast_text, fast_file, fast_status,
-    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_preview, fast_history, count
+    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_preview, fast_history,
+    legacy_profile, legacy_carrier, legacy_transcript, legacy_text, legacy_status, count
 };
 enum class Command {
     none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -33,13 +34,15 @@ enum class Command {
     planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
     planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
     planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
-    fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save
+    fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save,
+    legacy_transmit
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
-    pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation
+    pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation,
+    legacy_waterfall
 };
-enum class ScreenScope { regular, fast, shared };
+enum class ScreenScope { regular, fast, legacy, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
 enum class Menu { none, keyfile, recovery };
 enum class TextTone { normal, muted, data, inverse, negative };
@@ -113,6 +116,7 @@ struct Control {
     bool tab_navigation = false; // Multiline editors may reserve Tab for focus.
     bool developer_only = false; // Hide in place without changing the bound value.
     ScreenScope scope = ScreenScope::regular;
+    bool read_only = false; // Selectable/scrollable native text without editing.
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

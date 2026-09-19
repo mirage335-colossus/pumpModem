@@ -11,7 +11,7 @@
         auto* encryption=by_field(ui::Field::fast_encryption).toggle;
         auto* source=by_field(ui::Field::fast_source).choice;
         require(selector&&encryption&&source&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
-        require(selector->params.options.size()==2&&selector->params.options[0].name=="Robust Modem"&&
+        require(selector->params.options.size()==3&&selector->params.options[0].name=="Robust Modem"&&
             selector->params.options[0].value=="robust"&&selector->params.options[1].name=="Fast Modem"&&
             selector->params.options[1].value=="fast"&&selector->params.value=="robust"&&
             application.field(ui::Field::fast_mode).selected=="robust","Rev modem selector did not default to the declared Robust Modem choice");
@@ -93,6 +93,18 @@
             }
         }
         resize(ui::default_width,ui::default_height);
+        re::Event legacy_selection;selector->params.value="legacy";selector->onChange(legacy_selection);settle();
+        auto* transcript=by_field(ui::Field::legacy_transcript).editor;
+        auto* draft=by_field(ui::Field::legacy_text).editor;
+        require(transcript&&draft&&transcript->read_only&&!transcript->editable&&transcript->selectable&&
+            !transcript->targetFlags.disabled&&transcript->scroll_content&&draft->editable&&
+            !by_field(ui::Field::legacy_transcript).element->resolved.hidden&&by_field(ui::Field::legacy_carrier).editor->content.get()=="1500",
+            "Rev Legacy text terminal did not retain selectable read-only received text");
+        transcript->apply("Received text\nSent text");
+        require(!transcript->replace("unwanted")&&transcript->content.get()=="Received text\nSent text","Rev Legacy transcript accepted editing");
+        for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::regular||binding.control.scope==ui::ScreenScope::fast)
+            require(binding.element->resolved.hidden,"Rev Legacy exposed another modem's native controls");
+        selector->params.value="robust";selector->onChange(legacy_selection);settle();
     }
     void verify_developer_mode_visibility() {
         const auto require=[](bool condition,const char* message) {if(!condition)throw std::runtime_error(message);};
@@ -548,6 +560,14 @@
             if(active&&(help_owner!=gestures||help_text->content.get()!=controls[3].help))
                 throw std::runtime_error("Rev retained control ignored newly declared help");
             if(!active&&help_owner==gestures)throw std::runtime_error("Rev retained removed shared help");
+        }
+        for(bool readonly:{true,false}) {
+            test::read_only_stage(controls,readonly);apply();
+            for(unsigned frame=0;frame<3;++frame)native_frame();
+            input->apply("");editor->apply("");
+            if(input->targetFlags.disabled||editor->targetFlags.disabled||input->editable==readonly||editor->editable==readonly||
+               input->replace("a")==readonly||editor->replace("a")==readonly)
+                throw std::runtime_error("Rev retained editors ignored selectable read-only policy");
         }
         command_observer={};list->activate={};
         auto* toggle=bindings[4].toggle;

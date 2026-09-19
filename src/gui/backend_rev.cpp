@@ -159,7 +159,7 @@ struct CheckboxView : re::Checkbox {
 struct Editor : theme::RevText {
     std::size_t limit;
     bool multiline;
-    bool scroll_content=false,reveal_caret=false;
+    bool scroll_content=false,reveal_caret=false,read_only=false;
     int displayed_cursor=-1;
     float viewport_width=-1,viewport_height=-1;
     std::uint64_t cursor_end_revision=0;
@@ -186,7 +186,7 @@ struct Editor : theme::RevText {
             const float maximum_y=std::max(0.0f,height-inner_height);
             resolved.scroll.x=std::clamp(resolved.scroll.x,0.0f,maximum_x);
             resolved.scroll.y=std::clamp(resolved.scroll.y,0.0f,maximum_y);
-            if(targetFlags.focus&&inner_width>0&&inner_height>0&&!text->lines.empty()&&
+            if((targetFlags.focus||(read_only&&reveal_caret))&&inner_width>0&&inner_height>0&&!text->lines.empty()&&
                (reveal_caret||displayed_cursor!=cursor||resized)) {
                 const auto& row=text->lines[cursorLineIndex()];
                 const float caret_x=cursorOffsetOnLine(row),caret_y=row.rect.y-rect.y-resolved.pad.t.val;
@@ -274,8 +274,10 @@ struct Editor : theme::RevText {
         else if(error)error(result.error);
     }
     void keyDown(re::Event& e) override {
-        if(!targetFlags.focus || !editable || targetFlags.disabled) return;
+        if(!targetFlags.focus || (!editable&&!read_only) || targetFlags.disabled) return;
         clamp_positions();
+        if(read_only&&(e.keyboard.enter||e.keyboard.backspace||e.keyboard.del||
+            (e.keyboard.ctrl&&(e.keyboard.key=="v"||e.keyboard.key=="x")))) {e.propagate=false;return;}
         if(!e.keyboard.arrows.up && !e.keyboard.arrows.down)resetVerticalCursor();
         if(e.keyboard.ctrl && (e.keyboard.key=="c" || e.keyboard.key=="x")) {
             int left=std::min(selectAnchor,selectEnd),right=std::max(selectAnchor,selectEnd);
@@ -311,7 +313,13 @@ struct Editor : theme::RevText {
             if(e.keyboard.arrows.left) next=boundary(value,cursor-1);
             else if(next<static_cast<int>(value.size())) {++next;while(next<static_cast<int>(value.size()) && (static_cast<unsigned char>(value[static_cast<std::size_t>(next)])&0xc0)==0x80) ++next;}
             cursor=next;selectEnd=cursor;if(!e.keyboard.shift) selectAnchor=cursor;
-        } else {re::Text::keyDown(e);clamp_positions();}
+        } else {
+            const bool navigate=read_only&&(e.keyboard.arrows.up||e.keyboard.arrows.down||e.keyboard.key=="home"||e.keyboard.key=="end");
+            if(navigate)editable=true;
+            re::Text::keyDown(e);
+            if(navigate)editable=false;
+            clamp_positions();
+        }
         refresh(e);e.propagate=false;
     }
 };
@@ -1211,7 +1219,9 @@ public:
                 if(!b.control.help[0]||!view.visible||!view.enabled)hide_help(true);
                 else help_text->content=b.control.help;
             }
-            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->apply(value.text,value.text_cursor_end_revision);b.editor->editable=view.enabled;b.editor->setDisabled(!view.enabled);}
+            if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->read_only=b.control.read_only;
+                b.editor->scroll_content=b.control.multiline&&(b.control.document_only||b.control.read_only||b.control.follow_tail);
+                b.editor->apply(value.text,value.text_cursor_end_revision);b.editor->editable=view.enabled&&!b.control.read_only;b.editor->setDisabled(!view.enabled);}
             if(b.presentation.update_options(view.options)) {
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();

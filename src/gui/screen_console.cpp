@@ -1,5 +1,6 @@
 #include "ui_contract.hpp"
 #include "fast/screen.hpp"
+#include "legacy/screen.hpp"
 namespace datapump::gui::ui {
 namespace {
 Control placed(Control control, Slot slot, Menu menu=Menu::none) {
@@ -17,7 +18,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
-    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Robust Modem or Fast Modem. Active transfers continue in their original mode.";}
+    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Robust Modem, Fast Modem or Legacy Modem. Each mode keeps its own settings.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -224,6 +225,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::label,Field::received_raw_bits,Command::none,Bitmap::none,Page::compression,6,""}, Slot::received_raw_bits),
       };
       const auto& fast=fast_ui::screen();result.insert(result.end(),fast.begin(),fast.end());
+      const auto& legacy=legacy_ui::screen();result.insert(result.end(),legacy.begin(),legacy.end());
       return result;
     }();
     return controls;

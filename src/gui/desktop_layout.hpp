@@ -33,6 +33,7 @@ enum class Slot {
     fast_transmit, fast_listen, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
     fast_correction, fast_auth, fast_detail, fast_preview, fast_history, fast_status,
     fast_waveform, fast_waterfall, fast_constellation_plot,
+    legacy_profile, legacy_carrier, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -114,6 +115,16 @@ struct DesktopLayout {
         out[Slot::fast_preview]={margin,838,2*fast_column+fast_gap,std::max(70,height-898)};
         out[Slot::fast_history]={margin+2*(fast_column+fast_gap),838,2*fast_column+fast_gap,std::max(70,height-898)};
         out[Slot::fast_status]={margin,height-43,fast_width,27};
+        // Legacy is a separate text terminal; regular/Fast slots stay unchanged.
+        out[Slot::legacy_profile]={margin,76,240,field_height};
+        out[Slot::legacy_carrier]={276,76,170,field_height};
+        out[Slot::legacy_transmit]={width-margin-150,75,150,action_height};
+        const int legacy_transcript_height=(height-420)*3/5;
+        const int legacy_draft_height=(height-420)-legacy_transcript_height;
+        out[Slot::legacy_transcript]={margin,140,fast_width,legacy_transcript_height};
+        out[Slot::legacy_text]={margin,170+legacy_transcript_height,fast_width,legacy_draft_height};
+        out[Slot::legacy_waterfall]={margin,height-218,fast_width,166};
+        out[Slot::legacy_status]={margin,height-40,fast_width,24};
         out[Slot::callsign] = {margin, 62, 115, field_height};
         out[Slot::grid] = {142, 62, 85, field_height};
         out[Slot::repeatable] = {238, 61, 119, 28};
