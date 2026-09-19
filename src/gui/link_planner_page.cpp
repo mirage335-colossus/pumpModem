@@ -399,39 +399,27 @@ void planner_controls(Node& root,const planner::Model& model,bool show_details,b
             [&](const auto& control){return control.field==field;});
         auto node=column(width);node.kind=Kind::control;node.control=*declaration;node.height=height;return node;
     };
-    const bool one_row=root.width>=430,inline_command=root.width>=740;
-    auto first=row(root.width);
-    auto target=native(ui::Field::planner_target,std::min(240.f,root.width),ui::label_height+28);
+    const bool compact=model.available&&root.width>=900;
+    const bool paired=model.available&&root.width>=560;
+    const float chart_width=compact?std::min(300.f,root.width*.28f):std::min(340.f,root.width*.44f);
+    const float command_width=compact?std::clamp(root.width*.24f,220.f,280.f):
+        paired?root.width-chart_width-12:root.width;
+    const float controls_width=compact?root.width-chart_width-command_width-24:root.width;
+    auto controls=column(controls_width);
+    const bool one_row=controls_width>=360;
+    auto first=row(controls_width);
+    auto target=native(ui::Field::planner_target,
+        one_row?std::min(240.f,controls_width-179):controls_width,ui::label_height+28);
     target.right=one_row?8:0;first.children.push_back(std::move(target));
     if(one_row) {
         auto stronger=action("Stronger",Command::planner_stronger,86,model.stronger_fit_target.has_value());
         auto weaker=action("Weaker",Command::planner_weaker,77,model.weaker_fit_target.has_value());
         stronger.top=weaker.top=ui::label_height;stronger.height=weaker.height=28;stronger.right=8;
-        weaker.right=inline_command?12:0;
         first.children.push_back(std::move(stronger));first.children.push_back(std::move(weaker));
     }
-    const auto launch=[&](Node& destination,float width) {
-        const bool beside=width>=300;
-        auto command=native(ui::Field::planner_command,beside?width-64:width,ui::label_height+56);
-        command.right=beside?8:0;destination.children.push_back(std::move(command));
-        if(beside) {
-            auto load=action("Load",Command::planner_load_command,56);
-            load.top=ui::label_height;load.height=28;destination.children.push_back(std::move(load));
-        } else buttons(destination,{{"Load",Command::planner_load_command}});
-    };
-    if(inline_command)launch(first,root.width-431);
-    first.bottom=6;root.children.push_back(std::move(first));
-    if(!one_row)buttons(root,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
+    first.bottom=6;controls.children.push_back(std::move(first));
+    if(!one_row)buttons(controls,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
         {"Weaker",Command::planner_weaker,model.weaker_fit_target.has_value()}});
-    if(!inline_command) {
-        auto command=root.width>=300?row(root.width):column(root.width);
-        launch(command,root.width);command.bottom=6;root.children.push_back(std::move(command));
-    }
-    const bool side_by_side=root.width>=820;
-    const float chart_width=std::min(340.f,root.width*.36f);
-    const float controls_width=side_by_side?root.width-chart_width-12:root.width;
-    auto group=side_by_side?row(root.width):column(root.width);
-    auto controls=column(controls_width);controls.right=side_by_side?12:0;
     buttons(controls,{{"−8 example",Command::planner_example_short},{"+23 LPI example",Command::planner_example_lpi},
         {use_draft?"Plan 1 bit":"Use current draft",Command::planner_toggle_draft}});
     if(model.available&&model.automatic_mode)
@@ -439,8 +427,25 @@ void planner_controls(Node& root,const planner::Model& model,bool show_details,b
     if(model.available)buttons(controls,{{"Use target for short messages",Command::planner_apply_short},
         {"Use target for long messages",Command::planner_apply_long}});
     buttons(controls,{{show_details?"Hide details":"Model limits and references",Command::planner_toggle_details}});
-    controls.bottom=side_by_side?0:8;group.children.push_back(std::move(controls));
-    if(model.available)group.children.push_back(cpu_graph(model,side_by_side?chart_width:root.width));
+    auto command=column(command_width);
+    auto editor=native(ui::Field::planner_command,command_width,ui::label_height+56);
+    editor.bottom=6;command.children.push_back(std::move(editor));
+    auto load=action("Load",Command::planner_load_command,56);load.height=28;
+    command.children.push_back(std::move(load));
+
+    auto group=compact?row(root.width):column(root.width);
+    controls.right=compact?12:0;controls.bottom=compact?0:8;
+    group.children.push_back(std::move(controls));
+    if(compact) {
+        command.right=12;group.children.push_back(std::move(command));
+        group.children.push_back(cpu_graph(model,chart_width));
+    } else {
+        auto tools=paired?row(root.width):column(root.width);
+        command.right=paired?12:0;command.bottom=paired?0:8;
+        tools.children.push_back(std::move(command));
+        if(model.available)tools.children.push_back(cpu_graph(model,paired?chart_width:root.width));
+        group.children.push_back(std::move(tools));
+    }
     group.bottom=6;root.children.push_back(std::move(group));
 }
 

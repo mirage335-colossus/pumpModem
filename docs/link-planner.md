@@ -15,8 +15,9 @@ Rate, carrier, waveform, key, oscillator and DSP allowance follow the shared
 controls. Choose **Use target for short messages** or **Use target for long
 messages** to apply a preview.
 
-The **Launch command** box beside these controls lets you copy the preview's
-settings or paste a command to load. It includes the link budget, oscillator,
+The compact **Launch command** box sits between the target controls and CPU
+graph, with **Load** beneath it. It lets you copy the preview's settings or
+paste a command to load. It includes the link budget, oscillator,
 rate, carrier, waveform and DSP allowance; the preview target applies to both
 short and long messages. Click **Load** to apply the settings and select
 **Simulation: No**. Omitted options keep their current values. Loading preserves
@@ -84,8 +85,10 @@ conditional on completing the work. Expanded details also compare the complete
 one-bit simulation CPU time, including synthetic channel generation, with the
 bit's transmit duration.
 
-A compact CPU graph sits below the command row, on the right. It uses the same
-stronger-to-weaker target range as **Time per bit**, with a logarithmic vertical
+A compact CPU graph sits beside the command box, on the right. These columns
+wrap beneath the target controls on narrower pages and stack when needed.
+The graph uses the same stronger-to-weaker target range as **Time per bit**,
+with a logarithmic vertical
 scale of processing seconds per audio second. The reference line marks one
 second of work per second of audio; higher values indicate falling behind on
 the reference computer. The selected marker matches the headline. Clock/RAM

@@ -3881,3 +3881,23 @@ normalization, and invalid-command recovery. Default and minimum windows were
 inspected with the editor beside the target controls and no overlap. These are
 GUI/model checks; no physical audio/RF or full native transmission workflow was
 rerun for this settings feature.
+
+### Compact planner command placement (2026-09-18)
+
+The shared planner layout now aligns target controls, a 220–280 logical-pixel
+command column and the CPU graph in one row at normal window sizes. Load sits
+below the scrolling editor. Narrow documents pair the command and graph below
+the controls, then stack them. Text size, command parsing, native editor behavior
+and all modem models are unchanged.
+
+Both GUI binaries rebuilt successfully. Existing planner geometry/plot and
+launch-settings regressions passed 2/2 with GCC in 12.90 seconds and 2/2 with
+Clang/Rev in 14.66 seconds. Layout assertions cover 220–1200 logical-pixel
+documents, including compact-column alignment and non-overlap.
+`git diff --check` passed. Protocol suites were not repeated for this
+placement-only change.
+
+Default and minimum windows were inspected in both backends: the three columns
+fit, Load stays beneath the command, and the existing Apply buttons wrap when
+needed. Native clipboard round trips, multiline Enter and Tab-to-Load focus
+were also checked after the placement change.

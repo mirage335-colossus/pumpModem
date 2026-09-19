@@ -41,8 +41,11 @@ The native **Target SNR (dB-Hz)** editable dropdown sits in the page's **Stronge
 Weaker** controls row and scrolls with the document. It offers the same target
 presets as the transmit controls and changes only the preview. The numeric
 oscillator notes remain hidden while this tab is selected.
-The same row contains a native multiline **Launch command** editor and **Load**
-button. The generated command exports the current link budget, oscillator,
+At normal window widths, target controls, the compact native multiline
+**Launch command** editor and the CPU graph form three top-aligned columns.
+**Load** sits beneath the editor. Narrower pages move the command and graph
+below the target controls, then stack them when needed.
+The generated command exports the current link budget, oscillator,
 waveform, rate, carrier, DSP allowance and independent preview target. Its
 common `--target-snr` sets both short and long targets; the parser also accepts
 explicit `--short-target-snr` and `--long-target-snr` overrides without changing
@@ -118,7 +121,7 @@ not guarantee per-bit latency. Expanded details separately compare complete
 one-bit simulation CPU time, including channel generation, with bit duration.
 This indicator remains visible in both simulation modes and does not alter RX
 probability or the LPI warning.
-A compact CPU plot appears below the command row, on the right, sharing the
+A compact CPU plot appears beside the command editor, on the right, sharing the
 time graph's target-SNR horizontal range. Its logarithmic vertical scale shows
 receiver processing seconds per audio second, with an explicit equal-pace
 reference line. It models one bit at fixed link/clock settings regardless of the

@@ -1269,8 +1269,8 @@ void document_semantics_layout_and_plots() {
               (*command)->control->document_only&&(*command)->control->tab_navigation&&
               (*command)->control->submit==ui::Command::none&&(*command)->height>=ui::label_height+50,
               "Launch command must be a small native multiline editor whose Enter key cannot transmit");
-        if(width>=740) {
-            ui::DocumentRect editor_rect,stronger_rect,weaker_rect,command_rect,load_rect,cpu_rect;
+        if(width>=460) {
+            ui::DocumentRect editor_rect,stronger_rect,weaker_rect,command_rect,load_rect,cpu_rect,cpu_heading;
             const auto locate=[&](auto&& self,const ui::DocumentNode& node,const ui::DocumentBox& box,int x,int y)->void {
                 const auto& bounds=box.bounds;x+=bounds.x;y+=bounds.y;
                 const ui::DocumentRect rect{x,y,bounds.width,bounds.height};
@@ -1280,16 +1280,21 @@ void document_semantics_layout_and_plots() {
                 if(&node==*command)command_rect=rect;
                 if(node.command==ui::Command::planner_load_command)load_rect=rect;
                 if(node.plot_name=="planner/cpu-pace")cpu_rect=rect;
+                if(node.text=="CPU estimate")cpu_heading=rect;
                 for(std::size_t i=0;i<node.children.size();++i)self(self,node.children[i],box.children[i],x,y);
             };
             locate(locate,document,layout.root,0,0);
             check(editor_rect.y+ui::label_height==stronger_rect.y&&stronger_rect.y==weaker_rect.y&&
                   editor_rect.x+editor_rect.width<=stronger_rect.x&&
-                  command_rect.x>=weaker_rect.x+weaker_rect.width&&command_rect.y==editor_rect.y&&
-                  command_rect.width>=240&&load_rect.x>=command_rect.x+command_rect.width&&load_rect.y==weaker_rect.y,
-                  "Target, step buttons, multiline command and Load must remain adjacent without overlap");
-            if(width>=820)check(cpu_rect.x>weaker_rect.x+weaker_rect.width&&cpu_rect.y>=command_rect.y+command_rect.height,
-                  "The compact CPU graph must remain to the right of the secondary planner controls");
+                  command_rect.width>=220&&load_rect.x==command_rect.x&&
+                  load_rect.y>=command_rect.y+command_rect.height,
+                  "Target and step buttons must align; Load must remain below the command editor");
+            if(width>=560)check(cpu_rect.x>=command_rect.x+command_rect.width&&
+                  cpu_heading.y>=command_rect.y&&cpu_heading.y<=command_rect.y+12,
+                  "Launch command and CPU graph must align side by side without overlap");
+            if(width>=900)check(command_rect.x>=weaker_rect.x+weaker_rect.width&&
+                  command_rect.y==editor_rect.y&&command_rect.width<=280,
+                  "Wide planner layout must use compact aligned controls, command and CPU columns");
         }
     }
     const auto detailed=planner_page::build(model,900,true,false);
