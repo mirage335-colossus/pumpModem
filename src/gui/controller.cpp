@@ -243,7 +243,7 @@ struct Controller::Impl {
         f(UiField::simulation).options={{"no","No"},{"yes","Yes"}};
         f(UiField::simulation).selected=options.simulation||options.smoke?"yes":"no";
         // The sampled native smoke retains its established strong test link.
-        // Ordinary planning and simulation start from the shared 170 dB loss.
+        // Ordinary planning and simulation start from the shared 120 dB loss.
         if(options.smoke)planner_inputs.path_loss_db=60;
         for(const auto* value:{"100 W","4 W","1 W","100 mW","2 mW","1 mW","30 µW","1 µW"})
             f(UiField::link_power).options.push_back({value,value});
@@ -327,11 +327,13 @@ struct Controller::Impl {
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
         if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
     }
-    void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu,bool coherent_reference=false) {
-        if(!link_inputs_valid())confidence=cpu=gpu="Check link inputs";
+    void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu,bool coherent_reference=false,
+                                  ui::TextTone tone=ui::TextTone::normal) {
+        if(!link_inputs_valid()) {confidence=cpu=gpu="Check link inputs";tone=ui::TextTone::normal;}
         const auto target=short_draft()?short_target:long_target;
         std::ostringstream label;label<<(coherent_reference?"RX reference · ":"RX estimate · ")<<(target>0?"+":"")<<std::setprecision(4)<<target<<" dB target\n";
         f(UiField::simulation_confidence).text=label.str()+std::move(confidence);
+        f(UiField::simulation_confidence).text_tone=tone;
         f(UiField::simulation_cpu_time).text="CPU / i9-13900H\n"+std::move(cpu);
         f(UiField::simulation_gpu_time).text="GPU / RTX 4090 Laptop (projected)\n"+std::move(gpu);
     }
@@ -340,6 +342,7 @@ struct Controller::Impl {
     }
     void lpi_estimate_status(const std::string& state) {
         f(UiField::lpi_estimate).text="Observer / receiver time: "+state;
+        f(UiField::lpi_estimate).text_tone=ui::TextTone::normal;
     }
     static std::size_t link_input_index(UiField field) {
         return field==UiField::link_power?0:field==UiField::link_loss?1:2;
@@ -1060,6 +1063,8 @@ struct Controller::Impl {
             inspection=std::move(result.inspection); estimate=inspection->estimate; estimated_revision=revision;
             if(planner_draft)planner_model.reset();
             f(UiField::lpi_estimate).text=inspection->lpi_summary;
+            f(UiField::lpi_estimate).text_tone=inspection->lpi_estimate.status==lpi::Status::available&&
+                inspection->lpi_estimate.equivalent_symbols<8?ui::TextTone::negative:ui::TextTone::normal;
             if(receive_targets_due)simulation_estimate_status("Calculating...");
             else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
             else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");
@@ -1070,7 +1075,9 @@ struct Controller::Impl {
                     !model.receiver_workspace_supported?"Wide RX search exceeds RAM":
                     !model.confidence_available?"Unavailable":probability_text(model.success_probability);
                 simulation_estimate_text(confidence,
-                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds),model.coherent_reference_only);
+                    "~"+seconds_text(model.cpu_seconds),"~"+seconds_text(model.gpu_seconds),model.coherent_reference_only,
+                    model.profile_matches&&model.carrier_in_search&&model.receiver_workspace_supported&&
+                    model.confidence_available&&model.success_probability<.8?ui::TextTone::negative:ui::TextTone::normal);
             } else simulation_estimate_status("Unavailable");
             f(UiField::inspection).text=inspection->title+"\n"+inspection->summary;
             std::ostringstream flow,transmission;

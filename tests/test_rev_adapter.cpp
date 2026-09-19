@@ -1,6 +1,7 @@
 #define DATAPUMP_REV_ADAPTER_TEST
 #include <glew/glew.h>
 #include "gui_extension_fixture.hpp"
+#include "estimate_warning_fixture.hpp"
 #include "document_geometry_fixture.hpp"
 #include "overlay_fixture.hpp"
 import Rev.Graphics.FrameBuffer;
@@ -35,11 +36,11 @@ int run_native_probes() {
     {
         RevApp probe(windows,launch);
         probe.application.toggle(ui::Field::developer_mode,true);probe.apply();
-        probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_clipboard_shortcuts();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();probe.verify_overlay_composition();
+        probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_clipboard_shortcuts();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();probe.verify_overlay_composition();probe.verify_estimate_warning_colors();
     }
     {
         launch.color=true;configure_theme(launch.color);
-        RevApp probe(windows,launch);probe.application.toggle(ui::Field::developer_mode,true);probe.apply();probe.verify_palette_roles();
+        RevApp probe(windows,launch);probe.application.toggle(ui::Field::developer_mode,true);probe.apply();probe.verify_palette_roles();probe.verify_estimate_warning_colors();
     }
     if(!windows.empty())throw std::runtime_error("Rev native probes retained a window after conformance checks");
     std::cout<<"Rev native adapter probes passed: declarative extensions, UTF-8 editing, choices, records, scrolling and modal focus.\n";

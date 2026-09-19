@@ -55,6 +55,10 @@ static_assert(theme::text_rgb(ui::TextTone::normal,false)==theme::Rgb{240,240,24
 static_assert(theme::text_rgb(ui::TextTone::normal,true)==theme::Rgb{208,208,208});
 static_assert(theme::text_rgb(ui::TextTone::data,false)==theme::Rgb{255,255,255});
 static_assert(theme::text_rgb(ui::TextTone::data,true)==theme::Rgb{144,192,184});
+static_assert(ui::FieldState{}.text_tone==ui::TextTone::normal);
+static_assert(theme::text_rgb(ui::TextTone::negative,true)==theme::negative_tint);
+static_assert(theme::text_rgb(ui::TextTone::negative,false)==theme::text_rgb(ui::TextTone::normal,false));
+static_assert(theme::text_rgb(ui::TextTone::negative,true)==theme::text_rgb(ui::DocumentTone::negative,true));
 static_assert(theme::text_rgb(ui::DocumentTone::accent,false)==theme::Rgb{255,255,255});
 static_assert(theme::text_rgb(ui::DocumentTone::accent,true)==theme::Rgb{144,192,184});
 static_assert(theme::text_rgb(ui::DocumentTone::positive,true).green>theme::text_rgb(ui::DocumentTone::positive,true).red);
@@ -64,7 +68,7 @@ static_assert(theme::text_rgb(ui::DocumentTone::positive,false)==theme::text_rgb
 static_assert([] {
     for(bool color:{false,true}) {
         const auto disabled=theme::widget_rgb(theme::WidgetRole::disabled_text,color);
-        for(auto tone:{ui::TextTone::normal,ui::TextTone::muted,ui::TextTone::data,ui::TextTone::inverse})
+        for(auto tone:{ui::TextTone::normal,ui::TextTone::muted,ui::TextTone::data,ui::TextTone::inverse,ui::TextTone::negative})
             if(theme::text_rgb(tone,color,false)!=disabled)return false;
         for(auto tone:{ui::DocumentTone::text,ui::DocumentTone::muted,ui::DocumentTone::accent,ui::DocumentTone::comparison,
                        ui::DocumentTone::positive,ui::DocumentTone::caution,ui::DocumentTone::negative})

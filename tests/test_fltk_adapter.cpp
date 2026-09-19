@@ -1,6 +1,7 @@
 #define DATAPUMP_FLTK_ADAPTER_TEST
 #include "../src/gui/backend_fltk.cpp"
 #include "gui_extension_fixture.hpp"
+#include "estimate_warning_fixture.hpp"
 #include "overlay_fixture.hpp"
 #include <cstring>
 #include <FL/Fl_Image_Surface.H>
@@ -321,6 +322,25 @@ void prompts() {
     require(find_button(*file_dialog,ui::service_cancel_label)&&find_button(*file_dialog,ui::service_dialog({93,ui::ServiceKind::open_file}).accept_label),
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
+}
+void estimate_warning_colors() {
+    for(bool color:{false,true}) {
+        theme::apply_palette(color);
+        Launch launch;launch.color=color;launch.simulation=true;NativeApp app(launch);Fl::check();
+        auto* window=Fl::first_window();require(window,"Estimate color fixture has no native window");
+        test::estimate_warning_fields(app.application,[] {Fl::wait(.01);},[&](ui::Field field,ui::TextTone tone) {
+            const auto& state=app.application.field(field);
+            auto* label=find_label(*window,state.text);
+            const auto deadline=Clock::now()+std::chrono::seconds(2);
+            while((!label||label->labelcolor()!=text_color(tone))&&Clock::now()<deadline) {
+                Fl::wait(.01);label=find_label(*window,state.text);
+            }
+            require(state.text_tone==tone&&label&&label->labelcolor()==text_color(tone),
+                "FLTK estimate label ignored or retained a shared warning tone");
+        });
+        app.application.close();while(!app.application.finished())Fl::wait(.005);
+    }
+    theme::apply_palette();
 }
 void developer_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
@@ -1226,6 +1246,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

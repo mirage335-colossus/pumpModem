@@ -287,6 +287,20 @@
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
     }
+    void verify_estimate_warning_colors() {
+        test::estimate_warning_fields(application,[&] {
+            application.tick();apply();native_frame();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        },[&](ui::Field field,ui::TextTone tone) {
+            const auto binding=std::find_if(bindings.begin(),bindings.end(),[&](const auto& item){return item.control.field==field;});
+            if(application.field(field).text_tone!=tone||binding==bindings.end()||!binding->label)
+                throw std::runtime_error("Rev estimate warning fixture has no matching shared label");
+            const auto color=theme::text_rgb(tone,launch.color);
+            const Rev::Core::Color expected{color.red/255.0f,color.green/255.0f,color.blue/255.0f,1};
+            const auto actual=binding->label->resolved.style.text.color;
+            if(actual.r!=expected.r||actual.g!=expected.g||actual.b!=expected.b||actual.a!=expected.a)
+                throw std::runtime_error("Rev estimate label ignored or retained a shared warning tone");
+        });
+    }
     void verify_palette_roles() {
         native_frame();
         const auto matches=[](const auto& color,theme::WidgetRole role,float opacity=1.0f) {

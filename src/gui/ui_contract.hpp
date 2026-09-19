@@ -38,7 +38,7 @@ enum class Bitmap {
 };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };
 enum class Menu { none, keyfile, recovery };
-enum class TextTone { normal, muted, data, inverse };
+enum class TextTone { normal, muted, data, inverse, negative };
 enum class BitmapCaption { footer, overlay_error };
 // Overlay controls use viewport-relative insets and optional fixed dimensions.
 // A zero width/height fills the space between the corresponding insets.
@@ -133,6 +133,7 @@ struct FieldState {
     // Increment for an explicit request to collapse selection at the text end.
     // Zero requests nothing; each native editor consumes a revision only once.
     std::uint64_t text_cursor_end_revision = 0;
+    TextTone text_tone = TextTone::normal;
 };
 enum class ServiceKind { open_file, save_file, prompt, clipboard, open_folder };
 struct ServiceRequest {

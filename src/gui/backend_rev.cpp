@@ -1200,7 +1200,11 @@ public:
             const auto view=control_view(b,controls,document_geometry);
             const auto& value=view.control.state;
             relayout=relayout||b.presentation.needs_layout(view.geometry,b.control.font_size);
-            if(b.label)b.label->content=view.control.label;
+            if(b.label) {
+                b.label->content=view.control.label;
+                if(b.control.kind==ui::Kind::label)
+                    b.label->style->text.color=theme::rev_color(theme::text_rgb(value.text_tone,launch.color,view.enabled));
+            }
             if(b.toggle)b.toggle->label->content=view.control.label;
             b.element->style->visibility=view.visible?Visibility::Visible:Visibility::Hidden;b.element->setDisabled(!view.enabled);
             if(help_owner==b.element) {

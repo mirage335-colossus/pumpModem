@@ -4,6 +4,9 @@ Set transmit power, path loss and noise in the top bar, then open **Link
 planner**, immediately after **Console**. Its headline shows the preview's RX
 estimate or clock/RAM limit. A limited fallback model is labeled **RX reference**.
 Below it are the power budget's margin or shortfall and whole-bit phase loss.
+Available RX estimates below 80% are red, and available **Observer / receiver
+time** values below 8× are red. The thresholds use the underlying estimates
+before display rounding; exactly 80% and 8× do not trigger red.
 The power field accepts watts,
 milliwatts, microwatts or dBm.
 
@@ -31,7 +34,7 @@ setting regenerates the command from the accepted values.
 For example:
 
 ```text
-./datapump-gui --auto-pattern --tx-dbm 3 --path-loss-db 170 --noise-dbm-hz -164 --oscillator crystal --target-snr -8 --rate 3600 --carrier 1500 --dsp-workspace 50%
+./datapump-gui --auto-pattern --tx-dbm 3 --path-loss-db 120 --noise-dbm-hz -164 --oscillator crystal --target-snr -8 --rate 3600 --carrier 1500 --dsp-workspace 50%
 ```
 
 Windows exports start with `.\datapump-gui.exe`; Unix exports use
@@ -190,10 +193,25 @@ editable actual-link budget. Its assumptions remain behind the single concise
 LPI warning in the tab. See also [oscillator models](oscillator-models.md) and
 [simulation estimates](simulation-estimates.md).
 
-The default budget is +3 dBm transmit power, 170 dB path loss and −164 dBm/Hz
-noise density: −167 dBm received and −3 dB-Hz actual C/N0. Changing the target
-does not change that power. Groundwave, skywave, meteor scatter, sub-9 kHz and
-moonbounce scenarios need their own antenna, path and noise inputs; operating
+The hidden details explain the 8× listening guideline. Longer public patterns
+repeat less often and may sound less growling even without encryption. This is
+a plausible tendency, not a validated 8× acoustic threshold: experiments show
+that temporal repetition can give noise a pitch
+([Yost, 1996](https://pubmed.ncbi.nlm.nih.gov/8675844/)). Rate, carrier, filtering,
+level and the listener also affect the sound. The ratio itself models energy
+detection, not sound character, annoyance or interference complaints; actual
+tone modes still transmit tones. A noise-like sound does not establish fewer
+complaints or less physical interference. Research on noise annoyance considers
+multiple sound qualities, including loudness, roughness and tonality
+([NASA, 2024](https://ntrs.nasa.gov/citations/20240003202)). With encryption off,
+the observer ratio continues to describe a hypothetical private pattern.
+
+The default budget is +3 dBm transmit power, 120 dB path loss and −164 dBm/Hz
+noise density: −117 dBm received and +47 dB-Hz actual C/N0. The 120 dB starting
+loss is chosen for the audio-transfer workflow when reopening Data Pump.
+Changing the target does not change that power. Groundwave, skywave, meteor
+scatter, sub-9 kHz and moonbounce scenarios need their own antenna, path and
+noise inputs; operating
 modes such as FT8 and SSB do not themselves determine path loss.
 
 **Model limits and references** contains the detailed oscillator and LPI

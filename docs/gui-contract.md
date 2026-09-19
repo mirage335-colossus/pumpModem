@@ -156,8 +156,8 @@ run from 100 W to 1 µW.
 Typing preserves the entered text; incomplete or invalid values show **Check
 link inputs** instead of a stale RX or planner result. Valid edits and presets
 restore estimates using the shared accepted budget.
-The initial budget is +3 dBm, 170 dB loss and −164 dBm/Hz
-noise, yielding −167 dBm received and −3 dB-Hz actual C/N0. These inputs affect
+The initial budget is +3 dBm, 120 dB loss and −164 dBm/Hz
+noise, yielding −117 dBm received and +47 dB-Hz actual C/N0. These inputs affect
 the actual budget separately from the target-driven timing and the existing
 normalized observer comparison. Propagation names do not supply unverified
 path-loss presets. **Model limits and references** retains the SSB/FT8 and rough

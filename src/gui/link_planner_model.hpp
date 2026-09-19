@@ -12,7 +12,7 @@ struct Inputs {
     modem::ChannelConfig channel;
     double target_db_hz=-8;
     double tx_dbm=3;
-    double path_loss_db=170;
+    double path_loss_db=120;
     double noise_density_dbm_hz=-164;
     std::size_t wire_bits=1;
     bool empty_draft=false; // One-bit preview; the composer remains empty.

@@ -70,6 +70,8 @@ void simulation_estimate_controls() {
     controller.select(F::simulation,std::string(tuning::simulation_presets().back().name));prepare(controller);
     check(text(F::simulation_confidence)!=strong_probability,
           "Simulation probability did not respond to the weak channel preset");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::negative,
+          "A weak numeric RX estimate below 80% must be red");
     controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));
     check(!controller.settings().simulation,"Simulation No did not stop sampled simulation");
     // RX probability remains a link model when sampled simulation is off.
@@ -79,6 +81,8 @@ void simulation_estimate_controls() {
           "Simulation No must retain RX confidence for the configured link");
     controller.select(F::simulation,std::string(tuning::simulation_presets()[2].name));
     controller.edit(F::bandwidth,"invalid");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
+          "Invalid settings retained the previous RX estimate warning color");
     check(text(F::simulation_confidence).ends_with("Invalid settings")&&
           text(F::simulation_cpu_time).ends_with("Invalid settings"),
           "Invalid settings left a previous numeric simulation estimate visible");
@@ -104,6 +108,8 @@ void simulation_estimate_controls() {
     controller.select(F::simulation,"3dBm -170dB");prepare(controller);
     check(text(F::simulation_confidence).ends_with("Carrier outside RX search"),
           "100 Hz with a -61 target must not show the old low numeric probability");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
+          "Unavailable numeric RX estimate retained the warning color");
     const auto preset_snr=controller.settings().simulation_snr_db;
     controller.edit(F::snr,"140");prepare(controller);
     check(controller.settings().simulation_snr_db==preset_snr,
@@ -111,6 +117,8 @@ void simulation_estimate_controls() {
     controller.select(F::simulation,"3dBm -120dB");prepare(controller);
     check(text(F::simulation_confidence).ends_with(">99.9%"),
           "Covered strong 100 Hz channel must not treat target 140 as an admission threshold");
+    check(controller.field(F::simulation_confidence).text_tone==ui::TextTone::normal,
+          "An RX estimate above 80% must retain the normal foreground");
 }
 void empty_composer_preview() {
     using F=ui::Field;using C=ui::Command;
@@ -244,6 +252,23 @@ void lpi_estimate_controls() {
           controller.estimate()->wire_bits==3&&!controller.settings().transfer.key&&
           !controller.settings().transfer.modem.scramble&&!controller.settings().transfer.modem.dsss,
           "Unkeyed GUI must show a warned relative estimate while preserving its public waveform and exact short endpoint");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
+          "An available observer ratio above 8x must retain the normal foreground");
+    controller.edit(F::snr,"23");prepare(controller);
+    check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
+          controller.inspection()->lpi_estimate.equivalent_symbols<8&&
+          controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "An available observer ratio below 8x must be red even when hypothetical");
+    controller.edit(F::short_bits,"001x");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal&&text().ends_with("Unavailable"),
+          "Unavailable observer estimate retained the previous warning color");
+    controller.edit(F::message,"e");prepare(controller);
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "A restored low observer estimate lost its warning color");
+    controller.edit(F::snr,"0");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal&&text().ends_with("Calculating..."),
+          "Pending observer estimate retained the previous warning color");
+    prepare(controller);
     struct TemporaryKeyring {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
             ("datapump-lpi-keys-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));

@@ -12,6 +12,7 @@ inline constexpr Rgb text_rgb(ui::TextTone tone, bool use_color, bool enabled=tr
     case ui::TextTone::muted:return text_rgb(use_color,muted);
     case ui::TextTone::data:return data_rgb(use_color);
     case ui::TextTone::inverse:return grayscale(background);
+    case ui::TextTone::negative:return use_color?negative_tint:text_rgb(false);
     case ui::TextTone::normal:return text_rgb(use_color);
     }
     return text_rgb(use_color);

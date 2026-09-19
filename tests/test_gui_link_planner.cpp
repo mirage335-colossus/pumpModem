@@ -27,6 +27,7 @@ void near(double actual,double expected,const char* message) {
 }
 planner::Inputs example() {
     planner::Inputs inputs;
+    inputs.path_loss_db=170; // Preserve the independent weak-link reference budget.
     inputs.options.modem=tuning::resolve(3600,-8,tuning::PatternMode::auto_pattern,false,1500).config;
     return inputs;
 }
@@ -785,8 +786,14 @@ void shared_link_budget_without_simulation() {
     controller.edit(F::message,"e");controller.edit(F::snr,"0");prepare(controller);
     const auto initial=controller.link_plan();
     near(initial->inputs.tx_dbm,3,"Shared power default must be 3 dBm");
-    near(initial->inputs.path_loss_db,170,"Shared path-loss default must be 170 dB");
+    near(initial->inputs.path_loss_db,120,"Shared path-loss default must be 120 dB");
+    check(controller.field(F::link_loss).text=="120 dB","The initial path-loss field must show the accepted default");
     near(initial->inputs.noise_density_dbm_hz,-164,"Shared noise default must be -164 dBm/Hz");
+    near(initial->received_dbm,-117,"Default received power must follow the 120 dB path loss");
+    near(initial->actual_cn0_db_hz,47,"Default link strength must follow the 120 dB path loss");
+    // Use the original weak budget so the following edit crosses a visible
+    // probability change instead of comparing two saturated >99.9% labels.
+    controller.edit(F::link_loss,"170 dB");prepare(controller);
     const auto initial_confidence=controller.field(F::simulation_confidence).text;
     check(initial_confidence.find('%')!=std::string::npos,
           "RX confidence must be computed from the link budget with Simulation No");
@@ -901,7 +908,7 @@ void link_budget_edit_buffers() {
     type(F::link_noise,{{"",-164},{"-",-164},{"-1",-1},{"-17",-17},{"-174",-174},
                         {"-174 ",-174},{"-174 d",-174},{"-174 dB",-174},{"-174 dBm",-174},
                         {"-174 dBm/",-174},{"-174 dBm/H",-174},{"-174 dBm/Hz",-174}});
-    type(F::link_loss,{{"",170},{"2",2},{"22",22},{"220",220},{"220 ",220},
+    type(F::link_loss,{{"",120},{"2",2},{"22",22},{"220",220},{"220 ",220},
                        {"220 d",220},{"220 dB",220}});
     prepare(controller);
     const auto accepted=controller.link_plan();
@@ -1211,6 +1218,52 @@ void receiver_overlay_and_cpu_status() {
               "CPU pace must be a visible line in every supported pixel format");
     }
 }
+void estimate_warning_thresholds() {
+    planner::Model model;model.inputs=example();model.available=true;
+    model.clock_search_supported=model.receiver_workspace_supported=true;
+    model.confidence_available=model.observer_available=true;
+    model.bit_seconds=model.send_seconds=60;model.finish_seconds=120;
+    const auto tone_for=[&](const ui::DocumentNode& page,std::string_view prefix) {
+        const auto flat=nodes(page);
+        const auto found=std::find_if(flat.begin(),flat.end(),[&](const auto* node){return node->text.starts_with(prefix);});
+        check(found!=flat.end(),"Expected an estimate label in the planner");
+        return (*found)->tone;
+    };
+    for(const auto width:{220.f,900.f})for(const auto bits:{1u,3u})for(const auto reference:{false,true}) {
+        model.inputs.wire_bits=bits;model.coherent_reference_only=reference;
+        for(const auto probability:{0.,.79,std::nextafter(.8,0.),.8,.81,1.}) {
+            model.success_probability=model.one_bit_success_probability=probability;
+            const auto page=planner_page::build(model,width,false,bits>1);
+            check(tone_for(page,reference?"RX reference":"RX estimate")==
+                      (probability<.8?ui::DocumentTone::negative:ui::DocumentTone::accent),
+                  "RX values must turn red strictly below 80%, including all-bit and reference estimates");
+            check(tone_for(page,"┄ 1-bit RX")==
+                      (probability<.8?ui::DocumentTone::negative:ui::DocumentTone::comparison),
+                  "The one-bit percentage must use the same strict 80% threshold");
+        }
+        for(const auto ratio:{1.,7.,std::nextafter(8.,0.),8.,9.}) {
+            model.observer_ratio=ratio;
+            const auto page=planner_page::build(model,width,false,bits>1);
+            const auto flat=nodes(page);
+            const auto heading=std::find_if(flat.begin(),flat.end(),[](const auto* node){return node->text=="Observer / receiver time";});
+            check(heading!=flat.end()&&heading+1!=flat.end()&&(*(heading+1))->tone==
+                      (ratio<8?ui::DocumentTone::negative:ui::DocumentTone::accent),
+                  "Observer values must turn red strictly below 8x, before display rounding");
+        }
+    }
+    model.confidence_available=model.observer_available=false;
+    model.success_probability=model.one_bit_success_probability=model.observer_ratio=0;
+    const auto unavailable=planner_page::build(model,900,false,false);
+    check(tone_for(unavailable,"RX estimate unavailable")!=ui::DocumentTone::negative&&
+          tone_for(unavailable,"Outside model range")!=ui::DocumentTone::negative&&
+          tone_for(unavailable,"┄ 1-bit RX")!=ui::DocumentTone::negative,
+          "Unavailable estimates must not inherit a numerical red warning");
+    const auto detailed=planner_page::build(model,900,true,false);
+    check(!contains_text(unavailable,"Red indicators.")&&contains_text(detailed,"below 80%")&&
+          contains_text(detailed,"below 8×")&&contains_text(detailed,"not a validated acoustic threshold")&&
+          contains_text(detailed,"Tone modes still transmit tones"),
+          "Hidden details must explain both thresholds and the limits of the listening guideline");
+}
 void document_semantics_layout_and_plots() {
     const auto model=planner::build(example());
     for(const float width:{220.f,460.f,720.f,740.f,900.f,1200.f}) {
@@ -1367,7 +1420,7 @@ int main() {
         selected_workspace_reaches_planner();
         shared_link_budget_without_simulation();shared_link_controls_visibility();
         link_budget_edit_buffers();link_budget_preset_and_dialog_sync();
-        receiver_overlay_and_cpu_status();document_semantics_layout_and_plots();
+        receiver_overlay_and_cpu_status();estimate_warning_thresholds();document_semantics_layout_and_plots();
         std::cout<<"Shared Link planner tests passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

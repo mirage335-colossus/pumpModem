@@ -874,7 +874,10 @@ private:
             auto* child=b.group->child(i);
             if(!child->tooltip()||std::string_view(child->tooltip())!=c.help)child->copy_tooltip(c.help);
         }
-        if(b.label)label(b.label,view.control.label);
+        if(b.label) {
+            label(b.label,view.control.label);
+            if(c.kind==ui::Kind::label)b.label->labelcolor(text_color(state.text_tone,view.enabled));
+        }
         if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
         if(b.editor){b.editor->byte_limit=c.byte_limit;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision);}
         if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {

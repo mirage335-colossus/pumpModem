@@ -15,6 +15,8 @@ void near(double a,double b,const char* message) {
 }
 gui::planner::Inputs example() {
     gui::planner::Inputs input;
+    // Preserve the weak-link transition fixture independently of GUI defaults.
+    input.path_loss_db=170;
     input.options.modem=tuning::resolve(3600,-8,tuning::PatternMode::auto_pattern,false,1500).config;
     input.options.dsp_workspace_bytes=std::size_t{2}*1024*1024*1024;
     return input;

@@ -3938,3 +3938,37 @@ Default and minimum windows were inspected in both backends: the three columns
 fit, Load stays beneath the command, and the existing Apply buttons wrap when
 needed. Native clipboard round trips, multiline Enter and Tab-to-Load focus
 were also checked after the placement change.
+
+### RX and observer warning colors; audio-link default (2026-09-19)
+
+Available RX estimates below 80% and observer/receiver ratios below 8× now
+use the shared red foreground in the planner and current-draft labels. Checks
+use the unrounded estimates, so exactly 80% and 8× retain their usual color.
+Pending, invalid and unavailable labels clear old warning tones; monochrome
+keeps its established foreground. Both native adapters consume the same field
+tone. The normal launch path-loss default is 120 dB; explicit launch settings
+and the native smoke's established 60 dB fixture retain their behavior.
+
+Planner regressions cover threshold boundaries, narrow/wide layouts, one/all-bit
+estimates, limited RX references and hidden explanatory text. Historical 170 dB
+numerical and probability-curve fixtures remain explicit, preserving their
+independent anchors. Controller checks cover warning restoration and withdrawal.
+A shared native fixture checks actual low, unavailable and high estimate labels
+in color and monochrome on both backends.
+
+Both complete Release builds passed. GCC's 28 shared GUI suites passed in
+91.21 seconds; the selected 11 Clang/Rev shared suites passed in 106.63 seconds.
+The remaining 21 development-contract suites passed in 290.03 seconds; with
+the four shared GUI compatibility suites, all 25 required suites passed.
+FLTK adapter/document conformance passed 2/2 in 53.16 seconds. Rev adapter,
+platform and 1×/2× coordinate conformance passed 4/4 in 137.79 seconds, each on
+a private X display. Default-size and minimum-size planner windows were captured
+in both backends; the low RX percentage and observer ratio display in red
+without overlap.
+
+The hidden details and linked documentation describe a plausible reduction in
+audible repetition with longer public patterns, including unencrypted use.
+The 8× preference is not presented as a validated acoustic threshold or a
+prediction of annoyance or interference complaints. No physical audio/RF or
+controlled listening experiment was run for this presentation/default change.
+`git diff --check` passed.

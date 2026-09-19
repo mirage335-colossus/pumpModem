@@ -332,11 +332,12 @@ Node graph(const planner::Model& model, bool observer, float width) {
     auto n = card(width); n.padding = 8; const float inner = width - 2 * n.padding;
     paragraph(n, observer ? "Observer / receiver time" : "Time per bit", 14, Tone::text, true, 4);
     paragraph(n, observer ? (model.observer_available ? ratio(model.observer_ratio) : "Outside model range") :
-        planner::duration(model.bit_seconds) + " per bit", 13, Tone::accent, true, 6);
+        planner::duration(model.bit_seconds) + " per bit", 13,
+        observer && model.observer_available && model.observer_ratio < 8 ? Tone::negative : Tone::accent, true, 6);
     if(!observer) {
         paragraph(n,"━ Bit time · left axis",11,Tone::accent,false,2);
         paragraph(n,"┄ 1-bit RX · right axis"+(model.confidence_available?" · "+probability(model.one_bit_success_probability):""),
-            11,Tone::comparison,false,4);
+            11,model.confidence_available&&model.one_bit_success_probability<.8?Tone::negative:Tone::comparison,false,4);
     }
     const auto chart = chart_data(model, observer);
     const float label_width = 44,right_label_width=observer?0.f:36.f;
@@ -491,7 +492,8 @@ void link_budget(Node& root, const planner::Model& model) {
             (model.inputs.wire_bits==1?": ":" (all bits): ");
         const auto verdict = !search_fits ? model.receiver_status : !model.confidence_available ?
             "RX estimate unavailable" : label+probability(model.success_probability);
-        const auto rx_tone=search_fits&&model.confidence_available&&model.success_probability>=.5?Tone::accent:Tone::text;
+        const auto rx_tone=!search_fits||!model.confidence_available?Tone::text:
+            model.success_probability<.8?Tone::negative:Tone::accent;
         const bool cpu_available=search_fits&&model.one_bit_cpu_available;
         const auto cpu_ratio=model.cpu_realtime_ratio;
         const auto cpu_tone=!cpu_available?Tone::muted:cpu_ratio>=1?Tone::negative:
@@ -539,6 +541,7 @@ void details(Node& root,const planner::Model& model) {
     paragraph(n, "Pattern transitions. Long patterns also fit four fixed sections with separate gain and phase, then combine their evidence across the whole bit. One strong section cannot carry the match alone. RX estimate models both this fit and the original coherent match, including their shared noise, competing bit patterns and extra decision penalty. It uses 4096 deterministic statistical trials, without generating audio or running the complete receiver search. Small RAM budgets can retain only the original match; RX reference labels a limited model when the combined estimate is unavailable. Sections must still be coherent; there is no special 0.01 Hz cutoff.");
     paragraph(n, "Clock/RAM gaps. At some bit durations, the receiver can average more samples and use less RAM. Even a tiny duration change can lose that saving. Stronger and Weaker select timings that fit, usually about 1 dB apart. Labels are rounded; selections keep the exact value when applied.");
     paragraph(n, "Observer. Energy-only listener; private waveform; equal signal and noise at both receivers. 90% detection, 1% false alarm; known band, window and stationary noise. Numeric range: at most −10 dB in-band SNR. Each point holds bit energy relative to noise at 18 dB; longer bits use lower power. Repeated traffic, location, noise uncertainty and other detectors change the comparison.");
+    paragraph(n, "Red indicators. RX estimates below 80% and observer / receiver times below 8× are red. The 8× cutoff is a listening guideline, not a validated acoustic threshold. Longer public patterns repeat less often and may sound less growling, even without encryption. Sound also depends on rate, carrier, filtering, level and the listener. This energy-detector ratio does not predict sound character, annoyance or interference complaints; with encryption off it remains hypothetical. Tone modes still transmit tones.");
     paragraph(n, "Voice bandwidth. The ideal shaped signal must fit the radio's passband. At 3.6 kHz rate and 1.5 kHz carrier, the automatic shaped pattern spans 375–2625 Hz. Radio filtering and spectral tails still matter.");
     paragraph(n, "FT8 reference. −8 dB in 1 Hz converts to about −42 dB on the 2500 Hz reporting scale: 21 dB below the published −21 dB reference threshold. This is a scale conversion, not tested sensitivity.");
     paragraph(n, "Quick references", 15, Tone::text, true, 8);
