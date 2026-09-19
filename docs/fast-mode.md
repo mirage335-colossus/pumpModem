@@ -1,7 +1,9 @@
 # Fast text and file transfer
 
-Fast mode is a separate streaming APSK modem. Use the **Fast** toggle beside
-**DATA PUMP** to switch the entire desktop interface. Select a channel profile,
+Fast Modem is a separate streaming APSK modem. Select **Fast Modem** from the
+dropdown beside **DATA PUMP** to switch the entire desktop interface. The other
+choice, **Robust Modem**, is the existing regular interface and remains the
+default. Select a channel profile,
 constellation and coding. Choose **Text** and enter a message, or choose **File**
 and select a source file, then transmit. Select **Listen** on the receiving
 computer. The **Encryption** checkbox is optional and starts off; enabling it
@@ -39,6 +41,28 @@ the operator must retry when regular work is idle.
 Fast offers optional encryption and authentication, but no LPI claim, spreading, pattern
 codewords, time/key search, single-bit recovery or source compression. Its known
 training, markers, pilots, occupied spectrum and transmission duration are public.
+
+## Live signal plots
+
+The Fast interface shows waveform, waterfall and constellation plots while
+**Listen** or **Transmit** is active. Each plot identifies TX or RX. The waveform
+uses the latest 1,024 actual PCM samples with a fixed ±1 scale; its caption gives
+the sample rate and visible time span. The waterfall uses a 512-point Hann-window
+FFT of recent audio, with frequency increasing left to right, newest rows at the
+top, and amplitude in dBFS. These are audio measurements, not RF power or SNR.
+
+The constellation shows up to 512 payload symbols. RX points are actual
+equalized I/Q values before symbol slicing; TX points are the transmitted mapper
+values. Training and pilots are excluded. An idle receiver awaiting acquisition
+does not display a synthetic received constellation.
+
+Display snapshots publish at most ten times a second, and the waterfall retains
+at most 96 rows. A new transfer resets the plots; stopping retains the last
+capture, labelled **Retained**. **Stalled** marks an active session with no new
+display frame for more than two seconds. Switching modem interfaces preserves
+an active transfer and its plots. Plotting uses independent bounded storage;
+samples, display failures and GUI timing never feed modem decisions or physical
+completion. Both native backends render the same immutable plot snapshots.
 
 ## Channel profiles
 

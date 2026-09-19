@@ -37,7 +37,7 @@ enum class Command {
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
-    pattern_evidence, payload_alphabet, reference_alphabet
+    pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation
 };
 enum class ScreenScope { regular, fast, shared };
 enum class Kind { label, action, toggle, choice, text, list, bitmap };

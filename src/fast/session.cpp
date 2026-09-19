@@ -38,9 +38,11 @@ struct Session::Impl {
         current.goodput_bps=current.elapsed_seconds>0?8.0*static_cast<double>(current.source_bytes)/current.elapsed_seconds:0;
         ++current.revision;
     }
-    void receive(std::stop_token stop,const Settings& s) {
+    void receive(std::stop_token stop,const Settings& s,std::uint64_t stream_id) {
+        Telemetry telemetry(s.profile,false,stream_id);
         StreamDecoder decoder(s.profile,s.key,s.quota_bytes);
-        Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);});
+        Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);},
+            [&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);});
         std::mutex queue_mutex;std::condition_variable_any changed;
         std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
         bool done=false,overrun=false;std::string capture_error;
@@ -78,7 +80,10 @@ struct Session::Impl {
             }
             receiver.push(samples);
             const auto dsp=receiver.progress();const auto coding=decoder.snapshot();
+            telemetry.record_samples(samples);
+            const auto diagnostics=telemetry.publish(dsp.acquired);
             update([&](auto& out) {
+                if(diagnostics)out.diagnostics=diagnostics;
                 out.intervals=coding.intervals;out.authenticated_groups=coding.authenticated_groups;
                 out.checksum_groups=coding.checksum_groups;
                 out.corrected_bytes=coding.corrected_bytes;out.erased_bytes=coding.erased_bytes;
@@ -100,7 +105,8 @@ struct Session::Impl {
             if(end&&!result.complete)out.error=result.status;
         });
     }
-    void send(std::stop_token stop,const Settings& s,SourceReader input,bool text) {
+    void send(std::stop_token stop,const Settings& s,SourceReader input,bool text,std::uint64_t stream_id) {
+        Telemetry telemetry(s.profile,true,stream_id);
         std::uint64_t read_bytes=0;
         StreamEncoder encoder(s.profile,s.key,[&](std::span<std::uint8_t> bytes) {
             const auto count=input(bytes);
@@ -110,7 +116,7 @@ struct Session::Impl {
         Transmitter transmitter(s.profile,[&](std::span<std::uint8_t> bits) {
             if(stop.stop_requested())return false;
             return encoder.next_interval(bits);
-        });
+        },[&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);});
         // The playback producer is bounded; unlike capture it can wait for the
         // source reader. No full source, waveform or bit-vector is retained.
         auto silence=static_cast<std::uint64_t>(s.profile.sample_rate)*25/4;
@@ -121,7 +127,10 @@ struct Session::Impl {
                 count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),silence));
                 std::fill_n(output.begin(),count,0);silence-=count;
             }
+            telemetry.record_samples(output.first(count));
+            const auto diagnostics=telemetry.publish(false);
             update([&](auto& out) {
+                if(diagnostics)out.diagnostics=diagnostics;
                 out.source_bytes=encoder.source_bytes();out.intervals=encoder.intervals_emitted();
                 out.status=std::string("Transmitting fast ")+(s.key?"encrypted ":"unencrypted ")+(text?"text":"file");
             });
@@ -135,6 +144,7 @@ struct Session::Impl {
     }
     void launch(bool tx,const std::filesystem::path& path={},std::optional<std::string> text={}) {
         Settings s;
+        std::uint64_t stream_id=0;
         {
             std::lock_guard lock(mutex);
             if(closing)throw Error("Fast session is closing");
@@ -146,18 +156,20 @@ struct Session::Impl {
             const auto revision=current.revision+1;current={};current.revision=revision;
             current.active=true;current.transmitting=tx;current.listening=!tx;
             current.encrypted=s.key.has_value();
+            stream_id=next_diagnostics_stream_id();
+            current.diagnostics=initial_diagnostics(s.profile,tx,stream_id);
             current.status=tx?"Preparing fast transmission":"Opening fast audio input";started=Clock::now();
         }
         if(worker.joinable())worker.join();
-        worker=std::jthread([this,s=std::move(s),tx,path,text=std::move(text)](std::stop_token stop) {
+        worker=std::jthread([this,s=std::move(s),tx,path,text=std::move(text),stream_id](std::stop_token stop) {
             try {
-                if(!tx)receive(stop,s);
-                else if(text)send(stop,s,byte_source(Bytes(text->begin(),text->end())),true);
+                if(!tx)receive(stop,s,stream_id);
+                else if(text)send(stop,s,byte_source(Bytes(text->begin(),text->end())),true,stream_id);
                 else {
                     std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
                     if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
                     if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
-                    send(stop,s,file_source(path),false);
+                    send(stop,s,file_source(path),false,stream_id);
                 }
             }
             catch(const std::exception& e) {update([&](auto& out){if(!stop.stop_requested())out.error=e.what();out.status="Fast transfer incomplete";});}

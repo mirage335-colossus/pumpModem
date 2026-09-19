@@ -37,6 +37,7 @@ struct Application::Impl {
     std::uint64_t overlay_generation=0;
     bool service_active=false;
     ui::FieldState developer_mode,fast_mode;
+    bool fast_selected() const {return fast_mode.selected=="fast";}
     ui::Page regular_page=ui::Page::console;
     std::uint64_t mode_generation=0,next_service=0;
     struct ServiceRoute {std::uint64_t original,generation;bool fast;};
@@ -61,6 +62,8 @@ struct Application::Impl {
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
     // Smoke runs exercise every page; ordinary launches start with the simpler view.
     impl_->developer_mode.checked=launch.smoke;
+    impl_->fast_mode.options={{"robust","Robust Modem"},{"fast","Fast Modem"}};
+    impl_->fast_mode.selected="robust";
     select_page(launch.page);
 }
 Application::~Application()=default;
@@ -76,7 +79,7 @@ bool Application::tick() {
     if(now>=impl_->next) {
         impl_->next=now+std::chrono::milliseconds(40);
         impl_->controller.poll();impl_->fast_controller.poll();impl_->bitmaps.update(impl_->controller);
-        if(impl_->audio_suspended&&!impl_->fast_controller.active()&&!impl_->fast_mode.checked) {
+        if(impl_->audio_suspended&&!impl_->fast_controller.active()&&!impl_->fast_selected()) {
             impl_->controller.resume_capture();impl_->audio_suspended=false;
         }
         ++impl_->poll_count;
@@ -102,8 +105,8 @@ void Application::close() { dismiss_overlay();impl_->controller.close();impl_->f
 bool Application::closing() const { return impl_->controller.closing(); }
 void Application::edit(ui::Field field,std::string text) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
-    if(fast_ui::owns(field)) {if(impl_->fast_mode.checked)impl_->fast_controller.edit(field,std::move(text));}
-    else if(!impl_->fast_mode.checked&&!impl_->fast_controller.active())impl_->controller.edit(field,std::move(text));
+    if(fast_ui::owns(field)) {if(impl_->fast_selected())impl_->fast_controller.edit(field,std::move(text));}
+    else if(!impl_->fast_selected()&&!impl_->fast_controller.active())impl_->controller.edit(field,std::move(text));
 }
 void Application::edit(const ui::Control& declaration,std::string text) {
     if(declaration.field==ui::Field::count||!accepts_input(declaration))return;
@@ -121,8 +124,21 @@ void Application::preset(const ui::Control& declaration,const std::string& id) {
 }
 void Application::select(ui::Field field,std::string id) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
-    if(fast_ui::owns(field)) {if(impl_->fast_mode.checked)impl_->fast_controller.select(field,std::move(id));}
-    else if(!impl_->fast_mode.checked&&!impl_->fast_controller.active())impl_->controller.select(field,std::move(id));
+    if(field==ui::Field::fast_mode) {
+        if((id!="robust"&&id!="fast")||impl_->fast_mode.selected==id)return;
+        const bool fast=id=="fast";
+        dismiss_overlay();++impl_->mode_generation;
+        if(fast) {impl_->regular_page=impl_->page;impl_->page=ui::Page::console;}
+        impl_->fast_mode.selected=std::move(id);
+        if(!fast) {
+            select_page(impl_->regular_page);
+            if(impl_->audio_suspended&&!impl_->fast_controller.active()) {
+                impl_->controller.resume_capture();impl_->audio_suspended=false;
+            }
+        }
+        ++impl_->presentation_revision;
+    } else if(fast_ui::owns(field)) {if(impl_->fast_selected())impl_->fast_controller.select(field,std::move(id));}
+    else if(!impl_->fast_selected()&&!impl_->fast_controller.active())impl_->controller.select(field,std::move(id));
 }
 void Application::select(const ui::Control& declaration,std::string id) {
     if((declaration.kind==ui::Kind::choice||declaration.kind==ui::Kind::list)&&accepts_input(declaration))
@@ -130,21 +146,11 @@ void Application::select(const ui::Control& declaration,std::string id) {
 }
 void Application::toggle(ui::Field field,bool value) {
     if(closing()||field==ui::Field::count||!this->field(field).visible)return;
-    if(field==ui::Field::fast_mode) {
-        if(impl_->fast_mode.checked==value)return;
-        dismiss_overlay();++impl_->mode_generation;
-        if(value) {impl_->regular_page=impl_->page;impl_->page=ui::Page::console;}
-        impl_->fast_mode.checked=value;
-        if(!value) {
-            select_page(impl_->regular_page);
-            if(impl_->audio_suspended&&!impl_->fast_controller.active()) {
-                impl_->controller.resume_capture();impl_->audio_suspended=false;
-            }
-        }
-        ++impl_->presentation_revision;
-    } else if(fast_ui::owns(field)) {
-        if(impl_->fast_mode.checked)impl_->fast_controller.toggle(field,value);
-    } else if(impl_->fast_mode.checked||impl_->fast_controller.active())return;
+    // The modem selector only accepts choice IDs; obsolete toggle callbacks are inert.
+    if(field==ui::Field::fast_mode)return;
+    if(fast_ui::owns(field)) {
+        if(impl_->fast_selected())impl_->fast_controller.toggle(field,value);
+    } else if(impl_->fast_selected()||impl_->fast_controller.active())return;
     else if(field==ui::Field::developer_mode) {
         if(impl_->developer_mode.checked==value)return;
         impl_->developer_mode.checked=value;
@@ -158,10 +164,10 @@ void Application::toggle(const ui::Control& declaration,bool value) {
 void Application::activate(ui::Command command) {
     if(closing())return;
     if(fast_ui::owns(command)) {
-        if(impl_->fast_mode.checked)impl_->fast_controller.activate(command);
+        if(impl_->fast_selected())impl_->fast_controller.activate(command);
         return;
     }
-    if(impl_->fast_mode.checked||impl_->fast_controller.active())return;
+    if(impl_->fast_selected()||impl_->fast_controller.active())return;
     if(command==ui::Command::toggle_qr_expanded) {
         if(!enabled(command))return;
         if(impl_->overlay)dismiss_overlay();else show_overlay(ui::qr_overlay_definition());
@@ -179,7 +185,7 @@ void Application::gesture(const ui::Control& declaration,ui::Command command) {
 }
 std::shared_ptr<const ui::OverlayDefinition> Application::overlay() const {return impl_->overlay;}
 void Application::show_overlay(ui::OverlayDefinition definition) {
-    if(closing()||impl_->fast_mode.checked)return;
+    if(closing()||impl_->fast_selected())return;
     for(const auto& binding:definition.policy.keys)
         if(binding.stroke.key==ui::Key::other)throw std::invalid_argument("Overlay key bindings require a named key");
     definition.generation=++impl_->overlay_generation;
@@ -226,7 +232,7 @@ std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
     return result;
 }
 bool Application::page_visible(ui::Page page) const {
-    if(impl_->fast_mode.checked)return false;
+    if(impl_->fast_selected())return false;
     const auto& definitions=ui::pages();
     const auto found=std::find_if(definitions.begin(),definitions.end(),[&](const auto& item){return item.id==page;});
     return found!=definitions.end()&&(!found->developer_only||impl_->developer_mode.checked);
@@ -266,9 +272,9 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
         view.enabled=view.enabled&&enabled(declaration.command);
     }
     if(declaration.scope==ui::ScreenScope::regular) {
-        view.visible=view.visible&&!impl_->fast_mode.checked;
+        view.visible=view.visible&&!impl_->fast_selected();
         view.enabled=view.enabled&&!impl_->fast_controller.active();
-    } else if(declaration.scope==ui::ScreenScope::fast)view.visible=view.visible&&impl_->fast_mode.checked;
+    } else if(declaration.scope==ui::ScreenScope::fast)view.visible=view.visible&&impl_->fast_selected();
     return view;
 }
 MenuPresentation Application::menu(std::span<const ui::Control* const> items) const {
@@ -290,8 +296,8 @@ const ui::FieldState& Application::field(ui::Field field) const {
     return field==ui::Field::developer_mode?impl_->developer_mode:impl_->controller.field(field);
 }
 bool Application::enabled(ui::Command command) const {
-    if(fast_ui::owns(command))return impl_->fast_mode.checked&&impl_->fast_controller.enabled(command);
-    if(impl_->fast_mode.checked||impl_->fast_controller.active())return false;
+    if(fast_ui::owns(command))return impl_->fast_selected()&&impl_->fast_controller.enabled(command);
+    if(impl_->fast_selected()||impl_->fast_controller.active())return false;
     if(command==ui::Command::toggle_qr_expanded)return !closing()&&page()==ui::Page::console;
     if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
     return impl_->controller.enabled(command);
@@ -301,7 +307,7 @@ void Application::complete_service(ui::ServiceResult result) {
     const auto found=impl_->service_routes.find(result.id);
     if(found==impl_->service_routes.end())return;
     const auto route=found->second;impl_->service_routes.erase(found);result.id=route.original;
-    if(route.generation!=impl_->mode_generation||route.fast!=impl_->fast_mode.checked)result.cancelled=true;
+    if(route.generation!=impl_->mode_generation||route.fast!=impl_->fast_selected())result.cancelled=true;
     if(route.fast)impl_->fast_controller.complete_service(std::move(result));
     else impl_->controller.complete_service(std::move(result));
 }
@@ -309,7 +315,7 @@ std::vector<ui::ServiceRequest> Application::take_services() {
     std::vector<ui::ServiceRequest> result;
     const auto collect=[&](std::vector<ui::ServiceRequest> incoming,bool fast) {
         for(auto& request:incoming) {
-            if(fast!=impl_->fast_mode.checked) {
+            if(fast!=impl_->fast_selected()) {
                 ui::ServiceResult cancelled{request.id,true,{},{}};
                 if(fast)impl_->fast_controller.complete_service(std::move(cancelled));
                 else impl_->controller.complete_service(std::move(cancelled));
@@ -324,7 +330,7 @@ std::vector<ui::ServiceRequest> Application::take_services() {
     return result;
 }
 void Application::report_error(std::string message) {
-    if(impl_->fast_mode.checked)impl_->fast_controller.report_error(std::move(message));
+    if(impl_->fast_selected())impl_->fast_controller.report_error(std::move(message));
     else impl_->controller.report_error(std::move(message));
 }
 std::uint64_t Application::revision() const { return impl_->controller.revision()+impl_->fast_controller.revision()+impl_->presentation_revision; }
@@ -358,6 +364,15 @@ void Application::activate_record(const ui::Control& control,const std::string& 
     if(impl_->controller.field(control.field).selected==id&&enabled(control.activate_record))activate(control.activate_record);
 }
 BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width) const {
+    if(control.scope==ui::ScreenScope::fast) {
+        BitmapPresentation view;
+        view.source=impl_->fast_controller.bitmap(control.bitmap);
+        view.revision=impl_->fast_controller.bitmap_revision(control.bitmap);
+        view.title=impl_->fast_controller.bitmap_title(control.bitmap);
+        if(view.title.empty())view.title=control.label;
+        view.caption=impl_->fast_controller.bitmap_caption(control.bitmap,width);
+        return view;
+    }
     BitmapPresentation view;view.source=impl_->bitmaps.get(control.bitmap);view.revision=impl_->bitmaps.version(control.bitmap);
     view.title=impl_->bitmaps.title(control.bitmap);
     if(view.title.empty())view.title=control.field==ui::Field::count?control.label:impl_->controller.field(control.field).text;

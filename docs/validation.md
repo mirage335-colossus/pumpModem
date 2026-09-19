@@ -4,6 +4,70 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Modem dropdown and Fast live plots — 19 September 2026
+
+The shared header now selects **Robust Modem** (default) or **Fast Modem** from
+a dropdown. Mode routing retains the existing audio ownership, background
+polling, draft/page preservation and service-generation checks. Invalid choice
+IDs and obsolete toggle callbacks cannot change modes. The Robust transport,
+crypto and DSP sources remain unchanged.
+
+Fast adds isolated display telemetry: 1,024 recent PCM samples, a 512-point
+Hann FFT with 256 amplitude-dBFS bins, and 512 recent payload constellation
+points. RX points come from equalized observations before decisions; TX points
+come from the actual mapper. Immutable snapshots publish at most 10 Hz, and
+the GUI retains at most 96 waterfall rows. Plot storage never grows with the
+transfer. Initial, stalled, active and retained captures have distinct labels;
+new transfer identities reset history without changing modem completion.
+
+The new telemetry suite checks ring order/bounds, an independent −6.0206 dBFS
+tone/bin reference, publication cadence, immutable snapshots, stream identity
+and cancellation. Enabled and deliberately throwing observers produce exactly
+the same TX PCM and RX soft evidence as the original no-observer path. The
+focused telemetry suite also passes ASan/UBSan with no findings; LeakSanitizer
+is disabled because it cannot run under the sandbox's tracing environment.
+
+The live GUI test replaces only device callbacks, sends real generated PCM
+through the Fast transmitter/receiver, and verifies all three plots advance
+during TX and RX, old bitmap handles remain immutable, idle captures persist,
+and received UTF-8 text remains exact. Direct renderer checks cover bounded
+history, stream resets, actual point rendering and full-versus-damaged repaint
+equivalence in RGB, grayscale and monochrome.
+
+The complete FLTK Release build passed. The focused headless run passed
+**48/48** in 165.65 seconds, including the new telemetry/live-GUI suites, all
+Fast suites, the 92-case SNR matrix (121.85 seconds), shared GUI checks, original
+short/interval vectors, sampled long-symbol physical-end checks and CLI/crypto
+regressions. FLTK native adapter/document conformance passed 2/2 in 52.89 and
+0.07 seconds on a private X display.
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel 3
+ctest --test-dir build --output-on-failure -j 2 \
+  -R '^(fast_.*|crypto|keyring|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|cli|gui_.*)$' \
+  -E '^(gui_workflow|gui_adapter_conformance|gui_document_conformance)$'
+```
+
+Rev production GUI/CLI and affected test targets also rebuilt. Its Fast GUI,
+live-GUI and self-check suites passed 3/3 in 22.97 seconds. Standard native
+adapter/platform conformance and 1×/2× coordinate tests passed in 43.15, 6.21,
+5.18 and 5.17 seconds, with explicit `REV_SCALE=1` for the adapter. An initial
+auto fractional-DPI run failed a one-pixel expanded
+bitmap size assertion after the new mode/plot probes passed; no baseline rerun
+was used to assign its cause, and no assertion was weakened.
+
+Native screenshots were inspected at default and minimum window sizes. FLTK
+used a real 16,012-byte Fast PCM loopback with stubbed device callbacks, covering
+idle, live TX, live RX and completed captures. Rev used actual noisy modem
+observations in temporary display fixtures, covering Text and File views.
+Waveform, waterfall and constellation plots remained readable without overlap
+or unintended clipping. These fixtures are not part of production code.
+
+The unchanged long probability calibration and full GUI production workflows
+were not repeated for this presentation/diagnostics change. No physical audio,
+radio or Windows native execution is implied by the fixture checks.
+
 ## Fast optional encryption and text — 19 September 2026
 
 Fast now sends text and files through the same fixed source stream. The GUI

@@ -18,9 +18,9 @@ inline std::string integrity_label(const fast::Snapshot& snapshot) {
         return "Receive integrity · no received stream yet";
     const auto protection=snapshot.encrypted?
         "Encryption · "+std::to_string(snapshot.authenticated_groups)+" authenticated groups":
-        "Public data · "+std::to_string(snapshot.checksum_groups)+" checksum-verified groups · unauthenticated";
-    return protection+" · "+(snapshot.complete?"received bytes available":snapshot.physical_complete?
-        "physical end observed; validation pending or failed":"awaiting physical end");
+        "Public data · "+std::to_string(snapshot.checksum_groups)+" checksum-verified groups";
+    return protection+"\n"+(snapshot.encrypted?"":"Unauthenticated · ")+(snapshot.complete?"received bytes available":snapshot.physical_complete?
+        "physical end; validation pending/failed":"awaiting physical end");
 }
 inline std::vector<ui::Record> receive_preview(const fast::Snapshot& snapshot) {
     std::vector<ui::Record> rows;

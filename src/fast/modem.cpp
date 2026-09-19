@@ -86,6 +86,7 @@ std::size_t interval_symbols(const Profile& p) {
 struct Transmitter::Impl {
     Profile config;
     IntervalReader source;
+    SymbolObserver observer;
     std::vector<Complex> points;
     Pulse pulse;
     std::array<std::uint8_t,physical_interval_bits> bits{};
@@ -96,7 +97,7 @@ struct Transmitter::Impl {
     double sps,omega;
     bool ended=false,done=false,have_interval=false;
     std::uint64_t last_symbol=0;
-    Impl(Profile p,IntervalReader reader):config(p),source(std::move(reader)),points(constellation(p.constellation)),
+    Impl(Profile p,IntervalReader reader,SymbolObserver observe):config(p),source(std::move(reader)),observer(std::move(observe)),points(constellation(p.constellation)),
         pulse(p.rolloff),bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate) {
         validate(p);
         if(!source)throw std::invalid_argument("fast transmitter requires an interval source");
@@ -128,6 +129,7 @@ struct Transmitter::Impl {
                 unsigned label=0;
                 for(unsigned b=0;b<bps;++b)label=(label<<1)|(start_bit+b<physical_interval_bits?bits[start_bit+b]:0);
                 output=points[label];
+                if(observer)try{observer(static_cast<std::complex<float>>(output));}catch(...){}
             }
         }
         if(++position==interval_symbols(config))have_interval=false;
@@ -158,6 +160,7 @@ struct Transmitter::Impl {
 struct Receiver::Impl {
     Profile config;
     IntervalSink sink;
+    SymbolObserver observer;
     std::vector<Complex> points,raw,filtered;
     std::vector<double> taps;
     std::array<float,physical_interval_bits> soft{};
@@ -176,7 +179,7 @@ struct Receiver::Impl {
     Complex pilot_correlation=0;
     double pilot_energy=0,pilot_error=0;
     struct Correlation { double quality=0; Complex gain=0; double energy=0; };
-    Impl(Profile p,IntervalSink target):config(p),sink(std::move(target)),points(constellation(p.constellation)),
+    Impl(Profile p,IntervalSink target,SymbolObserver observe):config(p),sink(std::move(target)),observer(std::move(observe)),points(constellation(p.constellation)),
         bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),clock_period(sps) {
         validate(p);
         if(!sink)throw std::invalid_argument("fast receiver requires an interval sink");
@@ -290,6 +293,7 @@ struct Receiver::Impl {
         const auto start=group*pilot_spacing;
         const auto available=std::min(pilot_spacing,data_count-start);
         if(within<available) {
+            if(marker_good&&observer)try{observer(static_cast<std::complex<float>>(value));}catch(...){}
             std::array<double,8> zeros,ones;
             zeros.fill(std::numeric_limits<double>::infinity());ones.fill(std::numeric_limits<double>::infinity());
             unsigned closest=0;double best=std::numeric_limits<double>::infinity();
@@ -369,7 +373,7 @@ struct Receiver::Impl {
     }
 };
 
-Transmitter::Transmitter(Profile p,IntervalReader source):impl_(std::make_unique<Impl>(p,std::move(source))){}
+Transmitter::Transmitter(Profile p,IntervalReader source,SymbolObserver observer):impl_(std::make_unique<Impl>(p,std::move(source),std::move(observer))){}
 Transmitter::~Transmitter()=default;
 Transmitter::Transmitter(Transmitter&&) noexcept=default;
 Transmitter& Transmitter::operator=(Transmitter&&) noexcept=default;
@@ -377,7 +381,7 @@ std::size_t Transmitter::read(std::span<float> out){return impl_->read(out);}
 bool Transmitter::finished() const{return impl_->done;}
 std::uint64_t Transmitter::samples_generated() const{return impl_->sample;}
 std::size_t Transmitter::workspace_bytes() const{return sizeof(Impl)+impl_->points.capacity()*sizeof(Complex)+impl_->pulse.values.capacity()*sizeof(double)+32*sizeof(std::pair<std::uint64_t,Complex>);}
-Receiver::Receiver(Profile p,IntervalSink sink):impl_(std::make_unique<Impl>(p,std::move(sink))){}
+Receiver::Receiver(Profile p,IntervalSink sink,SymbolObserver observer):impl_(std::make_unique<Impl>(p,std::move(sink),std::move(observer))){}
 Receiver::~Receiver()=default;
 Receiver::Receiver(Receiver&&) noexcept=default;
 Receiver& Receiver::operator=(Receiver&&) noexcept=default;

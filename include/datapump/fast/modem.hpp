@@ -21,6 +21,10 @@ inline constexpr std::size_t pilot_symbols = 4;
 // zero is an erasure. There are no received lengths or modulation headers.
 using IntervalReader = std::function<bool(std::span<std::uint8_t>)>;
 using IntervalSink = std::function<void(std::span<const float>)>;
+// Optional display-only payload-symbol observation. Receiver values are actual
+// normalized/equalized points before slicing; transmitter values are mapper
+// outputs. Observer exceptions are ignored and cannot change transport results.
+using SymbolObserver = std::function<void(std::complex<float>)>;
 
 struct ModemProgress {
     bool acquired = false;
@@ -41,7 +45,7 @@ std::size_t interval_symbols(const Profile& profile);
 
 class Transmitter {
 public:
-    Transmitter(Profile profile, IntervalReader source);
+    Transmitter(Profile profile, IntervalReader source, SymbolObserver observer={});
     ~Transmitter();
     Transmitter(Transmitter&&) noexcept;
     Transmitter& operator=(Transmitter&&) noexcept;
@@ -60,7 +64,7 @@ private:
 
 class Receiver {
 public:
-    Receiver(Profile profile, IntervalSink sink);
+    Receiver(Profile profile, IntervalSink sink, SymbolObserver observer={});
     ~Receiver();
     Receiver(Receiver&&) noexcept;
     Receiver& operator=(Receiver&&) noexcept;

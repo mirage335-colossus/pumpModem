@@ -345,7 +345,16 @@ void estimate_warning_colors() {
 void fast_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=Fl::first_window();require(window,"Fast fixture has no native window");
-    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Fast"));
+    const std::function<NativeChoice*(Fl_Group&)> mode_choice=[&](Fl_Group& group) -> NativeChoice* {
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->size()==3&&
+                literal_menu_text(choice->text(0))=="Robust Modem"&&literal_menu_text(choice->text(1))=="Fast Modem")return choice;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* choice=mode_choice(*nested))return choice;
+        }
+        return nullptr;
+    };
+    auto* selector=mode_choice(*window);
     auto* encryption=dynamic_cast<NativeCheckbox*>(find_button(*window,"Encryption"));
     auto* choose=find_button(*window,"Choose file…");auto* transmit=find_button(*window,"Transmit text");
     auto* listen=find_button(*window,"Listen");auto* regular=find_button(*window,"Transmit");
@@ -357,7 +366,12 @@ void fast_mode_visibility() {
     auto* source=field_widget.template operator()<NativeChoice>("Source");
     auto* text=field_widget.template operator()<NativeEditor>("Text");
     auto* file=field_widget.template operator()<NativeInput>("Source file");
-    require(toggle&&encryption&&source&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    require(selector&&encryption&&source&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    require(selector->value()==0&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
+        "Modem selector did not default to Robust Modem or retained the obsolete Fast toggle");
+    app.application.toggle(ui::Field::fast_mode,true);
+    app.application.select(ui::Field::fast_mode,"invalid-mode");
+    require(app.application.field(ui::Field::fast_mode).selected=="robust","Obsolete toggle or invalid selection changed the modem");
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
         while(Clock::now()<until)Fl::wait(.005);
@@ -366,10 +380,39 @@ void fast_mode_visibility() {
     app.application.edit(ui::Field::binary,"001");
     for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);refresh();
-        toggle->value(1);toggle->do_callback();refresh();
-        require(app.application.field(ui::Field::fast_mode).checked&&toggle->visible_r()&&!choose->visible_r()&&text->visible_r()&&
+        selector->picked(selector->menu()+1);refresh();
+        require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&!choose->visible_r()&&text->visible_r()&&
             transmit->visible_r()&&listen->visible_r()&&listen->active_r()&&!encryption->value()&&!regular->visible_r(),
-            "Fast click did not show the default plain-text interface");
+            "Fast Modem selection did not show the default plain-text interface");
+        app.application.toggle(ui::Field::fast_mode,false);
+        require(app.application.field(ui::Field::fast_mode).selected=="fast","Obsolete toggle changed the selected Fast Modem");
+        std::vector<NativeBitmap*> plots;
+        for(const auto& declaration:ui::console_screen())if(declaration.scope==ui::ScreenScope::fast&&declaration.kind==ui::Kind::bitmap) {
+            const auto geometry=app.application.control_layout(declaration,window->w(),window->h());
+            const auto expected=geometry.widget;
+            NativeBitmap* plot=nullptr;
+            const std::function<void(Fl_Group&)> locate=[&](Fl_Group& group) {
+                for(int i=0;i<group.children();++i) {
+                    auto* child=group.child(i);
+                    if(auto* bitmap=dynamic_cast<NativeBitmap*>(child);bitmap&&bitmap->visible_r()&&
+                        ui::Rect{bitmap->x(),bitmap->y(),bitmap->w(),bitmap->h()}==expected)plot=bitmap;
+                    if(auto* nested=dynamic_cast<Fl_Group*>(child))locate(*nested);
+                }
+            };
+            locate(*window);require(plot,"Fast bitmap did not materialize at its shared native geometry");plots.push_back(plot);
+            require(plot->w()>0&&plot->h()>0&&plot->x()>=0&&plot->y()>=0&&plot->x()+plot->w()<=window->w()&&
+                plot->y()+plot->h()<=window->h(),"Fast native bitmap escaped the viewport");
+            const auto presentation=app.application.bitmap(declaration,static_cast<unsigned>(plot->w()));
+            require(!presentation.title.empty()&&!presentation.caption.empty(),"Fast bitmap lost its shared title or idle caption");
+            std::size_t painted=0;
+            presentation.source.paint(full_bitmap_request(128,48,false,true),[&](unsigned x,unsigned y,PixelBlock pixels) {
+                validate_pixel_block(pixels);
+                require(x+pixels.width<=128&&y+pixels.height<=48,"Fast bitmap painted outside requested native dimensions");
+                painted+=static_cast<std::size_t>(pixels.width)*pixels.height;
+            });
+            require(painted==128*48,"Fast idle bitmap did not paint a complete native image");
+        }
+        require(plots.size()==3,"Fast interface did not materialize all three native signal plots");
         text->changed("Native fast café\nSecond line");refresh();
         require(transmit->active_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line","Fast native text composer did not preserve UTF-8/newline input");
         encryption->value(1);encryption->do_callback();refresh();
@@ -378,6 +421,7 @@ void fast_mode_visibility() {
         source->picked(source->menu()+1);refresh();
         require(!text->visible_r()&&choose->visible_r()&&file->visible_r()&&std::string(transmit->label())=="Transmit file",
             "Fast native source choice did not replace the text composer");
+        for(const auto* plot:plots)require(plot->visible_r(),"Fast File view hid a live signal plot");
         file->value("/tmp/native-fast-source.bin");file->do_callback();refresh();
         source->picked(source->menu());refresh();
         require(text->visible_r()&&!choose->visible_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line"&&
@@ -391,9 +435,11 @@ void fast_mode_visibility() {
         Fl_Image_Surface surface(window->w(),window->h());Fl_Surface_Device::push_current(&surface);
         surface.draw(window);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
         require(image&&image->w()==window->w()&&image->h()==window->h(),"Fast native surface failed to render");
-        toggle->value(0);toggle->do_callback();refresh();
-        require(!choose->visible_r()&&!text->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
+        selector->picked(selector->menu());refresh();
+        require(app.application.field(ui::Field::fast_mode).selected=="robust"&&selector->visible_r()&&selector->active_r()&&
+            !choose->visible_r()&&!text->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
             "Returning from Fast did not restore the native regular interface and source");
+        for(const auto* plot:plots)require(!plot->visible_r(),"Fast signal plot remained visible in Robust Modem");
         choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
     }
     app.application.close();while(!app.application.finished())Fl::wait(.005);

@@ -1,6 +1,7 @@
 #include "controller.hpp"
 #include "screen.hpp"
 #include "presentation.hpp"
+#include "plots.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/crypto.hpp"
@@ -32,6 +33,7 @@ struct Controller::Impl {
     fast::Session session;
     fast::Settings settings;
     fast::Snapshot snapshot;
+    FastPlots plots;
     std::function<bool()> acquire_audio;
     std::vector<KeyEntry> keys;
     std::filesystem::path key_path;
@@ -96,16 +98,16 @@ struct Controller::Impl {
             "File bytes stream directly from disk. Text and file drafts are retained.";
         const auto& p=settings.profile;
         const double gross=fast::gross_bitrate(p);
-        f(F::fast_detail).text=std::string(fast::channel_name(p.channel))+" · "+number(p.symbol_rate,0)+" symbols/s · "+number(p.carrier_hz,0)+" Hz carrier · "+number(p.sample_rate,0)+" Hz audio\n"
-            +(f(F::fast_encryption).checked?"Next transfer: AES-256-CBC + HMAC-SHA256":"Next transfer: public data + checksum; no encryption or authentication")+"\n"
-            "Profile, constellation, coding and encryption must match. 256 transmitted byte positions per interval.";
+        f(F::fast_detail).text="Next: "+std::string(fast::channel_name(p.channel))+" · "+number(p.symbol_rate,0)+" symbols/s · "+number(p.carrier_hz,0)+" Hz carrier · "+number(p.sample_rate,0)+" Hz audio · "
+            +(f(F::fast_encryption).checked?"AES-CBC + HMAC":"public checksum")+"\n"
+            "Profile, constellation, coding and encryption must match. 256-byte intervals; no packet lengths.";
         f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":transfer_stage(snapshot);
         f(F::fast_progress).text+=" · "+std::to_string(snapshot.source_bytes)+" source bytes · "+std::to_string(snapshot.intervals)+" intervals · "+number(snapshot.elapsed_seconds)+" s";
-        f(F::fast_rate).text="Gross constellation rate: "+number(gross/1000)+" kbit/s · measured source rate: "+number(snapshot.goodput_bps/1000)+" kbit/s";
+        f(F::fast_rate).text="Gross: "+number(gross/1000)+" kbit/s\nMeasured source: "+number(snapshot.goodput_bps/1000)+" kbit/s";
         f(F::fast_tracking).text=snapshot.intervals&&!snapshot.transmitting?
-            "Tracking · EVM "+number(snapshot.evm*100,2)+"% · carrier error "+number(snapshot.carrier_error_hz,2)+" Hz · clock error "+number(snapshot.clock_error_ppm,2)+" ppm":
+            "RX EVM "+number(snapshot.evm*100,2)+"% · carrier "+number(snapshot.carrier_error_hz,2)+" Hz\nClock error "+number(snapshot.clock_error_ppm,2)+" ppm":
             "RX tracking · awaiting received intervals";
-        f(F::fast_correction).text="Correction · "+std::to_string(snapshot.corrected_bytes)+" corrected bytes · "+std::to_string(snapshot.erased_bytes)+" erasures · interleave depth "+std::to_string(p.interleave_depth);
+        f(F::fast_correction).text="Correction: "+std::to_string(snapshot.corrected_bytes)+" bytes · "+std::to_string(snapshot.erased_bytes)+" erasures\nInterleave depth "+std::to_string(p.interleave_depth);
         f(F::fast_auth).text=integrity_label(snapshot);
         f(F::fast_progress).text_tone=snapshot.complete?ui::TextTone::data:ui::TextTone::normal;
     }
@@ -164,6 +166,7 @@ void Controller::poll() {
         }catch(const std::exception& e) {p.pending_start=C::none;report_error(e.what());}
     }
     const auto snapshot=p.session.poll();
+    if(p.plots.update(snapshot.diagnostics,snapshot.active))++p.revision;
     if(snapshot.revision!=p.snapshot.revision) {
         if(snapshot.file!=p.snapshot.file||snapshot.complete!=p.snapshot.complete||snapshot.physical_complete!=p.snapshot.physical_complete)
             p.f(F::fast_preview).records=receive_preview(snapshot);
@@ -223,6 +226,7 @@ void Controller::activate(C command) {
             fast::validate(p.settings.profile);
             p.settings.device=p.f(F::fast_device).text;p.settings.mono=p.f(F::fast_mono).checked;
             {auto effective=p.settings;if(!p.f(F::fast_encryption).checked)effective.key.reset();p.session.configure(effective);}
+            p.plots.reset();
             if(p.acquire_audio())p.start_transfer(command);
             else {
                 p.pending_start=command;p.acquire_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
@@ -262,4 +266,8 @@ void Controller::complete_service(ui::ServiceResult result) {
 std::vector<ui::ServiceRequest> Controller::take_services() {std::vector<ui::ServiceRequest> result;result.swap(impl_->services);return result;}
 void Controller::report_error(std::string message) {impl_->f(F::fast_status).text=std::move(message);++impl_->revision;}
 std::uint64_t Controller::revision() const {return impl_->revision;}
+BitmapSource Controller::bitmap(ui::Bitmap id) const {return impl_->plots.source(id);}
+std::uint64_t Controller::bitmap_revision(ui::Bitmap id) const {return owns(id)?impl_->plots.revision():0;}
+std::string Controller::bitmap_caption(ui::Bitmap id,unsigned width) const {return impl_->plots.caption(id,width);}
+std::string Controller::bitmap_title(ui::Bitmap id) const {return impl_->plots.title(id);}
 }

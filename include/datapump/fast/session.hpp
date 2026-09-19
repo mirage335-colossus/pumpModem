@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/fast/profile.hpp"
+#include "datapump/fast/telemetry.hpp"
 #include "datapump/crypto.hpp"
 #include <filesystem>
 #include <memory>
@@ -27,6 +28,7 @@ struct Snapshot {
     double elapsed_seconds=0,goodput_bps=0,evm=0,carrier_error_hz=0,clock_error_ppm=0;
     std::string status="Fast mode ready",error;
     std::shared_ptr<const ReceivedFile> file;
+    std::shared_ptr<const Diagnostics> diagnostics;
 };
 // No GUI, regular receiver, simulation, or pattern dependencies.
 class Session {

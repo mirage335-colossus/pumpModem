@@ -7,46 +7,92 @@
             if(found==bindings.end())throw std::runtime_error("Rev Fast field was not materialized");
             return *found;
         };
-        auto* toggle=by_field(ui::Field::fast_mode).toggle;
+        auto* selector=by_field(ui::Field::fast_mode).choice;
         auto* encryption=by_field(ui::Field::fast_encryption).toggle;
         auto* source=by_field(ui::Field::fast_source).choice;
-        require(toggle&&encryption&&source&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
+        require(selector&&encryption&&source&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
+        require(selector->params.options.size()==2&&selector->params.options[0].name=="Robust Modem"&&
+            selector->params.options[0].value=="robust"&&selector->params.options[1].name=="Fast Modem"&&
+            selector->params.options[1].value=="fast"&&selector->params.value=="robust"&&
+            application.field(ui::Field::fast_mode).selected=="robust","Rev modem selector did not default to the declared Robust Modem choice");
+        application.toggle(ui::Field::fast_mode,true);
+        application.select(ui::Field::fast_mode,"invalid-mode");
+        require(application.field(ui::Field::fast_mode).selected=="robust","Rev obsolete toggle or invalid selection changed the modem");
         application.edit(ui::Field::binary,"001");settle();
-        for(bool fast:{true,false,true,false}) {
-            re::Event click;toggle->checkbox->click(click);settle();
-            require(application.field(ui::Field::fast_mode).checked==fast&&allows_input(toggle),"Rev Fast toggle callback failed or hid itself");
-            if(fast) {
-                require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&source->params.value=="text"&&
-                    !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
-                    "Rev Fast did not default to plain text and keyless receive");
-                application.edit(ui::Field::fast_text,"Rev fast café\nSecond line");settle();
-                encryption->checkbox->click(click);settle();
-                require(!application.enabled(ui::Command::fast_listen)&&!application.enabled(ui::Command::fast_transmit),
-                    "Rev encrypted actions accepted a missing key");
-                encryption->checkbox->click(click);settle();
-                source->params.value="file";source->onChange(click);settle();
-                require(by_field(ui::Field::fast_text).element->resolved.hidden&&!by_field(ui::Field::fast_file).element->resolved.hidden&&
-                    application.command_label(ui::Command::fast_transmit)=="Transmit file","Rev file choice did not replace text controls");
-                application.edit(ui::Field::fast_file,"/tmp/rev-fast-source.bin");
-                source->params.value="text";source->onChange(click);settle();
-                require(application.field(ui::Field::fast_text).text=="Rev fast café\nSecond line"&&
-                    application.field(ui::Field::fast_file).text=="/tmp/rev-fast-source.bin"&&application.command_label(ui::Command::fast_transmit)=="Transmit text",
-                    "Rev source switching discarded independent drafts");
+        const auto resize=[&](int width,int height) {
+            const int physical_width=static_cast<int>(std::ceil(width*details.scale));
+            const int physical_height=static_cast<int>(std::ceil(height*details.scale));
+            window->setSize(physical_width,physical_height);onResize(physical_width,physical_height);
+            const auto deadline=Clock::now()+std::chrono::seconds(2);
+            do {
+                Rev::NativeWindow::pumpEvents();
+                if(window->size.w==physical_width&&window->size.h==physical_height&&details.size.width==width&&details.size.height==height)break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(4));
+            }while(Clock::now()<deadline);
+            require(details.size.width==width&&details.size.height==height,"Rev modem fixture did not reach the requested viewport");
+            settle();
+        };
+        for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+            resize(size.first,size.second);
+            for(bool fast:{true,false}) {
+                re::Event click;selector->params.value=fast?"fast":"robust";selector->onChange(click);settle();
+                require(application.field(ui::Field::fast_mode).selected==(fast?"fast":"robust")&&allows_input(selector),
+                    "Rev modem selector callback failed or hid itself");
+                application.toggle(ui::Field::fast_mode,!fast);
+                require(application.field(ui::Field::fast_mode).selected==(fast?"fast":"robust"),"Rev obsolete toggle changed the selected modem");
+                if(fast) {
+                    require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&source->params.value=="text"&&
+                        !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
+                        "Rev Fast did not default to plain text and keyless receive");
+                    unsigned plot_count=0;
+                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.control.kind==ui::Kind::bitmap) {
+                        ++plot_count;
+                        require(binding.bitmap&&!binding.element->resolved.hidden&&binding.bitmap->width&&binding.bitmap->height&&
+                            binding.bitmap->video->texture,"Rev Fast signal plot did not materialize and upload pixels");
+                        require(binding.label&&binding.caption,"Rev Fast plot omitted native title or caption roles");
+                        const auto presentation=application.bitmap(binding.control,binding.bitmap->width);
+                        require(!presentation.title.empty()&&!presentation.caption.empty(),"Rev Fast bitmap lost its shared title or idle caption");
+                        std::size_t painted=0;
+                        binding.bitmap->snapshot.paint(full_bitmap_request(128,48,false,true),[&](unsigned x,unsigned y,PixelBlock pixels) {
+                            validate_pixel_block(pixels);
+                            require(x+pixels.width<=128&&y+pixels.height<=48,"Rev Fast bitmap painted beyond its requested native dimensions");
+                            painted+=static_cast<std::size_t>(pixels.width)*pixels.height;
+                        });
+                        require(painted==128*48,"Rev Fast idle bitmap did not paint a complete native image");
+                    }
+                    require(plot_count==3,"Rev Fast did not materialize all three native signal plots");
+                    application.edit(ui::Field::fast_text,"Rev fast café\nSecond line");settle();
+                    encryption->checkbox->click(click);settle();
+                    require(!application.enabled(ui::Command::fast_listen)&&!application.enabled(ui::Command::fast_transmit),
+                        "Rev encrypted actions accepted a missing key");
+                    encryption->checkbox->click(click);settle();
+                    source->params.value="file";source->onChange(click);settle();
+                    require(by_field(ui::Field::fast_text).element->resolved.hidden&&!by_field(ui::Field::fast_file).element->resolved.hidden&&
+                        application.command_label(ui::Command::fast_transmit)=="Transmit file","Rev file choice did not replace text controls");
+                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.bitmap)
+                        require(!binding.element->resolved.hidden,"Rev File view hid a Fast signal plot");
+                    application.edit(ui::Field::fast_file,"/tmp/rev-fast-source.bin");
+                    source->params.value="text";source->onChange(click);settle();
+                    require(application.field(ui::Field::fast_text).text=="Rev fast café\nSecond line"&&
+                        application.field(ui::Field::fast_file).text=="/tmp/rev-fast-source.bin"&&application.command_label(ui::Command::fast_transmit)=="Transmit text",
+                        "Rev source switching discarded independent drafts");
+                }
+                for(auto& b:bindings) {
+                    if(b.control.scope==ui::ScreenScope::fast) {
+                        require(b.element->resolved.hidden==!application.control(b.control).visible,"Rev Fast surface did not reconcile conditional control visibility");
+                        if(fast&&!b.element->resolved.hidden)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
+                            b.element->rect.x+b.element->rect.w<=details.size.width&&b.element->rect.y+b.element->rect.h<=details.size.height,
+                            "Rev Fast native control escaped its viewport");
+                        else if(!fast&&b.button) {re::Event stale;b.button->click(stale);}
+                    } else if(fast&&b.control.scope==ui::ScreenScope::regular)
+                        require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
+                }
+                if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden,"Rev Fast retained regular tabs");
+                require(application.field(ui::Field::binary).text=="001"&&application.take_services().empty(),
+                    "Rev mode switching or stale callbacks changed the regular source or opened a service");
             }
-            for(auto& b:bindings) {
-                if(b.control.scope==ui::ScreenScope::fast) {
-                    require(b.element->resolved.hidden==!application.control(b.control).visible,"Rev Fast surface did not reconcile conditional control visibility");
-                    if(fast&&!b.element->resolved.hidden)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
-                        b.element->rect.x+b.element->rect.w<=details.size.width&&b.element->rect.y+b.element->rect.h<=details.size.height,
-                        "Rev Fast native control escaped its viewport");
-                    else if(!fast&&b.button) {re::Event stale;b.button->click(stale);}
-                } else if(fast&&b.control.scope==ui::ScreenScope::regular)
-                    require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
-            }
-            if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden,"Rev Fast retained regular tabs");
-            require(application.field(ui::Field::binary).text=="001"&&application.take_services().empty(),
-                "Rev mode switching or stale callbacks changed the regular source or opened a service");
         }
+        resize(ui::default_width,ui::default_height);
     }
     void verify_developer_mode_visibility() {
         const auto require=[](bool condition,const char* message) {if(!condition)throw std::runtime_error(message);};

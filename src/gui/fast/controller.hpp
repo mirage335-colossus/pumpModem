@@ -1,5 +1,6 @@
 #pragma once
 #include "../ui_contract.hpp"
+#include "../bitmap.hpp"
 #include <functional>
 #include <memory>
 namespace datapump::gui::fast_ui {
@@ -24,6 +25,10 @@ public:
     std::vector<ui::ServiceRequest> take_services();
     void report_error(std::string);
     std::uint64_t revision() const;
+    BitmapSource bitmap(ui::Bitmap) const;
+    std::uint64_t bitmap_revision(ui::Bitmap) const;
+    std::string bitmap_caption(ui::Bitmap,unsigned width=640) const;
+    std::string bitmap_title(ui::Bitmap) const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;

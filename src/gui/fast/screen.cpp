@@ -8,6 +8,9 @@ Control placed(Kind kind,Field field,Command command,const char* label,Slot slot
     c.byte_limit=32768;
     return c;
 }
+Control plot(Bitmap bitmap,const char* label,Slot slot,const char* help) {
+    auto c=placed(Kind::bitmap,Field::count,Command::none,label,slot,help);c.bitmap=bitmap;c.font_size=12;return c;
+}
 }
 bool owns(Field field) {return field>=Field::fast_profile&&field<=Field::fast_history;}
 bool owns(Command command) {return command>=Command::fast_open_key&&command<=Command::fast_save;}
@@ -35,6 +38,9 @@ const std::vector<Control>& screen() {
         placed(Kind::action,Field::count,Command::fast_cancel,"Cancel",Slot::fast_cancel),
         placed(Kind::action,Field::count,Command::fast_save,"Save received file…",Slot::fast_save),
         placed(Kind::label,Field::fast_progress,Command::none,"",Slot::fast_progress),
+        plot(Bitmap::fast_waveform,"Fast waveform",Slot::fast_waveform,"Actual recent PCM at the audio sample rate. The fixed vertical range is −1 to +1; dense samples retain their minimum and maximum."),
+        plot(Bitmap::fast_waterfall,"Fast waterfall",Slot::fast_waterfall,"Actual 512-sample Hann FFT, 256 bins from DC to Nyquist. Fixed −120 to 0 dBFS scale. Newest frame at top; at most 96 frames retained."),
+        plot(Bitmap::fast_constellation,"Fast constellation",Slot::fast_constellation_plot,"TX shows mapped payload symbols. RX shows normalized equalized observations before symbol decisions; no ideal reference points are substituted. Retained or stalled plots are labeled."),
         placed(Kind::label,Field::fast_rate,Command::none,"",Slot::fast_rate),
         placed(Kind::label,Field::fast_tracking,Command::none,"",Slot::fast_tracking),
         placed(Kind::label,Field::fast_correction,Command::none,"",Slot::fast_correction),

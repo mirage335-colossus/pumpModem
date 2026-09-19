@@ -25,10 +25,11 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
-**Fast**, beside **DATA PUMP** at the upper left, switches the full interface
-between the regular controller and the separate `src/gui/fast` controller.
+The **Robust Modem / Fast Modem** dropdown beside **DATA PUMP** at the upper
+left switches the full interface between the regular controller and the
+separate `src/gui/fast` controller. **Robust Modem** is selected by default.
 Shared declarations carry regular/Fast/shared scope; native adapters contain
-no mode-specific behavior. The default is regular. Its draft, selected page,
+no mode-specific behavior. The Robust Modem draft, selected page,
 keys, settings and received rows survive a round trip through Fast, and admitted
 pending reception continues to be polled while hidden. Hidden controls cannot
 dispatch edits/actions; asynchronous native service replies retain their owner
@@ -49,6 +50,16 @@ regression simulator has no GUI control. Starting Fast obtains idle audio
 ownership without cancelling a pending regular reception. Active Fast work
 continues if the view changes back, with regular controls disabled until it
 finishes. See [Fast operation and audio ownership](fast-mode.md).
+
+Fast also declares three independent bitmap sources: live waveform, waterfall
+and constellation. Its controller consumes immutable, bounded diagnostic frames
+from the Fast session; native adapters only paint generic bitmap sources. RX
+constellation points precede slicing, TX points come from the mapper, and neither
+feeds reception decisions. Titles distinguish direction, active, stalled and
+retained captures. New transfers reset history; changing views does not reset
+ongoing work. The waterfall retains at most 96 rows and display publication is
+limited to ten frames per second. PCM/FFT and symbol histories stay separate from
+the regular controller and its plots.
 
 The controls and message presentation described below belong to regular mode.
 

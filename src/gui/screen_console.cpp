@@ -17,7 +17,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
-    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Switch between the independent regular and fast interfaces. Active transfers continue in their original mode.";}
+    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Robust Modem or Fast Modem. Active transfers continue in their original mode.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -132,7 +132,7 @@ const std::vector<Control>& console_screen() {
     static const std::vector<Control> controls=[] {
       std::vector<Control> result{
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::console,0,"DATA PUMP"}, Slot::header),
-        placed({Kind::toggle,Field::fast_mode,Command::none,Bitmap::none,Page::console,0,"Fast"}, Slot::fast_mode),
+        placed({Kind::choice,Field::fast_mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::fast_mode),
         placed({Kind::label,Field::mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::mode),
         placed({Kind::toggle,Field::developer_mode,Command::none,Bitmap::none,Page::console,0,"Developer mode"}, Slot::developer_mode),
         placed({Kind::action,Field::count,Command::clear_received,Bitmap::none,Page::console,0,"Clear received"}, Slot::clear),

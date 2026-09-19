@@ -26,8 +26,9 @@ intervals and per-bit pending reception. Each bit may cost hours or longer;
 neither added framing nor waiting for a whole message is harmless. See the
 [message behavior contract and regression checks](docs/development.md).
 
-**Fast mode** is an independent APSK text and file-transfer interface, selected
-by the **Fast** toggle beside **DATA PUMP**. It uses fixed 256-byte coded intervals,
+**Fast Modem** is an independent APSK text and file-transfer interface, selected
+from the **Robust Modem / Fast Modem** dropdown beside **DATA PUMP**. It includes
+live waveform, waterfall and constellation plots and uses fixed 256-byte coded intervals,
 real-time constellation tracking, optional AES-256-CBC/HMAC, convolutional coding and
 interleaved Reed–Solomon. Wire, SSB, FM and acoustic profiles offer QPSK through
 256-APSK. Regular waveform, encryption and short/pending-message behavior remain

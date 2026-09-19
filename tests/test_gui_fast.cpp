@@ -1,8 +1,10 @@
 #include "application.hpp"
 #include "fast/controller.hpp"
 #include "fast/presentation.hpp"
+#include "fast/plots.hpp"
 #include "datapump/types.hpp"
 #include <chrono>
+#include <cmath>
 #include <iostream>
 #include <thread>
 using namespace datapump;
@@ -21,13 +23,15 @@ void presentation_and_retention() {
     using F=ui::Field;using C=ui::Command;
     Application app({.simulation=true});
     const auto& mode=control(F::fast_mode);
-    check(mode.persistent&&mode.scope==ui::ScreenScope::shared&&!app.field(F::fast_mode).checked,
-          "Fast must be an unchecked shared header toggle");
+    check(mode.kind==ui::Kind::choice&&mode.persistent&&mode.scope==ui::ScreenScope::shared&&app.field(F::fast_mode).selected=="robust",
+          "Modem choice must default to Robust Modem in the shared header");
+    check(app.field(F::fast_mode).options.size()==2&&app.field(F::fast_mode).options[0].label=="Robust Modem"&&
+        app.field(F::fast_mode).options[1].label=="Fast Modem","Modem selector labels changed");
     app.toggle(F::developer_mode,true);app.select_page(ui::Page::compression);
     app.edit(F::binary,"001");const auto bits=app.field(F::binary).text;
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
-    app.toggle(mode,true);
-    check(app.field(F::fast_mode).checked,"Fast toggle was not accepted");
+    app.select(mode,"fast");
+    check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
     for(const auto& c:ui::console_screen()) {
         if(c.scope==ui::ScreenScope::regular)check(!app.control(c).visible,"Regular controls leaked into the fast interface");
         else check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
@@ -67,35 +71,103 @@ void presentation_and_retention() {
     check(app.field(F::fast_profile).selected=="ssb"&&app.field(F::fast_constellation).selected=="256","Fast profile did not retain local selections");
     for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
         for(const auto& c:ui::console_screen())if(c.scope==ui::ScreenScope::fast) {
-            const auto r=app.control_layout(c,size.w,size.h).frame;
+            const auto geometry=app.control_layout(c,size.w,size.h);const auto r=geometry.frame;
             check(r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=size.w&&r.y+r.h<=size.h,"Fast layout escaped desktop bounds");
+            if(c.kind==ui::Kind::bitmap)check(geometry.widget.w>=300&&geometry.widget.h>=140&&geometry.has_caption,
+                "Fast live plots lost useful dimensions or their metadata captions");
         }
         const auto title=ui::DesktopLayout(size.w,size.h)[ui::Slot::header];
         const auto toggle=app.control_layout(mode,size.w,size.h).frame;
-        check(toggle.x>=title.x+title.w&&toggle.x<title.x+title.w+24,"Fast toggle is not adjacent to DATA PUMP");
+        check(toggle.x>=title.x+title.w&&toggle.x<title.x+title.w+24,"Modem selector is not adjacent to DATA PUMP");
     }
-    app.toggle(mode,false);
+    app.select(mode,"robust");
     check(app.page()==ui::Page::compression&&app.field(F::binary).text==bits&&app.field(F::fec).selected==fec,
           "Returning to regular mode changed its selected page or exact draft");
     app.edit(control(F::fast_file),"/tmp/stale.bin");app.select(control(F::fast_profile),"wire");app.activate(action(C::fast_choose_file));
     check(app.field(F::fast_file).text=="/tmp/independent-source.bin"&&app.field(F::fast_profile).selected=="ssb"&&app.take_services().empty(),
           "Hidden fast callbacks changed state or opened native services");
-    app.toggle(mode,true);check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_text).text==fast_text&&app.field(F::fast_source).selected=="text",
+    app.select(mode,"fast");check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_text).text==fast_text&&app.field(F::fast_source).selected=="text",
         "Fast settings or source draft were discarded on mode switch");
-    app.close();app.toggle(mode,false);check(app.field(F::fast_mode).checked,"Closed application accepted mode callback");
+    app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
+}
+void live_plot_presentation() {
+    using P=fast_ui::FastPlots;using B=ui::Bitmap;
+    P plots;const auto start=P::Clock::time_point{};
+    auto data=std::make_shared<fast::Diagnostics>();data->stream_id=17;data->revision=1;data->samples=1024;
+    data->sample_rate=48000;data->constellation=256;data->acquired=true;data->spectrum_valid=true;
+    data->waveform_count=data->waveform.size();data->constellation_count=3;
+    for(std::size_t i=0;i<data->waveform.size();++i)data->waveform[i]=static_cast<float>(.6*std::sin(i*.13));
+    data->spectrum_db.fill(-100);data->spectrum_db[40]=-6;
+    data->constellation_points[0]={0,0};data->constellation_points[1]={.28F,.73F};data->constellation_points[2]={-.62F,-.31F};
+    check(plots.update(data,true,start)&&plots.history_size()==1,"Fast telemetry did not advance the live plots");
+    check(plots.title(B::fast_constellation).find("RX equalized")!=std::string::npos&&plots.caption(B::fast_constellation).find("3 points")!=std::string::npos,
+        "RX plot mislabeled actual equalized observations");
+    check(plots.caption(B::fast_waveform).find("21.3 ms")!=std::string::npos&&plots.caption(B::fast_waterfall,310).find("120")!=std::string::npos,
+        "Fast plot scale metadata did not use the captured sample rate and fixed dBFS scale");
+    const auto paint=[](const BitmapSource& source,BitmapRequest request,bool preference=true) {
+        BitmapImage image(request.width,request.height);source.paint(request,[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);},preference);return image;
+    };
+    for(const auto id:{B::fast_waveform,B::fast_waterfall,B::fast_constellation}) {
+        const auto source=plots.source(id);
+        for(const auto format:{PixelFormat::gray8,PixelFormat::rgb24,PixelFormat::mono1}) {
+            auto request=full_bitmap_request(177,91,format==PixelFormat::mono1,format==PixelFormat::rgb24);
+            const auto full=paint(source,request);BitmapImage split(177,91);
+            for(const auto damage:{PixelRect{0,0,63,37},PixelRect{63,0,114,37},PixelRect{0,37,63,54},PixelRect{63,37,114,54}}) {
+                request.damage=damage;
+                source.paint(request,[&](unsigned x,unsigned y,PixelBlock block) {
+                    check(block.format==format&&block.height==1&&block.width<=request.width,"Fast source violated the requested row pixel format/bound");
+                    split.blit(x,y,block);
+                });
+            }
+            check(split.pixels()==full.pixels(),"Fast damage repaint changed the immutable full pixel grid");
+        }
+        bool gray=false;source.paint(full_bitmap_request(17,11,false,true),[&](unsigned,unsigned,PixelBlock block){gray=block.format==PixelFormat::gray8;},false);
+        check(gray,"Fast plots ignored the shared color preference");
+    }
+    const auto original=plots.source(B::fast_constellation);
+    const auto original_image=paint(original,full_bitmap_request(65,65));
+    const auto middle=(32*65+32)*3;
+    check(original_image.pixels()[middle]>180,"Fast constellation did not render the actual zero-I/Q observation");
+    const auto old_revision=plots.revision();
+    check(!plots.update(data,true,start+std::chrono::milliseconds(100))&&plots.revision()==old_revision&&plots.history_size()==1,
+        "Polling an unchanged frame duplicated waterfall rows or invalidated native images");
+    check(plots.update(data,true,start+std::chrono::seconds(3))&&plots.title(B::fast_waveform).find("Stalled")!=std::string::npos,
+        "Stalled telemetry was still labeled live");
+    check(plots.update(data,false,start+std::chrono::seconds(4))&&plots.title(B::fast_waterfall).find("Retained")!=std::string::npos,
+        "Stopped telemetry was still labeled live");
+    for(std::size_t i=0;i<P::history_capacity+10;++i) {
+        auto next=std::make_shared<fast::Diagnostics>(*data);next->revision=i+2;next->samples=(i+2)*1024;
+        next->transmitting=true;next->constellation_points[0]={.6F,.6F};
+        plots.update(next,true,start+std::chrono::seconds(5)+std::chrono::milliseconds(i*100));
+    }
+    check(plots.history_size()==P::history_capacity&&plots.title(B::fast_constellation).find("TX constellation")!=std::string::npos,
+        "Fast waterfall retention grew without bound or TX points were labeled received");
+    check(paint(original,full_bitmap_request(65,65)).pixels()==original_image.pixels(),"Later telemetry mutated a retained native bitmap source");
+    check(paint(plots.source(B::fast_constellation),full_bitmap_request(65,65)).pixels()[middle]<180,
+        "Fast constellation substituted fixed reference points for changed observations");
+    plots.reset();check(plots.history_size()==0&&plots.caption(B::fast_waveform).find("Waiting")!=std::string::npos,"New session retained old plot history");
+    plots.update(data,false,start+std::chrono::seconds(20));check(plots.history_size()==0,"Delayed previous-session telemetry repopulated cleared plots");
+    auto next=std::make_shared<fast::Diagnostics>(*data);next->stream_id=18;next->revision=0;next->waveform_count=0;next->constellation_count=0;next->spectrum_valid=false;
+    plots.update(next,true,start+std::chrono::seconds(21));
+    check(plots.history_size()==0&&plots.caption(B::fast_constellation).find("Awaiting")!=std::string::npos,
+        "Unacquired new session fabricated spectrum or constellation observations");
+    next=std::make_shared<fast::Diagnostics>(*data);next->stream_id=18;next->revision=1;
+    plots.update(next,true,start+std::chrono::seconds(22));check(plots.history_size()==1,"New stream failed to start fresh waterfall history");
+    next=std::make_shared<fast::Diagnostics>(*next);next->stream_id=19;
+    plots.update(next,true,start+std::chrono::seconds(23));check(plots.history_size()==1,"Stream identity change mixed distinct waterfall histories");
 }
 void service_generations() {
     using F=ui::Field;using C=ui::Command;
     Application app({.simulation=true});
     app.activate(C::attach_file);auto regular=app.take_services();
     check(regular.size()==1,"Regular file service unavailable");
-    app.toggle(F::fast_mode,true);app.select(F::fast_source,"file");app.activate(C::fast_choose_file);auto fast=app.take_services();
+    app.select(F::fast_mode,"fast");app.select(F::fast_source,"file");app.activate(C::fast_choose_file);auto fast=app.take_services();
     check(fast.size()==1&&fast.front().id!=regular.front().id,"Mode services reused a callback identity");
     app.complete_service({regular.front().id,false,"/tmp/stale-regular.bin",{}});
     app.complete_service({fast.front().id,false,"/tmp/fast-current.bin",{}});
     check(app.field(F::fast_file).text=="/tmp/fast-current.bin","Fast file service routed to the wrong controller");
     app.activate(C::fast_choose_file);auto old=app.take_services();check(old.size()==1,"Second fast service unavailable");
-    app.toggle(F::fast_mode,false);app.toggle(F::fast_mode,true);
+    app.select(F::fast_mode,"robust");app.select(F::fast_mode,"fast");
     app.complete_service({old.front().id,false,"/tmp/stale-fast.bin",{}});
     check(app.field(F::fast_file).text=="/tmp/fast-current.bin","Stale service survived a mode generation change");
     app.close();
@@ -162,18 +234,18 @@ void regular_work_keeps_polling() {
         return false;
     };
     check(wait([&]{return app.enabled(C::transmit);}),"Regular simulation did not become ready");
-    app.activate(C::transmit);app.toggle(F::fast_mode,true);
+    app.activate(C::transmit);app.select(F::fast_mode,"fast");
     const auto before=app.poll_count();
     check(wait([&]{return !app.field(F::signals).records.empty();}),"Switching to Fast stopped regular reception/progress");
     check(app.poll_count()>before,"Mode switch stopped shared progress polling");
     const auto records=app.field(F::signals).records;
     const auto draft=app.field(F::binary).text; // Normal successful TX may clear its composer.
-    app.toggle(F::fast_mode,false);
+    app.select(F::fast_mode,"robust");
     check(app.field(F::signals).records==records&&app.field(F::binary).text==draft,"Mode switch replaced regular reception rows or exact source bits");
     app.close();
 }
 }
 int main() {
-    try {presentation_and_retention();service_generations();retained_key_and_result_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }
