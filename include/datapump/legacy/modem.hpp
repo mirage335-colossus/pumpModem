@@ -8,7 +8,7 @@
 #include <vector>
 namespace datapump::legacy {
 enum class Mode { olivia4_2000, bpsk31, bpsk125 };
-struct Config { Mode mode=Mode::bpsk31; double carrier_hz=1500; };
+struct Config { Mode mode=Mode::bpsk31; double carrier_hz=1500; unsigned squelch=1; };
 inline constexpr std::uint32_t sample_rate=8000;
 inline constexpr std::size_t text_byte_limit=32768;
 // The session adds three leading LF bytes and one trailing LF to a full draft.

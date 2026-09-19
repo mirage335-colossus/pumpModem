@@ -3,6 +3,7 @@
 #include <stdexcept>
 namespace datapump::legacy {
 void validate(const Config& c) {
+    if(c.squelch>2)throw std::invalid_argument("Unknown Legacy squelch level");
     if(c.mode!=Mode::bpsk31&&c.mode!=Mode::bpsk125&&c.mode!=Mode::olivia4_2000)
         throw std::invalid_argument("Unknown Legacy modulation");
     const double half=c.mode==Mode::olivia4_2000?1000:(c.mode==Mode::bpsk125?250:62.5);

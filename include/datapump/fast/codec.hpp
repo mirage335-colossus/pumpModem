@@ -23,6 +23,9 @@ SourceReader file_source(const std::filesystem::path&);
 // Owns the caller's local bytes (for text); each read stays within its span.
 SourceReader byte_source(Bytes);
 std::size_t cycle_intervals(const Profile&);
+struct TransmitEstimate { std::uint64_t intervals=0,samples=0; double seconds=0,source_bps=0; };
+TransmitEstimate estimate_transmission(const Profile&,bool encrypted,std::uint64_t source_bytes);
+
 std::size_t ciphertext_bytes(const Profile&);
 std::size_t source_bytes_per_group(const Profile&,bool encrypted);
 
@@ -30,7 +33,8 @@ class ReceivedFile {
 public:
     ~ReceivedFile();
     std::uint64_t size() const;
-    Bytes preview(std::size_t maximum = 4096) const;
+    // Immutable raw bytes for programmatic consumers; no text interpretation.
+    std::span<const std::uint8_t> bytes() const;
     // Exclusive creation: an existing destination is never overwritten.
     void save(const std::filesystem::path&) const;
 private:
@@ -69,7 +73,7 @@ private:
 
 class StreamDecoder {
 public:
-    StreamDecoder(Profile, const std::optional<Crypto>&, std::uint64_t spool_quota = 1024ULL*1024*1024);
+    StreamDecoder(Profile, const std::optional<Crypto>&, std::uint64_t memory_quota = 256ULL*1024*1024);
     ~StreamDecoder();
     StreamDecoder(StreamDecoder&&) noexcept;
     StreamDecoder& operator=(StreamDecoder&&) noexcept;

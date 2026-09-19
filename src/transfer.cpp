@@ -9,7 +9,6 @@
 #include <array>
 #include <bit>
 #include <cmath>
-#include <cstdio>
 #include <limits>
 #include <map>
 #include <utility>
@@ -412,10 +411,9 @@ Bytes transmission_wire(const Message& message,const Options& options) {
 }
 
 struct StreamReceiver::Impl {
-    struct FileCloser { void operator()(std::FILE* file)const {if(file)std::fclose(file);} };
     struct State {
         boundary_sync::Collector collector;
-        std::unique_ptr<std::FILE,FileCloser> spool;
+        Bytes source;
         Options options;
         Received result;
         std::uint64_t next_symbol=0;
@@ -447,11 +445,11 @@ struct StreamReceiver::Impl {
         if(!quota)quota=std::make_shared<ReceiveStorageQuota>(ReceiveStorageQuota{source_storage_limit(options.content_limit),0});
         if(quota->used>quota->limit)throw Error("Invalid receive source storage quota");
     }
-    ~Impl() {for(auto& [id,state]:states)quota->used-=state->stored;}
+    ~Impl() {for(auto& [id,state]:states) {quota->used-=state->stored;quota->reserved-=state->source.capacity();}}
 
     void fail(State& state,const std::string& error) {
         state.failed=true;state.result.error=error;
-        quota->used-=state.stored;state.stored=0;state.spool.reset();
+        quota->used-=state.stored;quota->reserved-=state.source.capacity();state.stored=0;Bytes{}.swap(state.source);
     }
     void accept_interval(State& state,const DecodedInterval& decoded) {
         auto& content=state.result.content;
@@ -473,12 +471,16 @@ struct StreamReceiver::Impl {
         accumulate(content.fec_stats.integrity,decoded.fec_stats.integrity);
         accumulate(content.fec_stats.parity,decoded.fec_stats.parity);
         if(state.failed)return;
-        const auto limit=quota->limit;
+        const auto limit=std::min(quota->limit,default_memory_limit);
         if(quota->used>limit || decoded.data.size()>limit-quota->used){fail(state,"received source storage quota exhausted");return;}
-        if(!state.spool)state.spool.reset(std::tmpfile());
-        if(!state.spool || std::fwrite(decoded.data.data(),1,decoded.data.size(),state.spool.get())!=decoded.data.size()) {
-            fail(state,"cannot store received source");return;
+        if(state.source.size()+decoded.data.size()>state.source.capacity()) {
+            const auto available=limit-std::min(limit,quota->reserved);
+            const auto old=state.source.capacity();
+            if(state.source.size()+decoded.data.size()-old>available) {fail(state,"received source memory quota exhausted");return;}
+            state.source.reserve(std::min(old+available,std::max(state.source.size()+decoded.data.size(),old*2)));
+            quota->reserved+=state.source.capacity()-old;
         }
+        state.source.insert(state.source.end(),decoded.data.begin(),decoded.data.end());
         state.stored+=decoded.data.size();quota->used+=decoded.data.size();
     }
     void interval(State& state,const boundary_sync::Interval& interval) {
@@ -585,12 +587,8 @@ struct StreamReceiver::Impl {
         // The sole decompression gate. No EOF, size, codeword or MAC can enter it.
         if(burst.complete && !state.failed && state.aligned && state.stored) {
             try {
-                Bytes source(state.stored);
-                if(std::fflush(state.spool.get()) || std::fseek(state.spool.get(),0,SEEK_SET) ||
-                   std::fread(source.data(),1,source.size(),state.spool.get())!=source.size())
-                    throw Error("cannot read sealed received source");
                 auto message=state.result.content.message;
-                message.data=decode_source(source,
+                message.data=decode_source(state.source,
                     interval_data_bytes(options.fec,options.key.has_value()),options.compression,attachment::source_limit(options.content_limit));
                 attachment::interpret(message,options.content_limit);
                 // Application interpretation can still reject the decoded
@@ -637,7 +635,7 @@ struct StreamReceiver::Impl {
                         state.options,quota->limit-quota->used+state.stored});
                 }
             }
-            auto result=std::move(state.result);quota->used-=state.stored;states.erase(it);return result;
+            auto result=std::move(state.result);quota->used-=state.stored;quota->reserved-=state.source.capacity();states.erase(it);return result;
         }
         return state.result;
     }
@@ -652,15 +650,19 @@ std::size_t StreamReceiver::working_bytes()const {
     for(const auto& [id,state]:impl_->states) {
         const auto& result=state->result;const auto& message=result.content.message;
         // Include map links, the actual diagnostic/preview allocations and
-        // the standard I/O buffer reserved by a live temporary file.
+        // bounded corrected source bytes retained in RAM until physical end.
         bytes+=sizeof(Impl::State)+sizeof(id)+sizeof(state)+4*sizeof(void*)+
             state->collector.working_bytes()+state->options.receive_targets_db_hz.capacity()*sizeof(double)+
             result.raw_bits.capacity()+result.diagnostics.constellation.capacity()*sizeof(std::complex<double>)+
             result.diagnostics.waveform.capacity()*sizeof(float)+result.error.capacity()+
             message.data.capacity()+message.filename.capacity()+message.callsign.capacity()+message.grid.capacity()+
             state->recovery_bits.capacity()+state->recovery_starts.capacity()*sizeof(std::uint64_t);
-        if(state->spool)bytes+=sizeof(std::FILE)+BUFSIZ;
+        bytes+=state->source.capacity();
     }
+    return bytes;
+}
+std::size_t StreamReceiver::source_buffer_bytes()const {
+    std::size_t bytes=0;for(const auto& [id,state]:impl_->states)bytes+=state->source.capacity();
     return bytes;
 }
 Received interpret_pattern(modem::PatternBurst burst,const Options& options,std::uint64_t timestamp,modem::Diagnostics diagnostics) {

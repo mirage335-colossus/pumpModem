@@ -1,5 +1,6 @@
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
+#include "datapump/resampler.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -32,6 +33,16 @@ std::vector<float> waveform(const Profile& p,const Bytes& source,std::size_t chu
     require(encoder.source_bytes()==source.size(),"fragmented source reader changed source size");
     return output;
 }
+std::vector<float> convert(std::span<const float> pcm,unsigned from,unsigned to) {
+    audio::Resampler converter(from,to);std::vector<float> result;std::array<float,977> buffer{};std::size_t offset=0;
+    while(!converter.finished()) {
+        const auto count=std::min<std::size_t>(613,pcm.size()-offset);
+        const auto progress=converter.process(pcm.subspan(offset,count),buffer,offset+count==pcm.size());
+        offset+=progress.consumed;
+        result.insert(result.end(),buffer.begin(),buffer.begin()+static_cast<std::ptrdiff_t>(progress.produced));
+    }
+    return result;
+}
 struct Result {DecodeSnapshot codec;ModemProgress modem;Bytes bytes;};
 Result receive(Profile p,std::span<const float> pcm,double tail=7,unsigned key_offset=0) {
     StreamDecoder decoder(p,key(key_offset),16*1024*1024);
@@ -42,7 +53,7 @@ Result receive(Profile p,std::span<const float> pcm,double tail=7,unsigned key_o
     std::size_t silence=static_cast<std::size_t>(p.sample_rate*tail);
     while(silence) {const auto n=std::min(silence,leading.size());rx.push(std::span<const float>(leading).first(n));silence-=n;}
     rx.finish();decoder.finish(rx.progress().physical_complete);
-    return {decoder.snapshot(),rx.progress(),decoder.result()?decoder.result()->preview():Bytes{}};
+    return {decoder.snapshot(),rx.progress(),decoder.result()?Bytes(decoder.result()->bytes().begin(),decoder.result()->bytes().end()):Bytes{}};
 }
 }
 int main() {try {
@@ -111,5 +122,45 @@ int main() {try {
         const auto result=receive(p,waveform(p,source));
         require(result.codec.complete && result.bytes==source,"punctured sampled source failed");
     }
+    // End-to-end FEC/checksum path through actual device-rate conversion,
+    // including the cable's upper passband and asymmetric device clocks.
+    for(const auto channel:{Channel::wire,Channel::acoustic}) {
+        auto link=profile(channel);link.interleave_depth=1;
+        if(channel==Channel::wire) {link.constellation=256;link.code_rate=CodeRate::seven_eighths;link.robust=false;}
+        const auto exact=fixture(179);
+        for(const auto rates:{std::pair{48000u,44100u},std::pair{44100u,48000u},std::pair{44100u,44100u}}) {
+            auto tx_profile=link,rx_profile=link;
+            tx_profile.sample_rate=rates.first;rx_profile.sample_rate=rates.second;
+            auto transmitted=waveform(tx_profile,exact);
+            const auto estimate=estimate_transmission(tx_profile,true,exact.size());
+            require(transmitted.size()+static_cast<std::uint64_t>(tx_profile.sample_rate)*25/4==estimate.samples,"airtime estimate differs from generated PCM");
+            auto device=convert(transmitted,rates.first,rates.second);
+            const auto result=receive(rx_profile,device);
+            require(result.codec.complete&&result.bytes==exact,"different logical peer sample rates changed source bytes");
+        }
+        const auto bridged=convert(convert(waveform(link,exact),48000,44100),44100,48000);
+        const auto bridged_result=receive(link,bridged);
+        require(bridged_result.codec.complete&&bridged_result.bytes==exact,"44.1 kHz hardware bridge changed source bytes");
+        if(channel==Channel::acoustic) {
+            const auto clean=waveform(link,exact);
+            for(const auto delay:{48u,120u,216u}) {
+                auto echoed=clean;echoed.resize(clean.size()+delay*2);
+                std::mt19937 echo_rng(19);std::normal_distribution<float> noise(0,.001f);
+                for(std::size_t i=0;i<echoed.size();++i) {
+                    const auto direct=i<clean.size()?clean[i]:0.f;
+                    const auto reflection=i>=delay&&i-delay<clean.size()?.6f*clean[i-delay]:0.f;
+                    const auto second=i>=2*delay&&i-2*delay<clean.size()?.2f*clean[i-2*delay]:0.f;
+                    echoed[i]=.6f*(direct+reflection+second)+noise(echo_rng);
+                }
+                const auto result=receive(link,echoed);
+                if(!result.codec.complete)std::cerr<<"echo delay "<<delay<<" acquired "<<result.modem.acquired<<" EVM "<<result.modem.evm<<" "<<result.codec.status<<'\n';
+                require(result.codec.complete&&result.bytes==exact,"acoustic echoes defeated exact file recovery");
+            }
+        }
+    }
+    auto cable=profile(Channel::wire);cable.constellation=256;cable.code_rate=CodeRate::seven_eighths;cable.robust=false;
+    const auto normal=estimate_transmission(cable,false,2*1024*1024);
+    cable.interleave_depth=64;
+    require(estimate_transmission(cable,false,2*1024*1024).source_bps>normal.source_bps,"deeper cable cycle did not reduce padding overhead");
     std::cout<<"fast sampled encrypted-file regressions passed\n";return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

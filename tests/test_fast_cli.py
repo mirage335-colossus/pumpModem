@@ -129,8 +129,7 @@ class FastCLI(unittest.TestCase):
         self.assertTrue(result["encrypted"])
         self.assertTrue(result["authenticated"])
         self.assertEqual(result["checksum_groups"], 0)
-        self.assertIn("\\xff", result["text_preview"])
-        self.assertFalse(result["preview_truncated"])
+        self.assertNotIn("text_preview", result)
         self.assertGreater(result["intervals"], 0)
 
     def test_plaintext_file_and_ignored_key_options(self):
@@ -151,7 +150,7 @@ class FastCLI(unittest.TestCase):
         human.decode("utf-8")  # Invalid source bytes must not corrupt console text.
         self.assertNotIn(b"\x1b", human)
         self.assertNotIn(b"\xff", human)
-        self.assertIn(b"\\x1b", human)
+        self.assertNotIn(b"\\x1b", human)
 
     def test_text_utf8_newlines_and_empty_text_in_both_modes(self):
         for encrypted in (False, True):
@@ -169,18 +168,17 @@ class FastCLI(unittest.TestCase):
                     self.assertTrue(result["complete"])
                     self.assertEqual(result["authenticated"], encrypted)
                     self.assertEqual(result["encrypted"], encrypted)
-                    self.assertEqual(result["text_preview"], text)
-                    self.assertFalse(result["preview_truncated"])
+                    self.assertNotIn("text_preview", result)
                     self.assertEqual(destination.read_bytes(), text.encode("utf-8"))
         plain_text = self.directory / "text-False-0.wav"
         human = self.run_pump("fast-rx", "--input", plain_text, *PROFILE).stdout.decode("utf-8")
-        self.assertIn("Received text (escaped):", human)
-        self.assertIn("Hello, pump!\\n", human)
+        self.assertNotIn("Received text (escaped):", human)
+        self.assertNotIn("Hello, pump!\\n", human)
         self.assertIn("encryption off", human)
         self.assertIn("checksum", human.lower())
         self.assertNotIn("; authenticated", human)
 
-    def test_explicit_plaintext_tx_and_bounded_preview(self):
+    def test_explicit_plaintext_tx_without_preview(self):
         text = "x" * 4095 + "🙂 trailing text\n"
         wave = self.directory / "long-text.wav"
         tx = json.loads(self.run_pump("fast-tx", "--text", text, "--output", wave,
@@ -188,9 +186,8 @@ class FastCLI(unittest.TestCase):
         self.assertFalse(tx["encrypted"])
         result = json.loads(self.run_pump("fast-rx", "--input", wave, *PROFILE, "--json").stdout)
         self.assertTrue(result["complete"])
-        self.assertTrue(result["preview_truncated"])
-        self.assertTrue(result["text_preview"].startswith("x" * 4095))
-        self.assertLessEqual(len(result["text_preview"]), 4099)
+        self.assertNotIn("text_preview", result)
+        self.assertNotIn("preview_truncated", result)
 
     def test_encryption_mismatch_never_falls_back(self):
         for wave, options, name in (
@@ -202,7 +199,7 @@ class FastCLI(unittest.TestCase):
                 *options, *PROFILE, "--json", ok=False).stdout)
             self.assertFalse(result["complete"])
             self.assertFalse(result["authenticated"])
-            self.assertEqual(result["text_preview"], "")
+            self.assertNotIn("text_preview", result)
             self.assertFalse(destination.exists())
 
     def test_wrong_key_never_saves(self):
@@ -239,7 +236,7 @@ class FastCLI(unittest.TestCase):
             self.assertFalse(result["physical_complete"])
             self.assertFalse(result["complete"])
             self.assertFalse(result["authenticated"])
-            self.assertEqual(result["text_preview"], "")
+            self.assertNotIn("text_preview", result)
             self.assertFalse(destination.exists())
 
     def test_never_overwrite_outputs(self):

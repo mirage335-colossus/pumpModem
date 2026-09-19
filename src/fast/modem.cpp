@@ -165,7 +165,8 @@ struct Receiver::Impl {
     std::vector<Complex> points,raw,filtered;
     std::vector<double> taps;
     std::array<float,physical_interval_bits> soft{};
-    std::array<Complex,5> equalizer{0.,0.,1.,0.,0.};
+    std::array<Complex,21> equalizer{};
+    std::size_t equalizer_size=5;
     ModemProgress state;
     unsigned bps;
     double sps,omega;
@@ -185,6 +186,8 @@ struct Receiver::Impl {
         input_observer(std::move(observe_input)),points(constellation(p.constellation)),
         bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),clock_period(sps) {
         validate(p);
+        equalizer_size=p.channel==Channel::acoustic?21:5;
+        equalizer[equalizer_size/2]=1.;
         if(!sink)throw std::invalid_argument("fast receiver requires an interval sink");
         const auto half=static_cast<std::size_t>(std::ceil(pulse_radius*sps));
         taps.resize(2*half+1);raw.resize(taps.size());
@@ -227,7 +230,7 @@ struct Receiver::Impl {
     void accept_marker(double end,bool initial) {
         const auto fitted=refine(end,initial?.8:.18*clock_period);
         const auto fit=correlation(fitted);
-        marker_good=fit.quality>.72 && fit.energy>1e-12 && (initial || fit.energy>gain*gain*.06);
+        marker_good=fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && (initial || fit.energy>gain*gain*.06);
         if(marker_good) {
             if(pending_absent_intervals) {
                 soft.fill(0);
@@ -249,6 +252,22 @@ struct Receiver::Impl {
             phase+=frequency*(sync_symbols-1)/2;
             next_time=fitted+clock_period;
             marker_end=fitted;
+            if(config.channel==Channel::acoustic) {
+                // Supervised fractional-spaced NLMS on the known marker. No
+                // payload decisions or source interpretation select a lock.
+                equalizer.fill(0);equalizer[equalizer_size/2]=1.;
+                for(unsigned pass=0;pass<24;++pass)for(std::size_t k=6;k<sync_symbols-6;++k) {
+                    const auto time=fitted-static_cast<double>(sync_symbols-1-k)*clock_period;
+                    std::array<Complex,21> input{};Complex actual=0;double power=.01;
+                    for(std::size_t j=0;j<equalizer_size;++j) {
+                        input[j]=at(time+(static_cast<double>(j)-10)*clock_period*.5)/gain;
+                        actual+=equalizer[j]*input[j];power+=std::norm(input[j]);
+                    }
+                    const auto target=marker[k]*std::polar(1.,phase-frequency*static_cast<double>(sync_symbols-1-k));
+                    for(std::size_t j=0;j<equalizer_size;++j)
+                        equalizer[j]+=.35*(target-actual)*std::conj(input[j])/power;
+                }
+            }
             noise_variance=std::clamp(1-fit.quality,1e-5,.3);
             absent=0;
         } else next_time=end+clock_period;
@@ -257,20 +276,24 @@ struct Receiver::Impl {
         state.carrier_error_hz=frequency*config.symbol_rate/(2*pi);
         soft.fill(0);
     }
-    Complex equalized(double time,std::array<Complex,5>& input) const {
+    Complex equalized(double time,std::array<Complex,21>& input) const {
         Complex value=0;
-        for(std::size_t k=0;k<input.size();++k) {
-            input[k]=at(time+(static_cast<double>(k)-2)*clock_period*.5)/gain;
+        for(std::size_t k=0;k<equalizer_size;++k) {
+            input[k]=at(time+(static_cast<double>(k)-static_cast<double>(equalizer_size/2))*clock_period*.5)/gain;
             value+=input[k]*equalizer[k];
         }
         return value*std::polar(1.,-phase);
     }
-    void track(Complex value,Complex expected,const std::array<Complex,5>& input,bool train) {
+    void track(Complex value,Complex expected,const std::array<Complex,21>& input,bool train) {
         if(!marker_good)return;
         const auto error=value-expected;
         const auto error_power=std::norm(error);
         state.evm=std::sqrt(.99*state.evm*state.evm+.01*error_power);
-        if(error_power>(train?.3:.08))return;
+        // QPSK has a much wider decision region than dense APSK. Let the
+        // acoustic loop follow its larger phase/ISI errors instead of freezing
+        // precisely when tracking is needed most.
+        const auto tracking_limit=config.channel==Channel::acoustic&&config.constellation==4?.7:(train?.3:.08);
+        if(error_power>tracking_limit)return;
         const auto phase_error=std::arg(value*std::conj(expected));
         phase+=.045*phase_error;
         frequency=std::clamp(frequency+.00008*phase_error,-.06,.06);
@@ -278,7 +301,7 @@ struct Receiver::Impl {
         const auto actual=value*std::polar(1.,phase);
         double power=.05;for(const auto x:input)power+=std::norm(x);
         const auto mu=train?.005:.0005;
-        for(std::size_t k=0;k<equalizer.size();++k)
+        for(std::size_t k=0;k<equalizer_size;++k)
             equalizer[k]+=mu*(target-actual)*std::conj(input[k])/power;
     }
     void process_symbol() {
@@ -286,7 +309,7 @@ struct Receiver::Impl {
         if(marker_good)absent=0;
         else absent+=clock_period/config.sample_rate;
         if(absent>=6) {state.physical_complete=true;return;}
-        std::array<Complex,5> input{};
+        std::array<Complex,21> input{};
         phase+=frequency;
         const auto value=equalized(next_time,input);
         const auto data_count=(physical_interval_bits+bps-1)/bps;
@@ -320,9 +343,17 @@ struct Receiver::Impl {
             pilot_correlation+=value*std::conj(expected);pilot_energy+=std::norm(value);
             pilot_error+=std::norm(value-expected);
             track(value,expected,input,true);
-            if(index+1==pilot_symbols && (pilot_error/pilot_symbols>.3 || std::norm(pilot_correlation)<.4*pilot_symbols*pilot_energy)) {
-                const auto begin=std::min(start*bps,soft.size()),end=std::min((start+available)*bps,soft.size());
-                std::fill(soft.begin()+static_cast<std::ptrdiff_t>(begin),soft.begin()+static_cast<std::ptrdiff_t>(end),0);
+            if(index+1==pilot_symbols) {
+                const bool incoherent=std::norm(pilot_correlation)<.4*pilot_symbols*pilot_energy;
+                if(pilot_error/pilot_symbols>.3 || incoherent) {
+                    const auto begin=std::min(start*bps,soft.size()),end=std::min((start+available)*bps,soft.size());
+                    // Coherent acoustic pilots can have substantial residual
+                    // amplitude/ISI error. Preserve and downweight their observed
+                    // soft evidence for the inner code.
+                    // Incoherent pilots and absent markers still erase positions.
+                    const float weight=config.channel==Channel::acoustic&&!incoherent?.2F:0.F;
+                    for(auto bit=begin;bit<end;++bit)soft[bit]*=weight;
+                }
             }
         }
         next_time+=clock_period;
@@ -354,10 +385,10 @@ struct Receiver::Impl {
             ++sample;
             if(state.physical_complete)continue;
             if(!locked) {
-                const auto time=static_cast<double>(sample)-2*sps-3;
+                const auto time=static_cast<double>(sample)-(config.channel==Channel::acoustic?6:2)*sps-3;
                 if(time<static_cast<double>(sync_symbols+2)*sps)continue;
                 const auto fit=correlation(time);
-                if(fit.quality>.72 && fit.energy>1e-12 && fit.quality>best_quality) {
+                if(fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && fit.quality>best_quality) {
                     best_quality=fit.quality;best_time=time;
                     if(candidate_until==0)candidate_until=time+sps;
                 }
@@ -366,7 +397,7 @@ struct Receiver::Impl {
                     best_quality=0;candidate_until=0;
                 }
             }
-            while(locked && !state.physical_complete && static_cast<double>(sample)>next_time+2*sps+4) {
+            while(locked && !state.physical_complete && static_cast<double>(sample)>next_time+(config.channel==Channel::acoustic?6:2)*sps+4) {
                 if(position==0) {
                     const auto end=next_time;
                     // Absence accounting covers every whole training symbol,

@@ -1,4 +1,5 @@
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/modem.hpp"
 #include "datapump/stream_codec.hpp"
 #include <openssl/crypto.h>
 #include <openssl/evp.h>
@@ -11,23 +12,14 @@
 #include <cstdio>
 #include <fstream>
 #include <limits>
-#include <mutex>
 #include <utility>
 
 namespace datapump::fast {
 namespace {
 struct CloseFile { void operator()(std::FILE* f)const {if(f)std::fclose(f);} };
 using File = std::unique_ptr<std::FILE, CloseFile>;
-File spool() {
-    auto* f=std::tmpfile();
-    if(!f) throw Error("Cannot create private fast receive spool");
-    return File(f);
-}
 void write_file(std::FILE* f,std::span<const std::uint8_t> data) {
-    if(std::fwrite(data.data(),1,data.size(),f)!=data.size()) throw Error("Fast receive spool write failed");
-}
-void rewind_file(std::FILE* f) {
-    if(std::fflush(f)!=0 || std::fseek(f,0,SEEK_SET)!=0) throw Error("Fast receive spool seek failed");
+    if(std::fwrite(data.data(),1,data.size(),f)!=data.size()) throw Error("Fast destination write failed");
 }
 void append(Bytes& a,std::span<const std::uint8_t> b) { a.insert(a.end(),b.begin(),b.end()); }
 Bytes label(const char* text) {
@@ -268,21 +260,12 @@ Decoded decode(std::span<const float> soft,std::size_t source_bytes,CodeRate rat
 }
 }
 
-struct ReceivedFile::Impl {
-    File file;std::uint64_t bytes=0;mutable std::mutex mutex;
-    Impl():file(spool()){}
-};
+struct ReceivedFile::Impl { Bytes data; };
 ReceivedFile::ReceivedFile(std::shared_ptr<Impl> impl):impl_(std::move(impl)){}
 ReceivedFile::~ReceivedFile()=default;
-std::uint64_t ReceivedFile::size()const{return impl_->bytes;}
-Bytes ReceivedFile::preview(std::size_t maximum)const {
-    std::lock_guard lock(impl_->mutex);rewind_file(impl_->file.get());
-    Bytes out(static_cast<std::size_t>(std::min<std::uint64_t>(impl_->bytes,std::min<std::size_t>(maximum,4096))));
-    if(std::fread(out.data(),1,out.size(),impl_->file.get())!=out.size())throw Error("Fast receive spool read failed");
-    return out;
-}
+std::uint64_t ReceivedFile::size()const{return impl_->data.size();}
+std::span<const std::uint8_t> ReceivedFile::bytes()const{return impl_->data;}
 void ReceivedFile::save(const std::filesystem::path& path)const {
-    std::lock_guard lock(impl_->mutex);rewind_file(impl_->file.get());
 #ifdef _WIN32
     auto* raw=_wfopen(path.c_str(),L"wbx");
 #else
@@ -291,17 +274,27 @@ void ReceivedFile::save(const std::filesystem::path& path)const {
     if(!raw)throw Error("Cannot exclusively create fast destination");
     File output(raw);
     try {
-        std::array<std::uint8_t,16384> buffer{};std::uint64_t left=impl_->bytes;
-        while(left) {
-            const auto n=static_cast<std::size_t>(std::min<std::uint64_t>(left,buffer.size()));
-            if(std::fread(buffer.data(),1,n,impl_->file.get())!=n)throw Error("Fast receive spool read failed");
-            write_file(output.get(),std::span(buffer).first(n));left-=n;
-        }
+        write_file(output.get(),impl_->data);
         if(std::fflush(output.get())!=0)throw Error("Fast destination write failed");
         auto* closed=output.release();if(std::fclose(closed)!=0)throw Error("Fast destination close failed");
     }catch(...) {
         output.reset();std::error_code ignored;std::filesystem::remove(path,ignored);throw;
     }
+}
+
+TransmitEstimate estimate_transmission(const Profile& p,bool encrypted,std::uint64_t bytes) {
+    validate(p);
+    if(bytes>256ULL*1024*1024)throw Error("Fast source exceeds 256 MiB memory budget");
+    const auto capacity=static_cast<std::uint64_t>(p.interleave_depth)*source_bytes_per_group(p,encrypted)*8;
+    const auto cycles=1+(9*(bytes+1)+capacity-1)/capacity;
+    TransmitEstimate out;out.intervals=cycles*cycle_intervals(p);
+    // Last symbol coordinate plus the 16-symbol RRC tail, then 6.25 s silence.
+    const auto symbols=training_symbols+out.intervals*interval_symbols(p)-1+16;
+    out.samples=static_cast<std::uint64_t>(std::floor(static_cast<double>(symbols)*p.sample_rate/p.symbol_rate))+1+
+        static_cast<std::uint64_t>(p.sample_rate)*25/4;
+    out.seconds=static_cast<double>(out.samples)/p.sample_rate;
+    out.source_bps=8.0*static_cast<double>(bytes)/out.seconds;
+    return out;
 }
 
 struct StreamEncoder::Impl {
@@ -373,11 +366,11 @@ std::uint64_t StreamEncoder::source_bytes()const{return impl_->source_count;}
 std::uint64_t StreamEncoder::intervals_emitted()const{return impl_->intervals;}
 
 struct StreamDecoder::Impl {
-    Profile profile;std::optional<Crypto> crypto;std::uint64_t quota;DecodeSnapshot stats;File plain;
+    Profile profile;std::optional<Crypto> crypto;std::uint64_t quota;DecodeSnapshot stats;Bytes plain;
     std::vector<float> soft;Bytes salt;std::unique_ptr<Keys> keys;std::uint64_t ordinal=0,cycles=0;
     bool bootstrap_received=false;
     std::shared_ptr<const ReceivedFile> received;
-    Impl(Profile p,const std::optional<Crypto>& c,std::uint64_t q):profile(p),crypto(c),quota(q),plain(spool()) {
+    Impl(Profile p,const std::optional<Crypto>& c,std::uint64_t q):profile(p),crypto(c),quota(std::min<std::uint64_t>(q,256ULL*1024*1024)) {
         validate_codec_profile(p);soft.reserve(cycle_intervals(p)*physical_interval_bits);
         stats.encrypted=crypto.has_value();
     }
@@ -400,8 +393,10 @@ struct StreamDecoder::Impl {
                 const auto k=k_bytes(profile)*2;
                 const auto body=std::span(systematic).subspan(group*k,k);
                 auto area=keys?open(profile,*keys,salt,ordinal,body):public_open(profile,salt,ordinal,body);++ordinal;
-                if(area.size()>quota-stats.spool_bytes)throw Error("Fast receive spool quota exceeded");
-                write_file(plain.get(),area);stats.spool_bytes+=area.size();
+                if(area.size()>quota-stats.spool_bytes)throw Error("Fast receive memory quota exceeded");
+                if(plain.size()+area.size()>plain.capacity())
+                    plain.reserve(static_cast<std::size_t>(std::min<std::uint64_t>(quota,std::max<std::uint64_t>(plain.size()+area.size(),plain.capacity()*2))));
+                append(plain,area);stats.spool_bytes+=area.size();
                 if(crypto)++stats.authenticated_groups;else ++stats.checksum_groups;
                 OPENSSL_cleanse(area.data(),area.size());
             }
@@ -411,34 +406,30 @@ struct StreamDecoder::Impl {
     }
     std::shared_ptr<ReceivedFile::Impl> interpret() {
         if(!bootstrap_received || !cycles || !soft.empty())throw Error("Fast stream ended within fixed coding geometry");
-        rewind_file(plain.get());auto output=std::make_shared<ReceivedFile::Impl>();
-        std::array<std::uint8_t,16384> buffer{},destination{};std::size_t used=0;
-        bool ended=false;unsigned cell=0,cell_bits=0;std::uint64_t position=0,endpoint=0,remaining=stats.spool_bytes;
-        while(remaining) {
-            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(remaining,buffer.size()));
-            if(std::fread(buffer.data(),1,count,plain.get())!=count)throw Error("Fast receive spool read failed");
-            remaining-=count;
-            for(std::size_t b=0;b<count;++b)for(unsigned i=0;i<8;++i) {
-                const auto bit=(buffer[b]>>(7-i))&1U;++position;
+        auto output=std::make_shared<ReceivedFile::Impl>();
+        // Interpret only after physical end. Compact in place: nine-bit cells
+        // shrink to bytes, so writes cannot overwrite unread source bits.
+        bool ended=false;unsigned cell=0,cell_bits=0;
+        std::uint64_t position=0,endpoint=0;std::size_t used=0;
+        for(std::size_t b=0;b<plain.size();++b) {
+            const auto source=plain[b];
+            for(unsigned i=0;i<8;++i) {
+                const auto bit=(source>>(7-i))&1U;++position;
                 if(ended) {if(bit)throw Error("Noncanonical fast source fill");continue;}
                 cell=(cell<<1)|bit;
                 if(++cell_bits!=9)continue;
                 if(!(cell&256)) {
                     if(cell)throw Error("Invalid fast endpoint cell");
                     ended=true;endpoint=position;
-                }else {
-                    if(output->bytes>=quota-stats.spool_bytes)throw Error("Fast combined spool quota exceeded");
-                    destination[used++]=static_cast<std::uint8_t>(cell);++output->bytes;
-                    if(used==destination.size()) {write_file(output->file.get(),destination);used=0;}
-                }
+                }else plain[used++]=static_cast<std::uint8_t>(cell);
                 cell=0;cell_bits=0;
             }
         }
         if(!ended)throw Error("Fast mandatory source endpoint missing");
         const auto cycle_bits=static_cast<std::uint64_t>(profile.interleave_depth)*source_bytes_per_group(profile,crypto.has_value())*8;
         if(endpoint<=position-cycle_bits)throw Error("Extra noncanonical fast padding cycle");
-        write_file(output->file.get(),std::span(destination).first(used));rewind_file(output->file.get());
-        stats.source_bytes=output->bytes;stats.spool_bytes+=output->bytes;
+        plain.resize(used);output->data=std::move(plain);
+        stats.source_bytes=used;
         return output;
     }
 };

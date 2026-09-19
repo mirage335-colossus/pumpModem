@@ -398,7 +398,7 @@ Immutable bit chunks drain continuously with a stable physical stream identity.
 Compact missing-run events avoid allocations proportional to a gap. Competing
 clock hypotheses cannot rewrite already delivered chunks. The collector keeps
 one interval and bounded marker overlap; corrected source areas enter a capped
-spool. Only physical completion permits source reconstruction/decompression.
+memory buffer. Only physical completion permits source reconstruction/decompression.
 RS or MAC success never closes a stream, and source decoding never feeds back
 into physical acquisition. `Received::raw_bits` is a bounded diagnostic prefix;
 `missing_symbols` reports unknown placeholders and `observed_bits` the full slot

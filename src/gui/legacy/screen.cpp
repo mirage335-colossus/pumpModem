@@ -22,6 +22,7 @@ const std::vector<Control>& screen() {
         [] {auto c=placed(Kind::action,Field::count,"Transmit",Slot::legacy_transmit);c.command=Command::legacy_transmit;return c;}(),
         [] {auto c=placed(Kind::bitmap,Field::count,"Waterfall",Slot::legacy_waterfall);c.bitmap=Bitmap::legacy_waterfall;
             c.help="Live audio from 0 to 4 kHz; newest row at the top. Reception pauses during transmission.";return c;}(),
+        placed(Kind::choice,Field::legacy_squelch,"Squelch",Slot::legacy_squelch),
         placed(Kind::label,Field::legacy_status,"",Slot::legacy_status)
     };
     return controls;

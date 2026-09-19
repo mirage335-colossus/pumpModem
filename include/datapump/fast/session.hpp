@@ -25,6 +25,7 @@ struct Snapshot {
     std::uint64_t revision=0,source_bytes=0,intervals=0,authenticated_groups=0;
     std::uint64_t checksum_groups=0;
     std::uint64_t corrected_bytes=0,erased_bytes=0;
+    double estimated_seconds=0,transmit_fraction=0;
     double elapsed_seconds=0,goodput_bps=0,evm=0,carrier_error_hz=0,clock_error_ppm=0;
     std::string status="Fast mode ready",error;
     std::shared_ptr<const ReceivedFile> file;

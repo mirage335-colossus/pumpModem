@@ -1,6 +1,7 @@
 #include "controller.hpp"
 #include "screen.hpp"
 #include "presentation.hpp"
+#include "../utf8_policy.hpp"
 #include "plots.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
@@ -34,6 +35,7 @@ struct Controller::Impl {
     fast::Session session;
     fast::Settings settings;
     fast::Snapshot snapshot;
+    std::optional<std::uint64_t> file_size;
     FastPlots plots;
     std::function<bool()> acquire_audio;
     std::vector<KeyEntry> keys;
@@ -56,6 +58,7 @@ struct Controller::Impl {
         f(F::fast_profile).selected="wire";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
+        f(F::fast_depth).options={{"1","1 · short messages"},{"4","4 · acoustic"},{"16","16 · normal"},{"64","64 · long cable transfers"}};
         f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         f(F::fast_device).text="default";f(F::fast_mono).checked=true;
         f(F::fast_encryption).checked=false;
@@ -63,12 +66,12 @@ struct Controller::Impl {
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
         f(F::fast_status).text="Choose matching settings at both ends.";
-        f(F::fast_preview).records=receive_preview(snapshot);
         set_profile(fast::Channel::wire);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
     void set_profile(fast::Channel channel) {
         settings.profile=fast::profile(channel);
+        f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
         f(F::fast_constellation).selected=std::to_string(settings.profile.constellation);
         f(F::fast_coding).selected=settings.profile.code_rate==fast::CodeRate::half?"half":settings.profile.code_rate==fast::CodeRate::three_quarters?"three-quarters":"seven-eighths";
         f(F::fast_fec).selected=settings.profile.robust?"robust":"high-rate";
@@ -89,7 +92,7 @@ struct Controller::Impl {
     }
     void refresh() {
         const bool edit=!closing&&!session.active()&&pending_start==C::none&&!key_loading;
-        for(const auto field:{F::fast_profile,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_device,F::fast_mono,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
+        for(const auto field:{F::fast_profile,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_depth,F::fast_device,F::fast_mono,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
         f(F::fast_key).enabled=edit&&f(F::fast_encryption).checked;
         f(F::fast_key_path).enabled=f(F::fast_encryption).checked;
         f(F::fast_text).visible=f(F::fast_source).selected=="text";
@@ -105,6 +108,15 @@ struct Controller::Impl {
         f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":transfer_stage(snapshot);
         f(F::fast_progress).text+=" · "+std::to_string(snapshot.source_bytes)+" source bytes · "+std::to_string(snapshot.intervals)+" intervals · "+number(snapshot.elapsed_seconds)+" s";
         f(F::fast_rate).text="Gross: "+number(gross/1000)+" kbit/s\nMeasured source: "+number(snapshot.goodput_bps/1000)+" kbit/s";
+        const auto size=f(F::fast_text).visible?std::optional<std::uint64_t>(f(F::fast_text).text.size()):file_size;
+        if(size&&*size<=settings.quota_bytes) {
+            const auto estimate=fast::estimate_transmission(p,f(F::fast_encryption).checked,*size);
+            f(F::fast_source_detail).text+=" · Estimated "+number(estimate.seconds)+" s (including end silence)";
+            f(F::fast_rate).text+=" · Estimated source: "+number(estimate.source_bps/1000)+" kbit/s";
+        }
+        if(snapshot.estimated_seconds>0)f(F::fast_progress).text+=" · "+number(snapshot.transmit_fraction*100,1)+"% · "+number(snapshot.estimated_seconds)+" s estimated total";
+        const auto bandwidth=p.symbol_rate*(1+p.rolloff);
+        f(F::fast_detail).text+="\nShannon-Hartley: C = B log2(1 + S/N), B = "+number(bandwidth,0)+" Hz; ideal at assumed 30 dB SNR: "+number(bandwidth*std::log2(1001.)/1000)+" kbit/s.";
         f(F::fast_tracking).text=snapshot.intervals&&!snapshot.transmitting?
             "RX EVM "+number(snapshot.evm*100,2)+"% · carrier "+number(snapshot.carrier_error_hz,2)+" Hz\nClock error "+number(snapshot.clock_error_ppm,2)+" ppm":
             "RX tracking · awaiting received intervals";
@@ -117,6 +129,10 @@ struct Controller::Impl {
         f(F::fast_correction).text="Correction: "+std::to_string(snapshot.corrected_bytes)+" bytes · "+std::to_string(snapshot.erased_bytes)+" erasures\nInterleave depth "+std::to_string(p.interleave_depth);
         f(F::fast_auth).text=integrity_label(snapshot);
         f(F::fast_progress).text_tone=snapshot.complete?ui::TextTone::data:ui::TextTone::normal;
+    }
+    void inspect_file() {
+        std::error_code error;const auto size=std::filesystem::file_size(path_from_text(f(F::fast_file).text),error);
+        file_size=error?std::nullopt:std::optional<std::uint64_t>(size);
     }
     void start_transfer(C command) {
         recorded=false;
@@ -175,8 +191,6 @@ void Controller::poll() {
     const auto snapshot=p.session.poll();
     if(p.plots.update(snapshot.diagnostics,snapshot.active))++p.revision;
     if(snapshot.revision!=p.snapshot.revision) {
-        if(snapshot.file!=p.snapshot.file||snapshot.complete!=p.snapshot.complete||snapshot.physical_complete!=p.snapshot.physical_complete)
-            p.f(F::fast_preview).records=receive_preview(snapshot);
         p.snapshot=snapshot;
         if(!snapshot.error.empty())p.f(F::fast_status).text=snapshot.error;
         else if(!snapshot.status.empty())p.f(F::fast_status).text=snapshot.status;
@@ -200,7 +214,7 @@ void Controller::edit(F field,std::string text) {
         const auto bytes=std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(text.data()),text.size());
         if(text.size()>fast::text_byte_limit||!valid_clipboard_text(bytes)) {report_error("Fast text requires valid UTF-8 without NUL, up to 32,768 bytes.");return;}
     }
-    if(field==F::fast_device||field==F::fast_file||field==F::fast_text) {p.f(field).text=std::move(text);++p.revision;p.refresh();}
+    if(field==F::fast_device||field==F::fast_file||field==F::fast_text) {p.f(field).text=std::move(text);if(field==F::fast_file)p.inspect_file();++p.revision;p.refresh();}
 }
 void Controller::select(F field,std::string id) {
     auto& p=*impl_;if(!owns(field)||!p.f(field).enabled)return;
@@ -210,6 +224,7 @@ void Controller::select(F field,std::string id) {
         if(field==F::fast_profile)p.set_profile(fast::parse_channel(id));
         else if(field==F::fast_constellation)p.settings.profile.constellation=static_cast<unsigned>(std::stoul(id));
         else if(field==F::fast_coding)p.settings.profile.code_rate=id=="half"?fast::CodeRate::half:id=="three-quarters"?fast::CodeRate::three_quarters:fast::CodeRate::seven_eighths;
+        else if(field==F::fast_depth)p.settings.profile.interleave_depth=static_cast<unsigned>(std::stoul(id));
         else if(field==F::fast_fec)p.settings.profile.robust=id=="robust";
         else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;
         else if(field==F::fast_source) {} // Source drafts have independent retained fields.
@@ -256,7 +271,7 @@ void Controller::complete_service(ui::ServiceResult result) {
     try {
         switch(pending.command) {
         case C::fast_open_key:case C::fast_generate_key:p.load(path_from_text(result.value),pending.command==C::fast_generate_key);break;
-        case C::fast_choose_file:p.f(F::fast_file).text=std::move(result.value);break;
+        case C::fast_choose_file:p.f(F::fast_file).text=std::move(result.value);p.inspect_file();break;
         case C::fast_save:if(pending.file) {
             p.key_loading=true;p.f(F::fast_status).text="Saving complete received bytes…";
             p.worker=std::jthread([&p,file=pending.file,path=path_from_text(result.value)] {

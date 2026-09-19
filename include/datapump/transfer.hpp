@@ -106,7 +106,7 @@ Received recover_received(Received, std::stop_token stop = {});
 // Consumes immutable bounded physical chunks. Only a physical complete event
 // can seal storage and invoke the application source decoder.
 struct ReceiveStorageQuota {
-    std::size_t limit=0, used=0; // Owned by one serialized receiver bank.
+    std::size_t limit=0, used=0, reserved=0; // Owned by one serialized receiver bank.
 };
 class StreamReceiver {
 public:
@@ -117,6 +117,7 @@ public:
     StreamReceiver& operator=(StreamReceiver&&) noexcept;
     Received push(modem::PatternBurst, modem::Diagnostics = {});
     std::size_t working_bytes() const;
+    std::size_t source_buffer_bytes() const;
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
@@ -126,7 +127,7 @@ Received interpret_pattern(modem::PatternBurst, const Options&, std::uint64_t ti
 using Progress = std::function<void(std::uint64_t)>;
 
 // Separate codec scratch from the amount of application content admitted.
-// Bounds the encoded source spool independently of the decoded output quota.
+// Bounds the encoded source memory independently of the decoded output quota.
 std::size_t source_storage_limit(std::size_t content_limit);
 // Capacity for unpacked 0/1 elements, including leading and periodic recovery words.
 // Checked separately from packed codec bytes; actual TX/RX allocations must

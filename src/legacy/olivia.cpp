@@ -97,6 +97,7 @@ class OliviaReceiver final:public WaveReceiver {
     };
     struct Candidate {olivia::Decoded decoded;std::size_t end=0;};
     TextCallback received_;
+    double squelch_=.72;
     std::array<float,32> samples_{};
     std::array<std::array<double,32>,4> cosine_{},sine_{};
     std::array<Phase,4> phases_{};
@@ -141,12 +142,12 @@ class OliviaReceiver final:public WaveReceiver {
         const auto decoded=olivia::decode(ordered);
         // Two independent, scrambled Walsh lanes must both agree. No source
         // syntax or packet metadata participates in symbol/block acquisition.
-        if(decoded.confidence<0.72) return;
+        if(decoded.confidence<squelch_) return;
         if(!candidate_ || decoded.confidence>candidate_->decoded.confidence)
             candidate_=Candidate{decoded,total_};
     }
 public:
-    OliviaReceiver(Config config,TextCallback received):received_(std::move(received)) {
+    OliviaReceiver(Config config,TextCallback received):received_(std::move(received)),squelch_(config.squelch==0?.60:config.squelch==1?.72:.85) {
         for(std::size_t tone=0;tone<4;++tone) {
             const double omega=tau*(config.carrier_hz-750+500*static_cast<double>(tone))/sample_rate;
             for(std::size_t i=0;i<32;++i) {

@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <fstream>
+#include <filesystem>
 #include <mutex>
 #include <numbers>
 #include <thread>
@@ -90,10 +92,6 @@ void unsynchronized_audio(fast_ui::Controller& controller) {
           "Diagnostic input I/Q was mistaken for decoded intervals or source bytes");
     check(controller.field(ui::Field::fast_auth).text.find("awaiting physical end")!=std::string::npos,
           "Diagnostic input I/Q manufactured a physical end");
-    const auto& preview=controller.field(ui::Field::fast_preview).records;
-    check(preview.size()==1&&preview.front().cells.front().text=="Preview is available after completed reception.",
-          "Unacquired input diagnostics exposed completed source content");
-
     std::array<BitmapSource,3> retained;
     std::array<Bytes,3> retained_pixels;
     for(std::size_t i=0;i<ids.size();++i) {
@@ -180,11 +178,21 @@ int main() {
         check(!fixture::input.empty(),"Live Fast TX produced no PCM");
         run_transfer(controller,true);
         check(controller.enabled(ui::Command::fast_save),"Live plots prevented a physically complete reception");
-        std::string preview;
-        for(const auto& row:controller.field(ui::Field::fast_preview).records)
-            for(const auto& cell:row.cells)preview+=cell.text+'\n';
-        check(preview.find("Live Fast plot check: café")!=std::string::npos&&preview.find("Exact received text.")!=std::string::npos,
-              "Plot telemetry changed the received source");
+        const auto path=std::filesystem::temp_directory_path()/("datapump-fast-save-"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
+        struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{path};
+        controller.activate(ui::Command::fast_save);
+        const auto requests=controller.take_services();check(requests.size()==1,"Explicit Save did not request a destination");
+        check(!std::filesystem::exists(path),"Receive wrote content before Save destination was chosen");
+        controller.complete_service({requests.front().id,false,path.string(),{}});
+        const auto deadline=std::chrono::steady_clock::now()+5s;
+        while(controller.field(ui::Field::fast_status).text!="Saved complete received bytes.") {
+            controller.poll();check(std::chrono::steady_clock::now()<deadline,"Explicit Fast Save did not finish");
+            std::this_thread::sleep_for(1ms);
+        }
+        std::ifstream saved(path,std::ios::binary);
+        const std::string exact((std::istreambuf_iterator<char>(saved)),std::istreambuf_iterator<char>());
+        check(exact==message,"Plot telemetry changed the saved source bytes");
         controller.close();
         check(controller.ready_to_close(),"Live plot controller failed to close after idle");
         std::cout<<"Fast GUI live PCM/constellation and retained snapshot checks passed\n";

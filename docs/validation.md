@@ -4,6 +4,98 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast acoustic/cable controls and memory-only reception — 19 September 2026
+
+Fast's acoustic preset now uses 500 symbols/s QPSK at a 1.8 kHz carrier with
+600 Hz shaped bandwidth, amplitude 0.35 and interleave depth 4. A 21-tap
+half-symbol-spaced equalizer trains on known markers before payload slicing;
+raw marker coherence still independently gates presence. Acoustic QPSK uses a
+wider tracking cutoff and downweights coherent but noisy pilot groups instead
+of erasing them. This preserves recovery at the existing 10 dB SNR requirement. Both peers must use the revised acoustic preset. Cable/radio waveform
+constants, the independent Fast wire vectors, and Robust short/raw/fixed-interval
+wire behavior remain unchanged.
+
+The GUI exposes interleave depth 1/4/16/64, exact-source airtime estimates including
+bootstrap/cycle padding/pilots/filter tail/end silence, generated-audio percentage,
+and an explicitly assumed 30 dB Shannon-Hartley example. Depth 64 raises the
+asymptotic public cable payload ceiling from 53.078 to 54.513 kbit/s for 256-APSK,
+7/8 coding and high-rate RS; this is a geometry calculation, not a hardware
+throughput measurement. Legacy adds Low/Normal/High squelch above its waterfall;
+Normal retains the original PSK/Olivia confidence thresholds.
+
+Fast GUI/CLI receive previews and their conversion/splitting API are removed.
+Fast and Robust corrected source areas stay in bounded RAM, capped at 256 MiB;
+Fast compacts source cells in place only after physical completion. Robust's
+memory accounting includes retained buffer capacity, and its shared quota also
+bounds reserved source capacity across receiver candidates. The recovery-anchor
+regression still requires constant diagnostic/recovery overhead after retention;
+it now subtracts the separately measured, intentionally growing source buffer.
+FLTK file-chooser preference writes are disabled. Explicit Save, requested
+keyfile creation and CLI output remain available. OS paging/hibernation/crash
+storage and graphics-driver shader caches are outside this application guarantee.
+
+Validation performed on Linux Release builds:
+
+- All 14 focused Fast/Legacy/shared-live-GUI suites pass, including exact Save
+  comparison after preview removal. CLI results omit both former preview fields.
+- The full 92-case Fast SNR matrix passed before the final acoustic tuning.
+  All 23 acoustic cases (10–120 dB in 5 dB steps) were rerun on the final
+  500-symbol/s profile and tracking code, with exact recovery in every case.
+  [Final acoustic CSV](validation-data/fast/acoustic-500-20260919.csv) records
+  these runs (three concurrent workers; timing columns are not an isolated
+  performance benchmark). Independent code/crypto/marker vectors remain passing.
+  All nine focused Fast DSP/codec/CLI/live-GUI suites pass again after tuning.
+- New sampled file regressions pass with 60% first and 20% second echoes at
+  1, 2.5 and 4.5 ms, added noise, and exact byte comparison after physical end.
+  Acoustic noise plus an unrelated carrier cannot acquire or hold reception.
+- Bandlimited resampler chains across 44.1/48 kHz logical peer clocks and
+  44.1 kHz hardware bridges recover exact acoustic and 256-APSK cable sources.
+  The test independently compares estimated sample counts with generated PCM.
+  The existing `audio_rates`, ALSA and Windows audio contract fixtures pass.
+- A temporary Linux preload guard rejected `tmpfile` and writable `fopen`/`open`
+  calls. Robust's stream-receive integration and a complete Fast CLI WAV receive
+  without `--save` passed under that guard; no implicit write was attempted.
+- FLTK shared/native checks pass. The production simulation workflow first
+  timed out under concurrent load in phase 15, then passed on retry in 219.63
+  seconds with the unchanged timeout and assertions. The final adapter rerun
+  passes, including disabled preference writes.
+- All 29 required Robust contract suites pass, including the long differential
+  receiver calibration. The `transfer` memory regression was adapted like the
+  recovery-anchor regression to separate retained source capacity from core
+  working state; its unchanged core bound and source-quota assertions pass.
+- Rev's 36 shared/native tests excluding the production workflow pass, including
+  adapter, platform, and 1x/2x coordinates. Both native backends were built in
+  Release mode and `git diff --check` passes.
+
+The sandbox hides `/dev/snd`, but an escalated host check found the physical
+ALC257 analog speaker/microphone and PipeWire. Live tests retained all content
+in RAM and compared all 40 source bytes, rather than relying only on checksums:
+
+| Acoustic settings | Logical rate | Physical result |
+| --- | --- | --- |
+| Initial 1,000 symbols/s, depth 1 | 48 kHz | Acquired and observed physical end; RS recovery failed |
+| 500 symbols/s, 1.8 kHz carrier, amplitude 0.35, depth 1 | 48 kHz | Exact recovery |
+| Same, depth 1 | 44.1 kHz | One RS failure, then exact recovery on diagnostic repeat |
+| Final preset: 500 symbols/s, 1.8 kHz, amplitude 0.35, depth 4 | 44.1 kHz | Exact recovery; final EVM 14.09% |
+| Final preset, depth 4 | 48 kHz | Exact recovery; final EVM 12.68% |
+| Final preset after tracking adjustment, depth 4 | 44.1 kHz | Exact recovery; final EVM 14.70% |
+
+The hardware negotiated 48 kHz when requested at 44.1 kHz, exercising the live
+resampler; native 44.1-kHz-only hardware is covered by the fake-device and sampled
+conversion regressions, not a second physical sound card. The final preset's
+40-byte test takes about 50.3 seconds including end silence. These are proximity
+link observations, not general room/cable qualifications. The short-cycle failure
+is why acoustic defaults to depth 4; cable/radio defaults remain depth 16.
+
+Rev's full production workflow remains a validation limitation. Its first final
+run failed the phase-11 replay-display assertion after 92.00 seconds (seven
+measured frames versus the required ten). An isolated retry passed that stage
+but reached the unchanged 300-second timeout in phase 18, simulating independent
+radios with sampled audio, clock error and phase noise (300.28 seconds total).
+Neither the replay assertion nor the workflow timeout was weakened. This is
+separate from the passing 36 shared/native Rev checks; full Rev workflow
+completion is not claimed. Private validation displays were closed afterward.
+
 ## Modem dropdown and Fast live plots — 19 September 2026
 
 The shared header now selects **Robust Modem** (default) or **Fast Modem** from

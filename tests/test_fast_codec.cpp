@@ -127,7 +127,7 @@ void independent_vectors() {
     check(EVP_Digest(fixed_wire.data(),fixed_wire.size(),digest.data(),&digest_size,EVP_sha256(),nullptr)==1 && digest_size==32,"wire fingerprint hashing");
     check(digest==unhex("e52aca6df25bb57b988ca1bea41a53d530815f7f1015589dd01c7ffac04aa6b7"),"independent full fixed-cadence wire vector");
     StreamDecoder fixed_rx(p,crypto);feed(fixed_rx,fixed_wire);fixed_rx.finish(true);
-    check(fixed_rx.result() && fixed_rx.result()->preview()==source,"independent full wire vector decode");
+    check(fixed_rx.result() && Bytes(fixed_rx.result()->bytes().begin(),fixed_rx.result()->bytes().end())==source,"independent full wire vector decode");
 
     // Public checksum mode has its own independent full-wire vector. It is
     // deliberately not an authentication construction: anyone can recreate it.
@@ -147,7 +147,7 @@ void independent_vectors() {
     public_wire.insert(public_wire.end(),coded.begin(),coded.end());
     check(sha256(public_wire)==unhex("82a64d0004b9588298479e8901f8bcd83008ec16644219d6ca6e11a09999c9fa"),"independent public complete wire vector");
     StreamDecoder public_fixed_rx(p,std::nullopt);feed(public_fixed_rx,public_wire);public_fixed_rx.finish(true);
-    check(public_fixed_rx.result() && public_fixed_rx.result()->preview()==source && !public_fixed_rx.snapshot().authenticated,"independent public wire decodes without authentication claim");
+    check(public_fixed_rx.result() && Bytes(public_fixed_rx.result()->bytes().begin(),public_fixed_rx.result()->bytes().end())==source && !public_fixed_rx.snapshot().authenticated,"independent public wire decodes without authentication claim");
 }
 void roundtrips() {
     std::mt19937 random(311);auto crypto=key();
@@ -173,22 +173,22 @@ void roundtrips() {
             check(!decoder.result() && !decoder.snapshot().physical_end,"EOF cannot manufacture physical completion");
             decoder.finish(true);check(decoder.snapshot().complete,"fixed-rate source roundtrip completes");
             check(decoder.snapshot().authenticated && !decoder.snapshot().checksum_groups,"keyed completion reports authentication only");
-            check(decoder.result()->preview()==source,"exact source and trailing zero retained");
+            check(Bytes(decoder.result()->bytes().begin(),decoder.result()->bytes().end())==source,"exact source and trailing zero retained");
             if(size==capacity)check(wire.size()==3*cycle_intervals(p)*physical_interval_bits,"mandatory endpoint may occupy extra final cycle");
         }
     }
     auto p=profile(Channel::wire);p.interleave_depth=1;const auto wire=transmit(p,crypto,Bytes(123,0));
-    StreamDecoder zero(p,crypto);feed(zero,wire);zero.finish(true);check(zero.result()->preview()==Bytes(123,0),"all-zero file");
+    StreamDecoder zero(p,crypto);feed(zero,wire);zero.finish(true);check(Bytes(zero.result()->bytes().begin(),zero.result()->bytes().end())==Bytes(123,0),"all-zero file");
     StreamDecoder wrong(p,key(1));feed(wrong,wire);wrong.finish(true);check(wrong.snapshot().failed && !wrong.result(),"wrong bootstrap key fails");
     auto missing=wire;missing.resize(missing.size()-physical_interval_bits);
     StreamDecoder truncated(p,crypto);feed(truncated,missing);truncated.finish(true);check(!truncated.result(),"partial final cycle unavailable");
     missing.assign(wire.begin(),wire.begin()+static_cast<std::ptrdiff_t>(cycle_intervals(p)*physical_interval_bits));
     StreamDecoder only_bootstrap(p,crypto);feed(only_bootstrap,missing);only_bootstrap.finish(true);check(!only_bootstrap.result(),"missing entire source cycle unavailable");
     StreamDecoder quota(p,crypto,64);feed(quota,wire);quota.finish(true);check(quota.snapshot().failed && !quota.result(),"local spool quota failure cannot complete");
-    StreamDecoder combined(p,crypto,176+123-1);feed(combined,wire);combined.finish(true);
-    check(combined.snapshot().failed && !combined.result(),"both private source areas and final file count against quota");
-    StreamDecoder exact_quota(p,crypto,176+123);feed(exact_quota,wire);exact_quota.finish(true);
-    check(exact_quota.snapshot().complete && exact_quota.snapshot().spool_bytes==176+123,"exact combined-spool quota is usable");
+    StreamDecoder combined(p,crypto,176-1);feed(combined,wire);combined.finish(true);
+    check(combined.snapshot().failed && !combined.result(),"encoded receive area cannot exceed memory quota");
+    StreamDecoder exact_quota(p,crypto,176);feed(exact_quota,wire);exact_quota.finish(true);
+    check(exact_quota.snapshot().complete && exact_quota.snapshot().spool_bytes==176,"exact in-place memory quota is usable");
     rejects([&]{StreamDecoder bad(p,crypto);bad.push_interval(std::array<float,7>{});},"remotely variable interval widths rejected");
     std::array<float,physical_interval_bits> nonfinite{};nonfinite.fill(std::numeric_limits<float>::quiet_NaN());
     StreamDecoder nan(p,crypto);for(std::size_t i=0;i<cycle_intervals(p);++i)nan.push_interval(nonfinite);
@@ -213,7 +213,7 @@ void public_roundtrips() {
             rx.finish(false);check(!rx.result() && !rx.snapshot().physical_end,"public EOF is not physical completion");
             rx.finish(true);const auto final=rx.snapshot();
             check(final.complete && !final.encrypted && !final.authenticated && !final.authenticated_groups,"public completion stays explicitly unauthenticated");
-            check(final.status.find("not authenticated")!=std::string::npos && rx.result()->preview()==source,"public status and exact source match");
+            check(final.status.find("not authenticated")!=std::string::npos && Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"public status and exact source match");
         }
     }
     auto p=profile(Channel::wire);p.interleave_depth=1;const auto crypto=key();const auto public_wire=transmit(p,std::nullopt,utf8);
@@ -222,10 +222,10 @@ void public_roundtrips() {
     StreamDecoder public_rx(p,std::nullopt);feed(public_rx,transmit(p,crypto,utf8));public_rx.finish(true);
     check(public_rx.snapshot().failed && !public_rx.result(),"public receiver never autodetects encrypted mode");
     const auto wire=transmit(p,std::nullopt,Bytes(123));
-    StreamDecoder limit(p,std::nullopt,192+123-1);feed(limit,wire);limit.finish(true);
-    check(limit.snapshot().failed && !limit.result(),"public source and output share a bounded spool quota");
-    StreamDecoder exact(p,std::nullopt,192+123);feed(exact,wire);exact.finish(true);
-    check(exact.snapshot().complete && exact.snapshot().spool_bytes==192+123,"public exact combined spool quota");
+    StreamDecoder limit(p,std::nullopt,192-1);feed(limit,wire);limit.finish(true);
+    check(limit.snapshot().failed && !limit.result(),"public source stays within memory quota");
+    StreamDecoder exact(p,std::nullopt,192);feed(exact,wire);exact.finish(true);
+    check(exact.snapshot().complete && exact.snapshot().spool_bytes==192,"public exact in-place memory quota");
 }
 void public_malformed() {
     auto p=profile(Channel::wire);p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
@@ -291,7 +291,7 @@ void burst_and_soft() {
         for(std::size_t b=0;b<soft.size();++b)soft[b]=interval==start?0.F:(wire[interval*soft.size()+b]?8.F:-8.F);
         rx.push_interval(soft);
     }
-    rx.finish(true);check(rx.snapshot().complete && rx.result()->preview()==source,"interleaver/RS recover one fully erased inner physical interval");
+    rx.finish(true);check(rx.snapshot().complete && Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"interleaver/RS recover one fully erased inner physical interval");
     check(rx.snapshot().erased_bytes>0,"RS erasure recovery is visible");
     Bytes raw(256);std::iota(raw.begin(),raw.end(),0);auto bits=coding::encode(raw,CodeRate::half);
     std::vector<float> noisy;for(std::size_t i=0;i<bits.size();++i)noisy.push_back((bits[i]?8.F:-8.F)*(i%211==0?-0.1F:1.F));
@@ -309,7 +309,7 @@ void streamed(std::size_t total,bool encrypted=true) {
     rx.finish(true);
     check(rx.snapshot().complete && rx.result()->size()==total,"large lazy file stream exact byte count");
     check(max_request<=16384,"source scratch is independent of file size");
-    check(rx.snapshot().spool_bytes<total*3+32768,"combined spool usage bounded by local quota");
+    check(rx.snapshot().spool_bytes<total*3+32768,"in-place memory usage bounded by local quota");
     const auto path=std::filesystem::temp_directory_path()/std::filesystem::path("datapump-fast-test-"+
         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     rx.result()->save(path);rejects([&]{rx.result()->save(path);},"save never overwrites destination");

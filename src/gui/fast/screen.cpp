@@ -20,6 +20,7 @@ const std::vector<Control>& screen() {
         placed(Kind::choice,Field::fast_profile,Command::none,"Channel profile",Slot::fast_profile,"Both ends must use identical local profile, constellation and coding selections."),
         placed(Kind::choice,Field::fast_constellation,Command::none,"Constellation",Slot::fast_constellation,"Denser APSK requires a cleaner, more linear audio path."),
         placed(Kind::choice,Field::fast_coding,Command::none,"Inner convolutional code",Slot::fast_coding),
+        placed(Kind::choice,Field::fast_depth,Command::none,"Interleave depth",Slot::fast_depth,"64 improves long cable transfers by reducing cycle padding; 1 reduces short-message latency. Both peers must match."),
         placed(Kind::choice,Field::fast_fec,Command::none,"Interleaved Reed–Solomon",Slot::fast_fec),
         placed(Kind::text,Field::fast_device,Command::none,"Audio device",Slot::fast_device),
         placed(Kind::toggle,Field::fast_mono,Command::none,"Right channel / mono",Slot::fast_mono),
@@ -46,7 +47,6 @@ const std::vector<Control>& screen() {
         placed(Kind::label,Field::fast_correction,Command::none,"",Slot::fast_correction),
         placed(Kind::label,Field::fast_auth,Command::none,"",Slot::fast_auth),
         placed(Kind::label,Field::fast_detail,Command::none,"",Slot::fast_detail),
-        placed(Kind::list,Field::fast_preview,Command::none,"Completed receive preview · up to 4096 bytes",Slot::fast_preview),
         placed(Kind::list,Field::fast_history,Command::none,"Transfer history",Slot::fast_history),
         placed(Kind::label,Field::fast_status,Command::none,"",Slot::fast_status)
     };

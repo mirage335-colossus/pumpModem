@@ -177,6 +177,15 @@ int main() {try {
     presence.push(unrelated);
     require(presence.progress().physical_complete,"noise/tones kept resetting physical absence through EVM");
     require(interval_count==input.size(),"trailing interference became phantom received intervals");
+    auto acoustic=profile(Channel::acoustic);
+    std::vector<float> acoustic_noise(acoustic.sample_rate*7);
+    for(std::size_t i=0;i<acoustic_noise.size();++i)
+        acoustic_noise[i]=noise(rng)+static_cast<float>(.3*std::cos(2*std::acos(-1.)*acoustic.carrier_hz*i/acoustic.sample_rate));
+    const auto acoustic_rejected=receive(acoustic,acoustic_noise,311,false);
+    require(!acoustic_rejected.progress.acquired&&acoustic_rejected.output.empty(),"acoustic noise/tone acquired through relaxed marker threshold");
+    Receiver acoustic_presence(acoustic,[](std::span<const float>){});
+    acoustic_presence.push(transmit(acoustic,input,503));acoustic_presence.push(acoustic_noise);
+    require(acoustic_presence.progress().physical_complete,"acoustic interference kept a reception alive");
     std::cout<<"fast sampled modem tests passed\n";
     return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}}

@@ -103,7 +103,7 @@ private:
 class PskReceiver final:public WaveReceiver {
 public:
     PskReceiver(Config config,TextCallback callback)
-        :callback_(std::move(callback)),period_(symbol_samples(config.mode)),
+        :squelch_(config.squelch),callback_(std::move(callback)),period_(symbol_samples(config.mode)),
          decimation_(period_/16),window_(period_/2),step_(2*pi*config.carrier_hz/sample_rate) {}
     void push(std::span<const float> pcm) override {
         for(const auto sample:pcm) {
@@ -124,6 +124,7 @@ private:
         unsigned reversals=0,coherent_symbols=0;
         std::uint32_t transitions=0;
     };
+    unsigned squelch_=1;
     void observe(Complex value) {
         const auto phase=static_cast<unsigned>(ticks_%16);
         auto& candidate=clocks_[phase];
@@ -161,7 +162,7 @@ private:
             const double previous_power=std::norm(previous_);
             const double norm=std::sqrt(power*previous_power);
             const double decision=norm>1e-18?(value*std::conj(previous_)).real()/norm:0;
-            const bool present=power>1e-12&&std::abs(decision)>.55;
+            const bool present=power>1e-12&&std::abs(decision)>(squelch_==0?.35:squelch_==1?.55:.8);
             previous_=value;next_tick_+=16;
             if(!present) {
                 word_=0;bits_=0;zero_=false;overlong_=false;character_sync_=false;

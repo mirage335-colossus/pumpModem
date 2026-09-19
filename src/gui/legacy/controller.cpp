@@ -23,11 +23,13 @@ struct Controller::Impl {
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
         f(F::legacy_profile).options={{"olivia4-2000","Olivia-4/2k"},{"bpsk31","BPSK31"},{"bpsk125","BPSK125"}};
         f(F::legacy_profile).selected="bpsk31";f(F::legacy_carrier).text="1500";
+        f(F::legacy_squelch).options={{"low","Low · weak signals"},{"normal","Normal"},{"high","High · cleaner text"}};
+        f(F::legacy_squelch).selected="normal";
         f(F::legacy_status).text="Select Legacy Modem to receive.";
     }
     void refresh() {
         const bool edit=!closing&&!snapshot.transmitting&&!pending_tx&&!cancelling;
-        f(F::legacy_profile).enabled=edit;f(F::legacy_carrier).enabled=edit;
+        f(F::legacy_profile).enabled=edit;f(F::legacy_carrier).enabled=edit;f(F::legacy_squelch).enabled=edit;
         f(F::legacy_text).enabled=!closing;
     }
     void changed_settings() {
@@ -106,9 +108,13 @@ void Controller::edit(F field,std::string value) {
     }
 }
 void Controller::select(F field,std::string value) {
-    auto& p=*impl_;if(field!=F::legacy_profile||p.closing||!p.f(field).enabled||value==p.f(field).selected)return;
+    auto& p=*impl_;if((field!=F::legacy_profile&&field!=F::legacy_squelch)||p.closing||!p.f(field).enabled||value==p.f(field).selected)return;
     auto config=p.settings.config;
-    if(value=="olivia4-2000")config.mode=legacy::Mode::olivia4_2000;
+    if(field==F::legacy_squelch) {
+        if(value!="low"&&value!="normal"&&value!="high")return;
+        config.squelch=value=="low"?0:value=="normal"?1:2;
+    }
+    else if(value=="olivia4-2000")config.mode=legacy::Mode::olivia4_2000;
     else if(value=="bpsk31")config.mode=legacy::Mode::bpsk31;
     else if(value=="bpsk125")config.mode=legacy::Mode::bpsk125;
     else return;

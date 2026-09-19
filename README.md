@@ -3,8 +3,8 @@
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform and sampled channel simulation, and a documented fixed-interval byte stream. Received source data uses bounded
-storage, including a temporary spool while reception continues; permanent saves
-are explicit. No network listener or routable addressing is implemented.
+RAM storage; reception creates no temporary files or disk cache. Saves are
+explicit. No network listener or routable addressing is implemented.
 
 **Status: working reference implementation, version 0.7.2.** The audio/stream/crypto
 pipeline works end to end and has automated regression tests. This is not yet
@@ -94,7 +94,7 @@ repair interior losses and a missing final coded bit without shifting later byte
 
 For interval-coded sources, the default codec emits raw LZMA2 with a fixed 4 MiB dictionary,
 including incompressible input, then pads the final data area with zeros.
-It transmits no original size. Corrected bytes enter a bounded spool; decompression
+It transmits no original size. Corrected bytes enter a bounded memory buffer; decompression
 runs only after iterative search establishes the physical stream end. A locally
 selected uncompressed profile uses fixed validity/byte cells to preserve exact
 bytes and trailing zeros. The bundled compression library needs no runtime download.
@@ -612,7 +612,7 @@ unsupported configuration is rejected before allocation.
 Simulation CPU work does grow with the number of samples, so long integrations
 and high sample rates can take substantial time and remain cancellable.
 Explicit batch WAV operations still use `--memory-mb` and can reject recordings
-that exceed that workspace. Corrected source intervals drain to a quota-limited temporary-file spool until
+that exceed that workspace. Corrected source intervals drain to a quota-limited memory buffer until
 physical completion; it is separate from the application receive cache.
 
 ## Development and portability

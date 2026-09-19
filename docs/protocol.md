@@ -82,7 +82,7 @@ area. Padding must be shorter than one data area. Exact multiples add no extra
 all-padding interval. The LZMA2 end control is part of the source codec, never a
 modem stream-ending signal.
 
-During reception, corrected source areas enter a capped temporary-file spool.
+During reception, corrected source areas enter a capped memory buffer.
 Only after the physical end event may the application invoke LZMA2. It produces
 output incrementally under a local quota without an original-size field, requires
 the codec to end, and checks that every remaining received byte is zero and that
@@ -341,7 +341,7 @@ probability, authentication, or protection against deliberately constructed data
 
 ```text
 TX: source areas -> keyed HMAC -> fixed RS -> markers -> Data mask -> patterns
-RX: patterns -> Data unmasking -> markers/erasures -> RS -> keyed HMAC -> spool
+RX: patterns -> Data unmasking -> markers/erasures -> RS -> keyed HMAC -> memory buffer
 ```
 
 Encryption masks every marker, source, tag and parity bit at its original symbol
@@ -455,7 +455,7 @@ codec on true completion. `encode_packet`, `decode_packet`, header probes,
 only exact-bit encode/decode APIs, with no packed padding or length field.
 
 Physical candidates, marker overlap, one coded interval, erasure masks and RS
-scratch are bounded. Corrected source bytes use a capped spool until completion;
+scratch are bounded. Corrected source bytes use a capped memory buffer until completion;
 raw diagnostics retain a bounded prefix. Local output and event limits still
 matter for an indefinitely confident signal. Successfully decoded content is
 opaque data, never a received path, command or permission to execute a file.

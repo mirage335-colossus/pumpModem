@@ -15,8 +15,8 @@ using Clock=std::chrono::steady_clock;
 void check_settings(const Settings& s) {
     validate(s.profile);
     if(s.device.empty())throw Error("Select a fast audio device");
-    if(s.quota_bytes<65536||s.quota_bytes>16ULL*1024*1024*1024)
-        throw Error("Fast storage quota must be 64 KiB..16 GiB");
+    if(s.quota_bytes<65536||s.quota_bytes>256ULL*1024*1024)
+        throw Error("Fast storage quota must be 64 KiB..256 MiB");
 }
 void check_format(const Settings& s,const audio::StreamFormat& f) {
     const auto high=s.profile.carrier_hz+s.profile.symbol_rate*(1+s.profile.rolloff)/2;
@@ -52,7 +52,7 @@ struct Session::Impl {
                 audio::capture(s.profile.sample_rate,s.device,[&](std::span<const float> samples) {
                     std::lock_guard lock(queue_mutex);
                     // One second is a fixed local queue bound. Capture never
-                    // waits for DSP/disk and never silently concatenates a gap.
+                    // waits for DSP/FEC and never silently concatenates a gap.
                     if(samples.size()>s.profile.sample_rate-queued_samples) {
                         overrun=true;changed.notify_all();return false;
                     }
@@ -106,7 +106,10 @@ struct Session::Impl {
             if(end&&!result.complete)out.error=result.status;
         });
     }
-    void send(std::stop_token stop,const Settings& s,SourceReader input,bool text,std::uint64_t stream_id) {
+    void send(std::stop_token stop,const Settings& s,SourceReader input,bool text,std::uint64_t stream_id,std::uint64_t size) {
+        const auto estimate=estimate_transmission(s.profile,s.key.has_value(),size);
+        std::uint64_t generated=0;
+        update([&](auto& out){out.estimated_seconds=estimate.seconds;});
         Telemetry telemetry(s.profile,true,stream_id);
         std::uint64_t read_bytes=0;
         StreamEncoder encoder(s.profile,s.key,[&](std::span<std::uint8_t> bytes) {
@@ -128,10 +131,12 @@ struct Session::Impl {
                 count=static_cast<std::size_t>(std::min<std::uint64_t>(output.size(),silence));
                 std::fill_n(output.begin(),count,0);silence-=count;
             }
+            generated+=count;
             telemetry.record_samples(output.first(count));
             const auto diagnostics=telemetry.publish(false);
             update([&](auto& out) {
                 if(diagnostics)out.diagnostics=diagnostics;
+                out.transmit_fraction=std::min(.999,static_cast<double>(generated)/static_cast<double>(estimate.samples));
                 out.source_bytes=encoder.source_bytes();out.intervals=encoder.intervals_emitted();
                 out.status=std::string("Transmitting fast ")+(s.key?"encrypted ":"unencrypted ")+(text?"text":"file");
             });
@@ -139,6 +144,7 @@ struct Session::Impl {
         },stop,[&](const auto& format){check_format(s,format);},s.mono);
         update([&](auto& out) {
             out.status=stop.stop_requested()?"Transmission cancelled":"Transmission sent; receiver observes physical absence";
+            if(!stop.stop_requested())out.transmit_fraction=1;
             // A sender cannot claim remote reception or authentication.
             out.complete=false;
         });
@@ -165,12 +171,12 @@ struct Session::Impl {
         worker=std::jthread([this,s=std::move(s),tx,path,text=std::move(text),stream_id](std::stop_token stop) {
             try {
                 if(!tx)receive(stop,s,stream_id);
-                else if(text)send(stop,s,byte_source(Bytes(text->begin(),text->end())),true,stream_id);
+                else if(text)send(stop,s,byte_source(Bytes(text->begin(),text->end())),true,stream_id,text->size());
                 else {
                     std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
                     if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
                     if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
-                    send(stop,s,file_source(path),false,stream_id);
+                    send(stop,s,file_source(path),false,stream_id,size);
                 }
             }
             catch(const std::exception& e) {update([&](auto& out){if(!stop.stop_requested())out.error=e.what();out.status="Fast transfer incomplete";});}

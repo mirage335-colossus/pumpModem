@@ -9,7 +9,7 @@ and select a source file, then transmit. Select **Listen** on the receiving
 computer. The **Encryption** checkbox is optional and starts off; enabling it
 requires loading a key. Both peers need matching local settings, including
 encryption on/off and, when enabled, the same key material (entry names are only
-local labels). A received-text preview and Save become available only after
+local labels). Save becomes available only after
 physical completion and integrity checks. Encrypted transfers authenticate;
 unencrypted transfers only check public checksums. Existing destinations are
 never overwritten.
@@ -18,8 +18,8 @@ Text is limited to 32,768 source bytes, including UTF-8 bytes. The GUI accepts
 valid UTF-8 without NUL; files preserve arbitrary binary data. Text and files use
 exactly the same source format: no message type, text encoding tag or source
 length is sent. UTF-8, newlines and all file bytes keep their exact values.
-The completed preview is bounded to 4,096 source bytes, escapes unsafe control
-and binary bytes, and indicates truncation; Save preserves all original bytes.
+Received content is never rendered as text or binary in the GUI or CLI. Save
+preserves all original bytes; reception status shows counts and integrity only.
 Switching Text/File retains both drafts. Loading a key does not enable
 encryption; switching encryption off retains the key for later use.
 
@@ -84,7 +84,8 @@ completion. Both native backends render the same immutable plot snapshots.
 ## Channel profiles
 
 Defaults use 48 kHz samples, 20% root-raised-cosine rolloff, a 16-symbol pulse
-span, rate-1/2 convolutional coding, robust RS and interleave depth 16. The CLI
+span, rate-1/2 convolutional coding and robust RS. Interleave depth is 16 except
+for acoustic (4). The CLI
 also accepts 44.1–192 kHz sample rates. Device passband validation is separate
 from these nominal waveform settings.
 
@@ -93,7 +94,12 @@ from these nominal waveform settings.
 | `wire` | 15,000/s | 9,300 Hz | 300–18,300 Hz | 16-APSK | 120 kbit/s |
 | `ssb` | 2,000/s | 1,500 Hz | 300–2,700 Hz | 16-APSK | 16 kbit/s |
 | `fm` | 2,000/s | 1,500 Hz | 300–2,700 Hz | QPSK | 16 kbit/s |
-| `acoustic` | 6,666.667/s | 4,500 Hz | 500–8,500 Hz | QPSK | 53.333 kbit/s |
+| `acoustic` | 500/s | 1,800 Hz | 1,500–2,100 Hz | QPSK | 4 kbit/s |
+
+The acoustic preset now favors proximity speaker/microphone links: QPSK at
+500 symbols/s with a 600 Hz occupied band, output amplitude 0.35 and interleave
+depth 4 to spread short erasure bursts while limiting startup/padding waits. Both peers must use this revised
+preset; it does not match the former 6,666.667-symbol/s acoustic setting.
 
 All profiles offer QPSK and 16/64/256-APSK. These are local choices, without
 over-air rate negotiation or automatic fallback. Denser constellations require
@@ -116,6 +122,34 @@ AGC, pre/de-emphasis, clipping and sound-card response require device measuremen
 Part 97 generally prohibits encryption intended to obscure meaning, subject to
 its exceptions; the encrypted preset is not permission for an amateur-band
 transmission. [47 CFR 97.113](https://www.govinfo.gov/content/pkg/CFR-2025-title47-vol5/pdf/CFR-2025-title47-vol5-sec97-113.pdf).
+
+## Airtime, payload rate and theoretical capacity
+
+The GUI estimates airtime from the exact local source size, nine-bit source
+cells, bootstrap, complete interleave cycles, sync/pilots, pulse tail and 6.25
+seconds of end silence. Active TX percentage counts generated audio samples,
+including that silence; it stays below 100% until playback drains. Device queues
+can make audible playback lag the producer. A source file changed after inspection
+can invalidate the estimate. An empty draft estimate is an empty source transfer.
+
+The GUI exposes interleave depths 1, 4, 16 and 64. Depth 16 remains the cable/radio default (acoustic uses 4);
+64 reduces padding loss for long cable transfers at the expense of larger
+coding cycles and short-message latency. Both peers must match. At 256-APSK,
+7/8 coding and high-rate RS, the long public-data ceiling is about 53.1 kbit/s
+at depth 16 and 54.5 kbit/s at depth 64, before start/end overhead. The 120
+kbit/s gross figure is mapper capacity; markers, pilots, coding, checksums and
+nine-bit source cells consume the remainder.
+
+The GUI and `fast-info` report Shannon-Hartley capacity, `C = B log2(1 + S/N)`,
+using occupied bandwidth `B = symbol_rate × (1 + rolloff)` and an explicitly
+assumed 30 dB in-band SNR. This is an ideal Gaussian-noise capacity example,
+not measured channel SNR, a throughput promise or a model of room echoes.
+
+Both ends can independently use 44.1 or 48 kHz hardware. Audio negotiation and
+the existing bandlimited resampler bridge device and modem sample rates; local
+device sample rate is excluded from the matching integrity context. The cable
+profile's 18.3 kHz upper edge fits the 18.522 kHz conservative passband of a
+44.1/48 kHz conversion. No higher baud rate is forced on a 44.1 kHz device.
 
 ## Fixed intervals, without packets or received lengths
 
@@ -160,7 +194,7 @@ Encrypted groups contain a 16-byte IV, the fixed ciphertext source area and a
 32-byte HMAC-SHA256 tag. Public groups contain the fixed plaintext source area
 and a 32-byte SHA-256 checksum. Both use identical physical coding geometry.
 
-An interleave cycle contains `D` outer groups (`D=16` by default, CLI range
+An interleave cycle contains `D` outer groups (`D=16` for cable/radio, `D=4` for acoustic, CLI range
 1–64). Its `2D` RS rows are transmitted column-first. A K=7 convolutional code
 uses generators 0171 and 0133, with selectable rates 1/2, 3/4 or 7/8.
 The puncture pairs are `[11]`, `[11,10,01]` and
@@ -176,18 +210,27 @@ decoding bounds work and memory and limits propagation of inner-code errors.
 There is no LDPC decoder, iterative source recovery or retransmission protocol.
 
 The receiver uses matched filtering, fractional sample interpolation, marker
-timing/phase/frequency fits, carrier and timing loops, a five-tap fractionally
-spaced LMS equalizer and pilot/decision error feedback. Known-marker coherence
-independently establishes signal presence; low constellation error alone cannot
-keep a reception alive on silence or a tone. These operations are wholly within
-the Fast modem and never call regular search or symbol recovery.
+timing/phase/frequency fits, carrier and timing loops and pilot/decision error
+feedback. Cable and radio profiles retain the five-tap fractionally spaced LMS
+equalizer. Acoustic uses 21 half-symbol-spaced taps, trained over each known
+marker with bounded normalized LMS passes before payload slicing. Its raw
+marker coherence threshold is 0.55 (other profiles retain 0.72), allowing
+moderate echoes to acquire before equalization. This remains an independent
+known-marker presence check, not a constellation-error or source-validity gate.
+Acoustic QPSK allows squared decision error up to 0.7 in its tracking loop;
+the denser constellations retain their tighter cutoffs. Coherent acoustic pilots
+with high residual error downweight their group's soft evidence to 20%;
+incoherent pilots still erase it. Neither adjustment changes correction or
+integrity acceptance limits. Low constellation error alone cannot keep a
+reception alive on silence or a tone. These operations are wholly within the
+Fast modem and never call regular search or symbol recovery.
 
 Failed markers retain their timed interval positions as erasures. Trailing
 failed intervals are held as a bounded count and only delivered to the codec
 if a later marker resumes the stream. This avoids appending fictitious coded
 data during end silence. A capture overrun with unknown missing sample time
 fails the transfer instead of concatenating discontinuous audio. A separate
-capture worker and a one-second bounded queue keep disk/FEC work out of the
+capture worker and a one-second bounded queue keep FEC work out of the
 capture callback.
 
 Burst repair has finite limits determined by depth, code rate and symbol rate.
@@ -246,7 +289,7 @@ byte; the remainder of the minimum final coding cycle is zero. This preserves
 empty text/files and all leading/trailing zero bytes without transmitting a source
 length, compression header or filename. It costs one bit per source byte.
 
-Integrity-checked source areas spool privately during reception, without source
+Integrity-checked source areas accumulate in bounded RAM during reception, without source
 interpretation. Only the DSP's observed physical end enables cell interpretation
 and an explicit save handle. The invalid source cell cannot end the modem.
 Missing endpoints, extra fill cycles, nonzero fill, incomplete coding cycles,
@@ -255,11 +298,19 @@ failed authentication/checksums and storage exhaustion all leave the source inco
 Physical end requires six seconds of fully scored absence. WAV transmission
 adds 6.25 seconds of actual silence after the filter tail. EOF, cancellation,
 quota exhaustion, a valid tag or the source endpoint cannot substitute for it.
-The default 256 MiB storage quota bounds the combined plaintext and output
-spools, not just the output file: with nine-bit cells, allow about 2.125 times
-the file size plus final-cycle fill. PCM, FEC and diagnostic scratch have their
-own fixed local bounds. Files and waveforms stream without buffering their
-entire contents in RAM; text has its separate 32,768-byte local limit.
+The 256 MiB maximum receive buffer stores encoded source areas in RAM. After
+physical completion, source cells compact in place into the completed file;
+there is no second output spool. Allow 1.125 times source size plus final-cycle
+fill. PCM, FEC and diagnostic scratch have separate bounded storage. Outgoing
+files and waveforms stream; text has its separate 32,768-byte local limit.
+No temporary receive files, disk caches, autosaves or persistent receive history
+are created. FLTK file-chooser preference writes are disabled as well. Only explicit Save, CLI `--save`/`--output`, and requested keyfile
+creation write files. Operating-system swap, hibernation and crash dumps are
+outside this application-level guarantee; RAM here is not locked against paging.
+Graphics drivers may maintain their own shader caches; these are not receive buffers.
+Robust receive source storage is also now held in RAM, with a shared 256 MiB
+maximum across candidates; its physical-end and short-message rules are unchanged.
+Legacy retains its bounded text transcript in memory.
 
 There is no persistent replay database: a complete previous authenticated
 transfer can be replayed. Packet removal reduces untrusted framing complexity;
@@ -303,8 +354,10 @@ explicitly selects public mode. Invalid keys never cause a public fallback.
 manufacturing completion. `--rs robust|high-rate`, `--interleave`, `--sample-rate`, `--quota-mb`,
 `--stereo` and named/pad-backed existing keyfiles are available in the CLI.
 `fast-info` reports local geometry and selected protection without loading a key.
-Completed receive output includes a safe text preview; JSON also distinguishes
-`encrypted`, `authenticated`, `checksum_groups` and `preview_truncated`.
+Completed receive output contains metadata only; JSON distinguishes
+`encrypted`, `authenticated`, and `checksum_groups`. The former `text_preview`
+and `preview_truncated` fields and preview API have been removed. Live transmit
+progress goes to stderr; JSON includes `estimated_seconds` and `transmit_fraction`.
 Receive exit code 2
 means incomplete; unsuccessful saves report an error. No radio PTT/CAT control
 is implemented.

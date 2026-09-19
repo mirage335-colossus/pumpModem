@@ -28,12 +28,12 @@ enum class Slot {
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
-    fast_heading, fast_profile, fast_constellation, fast_coding, fast_fec, fast_device, fast_mono, fast_encryption,
+    fast_heading, fast_profile, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
     fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_source, fast_source_detail, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_listen, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
-    fast_correction, fast_auth, fast_detail, fast_preview, fast_history, fast_status,
+    fast_correction, fast_auth, fast_detail, fast_history, fast_status,
     fast_waveform, fast_waterfall, fast_constellation_plot,
-    legacy_profile, legacy_carrier, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status,
+    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -111,16 +111,17 @@ struct DesktopLayout {
         out[Slot::fast_tracking]={margin+2*(fast_column+fast_gap),688,2*fast_column+fast_gap,34};
         out[Slot::fast_correction]={margin,731,2*fast_column+fast_gap,34};
         out[Slot::fast_auth]={margin+2*(fast_column+fast_gap),731,2*fast_column+fast_gap,40};
-        out[Slot::fast_detail]={margin,777,fast_width,32};
-        out[Slot::fast_preview]={margin,838,2*fast_column+fast_gap,std::max(70,height-898)};
-        out[Slot::fast_history]={margin+2*(fast_column+fast_gap),838,2*fast_column+fast_gap,std::max(70,height-898)};
+        out[Slot::fast_depth]={margin,866,210,field_height};
+        out[Slot::fast_detail]={margin,777,fast_width,48};
+        out[Slot::fast_history]={margin+230,866,fast_width-230,std::max(42,height-926)};
         out[Slot::fast_status]={margin,height-43,fast_width,27};
         // Legacy is a separate text terminal; regular/Fast slots stay unchanged.
         out[Slot::legacy_profile]={margin,76,240,field_height};
         out[Slot::legacy_carrier]={276,76,170,field_height};
         out[Slot::legacy_transmit]={width-margin-150,75,150,action_height};
-        const int legacy_transcript_height=(height-420)*3/5;
-        const int legacy_draft_height=(height-420)-legacy_transcript_height;
+        const int legacy_transcript_height=(height-486)*3/5;
+        const int legacy_draft_height=(height-486)-legacy_transcript_height;
+        out[Slot::legacy_squelch]={margin,height-284,240,field_height};
         out[Slot::legacy_transcript]={margin,140,fast_width,legacy_transcript_height};
         out[Slot::legacy_text]={margin,170+legacy_transcript_height,fast_width,legacy_draft_height};
         out[Slot::legacy_waterfall]={margin,height-218,fast_width,166};

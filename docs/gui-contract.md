@@ -42,9 +42,10 @@ Text and encryption-off are the Fast defaults. Both source drafts and the loaded
 key survive switching those choices. Encryption-on requires a key and never
 falls back to public mode. Text uses the same source stream as files, without
 a transmitted type. Completed integrity checks and physical end are required
-before preview or saving; only keyed transfers claim authentication. A bounded,
-escaped received-text preview appears on completion, and saving retains the
-exact original bytes. Completed results retain their original protection status
+before saving; only keyed transfers claim authentication. Received bytes stay
+in bounded memory and are not previewed. Explicit Save retains the exact
+original bytes. Fast shows estimated airtime, active transmit percentage, and
+an explicitly assumed-SNR Shannon-Hartley capacity example. Completed results retain their original protection status
 when the settings for the next transfer change. Its
 regression simulator has no GUI control. Starting Fast obtains idle audio
 ownership without cancelling a pending regular reception. Active Fast work

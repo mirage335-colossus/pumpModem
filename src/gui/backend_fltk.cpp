@@ -18,6 +18,7 @@
 #include <FL/Fl_Choice.H>
 #include <FL/Fl_Double_Window.H>
 #include <FL/Fl_File_Chooser.H>
+#include <FL/Fl_Preferences.H>
 #include <FL/Fl_Group.H>
 #include <FL/Fl_Hold_Browser.H>
 #include <FL/Fl_Input.H>
@@ -645,6 +646,8 @@ struct Binding {
 class NativeApp {
 public:
     explicit NativeApp(Launch launch,std::span<const ui::Control> controls=ui::console_screen()):application(std::move(launch)),controls_(controls) {
+        // File chooser preview/favorites otherwise flush preferences to disk.
+        Fl_Preferences::file_access(Fl_Preferences::ALL_READ_OK);
         window=std::make_unique<NativeWindow>();window->size_range(ui::min_width,ui::min_height);window->begin();
         background=new Fl_Group(0,0,window->w(),window->h());background->begin();
         for(const auto& definition:ui::pages()) {

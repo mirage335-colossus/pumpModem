@@ -38,7 +38,7 @@ resolve the existing ambiguity or pad incomplete dictionary tokens into text.
 
 Received header lengths must not drive modem boundaries, memory allocation,
 acquisition or message completion. Keep fixed local geometry and bounded
-storage while receiving. Corrected source areas may spool internally, but all
+storage while receiving. Corrected source areas stay in bounded RAM (no temporary disk files), but all
 source decoding, decompression and attachment-prefix interpretation wait until
 physical completion. Even a complete codec stream or an underfilled interval
 cannot finish reception early. After physical completion, the existing source
@@ -55,7 +55,7 @@ physical completion. Simulation and recorded audio obey the same rule.
 
 Unknown slots keep their positions through masking, marker alignment and FEC.
 An unresolved interval must not disappear so its neighbors become apparently
-contiguous source input. Keep scratch, spooling and diagnostic retention bounded
+contiguous source input. Keep scratch, source buffers and diagnostic retention bounded
 without making total message length or symbol airtime a buffering prerequisite.
 
 Receiver-local differential windows do not create smaller payload symbols.

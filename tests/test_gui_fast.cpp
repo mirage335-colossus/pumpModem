@@ -2,7 +2,9 @@
 #include "fast/controller.hpp"
 #include "fast/presentation.hpp"
 #include "fast/plots.hpp"
+#include "fast/screen.hpp"
 #include "datapump/types.hpp"
+#include "datapump/fast/codec.hpp"
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -88,6 +90,9 @@ void presentation_and_retention() {
           "Hidden fast callbacks changed state or opened native services");
     app.select(mode,"fast");check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_text).text==fast_text&&app.field(F::fast_source).selected=="text",
         "Fast settings or source draft were discarded on mode switch");
+    check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
+    check(app.field(F::fast_detail).text.find("Shannon-Hartley")!=std::string::npos,"Fast capacity explanation missing");
+    app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast cable depth choice ignored");
     app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
 }
 void live_plot_presentation() {
@@ -243,15 +248,10 @@ void retained_key_and_result_presentation() {
     }
     decoder.finish(true);check(bool(decoder.result()),"Plain preview fixture failed to decode");
     fast::Snapshot snapshot;snapshot.file=decoder.result();snapshot.checksum_groups=decoder.snapshot().checksum_groups;
-    check(fast_ui::receive_preview(snapshot).size()==1,"Preview exposed bytes before physical completion");
-    snapshot.physical_complete=true;
-    check(fast_ui::receive_preview(snapshot).size()==1,"Preview exposed bytes before source validation");
-    snapshot.complete=true;
-    const auto rows=fast_ui::receive_preview(snapshot);
-    check(rows.size()>2&&rows.front().cells.front().text.find("4200 bytes")!=std::string::npos&&rows.back().cells.front().text.find("truncated")!=std::string::npos,
-          "Receive preview did not preserve source size and bounded truncation");
-    std::string preview;for(const auto& row:rows)for(const auto& cell:row.cells)preview+=cell.text;
-    check(preview.find("\\x00\\xFF")!=std::string::npos&&preview.find('\0')==std::string::npos,"Receive preview did not escape arbitrary file bytes");
+    snapshot.physical_complete=true;snapshot.complete=true;
+    check(decoder.result()->size()==source.size(),"Raw binary receive size changed");
+    for(const auto& control:fast_ui::screen())
+        check(std::string_view(control.label).find("preview")==std::string::npos,"Fast source preview surface remains");
     const auto stage=fast_ui::transfer_stage(snapshot),integrity=fast_ui::integrity_label(snapshot);
     check(stage.find("checksum verified, unauthenticated")!=std::string::npos&&integrity.find("checksum-verified")!=std::string::npos,
           "Completed plain reception was mislabeled authenticated");

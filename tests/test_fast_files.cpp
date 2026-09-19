@@ -43,7 +43,7 @@ void test_files() {
         rx_progress=true;check(!s.complete && !s.file,"WAV receive progress remains pending until physical completion");
     });
     if(!rx.complete)throw std::runtime_error("S16 WAV loopback incomplete: "+rx.status);
-    check(rx.physical_complete && rx.file && rx.file->preview()==content && rx_progress,"streamed S16 WAV exact roundtrip");
+    check(rx.physical_complete && rx.file && Bytes(rx.file->bytes().begin(),rx.file->bytes().end())==content && rx_progress,"streamed S16 WAV exact roundtrip");
     rx.file->save(destination);check(std::filesystem::file_size(destination)==content.size(),"explicit save source size");
     rejects([&]{rx.file->save(destination);},"save must exclusively create destination");
     rejects([&]{transmit_wave(settings,source,wave);},"WAV generation must exclusively create destination");
@@ -93,7 +93,7 @@ void text_wave_roundtrips() {
             check(progress.encrypted==encrypted && !progress.authenticated && !progress.complete && !progress.file,
                   "text progress retains chosen protection and withholds source");
         });
-        check(rx.complete && rx.physical_complete && rx.file && rx.file->preview()==expected,
+        check(rx.complete && rx.physical_complete && rx.file && Bytes(rx.file->bytes().begin(),rx.file->bytes().end())==expected,
               "text S16 WAV preserves UTF-8, newline and embedded zero bytes");
         check(rx.encrypted==encrypted && rx.authenticated==encrypted,
               "public text never claims authentication");
@@ -109,12 +109,12 @@ void text_wave_roundtrips() {
         const auto file_wave=directory.path/(std::string(prefix)+"-file.wav");
         transmit_wave(settings,source,file_wave);
         const auto file_rx=receive_wave(settings,file_wave);
-        check(file_rx.complete && file_rx.file && file_rx.file->preview()==expected,
+        check(file_rx.complete && file_rx.file && Bytes(file_rx.file->bytes().begin(),file_rx.file->bytes().end())==expected,
               "file and text use identical source interpretation");
         const auto empty_wave=directory.path/(std::string(prefix)+"-empty.wav");
         transmit_text_wave(settings,"",empty_wave);
         const auto empty=receive_wave(settings,empty_wave);
-        check(empty.complete && empty.file && empty.source_bytes==0 && empty.file->preview().empty(),
+        check(empty.complete && empty.file && empty.source_bytes==0 && Bytes(empty.file->bytes().begin(),empty.file->bytes().end()).empty(),
               "empty text preserves exact endpoint in both protection modes");
         const auto oversize_wave=directory.path/(std::string(prefix)+"-oversize.wav");
         rejects([&]{transmit_text_wave(settings,std::string(text_byte_limit+1,'x'),oversize_wave);},

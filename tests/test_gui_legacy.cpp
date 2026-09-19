@@ -45,6 +45,10 @@ void presentation_and_isolation() {
     app.edit(transcript,"must not modify transcript");check(app.field(F::legacy_transcript).text.empty(),"Read-only transcript accepted an edit");
     check(app.field(F::legacy_carrier).text=="1500"&&app.field(F::legacy_profile).options.size()==3,"Legacy frequency or modes are incorrect");
     check(!app.enabled(C::legacy_transmit),"Empty Legacy draft enabled TX");
+    check(app.field(F::legacy_squelch).selected=="normal","Legacy squelch default changed");
+    app.select(F::legacy_squelch,"high");
+    check(app.field(F::legacy_squelch).selected=="high","Legacy squelch selection ignored");
+    app.select(F::legacy_squelch,"normal");
     app.edit(F::legacy_text,"CQ TEST\n");app.edit(F::legacy_carrier,"1700");app.select(F::legacy_profile,"bpsk125");
     check(app.enabled(C::legacy_transmit),"Legacy text draft did not enable TX");
     app.edit(F::binary,"111");app.select(F::fec,"rs60");app.toggle(F::fast_encryption,false);app.edit(F::fast_text,"stale fast");

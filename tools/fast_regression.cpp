@@ -6,8 +6,6 @@
 #include <chrono>
 #include <cmath>
 #include <ctime>
-#include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
@@ -40,22 +38,9 @@ std::uint8_t fixture_byte(std::uint64_t index,std::uint64_t seed) {
 }
 bool equal_file(const ReceivedFile& result,std::uint64_t bytes,std::uint64_t seed) {
     if(result.size()!=bytes)return false;
-    if(bytes<=4096) {
-        const auto data=result.preview();
-        for(std::size_t i=0;i<data.size();++i)if(data[i]!=fixture_byte(i,seed))return false;
-        return true;
-    }
-    const auto path=std::filesystem::temp_directory_path()/
-        ("datapump-fast-regression-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
-    result.save(path);
-    struct Remove {std::filesystem::path path;~Remove(){std::error_code error;std::filesystem::remove(path,error);}} remove{path};
-    std::ifstream file(path,std::ios::binary);std::array<char,16384> buffer{};std::uint64_t index=0;
-    while(file) {
-        file.read(buffer.data(),buffer.size());
-        for(std::streamsize i=0;i<file.gcount();++i,++index)
-            if(static_cast<std::uint8_t>(buffer[static_cast<std::size_t>(i)])!=fixture_byte(index,seed))return false;
-    }
-    return index==bytes;
+    const auto data=result.bytes();
+    for(std::size_t i=0;i<data.size();++i)if(data[i]!=fixture_byte(i,seed))return false;
+    return true;
 }
 double equivalent_bandwidth(const Profile& p) {
     const auto sps=p.sample_rate/p.symbol_rate;

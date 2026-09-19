@@ -610,11 +610,13 @@ void exhaustive_recovery_preserves_physical_end_and_source() {
     value.recovery_options.enabled=true;value.fec=FecMode::off;
     const auto uncoded=transfer::message_wire_bits(message(17),value);
     transfer::StreamReceiver no_fec(value,value.timestamp);
+    // Received source now occupies bounded RAM. Keep the independent check
+    // that diagnostic/recovery overhead stops growing after prefix retention.
     std::size_t steady=0;
     for(std::size_t i=0;i<100;++i) {
         no_fec.push(chunk(uncoded,i*uncoded.size()));
-        if(i==9)steady=no_fec.working_bytes();
-        if(i>=10)check(no_fec.working_bytes()==steady,
+        if(i==9)steady=no_fec.working_bytes()-no_fec.source_buffer_bytes();
+        if(i>=10)check(no_fec.working_bytes()-no_fec.source_buffer_bytes()==steady,
                       "FEC-off reception must not accumulate unused recovery anchors after diagnostic retention fills");
     }
 }

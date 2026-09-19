@@ -354,6 +354,7 @@ void fast_mode_visibility() {
         }
         return nullptr;
     };
+    require(!(Fl_Preferences::file_access()&Fl_Preferences::ALL_WRITE_OK),"File chooser preferences may write implicitly");
     auto* selector=mode_choice(*window);
     auto* encryption=dynamic_cast<NativeCheckbox*>(find_button(*window,"Encryption"));
     auto* choose=find_button(*window,"Choose file…");auto* transmit=find_button(*window,"Transmit text");

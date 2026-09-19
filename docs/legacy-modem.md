@@ -96,3 +96,11 @@ sampled tests. Session tests replace hardware only, checking incremental text
 and exclusive receive/transmit ownership. The existing development-contract
 and Fast suites remain necessary to verify isolation. See
 [validation](validation.md) for the actual test runs and their limits.
+
+### Receive squelch
+
+The dropdown immediately above the waterfall offers Low, Normal and High.
+Normal preserves the previous thresholds: PSK differential confidence 0.55 and
+Olivia block confidence 0.72. Low uses 0.35/0.60; High uses 0.80/0.85. Acquisition
+and the signal-presence floor remain active at every setting. Changing squelch
+restarts idle reception; the draft and transcript remain in memory.

@@ -118,6 +118,7 @@ void text_audio_roundtrip() {
         const auto sent=tx.poll();
         check(sent.error.empty()&&sent.source_bytes==text.size()&&sent.encrypted==encrypted,
               "text audio source or encryption selection changed");
+        check(sent.estimated_seconds>6.25&&sent.transmit_fraction==1,"TX estimate and terminal progress missing");
         check(!sent.authenticated&&!sent.complete,"text TX claimed remote authentication or completion");
         std::vector<float> recorded;
         {std::lock_guard lock(fixture::mutex);recorded=std::move(fixture::output);}
@@ -128,7 +129,7 @@ void text_audio_roundtrip() {
         const auto received=rx.poll();
         check(received.complete&&received.physical_complete&&received.file&&received.error.empty(),
               "text audio reception did not observe a valid physical end");
-        check(received.file->preview()==Bytes(text.begin(),text.end()),"text audio changed UTF-8, newline or zero bytes");
+        check(Bytes(received.file->bytes().begin(),received.file->bytes().end())==Bytes(text.begin(),text.end()),"text audio changed UTF-8, newline or zero bytes");
         check(received.encrypted==encrypted&&received.authenticated==encrypted,
               "public text was labelled authenticated or encryption state lost");
         check(encrypted?(received.authenticated_groups>0&&received.checksum_groups==0):

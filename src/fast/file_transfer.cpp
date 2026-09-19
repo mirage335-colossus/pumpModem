@@ -105,24 +105,27 @@ struct Reader {
 };
 void check_settings(const Settings& s) {
     validate(s.profile);
-    if(s.quota_bytes<65536||s.quota_bytes>16ULL*1024*1024*1024)
-        throw Error("Fast storage quota must be 64 KiB..16 GiB");
+    if(s.quota_bytes<65536||s.quota_bytes>256ULL*1024*1024)
+        throw Error("Fast storage quota must be 64 KiB..256 MiB");
 }
-Snapshot transmit_source_wave(const Settings& s,SourceReader reader,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
+Snapshot transmit_source_wave(const Settings& s,SourceReader reader,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop,std::uint64_t size) {
+    const auto estimate=estimate_transmission(s.profile,s.key.has_value(),size);
+    std::uint64_t generated=0;
     std::uint64_t source_bytes=0;
     StreamEncoder codec(s.profile,s.key,[&](auto bytes){auto n=reader(bytes);if(n>s.quota_bytes-source_bytes)throw Error("Fast source exceeds local quota");source_bytes+=n;return n;});
     Transmitter modem(s.profile,[&](auto bits){return codec.next_interval(bits);});
-    Writer writer(wave,s.profile.sample_rate);std::array<float,4096> block{};Snapshot result;result.transmitting=true;result.encrypted=s.key.has_value();
+    Writer writer(wave,s.profile.sample_rate);std::array<float,4096> block{};Snapshot result;result.transmitting=true;result.encrypted=s.key.has_value();result.estimated_seconds=estimate.seconds;
     const auto start=std::chrono::steady_clock::now();
     while(!stop.stop_requested()) {
         const auto n=modem.read(block);if(!n)break;writer.write(std::span(block).first(n));
+        generated+=n;result.transmit_fraction=std::min(.999,static_cast<double>(generated)/static_cast<double>(estimate.samples));
         result.source_bytes=codec.source_bytes();result.intervals=codec.intervals_emitted();++result.revision;
         if(progress)progress(result);
     }
     if(stop.stop_requested())throw Error("Fast WAV transmission cancelled");
     block.fill(0);auto silence=static_cast<std::uint64_t>(s.profile.sample_rate)*25/4;
     while(silence){if(stop.stop_requested())throw Error("Fast WAV transmission cancelled");auto n=static_cast<std::size_t>(std::min<std::uint64_t>(silence,block.size()));writer.write(std::span(block).first(n));silence-=n;}
-    writer.finish();result.transmitting=false;result.status="Fast waveform saved with observed-silence tail";
+    writer.finish();result.transmit_fraction=1;result.transmitting=false;result.status="Fast waveform saved with observed-silence tail";
     result.elapsed_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();return result;
 }
 }
@@ -130,12 +133,12 @@ Snapshot transmit_wave(const Settings& s,const std::filesystem::path& source,con
     check_settings(s);
     if(!std::filesystem::is_regular_file(source))throw Error("Fast source must be a readable regular file");
     if(std::filesystem::file_size(source)>s.quota_bytes)throw Error("Fast source exceeds local quota");
-    return transmit_source_wave(s,file_source(source),wave,std::move(progress),stop);
+    return transmit_source_wave(s,file_source(source),wave,std::move(progress),stop,std::filesystem::file_size(source));
 }
 Snapshot transmit_text_wave(const Settings& s,const std::string& text,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
     check_settings(s);
     if(text.size()>text_byte_limit||text.size()>s.quota_bytes)throw Error("Fast text exceeds the local 32768-byte limit");
-    return transmit_source_wave(s,byte_source(Bytes(text.begin(),text.end())),wave,std::move(progress),stop);
+    return transmit_source_wave(s,byte_source(Bytes(text.begin(),text.end())),wave,std::move(progress),stop,text.size());
 }
 Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
     Reader input(wave);auto s=settings;s.profile.sample_rate=input.rate;check_settings(s);

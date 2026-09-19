@@ -28,7 +28,7 @@ Matching local settings (no negotiation or received lengths):
   --apsk 4|16|64|256                 Profile default 16 (wire/SSB), 4 (FM/acoustic)
   --code-rate 1/2|3/4|7/8            Default 1/2
   --rs robust|high-rate              Two RS(128,112) or RS(128,120) words
-  --interleave 1..64                 Default 16 outer groups
+  --interleave 1..64                 Default 16 outer groups (acoustic: 4)
   --sample-rate 44100..192000        Default 48000 Hz
   --keyfile KEY                     Enable encryption using this keyfile
   --encrypt                        Require encryption and --keyfile
@@ -88,7 +88,7 @@ Settings settings(const Args& a,bool load_key) {
     if(code=="1/2")s.profile.code_rate=CodeRate::half;else if(code=="3/4")s.profile.code_rate=CodeRate::three_quarters;else if(code=="7/8")s.profile.code_rate=CodeRate::seven_eighths;else throw Error("Fast code rate must be 1/2, 3/4 or 7/8");
     const auto rs=a.get("rs","robust");if(rs!="robust"&&rs!="high-rate")throw Error("Fast RS must be robust or high-rate");s.profile.robust=rs=="robust";
     s.device=a.get("device","default");s.mono=!a.has("stereo");
-    auto quota=a.integer("quota-mb",256);if(!quota||quota>16384)throw Error("Fast quota must be 1..16384 MiB");s.quota_bytes=quota*1024*1024;
+    auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
     validate(s.profile);
     if(encryption_enabled(a)&&load_key) {
         auto ring=load_keyring(a.get("keyfile"),a.has("pad")?std::optional<std::filesystem::path>(a.get("pad")):std::nullopt);
@@ -101,53 +101,17 @@ Settings settings(const Args& a,bool load_key) {
     }
     return s;
 }
-std::string text_preview(std::span<const std::uint8_t> bytes) {
-    std::string out;out.reserve(bytes.size());
-    constexpr char hex[]="0123456789abcdef";
-    const auto escape_byte=[&](std::uint8_t value) {out+="\\x";out+=hex[value>>4];out+=hex[value&15];};
-    for(std::size_t i=0;i<bytes.size();) {
-        const auto first=bytes[i];
-        if(first<0x80) {
-            if(first>=0x20 || first=='\n' || first=='\r' || first=='\t') {
-                if(first==0x7f)escape_byte(first);else out+=static_cast<char>(first);
-            } else escape_byte(first);
-            ++i;continue;
-        }
-        unsigned count=first>=0xc2&&first<=0xdf?2:first>=0xe0&&first<=0xef?3:first>=0xf0&&first<=0xf4?4:0;
-        std::uint32_t code=first&((1u<<(7-count))-1);
-        bool valid=count && i+count<=bytes.size();
-        for(unsigned j=1;valid&&j<count;++j) {
-            if((bytes[i+j]&0xc0)!=0x80)valid=false;
-            else code=(code<<6)|(bytes[i+j]&0x3f);
-        }
-        valid=valid && code>=(count==2?0x80u:count==3?0x800u:0x10000u)
-            && code<=0x10ffff && !(code>=0xd800&&code<=0xdfff);
-        if(!valid) {escape_byte(first);++i;continue;}
-        // Keep valid text legible while preventing terminal control and bidi
-        // formatting characters from changing surrounding CLI presentation.
-        if((code>=0x80&&code<=0x9f) || code==0x61c || code==0x200e || code==0x200f
-                || (code>=0x2028&&code<=0x202e) || (code>=0x2066&&code<=0x2069)) {
-            out+="\\u";
-            for(int shift=12;shift>=0;shift-=4)out+=hex[(code>>shift)&15];
-        } else for(unsigned j=0;j<count;++j)out+=static_cast<char>(bytes[i+j]);
-        i+=count;
-    }
-    return out;
-}
 void report(const Snapshot& s,bool json) {
-    const auto preview=s.complete&&s.file?s.file->preview():Bytes{};
-    const auto text=text_preview(preview);
-    const auto truncated=s.complete&&s.file&&s.file->size()>preview.size();
     if(json)std::cout<<"{\"complete\":"<<(s.complete?"true":"false")<<",\"physical_complete\":"<<(s.physical_complete?"true":"false")
         <<",\"cancelled\":"<<(s.cancelled?"true":"false")<<",\"source_bytes\":"<<s.source_bytes<<",\"intervals\":"<<s.intervals
         <<",\"encrypted\":"<<(s.encrypted?"true":"false")<<",\"authenticated\":"<<(s.authenticated?"true":"false")
         <<",\"authenticated_groups\":"<<s.authenticated_groups<<",\"checksum_groups\":"<<s.checksum_groups<<",\"corrected_bytes\":"<<s.corrected_bytes<<",\"erased_bytes\":"<<s.erased_bytes
-        <<",\"evm\":"<<s.evm<<",\"goodput_bps\":"<<s.goodput_bps<<",\"text_preview\":\""<<json_escape(text)<<"\",\"preview_truncated\":"<<(truncated?"true":"false")
+        <<",\"estimated_seconds\":"<<s.estimated_seconds<<",\"transmit_fraction\":"<<s.transmit_fraction
+        <<",\"evm\":"<<s.evm<<",\"goodput_bps\":"<<s.goodput_bps
         <<",\"status\":\""<<json_escape(s.status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n";
     else {
         std::cout<<s.status<<"; "<<s.source_bytes<<" source bytes, "<<s.intervals<<" fixed intervals; encryption "<<(s.encrypted?"on":"off")
             <<(s.complete?(s.authenticated?"; authenticated":"; checksum checked"):"")<<(s.error.empty()?"":"; "+s.error)<<'\n';
-        if(s.complete&&s.file)std::cout<<"Received text (escaped): \""<<json_escape(text)<<'"'<<(truncated?" [preview truncated]":"")<<'\n';
     }
 }
 }
@@ -165,6 +129,7 @@ int cli_main(int argc,char** argv) {
         const auto& p=s.profile;
         std::cout<<"{\"profile\":\""<<channel_name(p.channel)<<"\",\"sample_rate\":"<<p.sample_rate<<",\"symbol_rate\":"<<p.symbol_rate
             <<",\"carrier_hz\":"<<p.carrier_hz<<",\"occupied_bandwidth_hz\":"<<p.symbol_rate*(1+p.rolloff)<<",\"constellation\":"<<p.constellation
+            <<",\"shannon_snr_db_assumed\":30,\"shannon_capacity_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(1001.)
             <<",\"gross_bitrate\":"<<gross_bitrate(p)<<",\"physical_interval_bits\":2048,\"interval_symbols\":"<<interval_symbols(p)
             <<",\"cycle_intervals\":"<<cycle_intervals(p)<<",\"ciphertext_bytes\":"<<ciphertext_bytes(p)
             <<",\"encrypted\":"<<(encrypted?"true":"false")<<",\"source_bytes_per_group\":"<<source_bytes_per_group(p,encrypted)<<"}\n";return 0;
@@ -188,7 +153,14 @@ int cli_main(int argc,char** argv) {
         if(a.has("text"))session.transmit_text(a.get("text"));else session.transmit(a.get("input"));
     } else session.listen();
     const auto start=std::chrono::steady_clock::now();const auto seconds=a.integer("seconds",0);
+    auto last_progress=start-std::chrono::seconds(1);
     while(session.active()) {
+        const auto now=std::chrono::steady_clock::now();
+        if(command=="fast-tx"&&!a.has("json")&&now-last_progress>=std::chrono::seconds(1)) {
+            const auto current=session.poll();
+            std::cerr<<"TX "<<static_cast<int>(100*current.transmit_fraction)<<"% · estimated "<<current.estimated_seconds<<" s total\n";
+            last_progress=now;
+        }
         if(interrupted||(seconds&&std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count()>=static_cast<double>(seconds)))session.cancel();
         std::this_thread::sleep_for(std::chrono::milliseconds(25));
     }
