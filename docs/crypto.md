@@ -7,7 +7,10 @@ random generation. It implements no asymmetric cryptography or key exchange.
 The time-indexed streams below belong to regular mode and are unchanged by
 Fast. [Fast cryptography](fast-mode.md#cryptography-and-exact-source-bytes) uses
 separately derived AES-256-CBC/HMAC keys, a per-transfer random salt and fresh
-per-group IVs. It reuses the keyfile loader, never the regular epoch keystream.
+per-group IVs when encryption is enabled. It reuses the keyfile loader, never
+the regular epoch keystream. Fast encryption is optional; its public SHA-256
+checksum mode provides neither secrecy nor authentication. Both peers choose
+the same mode locally, with no automatic fallback on authentication failure.
 
 ## Time-indexed streams
 

@@ -77,6 +77,51 @@ void test_files() {
     const auto cancelled_rx=receive_wave(settings,wave,{},cancellation.get_token());
     check(cancelled_rx.cancelled && !cancelled_rx.complete && !cancelled_rx.file,"cancelled RX cannot manufacture completion");
 }
+void text_wave_roundtrips() {
+    Directory directory;Settings settings;settings.profile=profile(Channel::wire);
+    settings.profile.interleave_depth=1;settings.quota_bytes=1024*1024;
+    const std::string text=std::string("Fast text: caf\xc3\xa9\nline two")+'\0'+std::string(" tail\0",6);
+    const Bytes expected(text.begin(),text.end());
+    for(bool encrypted:{false,true}) {
+        settings.key=encrypted?std::optional<Crypto>(Crypto(Bytes(32,4))):std::nullopt;
+        const auto prefix=encrypted?"encrypted":"public";
+        const auto wave=directory.path/(std::string(prefix)+"-text.wav");
+        const auto tx=transmit_text_wave(settings,text,wave);
+        check(tx.source_bytes==expected.size() && tx.encrypted==encrypted && !tx.authenticated && !tx.complete,
+              "text TX counts bytes without claiming RX authentication/completion");
+        const auto rx=receive_wave(settings,wave,[&](const Snapshot& progress) {
+            check(progress.encrypted==encrypted && !progress.authenticated && !progress.complete && !progress.file,
+                  "text progress retains chosen protection and withholds source");
+        });
+        check(rx.complete && rx.physical_complete && rx.file && rx.file->preview()==expected,
+              "text S16 WAV preserves UTF-8, newline and embedded zero bytes");
+        check(rx.encrypted==encrypted && rx.authenticated==encrypted,
+              "public text never claims authentication");
+        check(encrypted?(rx.authenticated_groups>0 && rx.checksum_groups==0):
+                        (rx.authenticated_groups==0 && rx.checksum_groups>0),
+              "public checksum counts remain distinct from authenticated groups");
+        auto opposite=settings;
+        opposite.key=encrypted?std::nullopt:std::optional<Crypto>(Crypto(Bytes(32,4)));
+        const auto mismatch=receive_wave(opposite,wave);
+        check(!mismatch.complete && !mismatch.file && !mismatch.authenticated,
+              "opposite locally selected encryption mode must fail without fallback");
+        const auto source=directory.path/(std::string(prefix)+"-source.bin");write(source,expected);
+        const auto file_wave=directory.path/(std::string(prefix)+"-file.wav");
+        transmit_wave(settings,source,file_wave);
+        const auto file_rx=receive_wave(settings,file_wave);
+        check(file_rx.complete && file_rx.file && file_rx.file->preview()==expected,
+              "file and text use identical source interpretation");
+        const auto empty_wave=directory.path/(std::string(prefix)+"-empty.wav");
+        transmit_text_wave(settings,"",empty_wave);
+        const auto empty=receive_wave(settings,empty_wave);
+        check(empty.complete && empty.file && empty.source_bytes==0 && empty.file->preview().empty(),
+              "empty text preserves exact endpoint in both protection modes");
+        const auto oversize_wave=directory.path/(std::string(prefix)+"-oversize.wav");
+        rejects([&]{transmit_text_wave(settings,std::string(text_byte_limit+1,'x'),oversize_wave);},
+                "text local size limit rejected");
+        check(!std::filesystem::exists(oversize_wave),"oversize text rejected before creating WAV");
+    }
+}
 }
 void dense_s16_file() {
     Directory directory;
@@ -99,6 +144,6 @@ void dense_s16_file() {
           "dense S16 transfer must preserve every byte and its exact endpoint");
 }
 int main() {
-    try{test_files();dense_s16_file();std::cout<<"fast bounded local WAV/file tests passed\n";}
+    try{test_files();text_wave_roundtrips();dense_s16_file();std::cout<<"fast bounded local WAV/file tests passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

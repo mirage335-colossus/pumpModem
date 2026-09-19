@@ -1,4 +1,4 @@
-"""Fast CLI integration: real keyring, fixed intervals and physical completion."""
+"""Fast CLI text/files with optional encryption and observed physical completion."""
 import json
 import pathlib
 import shutil
@@ -23,6 +23,7 @@ class FastCLI(unittest.TestCase):
         cls.key = cls.directory / "fast.key"
         cls.source = cls.directory / "source.bin"
         cls.wave = cls.directory / "source.wav"
+        cls.plain_wave = cls.directory / "source-plain.wav"
         cls.source.write_bytes(SOURCE_BYTES)
         # One production-size keyring provides independent right/wrong keys.
         # No reduced keyfile policy or plaintext export is exposed to the CLI.
@@ -39,6 +40,12 @@ class FastCLI(unittest.TestCase):
         if transmitted.returncode:
             raise AssertionError(transmitted.stderr.decode(errors="replace"))
         cls.tx = json.loads(transmitted.stdout)
+        plain = subprocess.run(
+            [PUMP, "fast-tx", "--input", str(cls.source), "--output", str(cls.plain_wave),
+             *PROFILE, "--json"], capture_output=True, timeout=90)
+        if plain.returncode:
+            raise AssertionError(plain.stderr.decode(errors="replace"))
+        cls.plain_tx = json.loads(plain.stdout)
 
     def run_pump(self, *args, ok=True):
         result = subprocess.run([PUMP, *map(str, args)], capture_output=True, timeout=90)
@@ -54,6 +61,8 @@ class FastCLI(unittest.TestCase):
                 self.assertEqual(report["physical_interval_bits"], 2048)
                 self.assertGreater(report["cycle_intervals"], 0)
                 self.assertIn(report["ciphertext_bytes"], (176, 192))
+                self.assertFalse(report["encrypted"])
+                self.assertEqual(report["source_bytes_per_group"], 192)
                 self.assertNotIn("packet_bytes", report)
         for modulation in (4, 16, 64, 256):
             report = json.loads(self.run_pump("fast-info", "--apsk", modulation).stdout)
@@ -64,6 +73,12 @@ class FastCLI(unittest.TestCase):
             report = json.loads(self.run_pump("fast-info", "--code-rate", rate).stdout)
             cycles.append(report["cycle_intervals"])
         self.assertEqual(cycles, [33, 22, 19])
+        encrypted = json.loads(self.run_pump("fast-info", *self.key_options).stdout)
+        self.assertTrue(encrypted["encrypted"])
+        self.assertEqual(encrypted["source_bytes_per_group"], 176)
+        public = json.loads(self.run_pump("fast-info", *self.key_options, "--no-encryption", "--rs", "high-rate").stdout)
+        self.assertFalse(public["encrypted"])
+        self.assertEqual(public["source_bytes_per_group"], 208)
 
     def test_help_and_invalid_local_options(self):
         help_text = self.run_pump("fast-tx", "--help").stdout
@@ -80,12 +95,28 @@ class FastCLI(unittest.TestCase):
         self.run_pump("fast-info", "--snr", "40", ok=False)
         self.run_pump("fast-info", "--apsk", "4", "--apsk", "4", ok=False)
         self.run_pump("fast-info", "--interleave", ok=False)
-        self.run_pump("fast-tx", "--input", self.source, "--output", self.directory / "no-key.wav", ok=False)
+        self.run_pump("fast-tx", "--input", self.source, "--output", self.directory / "no-key.wav", "--encrypt", ok=False)
+        self.run_pump("fast-info", "--encrypt", ok=False)
+        self.run_pump("fast-info", "--encrypt", "--no-encryption", *self.key_options, ok=False)
+        self.run_pump("fast-info", "--key-name", "Fast", ok=False)
+        self.run_pump("fast-info", "--pad", self.directory / "orphan.pad", ok=False)
+        ignored = json.loads(self.run_pump("fast-info", "--no-encryption", "--key-name", "ignored",
+                                         "--pad", self.directory / "ignored.pad").stdout)
+        self.assertFalse(ignored["encrypted"])
+        self.run_pump("fast-tx", "--text", "one", "--input", self.source,
+                      "--output", self.directory / "two-sources.wav", ok=False)
+        self.run_pump("fast-tx", "--output", self.directory / "no-source.wav", ok=False)
+        self.run_pump("fast-rx", "--input", self.wave, "--text", "invalid", ok=False)
+        self.run_pump("fast-tx", "--text", "x" * 32769,
+                      "--output", self.directory / "too-large.wav", ok=False)
+        self.run_pump("fast-tx", "--text", "é" * 16385,
+                      "--output", self.directory / "utf8-too-large.wav", ok=False)
 
     def test_streamed_encrypted_wav_and_explicit_save(self):
         self.assertGreaterEqual(self.key.stat().st_size, 128 * 1024 * 1024)
         self.assertEqual(self.tx["source_bytes"], len(SOURCE_BYTES))
         self.assertFalse(self.tx["complete"])
+        self.assertTrue(self.tx["encrypted"])
         destination = self.directory / "received.bin"
         result = json.loads(self.run_pump("fast-rx", "--input", self.wave,
             "--save", destination, *self.key_options, *PROFILE, "--json").stdout)
@@ -95,7 +126,84 @@ class FastCLI(unittest.TestCase):
         self.assertEqual(result["source_bytes"], len(SOURCE_BYTES))
         self.assertEqual(destination.read_bytes(), SOURCE_BYTES)
         self.assertGreater(result["authenticated_groups"], 0)
+        self.assertTrue(result["encrypted"])
+        self.assertTrue(result["authenticated"])
+        self.assertEqual(result["checksum_groups"], 0)
+        self.assertIn("\\xff", result["text_preview"])
+        self.assertFalse(result["preview_truncated"])
         self.assertGreater(result["intervals"], 0)
+
+    def test_plaintext_file_and_ignored_key_options(self):
+        self.assertFalse(self.plain_tx["encrypted"])
+        destination = self.directory / "received-plain.bin"
+        result = json.loads(self.run_pump("fast-rx", "--input", self.plain_wave,
+            "--save", destination, "--no-encryption", "--keyfile", self.directory / "does-not-exist.key",
+            "--key-name", "ignored", "--pad", self.directory / "does-not-exist.pad",
+            *PROFILE, "--json").stdout)
+        self.assertTrue(result["physical_complete"])
+        self.assertTrue(result["complete"])
+        self.assertFalse(result["encrypted"])
+        self.assertFalse(result["authenticated"])
+        self.assertEqual(result["authenticated_groups"], 0)
+        self.assertGreater(result["checksum_groups"], 0)
+        self.assertEqual(destination.read_bytes(), SOURCE_BYTES)
+        human = self.run_pump("fast-rx", "--input", self.plain_wave, *PROFILE).stdout
+        human.decode("utf-8")  # Invalid source bytes must not corrupt console text.
+        self.assertNotIn(b"\x1b", human)
+        self.assertNotIn(b"\xff", human)
+        self.assertIn(b"\\x1b", human)
+
+    def test_text_utf8_newlines_and_empty_text_in_both_modes(self):
+        for encrypted in (False, True):
+            options = (*self.key_options, "--encrypt") if encrypted else ()
+            for index, text in enumerate(("Hello, pump!\nΚαλημέρα\t世界 🙂\n", "")):
+                with self.subTest(encrypted=encrypted, text=text):
+                    wave = self.directory / f"text-{encrypted}-{index}.wav"
+                    destination = self.directory / f"text-{encrypted}-{index}.txt"
+                    tx = json.loads(self.run_pump("fast-tx", "--text", text,
+                        "--output", wave, *options, *PROFILE, "--json").stdout)
+                    self.assertEqual(tx["source_bytes"], len(text.encode("utf-8")))
+                    self.assertEqual(tx["encrypted"], encrypted)
+                    result = json.loads(self.run_pump("fast-rx", "--input", wave,
+                        "--save", destination, *options, *PROFILE, "--json").stdout)
+                    self.assertTrue(result["complete"])
+                    self.assertEqual(result["authenticated"], encrypted)
+                    self.assertEqual(result["encrypted"], encrypted)
+                    self.assertEqual(result["text_preview"], text)
+                    self.assertFalse(result["preview_truncated"])
+                    self.assertEqual(destination.read_bytes(), text.encode("utf-8"))
+        plain_text = self.directory / "text-False-0.wav"
+        human = self.run_pump("fast-rx", "--input", plain_text, *PROFILE).stdout.decode("utf-8")
+        self.assertIn("Received text (escaped):", human)
+        self.assertIn("Hello, pump!\\n", human)
+        self.assertIn("encryption off", human)
+        self.assertIn("checksum", human.lower())
+        self.assertNotIn("; authenticated", human)
+
+    def test_explicit_plaintext_tx_and_bounded_preview(self):
+        text = "x" * 4095 + "🙂 trailing text\n"
+        wave = self.directory / "long-text.wav"
+        tx = json.loads(self.run_pump("fast-tx", "--text", text, "--output", wave,
+            "--no-encryption", "--keyfile", self.directory / "missing.key", *PROFILE, "--json").stdout)
+        self.assertFalse(tx["encrypted"])
+        result = json.loads(self.run_pump("fast-rx", "--input", wave, *PROFILE, "--json").stdout)
+        self.assertTrue(result["complete"])
+        self.assertTrue(result["preview_truncated"])
+        self.assertTrue(result["text_preview"].startswith("x" * 4095))
+        self.assertLessEqual(len(result["text_preview"]), 4099)
+
+    def test_encryption_mismatch_never_falls_back(self):
+        for wave, options, name in (
+            (self.wave, (), "encrypted-as-plain"),
+            (self.plain_wave, self.key_options, "plain-as-encrypted"),
+        ):
+            destination = self.directory / (name + ".bin")
+            result = json.loads(self.run_pump("fast-rx", "--input", wave, "--save", destination,
+                *options, *PROFILE, "--json", ok=False).stdout)
+            self.assertFalse(result["complete"])
+            self.assertFalse(result["authenticated"])
+            self.assertEqual(result["text_preview"], "")
+            self.assertFalse(destination.exists())
 
     def test_wrong_key_never_saves(self):
         destination = self.directory / "wrong-key.bin"
@@ -103,42 +211,51 @@ class FastCLI(unittest.TestCase):
             "--keyfile", self.key, "--key-name", "Other", "--save", destination,
             *PROFILE, "--json", ok=False).stdout)
         self.assertFalse(result["complete"])
+        self.assertFalse(result["authenticated"])
         self.assertEqual(result["source_bytes"], 0)
         self.assertFalse(destination.exists())
 
     def test_valid_container_eof_does_not_complete(self):
-        path = self.directory / "no-absence.wav"
-        shutil.copyfile(self.wave, path)
-        with path.open("r+b") as file:
-            header = file.read(44)
-            self.assertEqual(header[:4], b"RIFF")
-            self.assertEqual(header[36:40], b"data")
-            rate = struct.unpack_from("<I", header, 24)[0]
-            source_size = struct.unpack_from("<I", header, 40)[0]
-            retained = source_size - rate * 6 * 2  # leave only 0.25s silence
-            self.assertGreater(retained, 0)
-            file.truncate(44 + retained)
-            file.seek(4)
-            file.write(struct.pack("<I", 36 + retained))
-            file.seek(40)
-            file.write(struct.pack("<I", retained))
-        destination = self.directory / "incomplete.bin"
-        result = json.loads(self.run_pump("fast-rx", "--input", path, "--save", destination,
-            *self.key_options, *PROFILE, "--json", ok=False).stdout)
-        self.assertFalse(result["physical_complete"])
-        self.assertFalse(result["complete"])
-        self.assertFalse(destination.exists())
+        for encrypted in (False, True):
+            path = self.directory / f"no-absence-{encrypted}.wav"
+            shutil.copyfile(self.wave if encrypted else self.plain_wave, path)
+            with path.open("r+b") as file:
+                header = file.read(44)
+                self.assertEqual(header[:4], b"RIFF")
+                self.assertEqual(header[36:40], b"data")
+                rate = struct.unpack_from("<I", header, 24)[0]
+                source_size = struct.unpack_from("<I", header, 40)[0]
+                retained = source_size - rate * 6 * 2  # leave only 0.25s silence
+                self.assertGreater(retained, 0)
+                file.truncate(44 + retained)
+                file.seek(4)
+                file.write(struct.pack("<I", 36 + retained))
+                file.seek(40)
+                file.write(struct.pack("<I", retained))
+            destination = self.directory / f"incomplete-{encrypted}.bin"
+            options = self.key_options if encrypted else ()
+            result = json.loads(self.run_pump("fast-rx", "--input", path, "--save", destination,
+                *options, *PROFILE, "--json", ok=False).stdout)
+            self.assertFalse(result["physical_complete"])
+            self.assertFalse(result["complete"])
+            self.assertFalse(result["authenticated"])
+            self.assertEqual(result["text_preview"], "")
+            self.assertFalse(destination.exists())
 
     def test_never_overwrite_outputs(self):
         destination = self.directory / "keep.bin"
         destination.write_bytes(b"keep existing file")
-        self.run_pump("fast-rx", "--input", self.wave, "--save", destination,
-            *self.key_options, *PROFILE, ok=False)
-        self.assertEqual(destination.read_bytes(), b"keep existing file")
-        size = self.wave.stat().st_size
-        self.run_pump("fast-tx", "--input", self.source, "--output", self.wave,
-            *self.key_options, *PROFILE, ok=False)
-        self.assertEqual(self.wave.stat().st_size, size)
+        for wave, options in ((self.wave, self.key_options), (self.plain_wave, ())):
+            self.run_pump("fast-rx", "--input", wave, "--save", destination,
+                *options, *PROFILE, ok=False)
+            self.assertEqual(destination.read_bytes(), b"keep existing file")
+            contents = wave.read_bytes()
+            self.run_pump("fast-tx", "--input", self.source, "--output", wave,
+                *options, *PROFILE, ok=False)
+            self.assertEqual(wave.read_bytes(), contents)
+            self.run_pump("fast-tx", "--text", "do not overwrite", "--output", wave,
+                *options, *PROFILE, ok=False)
+            self.assertEqual(wave.read_bytes(), contents)
 
 
 if __name__ == "__main__":

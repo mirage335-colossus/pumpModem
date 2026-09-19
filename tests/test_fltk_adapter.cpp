@@ -346,9 +346,18 @@ void fast_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=Fl::first_window();require(window,"Fast fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Fast"));
-    auto* choose=find_button(*window,"Choose file…");auto* transmit=find_button(*window,"Transmit file");
+    auto* encryption=dynamic_cast<NativeCheckbox*>(find_button(*window,"Encryption"));
+    auto* choose=find_button(*window,"Choose file…");auto* transmit=find_button(*window,"Transmit text");
     auto* listen=find_button(*window,"Listen");auto* regular=find_button(*window,"Transmit");
-    require(toggle&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    const auto field_widget=[&]<class Widget>(const char* label) -> Widget* {
+        auto* heading=find_label(*window,label);if(!heading)return nullptr;
+        for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
+        return nullptr;
+    };
+    auto* source=field_widget.template operator()<NativeChoice>("Source");
+    auto* text=field_widget.template operator()<NativeEditor>("Text");
+    auto* file=field_widget.template operator()<NativeInput>("Source file");
+    require(toggle&&encryption&&source&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
         while(Clock::now()<until)Fl::wait(.005);
@@ -358,20 +367,32 @@ void fast_mode_visibility() {
     for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);refresh();
         toggle->value(1);toggle->do_callback();refresh();
-        require(app.application.field(ui::Field::fast_mode).checked&&toggle->visible_r()&&choose->visible_r()&&
-            transmit->visible_r()&&listen->visible_r()&&!listen->active_r()&&!regular->visible_r(),
-            "Fast click did not replace the native interface or enforce its encryption gate");
+        require(app.application.field(ui::Field::fast_mode).checked&&toggle->visible_r()&&!choose->visible_r()&&text->visible_r()&&
+            transmit->visible_r()&&listen->visible_r()&&listen->active_r()&&!encryption->value()&&!regular->visible_r(),
+            "Fast click did not show the default plain-text interface");
+        text->changed("Native fast café\nSecond line");refresh();
+        require(transmit->active_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line","Fast native text composer did not preserve UTF-8/newline input");
+        encryption->value(1);encryption->do_callback();refresh();
+        require(!listen->active_r()&&!transmit->active_r(),"Fast encrypted native actions accepted a missing key");
+        encryption->value(0);encryption->do_callback();refresh();
+        source->picked(source->menu()+1);refresh();
+        require(!text->visible_r()&&choose->visible_r()&&file->visible_r()&&std::string(transmit->label())=="Transmit file",
+            "Fast native source choice did not replace the text composer");
+        file->value("/tmp/native-fast-source.bin");file->do_callback();refresh();
+        source->picked(source->menu());refresh();
+        require(text->visible_r()&&!choose->visible_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line"&&
+            app.application.field(ui::Field::fast_file).text=="/tmp/native-fast-source.bin"&&std::string(transmit->label())=="Transmit text",
+            "Fast native source switching changed independent drafts");
         for(const auto& page:ui::pages())require(!find_button(*window,page.title)->visible_r(),"Fast view retained a regular native tab");
-        require(choose->x()+choose->w()<=window->w()&&choose->y()+choose->h()<=window->h(),"Fast native file control escaped the viewport");
+        require(text->x()+text->w()<=window->w()&&text->y()+text->h()<=window->h(),"Fast native composer escaped the viewport");
         const auto draft=app.application.field(ui::Field::binary).text;
         regular->do_callback();refresh();
         require(app.application.field(ui::Field::binary).text==draft,"Hidden regular native action changed its exact draft");
-        // Render the entire replacement surface with the native drawing path.
         Fl_Image_Surface surface(window->w(),window->h());Fl_Surface_Device::push_current(&surface);
         surface.draw(window);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
         require(image&&image->w()==window->w()&&image->h()==window->h(),"Fast native surface failed to render");
         toggle->value(0);toggle->do_callback();refresh();
-        require(!choose->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
+        require(!choose->visible_r()&&!text->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
             "Returning from Fast did not restore the native regular interface and source");
         choose->do_callback();require(app.application.take_services().empty(),"Hidden fast native callback opened a file chooser");
     }

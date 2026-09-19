@@ -13,20 +13,24 @@ bool owns(Field field) {return field>=Field::fast_profile&&field<=Field::fast_hi
 bool owns(Command command) {return command>=Command::fast_open_key&&command<=Command::fast_save;}
 const std::vector<Control>& screen() {
     static const std::vector<Control> controls{
-        placed(Kind::label,Field::count,Command::none,"FAST FILE TRANSFER\nEncrypted APSK · fixed 256-byte alignment intervals",Slot::fast_heading),
+        placed(Kind::label,Field::count,Command::none,"FAST TRANSFER\nAPSK · fixed 256-byte alignment intervals",Slot::fast_heading),
         placed(Kind::choice,Field::fast_profile,Command::none,"Channel profile",Slot::fast_profile,"Both ends must use identical local profile, constellation and coding selections."),
         placed(Kind::choice,Field::fast_constellation,Command::none,"Constellation",Slot::fast_constellation,"Denser APSK requires a cleaner, more linear audio path."),
         placed(Kind::choice,Field::fast_coding,Command::none,"Inner convolutional code",Slot::fast_coding),
         placed(Kind::choice,Field::fast_fec,Command::none,"Interleaved Reed–Solomon",Slot::fast_fec),
         placed(Kind::text,Field::fast_device,Command::none,"Audio device",Slot::fast_device),
         placed(Kind::toggle,Field::fast_mono,Command::none,"Right channel / mono",Slot::fast_mono),
+        placed(Kind::toggle,Field::fast_encryption,Command::none,"Encryption",Slot::fast_encryption,"Off sends public data with a checksum. On requires matching keys at both ends; there is no fallback."),
         placed(Kind::choice,Field::fast_key,Command::none,"Encryption key entry",Slot::fast_key),
         placed(Kind::action,Field::count,Command::fast_open_key,"Open keyfile…",Slot::fast_open_key),
         placed(Kind::action,Field::count,Command::fast_generate_key,"Generate keyfile…",Slot::fast_generate_key),
         placed(Kind::label,Field::fast_key_path,Command::none,"",Slot::fast_key_path),
+        placed(Kind::choice,Field::fast_source,Command::none,"Source",Slot::fast_source),
+        placed(Kind::label,Field::fast_source_detail,Command::none,"",Slot::fast_source_detail),
+        [] {auto c=placed(Kind::text,Field::fast_text,Command::none,"Text",Slot::fast_text,"Exact UTF-8 bytes, up to 32,768 bytes. Enter inserts a newline.");c.multiline=true;c.tab_navigation=true;return c;}(),
         placed(Kind::text,Field::fast_file,Command::none,"Source file",Slot::fast_file),
-        placed(Kind::action,Field::count,Command::fast_choose_file,"Choose file…",Slot::fast_choose_file),
-        placed(Kind::action,Field::count,Command::fast_transmit,"Transmit file",Slot::fast_transmit),
+        placed(Kind::action,Field::fast_file,Command::fast_choose_file,"Choose file…",Slot::fast_choose_file),
+        placed(Kind::action,Field::count,Command::fast_transmit,"Transmit text",Slot::fast_transmit),
         placed(Kind::action,Field::count,Command::fast_listen,"Listen",Slot::fast_listen),
         placed(Kind::action,Field::count,Command::fast_cancel,"Cancel",Slot::fast_cancel),
         placed(Kind::action,Field::count,Command::fast_save,"Save received file…",Slot::fast_save),
@@ -36,6 +40,7 @@ const std::vector<Control>& screen() {
         placed(Kind::label,Field::fast_correction,Command::none,"",Slot::fast_correction),
         placed(Kind::label,Field::fast_auth,Command::none,"",Slot::fast_auth),
         placed(Kind::label,Field::fast_detail,Command::none,"",Slot::fast_detail),
+        placed(Kind::list,Field::fast_preview,Command::none,"Completed receive preview · up to 4096 bytes",Slot::fast_preview),
         placed(Kind::list,Field::fast_history,Command::none,"Transfer history",Slot::fast_history),
         placed(Kind::label,Field::fast_status,Command::none,"",Slot::fast_status)
     };

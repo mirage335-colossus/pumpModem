@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <fstream>
 #include <limits>
+#include <utility>
 
 namespace datapump::fast {
 namespace {
@@ -102,16 +103,16 @@ struct Reader {
         return frames;
     }
 };
-void require_key(const Settings& s) {validate(s.profile);if(!s.key)throw Error("Fast mode requires an encryption key");if(s.quota_bytes<65536)throw Error("Fast quota is too small");}
+void check_settings(const Settings& s) {
+    validate(s.profile);
+    if(s.quota_bytes<65536||s.quota_bytes>16ULL*1024*1024*1024)
+        throw Error("Fast storage quota must be 64 KiB..16 GiB");
 }
-Snapshot transmit_wave(const Settings& s,const std::filesystem::path& source,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
-    require_key(s);
-    if(!std::filesystem::is_regular_file(source))throw Error("Fast source must be a readable regular file");
-    if(std::filesystem::file_size(source)>s.quota_bytes)throw Error("Fast source exceeds local quota");
-    auto reader=file_source(source);std::uint64_t source_bytes=0;
-    StreamEncoder codec(s.profile,*s.key,[&](auto bytes){auto n=reader(bytes);if(n>s.quota_bytes-source_bytes)throw Error("Fast source exceeds local quota");source_bytes+=n;return n;});
+Snapshot transmit_source_wave(const Settings& s,SourceReader reader,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
+    std::uint64_t source_bytes=0;
+    StreamEncoder codec(s.profile,s.key,[&](auto bytes){auto n=reader(bytes);if(n>s.quota_bytes-source_bytes)throw Error("Fast source exceeds local quota");source_bytes+=n;return n;});
     Transmitter modem(s.profile,[&](auto bits){return codec.next_interval(bits);});
-    Writer writer(wave,s.profile.sample_rate);std::array<float,4096> block{};Snapshot result;result.transmitting=true;
+    Writer writer(wave,s.profile.sample_rate);std::array<float,4096> block{};Snapshot result;result.transmitting=true;result.encrypted=s.key.has_value();
     const auto start=std::chrono::steady_clock::now();
     while(!stop.stop_requested()) {
         const auto n=modem.read(block);if(!n)break;writer.write(std::span(block).first(n));
@@ -124,20 +125,38 @@ Snapshot transmit_wave(const Settings& s,const std::filesystem::path& source,con
     writer.finish();result.transmitting=false;result.status="Fast waveform saved with observed-silence tail";
     result.elapsed_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();return result;
 }
+}
+Snapshot transmit_wave(const Settings& s,const std::filesystem::path& source,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
+    check_settings(s);
+    if(!std::filesystem::is_regular_file(source))throw Error("Fast source must be a readable regular file");
+    if(std::filesystem::file_size(source)>s.quota_bytes)throw Error("Fast source exceeds local quota");
+    return transmit_source_wave(s,file_source(source),wave,std::move(progress),stop);
+}
+Snapshot transmit_text_wave(const Settings& s,const std::string& text,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
+    check_settings(s);
+    if(text.size()>text_byte_limit||text.size()>s.quota_bytes)throw Error("Fast text exceeds the local 32768-byte limit");
+    return transmit_source_wave(s,byte_source(Bytes(text.begin(),text.end())),wave,std::move(progress),stop);
+}
 Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
-    Reader input(wave);auto s=settings;s.profile.sample_rate=input.rate;require_key(s);
-    StreamDecoder codec(s.profile,*s.key,s.quota_bytes);Receiver modem(s.profile,[&](auto bits){codec.push_interval(bits);});
-    Snapshot result;result.listening=true;std::array<float,4096> block{};std::uint64_t samples=0;
+    Reader input(wave);auto s=settings;s.profile.sample_rate=input.rate;check_settings(s);
+    StreamDecoder codec(s.profile,s.key,s.quota_bytes);Receiver modem(s.profile,[&](auto bits){codec.push_interval(bits);});
+    Snapshot result;result.listening=true;result.encrypted=s.key.has_value();std::array<float,4096> block{};std::uint64_t samples=0;
     while(!stop.stop_requested()) {
         const auto n=input.read(block,s.mono);if(!n)break;modem.push(std::span(block).first(n));samples+=n;
         auto c=codec.snapshot();const auto& d=modem.progress();result.intervals=c.intervals;result.authenticated_groups=c.authenticated_groups;
+        result.checksum_groups=c.checksum_groups;
         result.corrected_bytes=c.corrected_bytes;result.erased_bytes=c.erased_bytes;result.evm=d.evm;result.status=c.status;++result.revision;
         if(progress)progress(result);
         if(d.physical_complete)break;
     }
     modem.finish();result.physical_complete=!stop.stop_requested()&&modem.progress().physical_complete;
     codec.finish(result.physical_complete);const auto c=codec.snapshot();result.complete=c.complete;result.file=codec.result();result.source_bytes=c.source_bytes;
+    result.encrypted=c.encrypted;result.authenticated=c.authenticated;result.authenticated_groups=c.authenticated_groups;result.checksum_groups=c.checksum_groups;
     result.cancelled=stop.stop_requested();result.status=c.status;result.listening=false;
+    if(result.cancelled) {
+        result.complete=false;result.authenticated=false;result.file.reset();
+        result.status="Cancelled; transfer incomplete";
+    }
     result.elapsed_seconds=static_cast<double>(samples)/input.rate;
     result.goodput_bps=result.elapsed_seconds>0?8.*static_cast<double>(result.source_bytes)/result.elapsed_seconds:0;
     if(!result.complete)result.error=result.status;

@@ -39,7 +39,7 @@ struct Session::Impl {
         ++current.revision;
     }
     void receive(std::stop_token stop,const Settings& s) {
-        StreamDecoder decoder(s.profile,*s.key,s.quota_bytes);
+        StreamDecoder decoder(s.profile,s.key,s.quota_bytes);
         Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);});
         std::mutex queue_mutex;std::condition_variable_any changed;
         std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
@@ -80,9 +80,10 @@ struct Session::Impl {
             const auto dsp=receiver.progress();const auto coding=decoder.snapshot();
             update([&](auto& out) {
                 out.intervals=coding.intervals;out.authenticated_groups=coding.authenticated_groups;
+                out.checksum_groups=coding.checksum_groups;
                 out.corrected_bytes=coding.corrected_bytes;out.erased_bytes=coding.erased_bytes;
                 out.evm=dsp.evm;out.carrier_error_hz=dsp.carrier_error_hz;out.clock_error_ppm=dsp.clock_error_ppm;
-                out.status=dsp.acquired?"Receiving fast stream; file pending":"Listening for fast APSK training";
+                out.status=dsp.acquired?"Receiving fast stream; content pending":"Listening for fast APSK training";
             });
             if(dsp.physical_complete)break;
         }
@@ -93,16 +94,15 @@ struct Session::Impl {
         const auto result=decoder.snapshot();
         update([&](auto& out) {
             out.physical_complete=end;out.complete=result.complete;out.source_bytes=result.source_bytes;
+            out.encrypted=result.encrypted;out.authenticated=result.authenticated;
+            out.authenticated_groups=result.authenticated_groups;out.checksum_groups=result.checksum_groups;
             out.file=decoder.result();out.status=result.status;
             if(end&&!result.complete)out.error=result.status;
         });
     }
-    void send(std::stop_token stop,const Settings& s,const std::filesystem::path& path) {
-        std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
-        if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
-        if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
-        auto input=file_source(path);std::uint64_t read_bytes=0;
-        StreamEncoder encoder(s.profile,*s.key,[&](std::span<std::uint8_t> bytes) {
+    void send(std::stop_token stop,const Settings& s,SourceReader input,bool text) {
+        std::uint64_t read_bytes=0;
+        StreamEncoder encoder(s.profile,s.key,[&](std::span<std::uint8_t> bytes) {
             const auto count=input(bytes);
             if(count>s.quota_bytes-read_bytes)throw Error("Fast source grew beyond local storage quota");
             read_bytes+=count;return count;
@@ -123,7 +123,7 @@ struct Session::Impl {
             }
             update([&](auto& out) {
                 out.source_bytes=encoder.source_bytes();out.intervals=encoder.intervals_emitted();
-                out.status="Transmitting fast encrypted file";
+                out.status=std::string("Transmitting fast ")+(s.key?"encrypted ":"unencrypted ")+(text?"text":"file");
             });
             return count;
         },stop,[&](const auto& format){check_format(s,format);},s.mono);
@@ -133,25 +133,37 @@ struct Session::Impl {
             out.complete=false;
         });
     }
-    void launch(bool tx,const std::filesystem::path& path={}) {
+    void launch(bool tx,const std::filesystem::path& path={},std::optional<std::string> text={}) {
         Settings s;
         {
             std::lock_guard lock(mutex);
             if(closing)throw Error("Fast session is closing");
             if(current.active)throw Error("Fast audio is already active");
-            check_settings(settings);if(!settings.key)throw Error("Fast mode requires an encryption key");
+            check_settings(settings);
+            if(text&&(text->size()>text_byte_limit||text->size()>settings.quota_bytes))
+                throw Error("Fast text exceeds the local 32768-byte limit");
             s=settings;
             const auto revision=current.revision+1;current={};current.revision=revision;
             current.active=true;current.transmitting=tx;current.listening=!tx;
-            current.status=tx?"Preparing fast file transmission":"Opening fast audio input";started=Clock::now();
+            current.encrypted=s.key.has_value();
+            current.status=tx?"Preparing fast transmission":"Opening fast audio input";started=Clock::now();
         }
         if(worker.joinable())worker.join();
-        worker=std::jthread([this,s=std::move(s),tx,path](std::stop_token stop) {
-            try {if(tx)send(stop,s,path);else receive(stop,s);}
+        worker=std::jthread([this,s=std::move(s),tx,path,text=std::move(text)](std::stop_token stop) {
+            try {
+                if(!tx)receive(stop,s);
+                else if(text)send(stop,s,byte_source(Bytes(text->begin(),text->end())),true);
+                else {
+                    std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
+                    if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
+                    if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
+                    send(stop,s,file_source(path),false);
+                }
+            }
             catch(const std::exception& e) {update([&](auto& out){if(!stop.stop_requested())out.error=e.what();out.status="Fast transfer incomplete";});}
             update([&](auto& out) {
                 out.cancelled=stop.stop_requested();
-                if(out.cancelled){out.complete=false;out.file.reset();out.status="Cancelled; transfer incomplete";}
+                if(out.cancelled){out.complete=false;out.authenticated=false;out.file.reset();out.status="Cancelled; transfer incomplete";}
                 out.active=false;out.transmitting=false;out.listening=false;
             });
         });
@@ -165,6 +177,10 @@ void Session::configure(const Settings& s) {
     impl_->settings=s;
 }
 void Session::transmit(const std::filesystem::path& source){impl_->launch(true,source);}
+void Session::transmit_text(const std::string& text) {
+    if(text.size()>text_byte_limit)throw Error("Fast text exceeds the local 32768-byte limit");
+    impl_->launch(true,{},text);
+}
 void Session::listen(){impl_->launch(false);}
 void Session::cancel(){impl_->worker.request_stop();}
 Snapshot Session::poll() const {std::lock_guard lock(impl_->mutex);return impl_->current;}

@@ -34,9 +34,17 @@ pending reception continues to be polled while hidden. Hidden controls cannot
 dispatch edits/actions; asynchronous native service replies retain their owner
 and mode generation and are cancelled if stale.
 
-Fast exposes file, key, channel, constellation, convolutional and RS settings,
-audio routing, transmit/listen/cancel/save and transfer metrics/history.
-Completed authentication and physical end are required before saving. Its
+Fast exposes a Text/File source choice, multiline text draft, file selection,
+optional Encryption toggle, key, channel, constellation, convolutional and RS
+settings, audio routing, transmit/listen/cancel/save and transfer metrics/history.
+Text and encryption-off are the Fast defaults. Both source drafts and the loaded
+key survive switching those choices. Encryption-on requires a key and never
+falls back to public mode. Text uses the same source stream as files, without
+a transmitted type. Completed integrity checks and physical end are required
+before preview or saving; only keyed transfers claim authentication. A bounded,
+escaped received-text preview appears on completion, and saving retains the
+exact original bytes. Completed results retain their original protection status
+when the settings for the next transfer change. Its
 regression simulator has no GUI control. Starting Fast obtains idle audio
 ownership without cancelling a pending regular reception. Active Fast work
 continues if the view changes back, with regular controls disabled until it

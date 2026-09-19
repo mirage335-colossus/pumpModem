@@ -18,6 +18,7 @@ public:
     void toggle(ui::Field,bool);
     void activate(ui::Command);
     bool enabled(ui::Command) const;
+    std::string command_label(ui::Command) const;
     const ui::FieldState& field(ui::Field) const;
     void complete_service(ui::ServiceResult);
     std::vector<ui::ServiceRequest> take_services();

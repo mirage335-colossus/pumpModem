@@ -1,4 +1,5 @@
 #include "datapump/fast/session.hpp"
+#include "datapump/fast/codec.hpp"
 #include "datapump/live.hpp"
 #include "datapump/audio.hpp"
 #include <atomic>
@@ -14,10 +15,11 @@ namespace fixture {
 std::atomic<unsigned> opened=0,active=0,played=0;
 std::mutex mutex;
 std::vector<float> input;
+std::vector<float> output;
 std::size_t offset=0;
-bool hold=false;
-void reset(std::vector<float> samples={},bool pause=false) {
-    std::lock_guard lock(mutex);input=std::move(samples);offset=0;hold=pause;
+bool hold=false,record=false;
+void reset(std::vector<float> samples={},bool pause=false,bool record_output=false) {
+    std::lock_guard lock(mutex);input=std::move(samples);offset=0;hold=pause;record=record_output;output.clear();
 }
 }
 // Device fixture replaces hardware symbols only in this executable. It never
@@ -43,7 +45,11 @@ void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& sour
     ++fixture::active;struct Done {~Done(){--fixture::active;}} done;
     if(format)format({rate,rate,rate*.49,4096});
     std::vector<float> block(rate/20);
-    while(!stop.stop_requested()) {auto n=source(block);if(!n)break;++fixture::played;std::this_thread::sleep_for(3ms);}
+    while(!stop.stop_requested()) {
+        auto n=source(block);if(!n)break;++fixture::played;
+        {std::lock_guard lock(fixture::mutex);if(fixture::record)fixture::output.insert(fixture::output.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));}
+        std::this_thread::sleep_for(3ms);
+    }
 }
 }
 namespace {
@@ -101,5 +107,41 @@ void fast_cancel() {
     await([&]{return session.ready_to_close();},"fast shutdown blocked");
     result=session.poll();check(!result.complete&&!result.physical_complete&&!result.file,"capture cancellation manufactured completion");
 }
+void text_audio_roundtrip() {
+    const auto text=std::string("Fast text: café\nline two")+std::string(1,'\0')+" tail";
+    for(bool encrypted:{false,true}) {
+        fast::Settings s;s.device="fixture";s.profile.interleave_depth=1;
+        if(encrypted)s.key=Crypto(Bytes(32,37));
+        fixture::reset({},true,true);
+        fast::Session tx;tx.configure(s);tx.transmit_text(text);
+        await([&]{return !tx.active();},"text audio TX did not finish");
+        const auto sent=tx.poll();
+        check(sent.error.empty()&&sent.source_bytes==text.size()&&sent.encrypted==encrypted,
+              "text audio source or encryption selection changed");
+        check(!sent.authenticated&&!sent.complete,"text TX claimed remote authentication or completion");
+        std::vector<float> recorded;
+        {std::lock_guard lock(fixture::mutex);recorded=std::move(fixture::output);}
+        check(!recorded.empty(),"text transmission did not produce audio");
+        fixture::reset(std::move(recorded),true);
+        fast::Session rx;rx.configure(s);rx.listen();
+        await([&]{return !rx.active();},"text audio RX did not finish");
+        const auto received=rx.poll();
+        check(received.complete&&received.physical_complete&&received.file&&received.error.empty(),
+              "text audio reception did not observe a valid physical end");
+        check(received.file->preview()==Bytes(text.begin(),text.end()),"text audio changed UTF-8, newline or zero bytes");
+        check(received.encrypted==encrypted&&received.authenticated==encrypted,
+              "public text was labelled authenticated or encryption state lost");
+        check(encrypted?(received.authenticated_groups>0&&received.checksum_groups==0):
+                        (received.authenticated_groups==0&&received.checksum_groups>0),
+              "text authentication and public checksum counters were confused");
+        if(encrypted)s.key.reset();else s.key=Crypto(Bytes(32,38));
+        rx.configure(s);
+        check(rx.poll().encrypted==encrypted&&rx.poll().authenticated==encrypted,
+              "changing the next transfer's mode relabelled completed content");
+        bool rejected=false;
+        try{rx.transmit_text(std::string(fast::text_byte_limit+1,'x'));}catch(const Error&){rejected=true;}
+        check(rejected&&!rx.active()&&rx.poll().file==received.file,"oversized text disturbed a completed reception");
+    }
 }
-int main(){try{idle_release();pending_preserved();fast_cancel();std::cout<<"fast session ownership passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{idle_release();pending_preserved();fast_cancel();text_audio_roundtrip();std::cout<<"fast session ownership and text transfer passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

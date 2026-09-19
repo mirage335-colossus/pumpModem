@@ -43,6 +43,12 @@ Bytes hmac(std::span<const std::uint8_t> key,std::span<const std::uint8_t> input
         throw Error("Fast HMAC failed");
     return output;
 }
+Bytes checksum(std::span<const std::uint8_t> input) {
+    Bytes output(32);unsigned count=0;
+    if(EVP_Digest(input.data(),input.size(),output.data(),&count,EVP_sha256(),nullptr)!=1 || count!=32)
+        throw Error("Fast SHA-256 checksum failed");
+    return output;
+}
 bool same(std::span<const std::uint8_t> a,std::span<const std::uint8_t> b) {
     return a.size()==b.size() && CRYPTO_memcmp(a.data(),b.data(),a.size())==0;
 }
@@ -119,9 +125,27 @@ Bytes open(const Profile& p,const Keys& keys,std::span<const std::uint8_t> salt,
         throw Error("Fast stream integrity failed");
     return crypt(body.subspan(16),keys.encryption,body.first(16),false);
 }
-Bytes bootstrap_tag(const Profile& p,const Crypto& crypto,std::span<const std::uint8_t> salt) {
-    auto canonical=label("DataPump/fast/v1/bootstrap");append(canonical,profile_id(p));append(canonical,salt);
-    return crypto.mac(canonical);
+Bytes public_tag(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
+                 std::span<const std::uint8_t> plain) {
+    auto canonical=label("DataPump/fast/v1/public/group");append(canonical,profile_id(p));append(canonical,salt);
+    ordinal_bytes(canonical,ordinal);append(canonical,plain);return checksum(canonical);
+}
+Bytes public_seal(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
+                  std::span<const std::uint8_t> plain) {
+    if(plain.size()!=source_bytes_per_group(p,false))throw Error("Invalid fixed fast public source width");
+    Bytes systematic(plain.begin(),plain.end());append(systematic,public_tag(p,salt,ordinal,plain));return systematic;
+}
+Bytes public_open(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
+                  std::span<const std::uint8_t> systematic) {
+    if(systematic.size()!=k_bytes(p)*2)throw Error("Invalid fixed fast public systematic width");
+    const auto plain=systematic.first(systematic.size()-32);
+    if(!same(systematic.last(32),public_tag(p,salt,ordinal,plain)))throw Error("Fast public stream checksum failed");
+    return Bytes(plain.begin(),plain.end());
+}
+Bytes bootstrap_tag(const Profile& p,const std::optional<Crypto>& crypto,std::span<const std::uint8_t> salt) {
+    auto canonical=label(crypto?"DataPump/fast/v1/bootstrap":"DataPump/fast/v1/public/bootstrap");
+    append(canonical,profile_id(p));append(canonical,salt);
+    return crypto?crypto->mac(canonical):checksum(canonical);
 }
 Bytes rs_interleave(const Profile& p,std::span<const std::uint8_t> systematic) {
     const std::size_t rows=p.interleave_depth*2U,k=k_bytes(p);
@@ -152,6 +176,7 @@ Bytes rs_deinterleave(const Profile& p,const coding::Decoded& decoded,DecodeSnap
 }
 
 std::size_t ciphertext_bytes(const Profile& p) { return k_bytes(p)*2-48; }
+std::size_t source_bytes_per_group(const Profile& p,bool encrypted) {return encrypted?ciphertext_bytes(p):k_bytes(p)*2-32;}
 std::size_t cycle_intervals(const Profile& p) {
     validate_codec_profile(p);
     return (inner_size(p.interleave_depth*256,p.code_rate)+physical_interval_bits-1)/physical_interval_bits;
@@ -164,6 +189,12 @@ SourceReader file_source(const std::filesystem::path& path) {
         const auto n=input->gcount();
         if(input->bad() || (input->fail() && !input->eof()))throw Error("Fast source read failed");
         return static_cast<std::size_t>(n);
+    };
+}
+SourceReader byte_source(Bytes bytes) {
+    return [bytes=std::move(bytes),position=std::size_t{0}](std::span<std::uint8_t> out) mutable {
+        const auto count=std::min(out.size(),bytes.size()-position);
+        std::copy_n(bytes.begin()+static_cast<std::ptrdiff_t>(position),count,out.begin());position+=count;return count;
     };
 }
 
@@ -274,14 +305,15 @@ void ReceivedFile::save(const std::filesystem::path& path)const {
 }
 
 struct StreamEncoder::Impl {
-    Profile profile;Crypto crypto;SourceReader reader;std::function<Bytes(std::size_t)> random;Bytes salt;Keys keys;Bytes wire;
+    Profile profile;std::optional<Crypto> crypto;SourceReader reader;std::function<Bytes(std::size_t)> random;Bytes salt;std::unique_ptr<Keys> keys;Bytes wire;
     std::size_t offset=0;std::uint64_t source_count=0,intervals=0,ordinal=0;
     bool bootstrap=true,source_end=false,terminal_done=false,final_cycle=false;
     std::array<std::uint8_t,16384> input{};std::size_t input_pos=0,input_size=0;
     unsigned cell=0,cell_left=0;
-    Impl(Profile p,const Crypto& c,SourceReader r,std::function<Bytes(std::size_t)> entropy):
-        profile(p),crypto(c),reader(std::move(r)),random(std::move(entropy)),salt(random(32)),keys(p,c,salt) {
+    Impl(Profile p,const std::optional<Crypto>& c,SourceReader r,std::function<Bytes(std::size_t)> entropy):
+        profile(p),crypto(c),reader(std::move(r)),random(std::move(entropy)),salt(random(32)) {
         validate_codec_profile(p);if(!reader)throw Error("Missing fast source reader");
+        if(crypto)keys=std::make_unique<Keys>(p,*crypto,salt);
     }
     unsigned next_source_bit() {
         if(terminal_done)return 0;
@@ -310,9 +342,10 @@ struct StreamEncoder::Impl {
         }else {
             for(unsigned group=0;group<profile.interleave_depth;++group) {
                 if(ordinal==std::numeric_limits<std::uint64_t>::max())throw Error("Fast group counter exhausted");
-                Bytes plain(ciphertext_bytes(profile));
+                Bytes plain(source_bytes_per_group(profile,crypto.has_value()));
                 for(std::size_t bit=0;bit<plain.size()*8;++bit)plain[bit/8]|=static_cast<std::uint8_t>(next_source_bit()<<(7-bit%8));
-                append(systematic,seal(profile,keys,salt,ordinal++,random(16),plain));
+                append(systematic,keys?seal(profile,*keys,salt,ordinal,random(16),plain):public_seal(profile,salt,ordinal,plain));
+                ++ordinal;
                 OPENSSL_cleanse(plain.data(),plain.size());
             }
             final_cycle=terminal_done;
@@ -321,8 +354,8 @@ struct StreamEncoder::Impl {
         wire.resize(cycle_intervals(profile)*physical_interval_bits);offset=0;
     }
 };
-StreamEncoder::StreamEncoder(Profile p,const Crypto& c,SourceReader r):StreamEncoder(p,c,std::move(r),random_bytes){}
-StreamEncoder::StreamEncoder(Profile p,const Crypto& c,SourceReader r,std::function<Bytes(std::size_t)> random):
+StreamEncoder::StreamEncoder(Profile p,const std::optional<Crypto>& c,SourceReader r):StreamEncoder(p,c,std::move(r),random_bytes){}
+StreamEncoder::StreamEncoder(Profile p,const std::optional<Crypto>& c,SourceReader r,std::function<Bytes(std::size_t)> random):
     impl_(std::make_unique<Impl>(p,c,std::move(r),std::move(random))){}
 StreamEncoder::~StreamEncoder()=default;
 StreamEncoder::StreamEncoder(StreamEncoder&&) noexcept=default;
@@ -340,30 +373,36 @@ std::uint64_t StreamEncoder::source_bytes()const{return impl_->source_count;}
 std::uint64_t StreamEncoder::intervals_emitted()const{return impl_->intervals;}
 
 struct StreamDecoder::Impl {
-    Profile profile;Crypto crypto;std::uint64_t quota;DecodeSnapshot stats;File plain;
+    Profile profile;std::optional<Crypto> crypto;std::uint64_t quota;DecodeSnapshot stats;File plain;
     std::vector<float> soft;Bytes salt;std::unique_ptr<Keys> keys;std::uint64_t ordinal=0,cycles=0;
+    bool bootstrap_received=false;
     std::shared_ptr<const ReceivedFile> received;
-    Impl(Profile p,const Crypto& c,std::uint64_t q):profile(p),crypto(c),quota(q),plain(spool()) {
+    Impl(Profile p,const std::optional<Crypto>& c,std::uint64_t q):profile(p),crypto(c),quota(q),plain(spool()) {
         validate_codec_profile(p);soft.reserve(cycle_intervals(p)*physical_interval_bits);
+        stats.encrypted=crypto.has_value();
     }
     void fail(const std::string& why) {stats.failed=true;stats.status=why;}
     void cycle() {
         const auto actual=inner_size(profile.interleave_depth*256,profile.code_rate);
         auto decoded=coding::decode(std::span(soft).first(actual),profile.interleave_depth*256,profile.code_rate);
         auto systematic=rs_deinterleave(profile,decoded,stats);
-        if(!keys) {
+        if(!bootstrap_received) {
             salt.assign(systematic.begin(),systematic.begin()+32);
             if(!same(std::span(systematic).subspan(32,32),bootstrap_tag(profile,crypto,salt)) ||
                std::any_of(systematic.begin()+64,systematic.end(),[](auto b){return b!=0;}))
-                throw Error("Fast bootstrap integrity failed");
-            keys=std::make_unique<Keys>(profile,crypto,salt);stats.status="Receiving authenticated fast areas";
+                throw Error(crypto?"Fast bootstrap integrity failed":"Fast public bootstrap checksum failed");
+            if(crypto)keys=std::make_unique<Keys>(profile,*crypto,salt);
+            bootstrap_received=true;
+            stats.status=crypto?"Receiving authenticated fast areas":"Receiving checksummed fast areas (not authenticated)";
         }else {
             for(unsigned group=0;group<profile.interleave_depth;++group) {
                 if(ordinal==std::numeric_limits<std::uint64_t>::max())throw Error("Fast group counter exhausted");
                 const auto k=k_bytes(profile)*2;
-                auto area=open(profile,*keys,salt,ordinal++,std::span(systematic).subspan(group*k,k));
+                const auto body=std::span(systematic).subspan(group*k,k);
+                auto area=keys?open(profile,*keys,salt,ordinal,body):public_open(profile,salt,ordinal,body);++ordinal;
                 if(area.size()>quota-stats.spool_bytes)throw Error("Fast receive spool quota exceeded");
-                write_file(plain.get(),area);stats.spool_bytes+=area.size();++stats.authenticated_groups;
+                write_file(plain.get(),area);stats.spool_bytes+=area.size();
+                if(crypto)++stats.authenticated_groups;else ++stats.checksum_groups;
                 OPENSSL_cleanse(area.data(),area.size());
             }
             ++cycles;
@@ -371,7 +410,7 @@ struct StreamDecoder::Impl {
         soft.clear();
     }
     std::shared_ptr<ReceivedFile::Impl> interpret() {
-        if(!keys || !cycles || !soft.empty())throw Error("Fast stream ended within fixed coding geometry");
+        if(!bootstrap_received || !cycles || !soft.empty())throw Error("Fast stream ended within fixed coding geometry");
         rewind_file(plain.get());auto output=std::make_shared<ReceivedFile::Impl>();
         std::array<std::uint8_t,16384> buffer{},destination{};std::size_t used=0;
         bool ended=false;unsigned cell=0,cell_bits=0;std::uint64_t position=0,endpoint=0,remaining=stats.spool_bytes;
@@ -396,14 +435,14 @@ struct StreamDecoder::Impl {
             }
         }
         if(!ended)throw Error("Fast mandatory source endpoint missing");
-        const auto cycle_bits=static_cast<std::uint64_t>(profile.interleave_depth)*ciphertext_bytes(profile)*8;
+        const auto cycle_bits=static_cast<std::uint64_t>(profile.interleave_depth)*source_bytes_per_group(profile,crypto.has_value())*8;
         if(endpoint<=position-cycle_bits)throw Error("Extra noncanonical fast padding cycle");
         write_file(output->file.get(),std::span(destination).first(used));rewind_file(output->file.get());
         stats.source_bytes=output->bytes;stats.spool_bytes+=output->bytes;
         return output;
     }
 };
-StreamDecoder::StreamDecoder(Profile p,const Crypto& c,std::uint64_t quota):impl_(std::make_unique<Impl>(p,c,quota)){}
+StreamDecoder::StreamDecoder(Profile p,const std::optional<Crypto>& c,std::uint64_t quota):impl_(std::make_unique<Impl>(p,c,quota)){}
 StreamDecoder::~StreamDecoder()=default;
 StreamDecoder::StreamDecoder(StreamDecoder&&) noexcept=default;
 StreamDecoder& StreamDecoder::operator=(StreamDecoder&&) noexcept=default;
@@ -428,7 +467,8 @@ void StreamDecoder::finish(bool physical_end) {
     try {
         auto output=impl_->interpret();
         impl_->received=std::shared_ptr<const ReceivedFile>(new ReceivedFile(std::move(output)));
-        impl_->stats.complete=true;impl_->stats.status="Verified and physically complete";
+        impl_->stats.complete=true;impl_->stats.authenticated=impl_->crypto.has_value();
+        impl_->stats.status=impl_->crypto?"Verified and physically complete":"Checksum-verified and physically complete (not authenticated)";
     }catch(const std::exception& error) {impl_->fail(error.what());}
 }
 DecodeSnapshot StreamDecoder::snapshot()const{return impl_->stats;}

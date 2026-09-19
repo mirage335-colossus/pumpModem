@@ -1,5 +1,6 @@
 #include "controller.hpp"
 #include "screen.hpp"
+#include "presentation.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/crypto.hpp"
@@ -54,9 +55,12 @@ struct Controller::Impl {
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
         f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         f(F::fast_device).text="default";f(F::fast_mono).checked=true;
+        f(F::fast_encryption).checked=false;
+        f(F::fast_source).options={{"text","Text"},{"file","File"}};f(F::fast_source).selected="text";
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
-        f(F::fast_status).text="Choose matching settings and a key at both ends.";
+        f(F::fast_status).text="Choose matching settings at both ends.";
+        f(F::fast_preview).records=receive_preview(snapshot);
         set_profile(fast::Channel::wire);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
@@ -68,37 +72,49 @@ struct Controller::Impl {
     }
     bool enabled(C command) const {
         if(closing)return false;
+        const bool idle=!session.active()&&pending_start==C::none&&!key_loading;
+        const bool key_ready=!f(F::fast_encryption).checked||settings.key.has_value();
         switch(command) {
         case C::fast_cancel:return session.active()||pending_start!=C::none;
         case C::fast_save:return bool(snapshot.file)&&!key_loading;
-        case C::fast_transmit:return !session.active()&&pending_start==C::none&&!key_loading&&settings.key.has_value()&&!f(F::fast_file).text.empty();
-        case C::fast_listen:return !session.active()&&pending_start==C::none&&!key_loading&&settings.key.has_value();
-        case C::fast_open_key:case C::fast_generate_key:case C::fast_choose_file:return !session.active()&&pending_start==C::none&&!key_loading;
+        case C::fast_transmit:return idle&&key_ready&&!f(f(F::fast_source).selected=="text"?F::fast_text:F::fast_file).text.empty();
+        case C::fast_listen:return idle&&key_ready;
+        case C::fast_open_key:case C::fast_generate_key:return idle&&f(F::fast_encryption).checked;
+        case C::fast_choose_file:return idle&&f(F::fast_source).selected=="file";
         default:return false;
         }
     }
     void refresh() {
         const bool edit=!closing&&!session.active()&&pending_start==C::none&&!key_loading;
-        for(const auto field:{F::fast_profile,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_device,F::fast_mono,F::fast_key,F::fast_file})f(field).enabled=edit;
+        for(const auto field:{F::fast_profile,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_device,F::fast_mono,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
+        f(F::fast_key).enabled=edit&&f(F::fast_encryption).checked;
+        f(F::fast_key_path).enabled=f(F::fast_encryption).checked;
+        f(F::fast_text).visible=f(F::fast_source).selected=="text";
+        f(F::fast_file).visible=!f(F::fast_text).visible;
+        f(F::fast_source_detail).text=f(F::fast_text).visible?
+            "UTF-8 text · "+std::to_string(f(F::fast_text).text.size())+" / "+std::to_string(fast::text_byte_limit)+" bytes":
+            "File bytes stream directly from disk. Text and file drafts are retained.";
         const auto& p=settings.profile;
         const double gross=fast::gross_bitrate(p);
         f(F::fast_detail).text=std::string(fast::channel_name(p.channel))+" · "+number(p.symbol_rate,0)+" symbols/s · "+number(p.carrier_hz,0)+" Hz carrier · "+number(p.sample_rate,0)+" Hz audio\n"
-            "AES-256-CBC + HMAC-SHA256 · no time synchronization · 256 transmitted byte positions per interval\n"
-            "Profile, constellation and coding must match. Regular mode continues independently when active.";
-        f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":snapshot.active?(snapshot.transmitting?"TRANSMITTING":"RECEIVING / PENDING"):
-            snapshot.complete?"RECEIVED · complete and authenticated":snapshot.cancelled?"CANCELLED · no completion implied":!snapshot.error.empty()?"INCOMPLETE":snapshot.source_bytes?"TRANSMISSION FINISHED":"READY";
+            +(f(F::fast_encryption).checked?"Next transfer: AES-256-CBC + HMAC-SHA256":"Next transfer: public data + checksum; no encryption or authentication")+"\n"
+            "Profile, constellation, coding and encryption must match. 256 transmitted byte positions per interval.";
+        f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":transfer_stage(snapshot);
         f(F::fast_progress).text+=" · "+std::to_string(snapshot.source_bytes)+" source bytes · "+std::to_string(snapshot.intervals)+" intervals · "+number(snapshot.elapsed_seconds)+" s";
         f(F::fast_rate).text="Gross constellation rate: "+number(gross/1000)+" kbit/s · measured source rate: "+number(snapshot.goodput_bps/1000)+" kbit/s";
         f(F::fast_tracking).text=snapshot.intervals&&!snapshot.transmitting?
             "Tracking · EVM "+number(snapshot.evm*100,2)+"% · carrier error "+number(snapshot.carrier_error_hz,2)+" Hz · clock error "+number(snapshot.clock_error_ppm,2)+" ppm":
             "RX tracking · awaiting received intervals";
         f(F::fast_correction).text="Correction · "+std::to_string(snapshot.corrected_bytes)+" corrected bytes · "+std::to_string(snapshot.erased_bytes)+" erasures · interleave depth "+std::to_string(p.interleave_depth);
-        f(F::fast_auth).text="Authentication · "+std::to_string(snapshot.authenticated_groups)+" verified groups · "+(snapshot.complete?"file available":snapshot.physical_complete?"physical end observed; source validation pending or failed":"awaiting physical end");
+        f(F::fast_auth).text=integrity_label(snapshot);
         f(F::fast_progress).text_tone=snapshot.complete?ui::TextTone::data:ui::TextTone::normal;
     }
     void start_transfer(C command) {
         recorded=false;
-        if(command==C::fast_transmit)session.transmit(path_from_text(f(F::fast_file).text));
+        if(command==C::fast_transmit) {
+            if(f(F::fast_source).selected=="text")session.transmit_text(f(F::fast_text).text);
+            else session.transmit(path_from_text(f(F::fast_file).text));
+        }
         else session.listen();
     }
     void request(C command,ui::ServiceKind kind,std::string title,std::string value={}) {
@@ -125,14 +141,14 @@ void Controller::poll() {
         p.key_loading=false;if(p.worker.joinable())p.worker.join();
         if(!p.closing) {
             if(!loaded->error.empty())report_error(loaded->error);
-            else if(loaded->saved)p.f(F::fast_status).text="Saved authenticated fast file.";
+            else if(loaded->saved)p.f(F::fast_status).text="Saved complete received bytes.";
             else {
                 p.keys=std::move(loaded->keys);p.key_path=std::move(loaded->path);
                 auto& key=p.f(F::fast_key);key.options.clear();key.selected.clear();
                 for(std::size_t i=0;i<p.keys.size();++i)key.options.push_back({std::to_string(i),p.keys[i].name});
                 if(!p.keys.empty()) {key.selected="0";p.settings.key=p.keys.front().key;}
                 p.f(F::fast_key_path).text=path_text(p.key_path);
-                p.f(F::fast_status).text="Fast key ready. Select a file or listen.";
+                p.f(F::fast_status).text="Fast key ready. Enter text, select a file, or listen.";
             }
         }
         ++p.revision;
@@ -149,6 +165,8 @@ void Controller::poll() {
     }
     const auto snapshot=p.session.poll();
     if(snapshot.revision!=p.snapshot.revision) {
+        if(snapshot.file!=p.snapshot.file||snapshot.complete!=p.snapshot.complete||snapshot.physical_complete!=p.snapshot.physical_complete)
+            p.f(F::fast_preview).records=receive_preview(snapshot);
         p.snapshot=snapshot;
         if(!snapshot.error.empty())p.f(F::fast_status).text=snapshot.error;
         else if(!snapshot.status.empty())p.f(F::fast_status).text=snapshot.status;
@@ -167,8 +185,12 @@ void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pe
 bool Controller::ready_to_close() const {return impl_->closing&&!impl_->key_loading&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_start!=C::none;}
 void Controller::edit(F field,std::string text) {
-    auto& p=*impl_;if(!owns(field)||!p.f(field).enabled)return;
-    if(field==F::fast_device||field==F::fast_file) {p.f(field).text=std::move(text);++p.revision;}
+    auto& p=*impl_;if(!owns(field)||!p.f(field).enabled||!p.f(field).visible)return;
+    if(field==F::fast_text) {
+        const auto bytes=std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(text.data()),text.size());
+        if(text.size()>fast::text_byte_limit||!valid_clipboard_text(bytes)) {report_error("Fast text requires valid UTF-8 without NUL, up to 32,768 bytes.");return;}
+    }
+    if(field==F::fast_device||field==F::fast_file||field==F::fast_text) {p.f(field).text=std::move(text);++p.revision;p.refresh();}
 }
 void Controller::select(F field,std::string id) {
     auto& p=*impl_;if(!owns(field)||!p.f(field).enabled)return;
@@ -180,11 +202,12 @@ void Controller::select(F field,std::string id) {
         else if(field==F::fast_coding)p.settings.profile.code_rate=id=="half"?fast::CodeRate::half:id=="three-quarters"?fast::CodeRate::three_quarters:fast::CodeRate::seven_eighths;
         else if(field==F::fast_fec)p.settings.profile.robust=id=="robust";
         else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;
+        else if(field==F::fast_source) {} // Source drafts have independent retained fields.
         else return;
         p.f(field).selected=std::move(id);++p.revision;p.refresh();
     }catch(const std::exception& e) {report_error(e.what());}
 }
-void Controller::toggle(F field,bool value) {auto& p=*impl_;if(field==F::fast_mono&&p.f(field).enabled) {p.f(field).checked=value;++p.revision;}}
+void Controller::toggle(F field,bool value) {auto& p=*impl_;if((field==F::fast_mono||field==F::fast_encryption)&&p.f(field).enabled) {p.f(field).checked=value;++p.revision;p.refresh();}}
 void Controller::activate(C command) {
     auto& p=*impl_;if(!p.enabled(command))return;
     try {
@@ -192,14 +215,14 @@ void Controller::activate(C command) {
         case C::fast_open_key:p.request(command,ui::ServiceKind::open_file,"Open fast encryption keyfile");break;
         case C::fast_generate_key:p.request(command,ui::ServiceKind::save_file,"Generate fast encryption keyfile","fast.key");break;
         case C::fast_choose_file:p.request(command,ui::ServiceKind::open_file,"Choose fast source file");break;
-        case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save authenticated fast file","received.bin");break;
+        case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save complete received bytes","received.bin");break;
         case C::fast_cancel:
             if(p.pending_start!=C::none)p.f(F::fast_status).text="Cancelled before audio was acquired.";
             p.pending_start=C::none;p.session.cancel();break;
         case C::fast_transmit:case C::fast_listen:
             fast::validate(p.settings.profile);
             p.settings.device=p.f(F::fast_device).text;p.settings.mono=p.f(F::fast_mono).checked;
-            p.session.configure(p.settings);
+            {auto effective=p.settings;if(!p.f(F::fast_encryption).checked)effective.key.reset();p.session.configure(effective);}
             if(p.acquire_audio())p.start_transfer(command);
             else {
                 p.pending_start=command;p.acquire_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
@@ -212,6 +235,7 @@ void Controller::activate(C command) {
     }catch(const std::exception& e) {report_error(e.what());}
 }
 bool Controller::enabled(C command) const {return impl_->enabled(command);}
+std::string Controller::command_label(C command) const {return command==C::fast_transmit?(impl_->f(F::fast_source).selected=="text"?"Transmit text":"Transmit file"):std::string{};}
 const ui::FieldState& Controller::field(F field) const {return impl_->f(field);}
 void Controller::complete_service(ui::ServiceResult result) {
     auto& p=*impl_;const auto found=p.pending.find(result.id);if(found==p.pending.end())return;
@@ -223,7 +247,7 @@ void Controller::complete_service(ui::ServiceResult result) {
         case C::fast_open_key:case C::fast_generate_key:p.load(path_from_text(result.value),pending.command==C::fast_generate_key);break;
         case C::fast_choose_file:p.f(F::fast_file).text=std::move(result.value);break;
         case C::fast_save:if(pending.file) {
-            p.key_loading=true;p.f(F::fast_status).text="Saving authenticated fast file…";
+            p.key_loading=true;p.f(F::fast_status).text="Saving complete received bytes…";
             p.worker=std::jthread([&p,file=pending.file,path=path_from_text(result.value)] {
                 Impl::Loaded saved;saved.saved=true;
                 try {file->save(path);}catch(const std::exception& e) {saved.error=e.what();}

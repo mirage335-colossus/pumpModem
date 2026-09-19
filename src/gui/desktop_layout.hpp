@@ -28,10 +28,10 @@ enum class Slot {
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
-    fast_heading, fast_profile, fast_constellation, fast_coding, fast_fec, fast_device, fast_mono,
-    fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_file, fast_choose_file,
+    fast_heading, fast_profile, fast_constellation, fast_coding, fast_fec, fast_device, fast_mono, fast_encryption,
+    fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_source, fast_source_detail, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_listen, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
-    fast_correction, fast_auth, fast_detail, fast_history, fast_status,
+    fast_correction, fast_auth, fast_detail, fast_preview, fast_history, fast_status,
     count
 };
 inline constexpr bool persistent_slot(Slot slot) {
@@ -86,23 +86,28 @@ struct DesktopLayout {
         out[Slot::fast_fec]={margin+3*(fast_column+fast_gap),137,fast_column,field_height};
         out[Slot::fast_device]={margin,196,2*fast_column+fast_gap,field_height};
         out[Slot::fast_mono]={margin+2*(fast_column+fast_gap),195,fast_column,28};
+        out[Slot::fast_encryption]={margin+3*(fast_column+fast_gap),195,fast_column,28};
         out[Slot::fast_key]={margin,255,2*fast_column+fast_gap,field_height};
         out[Slot::fast_open_key]={margin+2*(fast_column+fast_gap),254,fast_column,action_height};
         out[Slot::fast_generate_key]={margin+3*(fast_column+fast_gap),254,fast_column,action_height};
         out[Slot::fast_key_path]={margin,291,fast_width,24};
-        out[Slot::fast_file]={margin,344,fast_width-fast_column-fast_gap,field_height};
-        out[Slot::fast_choose_file]={margin+3*(fast_column+fast_gap),343,fast_column,action_height};
-        out[Slot::fast_transmit]={margin,397,fast_column,action_height};
-        out[Slot::fast_listen]={margin+fast_column+fast_gap,397,fast_column,action_height};
-        out[Slot::fast_cancel]={margin+2*(fast_column+fast_gap),397,fast_column,action_height};
-        out[Slot::fast_save]={margin+3*(fast_column+fast_gap),397,fast_column,action_height};
-        out[Slot::fast_progress]={margin,453,fast_width,36};
-        out[Slot::fast_rate]={margin,501,fast_width,28};
-        out[Slot::fast_tracking]={margin,541,fast_width,28};
-        out[Slot::fast_correction]={margin,581,fast_width,28};
-        out[Slot::fast_auth]={margin,621,fast_width,28};
-        out[Slot::fast_detail]={margin,670,fast_width,64};
-        out[Slot::fast_history]={margin,766,fast_width,std::max(90,height-826)};
+        out[Slot::fast_source]={margin,333,fast_column,field_height};
+        out[Slot::fast_source_detail]={margin+fast_column+fast_gap,330,3*fast_column+2*fast_gap,32};
+        out[Slot::fast_text]={margin,387,fast_width,60};
+        out[Slot::fast_file]={margin,387,fast_width-fast_column-fast_gap,field_height};
+        out[Slot::fast_choose_file]={margin+3*(fast_column+fast_gap),386,fast_column,action_height};
+        out[Slot::fast_transmit]={margin,463,fast_column,action_height};
+        out[Slot::fast_listen]={margin+fast_column+fast_gap,463,fast_column,action_height};
+        out[Slot::fast_cancel]={margin+2*(fast_column+fast_gap),463,fast_column,action_height};
+        out[Slot::fast_save]={margin+3*(fast_column+fast_gap),463,fast_column,action_height};
+        out[Slot::fast_progress]={margin,506,fast_width,32};
+        out[Slot::fast_rate]={margin,544,fast_width,24};
+        out[Slot::fast_tracking]={margin,575,fast_width,24};
+        out[Slot::fast_correction]={margin,606,fast_width,24};
+        out[Slot::fast_auth]={margin,637,fast_width,24};
+        out[Slot::fast_detail]={margin,673,fast_width,66};
+        out[Slot::fast_preview]={margin,772,2*fast_column+fast_gap,std::max(110,height-832)};
+        out[Slot::fast_history]={margin+2*(fast_column+fast_gap),772,2*fast_column+fast_gap,std::max(110,height-832)};
         out[Slot::fast_status]={margin,height-43,fast_width,27};
         out[Slot::callsign] = {margin, 62, 115, field_height};
         out[Slot::grid] = {142, 62, 85, field_height};

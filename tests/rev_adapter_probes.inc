@@ -2,19 +2,44 @@
     void verify_fast_mode_visibility() {
         const auto require=[](bool value,const char* message) {if(!value)throw std::runtime_error(message);};
         const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
-        const auto found=std::find_if(bindings.begin(),bindings.end(),[](const auto& b){return b.control.field==ui::Field::fast_mode;});
-        require(found!=bindings.end()&&found->toggle,"Rev Fast toggle was not materialized");
-        auto* toggle=found->toggle;application.edit(ui::Field::binary,"001");settle();
+        const auto by_field=[&](ui::Field field) -> Binding& {
+            const auto found=std::find_if(bindings.begin(),bindings.end(),[&](const auto& b){return b.control.field==field;});
+            if(found==bindings.end())throw std::runtime_error("Rev Fast field was not materialized");
+            return *found;
+        };
+        auto* toggle=by_field(ui::Field::fast_mode).toggle;
+        auto* encryption=by_field(ui::Field::fast_encryption).toggle;
+        auto* source=by_field(ui::Field::fast_source).choice;
+        require(toggle&&encryption&&source&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
+        application.edit(ui::Field::binary,"001");settle();
         for(bool fast:{true,false,true,false}) {
             re::Event click;toggle->checkbox->click(click);settle();
             require(application.field(ui::Field::fast_mode).checked==fast&&allows_input(toggle),"Rev Fast toggle callback failed or hid itself");
+            if(fast) {
+                require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&source->params.value=="text"&&
+                    !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
+                    "Rev Fast did not default to plain text and keyless receive");
+                application.edit(ui::Field::fast_text,"Rev fast café\nSecond line");settle();
+                encryption->checkbox->click(click);settle();
+                require(!application.enabled(ui::Command::fast_listen)&&!application.enabled(ui::Command::fast_transmit),
+                    "Rev encrypted actions accepted a missing key");
+                encryption->checkbox->click(click);settle();
+                source->params.value="file";source->onChange(click);settle();
+                require(by_field(ui::Field::fast_text).element->resolved.hidden&&!by_field(ui::Field::fast_file).element->resolved.hidden&&
+                    application.command_label(ui::Command::fast_transmit)=="Transmit file","Rev file choice did not replace text controls");
+                application.edit(ui::Field::fast_file,"/tmp/rev-fast-source.bin");
+                source->params.value="text";source->onChange(click);settle();
+                require(application.field(ui::Field::fast_text).text=="Rev fast café\nSecond line"&&
+                    application.field(ui::Field::fast_file).text=="/tmp/rev-fast-source.bin"&&application.command_label(ui::Command::fast_transmit)=="Transmit text",
+                    "Rev source switching discarded independent drafts");
+            }
             for(auto& b:bindings) {
                 if(b.control.scope==ui::ScreenScope::fast) {
-                    require(b.element->resolved.hidden==!fast,"Rev Fast surface did not reconcile complete control visibility");
-                    if(fast)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
+                    require(b.element->resolved.hidden==!application.control(b.control).visible,"Rev Fast surface did not reconcile conditional control visibility");
+                    if(fast&&!b.element->resolved.hidden)require(b.element->rect.x>=0&&b.element->rect.y>=0&&
                         b.element->rect.x+b.element->rect.w<=details.size.width&&b.element->rect.y+b.element->rect.h<=details.size.height,
                         "Rev Fast native control escaped its viewport");
-                    else if(b.button) {re::Event stale;b.button->click(stale);}
+                    else if(!fast&&b.button) {re::Event stale;b.button->click(stale);}
                 } else if(fast&&b.control.scope==ui::ScreenScope::regular)
                     require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
             }

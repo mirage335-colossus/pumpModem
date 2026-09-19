@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 
@@ -19,8 +20,11 @@ StreamEncoder deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint
 }
 // Readers return zero only at EOF. They never receive a remotely chosen size.
 SourceReader file_source(const std::filesystem::path&);
+// Owns the caller's local bytes (for text); each read stays within its span.
+SourceReader byte_source(Bytes);
 std::size_t cycle_intervals(const Profile&);
 std::size_t ciphertext_bytes(const Profile&);
+std::size_t source_bytes_per_group(const Profile&,bool encrypted);
 
 class ReceivedFile {
 public:
@@ -38,14 +42,18 @@ private:
 
 struct DecodeSnapshot {
     bool physical_end = false, complete = false, failed = false;
+    bool encrypted = false, authenticated = false;
     std::uint64_t intervals = 0, authenticated_groups = 0, source_bytes = 0;
+    std::uint64_t checksum_groups = 0;
     std::uint64_t corrected_bytes = 0, erased_bytes = 0, spool_bytes = 0;
     std::string status = "Waiting for fast stream";
 };
 
 class StreamEncoder {
 public:
-    StreamEncoder(Profile, const Crypto&, SourceReader);
+    // Encryption is a matching local choice. There is no wire negotiation or
+    // fallback between keyed HMAC and unkeyed SHA-256 checksum operation.
+    StreamEncoder(Profile, const std::optional<Crypto>&, SourceReader);
     ~StreamEncoder();
     StreamEncoder(StreamEncoder&&) noexcept;
     StreamEncoder& operator=(StreamEncoder&&) noexcept;
@@ -55,13 +63,13 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
-    StreamEncoder(Profile,const Crypto&,SourceReader,std::function<Bytes(std::size_t)>);
+    StreamEncoder(Profile,const std::optional<Crypto>&,SourceReader,std::function<Bytes(std::size_t)>);
     friend StreamEncoder testing::deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t);
 };
 
 class StreamDecoder {
 public:
-    StreamDecoder(Profile, const Crypto&, std::uint64_t spool_quota = 1024ULL*1024*1024);
+    StreamDecoder(Profile, const std::optional<Crypto>&, std::uint64_t spool_quota = 1024ULL*1024*1024);
     ~StreamDecoder();
     StreamDecoder(StreamDecoder&&) noexcept;
     StreamDecoder& operator=(StreamDecoder&&) noexcept;

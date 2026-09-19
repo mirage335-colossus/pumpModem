@@ -9,6 +9,8 @@ using ProgressCallback=std::function<void(const Snapshot&)>;
 // TX records actual silence after its waveform; RX EOF never completes a file.
 Snapshot transmit_wave(const Settings&,const std::filesystem::path& source,
     const std::filesystem::path& wave,ProgressCallback={},std::stop_token={});
+Snapshot transmit_text_wave(const Settings&,const std::string& text,
+    const std::filesystem::path& wave,ProgressCallback={},std::stop_token={});
 Snapshot receive_wave(const Settings&,const std::filesystem::path& wave,
     ProgressCallback={},std::stop_token={});
 }

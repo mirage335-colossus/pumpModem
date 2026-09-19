@@ -1,16 +1,30 @@
-# Fast encrypted file transfer
+# Fast text and file transfer
 
 Fast mode is a separate streaming APSK modem. Use the **Fast** toggle beside
 **DATA PUMP** to switch the entire desktop interface. Select a channel profile,
-constellation, coding and key; choose a source file and **Transmit file**, or
-select **Listen** on the receiving computer. Both peers need matching local
-settings and the same key material (entry names are only local labels). Save becomes available only for a complete,
-authenticated received file. Existing destinations are never overwritten.
+constellation and coding. Choose **Text** and enter a message, or choose **File**
+and select a source file, then transmit. Select **Listen** on the receiving
+computer. The **Encryption** checkbox is optional and starts off; enabling it
+requires loading a key. Both peers need matching local settings, including
+encryption on/off and, when enabled, the same key material (entry names are only
+local labels). A received-text preview and Save become available only after
+physical completion and integrity checks. Encrypted transfers authenticate;
+unencrypted transfers only check public checksums. Existing destinations are
+never overwritten.
+
+Text is limited to 32,768 source bytes, including UTF-8 bytes. The GUI accepts
+valid UTF-8 without NUL; files preserve arbitrary binary data. Text and files use
+exactly the same source format: no message type, text encoding tag or source
+length is sent. UTF-8, newlines and all file bytes keep their exact values.
+The completed preview is bounded to 4,096 source bytes, escapes unsafe control
+and binary bytes, and indicates truncation; Save preserves all original bytes.
+Switching Text/File retains both drafts. Loading a key does not enable
+encryption; switching encryption off retains the key for later use.
 
 Regular mode retains its existing short dictionary, exact raw bits, 192-bit
 markers and 128-coded-byte intervals, private noise waveforms, time-indexed
 encryption, iterative search and incremental pending reception. Fast settings,
-key selection, file state and history are independent of regular settings and
+key selection, text/file drafts and history are independent of regular settings and
 drafts. Switching views does not cancel a regular reception. Starting Fast
 hardware waits for the regular audio device to close and refuses to interrupt
 an admitted pending reception or transmission. A regular simulation can continue
@@ -22,7 +36,7 @@ resumes when Fast is inactive and the regular view is selected. Starting Fast
 allows up to two seconds for asynchronous device release, then reports that
 the operator must retry when regular work is idle.
 
-Fast has encryption and authentication, but no LPI claim, spreading, pattern
+Fast offers optional encryption and authentication, but no LPI claim, spreading, pattern
 codewords, time/key search, single-bit recovery or source compression. Its known
 training, markers, pilots, occupied spectrum and transmission duration are public.
 
@@ -96,10 +110,14 @@ Independent wire fingerprints and mapper tests protect these constants.
 
 Each fixed outer group contains two shortened Reed–Solomon codewords:
 
-| Local RS choice | Codewords | Systematic bytes | IV | Ciphertext | HMAC-SHA256 |
-| --- | --- | ---: | ---: | ---: | ---: |
-| Robust | 2 × RS(128,112) | 224 | 16 | 176 | 32 |
-| High rate | 2 × RS(128,120) | 240 | 16 | 192 | 32 |
+| Local RS choice | Codewords | Systematic bytes | Encrypted source area | Public source area |
+| --- | --- | ---: | ---: | ---: |
+| Robust | 2 × RS(128,112) | 224 | 176 | 192 |
+| High rate | 2 × RS(128,120) | 240 | 192 | 208 |
+
+Encrypted groups contain a 16-byte IV, the fixed ciphertext source area and a
+32-byte HMAC-SHA256 tag. Public groups contain the fixed plaintext source area
+and a 32-byte SHA-256 checksum. Both use identical physical coding geometry.
 
 An interleave cycle contains `D` outer groups (`D=16` by default, CLI range
 1–64). Its `2D` RS rows are transmitted column-first. A K=7 convolutional code
@@ -111,7 +129,8 @@ interval with zero coded bits. At depth 16 this consumes 33, 22 or 19 physical
 intervals, respectively. No cycle size is received from the channel.
 
 Reception performs soft Viterbi decoding, deinterleaving, RS correction using
-unreliable-byte erasures, then authentication before decryption. Fixed cycle
+unreliable-byte erasures, then authentication before decryption when encryption
+is on, or public checksum verification when it is off. Fixed cycle
 decoding bounds work and memory and limits propagation of inner-code errors.
 There is no LDPC decoder, iterative source recovery or retransmission protocol.
 
@@ -134,12 +153,12 @@ Burst repair has finite limits determined by depth, code rate and symbol rate.
 Tests recover the selected 1/10/50 ms erasure fixtures and a 10 ms additive sound
 effect; a 500 ms destructive interruption leaves no completed file. These are
 specific regressions, not guarantees for every sound, phase slip or hardware
-dropout. Initial acquisition must include the authenticated bootstrap cycle;
+dropout. Initial acquisition must include the integrity-checked bootstrap cycle;
 there is no arbitrary mid-file join or unknown-time-gap recovery.
 
 ## Cryptography and exact source bytes
 
-Fast uses OpenSSL AES-256-CBC with padding disabled and a fresh unpredictable
+With encryption enabled, Fast uses OpenSSL AES-256-CBC with padding disabled and a fresh unpredictable
 16-byte IV per fixed outer group. Encrypt-then-HMAC-SHA256 covers the versioned
 Fast domain, local profile, transfer salt, locally counted group ordinal, IV
 and ciphertext. Tags are compared before decryption. The ordinal is not a
@@ -164,17 +183,33 @@ output amplitude are excluded. See `profile_id()` and the independent crypto
 vectors for the exact encoding. Regular epoch streams and key derivation are
 unchanged; Fast never calls `Crypto::stream`.
 
+With encryption disabled, there is no AES, IV or secret key. The same fixed
+bootstrap cycle contains a fresh 32-byte salt, a public SHA-256 checksum and
+canonical zero fill. The checksum hashes the concatenation of
+`DataPump/fast/v1/public/bootstrap`, the profile context above and the salt.
+Each public group's checksum hashes `DataPump/fast/v1/public/group`, the profile
+context, salt, big-endian 64-bit locally counted group ordinal and the complete
+fixed plaintext source area. These checks detect corruption and accidental
+mixing, but an adversary can rewrite them: they provide no authentication.
+The receiver records public `checksum_groups` separately from
+`authenticated_groups`, and its `authenticated` flag remains false.
+
+Protection mode is local configuration, never a received flag or guessed from
+the stream. A public receiver rejects an encrypted bootstrap and vice versa;
+an encrypted receiver never retries as public after a key or tag failure. The
+existing encrypted byte format and independent wire vectors remain unchanged.
+
 Source bytes use fixed nine-bit cells: one valid bit followed by the byte's
 eight bits, MSB first. A mandatory all-zero invalid cell follows the final
 byte; the remainder of the minimum final coding cycle is zero. This preserves
-empty files and all leading/trailing zero bytes without transmitting a file
+empty text/files and all leading/trailing zero bytes without transmitting a source
 length, compression header or filename. It costs one bit per source byte.
 
-Authenticated plaintext areas spool privately during reception, without source
+Integrity-checked source areas spool privately during reception, without source
 interpretation. Only the DSP's observed physical end enables cell interpretation
 and an explicit save handle. The invalid source cell cannot end the modem.
 Missing endpoints, extra fill cycles, nonzero fill, incomplete coding cycles,
-failed authentication and storage exhaustion all leave the file incomplete.
+failed authentication/checksums and storage exhaustion all leave the source incomplete.
 
 Physical end requires six seconds of fully scored absence. WAV transmission
 adds 6.25 seconds of actual silence after the filter tail. EOF, cancellation,
@@ -182,7 +217,8 @@ quota exhaustion, a valid tag or the source endpoint cannot substitute for it.
 The default 256 MiB storage quota bounds the combined plaintext and output
 spools, not just the output file: with nine-bit cells, allow about 2.125 times
 the file size plus final-cycle fill. PCM, FEC and diagnostic scratch have their
-own fixed local bounds. There is no full-source or full-waveform RAM buffer.
+own fixed local bounds. Files and waveforms stream without buffering their
+entire contents in RAM; text has its separate 32,768-byte local limit.
 
 There is no persistent replay database: a complete previous authenticated
 transfer can be replayed. Packet removal reduces untrusted framing complexity;
@@ -198,6 +234,11 @@ classic RIFF 4 GiB size limit, with an explicit error on overflow.
 ./build/pump keygen --output keys.bin --key-names Fast
 ./build/pump fast-info --profile wire --apsk 256 --code-rate 7/8
 
+# Public text: no keyfile is needed on either peer.
+./build/pump fast-tx --profile wire --text 'Hello from Fast mode' --output text.wav
+./build/pump fast-rx --profile wire --input text.wav --json
+
+# Files and text can both use optional encryption.
 ./build/pump fast-tx --profile wire --apsk 256 --code-rate 7/8 \
   --keyfile keys.bin --key-name Fast --input source.bin --output transfer.wav
 ./build/pump fast-rx --profile wire --apsk 256 --code-rate 7/8 \
@@ -209,11 +250,21 @@ classic RIFF 4 GiB size limit, with an explicit error on overflow.
   --input source.bin
 ```
 
+`fast-tx` takes exactly one of `--text TEXT` and `--input FILE`. An empty text
+argument is accepted. Without `--keyfile`, Fast selects public mode; providing
+`--keyfile` enables encryption and preserves existing encrypted commands.
+`--encrypt` requires a keyfile, while `--no-encryption` explicitly selects public
+mode and skips loading any supplied key options. These flags conflict.
+`--key-name` or `--pad` without a keyfile is an error unless `--no-encryption`
+explicitly selects public mode. Invalid keys never cause a public fallback.
+
 `fast-listen` handles one reception. Ctrl+C or `--seconds N` cancels without
-manufacturing completion. Fast requires an encryption key; there is no plaintext
-fallback. `--rs robust|high-rate`, `--interleave`, `--sample-rate`, `--quota-mb`,
+manufacturing completion. `--rs robust|high-rate`, `--interleave`, `--sample-rate`, `--quota-mb`,
 `--stereo` and named/pad-backed existing keyfiles are available in the CLI.
-`fast-info` reports local geometry without loading a key. Receive exit code 2
+`fast-info` reports local geometry and selected protection without loading a key.
+Completed receive output includes a safe text preview; JSON also distinguishes
+`encrypted`, `authenticated`, `checksum_groups` and `preview_truncated`.
+Receive exit code 2
 means incomplete; unsuccessful saves report an error. No radio PTT/CAT control
 is implemented.
 

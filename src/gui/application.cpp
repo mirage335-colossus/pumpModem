@@ -296,7 +296,7 @@ bool Application::enabled(ui::Command command) const {
     if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
     return impl_->controller.enabled(command);
 }
-std::string Application::command_label(ui::Command command) const { return fast_ui::owns(command)?std::string{}:impl_->controller.command_label(command); }
+std::string Application::command_label(ui::Command command) const { return fast_ui::owns(command)?impl_->fast_controller.command_label(command):impl_->controller.command_label(command); }
 void Application::complete_service(ui::ServiceResult result) {
     const auto found=impl_->service_routes.find(result.id);
     if(found==impl_->service_routes.end())return;

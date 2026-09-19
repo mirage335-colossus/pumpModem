@@ -18,8 +18,8 @@ enum class Field {
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
     developer_mode, fast_mode, fast_profile, fast_constellation, fast_coding, fast_fec,
-    fast_device, fast_mono, fast_key, fast_key_path, fast_file, fast_status,
-    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, count
+    fast_device, fast_mono, fast_encryption, fast_key, fast_key_path, fast_source, fast_source_detail, fast_text, fast_file, fast_status,
+    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_preview, fast_history, count
 };
 enum class Command {
     none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,

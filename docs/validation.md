@@ -4,6 +4,63 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast optional encryption and text — 19 September 2026
+
+Fast now sends text and files through the same fixed source stream. The GUI
+defaults to Text with Encryption off; the CLI accepts exactly one of `--text`
+and `--input`, and an existing `--keyfile` still enables encryption. Public mode
+uses separate SHA-256 domains, no IV or cipher, and distinct checksum counters.
+No source type, received length, mode negotiation or encryption fallback was
+added. The encrypted bootstrap, CBC/HMAC format and independent wire vectors
+are unchanged. Regular transport, crypto, DSP and receiver source files were
+not modified for this revision.
+
+Codec checks cover both protection modes at all three convolutional rates and
+both RS settings, independent public checksum/wire vectors, exact source
+endpoints, corruption, mode mismatch, quotas and physical-end gating. Separate
+2 MiB streaming checks passed for both modes, as did AddressSanitizer and
+UndefinedBehaviorSanitizer (LeakSanitizer disabled for the container tracing
+limitation). Production S16 WAV and stubbed-device live session tests preserve
+UTF-8, newlines, embedded/trailing zero bytes and empty sources; no transmitter
+claims receiver completion or authentication. Text is bounded to 32,768 bytes
+and invalid oversized input is rejected before starting output.
+
+Review fixed two edge cases: orphan `--key-name`/`--pad` options now require a
+keyfile unless explicit `--no-encryption` selects public mode, and cancellation
+observed during post-end WAV interpretation clears completion and save access.
+GUI checks cover source draft/key retention, encryption-on without a key,
+literal bounded previews after completion, unchanged result protection labels
+when the next-transfer setting changes, and regular draft/pending isolation.
+
+Both production GUI/CLI builds succeeded. The final GCC focused headless run
+passed **52/52** in 355.16 seconds, including every Fast suite, all shared GUI
+suites matched below, regular tiny-message/interval/recovery/live checks,
+sampled long-symbol physical-end checks, weak-signal, crypto/keyring and CLI.
+`fast_snr` passed its 92-case matrix in 143.98 seconds. The unchanged long
+differential-probability calibration and full production GUI workflows were
+not repeated for this follow-up; their earlier results remain recorded below.
+
+```sh
+cmake --build build --parallel 3
+ctest --test-dir build --output-on-failure -j 2 \
+  -R '^(fast_.*|crypto|keyring|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|live_profiles|live_receptions|live|live_resources|weak_signal|cli|gui_.*)$' \
+  -E '^(gui_workflow|gui_adapter_conformance|gui_document_conformance)$'
+```
+
+Final FLTK adapter/document conformance passed 2/2 on a private X display
+(52.24 and 0.13 seconds). Final Clang/Rev checks passed 5/5 in 97.18 seconds:
+`gui_fast`, adapter/platform conformance and the 1×/2× coordinate suites, with
+`REV_SCALE=1` and software rendering. Both adapters' native Fast probes exercise
+plain defaults, encryption-on without a key, UTF-8/newline input, source switching,
+retained drafts and hidden callbacks. Default/minimum-size screenshots in both
+backends were inspected for Text/File and public/encrypted states; no overlap or
+unintended clipping was found. The FLTK screenshots precede the final idle-status
+wording change; final native tests use the rebuilt binaries. `git diff --check`
+passed. No physical audio/radio link was used.
+
+This follow-up does not add hardware qualification or change the broader native
+workflow limitations recorded in the original Fast validation below.
+
 ## Independent Fast APSK mode — 19 September 2026
 
 Fast is implemented in a separate codec, sampled modem, streaming session and

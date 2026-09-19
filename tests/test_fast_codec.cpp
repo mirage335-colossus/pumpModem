@@ -31,8 +31,8 @@ SourceReader memory_source(Bytes data) {
         std::copy_n(data.begin()+static_cast<std::ptrdiff_t>(position),count,out.begin());position+=count;return count;
     };
 }
-Bytes transmit(const Profile& p,const Crypto& crypto,const Bytes& bytes) {
-    StreamEncoder encoder(p,crypto,memory_source(bytes));Bytes wire;std::array<std::uint8_t,physical_interval_bits> interval{};
+Bytes transmit(const Profile& p,const std::optional<Crypto>& crypto,const Bytes& bytes) {
+    StreamEncoder encoder(p,crypto,byte_source(bytes));Bytes wire;std::array<std::uint8_t,physical_interval_bits> interval{};
     while(encoder.next_interval(interval))wire.insert(wire.end(),interval.begin(),interval.end());
     check(encoder.source_bytes()==bytes.size(),"TX byte counter");
     check(encoder.intervals_emitted()*physical_interval_bits==wire.size(),"TX physical cadence counter");return wire;
@@ -60,6 +60,18 @@ Bytes code_systematic(const Profile& p,std::span<const std::uint8_t> systematic)
         for(unsigned col=0;col<128;++col)words[col*rows+row]=word[col];
     }
     auto bits=coding::encode(words,p.code_rate);bits.resize(cycle_intervals(p)*physical_interval_bits);return bits;
+}
+Bytes sha256(const Bytes& bytes) {
+    Bytes digest(32);unsigned count=0;
+    check(EVP_Digest(bytes.data(),bytes.size(),digest.data(),&count,EVP_sha256(),nullptr)==1 && count==32,"SHA-256 fixture");
+    return digest;
+}
+Bytes public_group(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,const Bytes& plain) {
+    const std::string domain="DataPump/fast/v1/public/group";Bytes canonical(domain.begin(),domain.end());
+    const auto context=profile_id(p);canonical.insert(canonical.end(),context.begin(),context.end());canonical.insert(canonical.end(),salt.begin(),salt.end());
+    for(unsigned i=0;i<8;++i)canonical.push_back(static_cast<std::uint8_t>(ordinal>>(56-i*8)));
+    canonical.insert(canonical.end(),plain.begin(),plain.end());const auto digest=sha256(canonical);
+    auto group=plain;group.insert(group.end(),digest.begin(),digest.end());return group;
 }
 void independent_vectors() {
     // Frozen outputs generated independently using a Python shift register,
@@ -116,6 +128,26 @@ void independent_vectors() {
     check(digest==unhex("e52aca6df25bb57b988ca1bea41a53d530815f7f1015589dd01c7ffac04aa6b7"),"independent full fixed-cadence wire vector");
     StreamDecoder fixed_rx(p,crypto);feed(fixed_rx,fixed_wire);fixed_rx.finish(true);
     check(fixed_rx.result() && fixed_rx.result()->preview()==source,"independent full wire vector decode");
+
+    // Public checksum mode has its own independent full-wire vector. It is
+    // deliberately not an authentication construction: anyone can recreate it.
+    const std::string public_domain="DataPump/fast/v1/public/bootstrap";
+    Bytes public_canonical(public_domain.begin(),public_domain.end());
+    public_canonical.insert(public_canonical.end(),context.begin(),context.end());
+    public_canonical.insert(public_canonical.end(),salt.begin(),salt.end());
+    const auto public_digest=sha256(public_canonical);
+    check(public_digest==unhex("a57327e7e8d74665e8e5237f1849c5fe59682c9775b3df820267e45379353eee"),"independent public bootstrap checksum");
+    Bytes public_bootstrap=salt;public_bootstrap.insert(public_bootstrap.end(),public_digest.begin(),public_digest.end());public_bootstrap.resize(224);
+    Bytes public_plain(source_bytes_per_group(p,false));position=0;
+    for(auto byte:source)for(int bit=8;bit>=0;--bit,++position)
+        public_plain[position/8]|=static_cast<std::uint8_t>((((256U|byte)>>bit)&1U)<<(7-position%8));
+    const auto public_systematic=public_group(p,salt,0,public_plain);
+    check(Bytes(public_systematic.end()-32,public_systematic.end())==unhex("0473a8d3bfa5c2cb7d69d1b328a9b8b7190140fc0e5d89fa2494f7313d03164e"),"independent public group checksum");
+    auto public_wire=code_systematic(p,public_bootstrap);coded=code_systematic(p,public_systematic);
+    public_wire.insert(public_wire.end(),coded.begin(),coded.end());
+    check(sha256(public_wire)==unhex("82a64d0004b9588298479e8901f8bcd83008ec16644219d6ca6e11a09999c9fa"),"independent public complete wire vector");
+    StreamDecoder public_fixed_rx(p,std::nullopt);feed(public_fixed_rx,public_wire);public_fixed_rx.finish(true);
+    check(public_fixed_rx.result() && public_fixed_rx.result()->preview()==source && !public_fixed_rx.snapshot().authenticated,"independent public wire decodes without authentication claim");
 }
 void roundtrips() {
     std::mt19937 random(311);auto crypto=key();
@@ -136,9 +168,11 @@ void roundtrips() {
             if(size)source.back()=0;
             auto wire=transmit(p,crypto,source);StreamDecoder decoder(p,crypto);feed(decoder,wire);
             check(!decoder.result() && !decoder.snapshot().physical_end && !decoder.snapshot().source_bytes,"never expose source before physical end");
+            check(decoder.snapshot().encrypted && !decoder.snapshot().authenticated,"keyed pending reception is not whole-file authentication");
             decoder.finish(false);
             check(!decoder.result() && !decoder.snapshot().physical_end,"EOF cannot manufacture physical completion");
             decoder.finish(true);check(decoder.snapshot().complete,"fixed-rate source roundtrip completes");
+            check(decoder.snapshot().authenticated && !decoder.snapshot().checksum_groups,"keyed completion reports authentication only");
             check(decoder.result()->preview()==source,"exact source and trailing zero retained");
             if(size==capacity)check(wire.size()==3*cycle_intervals(p)*physical_interval_bits,"mandatory endpoint may occupy extra final cycle");
         }
@@ -159,6 +193,73 @@ void roundtrips() {
     std::array<float,physical_interval_bits> nonfinite{};nonfinite.fill(std::numeric_limits<float>::quiet_NaN());
     StreamDecoder nan(p,crypto);for(std::size_t i=0;i<cycle_intervals(p);++i)nan.push_interval(nonfinite);
     nan.finish(true);check(nan.snapshot().failed,"non-finite channel evidence fails closed");
+}
+void public_roundtrips() {
+    Bytes original{0,0xff,0xc3,0xa9,0xe2,0x98,0x83,0};auto reader=byte_source(original);original.assign(original.size(),77);
+    std::array<std::uint8_t,6> scratch{};scratch.fill(42);Bytes read;
+    while(const auto n=reader(std::span(scratch).first(3))) {
+        check(n<=3 && scratch[3]==42,"owned byte reader respects every requested span");
+        read.insert(read.end(),scratch.begin(),scratch.begin()+static_cast<std::ptrdiff_t>(n));
+    }
+    const Bytes utf8{0,0xff,0xc3,0xa9,0xe2,0x98,0x83,0};check(read==utf8,"byte source owns exact UTF-8/binary bytes");
+    for(auto rate:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_eighths})for(bool robust:{false,true}) {
+        auto p=profile(Channel::wire);p.code_rate=rate;p.robust=robust;p.interleave_depth=1;
+        check(source_bytes_per_group(p,true)==ciphertext_bytes(p) && source_bytes_per_group(p,false)==(robust?192U:208U),"mode geometry is a fixed local choice");
+        const auto capacity=source_bytes_per_group(p,false)*8/9;
+        for(const auto& source:std::vector<Bytes>{Bytes{},Bytes{0},utf8,Bytes(capacity-1),Bytes(capacity),Bytes(capacity+1),Bytes(513,0xff)}) {
+            const auto wire=transmit(p,std::nullopt,source);StreamDecoder rx(p,std::nullopt);feed(rx,wire);
+            const auto pending=rx.snapshot();check(!pending.encrypted && !pending.authenticated && !pending.authenticated_groups && pending.checksum_groups,"public checksums never claim keyed authentication");
+            check(!rx.result() && !pending.source_bytes,"public source stays pending until physical end");
+            rx.finish(false);check(!rx.result() && !rx.snapshot().physical_end,"public EOF is not physical completion");
+            rx.finish(true);const auto final=rx.snapshot();
+            check(final.complete && !final.encrypted && !final.authenticated && !final.authenticated_groups,"public completion stays explicitly unauthenticated");
+            check(final.status.find("not authenticated")!=std::string::npos && rx.result()->preview()==source,"public status and exact source match");
+        }
+    }
+    auto p=profile(Channel::wire);p.interleave_depth=1;const auto crypto=key();const auto public_wire=transmit(p,std::nullopt,utf8);
+    StreamDecoder keyed_rx(p,crypto);feed(keyed_rx,public_wire);keyed_rx.finish(true);
+    check(keyed_rx.snapshot().failed && !keyed_rx.result(),"keyed receiver never falls back to public mode");
+    StreamDecoder public_rx(p,std::nullopt);feed(public_rx,transmit(p,crypto,utf8));public_rx.finish(true);
+    check(public_rx.snapshot().failed && !public_rx.result(),"public receiver never autodetects encrypted mode");
+    const auto wire=transmit(p,std::nullopt,Bytes(123));
+    StreamDecoder limit(p,std::nullopt,192+123-1);feed(limit,wire);limit.finish(true);
+    check(limit.snapshot().failed && !limit.result(),"public source and output share a bounded spool quota");
+    StreamDecoder exact(p,std::nullopt,192+123);feed(exact,wire);exact.finish(true);
+    check(exact.snapshot().complete && exact.snapshot().spool_bytes==192+123,"public exact combined spool quota");
+}
+void public_malformed() {
+    auto p=profile(Channel::wire);p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
+    const auto pristine=transmit(p,std::nullopt,{});const auto bootstrap=systematic(p,std::span(pristine).first(width));
+    const auto salt=std::span(bootstrap).first(32);const auto good_group=systematic(p,std::span(pristine).subspan(width,width));
+    const auto invalid=[&](const Bytes& wire,const char* why) {
+        StreamDecoder rx(p,std::nullopt);feed(rx,wire);rx.finish(true);check(rx.snapshot().failed && !rx.snapshot().authenticated && !rx.result(),why);
+    };
+    for(const auto position:{0U,191U,192U,223U}) {
+        auto corrupt=good_group;corrupt[position]^=1;auto wire=pristine;
+        const auto replacement=code_systematic(p,corrupt);std::copy(replacement.begin(),replacement.end(),wire.begin()+static_cast<std::ptrdiff_t>(width));
+        invalid(wire,"public data/digest corruption is rejected after FEC");
+    }
+    auto damaged_boot=bootstrap;damaged_boot[0]^=1;auto damaged=pristine;auto replacement=code_systematic(p,damaged_boot);
+    std::copy(replacement.begin(),replacement.end(),damaged.begin());invalid(damaged,"public transfer salt is covered by bootstrap checksum");
+    for(const auto bad:{0,1,2}) {
+        Bytes plain(source_bytes_per_group(p,false));if(bad==0)plain[1]=0x80;if(bad==1)plain.back()=1;if(bad==2)std::fill(plain.begin(),plain.end(),0xff);
+        auto wire=pristine;replacement=code_systematic(p,public_group(p,salt,0,plain));
+        std::copy(replacement.begin(),replacement.end(),wire.begin()+static_cast<std::ptrdiff_t>(width));
+        invalid(wire,"public checksum success cannot bypass canonical endpoint/fill");
+    }
+    auto extra=pristine;replacement=code_systematic(p,public_group(p,salt,1,Bytes(source_bytes_per_group(p,false))));
+    extra.insert(extra.end(),replacement.begin(),replacement.end());invalid(extra,"public extra padding supercycle is rejected");
+    auto partial=pristine;partial.resize(partial.size()-physical_interval_bits);invalid(partial,"public partial final cycle cannot complete");
+    auto bootstrap_only=pristine;bootstrap_only.resize(width);invalid(bootstrap_only,"public missing source cycle cannot complete");
+    auto longwire=transmit(p,std::nullopt,Bytes(650,4));
+    auto missing=longwire;missing.erase(missing.begin()+static_cast<std::ptrdiff_t>(width),missing.begin()+static_cast<std::ptrdiff_t>(width*2));
+    invalid(missing,"public missing interior cycle cannot join neighboring source");
+    auto final_missing=longwire;final_missing.resize(final_missing.size()-width);invalid(final_missing,"public lost final cycle cannot validate a prefix");
+    auto reordered=longwire;std::swap_ranges(reordered.begin()+static_cast<std::ptrdiff_t>(width),reordered.begin()+static_cast<std::ptrdiff_t>(width*2),reordered.begin()+static_cast<std::ptrdiff_t>(width*2));
+    invalid(reordered,"public group ordinal detects reordered cycles");
+    const auto other=transmit(p,std::nullopt,{});auto spliced=pristine;
+    std::copy(other.begin()+static_cast<std::ptrdiff_t>(width),other.end(),spliced.begin()+static_cast<std::ptrdiff_t>(width));
+    invalid(spliced,"public checksum binds groups to their transfer salt");
 }
 void canonical_sources() {
     const auto crypto=key();auto p=profile(Channel::wire);p.interleave_depth=1;
@@ -196,8 +297,8 @@ void burst_and_soft() {
     std::vector<float> noisy;for(std::size_t i=0;i<bits.size();++i)noisy.push_back((bits[i]?8.F:-8.F)*(i%211==0?-0.1F:1.F));
     check(coding::decode(noisy,raw.size(),CodeRate::half).bytes==raw,"soft Viterbi corrects sparse low-confidence errors");
 }
-void streamed(std::size_t total) {
-    auto p=profile(Channel::wire);p.interleave_depth=4;auto crypto=key();std::size_t generated=0,max_request=0;
+void streamed(std::size_t total,bool encrypted=true) {
+    auto p=profile(Channel::wire);p.interleave_depth=4;const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;std::size_t generated=0,max_request=0;
     StreamEncoder tx(p,crypto,[&](std::span<std::uint8_t> output) {
         max_request=std::max(max_request,output.size());const auto n=std::min(output.size(),total-generated);
         for(std::size_t i=0;i<n;++i)output[i]=static_cast<std::uint8_t>((generated+i)*71+3);
@@ -223,7 +324,8 @@ void streamed(std::size_t total) {
 }
 int main(int argc,char**) {
     try {
-        independent_vectors();roundtrips();canonical_sources();burst_and_soft();streamed(argc>1?2*1024*1024:64*1024);
+        independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
+        streamed(argc>1?2*1024*1024:64*1024);streamed(argc>1?2*1024*1024:64*1024,false);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";
     }catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }
