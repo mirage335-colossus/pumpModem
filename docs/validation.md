@@ -4,6 +4,40 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast bulk-file coding defaults — 19 September 2026
+
+Fast defaults now use rate-3/4 convolutional coding, robust RS(128,112),
+and interleave depth 16 for cable/radio or 5 for acoustic. The original
+rate-1/2 crypto and full-wire vectors retain their original explicit profile
+and expected bytes. Regular-mode framing and receiver code are unchanged.
+
+The new airtime regression bounds cycle rounding plus bootstrap/final fill below
+10% against ideal continuous interleaving at the same FEC rate for all files
+at least 100,000 bytes. Exact estimates at 100,000 bytes, 100 KiB, 1 MiB and
+16 MiB cover every profile, encrypted and public; throughput is at least 25%
+higher than the former defaults. At 100,000 bytes, interleave overhead is
+4.98–6.91%. A 16-byte Fast source takes 8.14/20.40/33.07/40.58 seconds for
+wire/SSB/FM/acoustic, including 6.25 seconds of silence. These are airtime
+calculations, not hardware throughput measurements.
+
+Release build and final focused `fast_codec`, `fast_transfer`, `fast_cli`, and
+`gui_fast` tests pass. All 29 development-contract suites pass, including
+`differential_receiver_probability`, physical-end checks, and pending GUI
+regressions. All 11 Fast/shared-Fast-GUI suites pass (SNR retry noted below). Sampled interruption assertions remain unchanged.
+The full 92-case SNR matrix, added default 100 KB cable case, and argument
+checks pass. Its first run timed out on the acoustic sweep at 300 seconds
+while the bulk acoustic simulation was also active; the rerun passes with
+unchanged timeout and decoding assertions.
+The codec's ordinary public/encrypted streaming fixtures are now 100 KiB;
+`fast_regression` defaults to 100,000 bytes. A default encrypted cable run
+at 30 dB SNR and seed 417 recovers all 100,000 bytes exactly, with 902 physical
+intervals and no corrected/erased bytes. The matching 100,000-byte acoustic
+run also recovers exactly, with 903 intervals and no corrected/erased bytes.
+[Bulk simulation CSV](validation-data/fast/bulk-defaults-20260919.csv) retains
+both results; concurrent tests make timing/deadline columns unsuitable as
+isolated real-time benchmarks. Simulated AWGN results do not establish
+field error rates, and no native adapter or physical audio-device test was run.
+
 ## Fast acoustic/cable controls and memory-only reception — 19 September 2026
 
 Fast's acoustic preset now uses 500 symbols/s QPSK at a 1.8 kHz carrier with

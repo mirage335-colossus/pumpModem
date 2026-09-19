@@ -89,7 +89,8 @@ void independent_vectors() {
         std::vector<float> soft;for(auto b:wire)soft.push_back(b?8.F:-8.F);
         check(coding::decode(soft,source.size(),rate).bytes==source,"independent inner vector decode");
     }
-    auto p=profile(Channel::wire);Bytes salt(32),iv(16),plain(176);
+    // Freeze the original local profile as well as its independent wire bytes.
+    auto p=profile(Channel::wire);p.code_rate=CodeRate::half;Bytes salt(32),iv(16),plain(176);
     std::iota(salt.begin(),salt.end(),32);std::iota(iv.begin(),iv.end(),0);std::iota(plain.begin(),plain.end(),0);
     const auto expected_crypto=unhex(
         "000102030405060708090a0b0c0d0e0f1e03c7f5409c338d0198fd87e3fffc4691e3b226d5c20647f492e61bd1b833a5"
@@ -325,7 +326,7 @@ void streamed(std::size_t total,bool encrypted=true) {
 int main(int argc,char**) {
     try {
         independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
-        streamed(argc>1?2*1024*1024:64*1024);streamed(argc>1?2*1024*1024:64*1024,false);
+        streamed(argc>1?2*1024*1024:100*1024);streamed(argc>1?2*1024*1024:100*1024,false);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";
     }catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

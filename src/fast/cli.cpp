@@ -26,9 +26,9 @@ const char* help=R"(Fast APSK text and file transfer (separate from regular mode
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
   --apsk 4|16|64|256                 Profile default 16 (wire/SSB), 4 (FM/acoustic)
-  --code-rate 1/2|3/4|7/8            Default 1/2
-  --rs robust|high-rate              Two RS(128,112) or RS(128,120) words
-  --interleave 1..64                 Default 16 outer groups (acoustic: 4)
+  --code-rate 1/2|3/4|7/8            Default 3/4
+  --rs robust|high-rate              Default robust: two RS(128,112) words
+  --interleave 1..64                 Default 16 outer groups (acoustic: 5)
   --sample-rate 44100..192000        Default 48000 Hz
   --keyfile KEY                     Enable encryption using this keyfile
   --encrypt                        Require encryption and --keyfile
@@ -84,9 +84,9 @@ Settings settings(const Args& a,bool load_key) {
     const auto order=a.integer("apsk",s.profile.constellation),depth=a.integer("interleave",s.profile.interleave_depth),rate=a.integer("sample-rate",48000);
     if(order>256||depth>64||rate>192000)throw Error("Fast profile value exceeds local bound");
     s.profile.constellation=static_cast<unsigned>(order);s.profile.interleave_depth=static_cast<unsigned>(depth);s.profile.sample_rate=static_cast<std::uint32_t>(rate);
-    const auto code=a.get("code-rate","1/2");
+    const auto code=a.get("code-rate",s.profile.code_rate==CodeRate::half?"1/2":s.profile.code_rate==CodeRate::three_quarters?"3/4":"7/8");
     if(code=="1/2")s.profile.code_rate=CodeRate::half;else if(code=="3/4")s.profile.code_rate=CodeRate::three_quarters;else if(code=="7/8")s.profile.code_rate=CodeRate::seven_eighths;else throw Error("Fast code rate must be 1/2, 3/4 or 7/8");
-    const auto rs=a.get("rs","robust");if(rs!="robust"&&rs!="high-rate")throw Error("Fast RS must be robust or high-rate");s.profile.robust=rs=="robust";
+    const auto rs=a.get("rs",s.profile.robust?"robust":"high-rate");if(rs!="robust"&&rs!="high-rate")throw Error("Fast RS must be robust or high-rate");s.profile.robust=rs=="robust";
     s.device=a.get("device","default");s.mono=!a.has("stereo");
     auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
     validate(s.profile);

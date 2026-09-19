@@ -84,8 +84,8 @@ completion. Both native backends render the same immutable plot snapshots.
 ## Channel profiles
 
 Defaults use 48 kHz samples, 20% root-raised-cosine rolloff, a 16-symbol pulse
-span, rate-1/2 convolutional coding and robust RS. Interleave depth is 16 except
-for acoustic (4). The CLI
+span, rate-3/4 convolutional coding and robust RS. Interleave depth is 16 except
+for acoustic (5). These defaults target files of 100 KB (100,000 bytes) and larger. The CLI
 also accepts 44.1–192 kHz sample rates. Device passband validation is separate
 from these nominal waveform settings.
 
@@ -98,7 +98,7 @@ from these nominal waveform settings.
 
 The acoustic preset now favors proximity speaker/microphone links: QPSK at
 500 symbols/s with a 600 Hz occupied band, output amplitude 0.35 and interleave
-depth 4 to spread short erasure bursts while limiting startup/padding waits. Both peers must use this revised
+depth 5 to spread short erasure bursts while limiting startup/padding waits. Both peers must use this revised
 preset; it does not match the former 6,666.667-symbol/s acoustic setting.
 
 All profiles offer QPSK and 16/64/256-APSK. These are local choices, without
@@ -132,7 +132,7 @@ including that silence; it stays below 100% until playback drains. Device queues
 can make audible playback lag the producer. A source file changed after inspection
 can invalidate the estimate. An empty draft estimate is an empty source transfer.
 
-The GUI exposes interleave depths 1, 4, 16 and 64. Depth 16 remains the cable/radio default (acoustic uses 4);
+The GUI exposes interleave depths 1, 4, 5, 16 and 64. Depth 16 remains the cable/radio default (acoustic uses 5);
 64 reduces padding loss for long cable transfers at the expense of larger
 coding cycles and short-message latency. Both peers must match. At 256-APSK,
 7/8 coding and high-rate RS, the long public-data ceiling is about 53.1 kbit/s
@@ -181,6 +181,28 @@ of DVB compatibility. The frozen marker uses the implementation's xorshift32
 sequence seeded with `0x65a39c17`; training permutes it and rotates by pi/2.
 Independent wire fingerprints and mapper tests protect these constants.
 
+The bulk defaults retain robust RS: its 16 parity bytes per codeword correct
+up to eight unknown byte errors (or 16 erasures), twice the high-rate choice.
+High-rate RS increases source capacity by only 8–9%; rate 3/4 inner coding
+provides the larger throughput gain while retaining that outer correction budget.
+Rate 1/2 remains available for difficult links and 7/8 for cleaner links.
+No setting is universally optimal for an unmeasured channel.
+
+At the default code rate, depth 16 rounds to 22 physical intervals and depth 5
+to seven. Tests compare exact airtime against continuous interleaving at the
+same FEC rate: cycle rounding, bootstrap and final fill together stay below 10%
+for every source of at least 100,000 bytes, encrypted and public, in all profiles.
+Exact estimates are also checked at 100,000 bytes, 100 KiB, 1 MiB and 16 MiB.
+This is interleave overhead, not total protocol overhead or a measured error rate.
+A 16-byte encrypted Fast message takes less than 45 seconds in every profile,
+including the existing 6.25-second silence; no special short-message framing is
+introduced. Estimated 16-byte airtimes are 8.14 s (wire), 20.40 s (SSB),
+33.07 s (FM) and 40.58 s (acoustic). Both peers must select the same revised defaults. To communicate
+with previous defaults select rate 1/2 and depth 16 (acoustic: 4).
+
+The standalone `fast_regression` tool now defaults to 100,000 source bytes;
+use `--bytes` explicitly for smaller diagnostic fixtures.
+
 ## Coding and interruption handling
 
 Each fixed outer group contains two shortened Reed–Solomon codewords:
@@ -194,7 +216,7 @@ Encrypted groups contain a 16-byte IV, the fixed ciphertext source area and a
 32-byte HMAC-SHA256 tag. Public groups contain the fixed plaintext source area
 and a 32-byte SHA-256 checksum. Both use identical physical coding geometry.
 
-An interleave cycle contains `D` outer groups (`D=16` for cable/radio, `D=4` for acoustic, CLI range
+An interleave cycle contains `D` outer groups (`D=16` for cable/radio, `D=5` for acoustic, CLI range
 1–64). Its `2D` RS rows are transmitted column-first. A K=7 convolutional code
 uses generators 0171 and 0133, with selectable rates 1/2, 3/4 or 7/8.
 The puncture pairs are `[11]`, `[11,10,01]` and

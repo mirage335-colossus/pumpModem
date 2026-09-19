@@ -92,6 +92,12 @@ void presentation_and_retention() {
         "Fast settings or source draft were discarded on mode switch");
     check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
     check(app.field(F::fast_detail).text.find("Shannon-Hartley")!=std::string::npos,"Fast capacity explanation missing");
+    app.select(F::fast_profile,"acoustic");
+    check(app.field(F::fast_depth).selected=="5"&&app.field(F::fast_coding).selected=="three-quarters"&&
+        app.field(F::fast_fec).selected=="robust","Acoustic bulk defaults differ from modem profile");
+    app.select(F::fast_profile,"wire");
+    check(app.field(F::fast_depth).selected=="16"&&app.field(F::fast_coding).selected=="three-quarters"&&
+        app.field(F::fast_fec).selected=="robust","Cable bulk defaults differ from modem profile");
     app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast cable depth choice ignored");
     app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
 }

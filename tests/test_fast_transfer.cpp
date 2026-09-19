@@ -57,6 +57,30 @@ Result receive(Profile p,std::span<const float> pcm,double tail=7,unsigned key_o
 }
 }
 int main() {try {
+    // Compare with an ideal continuous interleaver at the SAME FEC rate.
+    // This isolates cycle rounding/bootstrap/final fill from deliberate parity.
+    for(auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
+        const auto p=profile(channel);
+        require(p.code_rate==CodeRate::three_quarters && p.robust,"bulk FEC defaults changed");
+        for(bool encrypted:{false,true})for(auto bytes:{100000ULL,102400ULL,1048576ULL,16777216ULL}) {
+            const auto actual=estimate_transmission(p,encrypted,bytes);
+            // Worst-case bootstrap plus final partial cycle; decreases with size.
+            const double cycle_expansion=cycle_intervals(p)/(p.interleave_depth*4.0/3);
+            const double fill_bound=1+2.0*p.interleave_depth*source_bytes_per_group(p,encrypted)*8/(9.0*(bytes+1));
+            require(cycle_expansion*fill_bound<1.10,"bulk interleave worst-case bound exceeds ten percent");
+            const double ideal_intervals=9.0*(bytes+1)/
+                (source_bytes_per_group(p,encrypted)*8)*4/3;
+            const double ideal_seconds=(training_symbols+ideal_intervals*interval_symbols(p)+15)/p.symbol_rate+6.25;
+            require(actual.seconds<=ideal_seconds*1.10,"bulk interleave overhead exceeds ten percent");
+            auto old=p;old.code_rate=CodeRate::half;
+            if(channel==Channel::acoustic)old.interleave_depth=4;
+            require(actual.source_bps>estimate_transmission(old,encrypted,bytes).source_bps*1.25,
+                "bulk defaults must improve source throughput by at least 25 percent");
+            if(bytes==100000)std::cout<<channel_name(channel)<<" encrypted="<<encrypted
+                <<" 100KB bps="<<actual.source_bps<<" cycle overhead="<<actual.seconds/ideal_seconds-1<<'\n';
+        }
+        require(estimate_transmission(p,true,16).seconds<45,"short fast message exceeds 45 seconds");
+    }
     const auto source=fixture(733);
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
         auto p=profile(channel);p.interleave_depth=4;

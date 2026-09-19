@@ -10,7 +10,8 @@ enum class CodeRate { half, three_quarters, seven_eighths };
 struct Profile {
     Channel channel=Channel::wire;
     unsigned constellation=16;
-    CodeRate code_rate=CodeRate::half;
+    // Bulk-file default: retain outer burst correction, reduce inner redundancy.
+    CodeRate code_rate=CodeRate::three_quarters;
     bool robust=true;
     unsigned interleave_depth=16;
     std::uint32_t sample_rate=48000;

@@ -47,6 +47,13 @@ class FastCLI(unittest.TestCase):
             raise AssertionError(plain.stderr.decode(errors="replace"))
         cls.plain_tx = json.loads(plain.stdout)
 
+    def test_bulk_defaults(self):
+        for profile, intervals in (("wire", 22), ("ssb", 22), ("fm", 22), ("acoustic", 7)):
+            result = self.run_pump("fast-info", "--profile", profile)
+            info = json.loads(result.stdout)
+            self.assertEqual(info["cycle_intervals"], intervals)
+            self.assertEqual(info["source_bytes_per_group"], 192)
+
     def run_pump(self, *args, ok=True):
         result = subprocess.run([PUMP, *map(str, args)], capture_output=True, timeout=90)
         self.assertEqual(result.returncode, 0 if ok else 2,

@@ -58,7 +58,7 @@ struct Controller::Impl {
         f(F::fast_profile).selected="wire";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
-        f(F::fast_depth).options={{"1","1 · short messages"},{"4","4 · acoustic"},{"16","16 · normal"},{"64","64 · long cable transfers"}};
+        f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · bulk files"},{"64","64 · long cable transfers"}};
         f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         f(F::fast_device).text="default";f(F::fast_mono).checked=true;
         f(F::fast_encryption).checked=false;

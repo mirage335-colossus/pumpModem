@@ -126,7 +126,7 @@ bool run(const Profile& p,std::uint64_t bytes,std::uint64_t seed,double snr) {
 }
 }
 int main(int argc,char** argv) {try {
-    auto selected_channel=Channel::wire;std::uint64_t bytes=4096,seed=417;
+    auto selected_channel=Channel::wire;std::uint64_t bytes=100000,seed=417;
     std::optional<unsigned> apsk,depth;
     std::optional<CodeRate> rate;
     std::optional<double> snr;bool require_success=false;
@@ -137,7 +137,7 @@ int main(int argc,char** argv) {try {
         if(option=="--require-success") {require_success=true;continue;}
         if(option=="--help") {
             std::cout<<"fast_regression [--snr 10..120] [--profile wire|ssb|fm|acoustic] [--apsk 4|16|64|256] [--bytes 0..67108864] [--seed N] [--code-rate 1/2|3/4|7/8] [--depth 1..64] [--require-success]\n"
-                <<"Without --snr, runs all 23 levels, 10 to 120 dB inclusive. Source, test-only IV/salt and AWGN seeds are reproducible.\n";return 0;
+                <<"Default source is 100,000 bytes. Without --snr, runs all 23 levels, 10 to 120 dB inclusive. Source, test-only IV/salt and AWGN seeds are reproducible.\n";return 0;
         }
         if(i+1==argc)throw Error("Missing regression option value");
         const std::string value(argv[++i]);

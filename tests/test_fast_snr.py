@@ -30,6 +30,10 @@ def main(tool):
                 assert row["exact"] == "1", row
         print(f"{profile}: all 23 SNR levels checked", flush=True)
 
+    # Exercise sustained default coding across a bulk file, beyond short fixtures.
+    bulk = run(tool, "--profile", "wire", "--snr", "30", "--require-success")
+    assert len(bulk) == 1 and bulk[0]["source_bytes"] == "100000" and bulk[0]["exact"] == "1", bulk
+
     # Profile selection must not reset explicitly selected local geometry.
     geometry = ["--apsk", "64", "--depth", "3", "--code-rate", "7/8"]
     fixture = ["--bytes", "0", "--snr", "60", "--seed", "417", "--require-success"]

@@ -9,7 +9,7 @@ Profile profile(Channel channel) {
     case Channel::wire: break;
     case Channel::ssb: p.symbol_rate=2000;p.carrier_hz=1500;break;
     case Channel::fm: p.symbol_rate=2000;p.carrier_hz=1500;p.constellation=4;break;
-    case Channel::acoustic: p.symbol_rate=500;p.carrier_hz=1800;p.constellation=4;p.amplitude=.35;p.interleave_depth=4;break;
+    case Channel::acoustic: p.symbol_rate=500;p.carrier_hz=1800;p.constellation=4;p.amplitude=.35;p.interleave_depth=5;break;
     default: throw Error("Unknown fast channel profile");
     }
     return p;
