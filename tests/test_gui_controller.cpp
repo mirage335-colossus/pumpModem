@@ -260,8 +260,8 @@ void lpi_estimate_controls() {
           controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
           "An available observer ratio below 8x must be red even when hypothetical");
     controller.edit(F::short_bits,"001x");
-    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal&&text().ends_with("Unavailable"),
-          "Unavailable observer estimate retained the previous warning color");
+    check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative&&text().ends_with("Unavailable"),
+          "Unavailable observer estimate must be red");
     controller.edit(F::message,"e");prepare(controller);
     check(controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
           "A restored low observer estimate lost its warning color");
@@ -323,9 +323,11 @@ void lpi_estimate_controls() {
     check(controller.estimate().has_value(),"RX target edits did not prepare an estimate");
     same_advisory(*reference);
     controller.edit(F::short_bits,"001x");
-    check(text().ends_with("Unavailable"),"Invalid raw draft retained the previous LPI number");
+    check(text().ends_with("Unavailable")&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "Invalid raw draft must replace the previous LPI number with a red unavailable status");
     controller.edit(F::message,"e");controller.edit(F::bandwidth,"invalid");
-    check(text().ends_with("Invalid settings"),"Invalid modem settings retained the previous LPI number");
+    check(text().ends_with("Invalid settings")&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "Invalid modem settings must replace the previous LPI number with a red status");
     controller.edit(F::bandwidth,"3.6 kHz");
     controller.select(F::simulation,std::string(tuning::simulation_presets().front().name));prepare(controller);
     check(!controller.settings().simulation,"Simulation-off selection did not reach settings");
@@ -343,17 +345,17 @@ void lpi_estimate_controls() {
     same_advisory(*long_reference);
     controller.edit(F::long_snr,"55");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
-          text().find("×")==std::string::npos,
-          "Short symbol geometry outside the normalized weak-signal model must withdraw unsupported numbers");
+          text().find("×")==std::string::npos&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
+          "Short symbol geometry outside the normalized weak-signal model must show a red status without unsupported numbers");
     controller.select(F::key,"none");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::outside_weak_signal_model&&
           controller.inspection()->lpi_estimate.hypothetical_encryption&&
           text().find("hypothetical")!=std::string::npos&&
-          !controller.settings().transfer.key,
+          !controller.settings().transfer.key&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::negative,
           "Turning encryption off must restore the hypothetical warning even outside the relative weak-signal model");
     controller.edit(F::long_snr,"0");prepare(controller);
     check(controller.inspection()->lpi_estimate.status==lpi::Status::available&&
-          text().find("hypothetical")!=std::string::npos,
+          text().find("hypothetical")!=std::string::npos&&controller.field(F::lpi_estimate).text_tone==ui::TextTone::normal,
           "Public experiments must retain numerical relative estimates after encryption is turned off");
     controller.select(F::key,"key:LPI estimate");prepare(controller);
     check(!controller.inspection()->lpi_estimate.hypothetical_encryption&&text().find("hypothetical")==std::string::npos,

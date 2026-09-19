@@ -7,6 +7,8 @@ Below it are the power budget's margin or shortfall and whole-bit phase loss.
 Available RX estimates below 80% are red, and available **Observer / receiver
 time** values below 8× are red. The thresholds use the underlying estimates
 before display rounding; exactly 80% and 8× do not trigger red.
+Observer results outside the model range, unavailable results and errors are
+also red. **Calculating...** remains neutral while a new estimate is pending.
 The power field accepts watts,
 milliwatts, microwatts or dBm.
 

@@ -342,7 +342,7 @@ struct Controller::Impl {
     }
     void lpi_estimate_status(const std::string& state) {
         f(UiField::lpi_estimate).text="Observer / receiver time: "+state;
-        f(UiField::lpi_estimate).text_tone=ui::TextTone::normal;
+        f(UiField::lpi_estimate).text_tone=state=="Calculating..."?ui::TextTone::normal:ui::TextTone::negative;
     }
     static std::size_t link_input_index(UiField field) {
         return field==UiField::link_power?0:field==UiField::link_loss?1:2;
@@ -1064,7 +1064,7 @@ struct Controller::Impl {
             if(planner_draft)planner_model.reset();
             f(UiField::lpi_estimate).text=inspection->lpi_summary;
             f(UiField::lpi_estimate).text_tone=inspection->lpi_estimate.status==lpi::Status::available&&
-                inspection->lpi_estimate.equivalent_symbols<8?ui::TextTone::negative:ui::TextTone::normal;
+                inspection->lpi_estimate.equivalent_symbols>=8?ui::TextTone::normal:ui::TextTone::negative;
             if(receive_targets_due)simulation_estimate_status("Calculating...");
             else if(!estimate->memory_supported)simulation_estimate_status("Budget exceeded");
             else if(!estimate->wire_bits)simulation_estimate_status("Enter a message");

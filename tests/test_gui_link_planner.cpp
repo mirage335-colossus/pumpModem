@@ -1255,9 +1255,16 @@ void estimate_warning_thresholds() {
     model.success_probability=model.one_bit_success_probability=model.observer_ratio=0;
     const auto unavailable=planner_page::build(model,900,false,false);
     check(tone_for(unavailable,"RX estimate unavailable")!=ui::DocumentTone::negative&&
-          tone_for(unavailable,"Outside model range")!=ui::DocumentTone::negative&&
           tone_for(unavailable,"┄ 1-bit RX")!=ui::DocumentTone::negative,
-          "Unavailable estimates must not inherit a numerical red warning");
+          "Unavailable RX estimates must not inherit a numerical red warning");
+    check(tone_for(unavailable,"Outside model range")==ui::DocumentTone::negative,
+          "An unavailable observer estimate must be red");
+    for(const bool available:{false,true})for(const double ratio:{-1.,0.,
+        std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        model.observer_available=available;model.observer_ratio=ratio;
+        check(tone_for(planner_page::build(model,900,false,false),"Outside model range")==ui::DocumentTone::negative,
+              "Invalid observer values must be red even when their availability flag is set");
+    }
     const auto detailed=planner_page::build(model,900,true,false);
     check(!contains_text(unavailable,"Red indicators.")&&contains_text(detailed,"below 80%")&&
           contains_text(detailed,"below 8×")&&contains_text(detailed,"not a validated acoustic threshold")&&

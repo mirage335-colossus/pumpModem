@@ -3983,3 +3983,20 @@ randomness. Only explanatory text and its presentation assertions changed.
 Both GUI binaries rebuilt, and the focused planner suite passed with GCC in
 12.36 seconds and Clang/Rev in 14.51 seconds. No waveform, model calculation,
 threshold, transport or receiver behavior changed in this refinement.
+
+### Observer estimate error colors (2026-09-19)
+
+Observer/receiver results outside the model range, unavailable results and
+invalid-settings/error states now use red in the planner and current-draft
+readout. Calculating remains neutral; valid ratios at or above 8× restore the
+usual foreground. RX unavailable-state colors are unchanged.
+
+Both GUI binaries rebuilt. Planner, controller and application checks passed
+3/3 with GCC in 70.39 seconds and 3/3 with Clang/Rev in 74.51 seconds. Coverage
+includes nonfinite planner ratios, encrypted/public out-of-range estimates,
+invalid drafts/settings, pending state and restoration of a valid estimate.
+The shared native fixture checks error and recovery colors in both color and
+monochrome. FLTK adapter conformance passed in 49.90 seconds and Rev adapter
+conformance passed in 68.57 seconds, each on a private X display.
+`git diff --check` passed. This changes presentation only; modem behavior and
+estimate calculations are unchanged.

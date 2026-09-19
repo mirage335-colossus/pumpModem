@@ -26,7 +26,13 @@ void estimate_warning_fields(Application& application,Present present,Verify ver
     application.edit(F::short_bits,"001x");
     await([&] {return application.field(F::simulation_confidence).text.ends_with("Unavailable");});
     verify(F::simulation_confidence,ui::TextTone::normal);
-    verify(F::lpi_estimate,ui::TextTone::normal);
+    verify(F::lpi_estimate,ui::TextTone::negative);
+    application.edit(F::message,"e");application.edit(F::bandwidth,"invalid");
+    await([&] {return application.field(F::lpi_estimate).text.ends_with("Invalid settings");});
+    verify(F::lpi_estimate,ui::TextTone::negative);
+    application.edit(F::bandwidth,"3.6 kHz");application.edit(F::snr,"55");
+    await([&] {return application.field(F::lpi_estimate).text.find("outside model range")!=std::string::npos;});
+    verify(F::lpi_estimate,ui::TextTone::negative);
     application.edit(F::message,"e");application.edit(F::snr,"0");
     application.select(F::simulation,"3dBm -60dB");
     await(numeric);
