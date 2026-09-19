@@ -193,18 +193,50 @@ editable actual-link budget. Its assumptions remain behind the single concise
 LPI warning in the tab. See also [oscillator models](oscillator-models.md) and
 [simulation estimates](simulation-estimates.md).
 
-The hidden details explain the 8× listening guideline. Longer public patterns
-repeat less often and may sound less growling even without encryption. This is
-a plausible tendency, not a validated 8× acoustic threshold: experiments show
-that temporal repetition can give noise a pitch
-([Yost, 1996](https://pubmed.ncbi.nlm.nih.gov/8675844/)). Rate, carrier, filtering,
-level and the listener also affect the sound. The ratio itself models energy
-detection, not sound character, annoyance or interference complaints; actual
-tone modes still transmit tones. A noise-like sound does not establish fewer
-complaints or less physical interference. Research on noise annoyance considers
-multiple sound qualities, including loudness, roughness and tonality
-([NASA, 2024](https://ntrs.nasa.gov/citations/20240003202)). With encryption off,
-the observer ratio continues to describe a hypothetical private pattern.
+The hidden details explain the 8× listening guideline. The reported steadier,
+less abruptly transitioning sound need not be explained solely by fewer symbol
+boundaries. Less conspicuous envelope fluctuations, spectral features and
+repeating structure within the listening window are also plausible contributors.
+Longer pseudorandom realizations can change that texture even without encryption;
+this is an interpretation to investigate, not a measured acoustic result.
+Short finite realizations can have accidental imbalances or correlations that
+become prominent when reused. A longer realization may dilute particular
+features, although improvement need not be monotonic and repeating the longer
+block still leaves periodic structure.
+Experiments show that temporal repetition can give noise a pitch
+([Yost, 1996](https://pubmed.ncbi.nlm.nih.gov/8675844/)); they do not establish an
+8× threshold for this modem.
+
+At the default 3.6 kHz rate and 1.5 kHz carrier, the automatic public profile
+steps from 1,024 chips (about 4.33×) to 2,048 chips (about 8.52×). Both already
+use the same root-raised-cosine pulse shaping with overlapping symbol tails.
+Shaping is enabled at 16 full chips, far below those lengths. The chip rate,
+pulse kernel and bounded circular Gaussian-like chip distribution do not change
+at 8×. Thus any perceived reduction in abruptness at that step is not the
+activation of a smoother pulse filter. A longer public pattern still repeats
+and is still known to an observer; statistical resemblance to noise does not
+make its template secret.
+
+Removing predictable features can make detection harder for an observer who
+does not know the waveform. A receiver with a matching private template can
+still accumulate correlation. This distinction between known-waveform and
+energy-only detection is part of the LPI rationale
+([Tandra and Sahai, 2005](https://people.eecs.berkeley.edu/~sahai/Papers/Rahul_WirelessCom05.pdf)).
+This implementation uses secret cryptographic pseudorandom sequences for that
+template asymmetry; the model does not require physical true randomness.
+Sequence length alone does not establish unpredictability.
+Even genuinely random chips can retain detectable structure after modulation,
+filtering, amplitude limiting or burst gating, and the signal adds energy.
+The ratio assumes a noise-like private waveform from the outset; it does not
+inspect the generated samples or test how random they are. Its increase with
+bandwidth and bit duration is not evidence of a new statistical regime at 8×.
+With encryption off, it continues to describe a hypothetical private pattern.
+
+Rate, carrier, filtering, level and the listener also affect sound quality;
+actual tone modes still transmit tones. A noise-like sound does not establish
+fewer complaints or less physical interference. Research on noise annoyance
+considers multiple sound qualities, including loudness, roughness and tonality
+([NASA, 2024](https://ntrs.nasa.gov/citations/20240003202)).
 
 The default budget is +3 dBm transmit power, 120 dB path loss and −164 dBm/Hz
 noise density: −117 dBm received and +47 dB-Hz actual C/N0. The 120 dB starting

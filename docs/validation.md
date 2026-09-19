@@ -3972,3 +3972,14 @@ The 8× preference is not presented as a validated acoustic threshold or a
 prediction of annoyance or interference complaints. No physical audio/RF or
 controlled listening experiment was run for this presentation/default change.
 `git diff --check` passed.
+
+The subsequent wording refinement distinguishes perceived abruptness and
+finite-pattern envelope/spectral structure from symbol-boundary repetition.
+It also distinguishes statistical resemblance to noise from the observer's
+ability to predict a public template. At the default geometry, both the
+1,024-chip (4.33×) and 2,048-chip (8.52×) profiles already use the same pulse
+shaping; the ratio assumes noise-like signals rather than testing their
+randomness. Only explanatory text and its presentation assertions changed.
+Both GUI binaries rebuilt, and the focused planner suite passed with GCC in
+12.36 seconds and Clang/Rev in 14.51 seconds. No waveform, model calculation,
+threshold, transport or receiver behavior changed in this refinement.

@@ -1261,6 +1261,9 @@ void estimate_warning_thresholds() {
     const auto detailed=planner_page::build(model,900,true,false);
     check(!contains_text(unavailable,"Red indicators.")&&contains_text(detailed,"below 80%")&&
           contains_text(detailed,"below 8×")&&contains_text(detailed,"not a validated acoustic threshold")&&
+          !contains_text(unavailable,"Sound and structure.")&&contains_text(detailed,"less abruptly changing")&&
+          contains_text(detailed,"public noise-like pattern remains predictable")&&
+          contains_text(detailed,"does not measure randomness")&&
           contains_text(detailed,"Tone modes still transmit tones"),
           "Hidden details must explain both thresholds and the limits of the listening guideline");
 }
