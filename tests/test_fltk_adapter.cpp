@@ -810,14 +810,15 @@ void inline_document_editor() {
         while(Clock::now()<until)Fl::wait(.005);
     };
     app.application.select_page(ui::Page::planner);refresh();
-    NativeInput* editor=nullptr;NativeMenuButton* presets=nullptr;FltkDocumentView* document=nullptr;
+    NativeInput* editor=nullptr;NativeEditor* command_editor=nullptr;NativeMenuButton* presets=nullptr;FltkDocumentView* document=nullptr;
     const std::function<void(Fl_Group&)> find=[&](Fl_Group& group) {
         if(auto* view=dynamic_cast<FltkDocumentView*>(&group);view&&view->visible_r())document=view;
         for(int i=0;i<group.children();++i) {
             auto* child=group.child(i);
             if(document&&document->contains(child)) {
                 if(auto* input=dynamic_cast<NativeInput*>(child))editor=input;
-                if(auto* menu=dynamic_cast<NativeMenuButton*>(child))presets=menu;
+                if(auto* menu=dynamic_cast<NativeMenuButton*>(child);menu&&menu->visible_r())presets=menu;
+                if(auto* command=dynamic_cast<NativeEditor*>(child))command_editor=command;
             }
             if(auto* nested=dynamic_cast<Fl_Group*>(child))find(*nested);
         }
@@ -862,6 +863,38 @@ void inline_document_editor() {
         "Scrolling the inline editor out of the viewport retained visible input or keyboard focus");
     scroll->scroll_to(0,0);refresh();
     require(editor->visible_r()&&editor->take_focus(),"Scrolling the inline editor back did not restore input");
+    require(command_editor&&command_editor->visible_r()&&command_editor->byte_limit==8192&&command_editor->tab_nav(),
+        "Launch command is not a native multiline editor with ordinary focus navigation");
+    app.application.edit(ui::Field::message,"e");refresh();
+    const auto original_rate=app.application.field(ui::Field::bandwidth).text;
+    const auto original_target=app.application.field(ui::Field::snr).text;
+    std::string lines="./datapump-gui --unsupported-setting 1";
+    for(unsigned line=0;line<24;++line)lines+="\n--line "+std::to_string(line);
+    command_editor->buffer()->select(0,command_editor->buffer()->length());
+    require(command_editor->paste(lines),"Multiline native command paste was rejected");refresh();
+    require(buffer_text(*command_editor->buffer())==lines&&app.application.field(ui::Field::planner_command).text==lines,
+        "Native command paste changed wrapped/newline content or failed to retain the buffer");
+    command_editor->take_focus();command_editor->insert_position(command_editor->buffer()->length());command_editor->show_insert_position();refresh();
+    int px=0,py=0;
+    require(command_editor->position_to_xy(command_editor->buffer()->length(),&px,&py)&&
+            !command_editor->position_to_xy(0,&px,&py),"Launch command editor did not scroll to its final line");
+    command_editor->scroll(1,0);refresh();
+    require(command_editor->position_to_xy(0,&px,&py),"Launch command editor could not scroll back to its first line");
+    command_editor->insert_position(command_editor->buffer()->length());command_editor->show_insert_position();
+    const auto enter_key=Fl::e_keysym,enter_state=Fl::e_state,enter_length=Fl::e_length;auto* enter_text=Fl::e_text;
+    char newline[]={'\n',0};Fl::e_keysym=FL_Enter;Fl::e_state=0;Fl::e_text=newline;Fl::e_length=1;
+    command_editor->handle(FL_KEYDOWN);
+    Fl::e_keysym=enter_key;Fl::e_state=enter_state;Fl::e_text=enter_text;Fl::e_length=enter_length;refresh();
+    require(buffer_text(*command_editor->buffer())==lines+"\n"&&!app.application.enabled(ui::Command::cancel)&&
+            app.application.field(ui::Field::message).text=="e"&&app.application.field(ui::Field::bandwidth).text==original_rate&&
+            app.application.field(ui::Field::snr).text==original_target,
+        "Enter in Launch command transmitted, applied settings or failed to insert a newline");
+    auto* load=find_button(*document,"Load");require(load&&load->visible_r(),"Launch command has no native Load action");
+    load->do_callback();refresh();
+    require(app.application.field(ui::Field::planner_command).text==lines+"\n"&&
+            app.application.field(ui::Field::status).text.find("unsupported-setting")!=std::string::npos&&
+            app.application.field(ui::Field::bandwidth).text==original_rate&&!app.application.enabled(ui::Command::cancel),
+        "Native Load failed to validate the retained command without starting transmission");
     app.application.select_page(ui::Page::console);refresh();
     require(!editor->visible_r()&&Fl::focus()!=editor,"Hiding the document page retained native editor focus");
     app.application.close();while(!app.application.finished())Fl::wait(.005);

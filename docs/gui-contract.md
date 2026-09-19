@@ -41,6 +41,21 @@ The native **Target SNR (dB-Hz)** editable dropdown sits in the page's **Stronge
 Weaker** controls row and scrolls with the document. It offers the same target
 presets as the transmit controls and changes only the preview. The numeric
 oscillator notes remain hidden while this tab is selected.
+The same row contains a native multiline **Launch command** editor and **Load**
+button. The generated command exports the current link budget, oscillator,
+waveform, rate, carrier, DSP allowance and independent preview target. Its
+common `--target-snr` sets both short and long targets; the parser also accepts
+explicit `--short-target-snr` and `--long-target-snr` overrides without changing
+the common preview target.
+Editing or pasting does not apply settings. **Load** parses settings without
+executing a process or shell expression, validates the complete proposed state,
+then applies it with **Simulation: No**. Omitted options preserve current values.
+Malformed or incompatible settings leave the existing settings and pasted text
+unchanged. A successful load preserves the draft and starts no transmission.
+Routine polls and draft edits preserve the command buffer; relevant accepted
+GUI setting changes regenerate it. Enter inserts a newline; Tab moves focus to
+**Load**. Native selection, clipboard, caret visibility and scrolling work
+within the editor as well as within its containing document.
 Native buttons move to a stronger or weaker usable target, select the −8/+23 examples,
 or select the one-bit/second, one-day/bit and combined clock/RAM search edges.
 Milestones are derived from the current rate, carrier, pattern and key geometry;
@@ -66,8 +81,9 @@ overhead; completion additionally requires complete absent symbols covering six
 seconds. The displayed finish time excludes processing delay.
 
 **Use target for short messages** and **Use target for long messages** explicitly
-apply the preview through the existing target/RX-list update. All other planner
-actions preserve the draft and modem geometry. Shared power/path/noise edits
+apply the preview through the existing target/RX-list update. Preview and
+navigation actions preserve the draft and modem geometry; **Load** applies its
+validated settings while retaining the draft. Shared power/path/noise edits
 update estimates without restarting reception in live mode. Preview
 recalculation is bounded in sample count and independent of transmission time;
 it generates no waveform, runs no receiver and starts no worker or transmission.
@@ -102,7 +118,7 @@ not guarantee per-bit latency. Expanded details separately compare complete
 one-bit simulation CPU time, including channel generation, with bit duration.
 This indicator remains visible in both simulation modes and does not alter RX
 probability or the LPI warning.
-A compact CPU plot appears to the right of the target controls, sharing the
+A compact CPU plot appears below the command row, on the right, sharing the
 time graph's target-SNR horizontal range. Its logarithmic vertical scale shows
 receiver processing seconds per audio second, with an explicit equal-pace
 reference line. It models one bit at fixed link/clock settings regardless of the

@@ -39,6 +39,9 @@ struct Settings {
         return !transfer.key && !transfer.modem.scramble && !transfer.modem.dsss;
     }
 };
+// Check exactly the settings accepted by Session without changing a live
+// receiver, opening audio hardware, or starting a transmission.
+void validate_settings(const Settings& settings);
 struct SignalUpdate {
     std::uint64_t id = 0; // Stable acquisition identity for replacing pending text.
     double frequency_hz = 0;

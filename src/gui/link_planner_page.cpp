@@ -393,28 +393,45 @@ Node cpu_graph(const planner::Model& model,float width) {
 }
 
 void planner_controls(Node& root,const planner::Model& model,bool show_details,bool use_draft) {
-    const bool side_by_side=root.width>=820;
-    const float chart_width=std::min(340.f,root.width*.36f);
-    const float controls_width=side_by_side?root.width-chart_width-12:root.width;
-    auto group=side_by_side?row(root.width):column(root.width);
-    auto controls=column(controls_width);controls.right=side_by_side?12:0;
     const auto& declarations=ui::console_screen();
-    const auto declaration=std::find_if(declarations.begin(),declarations.end(),
-        [](const auto& control){return control.field==ui::Field::planner_target;});
-    auto first=row(controls_width);
-    auto target=column(std::min(240.f,controls_width));target.kind=Kind::control;
-    target.control=*declaration;target.height=ui::label_height+28;
-    const bool one_row=controls_width>=430;
+    const auto native=[&](ui::Field field,float width,float height) {
+        const auto declaration=std::find_if(declarations.begin(),declarations.end(),
+            [&](const auto& control){return control.field==field;});
+        auto node=column(width);node.kind=Kind::control;node.control=*declaration;node.height=height;return node;
+    };
+    const bool one_row=root.width>=430,inline_command=root.width>=740;
+    auto first=row(root.width);
+    auto target=native(ui::Field::planner_target,std::min(240.f,root.width),ui::label_height+28);
     target.right=one_row?8:0;first.children.push_back(std::move(target));
     if(one_row) {
         auto stronger=action("Stronger",Command::planner_stronger,86,model.stronger_fit_target.has_value());
         auto weaker=action("Weaker",Command::planner_weaker,77,model.weaker_fit_target.has_value());
         stronger.top=weaker.top=ui::label_height;stronger.height=weaker.height=28;stronger.right=8;
+        weaker.right=inline_command?12:0;
         first.children.push_back(std::move(stronger));first.children.push_back(std::move(weaker));
     }
-    first.bottom=6;controls.children.push_back(std::move(first));
-    if(!one_row)buttons(controls,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
+    const auto launch=[&](Node& destination,float width) {
+        const bool beside=width>=300;
+        auto command=native(ui::Field::planner_command,beside?width-64:width,ui::label_height+56);
+        command.right=beside?8:0;destination.children.push_back(std::move(command));
+        if(beside) {
+            auto load=action("Load",Command::planner_load_command,56);
+            load.top=ui::label_height;load.height=28;destination.children.push_back(std::move(load));
+        } else buttons(destination,{{"Load",Command::planner_load_command}});
+    };
+    if(inline_command)launch(first,root.width-431);
+    first.bottom=6;root.children.push_back(std::move(first));
+    if(!one_row)buttons(root,{{"Stronger",Command::planner_stronger,model.stronger_fit_target.has_value()},
         {"Weaker",Command::planner_weaker,model.weaker_fit_target.has_value()}});
+    if(!inline_command) {
+        auto command=root.width>=300?row(root.width):column(root.width);
+        launch(command,root.width);command.bottom=6;root.children.push_back(std::move(command));
+    }
+    const bool side_by_side=root.width>=820;
+    const float chart_width=std::min(340.f,root.width*.36f);
+    const float controls_width=side_by_side?root.width-chart_width-12:root.width;
+    auto group=side_by_side?row(root.width):column(root.width);
+    auto controls=column(controls_width);controls.right=side_by_side?12:0;
     buttons(controls,{{"−8 example",Command::planner_example_short},{"+23 LPI example",Command::planner_example_lpi},
         {use_draft?"Plan 1 bit":"Use current draft",Command::planner_toggle_draft}});
     if(model.available&&model.automatic_mode)

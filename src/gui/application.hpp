@@ -3,6 +3,7 @@
 #include "control_layout.hpp"
 #include "ui_document.hpp"
 #include "overlay.hpp"
+#include "launch_command.hpp"
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -13,6 +14,7 @@ struct Launch {
     double hold=0,timeout=100,scroll=0;
     ui::Page page=ui::Page::console;
     std::filesystem::path smoke_directory;
+    std::optional<launch_command::Patch> settings;
 };
 struct BitmapPresentation {
     BitmapSource source;

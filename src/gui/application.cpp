@@ -17,7 +17,7 @@
 namespace datapump::gui {
 using Clock=std::chrono::steady_clock;
 struct Application::Impl {
-    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke}) {}
+    explicit Impl(const Launch& launch):controller({launch.simulation||launch.smoke,launch.smoke,launch.settings}) {}
     Controller controller;
     BitmapSources bitmaps;
     Clock::time_point next=Clock::now(),next_presentation=next,started=next,completed=next;
@@ -41,7 +41,7 @@ struct Application::Impl {
         std::shared_ptr<const planner::Model> model;
         std::shared_ptr<const ui::DocumentNode> root;
         int width=0;
-        bool details=false,draft=false,closing=false,can_apply=false;
+        bool details=false,draft=false,closing=false,can_apply=false,can_load=false;
     } planner_document;
 };
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
@@ -187,7 +187,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     // The current-draft advisory remains unchanged on the other pages.
     if(!declaration.surface&&declaration.field==ui::Field::lpi_estimate&&page()==ui::Page::planner)view.visible=false;
     if(!declaration.surface&&declaration.field==ui::Field::simulation_oscillator_detail&&page()==ui::Page::planner)view.visible=false;
-    if(!declaration.surface&&declaration.field==ui::Field::planner_target)view.visible=page()==ui::Page::planner;
+    if(!declaration.surface&&(declaration.field==ui::Field::planner_target||declaration.field==ui::Field::planner_command))
+        view.visible=page()==ui::Page::planner;
     if(declaration.surface) {
         view.visible=view.visible&&impl_->overlay&&impl_->overlay->generation==declaration.surface;
     }
@@ -279,15 +280,16 @@ std::shared_ptr<const ui::DocumentNode> Application::document(ui::Page page,int 
         const auto model=impl_->controller.link_plan();
         const bool details=impl_->controller.planner_details(),draft=impl_->controller.planner_uses_draft();
         const bool closing=impl_->controller.closing(),can_apply=impl_->controller.enabled(ui::Command::planner_apply_short);
+        const bool can_load=impl_->controller.enabled(ui::Command::planner_load_command);
         if(!cached.root||cached.model!=model||cached.width!=width||cached.details!=details||
-            cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply) {
+            cached.draft!=draft||cached.closing!=closing||cached.can_apply!=can_apply||cached.can_load!=can_load) {
             auto root=planner_page::build(*model,static_cast<float>(width),details,draft);
             std::function<void(ui::DocumentNode&)> enable=[&](auto& node) {
                 if(node.kind==ui::DocumentKind::action)node.enabled=node.enabled&&impl_->controller.enabled(node.command);
                 for(auto& child:node.children)enable(child);
             };
             enable(root);
-            cached={model,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply};
+            cached={model,std::make_shared<const ui::DocumentNode>(std::move(root)),width,details,draft,closing,can_apply,can_load};
         }
         return cached.root;
     }
@@ -321,9 +323,10 @@ void gui_self_check() {
 int gui_main(int argc,char** argv,const char* backend,const std::function<int(Launch)>& run) {
     try {
         Launch launch;
+        std::vector<std::string> settings_arguments;
         for(int i=1;i<argc;++i) {
             const std::string arg=argv[i];
-            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: "<<backend<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
+            if(arg=="--help") {std::cout<<"Data Pump continuous console\nGUI backend: "<<backend<<" (selected at build time)\nUsage: datapump-gui [--color|--monochrome] [--simulation] [--self-check] [--smoke-test]\nLink settings: --tx-dbm DBM --path-loss-db DB --noise-dbm-hz DBM/Hz\n  --oscillator ID --target-snr DB-Hz --rate HZ --carrier HZ --dsp-workspace 25%|50%|75%\n  --auto-pattern or --pattern MODE; --bw is an alias for --rate\n  --target-snr sets preview, short and long targets; --short-target-snr / --long-target-snr override them\nSmoke options: --smoke-dir PATH --smoke-hold SECONDS --smoke-timeout SECONDS --smoke-view NAME --smoke-scroll 0..1\n";return 0;}
             if(arg=="--version") {std::cout<<"Data Pump "<<DATAPUMP_VERSION<<" GUI backend: "<<backend<<'\n';return 0;}
             if(arg=="--self-check") {gui_self_check();return 0;}
             if(arg=="--color")launch.color=true;
@@ -343,8 +346,14 @@ int gui_main(int argc,char** argv,const char* backend,const std::function<int(La
                 const auto page=std::find_if(ui::pages().begin(),ui::pages().end(),[&](const auto& p){return name==p.name;});
                 if(page==ui::pages().end())throw Error("Unknown smoke view");
                 launch.page=page->id;
-            } else throw Error("Unknown or incomplete option: "+arg);
+            } else {
+                if(!arg.starts_with("--"))throw Error("Unknown or incomplete option: "+arg);
+                settings_arguments.push_back(arg);
+                if(arg!="--auto-pattern"&&arg.find('=')==std::string::npos&&i+1<argc)
+                    settings_arguments.emplace_back(argv[++i]);
+            }
         }
+        if(!settings_arguments.empty())launch.settings=launch_command::parse_arguments(settings_arguments);
         return run(launch);
     }catch(const std::exception& error){std::cerr<<"Data Pump "<<backend<<": "<<error.what()<<'\n';return 1;}
 }

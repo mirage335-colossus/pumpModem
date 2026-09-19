@@ -3,6 +3,7 @@
 #include "state.hpp"
 #include "inspection_model.hpp"
 #include "link_planner_model.hpp"
+#include "launch_command.hpp"
 #include "datapump/live.hpp"
 #include <memory>
 
@@ -11,7 +12,11 @@ namespace datapump::gui {
 // independently of paint cadence; no method calls a toolkit or enters its loop.
 class Controller {
 public:
-    struct Options { bool simulation = false; bool smoke = false; };
+    struct Options {
+        bool simulation = false;
+        bool smoke = false;
+        std::optional<launch_command::Patch> launch_settings = std::nullopt;
+    };
     Controller();
     explicit Controller(Options options);
     ~Controller();

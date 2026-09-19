@@ -15,6 +15,29 @@ Rate, carrier, waveform, key, oscillator and DSP allowance follow the shared
 controls. Choose **Use target for short messages** or **Use target for long
 messages** to apply a preview.
 
+The **Launch command** box beside these controls lets you copy the preview's
+settings or paste a command to load. It includes the link budget, oscillator,
+rate, carrier, waveform and DSP allowance; the preview target applies to both
+short and long messages. Click **Load** to apply the settings and select
+**Simulation: No**. Omitted options keep their current values. Loading preserves
+your message and never starts transmission or executes the command.
+
+The box supports selection, copy, paste and scrolling. Enter adds a line;
+Tab moves to **Load**. Invalid commands leave the settings and pasted text
+intact. Routine updates also preserve your text; changing a relevant GUI
+setting regenerates the command from the accepted values.
+
+For example:
+
+```text
+./datapump-gui --auto-pattern --tx-dbm 3 --path-loss-db 170 --noise-dbm-hz -164 --oscillator crystal --target-snr -8 --rate 3600 --carrier 1500 --dsp-workspace 50%
+```
+
+Windows exports start with `.\datapump-gui.exe`; Unix exports use
+`./datapump-gui`. Pasted commands may use either executable path, including a
+quoted path with spaces. **Load** ignores the executable token and reads only
+the settings options.
+
 In automatic modes, every target entry checks clock coverage and RAM: the short
 and long transmit dropdowns, each value in the independent RX list, and the
 Planner target. An already fitting value stays exact; otherwise selection
@@ -61,7 +84,7 @@ conditional on completing the work. Expanded details also compare the complete
 one-bit simulation CPU time, including synthetic channel generation, with the
 bit's transmit duration.
 
-A compact CPU graph sits to the right of the target controls. It uses the same
+A compact CPU graph sits below the command row, on the right. It uses the same
 stronger-to-weaker target range as **Time per bit**, with a logarithmic vertical
 scale of processing seconds per audio second. The reference line marks one
 second of work per second of audio; higher values indicate falling behind on

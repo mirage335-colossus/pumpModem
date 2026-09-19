@@ -269,7 +269,7 @@ public:
         if(event==FL_KEYDOWN&&!(Fl::event_state()&(FL_CTRL|FL_ALT|FL_META))) {
             std::string_view inserted;
             if(Fl::event_key()==FL_Enter||Fl::event_key()==FL_KP_Enter)inserted="\n";
-            else if(Fl::event_key()==FL_Tab)inserted="\t";
+            else if(Fl::event_key()==FL_Tab&&!tab_nav())inserted="\t";
             else if(Fl::event_length()>0&&static_cast<unsigned char>(Fl::event_text()[0])>=32)inserted={Fl::event_text(),static_cast<std::size_t>(Fl::event_length())};
             int start=insert_position(),end=start;buffer_.selection_position(&start,&end);
             if(!inserted.empty()&&!propose(inserted,start,end))return 1;
@@ -749,7 +749,7 @@ private:
             case ui::Kind::label:break;
             case ui::Kind::text:
                 if(control.multiline) {
-                    b.editor=new NativeEditor;b.editor->textsize(control.font_size);
+                    b.editor=new NativeEditor;b.editor->textsize(control.font_size);b.editor->tab_nav(control.tab_navigation);
                     b.editor->changed=[this,c=&control,widget=b.editor](std::string text){if(widget->visible_r()&&widget->active_r())application.edit(*c,std::move(text));};
                     b.editor->submit=[this,c=&control,widget=b.editor](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.editor->byte_limit=control.byte_limit;
@@ -876,7 +876,7 @@ private:
         }
         if(b.label)label(b.label,view.control.label);
         if(b.input){b.input->byte_limit=c.byte_limit;b.input->apply(state.text,state.text_cursor_end_revision);}
-        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->apply(state.text,state.text_cursor_end_revision);}
+        if(b.editor){b.editor->byte_limit=c.byte_limit;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision);}
         if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
             for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                 if(menu)populate(*menu,b.presentation.options());

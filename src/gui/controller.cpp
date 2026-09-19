@@ -194,6 +194,7 @@ struct Controller::Impl {
     std::array<bool,3> invalid_link_inputs{};
     mutable std::shared_ptr<const planner::Model> planner_model;
     bool planner_details=false,planner_draft=false;
+    std::string generated_launch_command;
     std::uint64_t revision=0,estimated_revision=0,service_id=0,attachment_revision=0;
     Clock::time_point estimate_requested=Clock::now(),notice_until{},cpu_time=Clock::now();
     std::clock_t cpu_clock=std::clock();
@@ -265,7 +266,9 @@ struct Controller::Impl {
         f(UiField::message_label).text="Message"; f(UiField::binary_label).text="Binary / first 16 bytes";
         f(UiField::compression_codes).text=compression_reference();
         f(UiField::mode).text="Starting continuous reception";
-        encryption_changed(); configure(); dirty(); controls();
+        encryption_changed();
+        configure(false,false,std::nullopt,options.launch_settings?&*options.launch_settings:nullptr,false);
+        dirty(); controls();
         need_devices=!options.smoke;
     }
     ~Impl() { session.stop(); worker.request_stop(); if(worker.joinable()) worker.join(); }
@@ -351,12 +354,15 @@ struct Controller::Impl {
         for(const auto field:{UiField::link_power,UiField::link_loss,UiField::link_noise})
             if(editing!=field)invalid_link_inputs[link_input_index(field)]=false;
     }
-    void update_link_channel(live::Settings& value) {
-        const auto cn0=planner_inputs.tx_dbm-planner_inputs.path_loss_db-planner_inputs.noise_density_dbm_hz;
+    static double link_channel(live::Settings& value,const planner::Inputs& input) {
+        const auto cn0=input.tx_dbm-input.path_loss_db-input.noise_density_dbm_hz;
         // ChannelConfig's sampled-noise model accepts only this finite range.
         // Retain the exact budget above for the planner's power and margin.
         value.simulation_snr_db=std::clamp(cn0-10*std::log10(value.transfer.modem.sample_rate/2.),-300.,300.);
-        channel_snr=cn0-10*std::log10(value.transfer.modem.bandwidth_hz);
+        return cn0-10*std::log10(value.transfer.modem.bandwidth_hz);
+    }
+    void update_link_channel(live::Settings& value) {
+        channel_snr=link_channel(value,planner_inputs);
     }
     static void validate_link_value(UiField field,double value) {
         if(!std::isfinite(value))throw Error("Link budget values must be finite");
@@ -433,59 +439,91 @@ struct Controller::Impl {
             receive_display=receive_target_edit->canonical;
     }
     void configure(bool match_receive_target=false,bool match_carrier=false,
-                   std::optional<UiField> align_target=std::nullopt) {
+                   std::optional<UiField> align_target=std::nullopt,
+                   const launch_command::Patch* load=nullptr,bool simulation_off=true) {
         const bool align_receive=receive_targets_due.has_value()||align_target==UiField::receive_snr;
-        receive_targets_due.reset();
-        dirty();
-        f(UiField::profile_reference).records.clear();
-        f(UiField::profile_reference).selected.clear();
+        if(!load) {
+            receive_targets_due.reset();dirty();
+            f(UiField::profile_reference).records.clear();
+            f(UiField::profile_reference).selected.clear();
+        }
         try {
             live::Settings next;
-            const auto mode=tuning::parse_pattern_mode(f(UiField::pattern).selected);
-            const auto rate=frequency(f(UiField::bandwidth).text,"Rate");
+            auto pattern=load&&load->pattern?*load->pattern:f(UiField::pattern).selected;
+            if(load&&pattern=="auto-keystream"&&f(UiField::key).selected=="none")pattern="auto-pattern";
+            const auto mode=tuning::parse_pattern_mode(pattern);
+            const bool next_tone=pattern=="auto-tone"||pattern.starts_with("tone-");
+            const bool next_encrypted=!next_tone&&f(UiField::key).selected!="none";
+            const auto rate=load&&load->rate_hz?*load->rate_hz:frequency(f(UiField::bandwidth).text,"Rate");
             if(match_carrier)reset_carrier(rate);
-            auto short_snr=effective_target(UiField::snr);
-            auto long_snr=effective_target(UiField::long_snr);
-            const auto carrier=frequency(f(UiField::carrier).text,"Carrier");
+            auto short_snr=load&&load->short_target_db_hz?*load->short_target_db_hz:
+                load&&load->target_db_hz?*load->target_db_hz:effective_target(UiField::snr);
+            auto long_snr=load&&load->long_target_db_hz?*load->long_target_db_hz:
+                load&&load->target_db_hz?*load->target_db_hz:effective_target(UiField::long_snr);
+            const auto carrier=load&&load->carrier_hz?*load->carrier_hz:frequency(f(UiField::carrier).text,"Carrier");
+            auto next_planner=planner_inputs;
+            if(load) {
+                if(load->tx_dbm)next_planner.tx_dbm=*load->tx_dbm;
+                if(load->path_loss_db)next_planner.path_loss_db=*load->path_loss_db;
+                if(load->noise_dbm_hz)next_planner.noise_density_dbm_hz=*load->noise_dbm_hz;
+                for(const auto field:{UiField::link_power,UiField::link_loss,UiField::link_noise})
+                    validate_link_value(field,field==UiField::link_power?next_planner.tx_dbm:
+                        field==UiField::link_loss?next_planner.path_loss_db:next_planner.noise_density_dbm_hz);
+            }
             next.transfer.timestamp=0;
             next.transfer.automatic_receive_profiles=true;
             next.transfer.receive_pattern_mode=mode;
             if(options.smoke) next.transfer.search_seconds=0;
             next.transfer.fec=f(UiField::fec).selected=="rs20"?FecMode::rs20:f(UiField::fec).selected=="rs60"?FecMode::rs60:FecMode::off;
-            if(encrypted()) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
-            if(!tone())for(const auto& key:keys) next.receive_keys.push_back(key.key);
+            if(next_encrypted) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
+            if(!next_tone)for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
             next.mono=f(UiField::mono).checked;
-            next.simulation=f(UiField::simulation).selected=="yes";
-            const auto oscillator=tuning::parse_oscillator_preset(f(UiField::simulation_oscillator).selected);
+            next.simulation=!(load&&simulation_off)&&f(UiField::simulation).selected=="yes";
+            const auto oscillator_id=load&&load->oscillator?*load->oscillator:f(UiField::simulation_oscillator).selected;
+            const auto oscillator=tuning::parse_oscillator_preset(oscillator_id);
             next.simulation_clock_error_ppm=oscillator.clock_error_ppm;
             next.simulation_phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
             std::ostringstream oscillator_detail;
             oscillator_detail<<std::setprecision(6)<<"Clock mismatch "<<oscillator.clock_error_ppm<<" ppm | Phase diffusion "
                 <<oscillator.phase_noise_degrees_per_sqrt_second<<" deg / sqrt(s)";
-            f(UiField::simulation_oscillator_detail).text=oscillator_detail.str();
-            const auto workspace_percent=f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
-            if(workspace_percent!=dsp_workspace_percent) {
-                dsp_workspace_bytes=runtime::dsp_workspace_budget(workspace_percent);
-                dsp_workspace_percent=workspace_percent;
-            }
-            next.content_limit=default_memory_limit; next.dsp_workspace_bytes=dsp_workspace_bytes;
+            const auto workspace_percent=load&&load->workspace_percent?*load->workspace_percent:
+                f(UiField::dsp_workspace).selected=="ram-25"?25u:f(UiField::dsp_workspace).selected=="ram-75"?75u:50u;
+            if(workspace_percent!=25&&workspace_percent!=50&&workspace_percent!=75)
+                throw Error("DSP workspace must be 25%, 50% or 75%");
+            const auto workspace_bytes=workspace_percent!=dsp_workspace_percent?
+                runtime::dsp_workspace_budget(workspace_percent):dsp_workspace_bytes;
+            next.content_limit=default_memory_limit; next.dsp_workspace_bytes=workspace_bytes;
             next.transfer.dsp_workspace_bytes=next.dsp_workspace_bytes;
-            f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
 
             std::optional<TargetEdit> adjustment;
             const bool automatic=mode==tuning::PatternMode::auto_pattern||
                 mode==tuning::PatternMode::auto_keystream||mode==tuning::PatternMode::auto_tone;
             const auto fit_target=[&](double target,std::span<const double> companions) {
                 if(!automatic)return target;
-                auto input=planner_inputs;input.options=next.transfer;input.mode=mode;input.target_db_hz=target;
-                input.options.modem=tuning::resolve(rate,-20,mode,encrypted(),carrier).config;
+                auto input=next_planner;input.options=next.transfer;input.mode=mode;input.target_db_hz=target;
+                input.options.modem=tuning::resolve(rate,-20,mode,next_encrypted,carrier).config;
                 input.channel.clock_error_ppm=oscillator.clock_error_ppm;
                 input.channel.phase_noise_degrees_per_sqrt_second=oscillator.phase_noise_degrees_per_sqrt_second;
                 const auto fitted=planner::nearest_fit_target(input,companions,receive_banks(next));
                 if(!fitted)throw Error("No clock/RAM fit found for this target.");
                 return *fitted;
             };
+            if(load) {
+                // Resolve the complete proposed configuration before changing
+                // any live field or receiver. Import uses the same fit policy
+                // as native target edits, with both receive profiles present.
+                const auto requested_short=short_snr,requested_long=long_snr;
+                if(short_snr< -200||short_snr>200||long_snr< -200||long_snr>200)
+                    throw Error("Target SNR must be -200 to 200 dB-Hz");
+                short_snr=fit_target(short_snr,{});long_snr=fit_target(long_snr,{});
+                short_snr=fit_target(requested_short,std::array{long_snr});
+                long_snr=fit_target(requested_long,std::array{short_snr});
+                if(fit_target(short_snr,std::array{long_snr})!=short_snr||
+                   fit_target(long_snr,std::array{short_snr})!=long_snr)
+                    throw Error("No clock/RAM fit found for both targets.");
+                next_planner.target_db_hz=fit_target(load->target_db_hz.value_or(next_planner.target_db_hz),{});
+            }
             if(align_target&&*align_target!=UiField::receive_snr) {
                 auto& target=*align_target==UiField::snr?short_snr:long_snr;
                 target=number(f(*align_target).text,"Target SNR");
@@ -495,14 +533,14 @@ struct Controller::Impl {
                 if(fitted!=target)adjustment=TargetEdit{f(*align_target).text,fitted};
                 target=fitted;
             }
-            const auto plan=tuning::resolve(rate,short_snr,mode,encrypted(),carrier);
-            const auto longer_plan=tuning::resolve(rate,long_snr,mode,encrypted(),carrier);
+            const auto plan=tuning::resolve(rate,short_snr,mode,next_encrypted,carrier);
+            const auto longer_plan=tuning::resolve(rate,long_snr,mode,next_encrypted,carrier);
             const auto receive_text=!align_receive&&receive_target_edit&&receive_target_edit->requested==f(UiField::receive_snr).text?
                 receive_target_edit->canonical:f(UiField::receive_snr).text;
-            auto targets=tuning::parse_receive_targets(match_receive_target?
+            auto targets=tuning::parse_receive_targets((match_receive_target||load)?
                 planner_number(short_snr)+", "+planner_number(long_snr):receive_text);
             std::optional<ReceiveTargetEdit> receive_adjustment;
-            if(align_receive&&!match_receive_target&&!targets.reset&&automatic) {
+            if(align_receive&&!match_receive_target&&!load&&!targets.reset&&automatic) {
                 const auto requested=targets.values;
                 // First make every companion representable, then share the
                 // actual bank allowance. A final pass verifies the resulting
@@ -524,6 +562,32 @@ struct Controller::Impl {
             }
             next.transfer.modem=plan.config;next.long_message_modem=longer_plan.config;
             next.transfer.receive_targets_db_hz=targets.values;
+            if(load) {
+                (void)link_channel(next,next_planner);
+                live::validate_settings(next);
+                dirty();receive_targets_due.reset();
+                f(UiField::profile_reference).records.clear();f(UiField::profile_reference).selected.clear();
+                planner_inputs=next_planner;sync_link_fields();planner_target_valid=true;
+                f(UiField::planner_target).text=planner_number(planner_inputs.target_db_hz);
+                f(UiField::planner_target).display_text.clear();
+                const auto exact_frequency=[&](double hz) {
+                    auto text=frequency_text(hz);
+                    return frequency(text,"Frequency")==hz?text:planner_number(hz)+" Hz";
+                };
+                f(UiField::bandwidth).text=exact_frequency(rate);reset_carrier(rate);
+                f(UiField::carrier).text=exact_frequency(carrier);
+                f(UiField::snr).text=planner_number(short_snr);f(UiField::long_snr).text=planner_number(long_snr);
+                target_edits={};receive_target_edit.reset();
+                f(UiField::simulation_oscillator).selected=oscillator_id;
+                f(UiField::dsp_workspace).selected="ram-"+std::to_string(workspace_percent);
+                f(UiField::simulation).selected=next.simulation?"yes":"no";
+                f(UiField::pattern).selected=pattern;
+                if(next_tone)f(UiField::key).selected="none";
+                encryption_changed();
+            }
+            dsp_workspace_percent=workspace_percent;dsp_workspace_bytes=workspace_bytes;
+            f(UiField::dsp_workspace).display_text=workspace_text(workspace_percent,next.dsp_workspace_bytes);
+            f(UiField::simulation_oscillator_detail).text=oscillator_detail.str();
             update_link_channel(next);
             if(match_receive_target||align_receive)receive_target_edit=std::move(receive_adjustment);
             if(!receive_target_edit)f(UiField::receive_snr).text=targets.canonical;
@@ -540,7 +604,10 @@ struct Controller::Impl {
             lpi_estimate_status(!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
-        } catch(...) { settings_valid=false;target_labels();simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings"; throw; }
+        } catch(...) {
+            if(!load) {settings_valid=false;target_labels();simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings";}
+            throw;
+        }
     }
     const std::shared_ptr<const planner::Model>& link_plan() const {
         if(planner_model)return planner_model;
@@ -586,6 +653,25 @@ struct Controller::Impl {
     }
     static std::string planner_number(double value) {
         std::ostringstream out;out<<std::setprecision(std::numeric_limits<double>::max_digits10)<<value;return out.str();
+    }
+    void sync_launch_command(bool force=false) {
+        if(!settings_valid||!link_inputs_valid()||!planner_target_valid)return;
+        launch_command::Patch values;
+        values.tx_dbm=planner_inputs.tx_dbm;values.path_loss_db=planner_inputs.path_loss_db;
+        values.noise_dbm_hz=planner_inputs.noise_density_dbm_hz;
+        values.oscillator=f(UiField::simulation_oscillator).selected;
+        values.target_db_hz=planner_inputs.target_db_hz;
+        values.pattern=f(UiField::pattern).selected;
+        values.rate_hz=settings.transfer.modem.bandwidth_hz;
+        values.carrier_hz=settings.transfer.modem.carrier_hz;
+        values.workspace_percent=dsp_workspace_percent;
+        auto command=launch_command::format(values);
+        // A poll, draft edit or document repaint must not erase pasted input.
+        // Only a new accepted launch setting (or successful Load) replaces it.
+        if(force||command!=generated_launch_command) {
+            generated_launch_command=std::move(command);
+            f(UiField::planner_command).text=generated_launch_command;
+        }
     }
     void message_label() {
         if(!attachment) f(UiField::message_label).text=composer.raw_bits()?
@@ -786,6 +872,7 @@ struct Controller::Impl {
         if(closing) return false;
         const bool busy=transmit_requested || snapshot.transmitting;
         switch(command) {
+        case Command::planner_load_command: return !busy&&!key_loading&&!key_failed;
         case Command::planner_apply_short: case Command::planner_apply_long:
             return !busy&&!key_loading&&!key_failed&&settings_valid&&link_plan()->available;
         case Command::planner_power: case Command::planner_loss: case Command::planner_noise:
@@ -847,6 +934,8 @@ struct Controller::Impl {
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
         f(UiField::planner_target).enabled=!closing;
+        f(UiField::planner_command).enabled=!closing;
+        sync_launch_command();
         for(auto id:{UiField::simulation,UiField::simulation_oscillator,UiField::link_power,UiField::link_loss,UiField::link_noise,UiField::key,UiField::device,UiField::mono,UiField::bandwidth,UiField::carrier,UiField::snr,UiField::long_snr,UiField::receive_snr,UiField::pattern,UiField::fec,UiField::dsp_workspace}) f(id).enabled=!busy;
         const bool simulation=f(UiField::simulation).selected=="yes";
         for(auto id:{UiField::link_power,UiField::link_loss,UiField::link_noise})f(id).visible=true;
@@ -1073,6 +1162,11 @@ struct Controller::Impl {
     void action(Command command) {
         if(!enabled(command)) throw Error("This action is currently unavailable");
         switch(command) {
+        case Command::planner_load_command: {
+            const auto values=launch_command::parse(f(UiField::planner_command).text);
+            configure(false,false,std::nullopt,&values);
+            sync_launch_command(true);notice("Settings loaded · Simulation No");break;
+        }
         case Command::planner_target:
             request(Purpose::planner_target,ui::ServiceKind::prompt,"Plan for signal level (dB in 1 Hz)",planner_number(planner_inputs.target_db_hz));break;
         case Command::planner_stronger: {const auto value=*link_plan()->stronger_fit_target;planner_target(value);break;}
@@ -1252,6 +1346,7 @@ void Controller::edit(UiField field,std::string text) {
             p.f(field).text="32";p.configure();p.controls();return;
         }
         if(field==UiField::message) { p.message_changed(text); p.controls(); return; }
+        if(field==UiField::planner_command) {p.f(field).text=std::move(text);p.controls();return;}
         if(field==UiField::link_power||field==UiField::link_loss||field==UiField::link_noise) {
             p.edit_link_budget(field,text,true);p.controls();return;
         }

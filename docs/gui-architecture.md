@@ -33,6 +33,7 @@ removed.
 | `record_presentations.hpp` | Signal/file records, including frequency, status, reception quality, text, tone and activation eligibility. |
 | `inspection_page.hpp` | Inspection section order, cards, tables, pagination and native text around plot snapshots. |
 | `link_planner_model.*`, `link_planner_page.*` | Bounded link previews, native planner controls and labels, logarithmic plot snapshots and model details. |
+| `launch_command.*` | Settings-only command parsing and formatting shared by GUI launch and the planner's copy/load editor; no process execution or shell expansion. |
 | `bitmap_sources.hpp`, `plot_render.cpp` | Shared snapshots, captions, error overlays, invalidation and pixel producers. |
 | `application.cpp` | Control/menu presentation and dispatch, validated edits/presets, launch parsing, lifecycle, submission/record dispatch, document caching and common self-check/smoke orchestration. |
 | `gui_smoke.cpp` | The same application workflow checks for both native backends and the headless harness. |
@@ -54,6 +55,18 @@ these checks.
 Adapters own native widget construction, text measurement, focus/caret behavior,
 scroll containers, menu escaping, event translation and platform services.
 Bitmap widgets receive opaque snapshots; they do not interpret measurements.
+
+The planner command editor is an ordinary document-only multiline control.
+Its shared declaration makes Enter insert a newline and Tab navigate to the
+next control. Retained native editors preserve selection, caret and uncommitted
+text across document updates. Adapters keep glyphs, selection, hit testing and
+caret reveal in the same scrolled coordinates and pass a wheel event to the
+containing document when the editor cannot scroll further.
+The controller stages imported settings, including the derived link channel,
+and preflights live-session validation before committing fields or configuration.
+Parsing and validation errors therefore preserve both the existing settings and
+the pasted command. Successful loads use the ordinary configuration path and
+do not submit the message.
 
 Full-window views use `OverlayDefinition.controls`, the same `Control` vocabulary
 and native factories as the desktop. Edit the QR view in `screen_overlay.hpp`:

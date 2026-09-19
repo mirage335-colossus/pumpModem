@@ -3823,3 +3823,61 @@ Opening a popup now hides that help; the rebuilt native adapter suite and a
 real hover-to-popup check both passed. Final default/minimum captures were
 checked in both backends. No physical audio/RF or full native transmission
 workflow was rerun for these view/control changes. `git diff --check` passed.
+
+### Planner launch-command editor (2026-09-18)
+
+The planner now includes a bounded multiline command editor beside
+Stronger/Weaker and an explicit Load action. Startup and pasted settings share
+one parser and canonical formatter. Commands use a relative executable name
+for the host, retain exact numerical targets, and carry the link budget,
+oscillator, waveform, rate, carrier and DSP percentage. The generated common
+target uses the planner preview for both transmit profiles. Explicit short and
+long overrides affect only their respective profiles. Pasting does not execute
+a command, change settings or submit the draft; Load validates and applies the
+settings with Simulation No. Ordinary polling retains uncommitted command text.
+
+Controller checks cover generated-command round trips, quoted Windows paths,
+partial imports, all requested settings, startup compatibility, malformed input,
+and exact raw draft preservation. Full live-setting validation runs before any
+field is committed: tests start a simulated session and verify that an
+unsupported live bandwidth or channel level cannot partially replace settings.
+The new validation entry point delegates to the existing live normalization;
+receiver scoring, LPI calculations and all wire formats remain unchanged.
+
+Native multiline controls retain caret/selection and use ordinary clipboard
+operations. FLTK reserves Tab for navigation in the command field. Rev's
+document-only multiline editor now scrolls glyphs, caret, selection and pointer
+hit testing together, with bounded extents and wheel handoff at the edge.
+Existing message editors retain their established behavior. Shared layout
+checks cover widths from 220 through 1200 logical units, including command/Load
+wrapping at narrow widths and the compact CPU graph below-right.
+
+Both complete Release builds passed. The initial six GCC GUI suites passed in
+73.50 seconds; 16 further shared GUI/estimate suites passed in 15.54 seconds.
+The remaining 23 development-contract suites passed in 281.46 seconds; together
+with gui_application and gui_controller, all 25 listed compatibility suites
+passed. Rev's selected shared checks passed except an initially stale parser
+binary; after rebuilding, parser and settings suites passed 2/2 on both
+compilers. Parser cases include malformed signs, quotes, missing/unknown flags,
+numeric bounds, frequency units and exact formatting.
+
+Final parser/settings checks, including independent preview versus explicit
+short/long overrides, passed 2/2 in 1.03 seconds with GCC and 1.28 seconds with
+Clang/Rev. Rev native adapter/platform and 1×/2× coordinate conformance passed
+4/4 in 92.87 seconds. Native fixtures explicitly wait for FLTK's deferred
+scroll layout and supply an ordinary single-click interval for Rev hit testing;
+their visibility, editing and scrolling assertions remain intact.
+
+Final FLTK adapter conformance passed in 45.24 seconds. The unchanged document
+suite passed five focused repetitions after one transient immediate-paint
+assertion in the combined run (it had also passed the preceding two runs).
+No document-renderer change or relaxed assertion was introduced. Both final
+production binaries and all affected tests were rebuilt; `git diff --check`
+passed.
+
+Real windows in both backends verified copy/cut/paste, multiline editing,
+Enter without transmission, Tab to Load, successful load with Simulation No,
+normalization, and invalid-command recovery. Default and minimum windows were
+inspected with the editor beside the target controls and no overlap. These are
+GUI/model checks; no physical audio/RF or full native transmission workflow was
+rerun for this settings feature.

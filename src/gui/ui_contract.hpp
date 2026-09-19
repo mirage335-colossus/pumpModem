@@ -10,7 +10,7 @@ enum class Page { console, compression, flow, transmission, planner, count };
 enum class Field {
     callsign, grid, repeatable, simulation, link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
-    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, planner_target,
+    simulation_oscillator, simulation_oscillator_detail, lpi_estimate, planner_target, planner_command,
     key, message, binary,
     qr_brightness, send_key, device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
     files, signals, mode, status, airtime, key_path, message_label, binary_label,
@@ -25,7 +25,7 @@ enum class Command {
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,
     transmit_short_bits, copy_raw_signal, paste_raw_signal, clear_pattern_scores,
     resume_recovery, cancel_recovery,
-    planner_target, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
+    planner_target, planner_load_command, planner_stronger, planner_weaker, planner_example_short, planner_example_lpi,
     planner_fast, planner_day, planner_clock, planner_toggle_details, planner_toggle_draft,
     planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
     planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
@@ -105,6 +105,7 @@ struct Control {
     std::uint64_t surface=0;
     OverlayPlacement placement;
     bool document_only = false; // Materialized only by a document control node.
+    bool tab_navigation = false; // Multiline editors may reserve Tab for focus.
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {

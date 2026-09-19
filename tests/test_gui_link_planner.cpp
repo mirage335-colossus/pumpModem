@@ -1210,7 +1210,7 @@ void receiver_overlay_and_cpu_status() {
 }
 void document_semantics_layout_and_plots() {
     const auto model=planner::build(example());
-    for(const float width:{220.f,460.f,900.f}) {
+    for(const float width:{220.f,460.f,720.f,740.f,900.f,1200.f}) {
         const auto document=planner_page::build(model,width,false,false);
         const auto flat=nodes(document);
         check(contains_text(document,"Time per bit")&&contains_text(document,"Observer / receiver time")&&
@@ -1232,7 +1232,7 @@ void document_semantics_layout_and_plots() {
         for(const auto command:{ui::Command::planner_example_short,
                                 ui::Command::planner_example_lpi,ui::Command::planner_fast,
                                 ui::Command::planner_day,ui::Command::planner_clock,
-                                ui::Command::planner_toggle_draft,ui::Command::planner_toggle_details})
+                                ui::Command::planner_toggle_draft,ui::Command::planner_toggle_details,ui::Command::planner_load_command})
             check(std::any_of(flat.begin(),flat.end(),[&](const auto* node) {
                       return node->kind==ui::DocumentKind::action&&node->command==command;
                   }),"Planner milestone and editing affordances must use native shared actions");
@@ -1262,22 +1262,34 @@ void document_semantics_layout_and_plots() {
             return node->kind==ui::DocumentKind::control&&node->control&&node->control->field==ui::Field::planner_target;
         });
         check(editor!=flat.end(),"Planner target must be a native editor within its scrollable document");
-        if(width>=820) {
-            ui::DocumentRect editor_rect,stronger_rect,weaker_rect,cpu_rect;
+        const auto command=std::find_if(flat.begin(),flat.end(),[](const auto* node) {
+            return node->kind==ui::DocumentKind::control&&node->control&&node->control->field==ui::Field::planner_command;
+        });
+        check(command!=flat.end()&&(*command)->control->multiline&&(*command)->control->byte_limit==8192&&
+              (*command)->control->document_only&&(*command)->control->tab_navigation&&
+              (*command)->control->submit==ui::Command::none&&(*command)->height>=ui::label_height+50,
+              "Launch command must be a small native multiline editor whose Enter key cannot transmit");
+        if(width>=740) {
+            ui::DocumentRect editor_rect,stronger_rect,weaker_rect,command_rect,load_rect,cpu_rect;
             const auto locate=[&](auto&& self,const ui::DocumentNode& node,const ui::DocumentBox& box,int x,int y)->void {
                 const auto& bounds=box.bounds;x+=bounds.x;y+=bounds.y;
                 const ui::DocumentRect rect{x,y,bounds.width,bounds.height};
                 if(&node==*editor)editor_rect=rect;
                 if(node.command==ui::Command::planner_stronger)stronger_rect=rect;
                 if(node.command==ui::Command::planner_weaker)weaker_rect=rect;
+                if(&node==*command)command_rect=rect;
+                if(node.command==ui::Command::planner_load_command)load_rect=rect;
                 if(node.plot_name=="planner/cpu-pace")cpu_rect=rect;
                 for(std::size_t i=0;i<node.children.size();++i)self(self,node.children[i],box.children[i],x,y);
             };
             locate(locate,document,layout.root,0,0);
             check(editor_rect.y+ui::label_height==stronger_rect.y&&stronger_rect.y==weaker_rect.y&&
                   editor_rect.x+editor_rect.width<=stronger_rect.x&&
-                  cpu_rect.x>weaker_rect.x+weaker_rect.width&&cpu_rect.y<weaker_rect.y+100,
-                  "Target and step buttons must share a row, with the compact CPU graph beside their control group");
+                  command_rect.x>=weaker_rect.x+weaker_rect.width&&command_rect.y==editor_rect.y&&
+                  command_rect.width>=240&&load_rect.x>=command_rect.x+command_rect.width&&load_rect.y==weaker_rect.y,
+                  "Target, step buttons, multiline command and Load must remain adjacent without overlap");
+            if(width>=820)check(cpu_rect.x>weaker_rect.x+weaker_rect.width&&cpu_rect.y>=command_rect.y+command_rect.height,
+                  "The compact CPU graph must remain to the right of the secondary planner controls");
         }
     }
     const auto detailed=planner_page::build(model,900,true,false);

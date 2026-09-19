@@ -159,6 +159,9 @@ struct CheckboxView : re::Checkbox {
 struct Editor : theme::RevText {
     std::size_t limit;
     bool multiline;
+    bool scroll_content=false,reveal_caret=false;
+    int displayed_cursor=-1;
+    float viewport_width=-1,viewport_height=-1;
     std::uint64_t cursor_end_revision=0;
     RevPlatform& platform;
     std::function<void(std::string)> changed;
@@ -166,14 +169,47 @@ struct Editor : theme::RevText {
     std::function<bool(Rev::Element::Event&)> submit_event;
     std::function<void(std::string)> error;
     std::shared_ptr<bool> alive=std::make_shared<bool>(true);
-    Editor(re::Element* parent, bool multi, std::size_t bytes, RevPlatform& services)
-        : theme::RevText(parent,"",{&editStyle,&editFocus,&theme::rev_disabled_text,&theme::rev_disabled_control}),limit(bytes),multiline(multi),platform(services) {
+    Editor(re::Element* parent, bool multi, std::size_t bytes, RevPlatform& services,bool scrolling=false)
+        : theme::RevText(parent,"",{&editStyle,&editFocus,&theme::rev_disabled_text,&theme::rev_disabled_control}),limit(bytes),multiline(multi),scroll_content(scrolling),platform(services) {
         editable=true;selectable=true;tabStop=true;
         if(multi)style->text.wrap=Wrap::BreakWord;
     }
     ~Editor() override {*alive=false;}
     void computePrimitives(re::Event& event) override {
         re::Text::computePrimitives(event);
+        if(scroll_content) {
+            const float inner_width=std::max(0.0f,resolved.getInner(Axis::Horizontal));
+            const float inner_height=std::max(0.0f,resolved.getInner(Axis::Vertical));
+            const bool resized=inner_width!=viewport_width||inner_height!=viewport_height;
+            viewport_width=inner_width;viewport_height=inner_height;
+            const float maximum_x=std::max(0.0f,width+1-inner_width);
+            const float maximum_y=std::max(0.0f,height-inner_height);
+            resolved.scroll.x=std::clamp(resolved.scroll.x,0.0f,maximum_x);
+            resolved.scroll.y=std::clamp(resolved.scroll.y,0.0f,maximum_y);
+            if(targetFlags.focus&&inner_width>0&&inner_height>0&&!text->lines.empty()&&
+               (reveal_caret||displayed_cursor!=cursor||resized)) {
+                const auto& row=text->lines[cursorLineIndex()];
+                const float caret_x=cursorOffsetOnLine(row),caret_y=row.rect.y-rect.y-resolved.pad.t.val;
+                const auto reveal=[](float scroll,float at,float extent,float viewport,float maximum) {
+                    if(at<scroll)scroll=at;
+                    else if(at+extent>scroll+viewport)scroll=at+extent-viewport;
+                    return std::clamp(scroll,0.0f,maximum);
+                };
+                resolved.scroll.x=reveal(resolved.scroll.x,caret_x,1,inner_width,maximum_x);
+                resolved.scroll.y=reveal(resolved.scroll.y,caret_y,row.rect.h,inner_height,maximum_y);
+            }
+            reveal_caret=false;displayed_cursor=cursor;
+            // Childless Rev text has no resolved scroll extent. Keep native
+            // glyphs, caret, selection and pointer hit testing in one space.
+            layout.rect={rect.x+resolved.pad.l.val-resolved.scroll.x,
+                rect.y+resolved.pad.t.val-resolved.scroll.y,width,height};
+            text->xPos-=resolved.scroll.x;text->yPos-=resolved.scroll.y;
+            for(auto& row:text->lines) {row.rect.x-=resolved.scroll.x;row.rect.y-=resolved.scroll.y;}
+            for(auto& strip:line->lines)for(auto& point:strip.points) {
+                point.x-=resolved.scroll.x;point.y-=resolved.scroll.y;
+            }
+            text->compute();
+        }
         // Rev exposes caret and selection strips as native line primitives.
         // Keep its glyph geometry while replacing its built-in blue highlight.
         for(auto& strip:line->lines) {
@@ -191,10 +227,11 @@ struct Editor : theme::RevText {
         selectAnchor=boundary(value,selectAnchor);selectEnd=boundary(value,selectEnd);
     }
     void apply(const std::string& value,std::uint64_t revision=0) {
-        if(content.get()!=value){content=value;clamp_positions();}
+        if(content.get()!=value){content=value;clamp_positions();reveal_caret=true;}
         if(revision&&revision!=cursor_end_revision) {
             cursor_end_revision=revision;resetVerticalCursor();
             cursor=selectAnchor=selectEnd=static_cast<int>(value.size());
+            reveal_caret=true;
         }
     }
     bool replace(const std::string& input) {
@@ -204,9 +241,24 @@ struct Editor : theme::RevText {
         if(!edit)return false;
         resetVerticalCursor();
         content=edit.text;cursor=edit.cursor;selectAnchor=selectEnd=cursor;
+        reveal_caret=true;
         if(changed) changed(edit.text);
         if(shared && shared->event) refresh(*shared->event);
         return true;
+    }
+    void mouseWheel(re::Event& event) override {
+        if(!scroll_content)return re::Text::mouseWheel(event);
+        if(targetFlags.disabled)return;
+        const auto wheel=event.mouse.wheel;
+        const float dx=event.keyboard.shift&&wheel.x==0?wheel.y:wheel.x;
+        const float dy=event.keyboard.shift&&wheel.x==0?0:wheel.y;
+        const float x=std::clamp(resolved.scroll.x-dx*re::Element::scrollSpeed,0.0f,
+            std::max(0.0f,width+1-std::max(0.0f,resolved.getInner(Axis::Horizontal))));
+        const float y=std::clamp(resolved.scroll.y-dy*re::Element::scrollSpeed,0.0f,
+            std::max(0.0f,height-std::max(0.0f,resolved.getInner(Axis::Vertical))));
+        if(x==resolved.scroll.x&&y==resolved.scroll.y)return;
+        resolved.scroll.x=x;resolved.scroll.y=y;reveal_caret=false;displayed_cursor=cursor;
+        refresh(event);event.propagate=false;
     }
     void textInput(re::Event& e) override {
         if(!targetFlags.focus || !editable || targetFlags.disabled) return;
@@ -968,7 +1020,7 @@ public:
                 switch(c.kind) {
                 case ui::Kind::label:break;
                 case ui::Kind::text:
-                    b.editor=new Editor(container,c.multiline,c.byte_limit,platform);
+                    b.editor=new Editor(container,c.multiline,c.byte_limit,platform,c.document_only&&c.multiline);
                     b.editor->changed=callback(lifetime,alive,[this,control=&c](std::string text){application.edit(*control,std::move(text));});
                     b.editor->error=callback(lifetime,alive,[this](std::string error){application.report_error(std::move(error));});
                     b.editor->submit_event=callback(lifetime,alive,[this,control=&c](re::Event& event){return application.submit(*control,event.keyboard.ctrl,event.keyboard.shift);});

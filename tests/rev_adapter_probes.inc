@@ -1,4 +1,111 @@
 // Included inside RevApp only by the native conformance executable.
+    void verify_document_editor_scrolling() {
+        auto editor=std::make_unique<Editor>(this,true,8192,platform,true);
+        place(editor.get(),{40,280,210,56});editor->style->text.size=11_px;
+        const std::string value="zero\none\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nlast";
+        editor->apply(value);focus_control(editor.get());
+        const auto settle=[&] {for(unsigned frame=0;frame<3;++frame)native_frame();};
+        settle();
+        if(editor->height<=editor->resolved.getInner(Axis::Vertical)||editor->resolved.scroll.y!=0)
+            throw std::runtime_error("Rev document editor did not retain a scrollable multiline extent at its first line");
+        re::Event wheel;wheel.mouse.wheel.y=-120;editor->mouseWheel(wheel);settle();
+        const float offset=editor->resolved.scroll.y;
+        if(wheel.propagate||offset<=0||editor->text->lines.front().rect.y>=editor->rect.y)
+            throw std::runtime_error("Rev document editor wheel did not move native glyph geometry");
+        settle();
+        if(editor->resolved.scroll.y!=offset)
+            throw std::runtime_error("Rev document editor repaint undid an intentional wheel scroll");
+        const float top=editor->rect.y+editor->resolved.pad.t.val;
+        const auto visible=std::find_if(editor->text->lines.begin(),editor->text->lines.end(),[&](const auto& row) {
+            return row.rect.y>=top&&row.rect.y+row.rect.h<=editor->rect.y+editor->rect.h-editor->resolved.pad.b.val;
+        });
+        if(visible==editor->text->lines.end())throw std::runtime_error("Rev document editor has no visible scrolled text line");
+        const auto expected=static_cast<int>(visible->start);
+        re::Event click;click.mouse.lb.pressTimeDiff=1000;
+        click.mouse.pos={visible->rect.x,visible->rect.y+visible->rect.h*.5f};
+        editor->mouseDown(click);settle();
+        if(editor->cursor!=expected||expected==0)
+            throw std::runtime_error("Rev document editor hit testing did not follow the scrolled line: expected="+
+                std::to_string(expected)+" actual="+std::to_string(editor->cursor)+" scroll="+
+                std::to_string(editor->resolved.scroll.y)+" point="+std::to_string(click.mouse.pos.x)+","+
+                std::to_string(click.mouse.pos.y));
+        editor->apply(value,1);settle();
+        const auto caret_visible=[&] {
+            if(editor->line->lines.empty())return false;
+            const auto& caret=editor->line->lines.front();
+            return caret.points.size()==2&&caret.points.front().x>=editor->rect.x+editor->resolved.pad.l.val-1&&
+                caret.points.front().x<=editor->rect.x+editor->rect.w-editor->resolved.pad.r.val+1&&
+                caret.points.front().y>=editor->rect.y+editor->resolved.pad.t.val-1&&
+                caret.points.back().y<=editor->rect.y+editor->rect.h-editor->resolved.pad.b.val+1;
+        };
+        if(editor->cursor!=static_cast<int>(value.size())||editor->resolved.scroll.y<=offset||!caret_visible())
+            throw std::runtime_error("Rev document editor did not reveal its ending caret with the final line");
+        wheel.propagate=true;wheel.mouse.wheel.y=10000;editor->mouseWheel(wheel);settle();
+        if(wheel.propagate||editor->resolved.scroll.y!=0)
+            throw std::runtime_error("Rev document editor could not scroll back to its first line");
+        wheel.propagate=true;editor->mouseWheel(wheel);
+        if(!wheel.propagate)throw std::runtime_error("Rev document editor swallowed wheel input at its scroll boundary");
+        editor->apply("short");settle();
+        if(editor->resolved.scroll.x||editor->resolved.scroll.y)
+            throw std::runtime_error("Rev document editor retained scroll beyond shortened content");
+        editor->style->text.wrap=Wrap::False;
+        const std::string wide(100,'W');editor->apply(wide,2);settle();
+        if(editor->resolved.scroll.x<=0||!caret_visible())
+            throw std::runtime_error("Rev document editor did not reveal an unwrapped horizontal caret");
+        const auto& row=editor->text->lines.front();
+        if(editor->getCursorPos({editor->rect.x+editor->resolved.pad.l.val,row.rect.y+row.rect.h*.5f})<=0)
+            throw std::runtime_error("Rev document editor horizontal hit testing ignored its scroll offset");
+        wheel.propagate=true;wheel.keyboard.shift.id=1;wheel.mouse.wheel.y=10000;editor->mouseWheel(wheel);settle();
+        if(wheel.propagate||editor->resolved.scroll.x!=0)
+            throw std::runtime_error("Rev document editor Shift+wheel did not reveal its horizontal start");
+        focus_control(nullptr);editor.reset();native_frame();
+    }
+    void verify_launch_command_editor() {
+        select_page(ui::Page::planner);
+        const auto settle=[&] {for(unsigned frame=0;frame<4;++frame){apply();native_frame();}};
+        settle();
+        const auto find_host=[&]() -> DocumentControlHost* {
+            for(auto* host:document_control_bindings)if(host->control.field==ui::Field::planner_command)return host;
+            throw std::runtime_error("Rev launch command has no retained native editor");
+        };
+        auto* host=find_host();auto* editor=host->bindings.front().editor;
+        if(!editor||!editor->multiline||!editor->scroll_content||editor->limit!=8192||
+           !host->control.tab_navigation||!allows_input(editor))
+            throw std::runtime_error("Rev launch command lacks native multiline scrolling or focus navigation");
+        application.edit(ui::Field::message,"e");settle();
+        const auto old_rate=application.field(ui::Field::bandwidth).text;
+        const auto old_target=application.field(ui::Field::snr).text;
+        std::string pasted="--unsupported-setting 1";
+        for(unsigned line=0;line<12;++line)pasted+="\n--line "+std::to_string(line);
+        focus_control(editor);editor->selectAll();
+        if(!editor->replace(pasted))throw std::runtime_error("Rev launch command paste was rejected");
+        settle();
+        if(find_host()!=host||editor->content.get()!=pasted||
+           application.field(ui::Field::planner_command).text!=pasted||editor->resolved.scroll.y<=0)
+            throw std::runtime_error("Rev launch command lost its pasted text, host or ending caret scroll");
+        editor->cursor=7;editor->selectAnchor=3;editor->selectEnd=7;settle();
+        application.dispatch(ui::Command::planner_toggle_details);settle();
+        if(find_host()!=host||!editor->targetFlags.focus||editor->cursor!=7||editor->selectAnchor!=3||editor->selectEnd!=7)
+            throw std::runtime_error("Rev launch command document refresh lost native selection or focus");
+        editor->cursor=editor->selectAnchor=editor->selectEnd=static_cast<int>(pasted.size());
+        re::Event enter;enter.keyboard.enter.id=1;editor->keyDown(enter);settle();
+        if(editor->content.get()!=pasted+"\n"||application.field(ui::Field::bandwidth).text!=old_rate||
+           application.field(ui::Field::snr).text!=old_target||application.field(ui::Field::message).text!="e"||
+           application.enabled(ui::Command::cancel))
+            throw std::runtime_error("Rev command Enter applied settings, transmitted or failed to insert a newline");
+        auto* document=documents.at(ui::Page::planner);const auto& order=document->tab_elements();
+        const auto position=std::find(order.begin(),order.end(),host->element());
+        if(position==order.end()||std::next(position)==order.end())
+            throw std::runtime_error("Rev command editor has no following Load action in native Tab order");
+        re::Event tab;tab.keyboard.tab.id=1;keyDown(tab);
+        if(!(*std::next(position))->targetFlags.focus)
+            throw std::runtime_error("Rev command Tab did not reach its following Load action");
+        application.dispatch(ui::Command::planner_load_command);settle();
+        if(application.field(ui::Field::planner_command).text!=pasted+"\n"||
+           application.field(ui::Field::status).text.find("unsupported-setting")==std::string::npos||
+           application.field(ui::Field::bandwidth).text!=old_rate||application.enabled(ui::Command::cancel))
+            throw std::runtime_error("Rev command Load did not preserve malformed input and existing settings");
+    }
     void verify_inline_document_editor() {
         select_page(ui::Page::planner);
         const auto settle=[&] {
@@ -76,6 +183,8 @@
         settle();host=find_host();editor=host->bindings.front().editor;focus_control(editor);
         const auto stale_edit=editor->changed;const auto saved=application.field(ui::Field::planner_target).text;
         const auto previous_count=document_control_bindings.size();
+        const auto owned_count=static_cast<std::size_t>(std::count_if(document_control_bindings.begin(),document_control_bindings.end(),
+            [&](const auto* retained){return retained->element()->parent==document;}));
         auto empty=std::make_shared<const ui::DocumentNode>();
         {
             NativeCallback callback(native_callback_depth);document->apply(empty);
@@ -83,7 +192,7 @@
                 throw std::runtime_error("Rev document retirement destroyed an active callback or retained input");
         }
         document->apply(empty);
-        if(document_control_bindings.size()+1!=previous_count)
+        if(!owned_count||document_control_bindings.size()+owned_count!=previous_count)
             throw std::runtime_error("Rev absent document control was not reclaimed and unregistered");
         stale_edit("-99");
         if(application.field(ui::Field::planner_target).text!=saved)
