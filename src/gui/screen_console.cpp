@@ -4,6 +4,9 @@ namespace {
 Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     control.slot=slot; control.menu=menu;
     control.persistent=persistent_slot(slot);
+    control.developer_only=slot==Slot::pattern||slot==Slot::fec||slot==Slot::dsp_workspace||
+        slot==Slot::receive_snr||slot==Slot::profile_reference||slot==Slot::callsign||
+        slot==Slot::grid||slot==Slot::repeatable;
     control.open_upward=slot>=Slot::device;
     control.font_size=control.multiline?16:13;
     if(control.kind==Kind::bitmap)control.font_size=11;
@@ -13,6 +16,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
     }
     if(slot==Slot::header)control.font_size=22;
+    if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
     if(slot==Slot::simulation_confidence||slot==Slot::simulation_cpu_time||slot==Slot::simulation_gpu_time)control.font_size=12;
@@ -116,9 +120,9 @@ const std::vector<PageDefinition>& pages() {
     static const std::vector<PageDefinition> definitions{
         {Page::console,"console","Console",false,86},
         {Page::planner,"planner","Link planner",true,128},
-        {Page::compression,"compression","Compression / raw bits",false,200},
-        {Page::flow,"flow","Modem flow",true,114},
-        {Page::transmission,"transmission","Transmission layout",true,204}
+        {Page::compression,"compression","Compression / raw bits",false,200,true},
+        {Page::flow,"flow","Modem flow",true,114,true},
+        {Page::transmission,"transmission","Transmission layout",true,204,true}
     };
     return definitions;
 }
@@ -126,6 +130,7 @@ const std::vector<Control>& console_screen() {
     static const std::vector<Control> controls{
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::console,0,"DATA PUMP"}, Slot::header),
         placed({Kind::label,Field::mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::mode),
+        placed({Kind::toggle,Field::developer_mode,Command::none,Bitmap::none,Page::console,0,"Developer mode"}, Slot::developer_mode),
         placed({Kind::action,Field::count,Command::clear_received,Bitmap::none,Page::console,0,"Clear received"}, Slot::clear),
         placed({Kind::text,Field::callsign,Command::none,Bitmap::none,Page::console,1,"Callsign",1,false,128}, Slot::callsign),
         placed({Kind::text,Field::grid,Command::none,Bitmap::none,Page::console,1,"Grid",1,false,128}, Slot::grid),

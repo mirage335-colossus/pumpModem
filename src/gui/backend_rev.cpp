@@ -923,7 +923,7 @@ public:
         Rev::Window::keyDown(e);
     }
     void select_page(ui::Page page) {
-        application.select_page(page);if(displayed_page&&*displayed_page==page)return;
+        application.select_page(page);page=application.page();if(displayed_page&&*displayed_page==page)return;
         hide_help(true);
         if(displayed_page)for(auto& binding:bindings)
             if(binding.list&&!binding.control.persistent&&binding.control.page==*displayed_page)binding.list->retain_for_page_change();
@@ -1180,6 +1180,13 @@ public:
     }
     void apply() {
         application.set_service_active(dialog!=nullptr);sync_overlay();apply_layers();
+        select_page(application.page());
+        for(const auto& tab:application.tab_layout(details.size.width,details.size.height)) {
+            auto* button=tabs.at(tab.page);const auto visibility=tab.visible?Visibility::Visible:Visibility::Hidden;
+            if(button->style->visibility!=visibility) {
+                button->style->visibility=visibility;button->dirty.style=true;shared->layoutDirty=true;
+            }
+        }
         bool relayout=apply_controls(bindings,declarations);
         if(overlay_view)relayout=apply_controls(overlay_view->bindings,overlay_view->definition->controls)||relayout;
         if(relayout)layout_desktop();

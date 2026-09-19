@@ -4,6 +4,43 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Developer mode visibility — 18 September 2026
+
+Added an initially unchecked Developer mode checkbox immediately left of Clear
+received. The eight advanced controls and three inspection tabs are hidden in
+place. The application retains their values, command-line overrides and layout;
+switching the view does not edit the draft, invalidate inspection or reconfigure
+reception. Disabling it on an advanced tab selects Console. Both adapters consume
+shared tab visibility and continue to reject callbacks from hidden controls.
+
+Release builds completed for FLTK and Rev. All 25 focused development-contract
+tests passed, including independent short-wire vectors, physical-end checks and
+pending reception regressions. All 28 headless GUI checks passed after updating
+advanced-view fixtures to enable the toggle explicitly and clearing the draft
+before the new exact-raw-bit preservation check. New shared coverage checks
+default visibility, preserved geometry/settings, CLI overrides, stale callbacks
+and page fallback; existing assertions remain intact.
+
+Native FLTK workflow, adapter and document conformance passed on a private Xvfb
+display. The document fixture now waits up to one second for its first paint
+before checking the same exact framebuffer dimensions; its immediate X11 poll
+could return before mapping finished. Rev adapter, platform and 1×/2× coordinate
+conformance also passed, with advanced-control fixtures explicitly enabling
+developer mode.
+The adapters exercise real checkbox/tab callbacks, hidden focus eligibility,
+active-tab fallback and unchanged native bounds. Final FLTK screenshots were
+visually checked with the mode off and on at both 1180×1048 and 1030×968; the
+checkbox fits the header and the hidden controls leave their allocated spaces.
+These are Linux display checks; Windows and physical audio links were not run.
+
+Rev's full production workflow did not complete within its existing test budget.
+A concurrent run missed the phase-11 replay fraction (0.830509); an isolated
+rerun passed that stage, then timed out at phase 17 after 300.55 seconds while
+transmitting sampled audio to an independent receiver. The 300-second budget,
+replay assertions and modem runtime remain unchanged. This limits end-to-end
+Rev workflow validation, despite the passing feature and native conformance
+checks above.
+
 ## Receiver probability and GPSDO assumptions — 18 September 2026
 
 The planner and top bar now model both implemented long-pattern detector

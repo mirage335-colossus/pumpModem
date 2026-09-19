@@ -137,7 +137,7 @@ inline Rect page_rect(int width,int height,bool simulation_estimates_visible=tru
 inline Rect tabs_rect(int width,int height,bool simulation_estimates_visible=true) {
     auto rect=DesktopLayout(width,height,true,simulation_estimates_visible)[Slot::tabs];rect.h=28;return rect;
 }
-struct TabLayout {Page page;Rect frame;};
+struct TabLayout {Page page;Rect frame;bool visible=true;};
 inline std::vector<TabLayout> tab_layout(int width,int height,std::span<const PageDefinition> definitions=pages(),
                                        bool simulation_estimates_visible=true) {
     const auto bounds=tabs_rect(width,height,simulation_estimates_visible);int x=bounds.x;

@@ -27,6 +27,7 @@ struct Application::Impl {
     std::shared_ptr<const ui::OverlayDefinition> overlay;
     std::uint64_t overlay_generation=0;
     bool service_active=false;
+    ui::FieldState developer_mode;
     ui::Page page=ui::Page::console;
     struct Document {
         std::shared_ptr<const Inspection> model;
@@ -45,7 +46,9 @@ struct Application::Impl {
     } planner_document;
 };
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
-    impl_->page=launch.page;
+    // Smoke runs exercise every page; ordinary launches start with the simpler view.
+    impl_->developer_mode.checked=launch.smoke;
+    select_page(launch.page);
 }
 Application::~Application()=default;
 void Application::start() {
@@ -106,7 +109,13 @@ void Application::select(const ui::Control& declaration,std::string id) {
         select(declaration.field,std::move(id));
 }
 void Application::toggle(ui::Field field,bool value) {
-    if(!closing()&&field!=ui::Field::count&&this->field(field).visible)impl_->controller.toggle(field,value);
+    if(closing()||field==ui::Field::count||!this->field(field).visible)return;
+    if(field==ui::Field::developer_mode) {
+        if(impl_->developer_mode.checked==value)return;
+        impl_->developer_mode.checked=value;
+        if(!page_visible(page()))select_page(ui::Page::console);
+        ++impl_->presentation_revision;
+    } else impl_->controller.toggle(field,value);
 }
 void Application::toggle(const ui::Control& declaration,bool value) {
     if(declaration.kind==ui::Kind::toggle&&accepts_input(declaration))toggle(declaration.field,value);
@@ -172,7 +181,14 @@ ui::Rect Application::tabs_bounds(int width,int height) const {
     return ui::tabs_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
 }
 std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
-    return ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
+    auto result=ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
+    for(auto& tab:result)tab.visible=page_visible(tab.page);
+    return result;
+}
+bool Application::page_visible(ui::Page page) const {
+    const auto& definitions=ui::pages();
+    const auto found=std::find_if(definitions.begin(),definitions.end(),[&](const auto& item){return item.id==page;});
+    return found!=definitions.end()&&(!found->developer_only||impl_->developer_mode.checked);
 }
 bool Application::accepts_input(const ui::Control& declaration) const {
     if(!accepts_surface(declaration.surface)||(!declaration.surface&&!declaration.persistent&&declaration.page!=page()))return false;
@@ -183,6 +199,8 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     static const ui::FieldState empty;
     const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
+    if(declaration.developer_only&&!impl_->developer_mode.checked)view.visible=false;
+    if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     // The planner owns its concise LPI reference and single model warning.
     // The current-draft advisory remains unchanged on the other pages.
     if(!declaration.surface&&declaration.field==ui::Field::lpi_estimate&&page()==ui::Page::planner)view.visible=false;
@@ -221,7 +239,9 @@ MenuPresentation Application::menu(std::span<const ui::Control* const> items) co
 void Application::select_menu(std::span<const ui::Control* const> items,const std::string& id) {
     for(std::size_t i=0;i<items.size();++i)if(id==std::to_string(i)) {activate(*items[i]);return;}
 }
-const ui::FieldState& Application::field(ui::Field field) const { return impl_->controller.field(field); }
+const ui::FieldState& Application::field(ui::Field field) const {
+    return field==ui::Field::developer_mode?impl_->developer_mode:impl_->controller.field(field);
+}
 bool Application::enabled(ui::Command command) const {
     if(command==ui::Command::toggle_qr_expanded)return !closing()&&page()==ui::Page::console;
     if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
@@ -234,7 +254,7 @@ void Application::report_error(std::string message) { impl_->controller.report_e
 std::uint64_t Application::revision() const { return impl_->controller.revision()+impl_->presentation_revision; }
 std::uint64_t Application::poll_count() const { return impl_->poll_count; }
 void Application::select_page(ui::Page page) {
-    if(std::any_of(ui::pages().begin(),ui::pages().end(),[&](const auto& value){return value.id==page;})) {
+    if(page_visible(page)) {
         if(impl_->page!=page&&impl_->overlay&&impl_->overlay->policy.dismiss_on_page_change)dismiss_overlay();
         impl_->page=page;
     }

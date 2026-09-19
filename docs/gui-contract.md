@@ -25,6 +25,17 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
+**Developer mode** is a persistent checkbox immediately left of **Clear received**
+and starts unchecked. It hides Pattern / tone, Error correction, DSP workspace,
+RX targets, Pattern steps, Callsign, Grid and Repeatable in place, together with
+the Compression / raw bits, Modem flow and Transmission layout tabs. Showing or
+hiding these controls preserves their geometry and values, including launch
+overrides, and does not reconfigure the modem or edit the draft. Turning it off
+on a hidden tab returns to Console; Link planner remains available. Visibility
+is shared presentation policy, and native adapters consume the tab visibility
+alongside its unchanged rectangle. Smoke workflows enable the advanced view
+explicitly so their all-page checks remain intact.
+
 **Link planner** is the second tab, immediately after **Console**. It previews a
 target independently of the live transmit/receive targets, with **Time per bit**,
 **Observer / receiver time**, send time and an earliest completion estimate.

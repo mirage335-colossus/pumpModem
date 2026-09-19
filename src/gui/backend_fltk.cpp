@@ -929,6 +929,10 @@ private:
     }
     void show_page() {
         shown_page=application.page();for(auto& [id,page]:pages)visible(page.group,id==shown_page);
+        for(const auto& tab:application.tab_layout(window->w(),window->h())) {
+            const auto found=std::find_if(tabs.begin(),tabs.end(),[&](const auto& item){return item.first==tab.page;});
+            visible(found->second,tab.visible);
+        }
         // value() resets FLTK's press baseline and can swallow the release.
         // Keep a held tab's native state until the click or drag completes.
         for(auto& [id,button]:tabs)if(Fl::pushed()!=button)button->value(id==shown_page);

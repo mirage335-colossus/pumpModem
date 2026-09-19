@@ -91,6 +91,7 @@ public:
     BitmapPresentation bitmap(const ui::Control& control,unsigned pixel_width=640) const;
     std::shared_ptr<const ui::DocumentNode> document(ui::Page page,int width);
 private:
+    bool page_visible(ui::Page page) const;
     bool accepts_surface(std::uint64_t surface) const;
     bool accepts_input(const ui::Control& control) const;
     struct Impl;

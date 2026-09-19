@@ -14,7 +14,7 @@ inline constexpr int margin = 16, field_height = 27, label_height = 16;
 inline constexpr int action_height = 29, compact_action_height = 20;
 
 enum class Slot {
-    none, header, mode, clear, callsign, grid, repeatable, simulation,
+    none, header, mode, developer_mode, clear, callsign, grid, repeatable, simulation,
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, simulation_oscillator_detail, lpi_estimate, key_actions,
@@ -32,7 +32,7 @@ enum class Slot {
 };
 inline constexpr bool persistent_slot(Slot slot) {
     switch (slot) {
-    case Slot::header: case Slot::mode: case Slot::clear:
+    case Slot::header: case Slot::mode: case Slot::developer_mode: case Slot::clear:
     case Slot::callsign: case Slot::grid: case Slot::repeatable: case Slot::simulation:
     case Slot::link_power: case Slot::link_loss: case Slot::link_noise:
     case Slot::simulation_confidence: case Slot::simulation_cpu_time: case Slot::simulation_gpu_time:
@@ -67,7 +67,8 @@ struct DesktopLayout {
             (simulation_estimates_visible ? simulation_estimate_row_height : 0);
         const int content_height = height - header_rows;
         out[Slot::header] = {margin, 10, 220, 32};
-        out[Slot::mode] = {235, 13, width - 420, 28};
+        out[Slot::mode] = {235, 13, width - 558, 28};
+        out[Slot::developer_mode] = {width - 313, 12, 150, 28};
         out[Slot::clear] = {width - 153, 12, 137, 28};
         out[Slot::callsign] = {margin, 62, 115, field_height};
         out[Slot::grid] = {142, 62, 85, field_height};

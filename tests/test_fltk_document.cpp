@@ -135,6 +135,9 @@ int main() {
         geometry_document.children[3].plot=datapump::gui::test::rectangle_bitmap(bitmap_probe);
         geometry_document.children[6].plot=datapump::gui::test::rectangle_bitmap(border_probe);
         view->layout(400);view->update(geometry_document);Fl::check();
+        // Mapping an X11 window can finish after Fl::check() returns. Wait for
+        // its first actual paint before inspecting the requested framebuffer.
+        for(unsigned attempt=0;bitmap_probe->requests.empty()&&attempt<100;++attempt)Fl::wait(.01);
         require(!bitmap_probe->requests.empty()&&bitmap_probe->requests.back().width==86&&bitmap_probe->requests.back().height==36,
             "FLTK document bitmap did not paint the shared padded framebuffer extent");
         auto* geometry_root=dynamic_cast<Fl_Group*>(view->child(0));

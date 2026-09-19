@@ -322,8 +322,75 @@ void prompts() {
         "Native chooser buttons did not consume shared service wording");
     file_services.cancel();Fl::check();require(!Fl::modal(),"Cancelling the title lifetime fixture retained its chooser");
 }
+void developer_mode_visibility() {
+    Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    auto* window=Fl::first_window();require(window,"Developer mode fixture has no native window");
+    auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Developer mode"));
+    auto* clear=find_button(*window,"Clear received");
+    require(toggle&&clear&&toggle->visible_r()&&!toggle->value(),"Developer mode did not start as an unchecked native toggle");
+    const auto refresh=[] {
+        const auto until=Clock::now()+std::chrono::milliseconds(130);
+        while(Clock::now()<until)Fl::wait(.005);
+    };
+    const auto frame=[](const Fl_Widget* widget) {return ui::Rect{widget->x(),widget->y(),widget->w(),widget->h()};};
+    const auto set_mode=[&](bool checked) {toggle->value(checked);toggle->do_callback();refresh();};
+    for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
+        window->size(size.first,size.second);refresh();
+        require(toggle->x()+toggle->w()<clear->x()&&toggle->y()==clear->y(),
+            "Developer mode is not immediately left of Clear received");
+        std::vector<std::pair<Fl_Widget*,ui::Rect>> preserved;
+        std::vector<NativeControlGroup*> advanced;
+        const std::function<void(Fl_Group&)> collect=[&](Fl_Group& group) {
+            for(int i=0;i<group.children();++i) {
+                auto* child=group.child(i);
+                if(auto* control=dynamic_cast<NativeControlGroup*>(child)) {
+                    for(const auto& declaration:ui::console_screen())if(declaration.persistent&&
+                        app.application.control_layout(declaration,window->w(),window->h()).frame==frame(control)) {
+                        preserved.push_back({control,frame(control)});
+                        if(declaration.developer_only)advanced.push_back(control);
+                        break;
+                    }
+                }
+                if(auto* nested=dynamic_cast<Fl_Group*>(child))collect(*nested);
+            }
+        };
+        collect(*window);require(!advanced.empty(),"Developer mode fixture found no advanced native controls");
+        for(const auto& definition:ui::pages()) {
+            auto* button=find_button(*window,definition.title);require(button,"Developer mode fixture lost a native tab");
+            preserved.push_back({button,frame(button)});
+        }
+        for(bool checked:{false,true,false,true,false}) {
+            set_mode(checked);
+            require(app.application.field(ui::Field::developer_mode).checked==checked&&toggle->visible_r(),
+                "Native developer mode callback failed or hid its own toggle");
+            for(auto* control:advanced)require(static_cast<bool>(control->visible_r())==checked,
+                "Developer mode did not hide/show an entire advanced control in place");
+            for(const auto& definition:ui::pages()) {
+                auto* button=find_button(*window,definition.title);
+                require(static_cast<bool>(button->visible_r())==(checked||!definition.developer_only),
+                    "Developer mode did not update native tab visibility without resizing");
+                if(!button->visible_r()) {
+                    require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
+                    button->do_callback();require(app.application.page()==ui::Page::console,
+                        "A stale native callback selected a hidden advanced tab");
+                }
+            }
+            for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
+                "Toggling developer mode moved an existing native control or tab");
+        }
+        for(const auto& definition:ui::pages())if(definition.developer_only) {
+            set_mode(true);auto* button=find_button(*window,definition.title);button->do_callback();refresh();
+            require(app.application.page()==definition.id,"An enabled advanced native tab could not be selected");
+            set_mode(false);
+            require(app.application.page()==ui::Page::console&&find_button(*window,"Console")->value()&&
+                !button->value()&&!button->visible_r(),"Hiding the selected advanced tab did not display Console");
+        }
+    }
+    app.application.close();while(!app.application.finished())Fl::wait(.005);
+}
 void tab_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);
     auto* window=Fl::first_window();require(window,"Tab fixture has no native window");
     const auto key=Fl::e_keysym,x=Fl::e_x,y=Fl::e_y,state=Fl::e_state;
     const auto refresh=[] {
@@ -375,6 +442,7 @@ void tab_clicks() {
 }
 void repeatable_clicks() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);
     auto* window=Fl::first_window();require(window,"Repeatable fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Repeatable"));
     require(toggle,"Repeatable fixture has no native checkbox");
@@ -988,6 +1056,7 @@ void document_geometry(Fl_Group& parent) {
 }
 void popup_polling_and_document_layout() {
     Launch launch;launch.simulation=true;NativeApp app(launch);auto* window=Fl::first_window();require(window,"Popup polling fixture has no native window");
+    app.application.toggle(ui::Field::developer_mode,true);
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);
         for(const auto& page:ui::pages())if(page.document) {
@@ -1033,6 +1102,7 @@ public:
 void compression_page_labels() {
     Launch launch;launch.simulation=true;launch.page=ui::Page::compression;
     NativeApp app(launch);Fl::check();
+    app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::compression);
     auto* window=Fl::first_window();require(window,"Compression fixture has no native window");
     window->resize(window->x(),window->y(),ui::min_width,ui::min_height);
     for(const auto* draft:{"","010","0010","01010"}) {
@@ -1156,6 +1226,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

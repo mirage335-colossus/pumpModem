@@ -16,7 +16,8 @@ enum class Field {
     files, signals, mode, status, airtime, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
-    compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference, count
+    compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
+    developer_mode, count
 };
 enum class Command {
     none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -106,6 +107,7 @@ struct Control {
     OverlayPlacement placement;
     bool document_only = false; // Materialized only by a document control node.
     bool tab_navigation = false; // Multiline editors may reserve Tab for focus.
+    bool developer_only = false; // Hide in place without changing the bound value.
 };
 const std::vector<Control>& console_screen();
 struct PageDefinition {
@@ -114,6 +116,7 @@ struct PageDefinition {
     const char* title;
     bool document=false;
     int tab_width=100;
+    bool developer_only=false;
 };
 const std::vector<PageDefinition>& pages();
 const char* window_title();

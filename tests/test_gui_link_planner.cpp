@@ -825,6 +825,7 @@ void shared_link_budget_without_simulation() {
 void shared_link_controls_visibility() {
     using F=ui::Field;
     Application app(Launch{});
+    app.toggle(F::developer_mode,true);
     const auto& screen=ui::console_screen();
     const auto declaration=[&](F field)->const ui::Control& {
         const auto found=std::find_if(screen.begin(),screen.end(),[&](const auto& control){return control.field==field;});
@@ -984,6 +985,7 @@ void link_budget_preset_and_dialog_sync() {
 }
 void one_warning_on_planner_page() {
     Launch launch;launch.simulation=true;Application app(launch);
+    app.toggle(ui::Field::developer_mode,true);
     const auto& pages=ui::pages();
     check(pages.size()>1&&pages[0].id==ui::Page::console&&pages[1].id==ui::Page::planner,
           "Link planner must be the second tab immediately after Console");
@@ -1026,6 +1028,7 @@ void all_target_dropdowns_and_native_planner_editor() {
     controller.close();
 
     Application app({});
+    app.toggle(F::developer_mode,true);
     const auto& screen=ui::console_screen();
     const auto editor=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::planner_target;});
     const auto active=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::snr;});

@@ -1,4 +1,75 @@
 // Included inside RevApp only by the native conformance executable.
+    void verify_developer_mode_visibility() {
+        const auto require=[](bool condition,const char* message) {if(!condition)throw std::runtime_error(message);};
+        const auto settle=[&] {apply();for(unsigned frame=0;frame<3;++frame)native_frame();};
+        settle();
+        auto toggle_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
+            return binding.control.field==ui::Field::developer_mode;
+        });
+        auto clear_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
+            return binding.control.command==ui::Command::clear_received;
+        });
+        require(toggle_binding!=bindings.end()&&toggle_binding->toggle&&clear_binding!=bindings.end(),
+            "Rev developer mode fixture lacks its toggle or Clear received button");
+        auto* toggle=toggle_binding->toggle;
+        require(!toggle->value&&allows_input(toggle),"Rev developer mode did not start unchecked and available");
+        require(toggle->rect.x+toggle->rect.w<clear_binding->element->rect.x&&toggle->rect.y==clear_binding->element->rect.y,
+            "Rev developer mode is not immediately left of Clear received");
+        const auto frame=[](const re::Element* element) {
+            return std::array<float,4>{element->rect.x,element->rect.y,element->rect.w,element->rect.h};
+        };
+        const auto geometry=[](re::Element* element) {
+            return std::array<float,4>{element->style->position.left.val,element->style->position.top.val,
+                element->style->size.width.val,element->style->size.height.val};
+        };
+        std::vector<std::pair<re::Element*,std::array<float,4>>> preserved;
+        for(auto& binding:bindings)if(binding.control.persistent)preserved.push_back({binding.element,geometry(binding.element)});
+        for(const auto& [id,button]:tabs)preserved.push_back({button,geometry(button)});
+        const auto set_mode=[&](bool checked) {
+            if(toggle->value!=checked) {re::Event click;toggle->checkbox->click(click);}
+            settle();
+        };
+        set_mode(true);
+        std::vector<std::pair<re::Element*,std::array<float,4>>> visible_bounds;
+        for(const auto& [element,bounds]:preserved)if(!element->resolved.hidden)visible_bounds.push_back({element,frame(element)});
+        set_mode(false);
+        for(bool checked:{false,true,false,true,false}) {
+            set_mode(checked);
+            require(application.field(ui::Field::developer_mode).checked==checked&&allows_input(toggle),
+                "Rev developer mode callback failed or hid its own toggle");
+            for(const auto& binding:bindings)if(binding.control.developer_only&&binding.control.persistent)
+                require(binding.element->resolved.hidden==!checked,
+                    "Rev developer mode did not hide/show an entire advanced control in place");
+            for(const auto& definition:ui::pages()) {
+                auto* button=tabs.at(definition.id);
+                require(button->resolved.hidden==(!checked&&definition.developer_only),
+                    "Rev developer mode did not refresh native tab visibility without resizing");
+                if(button->resolved.hidden) {
+                    require(!allows_input(button),"Rev hidden advanced tab retained keyboard input eligibility");
+                    re::Event click;button->click(click);
+                    require(application.page()==ui::Page::console&&displayed_page==ui::Page::console,
+                        "Rev stale native callback selected a hidden advanced tab");
+                }
+            }
+            for(const auto& [element,bounds]:preserved)require(geometry(element)==bounds,
+                "Rev toggling developer mode moved an existing native control or tab");
+            for(const auto& [element,bounds]:visible_bounds)if(!element->resolved.hidden)require(frame(element)==bounds,
+                "Rev developer mode changed the rendered position of a visible control or tab");
+        }
+        for(const auto& definition:ui::pages())if(definition.developer_only) {
+            set_mode(true);re::Event click;tabs.at(definition.id)->click(click);settle();
+            require(application.page()==definition.id&&displayed_page==definition.id,
+                "Rev enabled advanced tab could not be selected");
+            focus_control(tabs.at(definition.id));set_mode(false);
+            require(application.page()==ui::Page::console&&displayed_page==ui::Page::console&&
+                !pages.at(ui::Page::console)->resolved.hidden&&pages.at(definition.id)->resolved.hidden&&
+                !tabs.at(definition.id)->targetFlags.focus,
+                "Rev hiding the selected advanced tab did not display Console and clear hidden focus");
+        }
+        select_page(ui::Page::compression);settle();
+        require(application.page()==ui::Page::console&&displayed_page==ui::Page::console,
+            "Rev displayed a requested page rejected by the shared application");
+    }
     void verify_document_editor_scrolling() {
         auto editor=std::make_unique<Editor>(this,true,8192,platform,true);
         place(editor.get(),{40,280,210,56});editor->style->text.size=11_px;

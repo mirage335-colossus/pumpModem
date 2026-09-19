@@ -87,7 +87,11 @@ random-input evidence budget, independently of authentication. Unknown slots add
 no marker confidence. See the [fixed stream protocol](docs/protocol.md).
 
 The desktop has **Console**, **Link planner**, **Compression / raw bits**,
-**Modem flow**, and **Transmission layout** tabs, in that order. Link planner
+**Modem flow**, and **Transmission layout** tabs, in that order. **Developer mode**,
+next to **Clear received**, starts unchecked. Check it to show the last three
+tabs and the Pattern / tone, Error correction, DSP workspace, RX targets,
+Pattern steps, Callsign, Grid and Repeatable controls. Hidden controls keep their
+positions and current values, including command-line overrides. Link planner
 compares bit duration, modeled one-bit reception and receiver CPU pace at the
 selected power, path loss, noise and oscillator settings.
 Beside **Simulation**, the desktop shows a modeled whole-message receive

@@ -14,6 +14,9 @@ int run_native_probes() {
     Launch launch;launch.color=false;launch.simulation=true;launch.page=ui::pages().front().id;
     configure_theme(launch.color);std::vector<void*> windows;
     {
+        RevApp probe(windows,launch);probe.verify_developer_mode_visibility();
+    }
+    {
         RevApp probe(windows,launch);probe.verify_document_editor_scrolling();probe.verify_launch_command_editor();probe.verify_inline_document_editor();
     }
     {
@@ -31,11 +34,12 @@ int run_native_probes() {
     }
     {
         RevApp probe(windows,launch);
+        probe.application.toggle(ui::Field::developer_mode,true);probe.apply();
         probe.verify_palette_roles();probe.verify_editor_contract();probe.verify_clipboard_shortcuts();probe.verify_choice_contract();probe.verify_record_contract();probe.verify_prompt_focus();probe.verify_native_resize();probe.verify_overlay_composition();
     }
     {
         launch.color=true;configure_theme(launch.color);
-        RevApp probe(windows,launch);probe.verify_palette_roles();
+        RevApp probe(windows,launch);probe.application.toggle(ui::Field::developer_mode,true);probe.apply();probe.verify_palette_roles();
     }
     if(!windows.empty())throw std::runtime_error("Rev native probes retained a window after conformance checks");
     std::cout<<"Rev native adapter probes passed: declarative extensions, UTF-8 editing, choices, records, scrolling and modal focus.\n";
