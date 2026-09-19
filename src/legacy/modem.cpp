@@ -20,7 +20,8 @@ std::string_view mode_name(Mode mode) {
 struct Transmitter::Impl {std::unique_ptr<detail::WaveTransmitter> wave;};
 Transmitter::Transmitter(Config c,std::string text,TextCallback sent):impl_(std::make_unique<Impl>()) {
     validate(c);
-    if(text.empty()||text.size()>text_byte_limit)throw std::invalid_argument("Legacy text must contain 1 to 32768 bytes");
+    if(text.empty()||text.size()>encoded_text_byte_limit)
+        throw std::invalid_argument("Legacy codec text must contain 1 to 32772 bytes including session line breaks");
     // The supported wire alphabets are byte oriented. NUL is the idle symbol,
     // not printable text, and cannot be submitted as a hidden binary payload.
     if(text.find('\0')!=std::string::npos)throw std::invalid_argument("Legacy text cannot contain NUL");

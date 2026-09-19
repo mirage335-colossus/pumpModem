@@ -58,6 +58,7 @@ int main() {
         until(controller,[&]{return controller.field(F::legacy_transcript).text==received;});
         check(controller.bitmap_revision()>1,"Sampled RX did not update waterfall");
         controller.edit(F::legacy_text,sent);controller.activate(C::legacy_transmit);
+        check(controller.command_label()=="Cancel"&&controller.enabled(C::legacy_transmit),"Queued TX cannot be cancelled");
         bool partial=false,appended=false;
         until(controller,[&]{
             const auto& draft=controller.field(F::legacy_text).text;
@@ -68,9 +69,26 @@ int main() {
             return appended&&controller.field(F::legacy_text).text==later&&fixture::outputs==0&&fixture::inputs==1;
         });
         check(partial,"Legacy did not expose TX characters during playback");
-        check(controller.field(F::legacy_transcript).text==received+sent,"Live RX/TX transcript lost or duplicated bytes");
+        check(controller.field(F::legacy_transcript).text==received+"\n\n\n"+sent+"\n","Live RX/TX transcript lost text or transmission separators");
+        check(controller.command_label()=="Transmit","Completed TX retained Cancel button");
         check(!fixture::overlap,"Legacy GUI overlapped TX and RX");
         check(!fixture::output.empty(),"Legacy GUI transmitted no sampled audio");
+        const auto before_cancel=controller.field(F::legacy_transcript).text;
+        const std::string cancelled(1024,'x');controller.edit(F::legacy_text,cancelled);controller.transmit();
+        until(controller,[&]{return controller.field(F::legacy_transcript).text.size()>before_cancel.size()+3;});
+        check(controller.command_label()=="Cancel"&&controller.enabled(C::legacy_transmit),"Active TX cannot be cancelled");
+        controller.transmit();
+        check(controller.command_label()=="Cancel","Repeated start request cancelled active TX");
+        controller.edit(F::legacy_text,cancelled+" edited");
+        controller.activate(C::legacy_transmit);
+        check(controller.command_label()=="Cancelling…"&&!controller.enabled(C::legacy_transmit),"Cancel did not await audio closure");
+        controller.transmit();controller.activate(C::legacy_transmit);
+        until(controller,[&]{return fixture::outputs==0&&fixture::inputs==1&&controller.command_label()=="Transmit";});
+        check(controller.field(F::legacy_text).text==cancelled+" edited","Cancellation cleared an uncommitted or newly edited draft");
+        const auto partial_text=controller.field(F::legacy_transcript).text.substr(before_cancel.size());
+        check(partial_text.starts_with("\n\n\nx")&&partial_text.size()<cancelled.size()&&!partial_text.ends_with('\n'),
+            "Cancellation fabricated an unsent suffix or lost emitted prefix");
+        check(!fixture::overlap,"Cancellation resumed reception before playback closed");
         controller.selected(false);until(controller,[&]{return !controller.active();});
         check(!fixture::inputs&&!fixture::outputs,"Leaving Legacy did not close audio");
         controller.close();until(controller,[&]{return controller.ready_to_close();});

@@ -5,8 +5,16 @@ simplex radio-text console with BPSK31, BPSK125 and Olivia-4/2k. The carrier
 frequency defaults to 1500 Hz. Reception starts when Legacy obtains the audio
 device. The upper text area shows received characters and characters sent by
 this station as they become available. The lower area holds text to transmit;
-**Transmit** sends the current draft and clears its submitted text after
-successful playback. TX text echoes into the transcript as audio is generated;
+**Transmit** or **Ctrl+Enter** in the draft sends three line breaks, the current
+draft, and one final line break. These are transmitted LF characters and appear
+in the transcript as their audio is generated. The button becomes **Cancel**
+while a send is queued or transmitting. Cancel stops playback, retains the draft
+and resumes reception after the audio device closes; it does not finish sending
+the remaining text. Repeated Ctrl+Enter during a send leaves it running. Plain
+Enter and Shift+Enter insert line breaks in the draft.
+
+Successful playback clears the submitted draft text, excluding the added line
+breaks. TX text echoes into the transcript as audio is generated;
 a playback error retains the draft because the hardware API cannot acknowledge
 individual characters. Text appended while transmitting remains for the next transmission.
 A waveform's standard startup and trailing idle symbols take additional time.

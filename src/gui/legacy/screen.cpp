@@ -17,7 +17,8 @@ const std::vector<Control>& screen() {
             c.multiline=true;c.read_only=true;c.font_size=16;c.byte_limit=65536;return c;}(),
         [] {auto c=placed(Kind::text,Field::legacy_text,"Text to transmit",Slot::legacy_text);
             c.multiline=true;c.tab_navigation=true;c.follow_tail=true;c.font_size=16;c.byte_limit=32768;
-            c.help="Enter inserts a newline. Sent text clears after successful audio playback; you can keep typing.";return c;}(),
+            c.submit=Command::legacy_transmit;
+            c.help="Ctrl+Enter transmits; Enter inserts a newline. Three line breaks precede your text and one follows it. Sent text clears after successful playback; cancellation keeps the draft.";return c;}(),
         [] {auto c=placed(Kind::action,Field::count,"Transmit",Slot::legacy_transmit);c.command=Command::legacy_transmit;return c;}(),
         [] {auto c=placed(Kind::bitmap,Field::count,"Waterfall",Slot::legacy_waterfall);c.bitmap=Bitmap::legacy_waterfall;
             c.help="Live audio from 0 to 4 kHz; newest row at the top. Reception pauses during transmission.";return c;}(),

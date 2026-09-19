@@ -4477,3 +4477,27 @@ control conformance passed, but this environment did not complete its full
 production workflow within the tested budgets. No existing modem, replay or
 smoke assertion was changed to accommodate these results. All private displays
 were closed after validation, and `git diff --check` passed.
+
+### Legacy transmission separators and controls (2026-09-19)
+
+Legacy sessions now encode three leading LF characters and one trailing LF
+around each submitted draft. The real transmitter callback echoes those same
+characters into the transcript. The 32,768-byte draft limit is preserved by a
+separate codec allowance for the four added characters, and successful playback
+commits only the original draft byte count. Cancel stops queued or active TX,
+retains the draft and newly edited text, then resumes RX after audio closure.
+The same button reads Transmit, Cancel or Cancelling as appropriate. Ctrl+Enter
+in the draft starts TX; repeated shortcuts during TX do not cancel it. Existing
+Robust/Fast modem code and keyboard behavior are unchanged.
+
+Both Release GUI executables rebuilt. The focused Legacy/Fast, shared GUI,
+boundary, short dictionary and transport checks passed 20/20 in 77.65 seconds.
+Sampled session tests decode the exact separators in all three modes, including
+consecutive transmissions; cancellation covers maximum-sized drafts and partial
+audio emission without a committed draft. Live GUI tests cover cancellation,
+draft edits during TX, RX resumption and exclusive audio ownership. Native
+shortcut/control conformance passed on FLTK (53.18 seconds) and Rev (38.22
+seconds), using private displays that were closed afterward. No native adapter
+implementation changed. `git diff --check` passed. The earlier full-workflow
+and calibration timeout limits recorded above were not rerun for this scoped
+follow-up.

@@ -100,6 +100,15 @@
             !transcript->targetFlags.disabled&&transcript->scroll_content&&draft->editable&&
             !by_field(ui::Field::legacy_transcript).element->resolved.hidden&&by_field(ui::Field::legacy_carrier).editor->content.get()=="1500",
             "Rev Legacy text terminal did not retain selectable read-only received text");
+        const auto submit_legacy=[&](bool ctrl,bool shift) {
+            re::Event enter;enter.keyboard.enter.id=1;
+            enter.keyboard.ctrl.id=ctrl?1:0;enter.keyboard.shift.id=shift?1:0;
+            return draft->submit_event(enter);
+        };
+        require(draft->submit_event&&draft->content.get().empty()&&!submit_legacy(false,false)&&
+            !submit_legacy(false,true)&&!submit_legacy(true,true)&&submit_legacy(true,false)&&
+            application.field(ui::Field::legacy_text).text.empty(),
+            "Rev Legacy draft did not reserve only Ctrl+Enter for transmission");
         transcript->apply("Received text\nSent text");
         require(!transcript->replace("unwanted")&&transcript->content.get()=="Received text\nSent text","Rev Legacy transcript accepted editing");
         for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::regular||binding.control.scope==ui::ScreenScope::fast)

@@ -11,6 +11,9 @@ enum class Mode { olivia4_2000, bpsk31, bpsk125 };
 struct Config { Mode mode=Mode::bpsk31; double carrier_hz=1500; };
 inline constexpr std::uint32_t sample_rate=8000;
 inline constexpr std::size_t text_byte_limit=32768;
+// The session adds three leading LF bytes and one trailing LF to a full draft.
+// This codec-only allowance does not increase the submitted draft limit.
+inline constexpr std::size_t encoded_text_byte_limit=text_byte_limit+4;
 void validate(const Config&);
 std::string_view mode_name(Mode);
 // Character callback fires only when that character's waveform has been emitted.

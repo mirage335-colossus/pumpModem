@@ -326,7 +326,7 @@ bool Application::enabled(ui::Command command) const {
     return impl_->controller.enabled(command);
 }
 std::string Application::command_label(ui::Command command) const {
-    if(legacy_ui::owns(command))return "Transmit";
+    if(legacy_ui::owns(command))return impl_->legacy_controller.command_label();
     return fast_ui::owns(command)?impl_->fast_controller.command_label(command):impl_->controller.command_label(command);
 }
 void Application::complete_service(ui::ServiceResult result) {
@@ -378,6 +378,11 @@ bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
         return true;
     }
     if(control.submit==ui::Command::none||shift)return false;
+    if(control.field==ui::Field::legacy_text&&control.submit==ui::Command::legacy_transmit) {
+        if(!ctrl)return false;
+        if(accepts_input(control)&&impl_->legacy_selected())impl_->legacy_controller.transmit();
+        return true;
+    }
     const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
     if(ctrl!=wants_ctrl)return false;
     if(accepts_input(control)&&enabled(control.submit))activate(control.submit);

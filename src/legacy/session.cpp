@@ -83,7 +83,9 @@ struct Session::Impl {
         capture.request_stop();capture.join();
     }
     void send(std::stop_token stop,const Settings& s,const std::string& text) {
-        Transmitter transmitter(s.config,text,[&](std::string_view sent){append(sent,true);});
+        // These are ordinary on-air text characters. Route them through the
+        // same encoder and emitted-character callback as the submitted draft.
+        Transmitter transmitter(s.config,"\n\n\n"+text+'\n',[&](std::string_view sent){append(sent,true);});
         audio::playback(sample_rate,s.device,[&](std::span<float> out) {
             if(stop.stop_requested())return std::size_t{};
             const auto count=transmitter.read(out);if(count)samples(out.first(count));return count;

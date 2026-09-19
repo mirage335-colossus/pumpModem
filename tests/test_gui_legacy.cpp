@@ -86,6 +86,31 @@ void progress_and_bounded_text() {
     snapshot.events={{9,true,"CQ"}};presentation.update(snapshot,transcript,draft);
     check(transcript.text.ends_with("\xEF\xBF\xBD" "CQ"),"Malformed received UTF-8 swallowed later valid transmitted text");
 }
+void send_shortcut_and_cancel() {
+    using F=ui::Field;using C=ui::Command;
+    Application app({.simulation=true});app.select(F::fast_mode,"legacy");
+    const auto& draft=control(F::legacy_text);
+    check(draft.submit==C::legacy_transmit,"Legacy draft lacks a send binding");
+    check(!app.submit(draft,false,false)&&!app.submit(draft,false,true)&&!app.submit(draft,true,true),
+        "Legacy consumed a plain or shifted newline as transmit");
+    check(app.submit(draft,true,false)&&app.command_label(C::legacy_transmit)=="Transmit"&&!app.enabled(C::legacy_transmit),
+        "Ctrl+Enter started an empty Legacy draft");
+    app.edit(F::legacy_text,"queued text");
+    check(app.submit(draft,true,false)&&app.command_label(C::legacy_transmit)=="Cancel"&&app.enabled(C::legacy_transmit),
+        "Ctrl+Enter did not queue a cancellable transmission");
+    check(app.submit(draft,true,false)&&app.command_label(C::legacy_transmit)=="Cancel",
+        "Repeated Ctrl+Enter cancelled the transmission");
+    app.edit(F::legacy_text,"");
+    check(app.enabled(C::legacy_transmit),"Clearing the draft disabled cancellation");
+    app.activate(C::legacy_transmit);
+    check(app.command_label(C::legacy_transmit)=="Transmit"&&!app.enabled(C::legacy_transmit),"Button did not cancel queued transmission");
+    app.edit(F::legacy_text,"retained draft");app.activate(C::legacy_transmit);app.activate(C::legacy_transmit);
+    check(app.field(F::legacy_text).text=="retained draft"&&app.command_label(C::legacy_transmit)=="Transmit",
+        "Cancelling queued transmission discarded the draft");
+    app.select(F::fast_mode,"fast");app.submit(draft,true,false);app.select(F::fast_mode,"legacy");
+    check(app.command_label(C::legacy_transmit)=="Transmit","Hidden Legacy shortcut queued audio");
+    app.close();
+}
 void deferred_ownership() {
     unsigned requests=0;
     legacy_ui::Controller controller([&] {++requests;return false;});
@@ -124,6 +149,6 @@ void waterfall() {
 }
 }
 int main() {
-    try {presentation_and_isolation();progress_and_bounded_text();deferred_ownership();waterfall();std::cout<<"Legacy GUI checks passed\n";}
+    try {presentation_and_isolation();progress_and_bounded_text();send_shortcut_and_cancel();deferred_ownership();waterfall();std::cout<<"Legacy GUI checks passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

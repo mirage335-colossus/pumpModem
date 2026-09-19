@@ -16,7 +16,9 @@ public:
     void edit(ui::Field,std::string);
     void select(ui::Field,std::string);
     void activate(ui::Command);
+    void transmit(); // Start only; repeated send shortcuts never cancel TX.
     bool enabled(ui::Command) const;
+    std::string command_label() const;
     const ui::FieldState& field(ui::Field) const;
     void report_error(std::string);
     std::uint64_t revision() const;

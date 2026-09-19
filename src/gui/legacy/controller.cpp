@@ -16,7 +16,7 @@ struct Controller::Impl {
     Waterfall waterfall;
     std::function<bool()> acquire_audio;
     std::optional<std::string> pending_tx;
-    bool selected=false,closing=false,valid=true,failed=false,reconfigure=false;
+    bool selected=false,closing=false,valid=true,failed=false,reconfigure=false,cancelling=false;
     std::uint64_t revision=1;
     ui::FieldState& f(F field) {return fields.at(static_cast<std::size_t>(field));}
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
@@ -26,7 +26,7 @@ struct Controller::Impl {
         f(F::legacy_status).text="Select Legacy Modem to receive.";
     }
     void refresh() {
-        const bool edit=!closing&&!snapshot.transmitting&&!pending_tx;
+        const bool edit=!closing&&!snapshot.transmitting&&!pending_tx&&!cancelling;
         f(F::legacy_profile).enabled=edit;f(F::legacy_carrier).enabled=edit;
         f(F::legacy_text).enabled=!closing;
     }
@@ -40,6 +40,10 @@ struct Controller::Impl {
             if(!next.error.empty()) {failed=true;f(F::legacy_status).text=next.error;}
             else if(valid&&!reconfigure)f(F::legacy_status).text=next.status;
             snapshot=std::move(next);++revision;
+        }
+        if(cancelling) {
+            if(!snapshot.active) {cancelling=false;++revision;}
+            else f(F::legacy_status).text="Cancelling transmission…";
         }
         if(waterfall.update(snapshot.recent_samples,snapshot.audio_revision,snapshot.active,snapshot.transmitting))++revision;
         refresh();
@@ -114,12 +118,28 @@ void Controller::select(F field,std::string value) {
 }
 void Controller::activate(C command) {
     if(!enabled(command))return;
-    auto& p=*impl_;p.pending_tx=p.f(F::legacy_text).text;p.failed=false;
+    auto& p=*impl_;
+    if(p.pending_tx||p.snapshot.transmitting) {
+        p.pending_tx.reset();p.cancelling=p.session.active();p.session.cancel();
+        p.f(F::legacy_status).text=p.cancelling?"Cancelling transmission…":"Transmission cancelled";
+        p.refresh();++p.revision;return;
+    }
+    transmit();
+}
+void Controller::transmit() {
+    auto& p=*impl_;
+    if(!enabled(C::legacy_transmit)||p.pending_tx||p.snapshot.transmitting||p.cancelling)return;
+    p.pending_tx=p.f(F::legacy_text).text;p.failed=false;
     p.session.cancel();p.f(F::legacy_status).text="Preparing transmission…";p.refresh();++p.revision;
 }
 bool Controller::enabled(C command) const {
     const auto& p=*impl_;
-    return command==C::legacy_transmit&&p.selected&&!p.closing&&p.valid&&!p.snapshot.transmitting&&!p.pending_tx&&!p.f(F::legacy_text).text.empty();
+    return command==C::legacy_transmit&&p.selected&&!p.closing&&!p.cancelling&&
+        (p.pending_tx||p.snapshot.transmitting||(p.valid&&!p.f(F::legacy_text).text.empty()));
+}
+std::string Controller::command_label() const {
+    const auto& p=*impl_;
+    return p.cancelling?"Cancelling…":p.pending_tx||p.snapshot.transmitting?"Cancel":"Transmit";
 }
 const ui::FieldState& Controller::field(F field) const {return impl_->f(field);}
 void Controller::report_error(std::string error) {impl_->f(F::legacy_status).text=std::move(error);++impl_->revision;}

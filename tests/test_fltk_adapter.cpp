@@ -450,6 +450,10 @@ void fast_mode_visibility() {
         transcript->visible_r()&&transcript->active_r()&&transcript->read_only&&legacy_draft->visible_r()&&!legacy_draft->read_only&&
         std::string(legacy_carrier->value())=="1500","Legacy native text terminal failed to materialize");
     require(!choose->visible_r()&&!text->visible_r()&&!regular->visible_r(),"Legacy retained Fast or Robust native controls");
+    require(legacy_draft->submit&&buffer_text(*legacy_draft->buffer()).empty()&&
+        !legacy_draft->submit(false,false)&&!legacy_draft->submit(false,true)&&!legacy_draft->submit(true,true)&&
+        legacy_draft->submit(true,false)&&app.application.field(ui::Field::legacy_text).text.empty(),
+        "Legacy native draft did not reserve only Ctrl+Enter for transmission");
     transcript->apply("Received text\nSent text");
     require(!transcript->paste("unwanted")&&buffer_text(*transcript->buffer())=="Received text\nSent text",
         "Legacy transcript accepted a native edit");

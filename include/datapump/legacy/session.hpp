@@ -7,8 +7,10 @@ struct TextEvent {std::uint64_t serial=0;bool transmitted=false;std::string text
 struct Snapshot {
     bool active=false,listening=false,transmitting=false;
     std::uint64_t revision=0,transmission=0,audio_revision=0;
-    // Committed after successful playback/drain. The hardware API does not
-    // acknowledge individual characters; failures retain the entire draft.
+    // Original draft bytes only; the on-air three leading LF and one trailing
+    // LF never count toward draft removal. Committed after successful playback/drain.
+    // The hardware API does not acknowledge individual characters; failures
+    // retain the entire draft.
     std::size_t sent_bytes=0;
     std::string status="Legacy modem ready",error;
     // Chronological, independently numbered events; oldest text is dropped at
