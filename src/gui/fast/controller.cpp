@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <iomanip>
 #include <map>
 #include <mutex>
@@ -107,6 +108,12 @@ struct Controller::Impl {
         f(F::fast_tracking).text=snapshot.intervals&&!snapshot.transmitting?
             "RX EVM "+number(snapshot.evm*100,2)+"% · carrier "+number(snapshot.carrier_error_hz,2)+" Hz\nClock error "+number(snapshot.clock_error_ppm,2)+" ppm":
             "RX tracking · awaiting received intervals";
+        if(const auto& d=snapshot.diagnostics;d&&!d->transmitting&&!snapshot.intervals&&d->waveform_count) {
+            const auto dbfs=[](double amplitude) {return number(20*std::log10(std::max(1e-6,amplitude)),0);};
+            f(F::fast_tracking).text="Input RMS "+dbfs(d->waveform_rms)+" dBFS · peak "+dbfs(d->waveform_peak)+" dBFS"+
+                (d->waveform_peak>=.999?" · CLIPPING":"")+"\n"+
+                (d->acquired?"APSK synchronized · awaiting first interval":"No APSK lock · check input, level and matching profile");
+        }
         f(F::fast_correction).text="Correction: "+std::to_string(snapshot.corrected_bytes)+" bytes · "+std::to_string(snapshot.erased_bytes)+" erasures\nInterleave depth "+std::to_string(p.interleave_depth);
         f(F::fast_auth).text=integrity_label(snapshot);
         f(F::fast_progress).text_tone=snapshot.complete?ui::TextTone::data:ui::TextTone::normal;

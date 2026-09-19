@@ -161,6 +161,7 @@ struct Receiver::Impl {
     Profile config;
     IntervalSink sink;
     SymbolObserver observer;
+    SymbolObserver input_observer;
     std::vector<Complex> points,raw,filtered;
     std::vector<double> taps;
     std::array<float,physical_interval_bits> soft{};
@@ -171,6 +172,7 @@ struct Receiver::Impl {
     std::uint64_t sample=0;
     bool eof=false,locked=false,marker_good=false;
     double next_time=0,clock_period=0,phase=0,frequency=0,gain=1;
+    double next_input_time=0;
     double absent=0,noise_variance=.001;
     double best_quality=0,best_time=0,candidate_until=0;
     std::size_t position=0;
@@ -179,7 +181,8 @@ struct Receiver::Impl {
     Complex pilot_correlation=0;
     double pilot_energy=0,pilot_error=0;
     struct Correlation { double quality=0; Complex gain=0; double energy=0; };
-    Impl(Profile p,IntervalSink target,SymbolObserver observe):config(p),sink(std::move(target)),observer(std::move(observe)),points(constellation(p.constellation)),
+    Impl(Profile p,IntervalSink target,SymbolObserver observe,SymbolObserver observe_input):config(p),sink(std::move(target)),observer(std::move(observe)),
+        input_observer(std::move(observe_input)),points(constellation(p.constellation)),
         bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),clock_period(sps) {
         validate(p);
         if(!sink)throw std::invalid_argument("fast receiver requires an interval sink");
@@ -342,6 +345,12 @@ struct Receiver::Impl {
             for(std::size_t i=0;i<taps.size() && i<=sample;++i)
                 filtered_value+=raw[(sample-i)%raw.size()]*taps[i];
             filtered[sample%filtered.size()]=filtered_value;
+            if(input_observer && static_cast<double>(sample)>=next_input_time) {
+                // A separate free-running tap remains useful before lock. It
+                // never chooses a symbol boundary or changes DSP state.
+                try{input_observer(static_cast<std::complex<float>>(filtered_value));}catch(...){}
+                next_input_time+=sps*.5;
+            }
             ++sample;
             if(state.physical_complete)continue;
             if(!locked) {
@@ -381,7 +390,7 @@ std::size_t Transmitter::read(std::span<float> out){return impl_->read(out);}
 bool Transmitter::finished() const{return impl_->done;}
 std::uint64_t Transmitter::samples_generated() const{return impl_->sample;}
 std::size_t Transmitter::workspace_bytes() const{return sizeof(Impl)+impl_->points.capacity()*sizeof(Complex)+impl_->pulse.values.capacity()*sizeof(double)+32*sizeof(std::pair<std::uint64_t,Complex>);}
-Receiver::Receiver(Profile p,IntervalSink sink,SymbolObserver observer):impl_(std::make_unique<Impl>(p,std::move(sink),std::move(observer))){}
+Receiver::Receiver(Profile p,IntervalSink sink,SymbolObserver observer,SymbolObserver input_observer):impl_(std::make_unique<Impl>(p,std::move(sink),std::move(observer),std::move(input_observer))){}
 Receiver::~Receiver()=default;
 Receiver::Receiver(Receiver&&) noexcept=default;
 Receiver& Receiver::operator=(Receiver&&) noexcept=default;

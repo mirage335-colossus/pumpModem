@@ -18,12 +18,16 @@ struct Diagnostics {
     std::uint32_t sample_rate=0;
     unsigned constellation=0;
     bool transmitting=false,acquired=false,spectrum_valid=false;
-    std::size_t waveform_count=0,constellation_count=0;
+    std::size_t waveform_count=0,constellation_count=0,input_count=0;
+    float waveform_rms=0,waveform_peak=0;
     std::array<float,1024> waveform{};
     // Latest 512 samples, Hann-windowed, amplitude dBFS. Bin k is k*Fs/512
     // Hz; DC uses one-sided DC scaling. Values below -120 dBFS are clamped.
     std::array<float,256> spectrum_db{};
     std::array<std::complex<float>,512> constellation_points{};
+    // Matched-filter input samples before timing/gain/carrier correction.
+    // These are separate from acquired payload symbols and may contain noise.
+    std::array<std::complex<float>,512> input_points{};
 };
 
 std::uint64_t next_diagnostics_stream_id() noexcept;
@@ -38,6 +42,7 @@ public:
     Telemetry(const Profile&,bool transmitting,std::uint64_t stream_id) noexcept;
     void record_samples(std::span<const float>) noexcept;
     void record_symbol(std::complex<float>) noexcept;
+    void record_input(std::complex<float>) noexcept;
     // Returns a new frame at most once per 100 ms, otherwise null. An allocation
     // failure drops diagnostic output only and cannot abort the transfer.
     std::shared_ptr<const Diagnostics> publish(bool acquired,Clock::time_point now=Clock::now()) noexcept;
@@ -50,7 +55,9 @@ private:
     Clock::time_point last_publication_{};
     std::array<float,1024> waveform_{};
     std::array<std::complex<float>,512> points_{};
+    std::array<std::complex<float>,512> input_{};
     std::size_t waveform_position_=0,waveform_count_=0,point_position_=0,point_count_=0;
+    std::size_t input_position_=0,input_count_=0;
 };
 
 } // namespace datapump::fast

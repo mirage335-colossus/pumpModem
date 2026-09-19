@@ -4501,3 +4501,34 @@ seconds), using private displays that were closed afterward. No native adapter
 implementation changed. `git diff --check` passed. The earlier full-workflow
 and calibration timeout limits recorded above were not rerun for this scoped
 follow-up.
+
+### Fast input diagnostics before synchronization (2026-09-19)
+
+Fast's constellation previously remained empty until a valid marker admitted
+payload symbols, even when its waveform and waterfall showed captured audio.
+The RX panel now shows a separate, bounded history of actual matched-filter
+input I/Q before the first payload symbols, explicitly labeled unsynchronized
+with its automatic display scale. Payload observations still switch to the
+existing equalized constellation. Recent PCM RMS/peak and clipping indications
+help distinguish signal level from synchronization. The new tap has no feedback
+into modem acquisition, symbol decisions, coding or physical completion.
+
+Both Release GUI executables rebuilt. The focused Fast, shared GUI, boundary,
+short dictionary and transport group passed 23/23 in 70.14 seconds. The final
+expanded `fast_telemetry` suite also passed (0.71 seconds): independent FM and
+acoustic tone responses check actual uncorrected I/Q, fractional display cadence,
+callback chunk independence, bounded storage and immutable frames. Collecting
+or throwing input observers leave all soft evidence and receiver progress
+identical. The live GUI regression shows real low-level input without admitting
+payload, exposing a file or manufacturing completion, then preserves the plots
+on cancellation; its successful sampled transfer still produces exact source
+bytes and an equalized constellation. Shared pixel checks cover weak-input
+scaling, source separation and retained snapshots.
+
+Native adapter conformance passed on FLTK (51.76 seconds) and Rev (69.89
+seconds), using a private display that was closed afterward. No native adapter
+implementation changed. `git diff --check` passed.
+
+No acquisition thresholds, wire framing or regular modem algorithms changed.
+These software checks do not establish why the reported physical
+speaker/microphone link failed to synchronize or qualify an acoustic channel.

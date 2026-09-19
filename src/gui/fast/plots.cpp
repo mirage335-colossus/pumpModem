@@ -4,6 +4,7 @@
 #include <array>
 #include <cmath>
 #include <iomanip>
+#include <span>
 #include <sstream>
 #include <vector>
 
@@ -14,6 +15,14 @@ std::string number(double value,int precision=1) {
     std::ostringstream out;out<<std::fixed<<std::setprecision(precision)<<value;return out.str();
 }
 double finite_sample(float value) {return std::isfinite(value)?std::clamp(static_cast<double>(value),-1.,1.):0.;}
+bool input_view(const fast::Diagnostics& d) {return !d.transmitting&&!d.constellation_count;}
+std::span<const std::complex<float>> display_points(const fast::Diagnostics& d) {
+    if(input_view(d))return std::span(d.input_points).first(std::min(d.input_count,d.input_points.size()));
+    return std::span(d.constellation_points).first(std::min(d.constellation_count,d.constellation_points.size()));
+}
+std::string input_scale(double value) {
+    std::ostringstream out;out<<std::setprecision(2)<<value;return out.str();
+}
 template<class Sample>
 void paint_rows(const BitmapRequest& request,const BitmapSink& sink,bool color,Sample sample) {
     if(!request.width||!request.height||!request.damage.width||!request.damage.height)return;
@@ -65,11 +74,11 @@ bool FastPlots::update(std::shared_ptr<const fast::Diagnostics> diagnostics,bool
             if(next->history.size()==history_capacity)next->history.erase(next->history.begin());
             next->history.push_back(next->diagnostics->spectrum_db);
         }
-        next->extent=1.5;
-        for(std::size_t i=0;i<std::min(next->diagnostics->constellation_count,next->diagnostics->constellation_points.size());++i) {
-            const auto point=next->diagnostics->constellation_points[i];
+        const bool input=input_view(*next->diagnostics);
+        next->extent=input?1e-6:1.5;
+        for(const auto point:display_points(*next->diagnostics)) {
             const auto maximum=std::max(std::abs(static_cast<double>(point.real())),std::abs(static_cast<double>(point.imag())));
-            if(std::isfinite(maximum))next->extent=std::max(next->extent,std::ceil(maximum*2)/2);
+            if(std::isfinite(maximum))next->extent=std::max(next->extent,input?maximum*1.1:std::ceil(maximum*2)/2);
         }
     }
     frame_=std::move(next);++revision_;return true;
@@ -81,7 +90,8 @@ std::string FastPlots::title(B id) const {
     const auto direction=d?(d->transmitting?"TX ":"RX "):"";
     if(id==B::fast_waveform)return std::string(prefix)+direction+"waveform";
     if(id==B::fast_waterfall)return std::string(prefix)+direction+"waterfall";
-    if(id==B::fast_constellation)return std::string(prefix)+direction+(d&&!d->transmitting?"equalized constellation":"constellation");
+    if(id==B::fast_constellation)return std::string(prefix)+direction+
+        (d&&input_view(*d)?"input I/Q":d&&!d->transmitting?"equalized constellation":"constellation");
     return {};
 }
 std::string FastPlots::caption(B id,unsigned width) const {
@@ -89,13 +99,17 @@ std::string FastPlots::caption(B id,unsigned width) const {
     if(!d)return "Waiting for Fast audio";
     if(id==B::fast_waveform) {
         if(!d->waveform_count||!d->sample_rate)return "Waiting for PCM samples";
-        return number(1000.*std::min(d->waveform_count,d->waveform.size())/d->sample_rate)+" ms · PCM ±1 · "+number(d->sample_rate/1000.,1)+" kHz";
+        const auto level=number(20*std::log10(std::max(1e-6,static_cast<double>(d->waveform_rms))),0);
+        return number(1000.*std::min(d->waveform_count,d->waveform.size())/d->sample_rate)+" ms · "+
+            (width<340?"":"PCM ±1 · "+number(d->sample_rate/1000.,1)+" kHz · ")+
+            "RMS "+level+" dBFS"+(d->waveform_peak>=.999?" · CLIPPING":"");
     }
     if(id==B::fast_waterfall) {
         if(frame_->history.empty())return "Waiting for 512 PCM samples";
         return "0–"+number(d->sample_rate/2000.,0)+(width<340?"kHz · −120…0dBFS · ↑new":" kHz · −120…0 dBFS · newest at top");
     }
     if(id==B::fast_constellation) {
+        if(input_view(*d)&&d->input_count)return "Unsynchronized · auto ±"+input_scale(frame_->extent);
         if(!d->constellation_count)return d->transmitting?"Waiting for mapped payload symbols":"Awaiting APSK synchronization";
         return std::to_string(std::min(d->constellation_count,d->constellation_points.size()))+" points · I/Q ±"+number(frame_->extent)+
             (!d->transmitting&&!d->acquired?" · reacquiring":"");
@@ -133,8 +147,7 @@ BitmapSource FastPlots::source(B id) const {
         }
         const double aspect=std::isfinite(request.sample_aspect_ratio)&&request.sample_aspect_ratio>0?request.sample_aspect_ratio:1.;
         const double radius=std::max(0.,std::min(mid_x*aspect,mid_y)-3);
-        if(d&&id==B::fast_constellation)for(std::size_t i=0;i<std::min(d->constellation_count,d->constellation_points.size());++i) {
-            const auto point=d->constellation_points[i];
+        if(d&&id==B::fast_constellation)for(const auto point:display_points(*d)) {
             if(!std::isfinite(point.real())||!std::isfinite(point.imag()))continue;
             const auto x=static_cast<int>(std::lround(mid_x+point.real()/frame->extent*radius/aspect));
             const auto y=static_cast<int>(std::lround(mid_y-point.imag()/frame->extent*radius));

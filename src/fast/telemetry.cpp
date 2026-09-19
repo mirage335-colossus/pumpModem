@@ -67,18 +67,30 @@ void Telemetry::record_symbol(std::complex<float> value) noexcept {
     points_[point_position_]=value;point_position_=(point_position_+1)%points_.size();
     point_count_=std::min(point_count_+1,points_.size());
 }
+void Telemetry::record_input(std::complex<float> value) noexcept {
+    if(!std::isfinite(value.real())||!std::isfinite(value.imag()))return;
+    input_[input_position_]=value;input_position_=(input_position_+1)%input_.size();
+    input_count_=std::min(input_count_+1,input_.size());
+}
 std::shared_ptr<const Diagnostics> Telemetry::publish(bool acquired,Clock::time_point now) noexcept {
     if(published_ && now-last_publication_<std::chrono::milliseconds(100))return {};
     try {
         auto frame=std::make_shared<Diagnostics>();
         frame->stream_id=stream_id_;frame->revision=revision_+1;frame->samples=samples_;
         frame->sample_rate=sample_rate_;frame->constellation=constellation_;frame->transmitting=transmitting_;frame->acquired=acquired;
-        frame->waveform_count=waveform_count_;frame->constellation_count=point_count_;
+        frame->waveform_count=waveform_count_;frame->constellation_count=point_count_;frame->input_count=input_count_;
         frame->spectrum_db.fill(-120);
         const auto first_sample=(waveform_position_+waveform_.size()-waveform_count_)%waveform_.size();
-        for(std::size_t i=0;i<waveform_count_;++i)frame->waveform[i]=waveform_[(first_sample+i)%waveform_.size()];
+        double power=0;
+        for(std::size_t i=0;i<waveform_count_;++i) {
+            const auto value=waveform_[(first_sample+i)%waveform_.size()];frame->waveform[i]=value;
+            power+=static_cast<double>(value)*value;frame->waveform_peak=std::max(frame->waveform_peak,std::abs(value));
+        }
+        if(waveform_count_)frame->waveform_rms=static_cast<float>(std::sqrt(power/static_cast<double>(waveform_count_)));
         const auto first_point=(point_position_+points_.size()-point_count_)%points_.size();
         for(std::size_t i=0;i<point_count_;++i)frame->constellation_points[i]=points_[(first_point+i)%points_.size()];
+        const auto first_input=(input_position_+input_.size()-input_count_)%input_.size();
+        for(std::size_t i=0;i<input_count_;++i)frame->input_points[i]=input_[(first_input+i)%input_.size()];
         spectrum(*frame);
         ++revision_;published_=true;last_publication_=now;
         return frame;

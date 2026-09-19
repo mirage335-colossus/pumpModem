@@ -59,36 +59,48 @@ void collector() {
     const auto id=next_diagnostics_stream_id();
     const auto initial=initial_diagnostics(p,true,id);
     require(initial && initial->stream_id==id && !initial->revision && !initial->waveform_count
-            && !initial->constellation_count && !initial->spectrum_valid,"initial stream metadata contains stale samples");
+            && !initial->constellation_count && !initial->input_count && !initial->waveform_rms && !initial->waveform_peak
+            && !initial->spectrum_valid,"initial stream metadata contains stale samples");
     Telemetry telemetry(p,true,id);const auto memory=telemetry.workspace_bytes();
     std::array<float,2048> tone{};
     for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(.5*std::sin(2*std::numbers::pi*32*static_cast<double>(i)/512));
     telemetry.record_samples(tone);
     for(unsigned i=0;i<700;++i)telemetry.record_symbol({static_cast<float>(i),-static_cast<float>(i)});
+    for(unsigned i=0;i<900;++i)telemetry.record_input({-static_cast<float>(i),static_cast<float>(i)});
     const auto now=Telemetry::Clock::time_point{};
     const auto frame=telemetry.publish(false,now);
     require(frame && frame->revision==1 && frame->samples==tone.size(),"sample/revision diagnostics counters");
     require(frame->sample_rate==p.sample_rate && frame->constellation==p.constellation && frame->transmitting && !frame->acquired,
             "TX diagnostics mislabeled as acquired RX");
-    require(frame->waveform_count==1024 && frame->constellation_count==512 && frame->spectrum_valid,"fixed diagnostic bounds");
+    require(frame->waveform_count==1024 && frame->constellation_count==512 && frame->input_count==512 && frame->spectrum_valid,"fixed diagnostic bounds");
     for(std::size_t i=0;i<frame->waveform_count;++i)require(frame->waveform[i]==tone[1024+i],"waveform is not latest actual PCM in time order");
     require(frame->constellation_points.front()==std::complex<float>(188,-188)
             && frame->constellation_points.back()==std::complex<float>(699,-699),"constellation ring order");
+    require(frame->input_points.front()==std::complex<float>(-388,388)
+            && frame->input_points.back()==std::complex<float>(-899,899),"input I/Q ring order or payload/input separation");
+    require(std::abs(frame->waveform_rms-.5/std::sqrt(2.))<1e-6 && std::abs(frame->waveform_peak-.5)<1e-6,
+            "PCM RMS/peak do not measure the retained audio");
     const auto maximum=std::max_element(frame->spectrum_db.begin(),frame->spectrum_db.end());
     require(maximum-frame->spectrum_db.begin()==32,"FFT frequency axis/bin location");
     require(std::abs(*maximum+6.0205999f)<.02f,"Hann spectrum amplitude dBFS calibration");
     require(!telemetry.publish(false,now+99ms),"diagnostic publication exceeded 10 Hz");
-    for(unsigned i=0;i<100;++i) {telemetry.record_samples(tone);telemetry.record_symbol({7,8});}
+    for(unsigned i=0;i<100;++i) {telemetry.record_samples(tone);telemetry.record_symbol({7,8});telemetry.record_input({9,10});}
     const auto later=telemetry.publish(true,now+100ms);
     require(later && later->revision==2 && later->acquired,"diagnostic cadence/acquisition update");
-    require(frame->samples==2048 && frame->constellation_points.back()==std::complex<float>(699,-699),"published frame mutated after publication");
-    require(telemetry.workspace_bytes()==memory && later->waveform_count==1024 && later->constellation_count==512,
+    require(frame->samples==2048 && frame->constellation_points.back()==std::complex<float>(699,-699)
+            && frame->input_points.back()==std::complex<float>(-899,899),"published frame mutated after publication");
+    require(telemetry.workspace_bytes()==memory && later->waveform_count==1024 && later->constellation_count==512 && later->input_count==512,
             "diagnostic memory grew with stream duration");
     std::array<float,2> bad{std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()};
-    telemetry.record_samples(bad);telemetry.record_symbol({bad[0],0});
+    telemetry.record_samples(bad);telemetry.record_symbol({bad[0],0});telemetry.record_input({0,bad[1]});
     const auto safe=telemetry.publish(false,now+200ms);
-    require(safe && std::all_of(safe->waveform.begin(),safe->waveform.end(),[](float f){return std::isfinite(f);}),
+    require(safe && std::isfinite(safe->waveform_rms) && std::isfinite(safe->waveform_peak)
+            && safe->input_points.back()==std::complex<float>(9,10)
+            && std::all_of(safe->waveform.begin(),safe->waveform.end(),[](float f){return std::isfinite(f);}),
             "nonfinite display sample escaped sanitization");
+    std::array<float,1024> silence{};telemetry.record_samples(silence);
+    const auto quiet=telemetry.publish(false,now+300ms);
+    require(quiet && !quiet->waveform_rms && !quiet->waveform_peak,"audio meters retained older loud samples");
 }
 using Interval=std::array<std::uint8_t,physical_interval_bits>;
 std::vector<Interval> input() {
@@ -110,15 +122,61 @@ std::vector<float> transmit(const Profile& p,const std::vector<Interval>& data,S
     return output;
 }
 struct Reception {std::vector<float> soft;ModemProgress progress;};
-Reception receive(const Profile& p,std::span<const float> pcm,SymbolObserver observer={}) {
+Reception receive(const Profile& p,std::span<const float> pcm,SymbolObserver observer={},SymbolObserver input_observer={}) {
     Reception result;
-    Receiver receiver(p,[&](std::span<const float> interval){result.soft.insert(result.soft.end(),interval.begin(),interval.end());},std::move(observer));
+    Receiver receiver(p,[&](std::span<const float> interval){result.soft.insert(result.soft.end(),interval.begin(),interval.end());},std::move(observer),std::move(input_observer));
     for(std::size_t i=0;i<pcm.size();i+=197)receiver.push(pcm.subspan(i,std::min(std::size_t{197},pcm.size()-i)));
     std::array<float,2048> silence{};
     for(std::size_t left=p.sample_rate*7;left;) {
         const auto count=std::min(left,silence.size());receiver.push(std::span<const float>(silence).first(count));left-=count;
     }
     receiver.finish();result.progress=receiver.progress();return result;
+}
+void input_observations() {
+    // A carrier tone cannot satisfy the independent random marker. Its actual
+    // complex matched-filter response is still useful input instrumentation.
+    for(const auto channel:{Channel::fm,Channel::acoustic}) {
+        const auto p=profile(channel);
+        constexpr double amplitude=.25,phase=.7;
+        const auto omega=2*std::numbers::pi*p.carrier_hz/p.sample_rate;
+        std::vector<float> pcm(12000);
+        for(std::size_t i=0;i<pcm.size();++i)pcm[i]=static_cast<float>(amplitude*std::cos(omega*static_cast<double>(i)+phase));
+        const auto observe=[&](std::size_t chunk) {
+            std::vector<std::complex<float>> values;std::size_t payload=0;
+            Receiver receiver(p,[&](auto){++payload;},[&](auto){++payload;},[&](auto value){values.push_back(value);});
+            const auto memory=receiver.workspace_bytes();
+            for(std::size_t at=0;at<pcm.size();at+=chunk)receiver.push(std::span<const float>(pcm).subspan(at,std::min(chunk,pcm.size()-at)));
+            require(!receiver.progress().acquired && !receiver.progress().physical_complete && !payload,
+                    "input observations admitted tone payload or manufactured physical completion");
+            require(receiver.workspace_bytes()==memory,"input tap grows receiver workspace");
+            return values;
+        };
+        const auto values=observe(1);
+        require(values==observe(197),"input I/Q depends on capture callback chunks");
+        require(values.size()==static_cast<std::size_t>(std::ceil(2*static_cast<double>(pcm.size())*p.symbol_rate/p.sample_rate)),
+                "input I/Q cadence is not two observations per nominal symbol");
+        // Independent steady-state FIR frequency response, including the real-PCM
+        // mixer image, establishes amplitude, quadrature and filter delay.
+        const auto sps=p.sample_rate/p.symbol_rate;
+        const auto half=static_cast<std::size_t>(std::ceil(8*sps));
+        double dc=0;std::complex<double> image=0;
+        for(std::size_t k=0;k<=2*half;++k) {
+            const auto h=root_raised_cosine((static_cast<double>(k)-static_cast<double>(half))/sps,p.rolloff)/sps;
+            dc+=h;image+=h*std::polar(1.,2*omega*static_cast<double>(k));
+        }
+        for(std::size_t j=40;j<values.size();++j) {
+            // Fractional display intervals select integer PCM observations. Allow
+            // either adjacent sample at an exact floating-point cadence boundary.
+            const auto nominal=static_cast<double>(j)*sps*.5;
+            double error=1;
+            for(const auto sample:{std::ceil(nominal-1e-8),std::ceil(nominal+1e-8)}) {
+                const auto expected=amplitude*(std::polar(dc,phase)+std::polar(1.,-2*omega*sample-phase)*image);
+                error=std::min(error,std::abs(static_cast<std::complex<double>>(values[j])-expected));
+            }
+            require(error<1e-6,"input I/Q is not the actual uncorrected matched-filter response");
+        }
+        require(values.back().imag()>.1f && std::abs(values.back())<.3f,"input I/Q fabricated unit-energy constellation points");
+    }
 }
 void observers() {
     const auto p=profile(Channel::wire);const auto bits=input();
@@ -154,6 +212,19 @@ void observers() {
         if(distance>1e-5)unsliced=true;
     }
     require(unsliced,"RX constellation was synthesized from hard decisions");
+    std::vector<std::complex<float>> input_points;
+    const auto with_input=receive(p,noisy,{},[&](auto value){input_points.push_back(value);});
+    std::size_t throwing_input=0;
+    const auto failed_input=receive(p,noisy,{},[&](auto){++throwing_input;throw std::runtime_error("input display failed");});
+    require(!input_points.empty() && throwing_input==input_points.size(),"input observers missing or emitted inconsistently");
+    for(const auto* result:{&with_input,&failed_input}) {
+        require(baseline.soft==result->soft && baseline.progress.acquired==result->progress.acquired
+                && baseline.progress.physical_complete==result->progress.physical_complete
+                && baseline.progress.symbols==result->progress.symbols && baseline.progress.intervals==result->progress.intervals
+                && baseline.progress.erased_intervals==result->progress.erased_intervals && baseline.progress.evm==result->progress.evm
+                && baseline.progress.carrier_error_hz==result->progress.carrier_error_hz
+                && baseline.progress.clock_error_ppm==result->progress.clock_error_ppm,"input observer changed receiver evidence or progress");
+    }
 }
 void sessions() {
     Settings settings;settings.device="telemetry fixture";settings.profile.interleave_depth=1;
@@ -174,12 +245,14 @@ void sessions() {
     fixture::capture_ready=false;session.listen();
     const auto fresh=session.poll().diagnostics;
     require(fresh && fresh->stream_id!=pending->stream_id && !fresh->transmitting && !fresh->revision
-            && !fresh->waveform_count && !fresh->constellation_count,"RX inherited previous TX diagnostic samples");
+            && !fresh->waveform_count && !fresh->constellation_count && !fresh->input_count,"RX inherited previous TX diagnostic samples");
     fixture::capture_ready=true;
     await([&]{return session.poll().diagnostics->waveform_count>0;},"RX diagnostic PCM did not publish");
     const auto listening=session.poll().diagnostics;
     require(listening->spectrum_valid && !listening->transmitting && !listening->acquired && !listening->constellation_count,
             "unacquired RX invented constellation points");
+    require(listening->input_count>0 && listening->input_count<=512 && listening->waveform_rms>0 && listening->waveform_peak>0,
+            "unacquired RX did not publish actual input I/Q and PCM levels");
     session.cancel();await([&]{return !session.active();},"RX cancellation stalled with telemetry");
     require(session.poll().diagnostics->stream_id==fresh->stream_id && !session.poll().physical_complete,
             "RX cancellation lost retained diagnostics or manufactured end");
@@ -189,5 +262,5 @@ void sessions() {
     other.close();await([&]{return other.ready_to_close();},"second diagnostic session did not close");
 }
 }
-int main(){try{collector();observers();sessions();std::cout<<"fast immutable telemetry, waveform/spectrum and observer isolation passed\n";return 0;}
+int main(){try{collector();input_observations();observers();sessions();std::cout<<"fast immutable telemetry, waveform/spectrum and observer isolation passed\n";return 0;}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

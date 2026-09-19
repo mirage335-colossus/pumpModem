@@ -47,14 +47,31 @@ training, markers, pilots, occupied spectrum and transmission duration are publi
 The Fast interface shows waveform, waterfall and constellation plots while
 **Listen** or **Transmit** is active. Each plot identifies TX or RX. The waveform
 uses the latest 1,024 actual PCM samples with a fixed ±1 scale; its caption gives
-the sample rate and visible time span. The waterfall uses a 512-point Hann-window
+the visible time span and RMS audio level in dBFS, with the sample rate on wider
+plots. **CLIPPING** indicates recent samples reaching full scale. While waiting
+for synchronization, the tracking readout also shows input RMS and peak levels.
+The waterfall uses a 512-point Hann-window
 FFT of recent audio, with frequency increasing left to right, newest rows at the
 top, and amplitude in dBFS. These are audio measurements, not RF power or SNR.
 
-The constellation shows up to 512 payload symbols. RX points are actual
-equalized I/Q values before symbol slicing; TX points are the transmitted mapper
-values. Training and pilots are excluded. An idle receiver awaiting acquisition
-does not display a synthetic received constellation.
+Before the first received payload symbols, the constellation panel shows
+**RX input I/Q**, labeled **Unsynchronized**. These are up to 512 actual
+matched-filter observations on a free-running display clock, with the current
+automatic amplitude scale shown in the caption. Noise and unrecognized signals
+also produce points; this view does not indicate symbol lock or successful
+reception. It helps distinguish a blank capture from audio that has not acquired.
+
+Once payload symbols arrive, the panel switches to **RX equalized constellation**:
+up to 512 actual equalized I/Q values before symbol slicing. TX points are the
+transmitted mapper values. Training and pilots are excluded from these payload
+plots. No ideal constellation or hard decisions are substituted for RX samples.
+
+For two-instance speaker/microphone checks, select **Speakers / microphone** at
+both ends, start **Listen** before transmitting, and use matching constellation,
+coding and encryption settings. An elevated waterfall with an **Unsynchronized**
+input cloud means audio is being captured but Fast has not acquired it. Check
+the selected input, audio levels and matching settings; the waterfall alone
+cannot establish that the channel preserves the waveform well enough to decode.
 
 Display snapshots publish at most ten times a second, and the waterfall retains
 at most 96 rows. A new transfer resets the plots; stopping retains the last

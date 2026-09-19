@@ -64,7 +64,11 @@ private:
 
 class Receiver {
 public:
-    Receiver(Profile profile, IntervalSink sink, SymbolObserver observer={});
+    // input_observer receives actual matched-filter I/Q at approximately two
+    // samples per nominal symbol, on a free-running display-only cadence. It
+    // has no acquired timing, gain or carrier correction and is not evidence
+    // of payload symbols. Its exceptions cannot change receiver decisions.
+    Receiver(Profile profile, IntervalSink sink, SymbolObserver observer={},SymbolObserver input_observer={});
     ~Receiver();
     Receiver(Receiver&&) noexcept;
     Receiver& operator=(Receiver&&) noexcept;

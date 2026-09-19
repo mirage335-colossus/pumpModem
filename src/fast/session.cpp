@@ -42,7 +42,8 @@ struct Session::Impl {
         Telemetry telemetry(s.profile,false,stream_id);
         StreamDecoder decoder(s.profile,s.key,s.quota_bytes);
         Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);},
-            [&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);});
+            [&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);},
+            [&](std::complex<float> input) noexcept {telemetry.record_input(input);});
         std::mutex queue_mutex;std::condition_variable_any changed;
         std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
         bool done=false,overrun=false;std::string capture_error;

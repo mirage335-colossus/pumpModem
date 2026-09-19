@@ -172,6 +172,47 @@ void service_generations() {
     check(app.field(F::fast_file).text=="/tmp/fast-current.bin","Stale service survived a mode generation change");
     app.close();
 }
+void unsynchronized_plot_presentation() {
+    using B=ui::Bitmap;
+    fast_ui::FastPlots plots;
+    auto data=std::make_shared<fast::Diagnostics>();data->stream_id=30;data->revision=1;
+    data->sample_rate=48000;data->waveform_count=1024;data->waveform_rms=.001;data->waveform_peak=.002;
+    data->input_count=3;
+    data->input_points[0]={0,0};data->input_points[1]={.00002F,.00001F};data->input_points[2]={-.00001F,-.00002F};
+    plots.update(data,true);
+    check(plots.title(B::fast_constellation)=="Live RX input I/Q"&&
+          plots.caption(B::fast_constellation).find("Unsynchronized · auto ±")!=std::string::npos,
+          "Unacquired input was mislabeled as equalized payload symbols");
+    check(plots.caption(B::fast_waveform).find("RMS -60 dBFS")!=std::string::npos,
+          "Low-level captured audio has no calibrated amplitude readout");
+    const auto paint=[](const BitmapSource& source) {
+        BitmapImage image(65,65);
+        source.paint(full_bitmap_request(65,65),[&](unsigned x,unsigned y,PixelBlock block){image.blit(x,y,block);});
+        return image.pixels();
+    };
+    const auto retained=plots.source(B::fast_constellation);const auto weak=paint(retained);
+    bool visible=false;
+    for(int y=0;y<65;++y)for(int x=0;x<65;++x)
+        if(std::abs(x-32)>8&&std::abs(y-32)>8&&weak[(y*65+x)*3]>180)visible=true;
+    check(visible,"Real weak microphone I/Q collapsed into an unhelpful center dot");
+    auto next=std::make_shared<fast::Diagnostics>(*data);++next->revision;
+    for(auto& point:next->input_points)point*=1000;
+    next->waveform_peak=1.;plots.update(next,true);
+    check(paint(plots.source(B::fast_constellation))==weak,"Input display changed geometry with microphone gain alone");
+    check(plots.caption(B::fast_waveform,310).find("CLIPPING")!=std::string::npos,"Full-scale audio has no clipping indication");
+    next=std::make_shared<fast::Diagnostics>(*next);++next->revision;next->acquired=true;
+    next->constellation_count=1;next->constellation_points[0]={.7F,.7F};next->input_points[0]={100,100};
+    plots.update(next,true);
+    check(plots.title(B::fast_constellation)=="Live RX equalized constellation"&&
+          plots.caption(B::fast_constellation).find("1 points · I/Q ±1.5")!=std::string::npos,
+          "Acquired payload plot mixed unsynchronized input or its automatic scale");
+    check(paint(retained)==weak,"Acquisition mutated a retained unsynchronized input snapshot");
+    next=std::make_shared<fast::Diagnostics>(*data);++next->revision;next->transmitting=true;
+    plots.update(next,true);
+    check(plots.title(B::fast_constellation)=="Live TX constellation"&&
+          plots.caption(B::fast_constellation)=="Waiting for mapped payload symbols",
+          "Transmitter displayed receiver input as mapped symbols");
+}
 void retained_key_and_result_presentation() {
     using F=ui::Field;using C=ui::Command;
     unsigned acquisitions=0;
@@ -246,6 +287,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }
