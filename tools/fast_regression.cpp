@@ -146,6 +146,7 @@ int main(int argc,char** argv) {try {
         if(option=="--require-success") {require_success=true;continue;}
         if(option=="--help") {
             std::cout<<"fast_regression [--snr 10..120] [--profile wire|ssb|fm|acoustic] [--apsk 4|16|64|256] [--bytes 0..67108864] [--seed N] [--code-rate 1/2|3/4|7/8] [--rs robust|high-rate] [--depth 1..64] [--amplitude (0,0.8]] [--require-success]\n"
+                <<"This historical regression tool pins the classic APSK/convolutional wire format.\n"
                 <<"Default source is 100,000 bytes. Without --snr, runs all 23 levels, 10 to 120 dB inclusive. Source, test-only IV/salt and AWGN seeds are reproducible.\n";return 0;
         }
         if(i+1==argc)throw Error("Missing regression option value");
@@ -169,7 +170,7 @@ int main(int argc,char** argv) {try {
             else throw Error("Unsupported regression code rate");
         } else throw Error("Unknown regression option");
     }
-    auto p=profile(selected_channel);
+    auto p=classic_profile(selected_channel);
     if(apsk)p.constellation=*apsk;
     if(depth)p.interleave_depth=*depth;
     if(rate)p.code_rate=*rate;

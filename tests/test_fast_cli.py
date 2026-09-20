@@ -47,9 +47,9 @@ class FastCLI(unittest.TestCase):
             raise AssertionError(plain.stderr.decode(errors="replace"))
         cls.plain_tx = json.loads(plain.stdout)
 
-    def test_bulk_defaults(self):
+    def test_classic_bulk_defaults(self):
         for profile, intervals in (("wire", 71), ("ssb", 22), ("fm", 22), ("acoustic", 7)):
-            result = self.run_pump("fast-info", "--profile", profile)
+            result = self.run_pump("fast-info", "--format", "classic", "--profile", profile)
             info = json.loads(result.stdout)
             self.assertEqual(info["cycle_intervals"], intervals)
             self.assertEqual(info["source_bytes_per_group"], 208 if profile == "wire" else 192)
@@ -57,12 +57,101 @@ class FastCLI(unittest.TestCase):
             self.assertEqual(info["amplitude"], 0.35 if profile in ("wire", "acoustic") else 0.5)
             self.assertEqual(info["mono"], profile != "wire")
 
+    def test_capacity_bulk_default(self):
+        info = json.loads(self.run_pump("fast-info", "--estimate-bytes", "50000000").stdout)
+        self.assertEqual(info["format"], "capacity")
+        self.assertEqual(info["constellation"], 4194304)
+        self.assertEqual(info["code_rate"], "8/9")
+        self.assertEqual(info["marker_spacing_intervals"], 16)
+        self.assertEqual(info["cycle_intervals"], 127)
+        self.assertAlmostEqual(info["occupied_bandwidth_hz"], 18000, delta=1)
+        self.assertEqual(info["symbol_rate"], 18000 / 1.02)
+        self.assertLess(info["rs_parity_data_ratio"], 0.0031)
+        self.assertGreater(info["estimated_source_bps"], 310000)
+
     def test_local_output_routing(self):
         for profile in ("wire", "ssb", "fm", "acoustic"):
             for flag, mono in (("--mono", True), ("--stereo", False)):
                 report = json.loads(self.run_pump("fast-info", "--profile", profile, flag).stdout)
                 self.assertEqual(report["mono"], mono)
         self.run_pump("fast-info", "--mono", "--stereo", ok=False)
+
+    def test_capacity_source_and_geometry(self):
+        # Exercise the public CLI, S16 WAV, LDPC/RS, source endpoint, and an
+        # independent source-byte comparison rather than only codec roundtrips.
+        source = self.directory / "capacity-source.bin"
+        payload = bytes(range(256)) * 17 + bytes(1000)
+        source.write_bytes(payload)
+        for order, rate, keyed in ((4096, "7/9", False), (16384, "9/10", True)):
+            options = ("--format", "capacity", "--qam", str(order), "--code-rate", rate)
+            keys = self.key_options if keyed else ()
+            info = json.loads(self.run_pump("fast-info", *options, *keys,
+                                          "--estimate-bytes", len(payload)).stdout)
+            self.assertEqual(info["format"], "capacity")
+            self.assertEqual(info["cycle_intervals"], 127)
+            self.assertEqual(info["ldpc_blocks_per_cycle"], 4)
+            self.assertLess(info["rs_parity_data_ratio"], .0031)
+            self.assertGreaterEqual(info["rs_parity_data_ratio"], .003)
+            wave = self.directory / f"capacity-{order}.wav"
+            out = self.directory / f"capacity-{order}.bin"
+            self.run_pump("fast-tx", *options, *keys, "--input", source, "--output", wave)
+            self.assertEqual((wave.stat().st_size - 44) // 2, info["estimated_samples"])
+            received = json.loads(self.run_pump("fast-rx", *options, *keys,
+                                              "--input", wave, "--save", out, "--json").stdout)
+            self.assertTrue(received["complete"] and received["physical_complete"])
+            self.assertEqual(received["authenticated"], keyed)
+            self.assertEqual(out.read_bytes(), payload)
+        for args in (("--format", "capacity", "--apsk", "256"),
+                     ("--format", "classic", "--qam", "4096"),
+                     ("--format", "capacity", "--interleave", "17"),
+                     ("--format", "capacity", "--code-rate", "7/8"),
+                     ("--format", "capacity", "--rs", "high-rate"),
+                     ("--qam", "4096", "--marker-spacing", "0")):
+            self.run_pump("fast-info", *args, ok=False)
+
+    def test_capacity_dense_qam_s16_wav(self):
+        # Keep the production baud, rolloff, pilot/marker spacing and depth.
+        # Both the bootstrap and final source cycle must survive actual S16
+        # quantization at each advertised audio rate, with either integrity mode.
+        source = self.directory / "dense-source.bin"
+        payload = bytes(range(98)) + b"\x80\x00"
+        source.write_bytes(payload)
+        for order, rate in ((1048576, "9/10"), (4194304, "8/9")):
+            for sample_rate in (48000, 44100):
+                for keyed in (False, True):
+                    with self.subTest(order=order, rate=rate, sample_rate=sample_rate, keyed=keyed):
+                        options = ("--format", "capacity", "--qam", order,
+                                   "--code-rate", rate, "--sample-rate", sample_rate)
+                        keys = self.key_options if keyed else ()
+                        name = f"dense-{order}-{sample_rate}-{keyed}"
+                        wave = self.directory / f"{name}.wav"
+                        out = self.directory / f"{name}.bin"
+                        info = json.loads(self.run_pump("fast-info", *options, *keys,
+                                                      "--estimate-bytes", len(payload)).stdout)
+                        self.run_pump("fast-tx", *options, *keys,
+                                      "--input", source, "--output", wave)
+                        with wave.open("rb") as stream:
+                            header = stream.read(44)
+                        self.assertEqual(struct.unpack_from("<HHIIHH", header, 20),
+                                         (1, 1, sample_rate, sample_rate * 2, 2, 16))
+                        self.assertEqual((wave.stat().st_size - 44) // 2, info["estimated_samples"])
+                        received = json.loads(self.run_pump("fast-rx", *options, *keys,
+                                                          "--input", wave, "--save", out, "--json").stdout)
+                        self.assertTrue(received["complete"] and received["physical_complete"])
+                        self.assertEqual(received["encrypted"], keyed)
+                        self.assertEqual(received["authenticated"], keyed)
+                        self.assertEqual(received["ldpc_frames"], 8)
+                        self.assertEqual(received["ldpc_failed_frames"], 0)
+                        self.assertEqual(received["source_bytes"], len(payload))
+                        self.assertEqual(out.read_bytes(), payload)
+
+    def test_capacity_rs_ratio_excludes_alignment_byte(self):
+        info = json.loads(self.run_pump("fast-info", "--format", "capacity",
+                                      "--code-rate", "3/4", "--interleave", "1").stdout)
+        # K=48600 gives 6075 systematic bytes. GF(65536) uses 6074 bytes:
+        # 20 parity bytes and 6054 data bytes, with one separate alignment byte.
+        self.assertEqual(info["rs_parity_bytes"], 20)
+        self.assertAlmostEqual(info["rs_parity_data_ratio"], 20 / 6054, delta=5e-9)
 
     def run_pump(self, *args, ok=True):
         result = subprocess.run([PUMP, *map(str, args)], capture_output=True, timeout=90)
@@ -73,7 +162,7 @@ class FastCLI(unittest.TestCase):
     def test_profiles_and_fixed_geometry(self):
         for profile in ("wire", "ssb", "fm", "acoustic"):
             with self.subTest(profile=profile):
-                report = json.loads(self.run_pump("fast-info", "--profile", profile).stdout)
+                report = json.loads(self.run_pump("fast-info", "--format", "classic", "--profile", profile).stdout)
                 self.assertEqual(report["profile"], profile)
                 self.assertEqual(report["physical_interval_bits"], 2048)
                 self.assertGreater(report["cycle_intervals"], 0)
@@ -87,13 +176,13 @@ class FastCLI(unittest.TestCase):
             self.assertEqual(report["physical_interval_bits"], 2048)
         cycles = []
         for rate in ("1/2", "3/4", "7/8"):
-            report = json.loads(self.run_pump("fast-info", "--code-rate", rate, "--interleave", "16").stdout)
+            report = json.loads(self.run_pump("fast-info", "--format", "classic", "--code-rate", rate, "--interleave", "16").stdout)
             cycles.append(report["cycle_intervals"])
         self.assertEqual(cycles, [33, 22, 19])
-        encrypted = json.loads(self.run_pump("fast-info", *self.key_options).stdout)
+        encrypted = json.loads(self.run_pump("fast-info", "--format", "classic", *self.key_options).stdout)
         self.assertTrue(encrypted["encrypted"])
         self.assertEqual(encrypted["source_bytes_per_group"], 192)
-        public = json.loads(self.run_pump("fast-info", *self.key_options, "--no-encryption", "--rs", "high-rate").stdout)
+        public = json.loads(self.run_pump("fast-info", "--format", "classic", *self.key_options, "--no-encryption", "--rs", "high-rate").stdout)
         self.assertFalse(public["encrypted"])
         self.assertEqual(public["source_bytes_per_group"], 208)
 

@@ -13,7 +13,7 @@ using namespace datapump::fast;
 namespace {
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
 Profile previous_wire_profile() {
-    auto p=profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
+    auto p=classic_profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
     p.robust=true;p.interleave_depth=16;p.amplitude=.5;return p;
 }
 Crypto key(unsigned offset=0) {Bytes bytes(32);for(unsigned i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(i+offset);return Crypto(bytes);}
@@ -66,7 +66,7 @@ int main() {try {
     // Preserve the earlier wire preset's guarantees; its new bulk preset trades
     // some short-file padding for the best existing-code 50 MB airtime.
     for(auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
-        const auto p=channel==Channel::wire?previous_wire_profile():profile(channel);
+        const auto p=channel==Channel::wire?previous_wire_profile():classic_profile(channel);
         require(p.code_rate==CodeRate::three_quarters && p.robust,"bulk FEC defaults changed");
         for(bool encrypted:{false,true})for(auto bytes:{100000ULL,102400ULL,1048576ULL,16777216ULL}) {
             const auto actual=estimate_transmission(p,encrypted,bytes);
@@ -90,9 +90,15 @@ int main() {try {
     const auto source=fixture(733);
     {
         const auto cable=profile(Channel::wire);
+        require(cable.capacity_mode && Profile{}.capacity_mode,"cable defaults must select capacity format");
+        require(profile_id(Profile{})==profile_id(cable),"direct/API capacity defaults differ from factory");
+    }
+    {
+        // Freeze the earlier cable wire format and airtime independently of
+        // the capacity default selected by current physical-link evidence.
+        const auto cable=classic_profile(Channel::wire);
         require(cable.constellation==256 && cable.code_rate==CodeRate::seven_eighths &&
-            !cable.robust && cable.interleave_depth==62,"optimized cable defaults changed");
-        require(profile_id(Profile{})==profile_id(cable),"direct/API cable defaults differ from factory");
+            !cable.robust && cable.interleave_depth==62,"classic optimized cable preset changed");
         const auto public_bulk=estimate_transmission(cable,false,50000000);
         const auto encrypted_bulk=estimate_transmission(cable,true,50000000);
         require(public_bulk.intervals==309773 && public_bulk.samples==349228765,
@@ -119,7 +125,7 @@ int main() {try {
         }
     }
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
-        auto p=channel==Channel::wire?previous_wire_profile():profile(channel);p.interleave_depth=4;
+        auto p=channel==Channel::wire?previous_wire_profile():classic_profile(channel);p.interleave_depth=4;
         auto pcm=waveform(p,source);
         std::mt19937 rng(1527);std::normal_distribution<float> noise(0,.001f);
         for(auto& sample:pcm)sample+=noise(rng);
@@ -186,7 +192,7 @@ int main() {try {
     // End-to-end FEC/checksum path through actual device-rate conversion,
     // including the cable's upper passband and asymmetric device clocks.
     for(const auto channel:{Channel::wire,Channel::acoustic}) {
-        auto link=profile(channel);link.interleave_depth=1;
+        auto link=classic_profile(channel);link.interleave_depth=1;
         if(channel==Channel::wire) {link.constellation=256;link.code_rate=CodeRate::seven_eighths;link.robust=false;}
         const auto exact=fixture(179);
         for(const auto rates:{std::pair{48000u,44100u},std::pair{44100u,48000u},std::pair{44100u,44100u}}) {
@@ -219,7 +225,7 @@ int main() {try {
             }
         }
     }
-    auto cable=profile(Channel::wire);cable.constellation=256;cable.code_rate=CodeRate::seven_eighths;cable.robust=false;cable.interleave_depth=16;
+    auto cable=classic_profile(Channel::wire);cable.constellation=256;cable.code_rate=CodeRate::seven_eighths;cable.robust=false;cable.interleave_depth=16;
     const auto normal=estimate_transmission(cable,false,2*1024*1024);
     cable.interleave_depth=64;
     require(estimate_transmission(cable,false,2*1024*1024).source_bps>normal.source_bps,"deeper cable cycle did not reduce padding overhead");

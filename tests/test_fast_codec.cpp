@@ -1,4 +1,6 @@
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/ldpc.hpp"
+#include "datapump/fast/outer_rs.hpp"
 #include "datapump/stream_codec.hpp"
 #include <openssl/evp.h>
 #include <algorithm>
@@ -45,15 +47,40 @@ void feed(StreamDecoder& rx,std::span<const std::uint8_t> wire) {
         rx.push_interval(soft);
     }
 }
-std::size_t coded_size(const Profile& p) {return coding::encode(Bytes(p.interleave_depth*256),p.code_rate).size();}
-Bytes systematic(const Profile& p,std::span<const std::uint8_t> cycle) {
+std::size_t coded_size(const Profile& p) {return p.capacity_mode?p.interleave_depth*ldpc::coded_bits:coding::encode(Bytes(p.interleave_depth*256),p.code_rate).size();}
+Bytes systematic(const Profile& p,std::span<const std::uint8_t> cycle,std::uint64_t cycle_ordinal=0) {
+    if(p.capacity_mode) {
+        Bytes out;std::vector<float> soft(ldpc::coded_bits);
+        const auto mask=fast::testing::capacity_whitening_mask(cycle.size(),cycle_ordinal);
+        for(std::size_t block=0;block<p.interleave_depth;++block) {
+            for(std::size_t col=0;col<soft.size();++col) {
+                const auto at=col*p.interleave_depth+(block+fast::testing::capacity_interleave_rotation(p,col))%p.interleave_depth;
+                soft[col]=(cycle[at]^mask[at])?12.F:-12.F;
+            }
+            auto decoded=ldpc::decode(ldpc::deinterleave(soft),p.code_rate);
+            check(decoded.converged,"fixture capacity codeword converges");out.insert(out.end(),decoded.bytes.begin(),decoded.bytes.end());
+        }
+        out.resize((out.size()&~std::size_t{1})-2*capacity_parity_symbols(p));return out;
+    }
     std::vector<float> soft(coded_size(p));for(std::size_t i=0;i<soft.size();++i)soft[i]=cycle[i]?12.F:-12.F;
     auto de=coding::decode(soft,p.interleave_depth*256,p.code_rate);Bytes out;
     const auto rows=p.interleave_depth*2U,k=p.robust?112U:120U;
     for(unsigned row=0;row<rows;++row)for(unsigned column=0;column<k;++column)out.push_back(de.bytes[column*rows+row]);
     return out;
 }
-Bytes code_systematic(const Profile& p,std::span<const std::uint8_t> systematic) {
+Bytes code_systematic(const Profile& p,std::span<const std::uint8_t> systematic,std::uint64_t cycle_ordinal=1) {
+    if(p.capacity_mode) {
+        auto rs=outer_rs::encode(systematic,capacity_parity_symbols(p));
+        const auto k=ldpc::data_bits(p.code_rate)/8;rs.resize(k*p.interleave_depth);Bytes wire(cycle_intervals(p)*physical_interval_bits);
+        for(std::size_t block=0;block<p.interleave_depth;++block) {
+            const auto bits=ldpc::interleave(ldpc::encode(std::span(rs).subspan(block*k,k),p.code_rate));
+            for(std::size_t col=0;col<bits.size();++col)
+                wire[col*p.interleave_depth+(block+fast::testing::capacity_interleave_rotation(p,col))%p.interleave_depth]=bits[col];
+        }
+        const auto mask=fast::testing::capacity_whitening_mask(wire.size(),cycle_ordinal);
+        for(std::size_t i=0;i<wire.size();++i)wire[i]^=mask[i];
+        return wire;
+    }
     const auto rows=p.interleave_depth*2U,k=p.robust?112U:120U;Bytes words(rows*128);
     for(unsigned row=0;row<rows;++row) {
         auto area=systematic.subspan(row*k,k);auto word=fec::rs_encode(Bytes(area.begin(),area.end()),128-k);
@@ -67,7 +94,7 @@ Bytes sha256(const Bytes& bytes) {
     return digest;
 }
 Bytes public_group(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,const Bytes& plain) {
-    const std::string domain="DataPump/fast/v1/public/group";Bytes canonical(domain.begin(),domain.end());
+    const std::string domain=p.capacity_mode?"DataPump/fast/capacity/v2/public/group":"DataPump/fast/v1/public/group";Bytes canonical(domain.begin(),domain.end());
     const auto context=profile_id(p);canonical.insert(canonical.end(),context.begin(),context.end());canonical.insert(canonical.end(),salt.begin(),salt.end());
     for(unsigned i=0;i<8;++i)canonical.push_back(static_cast<std::uint8_t>(ordinal>>(56-i*8)));
     canonical.insert(canonical.end(),plain.begin(),plain.end());const auto digest=sha256(canonical);
@@ -90,7 +117,7 @@ void independent_vectors() {
         check(coding::decode(soft,source.size(),rate).bytes==source,"independent inner vector decode");
     }
     // Freeze the original local profile as well as its independent wire bytes.
-    auto p=profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::half;
+    auto p=classic_profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::half;
     p.robust=true;p.interleave_depth=16;Bytes salt(32),iv(16),plain(176);
     std::iota(salt.begin(),salt.end(),32);std::iota(iv.begin(),iv.end(),0);std::iota(plain.begin(),plain.end(),0);
     const auto expected_crypto=unhex(
@@ -154,7 +181,7 @@ void independent_vectors() {
 void roundtrips() {
     std::mt19937 random(311);auto crypto=key();
     {
-        auto p=profile(Channel::wire);p.interleave_depth=1;
+        auto p=classic_profile(Channel::wire);p.interleave_depth=1;
         auto a=fast::testing::deterministic_encoder(p,crypto,memory_source(Bytes{1,2,3}),71);
         auto b=fast::testing::deterministic_encoder(p,crypto,memory_source(Bytes{1,2,3}),71);
         auto c=fast::testing::deterministic_encoder(p,crypto,memory_source(Bytes{1,2,3}),72);
@@ -163,7 +190,7 @@ void roundtrips() {
         check(aa==bb && aa!=cc,"regression entropy is repeatable and scoped per encoder");
     }
     for(auto rate:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_eighths})for(bool robust:{false,true}) {
-        auto p=profile(Channel::wire);p.code_rate=rate;p.robust=robust;p.interleave_depth=1;
+        auto p=classic_profile(Channel::wire);p.code_rate=rate;p.robust=robust;p.interleave_depth=1;
         const auto capacity=ciphertext_bytes(p)*8/9;
         for(auto size:{std::size_t{0},std::size_t{1},capacity-1,capacity,capacity+1,std::size_t{513}}) {
             Bytes source(size);for(auto& b:source)b=static_cast<std::uint8_t>(random());
@@ -180,7 +207,7 @@ void roundtrips() {
         }
     }
     // Preserve the original robust-RS memory boundary independently of defaults.
-    auto p=profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto wire=transmit(p,crypto,Bytes(123,0));
+    auto p=classic_profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto wire=transmit(p,crypto,Bytes(123,0));
     StreamDecoder zero(p,crypto);feed(zero,wire);zero.finish(true);check(Bytes(zero.result()->bytes().begin(),zero.result()->bytes().end())==Bytes(123,0),"all-zero file");
     StreamDecoder wrong(p,key(1));feed(wrong,wire);wrong.finish(true);check(wrong.snapshot().failed && !wrong.result(),"wrong bootstrap key fails");
     auto missing=wire;missing.resize(missing.size()-physical_interval_bits);
@@ -206,7 +233,7 @@ void public_roundtrips() {
     }
     const Bytes utf8{0,0xff,0xc3,0xa9,0xe2,0x98,0x83,0};check(read==utf8,"byte source owns exact UTF-8/binary bytes");
     for(auto rate:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_eighths})for(bool robust:{false,true}) {
-        auto p=profile(Channel::wire);p.code_rate=rate;p.robust=robust;p.interleave_depth=1;
+        auto p=classic_profile(Channel::wire);p.code_rate=rate;p.robust=robust;p.interleave_depth=1;
         check(source_bytes_per_group(p,true)==ciphertext_bytes(p) && source_bytes_per_group(p,false)==(robust?192U:208U),"mode geometry is a fixed local choice");
         const auto capacity=source_bytes_per_group(p,false)*8/9;
         for(const auto& source:std::vector<Bytes>{Bytes{},Bytes{0},utf8,Bytes(capacity-1),Bytes(capacity),Bytes(capacity+1),Bytes(513,0xff)}) {
@@ -219,7 +246,7 @@ void public_roundtrips() {
             check(final.status.find("not authenticated")!=std::string::npos && Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"public status and exact source match");
         }
     }
-    auto p=profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto crypto=key();const auto public_wire=transmit(p,std::nullopt,utf8);
+    auto p=classic_profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto crypto=key();const auto public_wire=transmit(p,std::nullopt,utf8);
     StreamDecoder keyed_rx(p,crypto);feed(keyed_rx,public_wire);keyed_rx.finish(true);
     check(keyed_rx.snapshot().failed && !keyed_rx.result(),"keyed receiver never falls back to public mode");
     StreamDecoder public_rx(p,std::nullopt);feed(public_rx,transmit(p,crypto,utf8));public_rx.finish(true);
@@ -232,7 +259,7 @@ void public_roundtrips() {
 }
 void public_malformed() {
     // Keep the explicit source/checksum boundary offsets in the robust layout.
-    auto p=profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
+    auto p=classic_profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
     const auto pristine=transmit(p,std::nullopt,{});const auto bootstrap=systematic(p,std::span(pristine).first(width));
     const auto salt=std::span(bootstrap).first(32);const auto good_group=systematic(p,std::span(pristine).subspan(width,width));
     const auto invalid=[&](const Bytes& wire,const char* why) {
@@ -266,7 +293,7 @@ void public_malformed() {
     invalid(spliced,"public checksum binds groups to their transfer salt");
 }
 void canonical_sources() {
-    const auto crypto=key();auto p=profile(Channel::wire);p.interleave_depth=1;
+    const auto crypto=key();auto p=classic_profile(Channel::wire);p.interleave_depth=1;
     const auto pristine=transmit(p,crypto,{});const auto width=cycle_intervals(p)*physical_interval_bits;
     const auto bootstrap=systematic(p,std::span(pristine).first(width));const auto salt=std::span(bootstrap).first(32);
     for(auto bad:{0,1,2}) {
@@ -288,7 +315,7 @@ void canonical_sources() {
 }
 void burst_and_soft() {
     // This fixed burst fixture predates the cable throughput preset.
-    auto p=profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
+    auto p=classic_profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
     p.robust=true;p.interleave_depth=16;const auto crypto=key();Bytes source(2100);
     std::iota(source.begin(),source.end(),0);const auto wire=transmit(p,crypto,source);
     StreamDecoder rx(p,crypto);std::array<float,physical_interval_bits> soft{};
@@ -303,8 +330,201 @@ void burst_and_soft() {
     std::vector<float> noisy;for(std::size_t i=0;i<bits.size();++i)noisy.push_back((bits[i]?8.F:-8.F)*(i%211==0?-0.1F:1.F));
     check(coding::decode(noisy,raw.size(),CodeRate::half).bytes==raw,"soft Viterbi corrects sparse low-confidence errors");
 }
-void streamed(std::size_t total,bool encrypted=true) {
-    auto p=profile(Channel::wire);p.interleave_depth=4;const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;std::size_t generated=0,max_request=0;
+void capacity_rs() {
+    // Verify the chosen polynomial's full primitive period independently of
+    // the production logarithm tables, including every nonzero field element.
+    std::array<bool,65536> seen{};unsigned field_value=1;
+    for(unsigned i=0;i<65535;++i) {
+        check(field_value && !seen[field_value],"GF65536 polynomial has no short multiplicative cycle");
+        seen[field_value]=true;field_value<<=1;if(field_value&65536)field_value^=0x1100b;
+    }
+    check(field_value==1,"GF65536 primitive cycle closes after65535 elements");
+    const std::array<std::string_view,2> masks{
+        "10010110101111100111111000110010100001101001011000101101001101100011000010100010010010010101100010101110111010010010010010101110",
+        "01000110011010010110101101111001110101110001000101011101010010011000100000110010001101111000111110100100100010110011000011010000"};
+    for(std::size_t cycle=0;cycle<masks.size();++cycle) {
+        const auto mask=fast::testing::capacity_whitening_mask(128,cycle);std::string text;
+        for(auto bit:mask)text.push_back(static_cast<char>('0'+bit));
+        check(text==masks[cycle],"independent public capacity whitening vector");
+    }
+    // Independent polynomial long division in GF(2^16), generated with direct
+    // shift/XOR multiplication (not the production logarithm tables).
+    const auto data=unhex("01023456789abcde");
+    const auto expected=unhex("01023456789abcde1f7774cfd835429d");
+    check(outer_rs::encode(data,4)==expected,"independent GF65536 shortened RS vector");
+    auto pristine=expected;check(!outer_rs::correct(pristine,4),"valid RS vector has zero changes");
+    auto damaged=expected;damaged[0]^=3;damaged[13]^=55;
+    check(outer_rs::correct(damaged,4)==2 && damaged==expected,"GF65536 RS corrects two unknown symbols");
+    damaged=expected;damaged[0]^=3;damaged[5]^=55;damaged[15]^=88;
+    check(outer_rs::correct(damaged,4,std::array<std::size_t,2>{0,2})==3 && damaged==expected,"GF65536 mixed errors and erasures obey 2e+v budget");
+    rejects([&]{outer_rs::correct(damaged,4,std::array<std::size_t,2>{0,0});},"duplicate RS erasures rejected");
+    rejects([&]{outer_rs::correct(damaged,4,std::array<std::size_t,1>{8});},"out of range RS erasures rejected");
+    rejects([&]{outer_rs::encode(Bytes(3),4);},"odd RS source bytes rejected");
+    Bytes oversized(65536*2);
+    rejects([&]{outer_rs::encode(oversized,4);},"oversized RS source rejected before unpacking");
+    rejects([&]{outer_rs::correct(oversized,4);},"oversized RS word rejected before unpacking");
+    rejects([&]{outer_rs::encode(data,256);},"RS parity beyond fixed scratch rejected");
+    rejects([&]{outer_rs::correct(damaged,256);},"RS decoder parity beyond fixed scratch rejected");
+    rejects([&]{outer_rs::encode(Bytes(65534*2),4);},"source and parity combined field bound checked");
+    Bytes bulk(25124);std::mt19937 rng(81);for(auto& b:bulk)b=static_cast<std::uint8_t>(rng());
+    const auto word=outer_rs::encode(bulk,38);damaged=word;
+    for(std::size_t i=0;i<19;++i)damaged[i*1301]^=static_cast<std::uint8_t>(i+1);
+    check(outer_rs::correct(damaged,38)==19 && damaged==word,"full capacity RS corrects nineteen symbol errors");
+    damaged=word;
+    for(std::size_t i=0;i<20;++i)damaged[i*1201]^=static_cast<std::uint8_t>(i+1);
+    rejects([&]{outer_rs::correct(damaged,38);},"over-budget fixed RS fixture rejects");
+    Bytes maximum_data((58320-176)*2);
+    for(auto& b:maximum_data)b=static_cast<std::uint8_t>(rng());
+    const auto maximum_word=outer_rs::encode(maximum_data,176);damaged=maximum_word;
+    for(std::size_t i=0;i<88;++i)damaged[i*1301]^=static_cast<std::uint8_t>(i+1);
+    check(outer_rs::correct(damaged,176)==88 && damaged==maximum_word,"maximum capacity RS geometry corrects88 symbol errors");
+}
+void capacity_interleaver_balance() {
+    // QAM labels restart every2048 bits. Treating positions modulo only bps
+    // misses this boundary and the former depth4/20-bit reliability alias.
+    for(unsigned depth=1;depth<=16;++depth)for(unsigned bps=2;bps<=22;bps+=2) {
+        auto p=capacity_profile();p.interleave_depth=depth;p.constellation=1U<<bps;
+        std::array<std::array<unsigned,22>,16> counts{};std::array<unsigned,22> totals{};
+        std::string_view fingerprint;
+        if(depth==4&&bps==16)fingerprint="6f00534dca6961f8c7fee653d14b8fa1d0cfbf569efb722849ab609bf0bb91c6";
+        if(depth==4&&bps==20)fingerprint="805c47eade3103b7e4337f20192ce4ec72c13986013f8885a4385938b4f76cf9";
+        if(depth==3&&bps==14)fingerprint="284a6e6024ed6a9d8c50b25303d500267e19b8cb032c97aea1534e68be7d85d1";
+        Bytes frozen;if(!fingerprint.empty())frozen.reserve(ldpc::coded_bits);
+        for(std::size_t column=0;column<ldpc::coded_bits;++column) {
+            const auto rotation=fast::testing::capacity_interleave_rotation(p,column);
+            check(rotation<depth,"capacity column rotation bounded by local depth");
+            if(!fingerprint.empty())frozen.push_back(static_cast<std::uint8_t>(rotation));
+            std::array<bool,16> occupied{};
+            for(unsigned frame=0;frame<depth;++frame) {
+                const auto slot=(frame+rotation)%depth;
+                check(!occupied[slot],"capacity rotated column is a bijection");occupied[slot]=true;
+                const auto plane=((column*depth+slot)%physical_interval_bits)%bps;
+                ++counts[frame][plane];++totals[plane];
+            }
+        }
+        if(!fingerprint.empty())check(sha256(frozen)==unhex(fingerprint),"independent Python balanced-interleave schedule fingerprint");
+        for(unsigned plane=0;plane<bps;++plane) {
+            auto low=std::numeric_limits<unsigned>::max();unsigned high=0;
+            for(unsigned frame=0;frame<depth;++frame) {
+                low=std::min(low,counts[frame][plane]);high=std::max(high,counts[frame][plane]);
+                const auto expected=double(totals[plane])/depth;
+                check(std::abs(double(counts[frame][plane])-expected)<=expected*.002,"every LDPC frame spans every QAM plane within0.2 percent");
+            }
+            check(high-low<=5,"frozen balanced interleaver plane counts differ by at most five");
+        }
+        // Every D-bit column contains one bit per frame. Check partial-edge
+        // bursts, including a modem interval boundary and a full2048-bit loss.
+        for(auto start:{std::size_t{0},std::size_t{1},std::size_t{2047},std::size_t{70001}})
+            for(auto length:{std::size_t{1},std::size_t{17},std::size_t{2048}}) {
+                if(start+length>depth*ldpc::coded_bits)continue;
+                std::array<unsigned,16> losses{};
+                for(auto i=start;i<start+length;++i) {
+                    const auto column=i/depth,slot=i%depth;
+                    const auto rotation=fast::testing::capacity_interleave_rotation(p,column);
+                    ++losses[(slot+depth-rotation)%depth];
+                }
+                for(unsigned frame=0;frame<depth;++frame)
+                    check(losses[frame]<=(length+depth-1)/depth+1,"balanced frame interleaver preserves bounded burst spread");
+            }
+    }
+}
+void capacity_roundtrips() {
+    const auto crypto=key();
+    for(auto rate:{CodeRate::three_quarters,CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})for(bool encrypted:{false,true}) {
+        auto p=capacity_profile();p.code_rate=rate;p.interleave_depth=1;
+        const auto c=capacity_source_bytes_per_cycle(p,encrypted);const auto width=cycle_intervals(p)*physical_interval_bits;
+        for(auto size:{std::size_t{0},std::size_t{1},c-1,c,c+1}) {
+            Bytes source(size);for(std::size_t i=0;i<size;++i)source[i]=static_cast<std::uint8_t>(i*17);
+            if(size)source.back()=0;
+            const auto keying=encrypted?std::optional<Crypto>(crypto):std::nullopt;
+            const auto wire=transmit(p,keying,source);StreamDecoder rx(p,keying);feed(rx,wire);
+            check(!rx.result() && !rx.snapshot().source_bytes && !rx.snapshot().physical_end,"capacity source stays opaque before physical absence");
+            rx.finish(false);check(!rx.result() && !rx.snapshot().physical_end,"capacity EOF cannot complete");
+            rx.finish(true);check(rx.snapshot().complete,"capacity boundary roundtrip complete");
+            check(Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"capacity compact source preserves every byte and trailing zeros");
+            check(rx.snapshot().authenticated==encrypted,"capacity public/keyed integrity claims distinct");
+            check(wire.size()==(2+size/c)*width,"capacity exact-boundary mandatory final empty cycle");
+            check(estimate_transmission(p,encrypted,size).intervals==wire.size()/physical_interval_bits,"capacity estimate equals actual fixed geometry");
+        }
+    }
+    auto vector_profile=capacity_profile();vector_profile.interleave_depth=1;
+    const auto vector_wire=transmit(vector_profile,std::nullopt,Bytes{0,0x80,0xff,0});
+    const auto vector_width=cycle_intervals(vector_profile)*physical_interval_bits;
+    const auto vector_area=systematic(vector_profile,std::span(vector_wire).subspan(vector_width,vector_width),1);
+    const Bytes source_vector{1,0,0x80,0xff,0,0x80};
+    check(std::equal(source_vector.begin(),source_vector.end(),vector_area.begin()),"independent capacity flag/eight-bit source/padding vector");
+    check(std::all_of(vector_area.begin()+6,vector_area.end()-32,[](auto b){return !b;}),"capacity final source fill is canonical zeros");
+    auto maximum=capacity_profile();maximum.code_rate=CodeRate::nine_tenths;maximum.interleave_depth=16;
+    const auto max_wire=transmit(maximum,std::nullopt,{});StreamDecoder max_rx(maximum,std::nullopt);feed(max_rx,max_wire);max_rx.finish(true);
+    check(max_rx.result() && !max_rx.result()->size() && capacity_parity_symbols(maximum)==176,"maximum bounded capacity geometry roundtrip");
+    auto p=capacity_profile();p.code_rate=CodeRate::seven_ninths;
+    const auto c=capacity_source_bytes_per_cycle(p,false);
+    check(capacity_parity_symbols(p)==38 && c==25091,"four-frame7/9 RS/source geometry");
+    const auto wire=transmit(p,std::nullopt,Bytes(c+3,0x80));StreamDecoder rx(p,std::nullopt);feed(rx,wire);rx.finish(true);
+    check(rx.result() && rx.result()->size()==c+3,"four LDPC frames interleave and reassemble");
+    check(rx.snapshot().ldpc_frames==12 && !rx.snapshot().ldpc_failed_frames && !rx.snapshot().ldpc_changed_bits,"clean capacity LDPC diagnostics counted independently of digest groups");
+    const auto zero_wire=transmit(p,std::nullopt,Bytes(100000));
+    const auto ones=std::count(zero_wire.begin(),zero_wire.end(),1);
+    check(ones>static_cast<long>(zero_wire.size()*45/100) && ones<static_cast<long>(zero_wire.size()*55/100),"public all-zero source is whitened including bootstrap and final fill");
+    StreamDecoder quota(p,std::nullopt,source_bytes_per_group(p,false)-1);feed(quota,wire);quota.finish(true);
+    check(quota.snapshot().failed && !quota.result(),"capacity complete corrected source area obeys local memory quota");
+    StreamDecoder wrong(p,key(1));feed(wrong,wire);wrong.finish(true);check(!wrong.result(),"capacity public and keyed bootstrap never autodetect");
+}
+void capacity_malformed() {
+    auto p=capacity_profile();p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
+    const auto pristine=transmit(p,std::nullopt,{});const auto boot=systematic(p,std::span(pristine).first(width));
+    const auto salt=std::span(boot).first(32);const auto size=source_bytes_per_group(p,false);
+    const auto invalid=[&](const Bytes& wire,const char* why) {
+        StreamDecoder rx(p,std::nullopt);feed(rx,wire);rx.finish(true);check(rx.snapshot().failed && !rx.result(),why);
+    };
+    for(unsigned bad=0;bad<4;++bad) {
+        Bytes area(size);area[0]=1;area[1]=0x80;
+        if(bad==0)area[0]=2;
+        if(bad==1)area[0]=0;
+        if(bad==2)area[1]=0;
+        if(bad==3)area.back()=7;
+        auto wire=pristine;auto replacement=code_systematic(p,public_group(p,salt,0,area));
+        std::copy(replacement.begin(),replacement.end(),wire.begin()+static_cast<std::ptrdiff_t>(width));
+        invalid(wire,"capacity checksummed bad final flag/padding rejected after physical end");
+    }
+    auto area=Bytes(size);area[0]=1;area[1]=0x80;
+    auto group=public_group(p,salt,0,area);group.back()^=1;
+    auto wire=pristine;auto replacement=code_systematic(p,group);
+    std::copy(replacement.begin(),replacement.end(),wire.begin()+static_cast<std::ptrdiff_t>(width));
+    invalid(wire,"capacity digest remains mandatory after LDPC and RS success");
+    const auto longwire=transmit(p,std::nullopt,Bytes(capacity_source_bytes_per_cycle(p,false)*2+7,0x80));
+    wire=longwire;wire.resize(wire.size()-width);invalid(wire,"capacity missing whole final cycle cannot accept prefix");
+    wire=longwire;wire.resize(wire.size()-physical_interval_bits);invalid(wire,"capacity partial final cycle cannot complete");
+    wire=longwire;wire.erase(wire.begin()+static_cast<std::ptrdiff_t>(width),wire.begin()+static_cast<std::ptrdiff_t>(2*width));
+    invalid(wire,"capacity missing interior cycle cannot join neighboring source");
+    wire=longwire;std::swap_ranges(wire.begin()+static_cast<std::ptrdiff_t>(width),wire.begin()+static_cast<std::ptrdiff_t>(2*width),wire.begin()+static_cast<std::ptrdiff_t>(2*width));
+    invalid(wire,"capacity ordinal detects reordered cycles");
+    const auto other=transmit(p,std::nullopt,{});wire=pristine;
+    std::copy(other.begin()+static_cast<std::ptrdiff_t>(width),other.end(),wire.begin()+static_cast<std::ptrdiff_t>(width));
+    invalid(wire,"capacity salt detects splicing from another transfer");
+    wire=pristine;replacement=code_systematic(p,public_group(p,salt,1,area),2);wire.insert(wire.end(),replacement.begin(),replacement.end());
+    invalid(wire,"capacity final flag cannot appear before last fixed cycle");
+    const auto crypto=key();const auto keyed=transmit(p,crypto,{});StreamDecoder wrong(p,key(3));feed(wrong,keyed);wrong.finish(true);
+    check(!wrong.result() && wrong.snapshot().failed,"capacity wrong key rejected");
+    const auto keyedboot=systematic(p,std::span(keyed).first(width));const auto keyedsalt=std::span(keyedboot).first(32);
+    Bytes keyedarea(ciphertext_bytes(p));keyedarea[0]=1;keyedarea[1]=0x80;keyedarea.back()=3;
+    group=fast::testing::seal_group(p,crypto,keyedsalt,0,Bytes(16),keyedarea);replacement=code_systematic(p,group);wire=keyed;
+    std::copy(replacement.begin(),replacement.end(),wire.begin()+static_cast<std::ptrdiff_t>(width));StreamDecoder malformed(p,crypto);feed(malformed,wire);
+    check(!malformed.snapshot().failed,"capacity authenticated source syntax waits for physical end");
+    malformed.finish(true);check(malformed.snapshot().failed && !malformed.result(),"capacity keyed malformed padding rejected after physical end");
+    // A lost physical interval remains at its timed position; LDPC repairs the
+    // erased evidence rather than removing it or shifting the source stream.
+    auto four=capacity_profile();const Bytes source(1000,0x5a);const auto good=transmit(four,std::nullopt,source);
+    StreamDecoder recovered(four,std::nullopt);std::array<float,physical_interval_bits> soft{};
+    const auto erased=cycle_intervals(four)+3;
+    for(std::size_t interval=0;interval<good.size()/physical_interval_bits;++interval) {
+        for(std::size_t bit=0;bit<soft.size();++bit)soft[bit]=interval==erased?0.F:(good[interval*physical_interval_bits+bit]?12.F:-12.F);
+        recovered.push_interval(soft);
+    }
+    recovered.finish(true);check(recovered.result() && Bytes(recovered.result()->bytes().begin(),recovered.result()->bytes().end())==source,"capacity LDPC/frame interleaver repairs a timed interval erasure");
+}
+void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
+    auto p=capacity?capacity_profile():classic_profile(Channel::wire);p.interleave_depth=4;const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;std::size_t generated=0,max_request=0;
     StreamEncoder tx(p,crypto,[&](std::span<std::uint8_t> output) {
         max_request=std::max(max_request,output.size());const auto n=std::min(output.size(),total-generated);
         for(std::size_t i=0;i<n;++i)output[i]=static_cast<std::uint8_t>((generated+i)*71+3);
@@ -331,7 +551,9 @@ void streamed(std::size_t total,bool encrypted=true) {
 int main(int argc,char**) {
     try {
         independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
+        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();
         streamed(argc>1?2*1024*1024:100*1024);streamed(argc>1?2*1024*1024:100*1024,false);
+        streamed(1024*1024,true,true);streamed(1024*1024,false,true);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";
     }catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

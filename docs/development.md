@@ -17,6 +17,10 @@ For independent Fast Modem throughput work, consult the
 [coding and capacity study](fast-coding-study.md), including its development
 priorities and evidence limits, the [physical cable study](fast-cable-live-study.md),
 and the [current Fast format](fast-mode.md).
+The [implemented capacity format](fast-capacity-codec.md) and
+[capacity cable experiments](fast-capacity-live-study.md) describe the independent
+Fast v2 development; its compact source flags and sparse framing do not apply to
+the regular transport paths below.
 Its proposed coding and marker changes do not alter this compatibility contract.
 
 ## Preserve all three transmit paths

@@ -23,10 +23,17 @@ SourceReader file_source(const std::filesystem::path&);
 // Owns the caller's local bytes (for text); each read stays within its span.
 SourceReader byte_source(Bytes);
 std::size_t cycle_intervals(const Profile&);
+// Capacity mode uses interleave_depth LDPC frames per coding cycle. One source
+// flag is subtracted here; a final cycle additionally needs one padding byte.
+std::size_t capacity_source_bytes_per_cycle(const Profile&,bool encrypted);
+// GF(65536) parity symbols (two bytes each), rounded up to even at >=0.3%.
+std::size_t capacity_parity_symbols(const Profile&);
 struct TransmitEstimate { std::uint64_t intervals=0,samples=0; double seconds=0,source_bps=0; };
 TransmitEstimate estimate_transmission(const Profile&,bool encrypted,std::uint64_t source_bytes);
 
 std::size_t ciphertext_bytes(const Profile&);
+// In capacity mode there is one group per coding cycle; the returned area
+// includes the protected continuation/final flag and final padding.
 std::size_t source_bytes_per_group(const Profile&,bool encrypted);
 
 class ReceivedFile {
@@ -50,6 +57,8 @@ struct DecodeSnapshot {
     std::uint64_t intervals = 0, authenticated_groups = 0, source_bytes = 0;
     std::uint64_t checksum_groups = 0;
     std::uint64_t corrected_bytes = 0, erased_bytes = 0, spool_bytes = 0;
+    // LDPC changes are diagnostics until whole-cycle integrity succeeds.
+    std::uint64_t ldpc_frames = 0, ldpc_failed_frames = 0, ldpc_iterations = 0, ldpc_changed_bits = 0;
     std::string status = "Waiting for fast stream";
 };
 
@@ -100,6 +109,8 @@ Decoded decode(std::span<const float> soft, std::size_t source_bytes, CodeRate);
 
 namespace testing {
 // Deterministic wire-vector hooks; production always obtains salt/IV from RAND.
+Bytes capacity_whitening_mask(std::size_t bits,std::uint64_t cycle);
+std::size_t capacity_interleave_rotation(const Profile&,std::size_t column);
 Bytes seal_group(const Profile&, const Crypto&, std::span<const std::uint8_t> salt,
     std::uint64_t ordinal, std::span<const std::uint8_t> iv,
     std::span<const std::uint8_t> plaintext);

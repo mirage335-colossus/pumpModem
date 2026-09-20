@@ -39,9 +39,17 @@ struct ModemProgress {
 
 // Public wire primitives make independent constellation/filter vectors possible.
 std::vector<std::complex<double>> constellation(unsigned order);
+// Cartesian Gray-labelled QAM with unit average symbol energy.
+std::vector<std::complex<double>> square_qam_constellation(unsigned order);
+// Exact max-log squared-distance differences, positive for label bit one.
+// Metrics has log2(order) elements; returns the closest Gray constellation label.
+unsigned square_qam_soft_demodulate(unsigned order,std::complex<double> value,std::span<double> metrics);
 double root_raised_cosine(double symbol_time, double rolloff);
 std::complex<double> sync_symbol(std::size_t index);
-std::size_t interval_symbols(const Profile& profile);
+std::size_t interval_symbols(const Profile& profile, std::size_t interval_index=0);
+std::size_t total_interval_symbols(const Profile& profile, std::size_t interval_count);
+std::size_t pulse_tail_symbols(const Profile& profile);
+std::size_t preamble_symbols(const Profile& profile);
 
 class Transmitter {
 public:

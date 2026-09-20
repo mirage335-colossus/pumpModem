@@ -9,6 +9,8 @@
 #include <cmath>
 #include <csignal>
 #include <iostream>
+#include <iomanip>
+#include <limits>
 #include <map>
 #include <set>
 #include <thread>
@@ -17,7 +19,7 @@ namespace datapump::fast {
 namespace {
 volatile std::sig_atomic_t interrupted=0;
 void on_interrupt(int){interrupted=1;}
-const char* help=R"(Fast APSK text and file transfer (separate from regular mode)
+const char* help=R"(Fast QAM/LDPC and APSK text and file transfer (separate from regular mode)
   pump fast-info [profile options]
   pump fast-tx (--text TEXT | --input FILE) (--output WAV | --device DEVICE)
   pump fast-rx --input WAV [--save FILE]
@@ -25,11 +27,18 @@ const char* help=R"(Fast APSK text and file transfer (separate from regular mode
 
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
-  --apsk 4|16|64|256                 Default 256 (wire), 16 (SSB), 4 (FM/acoustic)
-  --code-rate 1/2|3/4|7/8            Default 7/8 (wire), 3/4 (others)
-  --rs robust|high-rate              Default high-rate (wire), robust (others)
-  --interleave 1..64                 Default 62 (wire), 16 (radio), 5 (acoustic)
+  --format classic|capacity          Default capacity for wire, classic for other profiles
+  --qam 4|16|64|256|1024|4096|16384|65536|262144|1048576|4194304
+                                    Cable default 4194304-QAM, LDPC 8/9
+  --apsk 4|16|64|256                 Select classic format; default 256 (classic wire)
+  --code-rate 1/2|3/4|7/8|7/9|8/9|9/10   Capacity supports 3/4, 7/9, 8/9, 9/10 LDPC
+  --rs robust|high-rate|0.3%          Capacity uses approximately 0.3% parity/data
+  --interleave 1..16 (capacity), 1..64 (classic); default 4 / 62 / 16 / 5
   --sample-rate 44100..192000        Default 48000 Hz
+  --symbol-rate HZ --carrier HZ --rolloff N --amplitude N
+  --marker-spacing 1..16            Capacity intervals per full marker (default 16)
+  --pilot-spacing 16..1024           Capacity data symbols per pilot group (default 256)
+  --estimate-bytes N                fast-info: estimate airtime for a local source size
   --keyfile KEY                     Enable encryption using this keyfile
   --encrypt                        Require encryption and --keyfile
   --no-encryption                  Explicit plaintext; ignore keyfile options
@@ -50,7 +59,7 @@ struct Args {
     std::map<std::string,std::string> values;
     Args(int argc,char** argv) {
         const std::set<std::string> flags{"help","json","stereo","mono","encrypt","no-encryption"};
-        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds"};
+        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes"};
         for(int i=2;i<argc;++i) {
             std::string name=argv[i];if(!name.starts_with("--"))throw Error("Expected a fast --option");name.erase(0,2);
             if(values.contains(name))throw Error("Duplicate fast option: "+name);
@@ -73,6 +82,13 @@ struct Args {
         if(parsed.ec!=std::errc{}||parsed.ptr!=text.data()+text.size())throw Error("Invalid fast integer: "+k);
         return n;
     }
+    double real(const std::string& k,double fallback)const {
+        if(!has(k))return fallback;
+        const auto text=get(k);double n=0;
+        const auto parsed=std::from_chars(text.data(),text.data()+text.size(),n);
+        if(parsed.ec!=std::errc{}||parsed.ptr!=text.data()+text.size()||!std::isfinite(n))throw Error("Invalid fast number: "+k);
+        return n;
+    }
 };
 bool encryption_enabled(const Args& a) {
     if(a.has("encrypt")&&a.has("no-encryption"))throw Error("--encrypt and --no-encryption conflict");
@@ -82,13 +98,26 @@ bool encryption_enabled(const Args& a) {
     return !a.has("no-encryption") && a.has("keyfile");
 }
 Settings settings(const Args& a,bool load_key) {
-    Settings s;s.profile=profile(parse_channel(a.get("profile","wire")));
-    const auto order=a.integer("apsk",s.profile.constellation),depth=a.integer("interleave",s.profile.interleave_depth),rate=a.integer("sample-rate",48000);
-    if(order>256||depth>64||rate>192000)throw Error("Fast profile value exceeds local bound");
+    Settings s;const auto channel=parse_channel(a.get("profile","wire"));
+    if(a.has("qam")&&a.has("apsk"))throw Error("--qam and --apsk conflict");
+    const auto format=a.get("format",a.has("apsk")?"classic":a.has("qam")||channel==Channel::wire?"capacity":"classic");
+    if(format!="classic"&&format!="capacity")throw Error("Fast format must be classic or capacity");
+    if((format=="classic"&&a.has("qam"))||(format=="capacity"&&a.has("apsk")))throw Error("Constellation option conflicts with selected format");
+    if(format=="capacity"&&channel!=Channel::wire)throw Error("Capacity format currently requires --profile wire");
+    s.profile=format=="capacity"?capacity_profile():classic_profile(channel);
+    const auto order=a.integer(a.has("qam")?"qam":"apsk",s.profile.constellation),depth=a.integer("interleave",s.profile.interleave_depth),rate=a.integer("sample-rate",48000);
+    if(order>4194304||depth>64||rate>192000)throw Error("Fast profile value exceeds local bound");
     s.profile.constellation=static_cast<unsigned>(order);s.profile.interleave_depth=static_cast<unsigned>(depth);s.profile.sample_rate=static_cast<std::uint32_t>(rate);
-    const auto code=a.get("code-rate",s.profile.code_rate==CodeRate::half?"1/2":s.profile.code_rate==CodeRate::three_quarters?"3/4":"7/8");
-    if(code=="1/2")s.profile.code_rate=CodeRate::half;else if(code=="3/4")s.profile.code_rate=CodeRate::three_quarters;else if(code=="7/8")s.profile.code_rate=CodeRate::seven_eighths;else throw Error("Fast code rate must be 1/2, 3/4 or 7/8");
-    const auto rs=a.get("rs",s.profile.robust?"robust":"high-rate");if(rs!="robust"&&rs!="high-rate")throw Error("Fast RS must be robust or high-rate");s.profile.robust=rs=="robust";
+    s.profile.code_rate=parse_code_rate(a.get("code-rate",std::string(code_rate_name(s.profile.code_rate))));
+    const auto rs=a.get("rs",s.profile.capacity_mode?"0.3%":s.profile.robust?"robust":"high-rate");
+    if(s.profile.capacity_mode?rs!="0.3%":(rs!="robust"&&rs!="high-rate"))throw Error("RS selection does not match Fast format");
+    s.profile.robust=rs=="robust";
+    s.profile.symbol_rate=a.real("symbol-rate",s.profile.symbol_rate);s.profile.carrier_hz=a.real("carrier",s.profile.carrier_hz);
+    s.profile.rolloff=a.real("rolloff",s.profile.rolloff);s.profile.amplitude=a.real("amplitude",s.profile.amplitude);
+    const auto markers=a.integer("marker-spacing",s.profile.marker_spacing_intervals),pilots=a.integer("pilot-spacing",s.profile.pilot_spacing_symbols);
+    if(markers>16||pilots>1024)throw Error("Fast marker/pilot spacing exceeds local bound");
+    if(!s.profile.capacity_mode&&(a.has("marker-spacing")||a.has("pilot-spacing")))throw Error("Marker/pilot spacing options require capacity format");
+    s.profile.marker_spacing_intervals=static_cast<unsigned>(markers);s.profile.pilot_spacing_symbols=static_cast<unsigned>(pilots);
     if(a.has("mono")&&a.has("stereo"))throw Error("--mono and --stereo conflict");
     s.device=a.get("device","default");
     s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire);
@@ -110,6 +139,8 @@ void report(const Snapshot& s,bool json) {
         <<",\"cancelled\":"<<(s.cancelled?"true":"false")<<",\"source_bytes\":"<<s.source_bytes<<",\"intervals\":"<<s.intervals
         <<",\"encrypted\":"<<(s.encrypted?"true":"false")<<",\"authenticated\":"<<(s.authenticated?"true":"false")
         <<",\"authenticated_groups\":"<<s.authenticated_groups<<",\"checksum_groups\":"<<s.checksum_groups<<",\"corrected_bytes\":"<<s.corrected_bytes<<",\"erased_bytes\":"<<s.erased_bytes
+        <<",\"ldpc_frames\":"<<s.ldpc_frames<<",\"ldpc_failed_frames\":"<<s.ldpc_failed_frames
+        <<",\"ldpc_iterations\":"<<s.ldpc_iterations<<",\"ldpc_changed_bits\":"<<s.ldpc_changed_bits
         <<",\"estimated_seconds\":"<<s.estimated_seconds<<",\"transmit_fraction\":"<<s.transmit_fraction
         <<",\"evm\":"<<s.evm<<",\"goodput_bps\":"<<s.goodput_bps
         <<",\"status\":\""<<json_escape(s.status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n";
@@ -124,6 +155,7 @@ int cli_main(int argc,char** argv) {
     if(a.has("help")){std::cout<<help;return 0;}
     if(command!="fast-info"&&command!="fast-tx"&&command!="fast-rx"&&command!="fast-listen")throw Error("Unknown fast command");
     const auto encrypted=encryption_enabled(a);
+    if(command!="fast-info"&&a.has("estimate-bytes"))throw Error("--estimate-bytes is only available for fast-info");
     if(command=="fast-tx") {
         if(a.has("input")==a.has("text")||a.has("output")==a.has("device")||a.has("save"))
             throw Error("fast-tx requires exactly one of --text/--input and exactly one of --output/--device");
@@ -131,14 +163,34 @@ int cli_main(int argc,char** argv) {
     auto s=settings(a,command!="fast-info");
     if(command=="fast-info") {
         const auto& p=s.profile;
+        // Fractional baud is part of the authenticated local profile. Preserve
+        // enough decimal digits for a JSON reader to reconstruct that value.
+        std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10);
         std::cout<<"{\"profile\":\""<<channel_name(p.channel)<<"\",\"sample_rate\":"<<p.sample_rate<<",\"symbol_rate\":"<<p.symbol_rate
+            <<",\"format\":\""<<(p.capacity_mode?"capacity":"classic")<<"\",\"code_rate\":\""<<code_rate_name(p.code_rate)<<"\""
             <<",\"carrier_hz\":"<<p.carrier_hz<<",\"occupied_bandwidth_hz\":"<<p.symbol_rate*(1+p.rolloff)<<",\"constellation\":"<<p.constellation
             <<",\"amplitude\":"<<p.amplitude
             <<",\"mono\":"<<(s.mono?"true":"false")
             <<",\"shannon_snr_db_assumed\":30,\"shannon_capacity_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(1001.)
+            <<",\"shannon_capacity_at_40db_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(10001.)
+            <<",\"shannon_capacity_at_60db_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(1000001.)
             <<",\"gross_bitrate\":"<<gross_bitrate(p)<<",\"physical_interval_bits\":2048,\"interval_symbols\":"<<interval_symbols(p)
             <<",\"cycle_intervals\":"<<cycle_intervals(p)<<",\"ciphertext_bytes\":"<<ciphertext_bytes(p)
-            <<",\"encrypted\":"<<(encrypted?"true":"false")<<",\"source_bytes_per_group\":"<<source_bytes_per_group(p,encrypted)<<"}\n";return 0;
+            <<",\"encrypted\":"<<(encrypted?"true":"false")<<",\"source_bytes_per_group\":"<<source_bytes_per_group(p,encrypted);
+        if(p.capacity_mode) {
+            const auto parity=capacity_parity_symbols(p)*2;
+            const auto info=static_cast<std::size_t>(std::llround(64800*code_rate_value(p.code_rate)))/8*p.interleave_depth;
+            std::cout<<",\"source_bytes_per_cycle\":"<<capacity_source_bytes_per_cycle(p,encrypted)
+                <<",\"ldpc_blocks_per_cycle\":"<<p.interleave_depth
+                <<",\"rs_parity_bytes\":"<<parity<<",\"rs_parity_data_ratio\":"<<static_cast<double>(parity)/((info&~std::size_t{1})-parity)
+                <<",\"marker_spacing_intervals\":"<<p.marker_spacing_intervals<<",\"pilot_spacing_symbols\":"<<p.pilot_spacing_symbols;
+        }
+        if(a.has("estimate-bytes")) {
+            const auto estimate=estimate_transmission(p,encrypted,a.integer("estimate-bytes",0));
+            std::cout<<",\"estimated_seconds\":"<<estimate.seconds<<",\"estimated_source_bps\":"<<estimate.source_bps
+                <<",\"estimated_intervals\":"<<estimate.intervals<<",\"estimated_samples\":"<<estimate.samples;
+        }
+        std::cout<<"}\n";return 0;
     }
     Snapshot result;
     if(command=="fast-tx") {

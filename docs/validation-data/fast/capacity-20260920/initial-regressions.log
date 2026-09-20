@@ -1,0 +1,216 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  52: differential_receiver_probability
+      Start 100: fast_snr
+ 1/99 Test #100: fast_snr ............................   Passed  381.61 sec
+      Start  90: gui_boundary_regression
+ 2/99 Test  #90: gui_boundary_regression .............   Passed   16.20 sec
+      Start  31: noise_receive
+ 3/99 Test  #31: noise_receive .......................   Passed    9.13 sec
+      Start  61: audio_rates
+ 4/99 Test  #61: audio_rates .........................   Passed   30.79 sec
+      Start  42: pulse_shaping
+ 5/99 Test  #42: pulse_shaping .......................   Passed    7.40 sec
+      Start  92: gui_self_check
+ 6/99 Test  #92: gui_self_check ......................   Passed   17.88 sec
+      Start  12: fast_transfer
+ 7/99 Test  #12: fast_transfer .......................   Passed   48.76 sec
+      Start  44: regressions
+ 8/99 Test  #44: regressions .........................   Passed   14.68 sec
+      Start  55: weak_signal
+ 9/99 Test  #55: weak_signal .........................   Passed  171.81 sec
+      Start  15: fast_qam
+10/99 Test  #15: fast_qam ............................   Passed   11.26 sec
+      Start  83: gui_link_planner
+11/99 Test  #83: gui_link_planner ....................   Passed   14.23 sec
+      Start  58: live_profiles
+12/99 Test  #58: live_profiles .......................   Passed  143.89 sec
+      Start  37: receiver_differential
+13/99 Test  #37: receiver_differential ...............   Passed   28.06 sec
+      Start  50: receiver_probability
+14/99 Test  #50: receiver_probability ................   Passed   44.17 sec
+      Start  51: differential_probability
+15/99 Test  #51: differential_probability ............   Passed   13.50 sec
+      Start   4: legacy_simulation
+16/99 Test   #4: legacy_simulation ...................   Passed    0.90 sec
+      Start  86: gui_launch_settings
+17/99 Test  #86: gui_launch_settings .................   Passed    0.62 sec
+      Start  14: fast_ldpc
+18/99 Test  #14: fast_ldpc ...........................   Passed    1.88 sec
+      Start  84: link_planner_curves
+19/99 Test  #84: link_planner_curves .................   Passed    0.68 sec
+      Start   9: fast_modem
+20/99 Test   #9: fast_modem ..........................   Passed   27.40 sec
+      Start  32: pattern_code
+21/99 Test  #32: pattern_code ........................   Passed    3.32 sec
+      Start  54: correlation_experiment
+22/99 Test  #54: correlation_experiment ..............   Passed    1.14 sec
+      Start  63: channel
+23/99 Test  #63: channel .............................   Passed    3.04 sec
+      Start   3: legacy_session
+24/99 Test   #3: legacy_session ......................   Passed    1.77 sec
+      Start   1: legacy_psk
+25/99 Test   #1: legacy_psk ..........................   Passed    1.15 sec
+      Start  81: gui_controller
+26/99 Test  #81: gui_controller ......................   Passed   78.87 sec
+      Start  33: pattern_receiver
+27/99 Test  #33: pattern_receiver ....................   Passed  109.84 sec
+      Start  60: resampler
+28/99 Test  #60: resampler ...........................   Passed    1.13 sec
+      Start  98: fast_cable_benchmark
+29/99 Test  #98: fast_cable_benchmark ................   Passed    1.12 sec
+      Start  56: live
+30/99 Test  #56: live ................................   Passed   53.80 sec
+      Start  96: alsa_audio_contract
+31/99 Test  #96: alsa_audio_contract .................   Passed    0.64 sec
+      Start  49: simulation_estimate
+32/99 Test  #49: simulation_estimate .................   Passed   20.55 sec
+      Start 102: cli
+33/99 Test #102: cli .................................   Passed   30.52 sec
+      Start  43: pattern_transfer
+34/99 Test  #43: pattern_transfer ....................   Passed    0.67 sec
+      Start  10: fast_files
+35/99 Test  #10: fast_files ..........................   Passed    3.11 sec
+      Start   7: gui_legacy_live
+36/99 Test   #7: gui_legacy_live .....................   Passed    0.38 sec
+      Start  99: fast_cli
+37/99 Test  #99: fast_cli ............................   Passed    9.09 sec
+      Start  20: crypto
+38/99 Test  #20: crypto ..............................   Passed    0.51 sec
+      Start  17: gui_fast
+39/99 Test  #17: gui_fast ............................   Passed    2.35 sec
+      Start  35: pattern_drift
+40/99 Test  #35: pattern_drift .......................   Passed    4.46 sec
+      Start  89: gui_adapter_boundary
+41/99 Test  #89: gui_adapter_boundary ................   Passed    0.47 sec
+      Start  97: windows_audio_contract
+42/99 Test  #97: windows_audio_contract ..............   Passed    0.34 sec
+      Start   8: fast_codec
+43/99 Test  #52: differential_receiver_probability ...   Passed  1319.25 sec
+      Start  18: gui_fast_live
+44/99 Test  #18: gui_fast_live .......................   Passed    2.63 sec
+      Start  38: pattern_fft_batch
+45/99 Test   #8: fast_codec ..........................   Passed   10.40 sec
+      Start  11: fast_session
+46/99 Test  #11: fast_session ........................***Failed    1.04 sec
+text RX: Fast transfer incomplete; error=Fast capture overrun: missing sample time; transfer incomplete; physical_end=0; intervals=7
+text audio reception did not observe a valid physical end
+
+      Start  57: live_resources
+47/99 Test  #38: pattern_fft_batch ...................   Passed    4.02 sec
+      Start  34: pattern_correlator
+48/99 Test  #57: live_resources ......................   Passed    9.11 sec
+      Start  41: search_parallel
+49/99 Test  #41: search_parallel .....................   Passed    0.11 sec
+      Start  30: streaming_modem
+50/99 Test  #30: streaming_modem .....................   Passed    0.44 sec
+      Start   2: legacy_olivia
+51/99 Test   #2: legacy_olivia .......................   Passed    0.05 sec
+      Start  13: fast_telemetry
+52/99 Test  #13: fast_telemetry ......................   Passed    0.81 sec
+      Start  75: gui_pattern_space
+53/99 Test  #75: gui_pattern_space ...................   Passed    0.09 sec
+      Start  29: modem
+54/99 Test  #29: modem ...............................   Passed    0.15 sec
+      Start 101: boundary_marker_storage
+55/99 Test #101: boundary_marker_storage .............   Passed    0.27 sec
+      Start   5: legacy_boundary
+56/99 Test   #5: legacy_boundary .....................   Passed    0.03 sec
+      Start  78: gui_bitmaps
+57/99 Test  #78: gui_bitmaps .........................   Passed    0.10 sec
+      Start   6: gui_legacy
+58/99 Test   #6: gui_legacy ..........................   Passed    0.02 sec
+      Start  62: signal_view
+59/99 Test  #62: signal_view .........................   Passed    0.08 sec
+      Start  82: gui_profile_reference
+60/99 Test  #82: gui_profile_reference ...............   Passed    0.03 sec
+      Start  19: vendored_lzma_source
+61/99 Test  #19: vendored_lzma_source ................   Passed    0.05 sec
+      Start  25: stream_receive
+62/99 Test  #34: pattern_correlator ..................   Passed   10.95 sec
+      Start  53: lpi_estimate
+63/99 Test  #53: lpi_estimate ........................   Passed    0.02 sec
+      Start  28: compression_lzma
+64/99 Test  #28: compression_lzma ....................   Passed    0.05 sec
+      Start  88: gui_overlay
+65/99 Test  #88: gui_overlay .........................   Passed    0.02 sec
+      Start  87: gui_application
+66/99 Test  #25: stream_receive ......................   Passed    2.10 sec
+      Start  76: gui_plots
+67/99 Test  #76: gui_plots ...........................   Passed    0.03 sec
+      Start  48: tuning
+68/99 Test  #87: gui_application .....................   Passed    1.73 sec
+      Start  91: gui_native_policy
+69/99 Test  #91: gui_native_policy ...................   Passed    0.03 sec
+      Start  36: pattern_differential
+70/99 Test  #36: pattern_differential ................   Passed    0.09 sec
+      Start  46: qr
+71/99 Test  #46: qr ..................................   Passed    0.02 sec
+      Start  85: gui_launch_command
+72/99 Test  #85: gui_launch_command ..................   Passed    0.01 sec
+      Start  21: keyring
+73/99 Test  #21: keyring .............................   Passed    0.01 sec
+      Start  26: boundary_sync
+74/99 Test  #26: boundary_sync .......................   Passed    0.01 sec
+      Start  39: pattern_correlator_batch
+75/99 Test  #39: pattern_correlator_batch ............   Passed    0.07 sec
+      Start  79: gui_inspection_page
+76/99 Test  #79: gui_inspection_page .................   Passed    0.01 sec
+      Start  23: recovery
+77/99 Test  #23: recovery ............................   Passed    0.21 sec
+      Start  77: rev_utf8
+78/99 Test  #77: rev_utf8 ............................   Passed    0.01 sec
+      Start  45: runtime
+79/99 Test  #45: runtime .............................   Passed    0.01 sec
+      Start  67: gui_document_layout
+80/99 Test  #67: gui_document_layout .................   Passed    0.00 sec
+      Start  66: gui_link_boundary
+81/99 Test  #66: gui_link_boundary ...................   Passed    0.00 sec
+      Start  68: gui_interactions
+82/99 Test  #68: gui_interactions ....................   Passed    0.00 sec
+      Start  69: gui_services
+83/99 Test  #69: gui_services ........................   Passed    0.00 sec
+      Start  73: gui_chrome
+84/99 Test  #48: tuning ..............................   Passed    1.13 sec
+      Start  72: gui_document_presentation
+85/99 Test  #73: gui_chrome ..........................   Passed    0.00 sec
+      Start  71: gui_record_reconciliation
+86/99 Test  #72: gui_document_presentation ...........   Passed    0.00 sec
+      Start  70: gui_bindings
+87/99 Test  #71: gui_record_reconciliation ...........   Passed    0.00 sec
+      Start  47: transfer
+88/99 Test  #70: gui_bindings ........................   Passed    0.01 sec
+      Start  16: fast_boundary
+89/99 Test  #16: fast_boundary .......................   Passed    0.03 sec
+      Start  65: gui_contract
+90/99 Test  #65: gui_contract ........................   Passed    0.00 sec
+      Start  64: gui_layout
+91/99 Test  #64: gui_layout ..........................   Passed    0.00 sec
+      Start  74: gui_inspection
+92/99 Test  #74: gui_inspection ......................   Passed    0.17 sec
+      Start  22: stream_codec
+93/99 Test  #22: stream_codec ........................   Passed    0.07 sec
+      Start  59: live_receptions
+94/99 Test  #47: transfer ............................   Passed    0.29 sec
+      Start  27: compression_short
+95/99 Test  #59: live_receptions .....................   Passed    0.01 sec
+      Start  80: gui_binary_editor
+96/99 Test  #27: compression_short ...................   Passed    0.04 sec
+      Start  24: attachment
+97/99 Test  #80: gui_binary_editor ...................   Passed    0.05 sec
+      Start  40: pattern_search
+98/99 Test  #40: pattern_search ......................   Passed    0.01 sec
+99/99 Test  #24: attachment ..........................   Passed    0.02 sec
+
+99% tests passed, 1 tests failed out of 99
+
+Label Time Summary:
+calibration        = 1319.25 sec*proc (1 test)
+fast_regression    = 381.61 sec*proc (1 test)
+gui                = 136.60 sec*proc (32 tests)
+
+Total Test time (real) = 1339.52 sec
+
+The following tests FAILED:
+	 11 - fast_session (Failed)
+Errors while running CTest

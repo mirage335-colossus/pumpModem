@@ -1,0 +1,25 @@
+{
+  "created_utc": "2026-09-20T10:30:59.046177+00:00",
+  "platform": "Linux-6.12.107+deb13-amd64-x86_64-with-glibc2.41",
+  "source_sha256": {
+    "tools/fast_ldpc_benchmark.cpp": "b0e1f43ecfb69008f1cc1d98e23d42a6c8a95cb993e453eafeed6935567c190b",
+    "src/fast/ldpc.cpp": "29345ff1b2f502f8cd64e4fa042941827e6f4c22e7a39f674e0772866a39fcd7",
+    "include/datapump/fast/ldpc.hpp": "7e8b00017f62345ec7298d27cda667b57d6bf13c65c0ba124c7d7c040d16399e",
+    "third_party/ldpc/tables.hpp": "82a8297cb54e5915b60167472c4f643f6674d48454926a6b1efb7f3174a05685",
+    "third_party/ldpc/LICENSE": "898fc54a3dad21274f7ded0bcf2dc7653c6811fe8f904825a60bb8582eb9c0ac",
+    "tests/test_fast_ldpc.cpp": "90e3a1bf4fced784aa94c6035d1f29840bfc878afbe38cafeffeb6729458afd6"
+  },
+  "compiler_command": "c++ -std=c++20 -O3 -Wall -Wextra -Wpedantic -Iinclude tools/fast_ldpc_benchmark.cpp src/fast/ldpc.cpp -o /tmp/pump-fast-ldpc-benchmark",
+  "benchmark_binary_sha256": "33592406063339873eae03f6988df35f216300049d32299c8192b701bc63b357",
+  "source_information_bytes": 10823040,
+  "historical_benchmark_versions": [
+    {
+      "purpose": "Original 74 invocations through 1048576-QAM",
+      "source_sha256": "1852ece6fd0c4ad17cf648dfe0cb76d77fbd5e0dc0d9c8c3045df128fa20b5b9",
+      "binary_sha256": "251d29efd4da228395bd4be4b852b3f585732a4abec876542fa5d3e6d291bed0"
+    }
+  ],
+  "updated_utc": "2026-09-20T10:38:04.656374+00:00",
+  "total_frames": 1560,
+  "total_invocations": 104
+}

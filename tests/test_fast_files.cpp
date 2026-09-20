@@ -30,7 +30,7 @@ void put32(std::fstream& file,std::streamoff offset,std::uint32_t value) {
     file.seekp(offset);file.write(bytes.data(),bytes.size());
 }
 void test_files() {
-    Directory directory;Settings settings;settings.profile=profile(Channel::wire);settings.profile.constellation=4;
+    Directory directory;Settings settings;settings.profile=classic_profile(Channel::wire);settings.profile.constellation=4;
     settings.profile.interleave_depth=1;settings.key=Crypto(Bytes(32,4));settings.quota_bytes=1024*1024;
     const auto source=directory.path/"source.bin",wave=directory.path/"transfer.wav",destination=directory.path/"received.bin";
     const Bytes content{0,255,0x80,0,1,3,5,7,0,0};write(source,content);
@@ -78,7 +78,7 @@ void test_files() {
     check(cancelled_rx.cancelled && !cancelled_rx.complete && !cancelled_rx.file,"cancelled RX cannot manufacture completion");
 }
 void text_wave_roundtrips() {
-    Directory directory;Settings settings;settings.profile=profile(Channel::wire);
+    Directory directory;Settings settings;settings.profile=classic_profile(Channel::wire);
     settings.profile.interleave_depth=1;settings.quota_bytes=1024*1024;
     const std::string text=std::string("Fast text: caf\xc3\xa9\nline two")+'\0'+std::string(" tail\0",6);
     const Bytes expected(text.begin(),text.end());
@@ -125,7 +125,7 @@ void text_wave_roundtrips() {
 }
 void dense_s16_file() {
     Directory directory;
-    Settings settings;settings.profile=profile(Channel::wire);
+    Settings settings;settings.profile=classic_profile(Channel::wire);
     settings.profile.constellation=256;settings.profile.code_rate=CodeRate::seven_eighths;
     settings.key=Crypto(Bytes(32,7));settings.quota_bytes=1024*1024;
     const auto source=directory.path/"dense.bin",wave=directory.path/"dense.wav";

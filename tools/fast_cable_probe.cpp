@@ -1,8 +1,9 @@
 // Standalone, memory-only physical loopback diagnostic. No production defaults
-// or framing are changed. Build command is printed by --help.
+// or framing are changed by running this tool. Build command is printed by --help.
 #include "datapump/audio.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
+#include <openssl/evp.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -12,6 +13,7 @@
 #include <cstdint>
 #include <iomanip>
 #include <iostream>
+#include <fstream>
 #include <map>
 #include <mutex>
 #include <optional>
@@ -24,6 +26,12 @@ using namespace datapump;
 using namespace datapump::fast;
 using Clock=std::chrono::steady_clock;
 namespace {
+struct Digest {
+    std::unique_ptr<EVP_MD_CTX,decltype(&EVP_MD_CTX_free)> context{EVP_MD_CTX_new(),EVP_MD_CTX_free};
+    Digest(){if(!context||EVP_DigestInit_ex(context.get(),EVP_sha256(),nullptr)!=1)throw Error("Cannot initialize diagnostic digest");}
+    void update(std::span<const std::uint8_t> data){if(EVP_DigestUpdate(context.get(),data.data(),data.size())!=1)throw Error("Cannot hash diagnostic source");}
+    std::string finish(){std::array<unsigned char,32> bytes{};unsigned count=0;if(EVP_DigestFinal_ex(context.get(),bytes.data(),&count)!=1||count!=32)throw Error("Cannot finish diagnostic digest");std::string out;for(auto b:bytes){out+="0123456789abcdef"[b>>4];out+="0123456789abcdef"[b&15];}return out;}
+};
 std::uint8_t fixture(std::uint64_t i,std::uint64_t seed) {
     auto x=i+seed*0x9e3779b97f4a7c15ULL;
     x=(x^(x>>30))*0xbf58476d1ce4e5b9ULL;
@@ -44,11 +52,11 @@ std::string quoted(const std::string& value) {
     return out+'\"';
 }
 struct Options {
-    Profile p=profile(Channel::wire);
-    std::string mode="raw",device="default";
+    Profile p=classic_profile(Channel::wire);
+    std::string mode="raw",device="default",capture_save,replay,tx_bits_save;
     std::uint64_t intervals=100,bytes=4096,seed=417;
     double pre=1,tail=8;
-    bool offline=false,stereo=false,quiet=false,require_success=false;
+    bool offline=false,stereo=false,quiet=false,require_success=false,abort_on_failure=false;
 };
 struct Level {
     std::uint64_t count=0,clipped=0;
@@ -98,25 +106,41 @@ int run(const Options& o) {
     const auto& p=o.p;
     std::unique_ptr<StreamEncoder> encoder;
     std::unique_ptr<StreamDecoder> decoder;
+    Digest source_hash;
+    std::atomic<bool> decode_failed{false};
     if(o.mode=="codec") {
         encoder=std::make_unique<StreamEncoder>(p,std::nullopt,[&,offset=std::uint64_t{0}](std::span<std::uint8_t> out)mutable {
             const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(out.size(),o.bytes-offset));
             for(std::size_t i=0;i<count;++i)out[i]=fixture(offset+i,o.seed);
+            source_hash.update(out.first(count));
             offset+=count;return count;
         });
         decoder=std::make_unique<StreamDecoder>(p,std::nullopt,256ULL*1024*1024);
     }
     const auto estimated_intervals=encoder?estimate_transmission(p,false,o.bytes).intervals:o.intervals;
-    const double estimated_signal=(training_symbols+estimated_intervals*interval_symbols(p)+16.)/p.symbol_rate;
+    const double estimated_signal=(preamble_symbols(p)+total_interval_symbols(p,estimated_intervals)+pulse_tail_symbols(p))/p.symbol_rate;
     std::uint64_t tx_intervals=0,rx_intervals=0,wrong=0,erasures=0,compared=0,exact_intervals=0;
     std::uint64_t aligned_wrong=0,aligned_erased=0,aligned_compared=0,unalignable=0;
     std::map<long long,std::uint64_t> alignment_offsets;
     std::vector<std::uint64_t> error_counts;
+    std::ofstream saved_bits;
+    if(!o.tx_bits_save.empty()) {
+        if(std::filesystem::exists(o.tx_bits_save))throw Error("TX bit destination already exists");
+        saved_bits.open(o.tx_bits_save,std::ios::binary);
+        if(!saved_bits)throw Error("Cannot create TX bit destination");
+    }
     Transmitter tx(p,[&](std::span<std::uint8_t> bits) {
-        if(encoder) {const bool next=encoder->next_interval(bits);tx_intervals+=next;return next;}
-        if(tx_intervals==o.intervals)return false;
-        for(std::size_t i=0;i<bits.size();++i)bits[i]=bit_at(tx_intervals,i,o.seed);
-        ++tx_intervals;return true;
+        bool next=true;
+        if(encoder)next=encoder->next_interval(bits);
+        else {
+            if(tx_intervals==o.intervals)return false;
+            for(std::size_t i=0;i<bits.size();++i)bits[i]=bit_at(tx_intervals,i,o.seed);
+        }
+        if(next) {
+            ++tx_intervals;
+            if(saved_bits.is_open()){saved_bits.write(reinterpret_cast<const char*>(bits.data()),static_cast<std::streamsize>(bits.size()));if(!saved_bits)throw Error("Cannot save TX bit fixture");}
+        }
+        return next;
     });
     Receiver rx(p,[&](std::span<const float> soft) {
         if(decoder)decoder->push_interval(soft);
@@ -162,7 +186,17 @@ int run(const Options& o) {
     double maximum_dsp=0,evm_sum=0,maximum_evm=0;
     std::uint64_t evm_samples=0;
     auto last_report=Clock::now();
+    std::ofstream saved_capture;
+    if(!o.capture_save.empty()) {
+        if(std::filesystem::exists(o.capture_save))throw Error("Capture destination already exists");
+        saved_capture.open(o.capture_save,std::ios::binary);
+        if(!saved_capture)throw Error("Cannot create capture destination");
+    }
     const auto consume=[&](std::span<const float> pcm) {
+        if(saved_capture.is_open()) {
+            saved_capture.write(reinterpret_cast<const char*>(pcm.data()),static_cast<std::streamsize>(pcm.size_bytes()));
+            if(!saved_capture)throw Error("Cannot save capture samples");
+        }
         const auto playback_at=playback_start.load();
         for(std::size_t i=0;i<pcm.size();++i) {
             const double time=double(processed+i)/p.sample_rate;
@@ -176,6 +210,7 @@ int run(const Options& o) {
             if(playback_at && relative/p.sample_rate>estimated_signal+o.tail-2)tail.add(pcm[i]);
         }
         const auto begin=Clock::now();rx.push(pcm);
+        if(decoder&&decoder->snapshot().failed)decode_failed=true;
         maximum_dsp=std::max(maximum_dsp,std::chrono::duration<double>(Clock::now()-begin).count());
         processed+=pcm.size();
         if(rx.progress().acquired && rx.progress().evm>0) {
@@ -185,12 +220,13 @@ int run(const Options& o) {
             std::cerr<<"captured_s="<<double(processed)/p.sample_rate<<" acquired="<<rx.progress().acquired
                 <<" intervals="<<rx_intervals<<" evm="<<rx.progress().evm
                 <<" clock_ppm="<<rx.progress().clock_error_ppm<<" physical_end="<<rx.progress().physical_complete<<'\n';
+            if(decoder) {const auto c=decoder->snapshot();std::cerr<<"ldpc_frames="<<c.ldpc_frames<<" ldpc_failed="<<c.ldpc_failed_frames<<" verified_cycles="<<c.checksum_groups<<" decode_failed="<<c.failed<<'\n';}
             last_report=Clock::now();
         }
     };
     std::uint64_t zero_tail=static_cast<std::uint64_t>(std::ceil(o.tail*p.sample_rate));
     const auto produce=[&](std::span<float> pcm) {
-        if(!tx.finished()) {
+        if(!tx.finished()&&!(o.abort_on_failure&&decode_failed.load())) {
             const auto n=tx.read(pcm);
             signal_samples+=n;for(std::size_t i=0;i<n;++i)tx_level.add(pcm[i]);
             if(n)return n;
@@ -199,7 +235,18 @@ int run(const Options& o) {
         std::fill_n(pcm.begin(),n,0);zero_tail-=n;return n;
     };
     std::size_t fifo_maximum=0;bool fifo_overflow=false;std::string capture_error,playback_error;
-    if(o.offline) {
+    if(!o.replay.empty()) {
+        std::ifstream input(o.replay,std::ios::binary);
+        if(!input)throw Error("Cannot open captured float PCM");
+        playback_start=static_cast<std::uint64_t>(o.pre*p.sample_rate);
+        std::array<float,2400> pcm{};
+        while(input.read(reinterpret_cast<char*>(pcm.data()),sizeof(pcm))||input.gcount()) {
+            if(input.gcount()%sizeof(float))throw Error("Truncated captured PCM sample");
+            consume(std::span(pcm).first(static_cast<std::size_t>(input.gcount())/sizeof(float)));
+        }
+        if(!input.eof())throw Error("Cannot read captured PCM");
+        tx_intervals=estimated_intervals;signal_samples=static_cast<std::uint64_t>(estimated_signal*p.sample_rate);
+    } else if(o.offline) {
         std::array<float,2400> pcm{};
         std::uint64_t pre=static_cast<std::uint64_t>(o.pre*p.sample_rate);
         while(pre) {const auto n=std::min<std::uint64_t>(pcm.size(),pre);consume(std::span(pcm).first(n));pre-=n;}
@@ -238,11 +285,12 @@ int run(const Options& o) {
     }
     // EOF reports only EOF. Only independently observed absence can finish codec.
     rx.finish();
-    bool exact=false;DecodeSnapshot decoded;
+    bool exact=false;DecodeSnapshot decoded;std::string received_sha256;
     if(decoder) {
         if(decoder->snapshot().complete)throw Error("Decoder completed before physical-end notification");
         decoder->finish(rx.progress().physical_complete);decoded=decoder->snapshot();
         const auto result=decoder->result();
+        if(result){Digest digest;digest.update(result->bytes());received_sha256=digest.finish();}
         exact=decoded.complete && result && result->size()==o.bytes;
         if(exact)for(std::size_t i=0;i<result->bytes().size();++i)if(result->bytes()[i]!=fixture(i,o.seed)){exact=false;break;}
     } else exact=rx_intervals==o.intervals && wrong==0 && erasures==0;
@@ -252,9 +300,14 @@ int run(const Options& o) {
     std::cout<<std::setprecision(10)<<"{\"mode\":"<<quoted(o.mode)<<",\"offline\":"<<o.offline
         <<",\"device\":"<<quoted(o.device)<<",\"stereo\":"<<o.stereo
         <<",\"apsk\":"<<p.constellation<<",\"code_rate\":"<<code_rate_value(p.code_rate)
-        <<",\"rs\":"<<quoted(p.robust?"robust":"high-rate")<<",\"depth\":"<<p.interleave_depth
+        <<",\"format\":"<<quoted(p.capacity_mode?"capacity":"classic")
+        <<",\"preamble_symbols\":"<<preamble_symbols(p)
+        <<",\"aborted_on_decode_failure\":"<<(o.abort_on_failure&&decode_failed.load())
+        <<",\"marker_spacing\":"<<(p.capacity_mode?p.marker_spacing_intervals:1)<<",\"pilot_spacing\":"<<(p.capacity_mode?p.pilot_spacing_symbols:32)
+        <<",\"rs\":"<<quoted(p.capacity_mode?"0.3%":p.robust?"robust":"high-rate")<<",\"depth\":"<<p.interleave_depth
         <<",\"sample_rate\":"<<p.sample_rate<<",\"symbol_rate\":"<<p.symbol_rate<<",\"carrier_hz\":"<<p.carrier_hz
         <<",\"rolloff\":"<<p.rolloff<<",\"amplitude\":"<<p.amplitude<<",\"seed\":"<<o.seed<<",\"source_bytes\":"<<(encoder?o.bytes:0)
+        <<",\"source_sha256\":"<<quoted(encoder&&o.replay.empty()?source_hash.finish():"")<<",\"received_sha256\":"<<quoted(received_sha256)
         <<",\"estimated_signal_seconds\":"<<estimated_signal<<",\"signal_seconds\":"<<air
         <<",\"tail_seconds\":"<<o.tail<<",\"wall_seconds\":"<<std::chrono::duration<double>(Clock::now()-started).count()
         <<",\"capture_seconds\":"<<double(processed)/p.sample_rate<<",\"tx_intervals\":"<<tx_intervals
@@ -276,6 +329,8 @@ int run(const Options& o) {
         <<",\"decoded_complete\":"<<decoded.complete<<",\"decoded_failed\":"<<decoded.failed
         <<",\"decoded_bytes\":"<<decoded.source_bytes<<",\"corrected_bytes\":"<<decoded.corrected_bytes
         <<",\"erased_bytes\":"<<decoded.erased_bytes<<",\"checksum_groups\":"<<decoded.checksum_groups
+        <<",\"ldpc_frames\":"<<decoded.ldpc_frames<<",\"ldpc_failed_frames\":"<<decoded.ldpc_failed_frames
+        <<",\"ldpc_iterations\":"<<decoded.ldpc_iterations<<",\"ldpc_changed_bits\":"<<decoded.ldpc_changed_bits
         <<",\"decode_status\":"<<quoted(decoded.status)<<",\"source_goodput_bps\":"<<(encoder&&exact?o.bytes*8/(air+o.tail):0)
         <<",\"capture_format\":";format_json(capture_format);std::cout<<",\"playback_format\":";format_json(playback_format);
     std::cout<<",\"before_level\":";before.json();std::cout<<",\"signal_level\":";signal.json();
@@ -290,26 +345,43 @@ int run(const Options& o) {
 }
 int main(int argc,char** argv) {try {
     Options o;
+    for(int i=1;i<argc;++i)if(std::string_view(argv[i])=="--capacity"||std::string_view(argv[i])=="--qam")o.p=capacity_profile();
     for(int i=1;i<argc;++i) {
         const std::string option=argv[i];
         if(option=="--help") {
-            std::cout<<"fast_cable_probe [--offline] [--mode raw|codec] [--intervals N] [--bytes N] [--apsk 4|16|64|256] [--code-rate 1/2|3/4|7/8] [--rs robust|high-rate] [--depth 1..64] [--amplitude 0..0.8] [--symbol-rate Hz] [--carrier Hz] [--rolloff 0.1..0.5] [--sample-rate Hz] [--seed N] [--device default] [--stereo] [--pre seconds] [--tail seconds>=6.5] [--quiet] [--require-success]\n"
-                <<"Without --offline this simultaneously uses the selected real capture/playback devices. This diagnostic defaults to right-only output; --stereo matches the cable application's both-channel default. JSON output; progress to stderr. Capture never runs DSP. Level ratio is an uncalibrated fullband measurement, not demodulator SNR. Strict raw success requires every interval at its original ordinal. --rs uses existing production choices only.\n"
-                <<"Build: c++ -std=c++20 -O3 -Iinclude tools/fast_cable_probe.cpp build/libdatapump_fast.a build/libdatapump.a build/third_party/xz/liblzma.a -lcrypto -ldl -pthread -o build/fast_cable_probe\n";
+            std::cout<<"fast_cable_probe [--offline | --replay PCM.f32] [--capacity] [--mode raw|codec] [--intervals N] [--bytes N]\n"
+                <<"  [--qam power-of-four:4..4194304 | --apsk 4|16|64|256] [--code-rate 1/2|3/4|7/8|7/9|8/9|9/10]\n"
+                <<"  [--rs robust|high-rate|0.3%] [--depth 1..16(capacity)|1..64(classic)] [--marker-spacing 1..16] [--pilot-spacing 16..1024]\n"
+                <<"  [--amplitude 0..0.8] [--symbol-rate Hz] [--carrier Hz] [--rolloff 0.02..0.5] [--sample-rate Hz]\n"
+                <<"  [--seed N] [--device default] [--stereo] [--pre seconds] [--tail seconds>=6.5] [--quiet] [--require-success]\n"
+                <<"  [--abort-on-failure] [--capture-save PCM.f32] [--tx-bits-save BITS.u8]\n"
+                <<"Default is classic cable; --capacity or --qam selects the capacity preset. Without --offline/--replay, uses real capture/playback simultaneously.\n"
+                <<"Diagnostic routing defaults to right-only; --stereo matches the cable application's both-channel default. JSON stdout, progress stderr.\n"
+                <<"Capture/replay files are headerless native float32 mono at --sample-rate, from the production S16 hardware path. TX bits are literal uint8 values 0 or 1.\n"
+                <<"Replay requires the exact original profile/source fixture and wire revision. Level ratio is fullband and uncalibrated, not demodulator SNR.\n"
+                <<"--abort-on-failure stops new TX data but sends the real silence tail; cancellation never fabricates physical end.\n"
+                <<"Build: cmake --build build --target fast_cable_probe -j 4\n";
             return 0;
         }
         if(option=="--offline"){o.offline=true;continue;}
+        if(option=="--capacity")continue;
         if(option=="--stereo"){o.stereo=true;continue;}
         if(option=="--quiet"){o.quiet=true;continue;}
+        if(option=="--abort-on-failure"){o.abort_on_failure=true;continue;}
         if(option=="--require-success"){o.require_success=true;continue;}
         if(i+1==argc)throw Error("Missing option value: "+option);
         const std::string value=argv[++i];
         if(option=="--mode")o.mode=value;
         else if(option=="--device")o.device=value;
+        else if(option=="--capture-save")o.capture_save=value;
+        else if(option=="--tx-bits-save")o.tx_bits_save=value;
+        else if(option=="--replay"){o.replay=value;o.offline=true;}
         else if(option=="--intervals")o.intervals=std::stoull(value);
         else if(option=="--bytes")o.bytes=std::stoull(value);
         else if(option=="--seed")o.seed=std::stoull(value);
-        else if(option=="--apsk")o.p.constellation=std::stoul(value);
+        else if(option=="--apsk"||option=="--qam")o.p.constellation=std::stoul(value);
+        else if(option=="--marker-spacing")o.p.marker_spacing_intervals=std::stoul(value);
+        else if(option=="--pilot-spacing")o.p.pilot_spacing_symbols=std::stoul(value);
         else if(option=="--depth")o.p.interleave_depth=std::stoul(value);
         else if(option=="--sample-rate")o.p.sample_rate=std::stoul(value);
         else if(option=="--symbol-rate")o.p.symbol_rate=std::stod(value);
@@ -321,12 +393,10 @@ int main(int argc,char** argv) {try {
         else if(option=="--rs") {
             if(value=="robust")o.p.robust=true;
             else if(value=="high-rate")o.p.robust=false;
+            else if(value=="0.3%"&&o.p.capacity_mode)o.p.robust=false;
             else throw Error("RS must be robust or high-rate");
         } else if(option=="--code-rate") {
-            if(value=="1/2")o.p.code_rate=CodeRate::half;
-            else if(value=="3/4")o.p.code_rate=CodeRate::three_quarters;
-            else if(value=="7/8")o.p.code_rate=CodeRate::seven_eighths;
-            else throw Error("Unsupported code rate");
+            o.p.code_rate=parse_code_rate(value);
         } else throw Error("Unknown option: "+option);
     }
     validate(o.p);

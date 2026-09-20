@@ -1,0 +1,354 @@
+{
+  "4m-r89-before-pilot-fix.csv": [
+    {
+      "first_interval": 0,
+      "intervals": 127,
+      "raw_errors": 4343,
+      "compared_bits": 260096,
+      "rms_evm": 0.0006554271137134052,
+      "signal_to_error_db": 63.66951193369747,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.118414572259706,
+      "maximum_interval_mean_phase_rad": 0.00130836
+    },
+    {
+      "first_interval": 127,
+      "intervals": 127,
+      "raw_errors": 6575,
+      "compared_bits": 260096,
+      "rms_evm": 0.0008749790105232536,
+      "signal_to_error_db": 61.16004729894261,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 16.829787940724046,
+      "maximum_interval_mean_phase_rad": 0.00198811
+    },
+    {
+      "first_interval": 254,
+      "intervals": 127,
+      "raw_errors": 7241,
+      "compared_bits": 260096,
+      "rms_evm": 0.0010189945401099236,
+      "signal_to_error_db": 59.836562859743594,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 17.66369112657823,
+      "maximum_interval_mean_phase_rad": 0.00275771
+    },
+    {
+      "first_interval": 381,
+      "intervals": 127,
+      "raw_errors": 5155,
+      "compared_bits": 260096,
+      "rms_evm": 0.0007221441928893721,
+      "signal_to_error_db": 62.8275215354831,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 19.494922339968625,
+      "maximum_interval_mean_phase_rad": 0.00132451
+    },
+    {
+      "first_interval": 508,
+      "intervals": 127,
+      "raw_errors": 4519,
+      "compared_bits": 260096,
+      "rms_evm": 0.0006681612829849324,
+      "signal_to_error_db": 63.50237386857481,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.202764074993528,
+      "maximum_interval_mean_phase_rad": 0.00118031
+    }
+  ],
+  "4m-r89-causal-pilot-pll.csv": [
+    {
+      "first_interval": 0,
+      "intervals": 127,
+      "raw_errors": 3666,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005928747189120808,
+      "signal_to_error_db": 64.54074136486886,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.578935408702538,
+      "maximum_interval_mean_phase_rad": 0.000441275
+    },
+    {
+      "first_interval": 127,
+      "intervals": 127,
+      "raw_errors": 3559,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005865853276430349,
+      "signal_to_error_db": 64.63337608600328,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.515722018306707,
+      "maximum_interval_mean_phase_rad": 0.000448688
+    },
+    {
+      "first_interval": 254,
+      "intervals": 127,
+      "raw_errors": 3680,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005965520453781665,
+      "signal_to_error_db": 64.48703321809467,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.590425562375305,
+      "maximum_interval_mean_phase_rad": 0.000466414
+    },
+    {
+      "first_interval": 381,
+      "intervals": 127,
+      "raw_errors": 3696,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005963185404428094,
+      "signal_to_error_db": 64.4904337514777,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.56364691512207,
+      "maximum_interval_mean_phase_rad": 0.000501725
+    },
+    {
+      "first_interval": 508,
+      "intervals": 127,
+      "raw_errors": 3531,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005820790252197951,
+      "signal_to_error_db": 64.70036099816846,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.658193685557197,
+      "maximum_interval_mean_phase_rad": 0.000426909
+    }
+  ],
+  "4m-r89-pilot-interpolation.csv": [
+    {
+      "first_interval": 0,
+      "intervals": 127,
+      "raw_errors": 3560,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005881486663921548,
+      "signal_to_error_db": 64.6102576678303,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.60617086614173,
+      "maximum_interval_mean_phase_rad": 0.000388564,
+      "initial_clock_ppm": -0.00449288,
+      "final_clock_ppm": 0.00653963
+    },
+    {
+      "first_interval": 127,
+      "intervals": 127,
+      "raw_errors": 3517,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005829558288210451,
+      "signal_to_error_db": 64.68728701892024,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.533440157480317,
+      "maximum_interval_mean_phase_rad": 0.00035364,
+      "initial_clock_ppm": 0.00653963,
+      "final_clock_ppm": -0.00183185
+    },
+    {
+      "first_interval": 254,
+      "intervals": 127,
+      "raw_errors": 3639,
+      "compared_bits": 260096,
+      "rms_evm": 0.000592123183696561,
+      "signal_to_error_db": 64.55175868870032,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.61181496062992,
+      "maximum_interval_mean_phase_rad": 0.000303898,
+      "initial_clock_ppm": -0.00183185,
+      "final_clock_ppm": -0.00467826
+    },
+    {
+      "first_interval": 381,
+      "intervals": 127,
+      "raw_errors": 3617,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005900309392926201,
+      "signal_to_error_db": 64.58250429557194,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.58864566929134,
+      "maximum_interval_mean_phase_rad": 0.000321933,
+      "initial_clock_ppm": -0.00467826,
+      "final_clock_ppm": 0.000545638
+    },
+    {
+      "first_interval": 508,
+      "intervals": 127,
+      "raw_errors": 3456,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005771943406321027,
+      "signal_to_error_db": 64.77355871596097,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.687896850393702,
+      "maximum_interval_mean_phase_rad": 0.000356538,
+      "initial_clock_ppm": 0.000545638,
+      "final_clock_ppm": -0.0106775
+    }
+  ],
+  "4m-v2-short-training-failure.csv": [
+    {
+      "first_interval": 0,
+      "intervals": 127,
+      "raw_errors": 8531,
+      "compared_bits": 260096,
+      "rms_evm": 0.0009852342240861452,
+      "signal_to_error_db": 60.12921020962652,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 17.158529763779526,
+      "maximum_interval_mean_phase_rad": 0.000774151,
+      "initial_clock_ppm": -0.633614,
+      "final_clock_ppm": -0.341684
+    },
+    {
+      "first_interval": 127,
+      "intervals": 127,
+      "raw_errors": 5951,
+      "compared_bits": 260096,
+      "rms_evm": 0.0007507791344341557,
+      "signal_to_error_db": 62.489756114887804,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 19.489845669291338,
+      "maximum_interval_mean_phase_rad": 0.000534095,
+      "initial_clock_ppm": -0.341684,
+      "final_clock_ppm": -0.206149
+    },
+    {
+      "first_interval": 254,
+      "intervals": 127,
+      "raw_errors": 3998,
+      "compared_bits": 260096,
+      "rms_evm": 0.0006150187034474744,
+      "signal_to_error_db": 64.22223353227972,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.445914173228346,
+      "maximum_interval_mean_phase_rad": 0.000382388,
+      "initial_clock_ppm": -0.206149,
+      "final_clock_ppm": -0.0938022
+    },
+    {
+      "first_interval": 381,
+      "intervals": 127,
+      "raw_errors": 3793,
+      "compared_bits": 260096,
+      "rms_evm": 0.0006004887255144408,
+      "signal_to_error_db": 64.42990284574877,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.569446456692912,
+      "maximum_interval_mean_phase_rad": 0.000479211,
+      "initial_clock_ppm": -0.0938022,
+      "final_clock_ppm": -0.0502885
+    },
+    {
+      "first_interval": 508,
+      "intervals": 49,
+      "raw_errors": 1650,
+      "compared_bits": 100352,
+      "rms_evm": 0.0006299087301259888,
+      "signal_to_error_db": 64.01444745137786,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.49914081632653,
+      "maximum_interval_mean_phase_rad": 0.000349787,
+      "initial_clock_ppm": -0.0502885,
+      "final_clock_ppm": -0.0252619
+    }
+  ],
+  "4m-v3-long-training-success.csv": [
+    {
+      "first_interval": 0,
+      "intervals": 127,
+      "raw_errors": 3535,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005865241156951844,
+      "signal_to_error_db": 64.63428253207626,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.655318897637795,
+      "maximum_interval_mean_phase_rad": 0.000318423,
+      "initial_clock_ppm": 0.00288858,
+      "final_clock_ppm": 0.0149745
+    },
+    {
+      "first_interval": 127,
+      "intervals": 127,
+      "raw_errors": 3654,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005869717499632002,
+      "signal_to_error_db": 64.62765600333837,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.641485826771653,
+      "maximum_interval_mean_phase_rad": 0.000430666,
+      "initial_clock_ppm": 0.0149745,
+      "final_clock_ppm": -0.0222238
+    },
+    {
+      "first_interval": 254,
+      "intervals": 127,
+      "raw_errors": 3551,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005849705042571117,
+      "signal_to_error_db": 64.65732063258967,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.65544409448819,
+      "maximum_interval_mean_phase_rad": 0.000406024,
+      "initial_clock_ppm": -0.0222238,
+      "final_clock_ppm": -0.00344895
+    },
+    {
+      "first_interval": 381,
+      "intervals": 127,
+      "raw_errors": 3427,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005819031772177068,
+      "signal_to_error_db": 64.70298543065144,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.665634645669293,
+      "maximum_interval_mean_phase_rad": 0.000292055,
+      "initial_clock_ppm": -0.00344895,
+      "final_clock_ppm": -0.00365785
+    },
+    {
+      "first_interval": 508,
+      "intervals": 127,
+      "raw_errors": 3506,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005787580352886754,
+      "signal_to_error_db": 64.7500593265707,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.692000787401575,
+      "maximum_interval_mean_phase_rad": 0.000309682,
+      "initial_clock_ppm": -0.00365785,
+      "final_clock_ppm": 0.00046772
+    }
+  ],
+  "4m-v3-counterfactual-short-fit.csv": [
+    {
+      "first_interval": 0,
+      "intervals": 127,
+      "raw_errors": 9531,
+      "compared_bits": 260096,
+      "rms_evm": 0.0010742637780232777,
+      "signal_to_error_db": 59.377781350859145,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 16.203517251968506,
+      "maximum_interval_mean_phase_rad": 0.000598888,
+      "initial_clock_ppm": -0.717271,
+      "final_clock_ppm": -0.385251
+    },
+    {
+      "first_interval": 127,
+      "intervals": 127,
+      "raw_errors": 6197,
+      "compared_bits": 260096,
+      "rms_evm": 0.000768650077762296,
+      "signal_to_error_db": 62.285426490918816,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 19.40130787401575,
+      "maximum_interval_mean_phase_rad": 0.00060216,
+      "initial_clock_ppm": -0.385251,
+      "final_clock_ppm": -0.227364
+    },
+    {
+      "first_interval": 254,
+      "intervals": 127,
+      "raw_errors": 4248,
+      "compared_bits": 260096,
+      "rms_evm": 0.0006307024055024218,
+      "signal_to_error_db": 64.00351025203987,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.352411023622047,
+      "maximum_interval_mean_phase_rad": 0.00041794,
+      "initial_clock_ppm": -0.227364,
+      "final_clock_ppm": -0.1086
+    },
+    {
+      "first_interval": 381,
+      "intervals": 127,
+      "raw_errors": 3553,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005900012483833677,
+      "signal_to_error_db": 64.58294138866782,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.615541732283464,
+      "maximum_interval_mean_phase_rad": 0.000288499,
+      "initial_clock_ppm": -0.1086,
+      "final_clock_ppm": -0.0575595
+    },
+    {
+      "first_interval": 508,
+      "intervals": 127,
+      "raw_errors": 3591,
+      "compared_bits": 260096,
+      "rms_evm": 0.0005817847485971526,
+      "signal_to_error_db": 64.70475335813242,
+      "gmi_at_unit_llr_scale_per_payload_symbol": 20.679899212598425,
+      "maximum_interval_mean_phase_rad": 0.000312183,
+      "initial_clock_ppm": -0.0575595,
+      "final_clock_ppm": -0.0271596
+    }
+  ]
+}

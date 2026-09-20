@@ -148,6 +148,8 @@ Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave
         const auto n=input.read(block,s.mono);if(!n)break;modem.push(std::span(block).first(n));samples+=n;
         auto c=codec.snapshot();const auto& d=modem.progress();result.intervals=c.intervals;result.authenticated_groups=c.authenticated_groups;
         result.checksum_groups=c.checksum_groups;
+        result.ldpc_frames=c.ldpc_frames;result.ldpc_failed_frames=c.ldpc_failed_frames;
+        result.ldpc_iterations=c.ldpc_iterations;result.ldpc_changed_bits=c.ldpc_changed_bits;
         result.corrected_bytes=c.corrected_bytes;result.erased_bytes=c.erased_bytes;result.evm=d.evm;result.status=c.status;++result.revision;
         if(progress)progress(result);
         if(d.physical_complete)break;

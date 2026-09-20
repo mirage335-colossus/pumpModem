@@ -55,7 +55,7 @@ template<class P> void await(P predicate,const char* message) {
     }
 }
 void collector() {
-    const auto p=profile(Channel::wire);
+    const auto p=classic_profile(Channel::wire);
     const auto id=next_diagnostics_stream_id();
     const auto initial=initial_diagnostics(p,true,id);
     require(initial && initial->stream_id==id && !initial->revision && !initial->waveform_count
@@ -136,7 +136,7 @@ void input_observations() {
     // A carrier tone cannot satisfy the independent random marker. Its actual
     // complex matched-filter response is still useful input instrumentation.
     for(const auto channel:{Channel::fm,Channel::acoustic}) {
-        const auto p=profile(channel);
+        const auto p=classic_profile(channel);
         constexpr double amplitude=.25,phase=.7;
         const auto omega=2*std::numbers::pi*p.carrier_hz/p.sample_rate;
         std::vector<float> pcm(12000);
@@ -179,7 +179,7 @@ void input_observations() {
     }
 }
 void observers() {
-    auto p=profile(Channel::wire);p.constellation=16;p.amplitude=.5;const auto bits=input();
+    auto p=classic_profile(Channel::wire);p.constellation=16;p.amplitude=.5;const auto bits=input();
     const auto plain=transmit(p,bits);
     std::vector<std::complex<float>> mapped;
     const auto tapped=transmit(p,bits,[&](auto symbol){mapped.push_back(symbol);});
@@ -227,7 +227,7 @@ void observers() {
     }
 }
 void sessions() {
-    Settings settings;settings.device="telemetry fixture";settings.profile.interleave_depth=1;
+    Settings settings;settings.device="telemetry fixture";settings.profile=classic_profile(Channel::wire);settings.profile.interleave_depth=1;
     Session session;session.configure(settings);
     fixture::playback_ready=false;session.transmit_text("Actual fast diagnostics");
     const auto pending=session.poll().diagnostics;

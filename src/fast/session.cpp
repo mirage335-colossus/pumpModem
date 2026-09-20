@@ -88,8 +88,10 @@ struct Session::Impl {
                 out.intervals=coding.intervals;out.authenticated_groups=coding.authenticated_groups;
                 out.checksum_groups=coding.checksum_groups;
                 out.corrected_bytes=coding.corrected_bytes;out.erased_bytes=coding.erased_bytes;
+                out.ldpc_frames=coding.ldpc_frames;out.ldpc_failed_frames=coding.ldpc_failed_frames;
+                out.ldpc_iterations=coding.ldpc_iterations;out.ldpc_changed_bits=coding.ldpc_changed_bits;
                 out.evm=dsp.evm;out.carrier_error_hz=dsp.carrier_error_hz;out.clock_error_ppm=dsp.clock_error_ppm;
-                out.status=dsp.acquired?"Receiving fast stream; content pending":"Listening for fast APSK training";
+                out.status=dsp.acquired?"Receiving fast stream; content pending":"Listening for Fast modem training";
             });
             if(dsp.physical_complete)break;
         }

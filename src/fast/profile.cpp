@@ -3,8 +3,11 @@
 #include <cmath>
 
 namespace datapump::fast {
-Profile profile(Channel channel) {
+Profile classic_profile(Channel channel) {
     Profile p;p.channel=channel;
+    p.capacity_mode=false;p.marker_spacing_intervals=4;
+    p.constellation=256;p.code_rate=CodeRate::seven_eighths;
+    p.interleave_depth=62;p.symbol_rate=15000;p.rolloff=.20;p.amplitude=.35;
     if(channel!=Channel::wire) {
         p.constellation=16;p.code_rate=CodeRate::three_quarters;
         p.robust=true;p.interleave_depth=16;p.amplitude=.5;
@@ -18,6 +21,8 @@ Profile profile(Channel channel) {
     }
     return p;
 }
+Profile profile(Channel channel) {return channel==Channel::wire?capacity_profile():classic_profile(channel);}
+Profile capacity_profile() {return Profile{};}
 std::string_view channel_name(Channel c) {
     switch(c) {
     case Channel::wire:return "wire";
@@ -37,21 +42,56 @@ double code_rate_value(CodeRate r) {
     case CodeRate::half:return .5;
     case CodeRate::three_quarters:return .75;
     case CodeRate::seven_eighths:return .875;
+    case CodeRate::seven_ninths:return 7./9.;
+    case CodeRate::eight_ninths:return 8./9.;
+    case CodeRate::nine_tenths:return .9;
     }
-    throw Error("Unknown fast convolutional code rate");
+    throw Error("Unknown fast code rate");
+}
+std::string_view code_rate_name(CodeRate r) {
+    switch(r) {
+    case CodeRate::half:return "1/2";
+    case CodeRate::three_quarters:return "3/4";
+    case CodeRate::seven_eighths:return "7/8";
+    case CodeRate::seven_ninths:return "7/9";
+    case CodeRate::eight_ninths:return "8/9";
+    case CodeRate::nine_tenths:return "9/10";
+    }
+    throw Error("Unknown fast code rate");
+}
+CodeRate parse_code_rate(std::string_view name) {
+    for(auto r:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_eighths,
+                CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})
+        if(code_rate_name(r)==name)return r;
+    throw Error("Fast code rate must be 1/2, 3/4, 7/8, 7/9, 8/9 or 9/10");
 }
 void validate(const Profile& p) {
     (void)channel_name(p.channel);(void)code_rate_value(p.code_rate);
-    if(p.constellation!=4&&p.constellation!=16&&p.constellation!=64&&p.constellation!=256)
+    if(p.capacity_mode) {
+        if(p.channel!=Channel::wire)throw Error("Capacity format currently requires the cable profile");
+        if(p.constellation<4||p.constellation>4194304||!std::has_single_bit(p.constellation)||std::countr_zero(p.constellation)%2)
+            throw Error("Fast QAM order must be a power of four from 4 through 4194304");
+        if(p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
+           p.code_rate!=CodeRate::eight_ninths&&p.code_rate!=CodeRate::nine_tenths)
+            throw Error("Fast capacity LDPC rate must be 3/4, 7/9, 8/9 or 9/10");
+        if(p.robust)throw Error("Capacity format uses the approximately 0.3% outer RS code");
+        if(!p.interleave_depth||p.interleave_depth>16)throw Error("Fast LDPC interleave depth must be 1..16");
+        if(!p.marker_spacing_intervals||p.marker_spacing_intervals>16)throw Error("Fast marker spacing must be 1..16 intervals");
+        if(p.pilot_spacing_symbols<16||p.pilot_spacing_symbols>1024)throw Error("Fast pilot spacing must be 16..1024 symbols");
+    } else if(p.constellation!=4&&p.constellation!=16&&p.constellation!=64&&p.constellation!=256)
         throw Error("Fast constellation must be 4, 16, 64 or 256");
+    if(!p.capacity_mode&&p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_eighths)
+        throw Error("Classic Fast format requires a convolutional code rate");
     if(!p.interleave_depth||p.interleave_depth>64)
         throw Error("Fast interleave depth must be 1..64");
     if(p.sample_rate<44100||p.sample_rate>192000)
         throw Error("Fast sample rate must be 44100..192000 Hz");
-    if(!std::isfinite(p.symbol_rate)||p.symbol_rate<100||p.symbol_rate>p.sample_rate/2.5)
+    // The 18 kHz / 1.02 cable waveform has 2.499 samples/symbol at
+    // 44.1 kHz. Keep peer baud fixed when only the local device rate changes.
+    if(!std::isfinite(p.symbol_rate)||p.symbol_rate<100||p.symbol_rate>p.sample_rate/(p.capacity_mode?2.49:2.5))
         throw Error("Invalid fast symbol rate");
-    if(!std::isfinite(p.rolloff)||p.rolloff<.1||p.rolloff>.5)
-        throw Error("Fast RRC rolloff must be 0.1..0.5");
+    if(!std::isfinite(p.rolloff)||p.rolloff<(p.capacity_mode?.02:.1)||p.rolloff>.5)
+        throw Error("Fast RRC rolloff is outside the selected format's range");
     const auto half=p.symbol_rate*(1+p.rolloff)/2;
     if(!std::isfinite(p.carrier_hz)||p.carrier_hz-half<50||p.carrier_hz+half>p.sample_rate*.45)
         throw Error("Fast waveform does not fit the selected sample rate");
@@ -61,6 +101,7 @@ void validate(const Profile& p) {
 Bytes profile_id(const Profile& p) {
     validate(p);
     Bytes out{'d','a','t','a','p','u','m','p','/','f','a','s','t','/','v','1'};
+    if(p.capacity_mode)out.back()='2';
     const auto append=[&](std::uint64_t n) {for(int i=7;i>=0;--i)out.push_back(static_cast<std::uint8_t>(n>>(i*8)));};
     append(static_cast<unsigned>(p.channel));append(p.constellation);
     append(static_cast<unsigned>(p.code_rate));append(p.robust);append(p.interleave_depth);
@@ -68,6 +109,7 @@ Bytes profile_id(const Profile& p) {
     append(std::bit_cast<std::uint64_t>(p.symbol_rate));
     append(std::bit_cast<std::uint64_t>(p.carrier_hz));
     append(std::bit_cast<std::uint64_t>(p.rolloff));
+    if(p.capacity_mode) {append(p.marker_spacing_intervals);append(p.pilot_spacing_symbols);}
     return out;
 }
 double gross_bitrate(const Profile& p) {validate(p);return p.symbol_rate*std::log2(p.constellation);}

@@ -1,0 +1,13 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 8000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 11025Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 16000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 22050Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 24000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 32000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 44100Hz, get 48000Hz)
+Fl_Xlib_Graphics_Driver::push_clip: clip stack overflow!
+
+Fl_Graphics_Driver::pop_clip: clip stack underflow!
+
+FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.

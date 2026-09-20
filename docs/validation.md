@@ -4,6 +4,45 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast capacity implementation and full-file cable test — 20 September 2026
+
+The [capacity cable study](fast-capacity-live-study.md) records a successful
+**50,000,000-byte live default-device transfer in 1,290.664 seconds**, with exact
+bytes and matching independent SHA-256 hashes. All 6,980 LDPC frames converged;
+there was no clipping, dropped interval or FIFO overrun. Maximum diagnostic
+capture backlog was 0.304 seconds, below the production one-second bound.
+
+The new cable default is 4,194,304-QAM, LDPC 8/9, four frames per coding cycle,
+0.30649% RS parity/data, one full marker every 16 intervals, raw source bytes and
+one protected continuation/final flag per cycle. The 18 kHz waveform uses
+17,647.0588 symbols/s, 2% rolloff, a 2,048-symbol training preamble and amplitude
+0.30. Nominal 50 MB payload rate is 310.72 kbit/s; observed end-to-end rate was
+309.92 kbit/s. Classic Fast and Regular wire formats are preserved.
+
+The complete initial 99-test suite passed 98 tests; its Fast session fixture
+fed 50 ms audio blocks every 3 ms and overran the capacity receiver. Fast capture
+in that fixture now uses audio pace while retaining production's one-second
+FIFO. The final 10-target Fast/shared-GUI suite passed after all runtime/default
+changes, including session ownership, codec, modem, QAM, LDPC, files, transfer,
+telemetry, CLI and GUI tests. The CLI target contains 16 cases, including eight
+public/keyed dense-QAM S16 WAV combinations at 48/44.1 kHz. QAM tests include 21
+sampled scenarios, clock offsets of ±100 ppm, carrier offset, echo and exact
+LDPC recovery. Independent classical vectors and physical-end checks remain.
+The LDPC and standalone GF(65536) RS audits also passed ASan/UBSan checks.
+
+Native FLTK adapter and document conformance passed on a private Xvfb display.
+The initial sandboxed display attempt could not connect to its socket; the same
+checks ran successfully outside that sandbox. See the archived logs and exact
+evidence scopes in the [study](fast-capacity-live-study.md). Linux FLTK validation
+does not establish native Windows or Rev runtime validation.
+
+Live experiments used 29 minutes 56 seconds in total, including failures and
+silence tails. One full-file success is not a demonstrated 80% reliability rate.
+The final short margin sweep passed both 8/9 and 9/10 at amplitudes 0.30 and 0.27,
+but failed both at 0.24. Device mixer levels remained unchanged. The archive
+separates those live trials, recorded replays, ideal-AWGN experiments and airtime
+projections; none is substituted for another.
+
 ## Physical cable SNR measurement — 20 September 2026 UTC
 
 The [SNR report](cable-snr-live-study.md) records live ALC257 headphone-to-mic

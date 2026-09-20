@@ -39,7 +39,10 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
             else if(!fixture::hold)block.assign(rate/20,0);
         }
         if(!block.empty()&&!consume(block))break;
-        std::this_thread::sleep_for(3ms);
+        // Capacity decoding is intentionally exercised against the production
+        // one-second FIFO. Feed Fast's 50 ms blocks at audio pace; the old 3 ms
+        // fixture clock imposed an unrelated 16.7x real-time requirement.
+        std::this_thread::sleep_for(rate>=44100?50ms:3ms);
     }
 }
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,bool mono) {

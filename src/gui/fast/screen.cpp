@@ -16,11 +16,11 @@ bool owns(Field field) {return field>=Field::fast_profile&&field<=Field::fast_hi
 bool owns(Command command) {return command>=Command::fast_open_key&&command<=Command::fast_save;}
 const std::vector<Control>& screen() {
     static const std::vector<Control> controls{
-        placed(Kind::label,Field::count,Command::none,"FAST TRANSFER\nAPSK · fixed 256-byte alignment intervals",Slot::fast_heading),
+        placed(Kind::label,Field::count,Command::none,"FAST TRANSFER\nText and files",Slot::fast_heading),
         placed(Kind::choice,Field::fast_profile,Command::none,"Channel profile",Slot::fast_profile,"Both ends must use identical local profile, constellation and coding selections."),
-        placed(Kind::choice,Field::fast_constellation,Command::none,"Constellation",Slot::fast_constellation,"Denser APSK requires a cleaner, more linear audio path."),
-        placed(Kind::choice,Field::fast_coding,Command::none,"Inner convolutional code",Slot::fast_coding),
-        placed(Kind::choice,Field::fast_depth,Command::none,"Interleave depth",Slot::fast_depth,"62 minimizes cycle padding for 50 MB cable transfers; 1 reduces short-message latency. Both peers must match."),
+        placed(Kind::choice,Field::fast_constellation,Command::none,"Constellation",Slot::fast_constellation,"Denser constellations require a cleaner, more linear audio path."),
+        placed(Kind::choice,Field::fast_coding,Command::none,"Inner error correction",Slot::fast_coding),
+        placed(Kind::choice,Field::fast_depth,Command::none,"Interleave depth",Slot::fast_depth,"More blocks spread brief disturbances; fewer blocks reduce short-message latency. Both peers must match."),
         placed(Kind::choice,Field::fast_fec,Command::none,"Interleaved Reed–Solomon",Slot::fast_fec),
         placed(Kind::text,Field::fast_device,Command::none,"Audio device",Slot::fast_device),
         placed(Kind::toggle,Field::fast_mono,Command::none,"Right channel / mono",Slot::fast_mono),

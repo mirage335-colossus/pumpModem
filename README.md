@@ -9,7 +9,7 @@ explicit. No network listener or routable addressing is implemented.
 **Status: working reference implementation, version 0.7.2.** The audio/stream/crypto
 pipeline works end to end and has automated regression tests. This is not yet
 the complete high-performance modem described in the supplied specification.
-In particular, near-capacity adaptive modulation, multi-signal radio scanning,
+In particular, automatic modulation/rate adaptation, multi-signal radio scanning,
 RF hopping, multi-day status reception, and hardware radio integrations remain
 unimplemented. See the [requirements matrix](docs/requirements.md) for precise
 coverage and boundaries. No unimplemented control is presented as functioning.
@@ -32,34 +32,51 @@ a waterfall and an editable carrier (1500 Hz by default). Its modulation,
 settings and regression-only fixed-SNR channel are independent of Robust and
 Fast. See [Legacy Modem](docs/legacy-modem.md).
 
-**Fast Modem** is an independent APSK text and file-transfer interface, selected
-from the **Modem** dropdown beside **DATA PUMP**. It includes
-live waveform, waterfall and constellation plots and uses fixed 256-byte coded intervals,
-real-time constellation tracking, optional AES-256-CBC/HMAC, convolutional coding and
-interleaved Reed–Solomon. Wire, SSB, FM and acoustic profiles offer QPSK through
-256-APSK. Regular waveform, encryption and short/pending-message behavior remain
-unchanged. See [Fast operation, format and measured limits](docs/fast-mode.md)
-and the earlier [design and code-path audit](docs/fast-mode-plan.md).
-The [live cable study](docs/fast-cable-live-study.md) measures the connected
-headphone-to-microphone path and explains the bulk cable default: 256-APSK,
-rate 7/8, high-rate RS, depth 62, amplitude 0.35 and both output channels.
-Its calculated 50 MB airtime is about
-2 hours 1 minute; long-file success probability remains unqualified.
-The [physical SNR measurement](docs/cable-snr-live-study.md) separately measures
-about 79 dB on one input channel and 81.5 dB with both inputs averaged over
-20 Hz–20 kHz under the tested best-case tone conditions.
-Future throughput work should start with the
-[Fast coding and capacity study](docs/fast-coding-study.md): measured LDPC and
-channel results, sparse RS models, shaping extrapolations and development priorities.
+**Fast Modem** is an independent QAM/LDPC and classic APSK text/file-transfer
+interface, selected from the **Modem** dropdown beside **DATA PUMP**. It includes
+live waveform, waterfall and constellation plots, fixed 2,048-bit coded intervals,
+optional AES-256-CBC/HMAC, and bounded streaming source storage. Regular waveform,
+encryption and short/pending-message behavior remain unchanged.
+
+The default audio-cable profile now uses **4,194,304-QAM, LDPC 8/9, four LDPC
+frames per cycle, approximately 0.3% RS parity/data, and a full marker every
+16 intervals**. It uses 17,647.0588 symbols/s, 2% rolloff and an 18 kHz shaped
+band, with output amplitude 0.30 on both channels. Compact eight-bit source
+bytes, one integrity-protected continuation/final flag per cycle, and unambiguous
+final padding replace the classic nine-bit source cells. A 2,048-symbol preamble
+supports dense-QAM acquisition.
+
+An exact live **50 MB transfer succeeded in 21m 30.664s** on the connected
+headphone-to-microphone cable, including startup and an eight-second silence
+tail. All 6,980 LDPC frames converged, the complete source SHA-256 matched,
+and no clipping or capture overrun occurred. Calculated public-source 50 MB
+airtime is **21m 27.337s**, including the current preamble and 6.25 seconds of
+end silence. This single whole-file success does not establish an 80% success
+probability. Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferred
+5 MB exactly. See [Fast operation and settings](docs/fast-mode.md), the
+[capacity codec specification](docs/fast-capacity-codec.md), and the
+[live capacity study](docs/fast-capacity-live-study.md) for measured limits and
+wire revisions.
+
+The preserved **classic APSK** profile supports the earlier 256-APSK,
+convolutional 7/8, high-rate RS and depth-62 cable settings. Its roughly
+2h 01m calculated 50 MB airtime and 44.14 kbit/s sampled 2 MiB result are
+historical reference points, not cable capacity limits. SSB, FM and acoustic
+profiles retain their classic coding and waveforms. The
+[earlier cable study](docs/fast-cable-live-study.md) documents those settings.
+The separate [physical SNR measurement](docs/cable-snr-live-study.md) found about
+79 dB on one input and 81.5 dB with both inputs averaged under best-case tone
+conditions; this is not a direct measurement of dense-QAM decoding margin.
+The [coding study](docs/fast-coding-study.md) records the preceding theoretical
+analysis and remaining work such as probabilistic shaping and adaptive loading.
 
 The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accepts
 `--text` or `--input`; encryption is off by default and enabled by `--keyfile`.
-Both peers select the same protection mode. Public checksums detect corruption
-without authentication, and neither Fast mode has an LPI claim. Its separate SNR regression executable is
-built only for testing. A sampled 2 MiB transfer achieved 44.14 kbit/s;
-bounded physical cable measurements are now available, while general audio/radio
-qualification remains outstanding. The following regular-mode
-description and its settings do not apply to Fast.
+Both peers select matching format, coding and protection settings. Public
+checksums detect corruption without authentication, and Fast has no LPI claim.
+Its historical SNR regression executable explicitly pins classic APSK and is
+built only for testing. General audio/radio qualification remains outstanding.
+The following regular-mode description and settings do not apply to Fast.
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,
 removing the fixed squared-carrier signature of the previous +/-1 mapping.
@@ -694,6 +711,7 @@ not as a claim that every requested feature or assertion is implemented.
 
 Application code is dedicated to the public domain under [CC0 1.0 Universal](LICENSE).
 Copyright (c) 2026 mirage335. The vendored QR encoder retains its own
-MIT notice. Data Pump is based in part on the work of the FLTK project. Its
+MIT notice. Vendored DVB-S2/S2X LDPC tables retain their
+[permissive notice](third_party/ldpc/LICENSE). Data Pump is based in part on the work of the FLTK project. Its
 license and static-linking exception, OpenSSL notices, and collected runtime
 notices accompany the installation.

@@ -23,6 +23,23 @@ namespace {
 std::string number(double value,int precision=1) {
     std::ostringstream out;out<<std::fixed<<std::setprecision(precision)<<value;return out.str();
 }
+std::string coding_id(fast::CodeRate r) {
+    switch(r) {
+    case fast::CodeRate::half:return "half";
+    case fast::CodeRate::three_quarters:return "three-quarters";
+    case fast::CodeRate::seven_eighths:return "seven-eighths";
+    case fast::CodeRate::seven_ninths:return "seven-ninths";
+    case fast::CodeRate::eight_ninths:return "eight-ninths";
+    case fast::CodeRate::nine_tenths:return "nine-tenths";
+    }
+    throw Error("Unknown Fast coding selection");
+}
+fast::CodeRate coding_rate(const std::string& id) {
+    for(auto r:{fast::CodeRate::half,fast::CodeRate::three_quarters,fast::CodeRate::seven_eighths,
+                fast::CodeRate::seven_ninths,fast::CodeRate::eight_ninths,fast::CodeRate::nine_tenths})
+        if(coding_id(r)==id)return r;
+    throw Error("Unknown Fast coding selection");
+}
 std::filesystem::path path_from_text(const std::string& text) {
     return std::filesystem::path(std::u8string(text.begin(),text.end()));
 }
@@ -54,7 +71,7 @@ struct Controller::Impl {
     ui::FieldState& f(F field) {return fields.at(static_cast<std::size_t>(field));}
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
-        f(F::fast_profile).options={{"wire","Audio cable · wideband"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"}};
+        f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"wire-classic","Audio cable · classic APSK"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"}};
         f(F::fast_profile).selected="wire";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
@@ -66,17 +83,28 @@ struct Controller::Impl {
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
         f(F::fast_status).text="Choose matching settings at both ends.";
-        set_profile(fast::Channel::wire);refresh();
+        set_profile(fast::Channel::wire,true);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
-    void set_profile(fast::Channel channel) {
-        settings.profile=fast::profile(channel);
+    void set_profile(fast::Channel channel,bool capacity=false) {
+        settings.profile=capacity?fast::capacity_profile():fast::classic_profile(channel);
+        if(capacity) {
+            f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
+            f(F::fast_coding).options={{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
+            f(F::fast_depth).options={{"1","1 LDPC block"},{"4","4 LDPC blocks"},{"8","8 LDPC blocks"},{"16","16 LDPC blocks"}};
+            f(F::fast_fec).options={{"sparse","RS · approximately 0.3%"}};
+        } else {
+            f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
+            f(F::fast_coding).options={{"half","Rate 1/2"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8"}};
+            f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long transfers"},{"64","64"}};
+            f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
+        }
         settings.mono=channel!=fast::Channel::wire;
         f(F::fast_mono).checked=settings.mono;
         f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
         f(F::fast_constellation).selected=std::to_string(settings.profile.constellation);
-        f(F::fast_coding).selected=settings.profile.code_rate==fast::CodeRate::half?"half":settings.profile.code_rate==fast::CodeRate::three_quarters?"three-quarters":"seven-eighths";
-        f(F::fast_fec).selected=settings.profile.robust?"robust":"high-rate";
+        f(F::fast_coding).selected=coding_id(settings.profile.code_rate);
+        f(F::fast_fec).selected=capacity?"sparse":settings.profile.robust?"robust":"high-rate";
     }
     bool enabled(C command) const {
         if(closing)return false;
@@ -118,7 +146,7 @@ struct Controller::Impl {
         }
         if(snapshot.estimated_seconds>0)f(F::fast_progress).text+=" · "+number(snapshot.transmit_fraction*100,1)+"% · "+number(snapshot.estimated_seconds)+" s estimated total";
         const auto bandwidth=p.symbol_rate*(1+p.rolloff);
-        f(F::fast_detail).text+="\nShannon-Hartley: C = B log2(1 + S/N), B = "+number(bandwidth,0)+" Hz; ideal at assumed 30 dB SNR: "+number(bandwidth*std::log2(1001.)/1000)+" kbit/s.";
+        f(F::fast_detail).text+="\nShannon-Hartley: C = B log2(1 + S/N), B = "+number(bandwidth,0)+" Hz; ideal at assumed 40 / 60 dB SNR: "+number(bandwidth*std::log2(10001.)/1000)+" / "+number(bandwidth*std::log2(1000001.)/1000)+" kbit/s. These are capacity examples, not measured SNR.";
         f(F::fast_tracking).text=snapshot.intervals&&!snapshot.transmitting?
             "RX EVM "+number(snapshot.evm*100,2)+"% · carrier "+number(snapshot.carrier_error_hz,2)+" Hz\nClock error "+number(snapshot.clock_error_ppm,2)+" ppm":
             "RX tracking · awaiting received intervals";
@@ -126,9 +154,11 @@ struct Controller::Impl {
             const auto dbfs=[](double amplitude) {return number(20*std::log10(std::max(1e-6,amplitude)),0);};
             f(F::fast_tracking).text="Input RMS "+dbfs(d->waveform_rms)+" dBFS · peak "+dbfs(d->waveform_peak)+" dBFS"+
                 (d->waveform_peak>=.999?" · CLIPPING":"")+"\n"+
-                (d->acquired?"APSK synchronized · awaiting first interval":"No APSK lock · check input, level and matching profile");
+                (d->acquired?"Modem synchronized · awaiting first interval":"No modem lock · check input, level and matching profile");
         }
-        f(F::fast_correction).text="Correction: "+std::to_string(snapshot.corrected_bytes)+" bytes · "+std::to_string(snapshot.erased_bytes)+" erasures\nInterleave depth "+std::to_string(p.interleave_depth);
+        f(F::fast_correction).text="RS: "+std::to_string(snapshot.corrected_bytes)+" corrected bytes · "+std::to_string(snapshot.erased_bytes)+" erasures";
+        if(p.capacity_mode)f(F::fast_correction).text+="\nLDPC: "+std::to_string(snapshot.ldpc_frames)+" blocks · "+std::to_string(snapshot.ldpc_failed_frames)+" unconverged · "+std::to_string(snapshot.ldpc_changed_bits)+" changed bits";
+        else f(F::fast_correction).text+="\nInterleave depth "+std::to_string(p.interleave_depth);
         f(F::fast_auth).text=integrity_label(snapshot);
         f(F::fast_progress).text_tone=snapshot.complete?ui::TextTone::data:ui::TextTone::normal;
     }
@@ -223,9 +253,9 @@ void Controller::select(F field,std::string id) {
     const auto& options=p.f(field).options;
     if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;}))return;
     try {
-        if(field==F::fast_profile)p.set_profile(fast::parse_channel(id));
+        if(field==F::fast_profile)p.set_profile(id=="wire-classic"?fast::Channel::wire:fast::parse_channel(id),id=="wire");
         else if(field==F::fast_constellation)p.settings.profile.constellation=static_cast<unsigned>(std::stoul(id));
-        else if(field==F::fast_coding)p.settings.profile.code_rate=id=="half"?fast::CodeRate::half:id=="three-quarters"?fast::CodeRate::three_quarters:fast::CodeRate::seven_eighths;
+        else if(field==F::fast_coding)p.settings.profile.code_rate=coding_rate(id);
         else if(field==F::fast_depth)p.settings.profile.interleave_depth=static_cast<unsigned>(std::stoul(id));
         else if(field==F::fast_fec)p.settings.profile.robust=id=="robust";
         else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;

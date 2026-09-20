@@ -1,0 +1,170 @@
+[
+  {
+    "order": 4096,
+    "rate": "7/9",
+    "sizes": {
+      "100000": {
+        "estimated_seconds": 12.8444,
+        "estimated_source_bps": 62283.9,
+        "estimated_intervals": 635,
+        "estimated_samples": 616532
+      },
+      "5000000": {
+        "estimated_seconds": 265.333,
+        "estimated_source_bps": 150754,
+        "estimated_intervals": 25527,
+        "estimated_samples": 12735993
+      },
+      "50000000": {
+        "estimated_seconds": 2575.08,
+        "estimated_source_bps": 155335,
+        "estimated_intervals": 253238,
+        "estimated_samples": 123603935
+      }
+    },
+    "rs_parity_data_ratio": 0.003025,
+    "source_bytes_per_cycle": 25091,
+    "gross_bitrate": 211765,
+    "occupied_bandwidth_hz": 18000
+  },
+  {
+    "order": 16384,
+    "rate": "8/9",
+    "sizes": {
+      "100000": {
+        "estimated_seconds": 11.9808,
+        "estimated_source_bps": 66773.3,
+        "estimated_intervals": 635,
+        "estimated_samples": 575080
+      },
+      "5000000": {
+        "estimated_seconds": 202.727,
+        "estimated_source_bps": 197309,
+        "estimated_intervals": 22352,
+        "estimated_samples": 9730912
+      },
+      "50000000": {
+        "estimated_seconds": 1952.92,
+        "estimated_source_bps": 204821,
+        "estimated_intervals": 221615,
+        "estimated_samples": 93740204
+      }
+    },
+    "rs_parity_data_ratio": 0.00306492,
+    "source_bytes_per_cycle": 28679,
+    "gross_bitrate": 247059,
+    "occupied_bandwidth_hz": 18000
+  },
+  {
+    "order": 65536,
+    "rate": "9/10",
+    "sizes": {
+      "100000": {
+        "estimated_seconds": 11.2971,
+        "estimated_source_bps": 70814.3,
+        "estimated_intervals": 635,
+        "estimated_samples": 542263
+      },
+      "5000000": {
+        "estimated_seconds": 176.707,
+        "estimated_source_bps": 226363,
+        "estimated_intervals": 22098,
+        "estimated_samples": 8481954
+      },
+      "50000000": {
+        "estimated_seconds": 1692.79,
+        "estimated_source_bps": 236297,
+        "estimated_intervals": 218821,
+        "estimated_samples": 81253693
+      }
+    },
+    "rs_parity_data_ratio": 0.00302697,
+    "source_bytes_per_cycle": 29039,
+    "gross_bitrate": 282353,
+    "occupied_bandwidth_hz": 18000
+  },
+  {
+    "order": 1048576,
+    "rate": "9/10",
+    "sizes": {
+      "100000": {
+        "estimated_seconds": 10.3976,
+        "estimated_source_bps": 76941.1,
+        "estimated_intervals": 635,
+        "estimated_samples": 499083
+      },
+      "5000000": {
+        "estimated_seconds": 145.402,
+        "estimated_source_bps": 275100,
+        "estimated_intervals": 22098,
+        "estimated_samples": 6979290
+      },
+      "50000000": {
+        "estimated_seconds": 1382.79,
+        "estimated_source_bps": 289270,
+        "estimated_intervals": 218821,
+        "estimated_samples": 66373865
+      }
+    },
+    "rs_parity_data_ratio": 0.00302697,
+    "source_bytes_per_cycle": 29039,
+    "gross_bitrate": 352941,
+    "occupied_bandwidth_hz": 18000
+  },
+  {
+    "order": 4194304,
+    "rate": "8/9",
+    "sizes": {
+      "100000": {
+        "estimated_seconds": 10.0737,
+        "estimated_source_bps": 79414.6,
+        "estimated_intervals": 635,
+        "estimated_samples": 483538
+      },
+      "5000000": {
+        "estimated_seconds": 135.597,
+        "estimated_source_bps": 294992,
+        "estimated_intervals": 22352,
+        "estimated_samples": 6508648
+      },
+      "50000000": {
+        "estimated_seconds": 1287.34,
+        "estimated_source_bps": 310719,
+        "estimated_intervals": 221615,
+        "estimated_samples": 61792186
+      }
+    },
+    "rs_parity_data_ratio": 0.00306492,
+    "source_bytes_per_cycle": 28679,
+    "gross_bitrate": 388235,
+    "occupied_bandwidth_hz": 18000
+  },
+  {
+    "order": 4194304,
+    "rate": "9/10",
+    "sizes": {
+      "100000": {
+        "estimated_seconds": 10.0737,
+        "estimated_source_bps": 79414.6,
+        "estimated_intervals": 635,
+        "estimated_samples": 483538
+      },
+      "5000000": {
+        "estimated_seconds": 134.132,
+        "estimated_source_bps": 298214,
+        "estimated_intervals": 22098,
+        "estimated_samples": 6438331
+      },
+      "50000000": {
+        "estimated_seconds": 1271.19,
+        "estimated_source_bps": 314666,
+        "estimated_intervals": 218821,
+        "estimated_samples": 61017127
+      }
+    },
+    "rs_parity_data_ratio": 0.00302697,
+    "source_bytes_per_cycle": 29039,
+    "gross_bitrate": 388235,
+    "occupied_bandwidth_hz": 18000
+  }
+]

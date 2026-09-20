@@ -1,0 +1,7 @@
+{
+  "probe_sha256": "42efd8621688ca5a78220bbf23ce020991081d50424f125d04cb918004b191c2",
+  "command": "build/fast_cable_probe --capacity --mode codec --bytes 50000000 --qam 4194304 --code-rate 8/9 --depth 4 --marker-spacing 16 --stereo --abort-on-failure --require-success",
+  "note": "Full-size trial. Running executable uses 2048-symbol preamble and balanced interleaver. Validated source bytes are fixture(index,417); bootstrap salt is freshly random, so repeat waveforms differ. Final outcome is in live-runs/v3-4m-50m.json.",
+  "compiler": "c++ (Debian 14.2.0-19) 14.2.0",
+  "build_type": "CMAKE_BUILD_TYPE:STRING=Release"
+}

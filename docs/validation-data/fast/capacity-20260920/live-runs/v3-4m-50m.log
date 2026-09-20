@@ -1,0 +1,1280 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+captured_s=1.74815 acquired=1 intervals=92 evm=0.000482993 clock_ppm=0.0185251 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=3.75429 acquired=1 intervals=439 evm=0.000474849 clock_ppm=-0.0049156 physical_end=0
+ldpc_frames=12 ldpc_failed=0 verified_cycles=2 decode_failed=0
+captured_s=5.63085 acquired=1 intervals=764 evm=0.00046136 clock_ppm=-0.00329389 physical_end=0
+ldpc_frames=24 ldpc_failed=0 verified_cycles=5 decode_failed=0
+captured_s=7.80698 acquired=1 intervals=1140 evm=0.000497057 clock_ppm=0.0101545 physical_end=0
+ldpc_frames=32 ldpc_failed=0 verified_cycles=7 decode_failed=0
+captured_s=9.83352 acquired=1 intervals=1491 evm=0.000479727 clock_ppm=-0.00926533 physical_end=0
+ldpc_frames=44 ldpc_failed=0 verified_cycles=10 decode_failed=0
+captured_s=11.8388 acquired=1 intervals=1838 evm=0.000461007 clock_ppm=0.00261039 physical_end=0
+ldpc_frames=56 ldpc_failed=0 verified_cycles=13 decode_failed=0
+captured_s=13.6956 acquired=1 intervals=2160 evm=0.000466544 clock_ppm=0.010858 physical_end=0
+ldpc_frames=68 ldpc_failed=0 verified_cycles=16 decode_failed=0
+captured_s=15.8709 acquired=1 intervals=2536 evm=0.000454309 clock_ppm=0.000775722 physical_end=0
+ldpc_frames=76 ldpc_failed=0 verified_cycles=18 decode_failed=0
+captured_s=17.8762 acquired=1 intervals=2882 evm=0.000480028 clock_ppm=0.00333692 physical_end=0
+ldpc_frames=88 ldpc_failed=0 verified_cycles=21 decode_failed=0
+captured_s=19.8815 acquired=1 intervals=3230 evm=0.000475735 clock_ppm=0.0160209 physical_end=0
+ldpc_frames=100 ldpc_failed=0 verified_cycles=24 decode_failed=0
+captured_s=21.8869 acquired=1 intervals=3577 evm=0.000459136 clock_ppm=-0.000743062 physical_end=0
+ldpc_frames=112 ldpc_failed=0 verified_cycles=27 decode_failed=0
+captured_s=23.8922 acquired=1 intervals=3923 evm=0.000483583 clock_ppm=0.000915508 physical_end=0
+ldpc_frames=120 ldpc_failed=0 verified_cycles=29 decode_failed=0
+captured_s=25.8975 acquired=1 intervals=4271 evm=0.000442641 clock_ppm=-0.000433452 physical_end=0
+ldpc_frames=132 ldpc_failed=0 verified_cycles=32 decode_failed=0
+captured_s=27.9033 acquired=1 intervals=4617 evm=0.000456879 clock_ppm=0.00515891 physical_end=0
+ldpc_frames=144 ldpc_failed=0 verified_cycles=35 decode_failed=0
+captured_s=29.8442 acquired=1 intervals=4953 evm=0.000481484 clock_ppm=0.0143529 physical_end=0
+ldpc_frames=156 ldpc_failed=0 verified_cycles=38 decode_failed=0
+captured_s=31.9349 acquired=1 intervals=5315 evm=0.00046006 clock_ppm=0.00362941 physical_end=0
+ldpc_frames=164 ldpc_failed=0 verified_cycles=40 decode_failed=0
+captured_s=33.9402 acquired=1 intervals=5662 evm=0.000462451 clock_ppm=0.00713583 physical_end=0
+ldpc_frames=176 ldpc_failed=0 verified_cycles=43 decode_failed=0
+captured_s=35.9455 acquired=1 intervals=6009 evm=0.000475952 clock_ppm=0.00959554 physical_end=0
+ldpc_frames=188 ldpc_failed=0 verified_cycles=46 decode_failed=0
+captured_s=37.9299 acquired=1 intervals=6352 evm=0.000443119 clock_ppm=-0.00976076 physical_end=0
+ldpc_frames=200 ldpc_failed=0 verified_cycles=49 decode_failed=0
+captured_s=40.0202 acquired=1 intervals=6714 evm=0.000481979 clock_ppm=0.0104866 physical_end=0
+ldpc_frames=208 ldpc_failed=0 verified_cycles=51 decode_failed=0
+captured_s=42.0256 acquired=1 intervals=7061 evm=0.000487501 clock_ppm=-0.0037326 physical_end=0
+ldpc_frames=220 ldpc_failed=0 verified_cycles=54 decode_failed=0
+captured_s=44.0737 acquired=1 intervals=7415 evm=0.000478206 clock_ppm=-0.0115919 physical_end=0
+ldpc_frames=232 ldpc_failed=0 verified_cycles=57 decode_failed=0
+captured_s=45.9935 acquired=1 intervals=7747 evm=0.000467681 clock_ppm=0.00294734 physical_end=0
+ldpc_frames=244 ldpc_failed=0 verified_cycles=60 decode_failed=0
+captured_s=48.1342 acquired=1 intervals=8117 evm=0.000466718 clock_ppm=-0.00455997 physical_end=0
+ldpc_frames=252 ldpc_failed=0 verified_cycles=62 decode_failed=0
+captured_s=50.1537 acquired=1 intervals=8467 evm=0.000469374 clock_ppm=0.0116988 physical_end=0
+ldpc_frames=264 ldpc_failed=0 verified_cycles=65 decode_failed=0
+captured_s=52.1802 acquired=1 intervals=8817 evm=0.000491324 clock_ppm=0.000995719 physical_end=0
+ldpc_frames=276 ldpc_failed=0 verified_cycles=68 decode_failed=0
+captured_s=54.1855 acquired=1 intervals=9165 evm=0.000446889 clock_ppm=0.00697279 physical_end=0
+ldpc_frames=288 ldpc_failed=0 verified_cycles=71 decode_failed=0
+captured_s=56.1908 acquired=1 intervals=9511 evm=0.00043866 clock_ppm=0.00965877 physical_end=0
+ldpc_frames=296 ldpc_failed=0 verified_cycles=73 decode_failed=0
+captured_s=58.1962 acquired=1 intervals=9858 evm=0.000448754 clock_ppm=-0.0012662 physical_end=0
+ldpc_frames=308 ldpc_failed=0 verified_cycles=76 decode_failed=0
+captured_s=60.2015 acquired=1 intervals=10206 evm=0.000478397 clock_ppm=0.0148216 physical_end=0
+ldpc_frames=320 ldpc_failed=0 verified_cycles=79 decode_failed=0
+captured_s=62.1429 acquired=1 intervals=10541 evm=0.000521419 clock_ppm=0.0105292 physical_end=0
+ldpc_frames=332 ldpc_failed=0 verified_cycles=82 decode_failed=0
+captured_s=64.2551 acquired=1 intervals=10907 evm=0.000429743 clock_ppm=0.010157 physical_end=0
+ldpc_frames=340 ldpc_failed=0 verified_cycles=84 decode_failed=0
+captured_s=66.2602 acquired=1 intervals=11253 evm=0.000489786 clock_ppm=0.00329461 physical_end=0
+ldpc_frames=352 ldpc_failed=0 verified_cycles=87 decode_failed=0
+captured_s=68.2655 acquired=1 intervals=11600 evm=0.000454829 clock_ppm=-0.00522412 physical_end=0
+ldpc_frames=364 ldpc_failed=0 verified_cycles=90 decode_failed=0
+captured_s=70.2281 acquired=1 intervals=11940 evm=0.000461121 clock_ppm=-0.00670018 physical_end=0
+ldpc_frames=376 ldpc_failed=0 verified_cycles=93 decode_failed=0
+captured_s=72.3191 acquired=1 intervals=12302 evm=0.000472627 clock_ppm=-0.00467022 physical_end=0
+ldpc_frames=384 ldpc_failed=0 verified_cycles=95 decode_failed=0
+captured_s=74.3245 acquired=1 intervals=12649 evm=0.000470865 clock_ppm=-0.0101558 physical_end=0
+ldpc_frames=396 ldpc_failed=0 verified_cycles=98 decode_failed=0
+captured_s=76.3295 acquired=1 intervals=12995 evm=0.000450278 clock_ppm=0.0124774 physical_end=0
+ldpc_frames=408 ldpc_failed=0 verified_cycles=101 decode_failed=0
+captured_s=78.2921 acquired=1 intervals=13335 evm=0.000494965 clock_ppm=0.000621876 physical_end=0
+ldpc_frames=420 ldpc_failed=0 verified_cycles=104 decode_failed=0
+captured_s=80.384 acquired=1 intervals=13697 evm=0.000477534 clock_ppm=0.00606777 physical_end=0
+ldpc_frames=428 ldpc_failed=0 verified_cycles=106 decode_failed=0
+captured_s=82.3891 acquired=1 intervals=14044 evm=0.000464465 clock_ppm=0.0060773 physical_end=0
+ldpc_frames=440 ldpc_failed=0 verified_cycles=109 decode_failed=0
+captured_s=84.3935 acquired=1 intervals=14391 evm=0.000482981 clock_ppm=-0.0146359 physical_end=0
+ldpc_frames=452 ldpc_failed=0 verified_cycles=112 decode_failed=0
+captured_s=86.3776 acquired=1 intervals=14734 evm=0.000470706 clock_ppm=-0.00993397 physical_end=0
+ldpc_frames=464 ldpc_failed=0 verified_cycles=115 decode_failed=0
+captured_s=88.4684 acquired=1 intervals=15096 evm=0.000481512 clock_ppm=-0.00867805 physical_end=0
+ldpc_frames=472 ldpc_failed=0 verified_cycles=117 decode_failed=0
+captured_s=90.4735 acquired=1 intervals=15442 evm=0.000451326 clock_ppm=-0.000843177 physical_end=0
+ldpc_frames=484 ldpc_failed=0 verified_cycles=120 decode_failed=0
+captured_s=92.4789 acquired=1 intervals=15790 evm=0.000459025 clock_ppm=0.00938276 physical_end=0
+ldpc_frames=496 ldpc_failed=0 verified_cycles=123 decode_failed=0
+captured_s=94.4629 acquired=1 intervals=16133 evm=0.000463075 clock_ppm=-0.00540388 physical_end=0
+ldpc_frames=508 ldpc_failed=0 verified_cycles=126 decode_failed=0
+captured_s=96.5962 acquired=1 intervals=16502 evm=0.000482792 clock_ppm=0.00632019 physical_end=0
+ldpc_frames=516 ldpc_failed=0 verified_cycles=128 decode_failed=0
+captured_s=98.6015 acquired=1 intervals=16849 evm=0.000465802 clock_ppm=0.0049364 physical_end=0
+ldpc_frames=528 ldpc_failed=0 verified_cycles=131 decode_failed=0
+captured_s=100.607 acquired=1 intervals=17196 evm=0.000448768 clock_ppm=-0.00699894 physical_end=0
+ldpc_frames=540 ldpc_failed=0 verified_cycles=134 decode_failed=0
+captured_s=102.527 acquired=1 intervals=17528 evm=0.000447744 clock_ppm=0.00215014 physical_end=0
+ldpc_frames=552 ldpc_failed=0 verified_cycles=137 decode_failed=0
+captured_s=104.639 acquired=1 intervals=17893 evm=0.000459679 clock_ppm=-0.00226388 physical_end=0
+ldpc_frames=560 ldpc_failed=0 verified_cycles=139 decode_failed=0
+captured_s=106.644 acquired=1 intervals=18240 evm=0.000453448 clock_ppm=0.0133195 physical_end=0
+ldpc_frames=572 ldpc_failed=0 verified_cycles=142 decode_failed=0
+captured_s=108.65 acquired=1 intervals=18587 evm=0.000468525 clock_ppm=-0.015581 physical_end=0
+ldpc_frames=584 ldpc_failed=0 verified_cycles=145 decode_failed=0
+captured_s=110.591 acquired=1 intervals=18923 evm=0.000500514 clock_ppm=0.00769098 physical_end=0
+ldpc_frames=596 ldpc_failed=0 verified_cycles=148 decode_failed=0
+captured_s=112.703 acquired=1 intervals=19289 evm=0.00049413 clock_ppm=-0.00721636 physical_end=0
+ldpc_frames=604 ldpc_failed=0 verified_cycles=150 decode_failed=0
+captured_s=114.708 acquired=1 intervals=19635 evm=0.000480008 clock_ppm=0.00655265 physical_end=0
+ldpc_frames=616 ldpc_failed=0 verified_cycles=153 decode_failed=0
+captured_s=116.713 acquired=1 intervals=19983 evm=0.000452953 clock_ppm=1.47478e-05 physical_end=0
+ldpc_frames=628 ldpc_failed=0 verified_cycles=156 decode_failed=0
+captured_s=118.676 acquired=1 intervals=20322 evm=0.000477005 clock_ppm=0.0163654 physical_end=0
+ldpc_frames=640 ldpc_failed=0 verified_cycles=159 decode_failed=0
+captured_s=120.788 acquired=1 intervals=20688 evm=0.00045916 clock_ppm=-0.0161019 physical_end=0
+ldpc_frames=648 ldpc_failed=0 verified_cycles=161 decode_failed=0
+captured_s=122.794 acquired=1 intervals=21034 evm=0.00048329 clock_ppm=0.0183041 physical_end=0
+ldpc_frames=660 ldpc_failed=0 verified_cycles=164 decode_failed=0
+captured_s=124.799 acquired=1 intervals=21381 evm=0.000467583 clock_ppm=-0.00141713 physical_end=0
+ldpc_frames=672 ldpc_failed=0 verified_cycles=167 decode_failed=0
+captured_s=126.74 acquired=1 intervals=21717 evm=0.000508941 clock_ppm=-0.0161361 physical_end=0
+ldpc_frames=684 ldpc_failed=0 verified_cycles=170 decode_failed=0
+captured_s=128.873 acquired=1 intervals=22086 evm=0.00045799 clock_ppm=0.0139137 physical_end=0
+ldpc_frames=692 ldpc_failed=0 verified_cycles=172 decode_failed=0
+captured_s=130.879 acquired=1 intervals=22433 evm=0.000450084 clock_ppm=0.0171115 physical_end=0
+ldpc_frames=704 ldpc_failed=0 verified_cycles=175 decode_failed=0
+captured_s=132.884 acquired=1 intervals=22780 evm=0.000492423 clock_ppm=-0.00161013 physical_end=0
+ldpc_frames=716 ldpc_failed=0 verified_cycles=178 decode_failed=0
+captured_s=134.826 acquired=1 intervals=23116 evm=0.000454008 clock_ppm=0.00862435 physical_end=0
+ldpc_frames=728 ldpc_failed=0 verified_cycles=181 decode_failed=0
+captured_s=136.959 acquired=1 intervals=23485 evm=0.000466843 clock_ppm=0.0048618 physical_end=0
+ldpc_frames=736 ldpc_failed=0 verified_cycles=183 decode_failed=0
+captured_s=138.964 acquired=1 intervals=23832 evm=0.000457163 clock_ppm=0.00137766 physical_end=0
+ldpc_frames=748 ldpc_failed=0 verified_cycles=186 decode_failed=0
+captured_s=140.991 acquired=1 intervals=24183 evm=0.000477949 clock_ppm=-0.00826726 physical_end=0
+ldpc_frames=760 ldpc_failed=0 verified_cycles=189 decode_failed=0
+captured_s=142.889 acquired=1 intervals=24511 evm=0.000452589 clock_ppm=-0.00882016 physical_end=0
+ldpc_frames=772 ldpc_failed=0 verified_cycles=192 decode_failed=0
+captured_s=145.023 acquired=1 intervals=24880 evm=0.000483173 clock_ppm=0.000324971 physical_end=0
+ldpc_frames=780 ldpc_failed=0 verified_cycles=194 decode_failed=0
+captured_s=147.028 acquired=1 intervals=25227 evm=0.000457984 clock_ppm=0.0181575 physical_end=0
+ldpc_frames=792 ldpc_failed=0 verified_cycles=197 decode_failed=0
+captured_s=149.033 acquired=1 intervals=25574 evm=0.00045454 clock_ppm=0.010473 physical_end=0
+ldpc_frames=804 ldpc_failed=0 verified_cycles=200 decode_failed=0
+captured_s=150.975 acquired=1 intervals=25910 evm=0.000474484 clock_ppm=-0.00350933 physical_end=0
+ldpc_frames=816 ldpc_failed=0 verified_cycles=203 decode_failed=0
+captured_s=153.108 acquired=1 intervals=26279 evm=0.000464591 clock_ppm=0.00250699 physical_end=0
+ldpc_frames=824 ldpc_failed=0 verified_cycles=205 decode_failed=0
+captured_s=155.113 acquired=1 intervals=26626 evm=0.000446389 clock_ppm=0.0125193 physical_end=0
+ldpc_frames=836 ldpc_failed=0 verified_cycles=208 decode_failed=0
+captured_s=157.14 acquired=1 intervals=26976 evm=0.000473948 clock_ppm=-0.0135638 physical_end=0
+ldpc_frames=848 ldpc_failed=0 verified_cycles=211 decode_failed=0
+captured_s=159.039 acquired=1 intervals=27305 evm=0.000487988 clock_ppm=-0.00103599 physical_end=0
+ldpc_frames=860 ldpc_failed=0 verified_cycles=214 decode_failed=0
+captured_s=161.194 acquired=1 intervals=27678 evm=0.000486895 clock_ppm=0.00385869 physical_end=0
+ldpc_frames=868 ldpc_failed=0 verified_cycles=216 decode_failed=0
+captured_s=163.199 acquired=1 intervals=28025 evm=0.000461708 clock_ppm=0.00447826 physical_end=0
+ldpc_frames=880 ldpc_failed=0 verified_cycles=219 decode_failed=0
+captured_s=165.204 acquired=1 intervals=28372 evm=0.000468593 clock_ppm=0.0136233 physical_end=0
+ldpc_frames=892 ldpc_failed=0 verified_cycles=222 decode_failed=0
+captured_s=167.124 acquired=1 intervals=28704 evm=0.00044638 clock_ppm=-0.000881798 physical_end=0
+ldpc_frames=904 ldpc_failed=0 verified_cycles=225 decode_failed=0
+captured_s=169.279 acquired=1 intervals=29077 evm=0.000458539 clock_ppm=0.0117906 physical_end=0
+ldpc_frames=912 ldpc_failed=0 verified_cycles=227 decode_failed=0
+captured_s=171.284 acquired=1 intervals=29424 evm=0.000464194 clock_ppm=-7.3772e-05 physical_end=0
+ldpc_frames=924 ldpc_failed=0 verified_cycles=230 decode_failed=0
+captured_s=173.29 acquired=1 intervals=29771 evm=0.000473576 clock_ppm=-0.00213998 physical_end=0
+ldpc_frames=936 ldpc_failed=0 verified_cycles=233 decode_failed=0
+captured_s=175.238 acquired=1 intervals=30108 evm=0.000472068 clock_ppm=0.00240942 physical_end=0
+ldpc_frames=948 ldpc_failed=0 verified_cycles=236 decode_failed=0
+captured_s=177.3 acquired=1 intervals=30464 evm=0.000474399 clock_ppm=-0.000995998 physical_end=0
+ldpc_frames=956 ldpc_failed=0 verified_cycles=238 decode_failed=0
+captured_s=179.306 acquired=1 intervals=30812 evm=0.000454287 clock_ppm=-0.00488681 physical_end=0
+ldpc_frames=968 ldpc_failed=0 verified_cycles=241 decode_failed=0
+captured_s=181.311 acquired=1 intervals=31158 evm=0.000470609 clock_ppm=-0.00836306 physical_end=0
+ldpc_frames=980 ldpc_failed=0 verified_cycles=244 decode_failed=0
+captured_s=183.274 acquired=1 intervals=31498 evm=0.000459574 clock_ppm=0.00206907 physical_end=0
+ldpc_frames=992 ldpc_failed=0 verified_cycles=247 decode_failed=0
+captured_s=185.364 acquired=1 intervals=31860 evm=0.000468808 clock_ppm=-4.49704e-05 physical_end=0
+ldpc_frames=1000 ldpc_failed=0 verified_cycles=249 decode_failed=0
+captured_s=187.37 acquired=1 intervals=32207 evm=0.000463874 clock_ppm=0.0053198 physical_end=0
+ldpc_frames=1012 ldpc_failed=0 verified_cycles=252 decode_failed=0
+captured_s=189.375 acquired=1 intervals=32554 evm=0.00048222 clock_ppm=0.00816855 physical_end=0
+ldpc_frames=1024 ldpc_failed=0 verified_cycles=255 decode_failed=0
+captured_s=191.338 acquired=1 intervals=32893 evm=0.000434933 clock_ppm=0.00264389 physical_end=0
+ldpc_frames=1036 ldpc_failed=0 verified_cycles=258 decode_failed=0
+captured_s=193.428 acquired=1 intervals=33255 evm=0.000469567 clock_ppm=-0.00343652 physical_end=0
+ldpc_frames=1044 ldpc_failed=0 verified_cycles=260 decode_failed=0
+captured_s=195.433 acquired=1 intervals=33602 evm=0.000457673 clock_ppm=-0.000622012 physical_end=0
+ldpc_frames=1056 ldpc_failed=0 verified_cycles=263 decode_failed=0
+captured_s=197.439 acquired=1 intervals=33949 evm=0.000482717 clock_ppm=-0.000538159 physical_end=0
+ldpc_frames=1068 ldpc_failed=0 verified_cycles=266 decode_failed=0
+captured_s=199.423 acquired=1 intervals=34292 evm=0.000494206 clock_ppm=-0.0157702 physical_end=0
+ldpc_frames=1080 ldpc_failed=0 verified_cycles=269 decode_failed=0
+captured_s=201.513 acquired=1 intervals=34654 evm=0.000451185 clock_ppm=-0.0110099 physical_end=0
+ldpc_frames=1088 ldpc_failed=0 verified_cycles=271 decode_failed=0
+captured_s=203.519 acquired=1 intervals=35001 evm=0.000463006 clock_ppm=0.0121213 physical_end=0
+ldpc_frames=1100 ldpc_failed=0 verified_cycles=274 decode_failed=0
+captured_s=205.524 acquired=1 intervals=35347 evm=0.000517964 clock_ppm=0.0214517 physical_end=0
+ldpc_frames=1112 ldpc_failed=0 verified_cycles=277 decode_failed=0
+captured_s=207.487 acquired=1 intervals=35687 evm=0.000450404 clock_ppm=0.00677033 physical_end=0
+ldpc_frames=1124 ldpc_failed=0 verified_cycles=280 decode_failed=0
+captured_s=209.62 acquired=1 intervals=36056 evm=0.000447016 clock_ppm=-0.00148123 physical_end=0
+ldpc_frames=1132 ldpc_failed=0 verified_cycles=282 decode_failed=0
+captured_s=211.625 acquired=1 intervals=36403 evm=0.00046176 clock_ppm=0.00269938 physical_end=0
+ldpc_frames=1144 ldpc_failed=0 verified_cycles=285 decode_failed=0
+captured_s=213.631 acquired=1 intervals=36750 evm=0.000486638 clock_ppm=-0.00417976 physical_end=0
+ldpc_frames=1156 ldpc_failed=0 verified_cycles=288 decode_failed=0
+captured_s=215.572 acquired=1 intervals=37086 evm=0.000498957 clock_ppm=-0.00297328 physical_end=0
+ldpc_frames=1168 ldpc_failed=0 verified_cycles=291 decode_failed=0
+captured_s=217.684 acquired=1 intervals=37452 evm=0.000450507 clock_ppm=-0.00529809 physical_end=0
+ldpc_frames=1176 ldpc_failed=0 verified_cycles=293 decode_failed=0
+captured_s=219.69 acquired=1 intervals=37798 evm=0.000489591 clock_ppm=0.00254927 physical_end=0
+ldpc_frames=1188 ldpc_failed=0 verified_cycles=296 decode_failed=0
+captured_s=221.695 acquired=1 intervals=38145 evm=0.000455235 clock_ppm=-0.00286358 physical_end=0
+ldpc_frames=1200 ldpc_failed=0 verified_cycles=299 decode_failed=0
+captured_s=223.636 acquired=1 intervals=38481 evm=0.000528191 clock_ppm=0.00403453 physical_end=0
+ldpc_frames=1212 ldpc_failed=0 verified_cycles=302 decode_failed=0
+captured_s=225.769 acquired=1 intervals=38850 evm=0.000490015 clock_ppm=0.00873563 physical_end=0
+ldpc_frames=1220 ldpc_failed=0 verified_cycles=304 decode_failed=0
+captured_s=227.775 acquired=1 intervals=39197 evm=0.000462983 clock_ppm=0.0139406 physical_end=0
+ldpc_frames=1232 ldpc_failed=0 verified_cycles=307 decode_failed=0
+captured_s=229.78 acquired=1 intervals=39544 evm=0.000460762 clock_ppm=-0.0134066 physical_end=0
+ldpc_frames=1244 ldpc_failed=0 verified_cycles=310 decode_failed=0
+captured_s=231.722 acquired=1 intervals=39880 evm=0.000490951 clock_ppm=-0.00369205 physical_end=0
+ldpc_frames=1256 ldpc_failed=0 verified_cycles=313 decode_failed=0
+captured_s=233.856 acquired=1 intervals=40249 evm=0.000454613 clock_ppm=0.0076277 physical_end=0
+ldpc_frames=1264 ldpc_failed=0 verified_cycles=315 decode_failed=0
+captured_s=235.86 acquired=1 intervals=40596 evm=0.000472187 clock_ppm=-0.00331826 physical_end=0
+ldpc_frames=1276 ldpc_failed=0 verified_cycles=318 decode_failed=0
+captured_s=237.867 acquired=1 intervals=40944 evm=0.000440291 clock_ppm=-0.000131509 physical_end=0
+ldpc_frames=1288 ldpc_failed=0 verified_cycles=321 decode_failed=0
+captured_s=239.786 acquired=1 intervals=41275 evm=0.000458842 clock_ppm=0.000466546 physical_end=0
+ldpc_frames=1300 ldpc_failed=0 verified_cycles=324 decode_failed=0
+captured_s=241.876 acquired=1 intervals=41637 evm=0.000464347 clock_ppm=0.00578261 physical_end=0
+ldpc_frames=1308 ldpc_failed=0 verified_cycles=326 decode_failed=0
+captured_s=243.882 acquired=1 intervals=41984 evm=0.000455251 clock_ppm=-0.00651837 physical_end=0
+ldpc_frames=1320 ldpc_failed=0 verified_cycles=329 decode_failed=0
+captured_s=245.887 acquired=1 intervals=42331 evm=0.00050059 clock_ppm=-0.0113047 physical_end=0
+ldpc_frames=1332 ldpc_failed=0 verified_cycles=332 decode_failed=0
+captured_s=247.872 acquired=1 intervals=42674 evm=0.000499653 clock_ppm=0.00253268 physical_end=0
+ldpc_frames=1344 ldpc_failed=0 verified_cycles=335 decode_failed=0
+captured_s=249.983 acquired=1 intervals=43040 evm=0.000481128 clock_ppm=0.000539457 physical_end=0
+ldpc_frames=1352 ldpc_failed=0 verified_cycles=337 decode_failed=0
+captured_s=251.988 acquired=1 intervals=43387 evm=0.000466388 clock_ppm=0.00791263 physical_end=0
+ldpc_frames=1364 ldpc_failed=0 verified_cycles=340 decode_failed=0
+captured_s=253.994 acquired=1 intervals=43733 evm=0.000483642 clock_ppm=-0.00284008 physical_end=0
+ldpc_frames=1376 ldpc_failed=0 verified_cycles=343 decode_failed=0
+captured_s=255.935 acquired=1 intervals=44069 evm=0.000469033 clock_ppm=0.0232102 physical_end=0
+ldpc_frames=1388 ldpc_failed=0 verified_cycles=346 decode_failed=0
+captured_s=258.047 acquired=1 intervals=44434 evm=0.000441582 clock_ppm=-0.000320365 physical_end=0
+ldpc_frames=1396 ldpc_failed=0 verified_cycles=348 decode_failed=0
+captured_s=260.052 acquired=1 intervals=44782 evm=0.000493833 clock_ppm=-0.00601941 physical_end=0
+ldpc_frames=1408 ldpc_failed=0 verified_cycles=351 decode_failed=0
+captured_s=262.058 acquired=1 intervals=45129 evm=0.000461443 clock_ppm=-0.00130026 physical_end=0
+ldpc_frames=1420 ldpc_failed=0 verified_cycles=354 decode_failed=0
+captured_s=264.021 acquired=1 intervals=45468 evm=0.00047125 clock_ppm=-0.00865547 physical_end=0
+ldpc_frames=1432 ldpc_failed=0 verified_cycles=357 decode_failed=0
+captured_s=266.154 acquired=1 intervals=45837 evm=0.000490703 clock_ppm=-0.00875161 physical_end=0
+ldpc_frames=1440 ldpc_failed=0 verified_cycles=359 decode_failed=0
+captured_s=268.159 acquired=1 intervals=46184 evm=0.000491894 clock_ppm=0.000193131 physical_end=0
+ldpc_frames=1452 ldpc_failed=0 verified_cycles=362 decode_failed=0
+captured_s=270.164 acquired=1 intervals=46531 evm=0.000459384 clock_ppm=-0.0067465 physical_end=0
+ldpc_frames=1464 ldpc_failed=0 verified_cycles=365 decode_failed=0
+captured_s=272.084 acquired=1 intervals=46864 evm=0.000488609 clock_ppm=0.00722337 physical_end=0
+ldpc_frames=1476 ldpc_failed=0 verified_cycles=368 decode_failed=0
+captured_s=274.196 acquired=1 intervals=47229 evm=0.000474572 clock_ppm=0.00602474 physical_end=0
+ldpc_frames=1484 ldpc_failed=0 verified_cycles=370 decode_failed=0
+captured_s=276.202 acquired=1 intervals=47576 evm=0.000468456 clock_ppm=0.0166633 physical_end=0
+ldpc_frames=1496 ldpc_failed=0 verified_cycles=373 decode_failed=0
+captured_s=278.207 acquired=1 intervals=47922 evm=0.000467874 clock_ppm=0.00208092 physical_end=0
+ldpc_frames=1508 ldpc_failed=0 verified_cycles=376 decode_failed=0
+captured_s=280.17 acquired=1 intervals=48262 evm=0.000480757 clock_ppm=-0.00363142 physical_end=0
+ldpc_frames=1520 ldpc_failed=0 verified_cycles=379 decode_failed=0
+captured_s=282.281 acquired=1 intervals=48627 evm=0.000458152 clock_ppm=3.4118e-05 physical_end=0
+ldpc_frames=1528 ldpc_failed=0 verified_cycles=381 decode_failed=0
+captured_s=284.288 acquired=1 intervals=48975 evm=0.000481007 clock_ppm=-0.0117738 physical_end=0
+ldpc_frames=1540 ldpc_failed=0 verified_cycles=384 decode_failed=0
+captured_s=286.293 acquired=1 intervals=49321 evm=0.000473262 clock_ppm=-0.00316136 physical_end=0
+ldpc_frames=1552 ldpc_failed=0 verified_cycles=387 decode_failed=0
+captured_s=288.234 acquired=1 intervals=49657 evm=0.000468544 clock_ppm=0.000243887 physical_end=0
+ldpc_frames=1564 ldpc_failed=0 verified_cycles=390 decode_failed=0
+captured_s=290.346 acquired=1 intervals=50023 evm=0.000458924 clock_ppm=-0.00529584 physical_end=0
+ldpc_frames=1572 ldpc_failed=0 verified_cycles=392 decode_failed=0
+captured_s=292.351 acquired=1 intervals=50369 evm=0.000456757 clock_ppm=0.00221613 physical_end=0
+ldpc_frames=1584 ldpc_failed=0 verified_cycles=395 decode_failed=0
+captured_s=294.356 acquired=1 intervals=50717 evm=0.000455391 clock_ppm=0.0041384 physical_end=0
+ldpc_frames=1596 ldpc_failed=0 verified_cycles=398 decode_failed=0
+captured_s=296.319 acquired=1 intervals=51056 evm=0.000460613 clock_ppm=-0.00341309 physical_end=0
+ldpc_frames=1608 ldpc_failed=0 verified_cycles=401 decode_failed=0
+captured_s=298.41 acquired=1 intervals=51418 evm=0.000450453 clock_ppm=0.00557993 physical_end=0
+ldpc_frames=1616 ldpc_failed=0 verified_cycles=403 decode_failed=0
+captured_s=300.415 acquired=1 intervals=51765 evm=0.000483832 clock_ppm=-0.00484841 physical_end=0
+ldpc_frames=1628 ldpc_failed=0 verified_cycles=406 decode_failed=0
+captured_s=302.42 acquired=1 intervals=52112 evm=0.000464395 clock_ppm=0.0137539 physical_end=0
+ldpc_frames=1640 ldpc_failed=0 verified_cycles=409 decode_failed=0
+captured_s=304.383 acquired=1 intervals=52451 evm=0.000457943 clock_ppm=0.0123047 physical_end=0
+ldpc_frames=1652 ldpc_failed=0 verified_cycles=412 decode_failed=0
+captured_s=306.538 acquired=1 intervals=52824 evm=0.000451634 clock_ppm=0.00609832 physical_end=0
+ldpc_frames=1660 ldpc_failed=0 verified_cycles=414 decode_failed=0
+captured_s=308.543 acquired=1 intervals=53171 evm=0.0004964 clock_ppm=-0.0151208 physical_end=0
+ldpc_frames=1672 ldpc_failed=0 verified_cycles=417 decode_failed=0
+captured_s=310.548 acquired=1 intervals=53518 evm=0.000458706 clock_ppm=-0.00336314 physical_end=0
+ldpc_frames=1684 ldpc_failed=0 verified_cycles=420 decode_failed=0
+captured_s=312.468 acquired=1 intervals=53850 evm=0.000439762 clock_ppm=0.00982764 physical_end=0
+ldpc_frames=1696 ldpc_failed=0 verified_cycles=423 decode_failed=0
+captured_s=314.559 acquired=1 intervals=54212 evm=0.000502142 clock_ppm=0.00839081 physical_end=0
+ldpc_frames=1704 ldpc_failed=0 verified_cycles=425 decode_failed=0
+captured_s=316.564 acquired=1 intervals=54559 evm=0.000494908 clock_ppm=0.000789105 physical_end=0
+ldpc_frames=1716 ldpc_failed=0 verified_cycles=428 decode_failed=0
+captured_s=318.57 acquired=1 intervals=54906 evm=0.000495445 clock_ppm=-0.000168367 physical_end=0
+ldpc_frames=1728 ldpc_failed=0 verified_cycles=431 decode_failed=0
+captured_s=320.532 acquired=1 intervals=55245 evm=0.000472318 clock_ppm=-0.0082307 physical_end=0
+ldpc_frames=1740 ldpc_failed=0 verified_cycles=434 decode_failed=0
+captured_s=322.666 acquired=1 intervals=55615 evm=0.000463206 clock_ppm=0.00979306 physical_end=0
+ldpc_frames=1748 ldpc_failed=0 verified_cycles=436 decode_failed=0
+captured_s=324.671 acquired=1 intervals=55961 evm=0.000458093 clock_ppm=-0.0035287 physical_end=0
+ldpc_frames=1760 ldpc_failed=0 verified_cycles=439 decode_failed=0
+captured_s=326.676 acquired=1 intervals=56308 evm=0.000493373 clock_ppm=-0.000653264 physical_end=0
+ldpc_frames=1772 ldpc_failed=0 verified_cycles=442 decode_failed=0
+captured_s=328.618 acquired=1 intervals=56644 evm=0.000529392 clock_ppm=0.00883361 physical_end=0
+ldpc_frames=1784 ldpc_failed=0 verified_cycles=445 decode_failed=0
+captured_s=330.708 acquired=1 intervals=57006 evm=0.000460931 clock_ppm=-0.0106003 physical_end=0
+ldpc_frames=1792 ldpc_failed=0 verified_cycles=447 decode_failed=0
+captured_s=332.714 acquired=1 intervals=57353 evm=0.000491518 clock_ppm=-0.00858918 physical_end=0
+ldpc_frames=1804 ldpc_failed=0 verified_cycles=450 decode_failed=0
+captured_s=334.719 acquired=1 intervals=57699 evm=0.000468179 clock_ppm=-0.00149399 physical_end=0
+ldpc_frames=1816 ldpc_failed=0 verified_cycles=453 decode_failed=0
+captured_s=336.682 acquired=1 intervals=58039 evm=0.000467639 clock_ppm=-0.00218902 physical_end=0
+ldpc_frames=1828 ldpc_failed=0 verified_cycles=456 decode_failed=0
+captured_s=338.772 acquired=1 intervals=58401 evm=0.000486643 clock_ppm=0.00195175 physical_end=0
+ldpc_frames=1836 ldpc_failed=0 verified_cycles=458 decode_failed=0
+captured_s=340.778 acquired=1 intervals=58748 evm=0.000479896 clock_ppm=0.0058193 physical_end=0
+ldpc_frames=1848 ldpc_failed=0 verified_cycles=461 decode_failed=0
+captured_s=342.783 acquired=1 intervals=59095 evm=0.000487784 clock_ppm=0.00463903 physical_end=0
+ldpc_frames=1860 ldpc_failed=0 verified_cycles=464 decode_failed=0
+captured_s=344.767 acquired=1 intervals=59438 evm=0.000458916 clock_ppm=-0.00405287 physical_end=0
+ldpc_frames=1872 ldpc_failed=0 verified_cycles=467 decode_failed=0
+captured_s=346.858 acquired=1 intervals=59800 evm=0.000508868 clock_ppm=0.00394538 physical_end=0
+ldpc_frames=1880 ldpc_failed=0 verified_cycles=469 decode_failed=0
+captured_s=348.863 acquired=1 intervals=60147 evm=0.00045847 clock_ppm=-0.00759142 physical_end=0
+ldpc_frames=1892 ldpc_failed=0 verified_cycles=472 decode_failed=0
+captured_s=350.868 acquired=1 intervals=60494 evm=0.000493385 clock_ppm=0.00720729 physical_end=0
+ldpc_frames=1904 ldpc_failed=0 verified_cycles=475 decode_failed=0
+captured_s=352.831 acquired=1 intervals=60833 evm=0.000463686 clock_ppm=0.0097701 physical_end=0
+ldpc_frames=1916 ldpc_failed=0 verified_cycles=478 decode_failed=0
+captured_s=354.986 acquired=1 intervals=61206 evm=0.00048093 clock_ppm=0.0149505 physical_end=0
+ldpc_frames=1924 ldpc_failed=0 verified_cycles=480 decode_failed=0
+captured_s=356.991 acquired=1 intervals=61553 evm=0.000453262 clock_ppm=-0.0112728 physical_end=0
+ldpc_frames=1936 ldpc_failed=0 verified_cycles=483 decode_failed=0
+captured_s=358.996 acquired=1 intervals=61900 evm=0.000473112 clock_ppm=0.00472443 physical_end=0
+ldpc_frames=1948 ldpc_failed=0 verified_cycles=486 decode_failed=0
+captured_s=360.917 acquired=1 intervals=62232 evm=0.000478525 clock_ppm=-0.00190238 physical_end=0
+ldpc_frames=1960 ldpc_failed=0 verified_cycles=489 decode_failed=0
+captured_s=363.007 acquired=1 intervals=62594 evm=0.000464692 clock_ppm=0.0127449 physical_end=0
+ldpc_frames=1968 ldpc_failed=0 verified_cycles=491 decode_failed=0
+captured_s=365.012 acquired=1 intervals=62941 evm=0.000490817 clock_ppm=0.00236699 physical_end=0
+ldpc_frames=1980 ldpc_failed=0 verified_cycles=494 decode_failed=0
+captured_s=367.019 acquired=1 intervals=63288 evm=0.000503925 clock_ppm=0.00105554 physical_end=0
+ldpc_frames=1992 ldpc_failed=0 verified_cycles=497 decode_failed=0
+captured_s=368.98 acquired=1 intervals=63627 evm=0.000479838 clock_ppm=-0.00353448 physical_end=0
+ldpc_frames=2004 ldpc_failed=0 verified_cycles=500 decode_failed=0
+captured_s=371.072 acquired=1 intervals=63989 evm=0.000464414 clock_ppm=-0.00735194 physical_end=0
+ldpc_frames=2012 ldpc_failed=0 verified_cycles=502 decode_failed=0
+captured_s=373.077 acquired=1 intervals=64336 evm=0.000439649 clock_ppm=-0.00373125 physical_end=0
+ldpc_frames=2024 ldpc_failed=0 verified_cycles=505 decode_failed=0
+captured_s=375.082 acquired=1 intervals=64683 evm=0.000487413 clock_ppm=0.0130538 physical_end=0
+ldpc_frames=2036 ldpc_failed=0 verified_cycles=508 decode_failed=0
+captured_s=377.066 acquired=1 intervals=65026 evm=0.000491947 clock_ppm=0.00729047 physical_end=0
+ldpc_frames=2048 ldpc_failed=0 verified_cycles=511 decode_failed=0
+captured_s=379.178 acquired=1 intervals=65392 evm=0.000471948 clock_ppm=-0.0146232 physical_end=0
+ldpc_frames=2056 ldpc_failed=0 verified_cycles=513 decode_failed=0
+captured_s=381.204 acquired=1 intervals=65742 evm=0.000454857 clock_ppm=-0.0067839 physical_end=0
+ldpc_frames=2068 ldpc_failed=0 verified_cycles=516 decode_failed=0
+captured_s=383.231 acquired=1 intervals=66093 evm=0.000553685 clock_ppm=-0.00454066 physical_end=0
+ldpc_frames=2080 ldpc_failed=0 verified_cycles=519 decode_failed=0
+captured_s=385.18 acquired=1 intervals=66430 evm=0.000489727 clock_ppm=0.00887376 physical_end=0
+ldpc_frames=2092 ldpc_failed=0 verified_cycles=522 decode_failed=0
+captured_s=387.242 acquired=1 intervals=66786 evm=0.000461471 clock_ppm=0.0115263 physical_end=0
+ldpc_frames=2100 ldpc_failed=0 verified_cycles=524 decode_failed=0
+captured_s=389.247 acquired=1 intervals=67134 evm=0.000476493 clock_ppm=-0.00321833 physical_end=0
+ldpc_frames=2112 ldpc_failed=0 verified_cycles=527 decode_failed=0
+captured_s=391.253 acquired=1 intervals=67481 evm=0.000472354 clock_ppm=-0.00114306 physical_end=0
+ldpc_frames=2124 ldpc_failed=0 verified_cycles=530 decode_failed=0
+captured_s=393.215 acquired=1 intervals=67820 evm=0.000429725 clock_ppm=-0.0139062 physical_end=0
+ldpc_frames=2136 ldpc_failed=0 verified_cycles=533 decode_failed=0
+captured_s=395.306 acquired=1 intervals=68182 evm=0.000514154 clock_ppm=0.00605032 physical_end=0
+ldpc_frames=2144 ldpc_failed=0 verified_cycles=535 decode_failed=0
+captured_s=397.311 acquired=1 intervals=68528 evm=0.00050151 clock_ppm=0.0193921 physical_end=0
+ldpc_frames=2156 ldpc_failed=0 verified_cycles=538 decode_failed=0
+captured_s=399.317 acquired=1 intervals=68876 evm=0.000501925 clock_ppm=0.00170173 physical_end=0
+ldpc_frames=2168 ldpc_failed=0 verified_cycles=541 decode_failed=0
+captured_s=401.279 acquired=1 intervals=69216 evm=0.000481725 clock_ppm=0.00432007 physical_end=0
+ldpc_frames=2180 ldpc_failed=0 verified_cycles=544 decode_failed=0
+captured_s=403.391 acquired=1 intervals=69581 evm=0.000434788 clock_ppm=0.00436216 physical_end=0
+ldpc_frames=2188 ldpc_failed=0 verified_cycles=546 decode_failed=0
+captured_s=405.396 acquired=1 intervals=69928 evm=0.00049184 clock_ppm=0.00694156 physical_end=0
+ldpc_frames=2200 ldpc_failed=0 verified_cycles=549 decode_failed=0
+captured_s=407.423 acquired=1 intervals=70278 evm=0.000458202 clock_ppm=0.0186168 physical_end=0
+ldpc_frames=2212 ldpc_failed=0 verified_cycles=552 decode_failed=0
+captured_s=409.364 acquired=1 intervals=70614 evm=0.000480602 clock_ppm=0.0169433 physical_end=0
+ldpc_frames=2224 ldpc_failed=0 verified_cycles=555 decode_failed=0
+captured_s=411.476 acquired=1 intervals=70979 evm=0.000462766 clock_ppm=-0.00104685 physical_end=0
+ldpc_frames=2232 ldpc_failed=0 verified_cycles=557 decode_failed=0
+captured_s=413.482 acquired=1 intervals=71327 evm=0.000452766 clock_ppm=0.00574747 physical_end=0
+ldpc_frames=2244 ldpc_failed=0 verified_cycles=560 decode_failed=0
+captured_s=415.487 acquired=1 intervals=71673 evm=0.000467199 clock_ppm=-0.00118448 physical_end=0
+ldpc_frames=2256 ldpc_failed=0 verified_cycles=563 decode_failed=0
+captured_s=417.428 acquired=1 intervals=72009 evm=0.000458844 clock_ppm=-0.00268076 physical_end=0
+ldpc_frames=2268 ldpc_failed=0 verified_cycles=566 decode_failed=0
+captured_s=419.519 acquired=1 intervals=72371 evm=0.00046168 clock_ppm=-0.0146495 physical_end=0
+ldpc_frames=2276 ldpc_failed=0 verified_cycles=568 decode_failed=0
+captured_s=421.524 acquired=1 intervals=72718 evm=0.000453198 clock_ppm=0.00494431 physical_end=0
+ldpc_frames=2288 ldpc_failed=0 verified_cycles=571 decode_failed=0
+captured_s=423.529 acquired=1 intervals=73065 evm=0.000484901 clock_ppm=0.0172819 physical_end=0
+ldpc_frames=2300 ldpc_failed=0 verified_cycles=574 decode_failed=0
+captured_s=425.514 acquired=1 intervals=73408 evm=0.000500307 clock_ppm=-0.0121785 physical_end=0
+ldpc_frames=2312 ldpc_failed=0 verified_cycles=577 decode_failed=0
+captured_s=427.605 acquired=1 intervals=73770 evm=0.000443047 clock_ppm=0.000978734 physical_end=0
+ldpc_frames=2320 ldpc_failed=0 verified_cycles=579 decode_failed=0
+captured_s=429.61 acquired=1 intervals=74117 evm=0.000460653 clock_ppm=0.0148704 physical_end=0
+ldpc_frames=2332 ldpc_failed=0 verified_cycles=582 decode_failed=0
+captured_s=431.615 acquired=1 intervals=74464 evm=0.000447631 clock_ppm=0.00607523 physical_end=0
+ldpc_frames=2344 ldpc_failed=0 verified_cycles=585 decode_failed=0
+captured_s=433.577 acquired=1 intervals=74803 evm=0.000536275 clock_ppm=-0.0112412 physical_end=0
+ldpc_frames=2356 ldpc_failed=0 verified_cycles=588 decode_failed=0
+captured_s=435.711 acquired=1 intervals=75172 evm=0.000454629 clock_ppm=-0.00106666 physical_end=0
+ldpc_frames=2364 ldpc_failed=0 verified_cycles=590 decode_failed=0
+captured_s=437.716 acquired=1 intervals=75520 evm=0.000477048 clock_ppm=-0.0113152 physical_end=0
+ldpc_frames=2376 ldpc_failed=0 verified_cycles=593 decode_failed=0
+captured_s=439.722 acquired=1 intervals=75866 evm=0.000479663 clock_ppm=-0.00496583 physical_end=0
+ldpc_frames=2388 ldpc_failed=0 verified_cycles=596 decode_failed=0
+captured_s=441.663 acquired=1 intervals=76202 evm=0.000485316 clock_ppm=0.00287951 physical_end=0
+ldpc_frames=2400 ldpc_failed=0 verified_cycles=599 decode_failed=0
+captured_s=443.753 acquired=1 intervals=76564 evm=0.000504132 clock_ppm=-0.00393286 physical_end=0
+ldpc_frames=2408 ldpc_failed=0 verified_cycles=601 decode_failed=0
+captured_s=445.759 acquired=1 intervals=76911 evm=0.000453348 clock_ppm=0.00829417 physical_end=0
+ldpc_frames=2420 ldpc_failed=0 verified_cycles=604 decode_failed=0
+captured_s=447.764 acquired=1 intervals=77258 evm=0.000478244 clock_ppm=-0.0118748 physical_end=0
+ldpc_frames=2432 ldpc_failed=0 verified_cycles=607 decode_failed=0
+captured_s=449.727 acquired=1 intervals=77597 evm=0.000513431 clock_ppm=-0.0104308 physical_end=0
+ldpc_frames=2444 ldpc_failed=0 verified_cycles=610 decode_failed=0
+captured_s=451.839 acquired=1 intervals=77963 evm=0.00045646 clock_ppm=0.00824281 physical_end=0
+ldpc_frames=2452 ldpc_failed=0 verified_cycles=612 decode_failed=0
+captured_s=453.844 acquired=1 intervals=78310 evm=0.000464462 clock_ppm=-0.00451702 physical_end=0
+ldpc_frames=2464 ldpc_failed=0 verified_cycles=615 decode_failed=0
+captured_s=455.85 acquired=1 intervals=78656 evm=0.000503083 clock_ppm=-0.00530239 physical_end=0
+ldpc_frames=2476 ldpc_failed=0 verified_cycles=618 decode_failed=0
+captured_s=457.812 acquired=1 intervals=78996 evm=0.000441335 clock_ppm=-0.0130642 physical_end=0
+ldpc_frames=2488 ldpc_failed=0 verified_cycles=621 decode_failed=0
+captured_s=459.903 acquired=1 intervals=79358 evm=0.000495029 clock_ppm=-0.00777611 physical_end=0
+ldpc_frames=2496 ldpc_failed=0 verified_cycles=623 decode_failed=0
+captured_s=461.908 acquired=1 intervals=79705 evm=0.000472627 clock_ppm=-0.000314993 physical_end=0
+ldpc_frames=2508 ldpc_failed=0 verified_cycles=626 decode_failed=0
+captured_s=463.913 acquired=1 intervals=80052 evm=0.000464658 clock_ppm=-0.0101426 physical_end=0
+ldpc_frames=2520 ldpc_failed=0 verified_cycles=629 decode_failed=0
+captured_s=465.876 acquired=1 intervals=80391 evm=0.000502919 clock_ppm=0.0178181 physical_end=0
+ldpc_frames=2532 ldpc_failed=0 verified_cycles=632 decode_failed=0
+captured_s=467.968 acquired=1 intervals=80753 evm=0.000455574 clock_ppm=-0.0117112 physical_end=0
+ldpc_frames=2540 ldpc_failed=0 verified_cycles=634 decode_failed=0
+captured_s=469.972 acquired=1 intervals=81100 evm=0.000459987 clock_ppm=6.94327e-05 physical_end=0
+ldpc_frames=2552 ldpc_failed=0 verified_cycles=637 decode_failed=0
+captured_s=471.977 acquired=1 intervals=81447 evm=0.000460929 clock_ppm=-0.0232822 physical_end=0
+ldpc_frames=2564 ldpc_failed=0 verified_cycles=640 decode_failed=0
+captured_s=473.961 acquired=1 intervals=81790 evm=0.000493691 clock_ppm=-0.0101697 physical_end=0
+ldpc_frames=2576 ldpc_failed=0 verified_cycles=643 decode_failed=0
+captured_s=476.073 acquired=1 intervals=82156 evm=0.000476759 clock_ppm=-0.0102045 physical_end=0
+ldpc_frames=2584 ldpc_failed=0 verified_cycles=645 decode_failed=0
+captured_s=478.079 acquired=1 intervals=82502 evm=0.000459835 clock_ppm=0.00558674 physical_end=0
+ldpc_frames=2596 ldpc_failed=0 verified_cycles=648 decode_failed=0
+captured_s=480.084 acquired=1 intervals=82849 evm=0.000470527 clock_ppm=0.00745952 physical_end=0
+ldpc_frames=2608 ldpc_failed=0 verified_cycles=651 decode_failed=0
+captured_s=482.026 acquired=1 intervals=83185 evm=0.000452714 clock_ppm=0.00552504 physical_end=0
+ldpc_frames=2620 ldpc_failed=0 verified_cycles=654 decode_failed=0
+captured_s=484.138 acquired=1 intervals=83551 evm=0.00045032 clock_ppm=0.013189 physical_end=0
+ldpc_frames=2628 ldpc_failed=0 verified_cycles=656 decode_failed=0
+captured_s=486.143 acquired=1 intervals=83898 evm=0.000446777 clock_ppm=0.00964013 physical_end=0
+ldpc_frames=2640 ldpc_failed=0 verified_cycles=659 decode_failed=0
+captured_s=488.149 acquired=1 intervals=84244 evm=0.000483241 clock_ppm=-0.0070556 physical_end=0
+ldpc_frames=2652 ldpc_failed=0 verified_cycles=662 decode_failed=0
+captured_s=490.111 acquired=1 intervals=84584 evm=0.000458396 clock_ppm=0.000755906 physical_end=0
+ldpc_frames=2664 ldpc_failed=0 verified_cycles=665 decode_failed=0
+captured_s=492.244 acquired=1 intervals=84953 evm=0.000570491 clock_ppm=0.00214866 physical_end=0
+ldpc_frames=2672 ldpc_failed=0 verified_cycles=667 decode_failed=0
+captured_s=494.25 acquired=1 intervals=85300 evm=0.000466236 clock_ppm=0.00271422 physical_end=0
+ldpc_frames=2684 ldpc_failed=0 verified_cycles=670 decode_failed=0
+captured_s=496.255 acquired=1 intervals=85647 evm=0.000497985 clock_ppm=0.000153554 physical_end=0
+ldpc_frames=2696 ldpc_failed=0 verified_cycles=673 decode_failed=0
+captured_s=498.175 acquired=1 intervals=85979 evm=0.000514957 clock_ppm=0.00363635 physical_end=0
+ldpc_frames=2708 ldpc_failed=0 verified_cycles=676 decode_failed=0
+captured_s=500.308 acquired=1 intervals=86349 evm=0.000455505 clock_ppm=0.0121279 physical_end=0
+ldpc_frames=2716 ldpc_failed=0 verified_cycles=678 decode_failed=0
+captured_s=502.313 acquired=1 intervals=86695 evm=0.000435462 clock_ppm=-0.00183041 physical_end=0
+ldpc_frames=2728 ldpc_failed=0 verified_cycles=681 decode_failed=0
+captured_s=504.319 acquired=1 intervals=87042 evm=0.000468187 clock_ppm=-0.0121544 physical_end=0
+ldpc_frames=2740 ldpc_failed=0 verified_cycles=684 decode_failed=0
+captured_s=506.26 acquired=1 intervals=87378 evm=0.000487621 clock_ppm=-0.0085641 physical_end=0
+ldpc_frames=2752 ldpc_failed=0 verified_cycles=687 decode_failed=0
+captured_s=508.394 acquired=1 intervals=87747 evm=0.000485859 clock_ppm=-0.00339161 physical_end=0
+ldpc_frames=2760 ldpc_failed=0 verified_cycles=689 decode_failed=0
+captured_s=510.399 acquired=1 intervals=88094 evm=0.000453252 clock_ppm=0.00698486 physical_end=0
+ldpc_frames=2772 ldpc_failed=0 verified_cycles=692 decode_failed=0
+captured_s=512.404 acquired=1 intervals=88441 evm=0.000465075 clock_ppm=0.0219305 physical_end=0
+ldpc_frames=2784 ldpc_failed=0 verified_cycles=695 decode_failed=0
+captured_s=514.324 acquired=1 intervals=88773 evm=0.000472066 clock_ppm=0.00545394 physical_end=0
+ldpc_frames=2796 ldpc_failed=0 verified_cycles=698 decode_failed=0
+captured_s=516.479 acquired=1 intervals=89146 evm=0.000453655 clock_ppm=-0.0116165 physical_end=0
+ldpc_frames=2804 ldpc_failed=0 verified_cycles=700 decode_failed=0
+captured_s=518.484 acquired=1 intervals=89493 evm=0.000475541 clock_ppm=0.00848034 physical_end=0
+ldpc_frames=2816 ldpc_failed=0 verified_cycles=703 decode_failed=0
+captured_s=520.49 acquired=1 intervals=89840 evm=0.000458042 clock_ppm=-0.00155414 physical_end=0
+ldpc_frames=2828 ldpc_failed=0 verified_cycles=706 decode_failed=0
+captured_s=522.394 acquired=1 intervals=90170 evm=0.000435674 clock_ppm=0.0193914 physical_end=0
+ldpc_frames=2840 ldpc_failed=0 verified_cycles=709 decode_failed=0
+captured_s=524.543 acquired=1 intervals=90541 evm=0.000470339 clock_ppm=-0.00790461 physical_end=0
+ldpc_frames=2848 ldpc_failed=0 verified_cycles=711 decode_failed=0
+captured_s=526.548 acquired=1 intervals=90888 evm=0.000452406 clock_ppm=0.012319 physical_end=0
+ldpc_frames=2860 ldpc_failed=0 verified_cycles=714 decode_failed=0
+captured_s=528.554 acquired=1 intervals=91235 evm=0.000452405 clock_ppm=0.00594069 physical_end=0
+ldpc_frames=2872 ldpc_failed=0 verified_cycles=717 decode_failed=0
+captured_s=530.473 acquired=1 intervals=91568 evm=0.000484975 clock_ppm=-0.00916638 physical_end=0
+ldpc_frames=2884 ldpc_failed=0 verified_cycles=720 decode_failed=0
+captured_s=532.586 acquired=1 intervals=91933 evm=0.000448375 clock_ppm=0.00146749 physical_end=0
+ldpc_frames=2892 ldpc_failed=0 verified_cycles=722 decode_failed=0
+captured_s=534.591 acquired=1 intervals=92280 evm=0.00045274 clock_ppm=-0.0152814 physical_end=0
+ldpc_frames=2904 ldpc_failed=0 verified_cycles=725 decode_failed=0
+captured_s=536.596 acquired=1 intervals=92626 evm=0.000473609 clock_ppm=0.0168808 physical_end=0
+ldpc_frames=2916 ldpc_failed=0 verified_cycles=728 decode_failed=0
+captured_s=538.559 acquired=1 intervals=92966 evm=0.000503146 clock_ppm=0.00356975 physical_end=0
+ldpc_frames=2928 ldpc_failed=0 verified_cycles=731 decode_failed=0
+captured_s=540.65 acquired=1 intervals=93328 evm=0.000474739 clock_ppm=-0.000558499 physical_end=0
+ldpc_frames=2936 ldpc_failed=0 verified_cycles=733 decode_failed=0
+captured_s=542.656 acquired=1 intervals=93675 evm=0.000477292 clock_ppm=-0.0168131 physical_end=0
+ldpc_frames=2948 ldpc_failed=0 verified_cycles=736 decode_failed=0
+captured_s=544.66 acquired=1 intervals=94022 evm=0.000460065 clock_ppm=0.0152295 physical_end=0
+ldpc_frames=2960 ldpc_failed=0 verified_cycles=739 decode_failed=0
+captured_s=546.623 acquired=1 intervals=94361 evm=0.000451898 clock_ppm=-0.00562935 physical_end=0
+ldpc_frames=2972 ldpc_failed=0 verified_cycles=742 decode_failed=0
+captured_s=548.714 acquired=1 intervals=94723 evm=0.000510089 clock_ppm=-0.00754214 physical_end=0
+ldpc_frames=2980 ldpc_failed=0 verified_cycles=744 decode_failed=0
+captured_s=550.719 acquired=1 intervals=95070 evm=0.000477857 clock_ppm=-0.0116494 physical_end=0
+ldpc_frames=2992 ldpc_failed=0 verified_cycles=747 decode_failed=0
+captured_s=552.724 acquired=1 intervals=95417 evm=0.000438649 clock_ppm=-0.00578249 physical_end=0
+ldpc_frames=3004 ldpc_failed=0 verified_cycles=750 decode_failed=0
+captured_s=554.708 acquired=1 intervals=95760 evm=0.000423722 clock_ppm=0.00678023 physical_end=0
+ldpc_frames=3016 ldpc_failed=0 verified_cycles=753 decode_failed=0
+captured_s=556.821 acquired=1 intervals=96126 evm=0.000475527 clock_ppm=0.0124426 physical_end=0
+ldpc_frames=3024 ldpc_failed=0 verified_cycles=755 decode_failed=0
+captured_s=558.826 acquired=1 intervals=96472 evm=0.000475653 clock_ppm=-0.0139649 physical_end=0
+ldpc_frames=3036 ldpc_failed=0 verified_cycles=758 decode_failed=0
+captured_s=560.831 acquired=1 intervals=96819 evm=0.000460664 clock_ppm=-0.0114107 physical_end=0
+ldpc_frames=3048 ldpc_failed=0 verified_cycles=761 decode_failed=0
+captured_s=562.772 acquired=1 intervals=97155 evm=0.000445281 clock_ppm=0.00155631 physical_end=0
+ldpc_frames=3060 ldpc_failed=0 verified_cycles=764 decode_failed=0
+captured_s=564.884 acquired=1 intervals=97520 evm=0.000488763 clock_ppm=-0.0111426 physical_end=0
+ldpc_frames=3068 ldpc_failed=0 verified_cycles=766 decode_failed=0
+captured_s=566.911 acquired=1 intervals=97872 evm=0.00044783 clock_ppm=-0.00158979 physical_end=0
+ldpc_frames=3080 ldpc_failed=0 verified_cycles=769 decode_failed=0
+captured_s=568.916 acquired=1 intervals=98218 evm=0.000463506 clock_ppm=0.0205483 physical_end=0
+ldpc_frames=3092 ldpc_failed=0 verified_cycles=772 decode_failed=0
+captured_s=570.858 acquired=1 intervals=98554 evm=0.000438108 clock_ppm=-0.00980083 physical_end=0
+ldpc_frames=3104 ldpc_failed=0 verified_cycles=775 decode_failed=0
+captured_s=572.948 acquired=1 intervals=98916 evm=0.000473318 clock_ppm=0.00716217 physical_end=0
+ldpc_frames=3112 ldpc_failed=0 verified_cycles=777 decode_failed=0
+captured_s=574.954 acquired=1 intervals=99263 evm=0.000476669 clock_ppm=0.0118892 physical_end=0
+ldpc_frames=3124 ldpc_failed=0 verified_cycles=780 decode_failed=0
+captured_s=576.959 acquired=1 intervals=99610 evm=0.000503167 clock_ppm=-0.00422034 physical_end=0
+ldpc_frames=3136 ldpc_failed=0 verified_cycles=783 decode_failed=0
+captured_s=578.923 acquired=1 intervals=99950 evm=0.000478617 clock_ppm=-0.00625493 physical_end=0
+ldpc_frames=3148 ldpc_failed=0 verified_cycles=786 decode_failed=0
+captured_s=581.034 acquired=1 intervals=100315 evm=0.000476777 clock_ppm=-0.0175017 physical_end=0
+ldpc_frames=3156 ldpc_failed=0 verified_cycles=788 decode_failed=0
+captured_s=583.039 acquired=1 intervals=100662 evm=0.00048981 clock_ppm=0.00114309 physical_end=0
+ldpc_frames=3168 ldpc_failed=0 verified_cycles=791 decode_failed=0
+captured_s=585.045 acquired=1 intervals=101008 evm=0.000484019 clock_ppm=0.00541279 physical_end=0
+ldpc_frames=3180 ldpc_failed=0 verified_cycles=794 decode_failed=0
+captured_s=587.007 acquired=1 intervals=101348 evm=0.000511895 clock_ppm=-0.00703029 physical_end=0
+ldpc_frames=3192 ldpc_failed=0 verified_cycles=797 decode_failed=0
+captured_s=589.098 acquired=1 intervals=101710 evm=0.000492707 clock_ppm=0.0119954 physical_end=0
+ldpc_frames=3200 ldpc_failed=0 verified_cycles=799 decode_failed=0
+captured_s=591.103 acquired=1 intervals=102057 evm=0.000454739 clock_ppm=-0.00909663 physical_end=0
+ldpc_frames=3212 ldpc_failed=0 verified_cycles=802 decode_failed=0
+captured_s=593.108 acquired=1 intervals=102404 evm=0.000456665 clock_ppm=0.0073754 physical_end=0
+ldpc_frames=3224 ldpc_failed=0 verified_cycles=805 decode_failed=0
+captured_s=595.071 acquired=1 intervals=102743 evm=0.000484475 clock_ppm=0.00622387 physical_end=0
+ldpc_frames=3236 ldpc_failed=0 verified_cycles=808 decode_failed=0
+captured_s=597.162 acquired=1 intervals=103105 evm=0.0004628 clock_ppm=-0.00515952 physical_end=0
+ldpc_frames=3244 ldpc_failed=0 verified_cycles=810 decode_failed=0
+captured_s=599.167 acquired=1 intervals=103452 evm=0.000473784 clock_ppm=0.00542481 physical_end=0
+ldpc_frames=3256 ldpc_failed=0 verified_cycles=813 decode_failed=0
+captured_s=601.172 acquired=1 intervals=103799 evm=0.000479717 clock_ppm=-0.012982 physical_end=0
+ldpc_frames=3268 ldpc_failed=0 verified_cycles=816 decode_failed=0
+captured_s=603.156 acquired=1 intervals=104142 evm=0.000455119 clock_ppm=-0.00981969 physical_end=0
+ldpc_frames=3280 ldpc_failed=0 verified_cycles=819 decode_failed=0
+captured_s=605.247 acquired=1 intervals=104504 evm=0.000449823 clock_ppm=-0.00828716 physical_end=0
+ldpc_frames=3288 ldpc_failed=0 verified_cycles=821 decode_failed=0
+captured_s=607.253 acquired=1 intervals=104851 evm=0.000507287 clock_ppm=-0.00145686 physical_end=0
+ldpc_frames=3300 ldpc_failed=0 verified_cycles=824 decode_failed=0
+captured_s=609.258 acquired=1 intervals=105198 evm=0.000451108 clock_ppm=0.000510992 physical_end=0
+ldpc_frames=3312 ldpc_failed=0 verified_cycles=827 decode_failed=0
+captured_s=611.22 acquired=1 intervals=105537 evm=0.000449527 clock_ppm=-0.0213799 physical_end=0
+ldpc_frames=3324 ldpc_failed=0 verified_cycles=830 decode_failed=0
+captured_s=613.311 acquired=1 intervals=105899 evm=0.000449699 clock_ppm=0.00964087 physical_end=0
+ldpc_frames=3332 ldpc_failed=0 verified_cycles=832 decode_failed=0
+captured_s=615.316 acquired=1 intervals=106246 evm=0.000467943 clock_ppm=0.0012934 physical_end=0
+ldpc_frames=3344 ldpc_failed=0 verified_cycles=835 decode_failed=0
+captured_s=617.322 acquired=1 intervals=106593 evm=0.000495394 clock_ppm=-0.00183786 physical_end=0
+ldpc_frames=3356 ldpc_failed=0 verified_cycles=838 decode_failed=0
+captured_s=619.306 acquired=1 intervals=106936 evm=0.000443559 clock_ppm=0.00573337 physical_end=0
+ldpc_frames=3368 ldpc_failed=0 verified_cycles=841 decode_failed=0
+captured_s=621.396 acquired=1 intervals=107298 evm=0.000471081 clock_ppm=0.00982321 physical_end=0
+ldpc_frames=3376 ldpc_failed=0 verified_cycles=843 decode_failed=0
+captured_s=623.402 acquired=1 intervals=107645 evm=0.000432582 clock_ppm=-0.00948448 physical_end=0
+ldpc_frames=3388 ldpc_failed=0 verified_cycles=846 decode_failed=0
+captured_s=625.407 acquired=1 intervals=107992 evm=0.000474814 clock_ppm=-0.000685857 physical_end=0
+ldpc_frames=3400 ldpc_failed=0 verified_cycles=849 decode_failed=0
+captured_s=627.37 acquired=1 intervals=108332 evm=0.000476149 clock_ppm=0.0041811 physical_end=0
+ldpc_frames=3412 ldpc_failed=0 verified_cycles=852 decode_failed=0
+captured_s=629.461 acquired=1 intervals=108693 evm=0.000505094 clock_ppm=-0.0110437 physical_end=0
+ldpc_frames=3420 ldpc_failed=0 verified_cycles=854 decode_failed=0
+captured_s=631.466 acquired=1 intervals=109040 evm=0.00047065 clock_ppm=0.0105721 physical_end=0
+ldpc_frames=3432 ldpc_failed=0 verified_cycles=857 decode_failed=0
+captured_s=633.471 acquired=1 intervals=109387 evm=0.000488907 clock_ppm=0.00514323 physical_end=0
+ldpc_frames=3444 ldpc_failed=0 verified_cycles=860 decode_failed=0
+captured_s=635.456 acquired=1 intervals=109730 evm=0.000474165 clock_ppm=-0.0154833 physical_end=0
+ldpc_frames=3456 ldpc_failed=0 verified_cycles=863 decode_failed=0
+captured_s=637.546 acquired=1 intervals=110092 evm=0.00043658 clock_ppm=0.00368576 physical_end=0
+ldpc_frames=3464 ldpc_failed=0 verified_cycles=865 decode_failed=0
+captured_s=639.551 acquired=1 intervals=110439 evm=0.000490236 clock_ppm=0.00485495 physical_end=0
+ldpc_frames=3476 ldpc_failed=0 verified_cycles=868 decode_failed=0
+captured_s=641.556 acquired=1 intervals=110785 evm=0.000472746 clock_ppm=0.00655479 physical_end=0
+ldpc_frames=3488 ldpc_failed=0 verified_cycles=871 decode_failed=0
+captured_s=643.52 acquired=1 intervals=111125 evm=0.000474609 clock_ppm=-0.00750676 physical_end=0
+ldpc_frames=3500 ldpc_failed=0 verified_cycles=874 decode_failed=0
+captured_s=645.631 acquired=1 intervals=111490 evm=0.000455274 clock_ppm=-0.0167497 physical_end=0
+ldpc_frames=3508 ldpc_failed=0 verified_cycles=876 decode_failed=0
+captured_s=647.636 acquired=1 intervals=111838 evm=0.000455396 clock_ppm=-0.0125628 physical_end=0
+ldpc_frames=3520 ldpc_failed=0 verified_cycles=879 decode_failed=0
+captured_s=649.642 acquired=1 intervals=112185 evm=0.000473984 clock_ppm=0.00584105 physical_end=0
+ldpc_frames=3532 ldpc_failed=0 verified_cycles=882 decode_failed=0
+captured_s=651.604 acquired=1 intervals=112524 evm=0.000457606 clock_ppm=0.000420826 physical_end=0
+ldpc_frames=3544 ldpc_failed=0 verified_cycles=885 decode_failed=0
+captured_s=653.716 acquired=1 intervals=112890 evm=0.000455591 clock_ppm=-0.00765332 physical_end=0
+ldpc_frames=3552 ldpc_failed=0 verified_cycles=887 decode_failed=0
+captured_s=655.722 acquired=1 intervals=113236 evm=0.000463836 clock_ppm=0.0106334 physical_end=0
+ldpc_frames=3564 ldpc_failed=0 verified_cycles=890 decode_failed=0
+captured_s=657.727 acquired=1 intervals=113584 evm=0.000452526 clock_ppm=0.00576566 physical_end=0
+ldpc_frames=3576 ldpc_failed=0 verified_cycles=893 decode_failed=0
+captured_s=659.668 acquired=1 intervals=113920 evm=0.000460492 clock_ppm=-0.0028864 physical_end=0
+ldpc_frames=3588 ldpc_failed=0 verified_cycles=896 decode_failed=0
+captured_s=661.78 acquired=1 intervals=114285 evm=0.000464722 clock_ppm=0.00328253 physical_end=0
+ldpc_frames=3596 ldpc_failed=0 verified_cycles=898 decode_failed=0
+captured_s=663.786 acquired=1 intervals=114632 evm=0.000463732 clock_ppm=-0.00605177 physical_end=0
+ldpc_frames=3608 ldpc_failed=0 verified_cycles=901 decode_failed=0
+captured_s=665.791 acquired=1 intervals=114978 evm=0.000456845 clock_ppm=-0.00708615 physical_end=0
+ldpc_frames=3620 ldpc_failed=0 verified_cycles=904 decode_failed=0
+captured_s=667.754 acquired=1 intervals=115318 evm=0.000453585 clock_ppm=-0.00934564 physical_end=0
+ldpc_frames=3632 ldpc_failed=0 verified_cycles=907 decode_failed=0
+captured_s=669.844 acquired=1 intervals=115680 evm=0.000482869 clock_ppm=-0.00325062 physical_end=0
+ldpc_frames=3640 ldpc_failed=0 verified_cycles=909 decode_failed=0
+captured_s=671.851 acquired=1 intervals=116027 evm=0.000485528 clock_ppm=0.00831357 physical_end=0
+ldpc_frames=3652 ldpc_failed=0 verified_cycles=912 decode_failed=0
+captured_s=673.855 acquired=1 intervals=116374 evm=0.000445551 clock_ppm=0.0133745 physical_end=0
+ldpc_frames=3664 ldpc_failed=0 verified_cycles=915 decode_failed=0
+captured_s=675.817 acquired=1 intervals=116713 evm=0.00047264 clock_ppm=0.0032203 physical_end=0
+ldpc_frames=3676 ldpc_failed=0 verified_cycles=918 decode_failed=0
+captured_s=677.908 acquired=1 intervals=117075 evm=0.000448709 clock_ppm=-0.00281933 physical_end=0
+ldpc_frames=3684 ldpc_failed=0 verified_cycles=920 decode_failed=0
+captured_s=679.914 acquired=1 intervals=117422 evm=0.000485888 clock_ppm=0.00293671 physical_end=0
+ldpc_frames=3696 ldpc_failed=0 verified_cycles=923 decode_failed=0
+captured_s=681.919 acquired=1 intervals=117769 evm=0.000481859 clock_ppm=-0.0102124 physical_end=0
+ldpc_frames=3708 ldpc_failed=0 verified_cycles=926 decode_failed=0
+captured_s=683.904 acquired=1 intervals=118112 evm=0.000478783 clock_ppm=0.000887158 physical_end=0
+ldpc_frames=3720 ldpc_failed=0 verified_cycles=929 decode_failed=0
+captured_s=685.994 acquired=1 intervals=118474 evm=0.000474056 clock_ppm=0.00349173 physical_end=0
+ldpc_frames=3728 ldpc_failed=0 verified_cycles=931 decode_failed=0
+captured_s=687.999 acquired=1 intervals=118821 evm=0.000452227 clock_ppm=0.0208554 physical_end=0
+ldpc_frames=3740 ldpc_failed=0 verified_cycles=934 decode_failed=0
+captured_s=690.005 acquired=1 intervals=119168 evm=0.0004827 clock_ppm=-0.00793563 physical_end=0
+ldpc_frames=3752 ldpc_failed=0 verified_cycles=937 decode_failed=0
+captured_s=691.967 acquired=1 intervals=119507 evm=0.000486782 clock_ppm=0.000829353 physical_end=0
+ldpc_frames=3764 ldpc_failed=0 verified_cycles=940 decode_failed=0
+captured_s=694.079 acquired=1 intervals=119872 evm=0.000480583 clock_ppm=0.0102183 physical_end=0
+ldpc_frames=3772 ldpc_failed=0 verified_cycles=942 decode_failed=0
+captured_s=696.084 acquired=1 intervals=120220 evm=0.000445752 clock_ppm=-0.0122343 physical_end=0
+ldpc_frames=3784 ldpc_failed=0 verified_cycles=945 decode_failed=0
+captured_s=698.09 acquired=1 intervals=120567 evm=0.000477666 clock_ppm=0.00799742 physical_end=0
+ldpc_frames=3796 ldpc_failed=0 verified_cycles=948 decode_failed=0
+captured_s=700.037 acquired=1 intervals=120904 evm=0.000457267 clock_ppm=0.0220494 physical_end=0
+ldpc_frames=3808 ldpc_failed=0 verified_cycles=951 decode_failed=0
+captured_s=702.164 acquired=1 intervals=121272 evm=0.000484995 clock_ppm=0.00677526 physical_end=0
+ldpc_frames=3816 ldpc_failed=0 verified_cycles=953 decode_failed=0
+captured_s=704.17 acquired=1 intervals=121618 evm=0.000455904 clock_ppm=0.00149777 physical_end=0
+ldpc_frames=3828 ldpc_failed=0 verified_cycles=956 decode_failed=0
+captured_s=706.175 acquired=1 intervals=121966 evm=0.000493379 clock_ppm=0.00285313 physical_end=0
+ldpc_frames=3840 ldpc_failed=0 verified_cycles=959 decode_failed=0
+captured_s=708.116 acquired=1 intervals=122302 evm=0.000459576 clock_ppm=0.0119425 physical_end=0
+ldpc_frames=3852 ldpc_failed=0 verified_cycles=962 decode_failed=0
+captured_s=710.228 acquired=1 intervals=122667 evm=0.000428874 clock_ppm=-0.000733191 physical_end=0
+ldpc_frames=3860 ldpc_failed=0 verified_cycles=964 decode_failed=0
+captured_s=712.234 acquired=1 intervals=123014 evm=0.000471064 clock_ppm=0.00237605 physical_end=0
+ldpc_frames=3872 ldpc_failed=0 verified_cycles=967 decode_failed=0
+captured_s=714.239 acquired=1 intervals=123360 evm=0.000460439 clock_ppm=0.00518842 physical_end=0
+ldpc_frames=3884 ldpc_failed=0 verified_cycles=970 decode_failed=0
+captured_s=716.202 acquired=1 intervals=123700 evm=0.000447571 clock_ppm=-0.0206465 physical_end=0
+ldpc_frames=3896 ldpc_failed=0 verified_cycles=973 decode_failed=0
+captured_s=718.356 acquired=1 intervals=124073 evm=0.000478195 clock_ppm=0.00240962 physical_end=0
+ldpc_frames=3904 ldpc_failed=0 verified_cycles=975 decode_failed=0
+captured_s=720.361 acquired=1 intervals=124420 evm=0.00049306 clock_ppm=-0.0168871 physical_end=0
+ldpc_frames=3916 ldpc_failed=0 verified_cycles=978 decode_failed=0
+captured_s=722.367 acquired=1 intervals=124767 evm=0.000473533 clock_ppm=0.0177649 physical_end=0
+ldpc_frames=3928 ldpc_failed=0 verified_cycles=981 decode_failed=0
+captured_s=724.265 acquired=1 intervals=125095 evm=0.000506589 clock_ppm=-0.0148433 physical_end=0
+ldpc_frames=3940 ldpc_failed=0 verified_cycles=984 decode_failed=0
+captured_s=726.378 acquired=1 intervals=125461 evm=0.0004547 clock_ppm=0.00185091 physical_end=0
+ldpc_frames=3948 ldpc_failed=0 verified_cycles=986 decode_failed=0
+captured_s=728.383 acquired=1 intervals=125808 evm=0.000450027 clock_ppm=-0.00474475 physical_end=0
+ldpc_frames=3960 ldpc_failed=0 verified_cycles=989 decode_failed=0
+captured_s=730.389 acquired=1 intervals=126155 evm=0.000453468 clock_ppm=-0.000901705 physical_end=0
+ldpc_frames=3972 ldpc_failed=0 verified_cycles=992 decode_failed=0
+captured_s=732.351 acquired=1 intervals=126494 evm=0.000457101 clock_ppm=0.00459721 physical_end=0
+ldpc_frames=3984 ldpc_failed=0 verified_cycles=995 decode_failed=0
+captured_s=734.463 acquired=1 intervals=126860 evm=0.000451927 clock_ppm=-0.000305395 physical_end=0
+ldpc_frames=3992 ldpc_failed=0 verified_cycles=997 decode_failed=0
+captured_s=736.468 acquired=1 intervals=127206 evm=0.000453052 clock_ppm=-0.00563405 physical_end=0
+ldpc_frames=4004 ldpc_failed=0 verified_cycles=1000 decode_failed=0
+captured_s=738.474 acquired=1 intervals=127553 evm=0.00048656 clock_ppm=0.00359405 physical_end=0
+ldpc_frames=4016 ldpc_failed=0 verified_cycles=1003 decode_failed=0
+captured_s=740.415 acquired=1 intervals=127889 evm=0.000467286 clock_ppm=0.00840857 physical_end=0
+ldpc_frames=4028 ldpc_failed=0 verified_cycles=1006 decode_failed=0
+captured_s=742.548 acquired=1 intervals=128258 evm=0.00048285 clock_ppm=0.00025211 physical_end=0
+ldpc_frames=4036 ldpc_failed=0 verified_cycles=1008 decode_failed=0
+captured_s=744.554 acquired=1 intervals=128606 evm=0.000461516 clock_ppm=0.0068663 physical_end=0
+ldpc_frames=4048 ldpc_failed=0 verified_cycles=1011 decode_failed=0
+captured_s=746.58 acquired=1 intervals=128956 evm=0.000480219 clock_ppm=0.00131287 physical_end=0
+ldpc_frames=4060 ldpc_failed=0 verified_cycles=1014 decode_failed=0
+captured_s=748.5 acquired=1 intervals=129288 evm=0.000452484 clock_ppm=-0.000569511 physical_end=0
+ldpc_frames=4072 ldpc_failed=0 verified_cycles=1017 decode_failed=0
+captured_s=750.655 acquired=1 intervals=129661 evm=0.000464762 clock_ppm=-0.0063794 physical_end=0
+ldpc_frames=4080 ldpc_failed=0 verified_cycles=1019 decode_failed=0
+captured_s=752.66 acquired=1 intervals=130008 evm=0.000461289 clock_ppm=-0.00093769 physical_end=0
+ldpc_frames=4092 ldpc_failed=0 verified_cycles=1022 decode_failed=0
+captured_s=754.666 acquired=1 intervals=130355 evm=0.000467446 clock_ppm=-0.0205713 physical_end=0
+ldpc_frames=4104 ldpc_failed=0 verified_cycles=1025 decode_failed=0
+captured_s=756.614 acquired=1 intervals=130692 evm=0.000442549 clock_ppm=0.00365581 physical_end=0
+ldpc_frames=4116 ldpc_failed=0 verified_cycles=1028 decode_failed=0
+captured_s=758.697 acquired=1 intervals=131053 evm=0.00048517 clock_ppm=0.00852928 physical_end=0
+ldpc_frames=4124 ldpc_failed=0 verified_cycles=1030 decode_failed=0
+captured_s=760.703 acquired=1 intervals=131399 evm=0.000444265 clock_ppm=0.000537308 physical_end=0
+ldpc_frames=4136 ldpc_failed=0 verified_cycles=1033 decode_failed=0
+captured_s=762.708 acquired=1 intervals=131746 evm=0.0004347 clock_ppm=-0.00450937 physical_end=0
+ldpc_frames=4148 ldpc_failed=0 verified_cycles=1036 decode_failed=0
+captured_s=764.651 acquired=1 intervals=132082 evm=0.00045448 clock_ppm=-0.0025009 physical_end=0
+ldpc_frames=4160 ldpc_failed=0 verified_cycles=1039 decode_failed=0
+captured_s=766.74 acquired=1 intervals=132444 evm=0.000428319 clock_ppm=0.00725677 physical_end=0
+ldpc_frames=4168 ldpc_failed=0 verified_cycles=1041 decode_failed=0
+captured_s=768.746 acquired=1 intervals=132791 evm=0.000442759 clock_ppm=-0.0019105 physical_end=0
+ldpc_frames=4180 ldpc_failed=0 verified_cycles=1044 decode_failed=0
+captured_s=770.751 acquired=1 intervals=133138 evm=0.000450784 clock_ppm=0.0118084 physical_end=0
+ldpc_frames=4192 ldpc_failed=0 verified_cycles=1047 decode_failed=0
+captured_s=772.714 acquired=1 intervals=133477 evm=0.000506085 clock_ppm=-0.00946743 physical_end=0
+ldpc_frames=4204 ldpc_failed=0 verified_cycles=1050 decode_failed=0
+captured_s=774.805 acquired=1 intervals=133839 evm=0.000476734 clock_ppm=0.0117995 physical_end=0
+ldpc_frames=4212 ldpc_failed=0 verified_cycles=1052 decode_failed=0
+captured_s=776.809 acquired=1 intervals=134186 evm=0.000459296 clock_ppm=-0.00387305 physical_end=0
+ldpc_frames=4224 ldpc_failed=0 verified_cycles=1055 decode_failed=0
+captured_s=778.815 acquired=1 intervals=134533 evm=0.00048131 clock_ppm=0.0189129 physical_end=0
+ldpc_frames=4236 ldpc_failed=0 verified_cycles=1058 decode_failed=0
+captured_s=780.799 acquired=1 intervals=134876 evm=0.000451108 clock_ppm=0.0109055 physical_end=0
+ldpc_frames=4248 ldpc_failed=0 verified_cycles=1061 decode_failed=0
+captured_s=782.89 acquired=1 intervals=135238 evm=0.000479031 clock_ppm=0.0104604 physical_end=0
+ldpc_frames=4256 ldpc_failed=0 verified_cycles=1063 decode_failed=0
+captured_s=784.895 acquired=1 intervals=135584 evm=0.000462184 clock_ppm=0.00075886 physical_end=0
+ldpc_frames=4268 ldpc_failed=0 verified_cycles=1066 decode_failed=0
+captured_s=786.9 acquired=1 intervals=135932 evm=0.000466632 clock_ppm=0.00955016 physical_end=0
+ldpc_frames=4280 ldpc_failed=0 verified_cycles=1069 decode_failed=0
+captured_s=788.863 acquired=1 intervals=136272 evm=0.000472106 clock_ppm=0.0154888 physical_end=0
+ldpc_frames=4292 ldpc_failed=0 verified_cycles=1072 decode_failed=0
+captured_s=790.954 acquired=1 intervals=136633 evm=0.000474875 clock_ppm=0.00531477 physical_end=0
+ldpc_frames=4300 ldpc_failed=0 verified_cycles=1074 decode_failed=0
+captured_s=792.959 acquired=1 intervals=136980 evm=0.000508459 clock_ppm=-0.0121773 physical_end=0
+ldpc_frames=4312 ldpc_failed=0 verified_cycles=1077 decode_failed=0
+captured_s=794.964 acquired=1 intervals=137327 evm=0.000469207 clock_ppm=-0.00960653 physical_end=0
+ldpc_frames=4324 ldpc_failed=0 verified_cycles=1080 decode_failed=0
+captured_s=796.948 acquired=1 intervals=137670 evm=0.000472658 clock_ppm=0.0131827 physical_end=0
+ldpc_frames=4336 ldpc_failed=0 verified_cycles=1083 decode_failed=0
+captured_s=799.039 acquired=1 intervals=138032 evm=0.000493058 clock_ppm=0.00352409 physical_end=0
+ldpc_frames=4344 ldpc_failed=0 verified_cycles=1085 decode_failed=0
+captured_s=801.044 acquired=1 intervals=138379 evm=0.000488823 clock_ppm=0.00740971 physical_end=0
+ldpc_frames=4356 ldpc_failed=0 verified_cycles=1088 decode_failed=0
+captured_s=803.05 acquired=1 intervals=138726 evm=0.000475979 clock_ppm=-0.00951348 physical_end=0
+ldpc_frames=4368 ldpc_failed=0 verified_cycles=1091 decode_failed=0
+captured_s=805.012 acquired=1 intervals=139065 evm=0.000438245 clock_ppm=-0.00790139 physical_end=0
+ldpc_frames=4380 ldpc_failed=0 verified_cycles=1094 decode_failed=0
+captured_s=807.124 acquired=1 intervals=139431 evm=0.000472934 clock_ppm=-0.0106574 physical_end=0
+ldpc_frames=4388 ldpc_failed=0 verified_cycles=1096 decode_failed=0
+captured_s=809.13 acquired=1 intervals=139777 evm=0.000481105 clock_ppm=-0.00441994 physical_end=0
+ldpc_frames=4400 ldpc_failed=0 verified_cycles=1099 decode_failed=0
+captured_s=811.136 acquired=1 intervals=140125 evm=0.000460482 clock_ppm=0.0199576 physical_end=0
+ldpc_frames=4412 ldpc_failed=0 verified_cycles=1102 decode_failed=0
+captured_s=813.098 acquired=1 intervals=140464 evm=0.000453515 clock_ppm=-0.00463948 physical_end=0
+ldpc_frames=4424 ldpc_failed=0 verified_cycles=1105 decode_failed=0
+captured_s=815.188 acquired=1 intervals=140826 evm=0.000429332 clock_ppm=0.00339586 physical_end=0
+ldpc_frames=4432 ldpc_failed=0 verified_cycles=1107 decode_failed=0
+captured_s=817.193 acquired=1 intervals=141173 evm=0.000468343 clock_ppm=0.00499613 physical_end=0
+ldpc_frames=4444 ldpc_failed=0 verified_cycles=1110 decode_failed=0
+captured_s=819.199 acquired=1 intervals=141520 evm=0.00045983 clock_ppm=-0.00430272 physical_end=0
+ldpc_frames=4456 ldpc_failed=0 verified_cycles=1113 decode_failed=0
+captured_s=821.162 acquired=1 intervals=141859 evm=0.000465005 clock_ppm=-0.0165806 physical_end=0
+ldpc_frames=4468 ldpc_failed=0 verified_cycles=1116 decode_failed=0
+captured_s=823.274 acquired=1 intervals=142224 evm=0.000436702 clock_ppm=0.0101603 physical_end=0
+ldpc_frames=4476 ldpc_failed=0 verified_cycles=1118 decode_failed=0
+captured_s=825.279 acquired=1 intervals=142572 evm=0.000490255 clock_ppm=0.0118171 physical_end=0
+ldpc_frames=4488 ldpc_failed=0 verified_cycles=1121 decode_failed=0
+captured_s=827.285 acquired=1 intervals=142919 evm=0.000510705 clock_ppm=-0.00890361 physical_end=0
+ldpc_frames=4500 ldpc_failed=0 verified_cycles=1124 decode_failed=0
+captured_s=829.247 acquired=1 intervals=143258 evm=0.000466589 clock_ppm=-0.0119096 physical_end=0
+ldpc_frames=4512 ldpc_failed=0 verified_cycles=1127 decode_failed=0
+captured_s=831.338 acquired=1 intervals=143620 evm=0.000479565 clock_ppm=0.0144072 physical_end=0
+ldpc_frames=4520 ldpc_failed=0 verified_cycles=1129 decode_failed=0
+captured_s=833.343 acquired=1 intervals=143967 evm=0.000443028 clock_ppm=-0.00204021 physical_end=0
+ldpc_frames=4532 ldpc_failed=0 verified_cycles=1132 decode_failed=0
+captured_s=835.348 acquired=1 intervals=144314 evm=0.000487074 clock_ppm=0.0195233 physical_end=0
+ldpc_frames=4544 ldpc_failed=0 verified_cycles=1135 decode_failed=0
+captured_s=837.311 acquired=1 intervals=144654 evm=0.000464656 clock_ppm=0.00346837 physical_end=0
+ldpc_frames=4556 ldpc_failed=0 verified_cycles=1138 decode_failed=0
+captured_s=839.402 acquired=1 intervals=145015 evm=0.000490894 clock_ppm=0.000413909 physical_end=0
+ldpc_frames=4564 ldpc_failed=0 verified_cycles=1140 decode_failed=0
+captured_s=841.407 acquired=1 intervals=145362 evm=0.000482553 clock_ppm=0.0196949 physical_end=0
+ldpc_frames=4576 ldpc_failed=0 verified_cycles=1143 decode_failed=0
+captured_s=843.412 acquired=1 intervals=145709 evm=0.000487697 clock_ppm=0.0106644 physical_end=0
+ldpc_frames=4588 ldpc_failed=0 verified_cycles=1146 decode_failed=0
+captured_s=845.396 acquired=1 intervals=146052 evm=0.000472143 clock_ppm=0.010279 physical_end=0
+ldpc_frames=4600 ldpc_failed=0 verified_cycles=1149 decode_failed=0
+captured_s=847.489 acquired=1 intervals=146414 evm=0.000470979 clock_ppm=-0.0217423 physical_end=0
+ldpc_frames=4608 ldpc_failed=0 verified_cycles=1151 decode_failed=0
+captured_s=849.492 acquired=1 intervals=146761 evm=0.00048258 clock_ppm=0.00941159 physical_end=0
+ldpc_frames=4620 ldpc_failed=0 verified_cycles=1154 decode_failed=0
+captured_s=851.498 acquired=1 intervals=147108 evm=0.000461941 clock_ppm=0.00188219 physical_end=0
+ldpc_frames=4632 ldpc_failed=0 verified_cycles=1157 decode_failed=0
+captured_s=853.46 acquired=1 intervals=147447 evm=0.0004778 clock_ppm=0.00170012 physical_end=0
+ldpc_frames=4644 ldpc_failed=0 verified_cycles=1160 decode_failed=0
+captured_s=855.551 acquired=1 intervals=147809 evm=0.000439654 clock_ppm=0.000861846 physical_end=0
+ldpc_frames=4652 ldpc_failed=0 verified_cycles=1162 decode_failed=0
+captured_s=857.557 acquired=1 intervals=148156 evm=0.00046065 clock_ppm=-0.00967851 physical_end=0
+ldpc_frames=4664 ldpc_failed=0 verified_cycles=1165 decode_failed=0
+captured_s=859.562 acquired=1 intervals=148503 evm=0.000454423 clock_ppm=0.011133 physical_end=0
+ldpc_frames=4676 ldpc_failed=0 verified_cycles=1168 decode_failed=0
+captured_s=861.546 acquired=1 intervals=148846 evm=0.000474856 clock_ppm=7.86482e-06 physical_end=0
+ldpc_frames=4688 ldpc_failed=0 verified_cycles=1171 decode_failed=0
+captured_s=863.637 acquired=1 intervals=149208 evm=0.000505262 clock_ppm=-0.0184976 physical_end=0
+ldpc_frames=4696 ldpc_failed=0 verified_cycles=1173 decode_failed=0
+captured_s=865.642 acquired=1 intervals=149555 evm=0.000483314 clock_ppm=0.00628489 physical_end=0
+ldpc_frames=4708 ldpc_failed=0 verified_cycles=1176 decode_failed=0
+captured_s=867.647 acquired=1 intervals=149902 evm=0.00045611 clock_ppm=-0.00676624 physical_end=0
+ldpc_frames=4720 ldpc_failed=0 verified_cycles=1179 decode_failed=0
+captured_s=869.61 acquired=1 intervals=150241 evm=0.000485041 clock_ppm=0.00867027 physical_end=0
+ldpc_frames=4732 ldpc_failed=0 verified_cycles=1182 decode_failed=0
+captured_s=871.722 acquired=1 intervals=150607 evm=0.000462032 clock_ppm=-0.0133705 physical_end=0
+ldpc_frames=4740 ldpc_failed=0 verified_cycles=1184 decode_failed=0
+captured_s=873.727 acquired=1 intervals=150954 evm=0.000458277 clock_ppm=-0.00387533 physical_end=0
+ldpc_frames=4752 ldpc_failed=0 verified_cycles=1187 decode_failed=0
+captured_s=875.732 acquired=1 intervals=151300 evm=0.000444824 clock_ppm=-0.00574308 physical_end=0
+ldpc_frames=4764 ldpc_failed=0 verified_cycles=1190 decode_failed=0
+captured_s=877.695 acquired=1 intervals=151640 evm=0.00046498 clock_ppm=0.00103949 physical_end=0
+ldpc_frames=4776 ldpc_failed=0 verified_cycles=1193 decode_failed=0
+captured_s=879.786 acquired=1 intervals=152002 evm=0.000468579 clock_ppm=-0.000814428 physical_end=0
+ldpc_frames=4784 ldpc_failed=0 verified_cycles=1195 decode_failed=0
+captured_s=881.791 acquired=1 intervals=152349 evm=0.000442958 clock_ppm=-0.0226555 physical_end=0
+ldpc_frames=4796 ldpc_failed=0 verified_cycles=1198 decode_failed=0
+captured_s=883.796 acquired=1 intervals=152696 evm=0.000452083 clock_ppm=-0.0114493 physical_end=0
+ldpc_frames=4808 ldpc_failed=0 verified_cycles=1201 decode_failed=0
+captured_s=885.759 acquired=1 intervals=153035 evm=0.000466062 clock_ppm=0.00415155 physical_end=0
+ldpc_frames=4820 ldpc_failed=0 verified_cycles=1204 decode_failed=0
+captured_s=887.872 acquired=1 intervals=153401 evm=0.00046127 clock_ppm=0.0167275 physical_end=0
+ldpc_frames=4828 ldpc_failed=0 verified_cycles=1206 decode_failed=0
+captured_s=889.876 acquired=1 intervals=153747 evm=0.000445841 clock_ppm=-0.00209231 physical_end=0
+ldpc_frames=4840 ldpc_failed=0 verified_cycles=1209 decode_failed=0
+captured_s=891.881 acquired=1 intervals=154095 evm=0.000456783 clock_ppm=0.00394544 physical_end=0
+ldpc_frames=4852 ldpc_failed=0 verified_cycles=1212 decode_failed=0
+captured_s=893.844 acquired=1 intervals=154434 evm=0.00048715 clock_ppm=-0.00672046 physical_end=0
+ldpc_frames=4864 ldpc_failed=0 verified_cycles=1215 decode_failed=0
+captured_s=895.935 acquired=1 intervals=154796 evm=0.000453389 clock_ppm=0.00702877 physical_end=0
+ldpc_frames=4872 ldpc_failed=0 verified_cycles=1217 decode_failed=0
+captured_s=897.94 acquired=1 intervals=155143 evm=0.000483026 clock_ppm=0.0105308 physical_end=0
+ldpc_frames=4884 ldpc_failed=0 verified_cycles=1220 decode_failed=0
+captured_s=899.946 acquired=1 intervals=155489 evm=0.000454452 clock_ppm=-0.00172762 physical_end=0
+ldpc_frames=4896 ldpc_failed=0 verified_cycles=1223 decode_failed=0
+captured_s=901.908 acquired=1 intervals=155829 evm=0.00046661 clock_ppm=0.00226433 physical_end=0
+ldpc_frames=4908 ldpc_failed=0 verified_cycles=1226 decode_failed=0
+captured_s=903.999 acquired=1 intervals=156191 evm=0.00047803 clock_ppm=0.0108193 physical_end=0
+ldpc_frames=4916 ldpc_failed=0 verified_cycles=1228 decode_failed=0
+captured_s=906.005 acquired=1 intervals=156538 evm=0.000461098 clock_ppm=0.0137897 physical_end=0
+ldpc_frames=4928 ldpc_failed=0 verified_cycles=1231 decode_failed=0
+captured_s=908.01 acquired=1 intervals=156885 evm=0.00047038 clock_ppm=0.0189955 physical_end=0
+ldpc_frames=4940 ldpc_failed=0 verified_cycles=1234 decode_failed=0
+captured_s=909.994 acquired=1 intervals=157228 evm=0.000486665 clock_ppm=-0.00918384 physical_end=0
+ldpc_frames=4952 ldpc_failed=0 verified_cycles=1237 decode_failed=0
+captured_s=912.106 acquired=1 intervals=157594 evm=0.000462011 clock_ppm=0.0007269 physical_end=0
+ldpc_frames=4960 ldpc_failed=0 verified_cycles=1239 decode_failed=0
+captured_s=914.111 acquired=1 intervals=157940 evm=0.000476938 clock_ppm=-0.00707897 physical_end=0
+ldpc_frames=4972 ldpc_failed=0 verified_cycles=1242 decode_failed=0
+captured_s=916.118 acquired=1 intervals=158288 evm=0.000435731 clock_ppm=0.00618043 physical_end=0
+ldpc_frames=4984 ldpc_failed=0 verified_cycles=1245 decode_failed=0
+captured_s=918.058 acquired=1 intervals=158624 evm=0.000455323 clock_ppm=0.00904865 physical_end=0
+ldpc_frames=4996 ldpc_failed=0 verified_cycles=1248 decode_failed=0
+captured_s=920.148 acquired=1 intervals=158985 evm=0.000493653 clock_ppm=0.00678748 physical_end=0
+ldpc_frames=5004 ldpc_failed=0 verified_cycles=1250 decode_failed=0
+captured_s=922.154 acquired=1 intervals=159332 evm=0.000492841 clock_ppm=0.0027018 physical_end=0
+ldpc_frames=5016 ldpc_failed=0 verified_cycles=1253 decode_failed=0
+captured_s=924.159 acquired=1 intervals=159679 evm=0.000484322 clock_ppm=-0.00359282 physical_end=0
+ldpc_frames=5028 ldpc_failed=0 verified_cycles=1256 decode_failed=0
+captured_s=926.143 acquired=1 intervals=160022 evm=0.000475455 clock_ppm=-0.00290171 physical_end=0
+ldpc_frames=5040 ldpc_failed=0 verified_cycles=1259 decode_failed=0
+captured_s=928.234 acquired=1 intervals=160384 evm=0.000440961 clock_ppm=0.0093505 physical_end=0
+ldpc_frames=5048 ldpc_failed=0 verified_cycles=1261 decode_failed=0
+captured_s=930.24 acquired=1 intervals=160731 evm=0.000441967 clock_ppm=0.010335 physical_end=0
+ldpc_frames=5060 ldpc_failed=0 verified_cycles=1264 decode_failed=0
+captured_s=932.244 acquired=1 intervals=161078 evm=0.000474516 clock_ppm=-0.00485754 physical_end=0
+ldpc_frames=5072 ldpc_failed=0 verified_cycles=1267 decode_failed=0
+captured_s=934.207 acquired=1 intervals=161417 evm=0.000440257 clock_ppm=0.00797916 physical_end=0
+ldpc_frames=5084 ldpc_failed=0 verified_cycles=1270 decode_failed=0
+captured_s=936.34 acquired=1 intervals=161786 evm=0.00046515 clock_ppm=-0.00673751 physical_end=0
+ldpc_frames=5092 ldpc_failed=0 verified_cycles=1272 decode_failed=0
+captured_s=938.346 acquired=1 intervals=162133 evm=0.000464506 clock_ppm=0.00111885 physical_end=0
+ldpc_frames=5104 ldpc_failed=0 verified_cycles=1275 decode_failed=0
+captured_s=940.352 acquired=1 intervals=162480 evm=0.000480802 clock_ppm=-0.00801217 physical_end=0
+ldpc_frames=5116 ldpc_failed=0 verified_cycles=1278 decode_failed=0
+captured_s=942.292 acquired=1 intervals=162816 evm=0.000464288 clock_ppm=-0.00480451 physical_end=0
+ldpc_frames=5128 ldpc_failed=0 verified_cycles=1281 decode_failed=0
+captured_s=944.383 acquired=1 intervals=163178 evm=0.00048588 clock_ppm=-0.00960842 physical_end=0
+ldpc_frames=5136 ldpc_failed=0 verified_cycles=1283 decode_failed=0
+captured_s=946.389 acquired=1 intervals=163525 evm=0.000433812 clock_ppm=-0.00283001 physical_end=0
+ldpc_frames=5148 ldpc_failed=0 verified_cycles=1286 decode_failed=0
+captured_s=948.394 acquired=1 intervals=163872 evm=0.000462865 clock_ppm=-0.00485593 physical_end=0
+ldpc_frames=5160 ldpc_failed=0 verified_cycles=1289 decode_failed=0
+captured_s=950.356 acquired=1 intervals=164211 evm=0.000508023 clock_ppm=-0.00410172 physical_end=0
+ldpc_frames=5172 ldpc_failed=0 verified_cycles=1292 decode_failed=0
+captured_s=952.447 acquired=1 intervals=164573 evm=0.00048877 clock_ppm=-0.0163037 physical_end=0
+ldpc_frames=5180 ldpc_failed=0 verified_cycles=1294 decode_failed=0
+captured_s=954.452 acquired=1 intervals=164920 evm=0.000469885 clock_ppm=-0.00783238 physical_end=0
+ldpc_frames=5192 ldpc_failed=0 verified_cycles=1297 decode_failed=0
+captured_s=956.458 acquired=1 intervals=165267 evm=0.000503154 clock_ppm=-0.00299638 physical_end=0
+ldpc_frames=5204 ldpc_failed=0 verified_cycles=1300 decode_failed=0
+captured_s=958.442 acquired=1 intervals=165610 evm=0.000511422 clock_ppm=0.00638157 physical_end=0
+ldpc_frames=5216 ldpc_failed=0 verified_cycles=1303 decode_failed=0
+captured_s=960.554 acquired=1 intervals=165976 evm=0.000436294 clock_ppm=-0.0132824 physical_end=0
+ldpc_frames=5224 ldpc_failed=0 verified_cycles=1305 decode_failed=0
+captured_s=962.559 acquired=1 intervals=166322 evm=0.000472779 clock_ppm=-0.00158744 physical_end=0
+ldpc_frames=5236 ldpc_failed=0 verified_cycles=1308 decode_failed=0
+captured_s=964.564 acquired=1 intervals=166670 evm=0.000445212 clock_ppm=0.00179277 physical_end=0
+ldpc_frames=5248 ldpc_failed=0 verified_cycles=1311 decode_failed=0
+captured_s=966.506 acquired=1 intervals=167006 evm=0.000482882 clock_ppm=-0.00926145 physical_end=0
+ldpc_frames=5260 ldpc_failed=0 verified_cycles=1314 decode_failed=0
+captured_s=968.596 acquired=1 intervals=167367 evm=0.000428269 clock_ppm=-0.00549964 physical_end=0
+ldpc_frames=5268 ldpc_failed=0 verified_cycles=1316 decode_failed=0
+captured_s=970.603 acquired=1 intervals=167714 evm=0.000486896 clock_ppm=0.011361 physical_end=0
+ldpc_frames=5280 ldpc_failed=0 verified_cycles=1319 decode_failed=0
+captured_s=972.608 acquired=1 intervals=168061 evm=0.000478417 clock_ppm=-0.00494563 physical_end=0
+ldpc_frames=5292 ldpc_failed=0 verified_cycles=1322 decode_failed=0
+captured_s=974.591 acquired=1 intervals=168404 evm=0.000481521 clock_ppm=-0.00615006 physical_end=0
+ldpc_frames=5304 ldpc_failed=0 verified_cycles=1325 decode_failed=0
+captured_s=976.682 acquired=1 intervals=168766 evm=0.000445579 clock_ppm=0.0190463 physical_end=0
+ldpc_frames=5312 ldpc_failed=0 verified_cycles=1327 decode_failed=0
+captured_s=978.687 acquired=1 intervals=169113 evm=0.00046971 clock_ppm=0.00776338 physical_end=0
+ldpc_frames=5324 ldpc_failed=0 verified_cycles=1330 decode_failed=0
+captured_s=980.692 acquired=1 intervals=169460 evm=0.000486788 clock_ppm=-0.00214615 physical_end=0
+ldpc_frames=5336 ldpc_failed=0 verified_cycles=1333 decode_failed=0
+captured_s=982.656 acquired=1 intervals=169799 evm=0.000432459 clock_ppm=-0.00812389 physical_end=0
+ldpc_frames=5348 ldpc_failed=0 verified_cycles=1336 decode_failed=0
+captured_s=984.746 acquired=1 intervals=170161 evm=0.000443634 clock_ppm=-0.00556449 physical_end=0
+ldpc_frames=5356 ldpc_failed=0 verified_cycles=1338 decode_failed=0
+captured_s=986.751 acquired=1 intervals=170508 evm=0.000460956 clock_ppm=0.0106128 physical_end=0
+ldpc_frames=5368 ldpc_failed=0 verified_cycles=1341 decode_failed=0
+captured_s=988.756 acquired=1 intervals=170855 evm=0.000473147 clock_ppm=0.0310836 physical_end=0
+ldpc_frames=5380 ldpc_failed=0 verified_cycles=1344 decode_failed=0
+captured_s=990.741 acquired=1 intervals=171199 evm=0.000494209 clock_ppm=-0.00756987 physical_end=0
+ldpc_frames=5392 ldpc_failed=0 verified_cycles=1347 decode_failed=0
+captured_s=992.831 acquired=1 intervals=171560 evm=0.000463813 clock_ppm=-0.00399658 physical_end=0
+ldpc_frames=5400 ldpc_failed=0 verified_cycles=1349 decode_failed=0
+captured_s=994.837 acquired=1 intervals=171907 evm=0.000474033 clock_ppm=-0.0184156 physical_end=0
+ldpc_frames=5412 ldpc_failed=0 verified_cycles=1352 decode_failed=0
+captured_s=996.842 acquired=1 intervals=172254 evm=0.000469756 clock_ppm=0.000231565 physical_end=0
+ldpc_frames=5424 ldpc_failed=0 verified_cycles=1355 decode_failed=0
+captured_s=998.804 acquired=1 intervals=172593 evm=0.000506576 clock_ppm=-0.00136293 physical_end=0
+ldpc_frames=5436 ldpc_failed=0 verified_cycles=1358 decode_failed=0
+captured_s=1000.89 acquired=1 intervals=172955 evm=0.000524917 clock_ppm=0.00274893 physical_end=0
+ldpc_frames=5444 ldpc_failed=0 verified_cycles=1360 decode_failed=0
+captured_s=1002.9 acquired=1 intervals=173302 evm=0.000502436 clock_ppm=-0.00142645 physical_end=0
+ldpc_frames=5456 ldpc_failed=0 verified_cycles=1363 decode_failed=0
+captured_s=1004.91 acquired=1 intervals=173649 evm=0.000461515 clock_ppm=-0.0178969 physical_end=0
+ldpc_frames=5468 ldpc_failed=0 verified_cycles=1366 decode_failed=0
+captured_s=1006.89 acquired=1 intervals=173992 evm=0.000464742 clock_ppm=0.012056 physical_end=0
+ldpc_frames=5480 ldpc_failed=0 verified_cycles=1369 decode_failed=0
+captured_s=1008.98 acquired=1 intervals=174354 evm=0.000449622 clock_ppm=0.0184365 physical_end=0
+ldpc_frames=5488 ldpc_failed=0 verified_cycles=1371 decode_failed=0
+captured_s=1010.99 acquired=1 intervals=174701 evm=0.000441106 clock_ppm=0.0082426 physical_end=0
+ldpc_frames=5500 ldpc_failed=0 verified_cycles=1374 decode_failed=0
+captured_s=1012.99 acquired=1 intervals=175048 evm=0.000468849 clock_ppm=-0.00345734 physical_end=0
+ldpc_frames=5512 ldpc_failed=0 verified_cycles=1377 decode_failed=0
+captured_s=1014.95 acquired=1 intervals=175387 evm=0.000471254 clock_ppm=-0.00174723 physical_end=0
+ldpc_frames=5524 ldpc_failed=0 verified_cycles=1380 decode_failed=0
+captured_s=1017.04 acquired=1 intervals=175749 evm=0.000454972 clock_ppm=-0.00334844 physical_end=0
+ldpc_frames=5532 ldpc_failed=0 verified_cycles=1382 decode_failed=0
+captured_s=1019.05 acquired=1 intervals=176096 evm=0.000435391 clock_ppm=1.78006e-05 physical_end=0
+ldpc_frames=5544 ldpc_failed=0 verified_cycles=1385 decode_failed=0
+captured_s=1021.06 acquired=1 intervals=176443 evm=0.000479879 clock_ppm=8.58773e-05 physical_end=0
+ldpc_frames=5556 ldpc_failed=0 verified_cycles=1388 decode_failed=0
+captured_s=1023.04 acquired=1 intervals=176786 evm=0.000474618 clock_ppm=0.0142578 physical_end=0
+ldpc_frames=5568 ldpc_failed=0 verified_cycles=1391 decode_failed=0
+captured_s=1025.15 acquired=1 intervals=177152 evm=0.000457161 clock_ppm=-0.00281766 physical_end=0
+ldpc_frames=5576 ldpc_failed=0 verified_cycles=1393 decode_failed=0
+captured_s=1027.16 acquired=1 intervals=177499 evm=0.00045079 clock_ppm=-0.0072354 physical_end=0
+ldpc_frames=5588 ldpc_failed=0 verified_cycles=1396 decode_failed=0
+captured_s=1029.16 acquired=1 intervals=177845 evm=0.000470882 clock_ppm=0.0138577 physical_end=0
+ldpc_frames=5600 ldpc_failed=0 verified_cycles=1399 decode_failed=0
+captured_s=1031.1 acquired=1 intervals=178181 evm=0.00049033 clock_ppm=-0.00438208 physical_end=0
+ldpc_frames=5612 ldpc_failed=0 verified_cycles=1402 decode_failed=0
+captured_s=1033.19 acquired=1 intervals=178543 evm=0.000491718 clock_ppm=-0.00697934 physical_end=0
+ldpc_frames=5620 ldpc_failed=0 verified_cycles=1404 decode_failed=0
+captured_s=1035.2 acquired=1 intervals=178890 evm=0.000470917 clock_ppm=-0.00205847 physical_end=0
+ldpc_frames=5632 ldpc_failed=0 verified_cycles=1407 decode_failed=0
+captured_s=1037.2 acquired=1 intervals=179237 evm=0.000438354 clock_ppm=-0.0024899 physical_end=0
+ldpc_frames=5644 ldpc_failed=0 verified_cycles=1410 decode_failed=0
+captured_s=1039.19 acquired=1 intervals=179580 evm=0.000479156 clock_ppm=-0.00241094 physical_end=0
+ldpc_frames=5656 ldpc_failed=0 verified_cycles=1413 decode_failed=0
+captured_s=1041.28 acquired=1 intervals=179942 evm=0.000483397 clock_ppm=-0.00249218 physical_end=0
+ldpc_frames=5664 ldpc_failed=0 verified_cycles=1415 decode_failed=0
+captured_s=1043.28 acquired=1 intervals=180289 evm=0.000456839 clock_ppm=0.00722843 physical_end=0
+ldpc_frames=5676 ldpc_failed=0 verified_cycles=1418 decode_failed=0
+captured_s=1045.29 acquired=1 intervals=180636 evm=0.000458019 clock_ppm=-0.00141853 physical_end=0
+ldpc_frames=5688 ldpc_failed=0 verified_cycles=1421 decode_failed=0
+captured_s=1047.25 acquired=1 intervals=180976 evm=0.000465193 clock_ppm=-0.0109608 physical_end=0
+ldpc_frames=5700 ldpc_failed=0 verified_cycles=1424 decode_failed=0
+captured_s=1049.36 acquired=1 intervals=181341 evm=0.000456972 clock_ppm=0.0149008 physical_end=0
+ldpc_frames=5708 ldpc_failed=0 verified_cycles=1426 decode_failed=0
+captured_s=1051.37 acquired=1 intervals=181688 evm=0.000478643 clock_ppm=0.00703495 physical_end=0
+ldpc_frames=5720 ldpc_failed=0 verified_cycles=1429 decode_failed=0
+captured_s=1053.38 acquired=1 intervals=182034 evm=0.000479331 clock_ppm=0.00512853 physical_end=0
+ldpc_frames=5732 ldpc_failed=0 verified_cycles=1432 decode_failed=0
+captured_s=1055.34 acquired=1 intervals=182374 evm=0.00048235 clock_ppm=0.00416377 physical_end=0
+ldpc_frames=5744 ldpc_failed=0 verified_cycles=1435 decode_failed=0
+captured_s=1057.43 acquired=1 intervals=182736 evm=0.00046218 clock_ppm=0.00530872 physical_end=0
+ldpc_frames=5752 ldpc_failed=0 verified_cycles=1437 decode_failed=0
+captured_s=1059.43 acquired=1 intervals=183083 evm=0.000473337 clock_ppm=0.00918252 physical_end=0
+ldpc_frames=5764 ldpc_failed=0 verified_cycles=1440 decode_failed=0
+captured_s=1061.44 acquired=1 intervals=183430 evm=0.000445694 clock_ppm=-0.00392421 physical_end=0
+ldpc_frames=5776 ldpc_failed=0 verified_cycles=1443 decode_failed=0
+captured_s=1063.4 acquired=1 intervals=183769 evm=0.000494719 clock_ppm=-0.00383357 physical_end=0
+ldpc_frames=5788 ldpc_failed=0 verified_cycles=1446 decode_failed=0
+captured_s=1065.51 acquired=1 intervals=184135 evm=0.000450446 clock_ppm=-0.00250346 physical_end=0
+ldpc_frames=5796 ldpc_failed=0 verified_cycles=1448 decode_failed=0
+captured_s=1067.52 acquired=1 intervals=184481 evm=0.000471078 clock_ppm=0.012626 physical_end=0
+ldpc_frames=5808 ldpc_failed=0 verified_cycles=1451 decode_failed=0
+captured_s=1069.52 acquired=1 intervals=184829 evm=0.000446012 clock_ppm=0.0105019 physical_end=0
+ldpc_frames=5820 ldpc_failed=0 verified_cycles=1454 decode_failed=0
+captured_s=1071.49 acquired=1 intervals=185168 evm=0.000461206 clock_ppm=-0.00747172 physical_end=0
+ldpc_frames=5832 ldpc_failed=0 verified_cycles=1457 decode_failed=0
+captured_s=1073.58 acquired=1 intervals=185530 evm=0.000462224 clock_ppm=0.00413799 physical_end=0
+ldpc_frames=5840 ldpc_failed=0 verified_cycles=1459 decode_failed=0
+captured_s=1075.58 acquired=1 intervals=185877 evm=0.000439147 clock_ppm=0.0161196 physical_end=0
+ldpc_frames=5852 ldpc_failed=0 verified_cycles=1462 decode_failed=0
+captured_s=1077.59 acquired=1 intervals=186224 evm=0.000443379 clock_ppm=0.00662085 physical_end=0
+ldpc_frames=5864 ldpc_failed=0 verified_cycles=1465 decode_failed=0
+captured_s=1079.55 acquired=1 intervals=186563 evm=0.000519928 clock_ppm=-0.00501666 physical_end=0
+ldpc_frames=5876 ldpc_failed=0 verified_cycles=1468 decode_failed=0
+captured_s=1081.64 acquired=1 intervals=186925 evm=0.000455666 clock_ppm=-0.012929 physical_end=0
+ldpc_frames=5884 ldpc_failed=0 verified_cycles=1470 decode_failed=0
+captured_s=1083.65 acquired=1 intervals=187272 evm=0.000465181 clock_ppm=0.0045102 physical_end=0
+ldpc_frames=5896 ldpc_failed=0 verified_cycles=1473 decode_failed=0
+captured_s=1085.65 acquired=1 intervals=187619 evm=0.000457861 clock_ppm=-0.0137984 physical_end=0
+ldpc_frames=5908 ldpc_failed=0 verified_cycles=1476 decode_failed=0
+captured_s=1087.64 acquired=1 intervals=187962 evm=0.00049945 clock_ppm=-0.0104703 physical_end=0
+ldpc_frames=5920 ldpc_failed=0 verified_cycles=1479 decode_failed=0
+captured_s=1089.73 acquired=1 intervals=188324 evm=0.000470914 clock_ppm=-0.00111063 physical_end=0
+ldpc_frames=5928 ldpc_failed=0 verified_cycles=1481 decode_failed=0
+captured_s=1091.73 acquired=1 intervals=188671 evm=0.000439751 clock_ppm=0.00774378 physical_end=0
+ldpc_frames=5940 ldpc_failed=0 verified_cycles=1484 decode_failed=0
+captured_s=1093.74 acquired=1 intervals=189018 evm=0.000486524 clock_ppm=0.0157778 physical_end=0
+ldpc_frames=5952 ldpc_failed=0 verified_cycles=1487 decode_failed=0
+captured_s=1095.7 acquired=1 intervals=189358 evm=0.000492879 clock_ppm=-0.000577836 physical_end=0
+ldpc_frames=5964 ldpc_failed=0 verified_cycles=1490 decode_failed=0
+captured_s=1097.79 acquired=1 intervals=189719 evm=0.000471091 clock_ppm=-0.000428658 physical_end=0
+ldpc_frames=5972 ldpc_failed=0 verified_cycles=1492 decode_failed=0
+captured_s=1099.8 acquired=1 intervals=190066 evm=0.000469494 clock_ppm=-0.00193548 physical_end=0
+ldpc_frames=5984 ldpc_failed=0 verified_cycles=1495 decode_failed=0
+captured_s=1101.8 acquired=1 intervals=190413 evm=0.000455604 clock_ppm=0.00416176 physical_end=0
+ldpc_frames=5996 ldpc_failed=0 verified_cycles=1498 decode_failed=0
+captured_s=1103.79 acquired=1 intervals=190756 evm=0.000460823 clock_ppm=-0.000206838 physical_end=0
+ldpc_frames=6008 ldpc_failed=0 verified_cycles=1501 decode_failed=0
+captured_s=1105.88 acquired=1 intervals=191118 evm=0.000465908 clock_ppm=0.0131047 physical_end=0
+ldpc_frames=6016 ldpc_failed=0 verified_cycles=1503 decode_failed=0
+captured_s=1107.88 acquired=1 intervals=191465 evm=0.000467395 clock_ppm=-0.00407943 physical_end=0
+ldpc_frames=6028 ldpc_failed=0 verified_cycles=1506 decode_failed=0
+captured_s=1109.89 acquired=1 intervals=191812 evm=0.000440238 clock_ppm=-0.0176585 physical_end=0
+ldpc_frames=6040 ldpc_failed=0 verified_cycles=1509 decode_failed=0
+captured_s=1111.85 acquired=1 intervals=192151 evm=0.000459178 clock_ppm=0.0037106 physical_end=0
+ldpc_frames=6052 ldpc_failed=0 verified_cycles=1512 decode_failed=0
+captured_s=1113.94 acquired=1 intervals=192513 evm=0.00047427 clock_ppm=-0.00814953 physical_end=0
+ldpc_frames=6060 ldpc_failed=0 verified_cycles=1514 decode_failed=0
+captured_s=1115.95 acquired=1 intervals=192860 evm=0.000468099 clock_ppm=0.00316048 physical_end=0
+ldpc_frames=6072 ldpc_failed=0 verified_cycles=1517 decode_failed=0
+captured_s=1117.95 acquired=1 intervals=193207 evm=0.000470665 clock_ppm=-0.020157 physical_end=0
+ldpc_frames=6084 ldpc_failed=0 verified_cycles=1520 decode_failed=0
+captured_s=1119.93 acquired=1 intervals=193550 evm=0.000457371 clock_ppm=0.00260459 physical_end=0
+ldpc_frames=6096 ldpc_failed=0 verified_cycles=1523 decode_failed=0
+captured_s=1122.05 acquired=1 intervals=193916 evm=0.000462212 clock_ppm=-0.00173165 physical_end=0
+ldpc_frames=6104 ldpc_failed=0 verified_cycles=1525 decode_failed=0
+captured_s=1124.05 acquired=1 intervals=194263 evm=0.000482312 clock_ppm=-0.00187868 physical_end=0
+ldpc_frames=6116 ldpc_failed=0 verified_cycles=1528 decode_failed=0
+captured_s=1126.06 acquired=1 intervals=194609 evm=0.00049376 clock_ppm=-0.0191406 physical_end=0
+ldpc_frames=6128 ldpc_failed=0 verified_cycles=1531 decode_failed=0
+captured_s=1128 acquired=1 intervals=194945 evm=0.000460673 clock_ppm=-0.00980472 physical_end=0
+ldpc_frames=6140 ldpc_failed=0 verified_cycles=1534 decode_failed=0
+captured_s=1130.09 acquired=1 intervals=195307 evm=0.000457347 clock_ppm=0.000891656 physical_end=0
+ldpc_frames=6148 ldpc_failed=0 verified_cycles=1536 decode_failed=0
+captured_s=1132.1 acquired=1 intervals=195654 evm=0.000489756 clock_ppm=-0.00561041 physical_end=0
+ldpc_frames=6160 ldpc_failed=0 verified_cycles=1539 decode_failed=0
+captured_s=1134.1 acquired=1 intervals=196001 evm=0.000476566 clock_ppm=0.00216054 physical_end=0
+ldpc_frames=6172 ldpc_failed=0 verified_cycles=1542 decode_failed=0
+captured_s=1136.08 acquired=1 intervals=196344 evm=0.000466179 clock_ppm=0.00639889 physical_end=0
+ldpc_frames=6184 ldpc_failed=0 verified_cycles=1545 decode_failed=0
+captured_s=1138.17 acquired=1 intervals=196706 evm=0.000472908 clock_ppm=-0.00932456 physical_end=0
+ldpc_frames=6192 ldpc_failed=0 verified_cycles=1547 decode_failed=0
+captured_s=1140.18 acquired=1 intervals=197053 evm=0.00046227 clock_ppm=-0.0082407 physical_end=0
+ldpc_frames=6204 ldpc_failed=0 verified_cycles=1550 decode_failed=0
+captured_s=1142.19 acquired=1 intervals=197400 evm=0.00049883 clock_ppm=-0.0117008 physical_end=0
+ldpc_frames=6216 ldpc_failed=0 verified_cycles=1553 decode_failed=0
+captured_s=1144.15 acquired=1 intervals=197739 evm=0.000512806 clock_ppm=-0.00315495 physical_end=0
+ldpc_frames=6228 ldpc_failed=0 verified_cycles=1556 decode_failed=0
+captured_s=1146.26 acquired=1 intervals=198105 evm=0.000489679 clock_ppm=-0.00150432 physical_end=0
+ldpc_frames=6236 ldpc_failed=0 verified_cycles=1558 decode_failed=0
+captured_s=1148.27 acquired=1 intervals=198452 evm=0.000450634 clock_ppm=0.00600453 physical_end=0
+ldpc_frames=6248 ldpc_failed=0 verified_cycles=1561 decode_failed=0
+captured_s=1150.27 acquired=1 intervals=198799 evm=0.000451208 clock_ppm=-0.00473428 physical_end=0
+ldpc_frames=6260 ldpc_failed=0 verified_cycles=1564 decode_failed=0
+captured_s=1152.23 acquired=1 intervals=199138 evm=0.000444201 clock_ppm=0.00361338 physical_end=0
+ldpc_frames=6272 ldpc_failed=0 verified_cycles=1567 decode_failed=0
+captured_s=1154.32 acquired=1 intervals=199500 evm=0.000479416 clock_ppm=0.012674 physical_end=0
+ldpc_frames=6280 ldpc_failed=0 verified_cycles=1569 decode_failed=0
+captured_s=1156.33 acquired=1 intervals=199847 evm=0.000463728 clock_ppm=0.00983362 physical_end=0
+ldpc_frames=6292 ldpc_failed=0 verified_cycles=1572 decode_failed=0
+captured_s=1158.34 acquired=1 intervals=200194 evm=0.000443423 clock_ppm=0.00157242 physical_end=0
+ldpc_frames=6304 ldpc_failed=0 verified_cycles=1575 decode_failed=0
+captured_s=1160.3 acquired=1 intervals=200533 evm=0.000472624 clock_ppm=0.00427173 physical_end=0
+ldpc_frames=6316 ldpc_failed=0 verified_cycles=1578 decode_failed=0
+captured_s=1162.39 acquired=1 intervals=200895 evm=0.000445821 clock_ppm=-0.00248828 physical_end=0
+ldpc_frames=6324 ldpc_failed=0 verified_cycles=1580 decode_failed=0
+captured_s=1164.39 acquired=1 intervals=201242 evm=0.000437429 clock_ppm=-0.0036096 physical_end=0
+ldpc_frames=6336 ldpc_failed=0 verified_cycles=1583 decode_failed=0
+captured_s=1166.4 acquired=1 intervals=201589 evm=0.00045014 clock_ppm=0.000238952 physical_end=0
+ldpc_frames=6348 ldpc_failed=0 verified_cycles=1586 decode_failed=0
+captured_s=1168.38 acquired=1 intervals=201932 evm=0.000491345 clock_ppm=-0.00838961 physical_end=0
+ldpc_frames=6360 ldpc_failed=0 verified_cycles=1589 decode_failed=0
+captured_s=1170.52 acquired=1 intervals=202301 evm=0.000464492 clock_ppm=0.00820313 physical_end=0
+ldpc_frames=6368 ldpc_failed=0 verified_cycles=1591 decode_failed=0
+captured_s=1172.52 acquired=1 intervals=202648 evm=0.000458418 clock_ppm=0.00060713 physical_end=0
+ldpc_frames=6380 ldpc_failed=0 verified_cycles=1594 decode_failed=0
+captured_s=1174.53 acquired=1 intervals=202995 evm=0.000481038 clock_ppm=0.0106111 physical_end=0
+ldpc_frames=6392 ldpc_failed=0 verified_cycles=1597 decode_failed=0
+captured_s=1176.5 acquired=1 intervals=203336 evm=0.000467766 clock_ppm=-0.00607165 physical_end=0
+ldpc_frames=6404 ldpc_failed=0 verified_cycles=1600 decode_failed=0
+captured_s=1178.54 acquired=1 intervals=203689 evm=0.000466178 clock_ppm=-0.020404 physical_end=0
+ldpc_frames=6412 ldpc_failed=0 verified_cycles=1602 decode_failed=0
+captured_s=1180.54 acquired=1 intervals=204036 evm=0.000474532 clock_ppm=0.00513672 physical_end=0
+ldpc_frames=6424 ldpc_failed=0 verified_cycles=1605 decode_failed=0
+captured_s=1182.55 acquired=1 intervals=204383 evm=0.000516356 clock_ppm=-0.00614053 physical_end=0
+ldpc_frames=6436 ldpc_failed=0 verified_cycles=1608 decode_failed=0
+captured_s=1184.53 acquired=1 intervals=204726 evm=0.000450333 clock_ppm=-0.00503841 physical_end=0
+ldpc_frames=6448 ldpc_failed=0 verified_cycles=1611 decode_failed=0
+captured_s=1186.62 acquired=1 intervals=205088 evm=0.00044458 clock_ppm=0.000397126 physical_end=0
+ldpc_frames=6456 ldpc_failed=0 verified_cycles=1613 decode_failed=0
+captured_s=1188.63 acquired=1 intervals=205435 evm=0.000452784 clock_ppm=0.0179792 physical_end=0
+ldpc_frames=6468 ldpc_failed=0 verified_cycles=1616 decode_failed=0
+captured_s=1190.63 acquired=1 intervals=205782 evm=0.000474481 clock_ppm=-0.0139338 physical_end=0
+ldpc_frames=6480 ldpc_failed=0 verified_cycles=1619 decode_failed=0
+captured_s=1192.6 acquired=1 intervals=206121 evm=0.000465733 clock_ppm=-0.00166425 physical_end=0
+ldpc_frames=6492 ldpc_failed=0 verified_cycles=1622 decode_failed=0
+captured_s=1194.71 acquired=1 intervals=206487 evm=0.00046204 clock_ppm=-0.00380927 physical_end=0
+ldpc_frames=6500 ldpc_failed=0 verified_cycles=1624 decode_failed=0
+captured_s=1196.71 acquired=1 intervals=206833 evm=0.000462493 clock_ppm=0.000283261 physical_end=0
+ldpc_frames=6512 ldpc_failed=0 verified_cycles=1627 decode_failed=0
+captured_s=1198.72 acquired=1 intervals=207181 evm=0.000426219 clock_ppm=-0.00987401 physical_end=0
+ldpc_frames=6524 ldpc_failed=0 verified_cycles=1630 decode_failed=0
+captured_s=1200.68 acquired=1 intervals=207520 evm=0.000475041 clock_ppm=-0.00615141 physical_end=0
+ldpc_frames=6536 ldpc_failed=0 verified_cycles=1633 decode_failed=0
+captured_s=1202.79 acquired=1 intervals=207886 evm=0.000477033 clock_ppm=0.002388 physical_end=0
+ldpc_frames=6544 ldpc_failed=0 verified_cycles=1635 decode_failed=0
+captured_s=1204.8 acquired=1 intervals=208233 evm=0.000462226 clock_ppm=-0.00322947 physical_end=0
+ldpc_frames=6556 ldpc_failed=0 verified_cycles=1638 decode_failed=0
+captured_s=1206.8 acquired=1 intervals=208579 evm=0.000451589 clock_ppm=-0.00449984 physical_end=0
+ldpc_frames=6568 ldpc_failed=0 verified_cycles=1641 decode_failed=0
+captured_s=1208.75 acquired=1 intervals=208915 evm=0.000472464 clock_ppm=0.0050191 physical_end=0
+ldpc_frames=6580 ldpc_failed=0 verified_cycles=1644 decode_failed=0
+captured_s=1210.84 acquired=1 intervals=209278 evm=0.000468161 clock_ppm=0.0151709 physical_end=0
+ldpc_frames=6588 ldpc_failed=0 verified_cycles=1646 decode_failed=0
+captured_s=1212.84 acquired=1 intervals=209624 evm=0.000438793 clock_ppm=0.00123687 physical_end=0
+ldpc_frames=6600 ldpc_failed=0 verified_cycles=1649 decode_failed=0
+captured_s=1214.85 acquired=1 intervals=209971 evm=0.000449442 clock_ppm=-0.00580082 physical_end=0
+ldpc_frames=6612 ldpc_failed=0 verified_cycles=1652 decode_failed=0
+captured_s=1216.83 acquired=1 intervals=210314 evm=0.000459553 clock_ppm=0.0165391 physical_end=0
+ldpc_frames=6624 ldpc_failed=0 verified_cycles=1655 decode_failed=0
+captured_s=1218.92 acquired=1 intervals=210676 evm=0.00045922 clock_ppm=-0.017689 physical_end=0
+ldpc_frames=6632 ldpc_failed=0 verified_cycles=1657 decode_failed=0
+captured_s=1220.93 acquired=1 intervals=211023 evm=0.00044276 clock_ppm=0.0146813 physical_end=0
+ldpc_frames=6644 ldpc_failed=0 verified_cycles=1660 decode_failed=0
+captured_s=1222.93 acquired=1 intervals=211370 evm=0.000438429 clock_ppm=-0.00716745 physical_end=0
+ldpc_frames=6656 ldpc_failed=0 verified_cycles=1663 decode_failed=0
+captured_s=1224.89 acquired=1 intervals=211710 evm=0.000485508 clock_ppm=-0.000939973 physical_end=0
+ldpc_frames=6668 ldpc_failed=0 verified_cycles=1666 decode_failed=0
+captured_s=1226.99 acquired=1 intervals=212071 evm=0.000437504 clock_ppm=0.000108034 physical_end=0
+ldpc_frames=6676 ldpc_failed=0 verified_cycles=1668 decode_failed=0
+captured_s=1228.99 acquired=1 intervals=212418 evm=0.000431132 clock_ppm=-0.00366533 physical_end=0
+ldpc_frames=6688 ldpc_failed=0 verified_cycles=1671 decode_failed=0
+captured_s=1230.98 acquired=1 intervals=212763 evm=0.000490333 clock_ppm=0.00971008 physical_end=0
+ldpc_frames=6700 ldpc_failed=0 verified_cycles=1674 decode_failed=0
+captured_s=1232.98 acquired=1 intervals=213108 evm=0.000534129 clock_ppm=0.0055523 physical_end=0
+ldpc_frames=6712 ldpc_failed=0 verified_cycles=1677 decode_failed=0
+captured_s=1235.09 acquired=1 intervals=213473 evm=0.000486674 clock_ppm=0.00958816 physical_end=0
+ldpc_frames=6720 ldpc_failed=0 verified_cycles=1679 decode_failed=0
+captured_s=1237.1 acquired=1 intervals=213821 evm=0.000473066 clock_ppm=0.0151237 physical_end=0
+ldpc_frames=6732 ldpc_failed=0 verified_cycles=1682 decode_failed=0
+captured_s=1239.1 acquired=1 intervals=214168 evm=0.000478714 clock_ppm=0.000874871 physical_end=0
+ldpc_frames=6744 ldpc_failed=0 verified_cycles=1685 decode_failed=0
+captured_s=1241.04 acquired=1 intervals=214503 evm=0.000476598 clock_ppm=0.0192588 physical_end=0
+ldpc_frames=6756 ldpc_failed=0 verified_cycles=1688 decode_failed=0
+captured_s=1243.14 acquired=1 intervals=214865 evm=0.00046726 clock_ppm=-0.0004155 physical_end=0
+ldpc_frames=6764 ldpc_failed=0 verified_cycles=1690 decode_failed=0
+captured_s=1245.14 acquired=1 intervals=215212 evm=0.000459212 clock_ppm=-0.0150739 physical_end=0
+ldpc_frames=6776 ldpc_failed=0 verified_cycles=1693 decode_failed=0
+captured_s=1247.15 acquired=1 intervals=215559 evm=0.000462277 clock_ppm=0.0143991 physical_end=0
+ldpc_frames=6788 ldpc_failed=0 verified_cycles=1696 decode_failed=0
+captured_s=1249.13 acquired=1 intervals=215902 evm=0.000450652 clock_ppm=0.0176496 physical_end=0
+ldpc_frames=6800 ldpc_failed=0 verified_cycles=1699 decode_failed=0
+captured_s=1251.22 acquired=1 intervals=216264 evm=0.000464694 clock_ppm=-0.0084256 physical_end=0
+ldpc_frames=6808 ldpc_failed=0 verified_cycles=1701 decode_failed=0
+captured_s=1253.23 acquired=1 intervals=216611 evm=0.000473976 clock_ppm=-0.00207499 physical_end=0
+ldpc_frames=6820 ldpc_failed=0 verified_cycles=1704 decode_failed=0
+captured_s=1255.23 acquired=1 intervals=216958 evm=0.000436476 clock_ppm=-0.00191279 physical_end=0
+ldpc_frames=6832 ldpc_failed=0 verified_cycles=1707 decode_failed=0
+captured_s=1257.19 acquired=1 intervals=217297 evm=0.00047129 clock_ppm=-0.00985414 physical_end=0
+ldpc_frames=6844 ldpc_failed=0 verified_cycles=1710 decode_failed=0
+captured_s=1259.29 acquired=1 intervals=217659 evm=0.00044903 clock_ppm=-0.0137561 physical_end=0
+ldpc_frames=6852 ldpc_failed=0 verified_cycles=1712 decode_failed=0
+captured_s=1261.29 acquired=1 intervals=218006 evm=0.00044217 clock_ppm=-0.00473683 physical_end=0
+ldpc_frames=6864 ldpc_failed=0 verified_cycles=1715 decode_failed=0
+captured_s=1263.29 acquired=1 intervals=218353 evm=0.000481637 clock_ppm=-0.00109774 physical_end=0
+ldpc_frames=6876 ldpc_failed=0 verified_cycles=1718 decode_failed=0
+captured_s=1265.28 acquired=1 intervals=218696 evm=0.000497746 clock_ppm=0.00403259 physical_end=0
+ldpc_frames=6888 ldpc_failed=0 verified_cycles=1721 decode_failed=0
+captured_s=1267.37 acquired=1 intervals=219058 evm=0.000472867 clock_ppm=-0.00622861 physical_end=0
+ldpc_frames=6896 ldpc_failed=0 verified_cycles=1723 decode_failed=0
+captured_s=1269.38 acquired=1 intervals=219405 evm=0.000476949 clock_ppm=-0.0077682 physical_end=0
+ldpc_frames=6908 ldpc_failed=0 verified_cycles=1726 decode_failed=0
+captured_s=1271.38 acquired=1 intervals=219752 evm=0.000434449 clock_ppm=0.00547912 physical_end=0
+ldpc_frames=6920 ldpc_failed=0 verified_cycles=1729 decode_failed=0
+captured_s=1273.34 acquired=1 intervals=220092 evm=0.000456954 clock_ppm=-0.00728991 physical_end=0
+ldpc_frames=6932 ldpc_failed=0 verified_cycles=1732 decode_failed=0
+captured_s=1275.43 acquired=1 intervals=220453 evm=0.000467902 clock_ppm=0.00916949 physical_end=0
+ldpc_frames=6940 ldpc_failed=0 verified_cycles=1734 decode_failed=0
+captured_s=1277.44 acquired=1 intervals=220800 evm=0.000460154 clock_ppm=-0.0017675 physical_end=0
+ldpc_frames=6952 ldpc_failed=0 verified_cycles=1737 decode_failed=0
+captured_s=1279.44 acquired=1 intervals=221147 evm=0.00049025 clock_ppm=0.00100512 physical_end=0
+ldpc_frames=6964 ldpc_failed=0 verified_cycles=1740 decode_failed=0
+captured_s=1281.43 acquired=1 intervals=221490 evm=0.000493368 clock_ppm=-0.00677323 physical_end=0
+ldpc_frames=6976 ldpc_failed=0 verified_cycles=1743 decode_failed=0
+captured_s=1283.52 acquired=1 intervals=221615 evm=0.000462402 clock_ppm=0.0083844 physical_end=0
+ldpc_frames=6980 ldpc_failed=0 verified_cycles=1744 decode_failed=0
+captured_s=1285.52 acquired=1 intervals=221615 evm=0.000462402 clock_ppm=0.0083844 physical_end=0
+ldpc_frames=6980 ldpc_failed=0 verified_cycles=1744 decode_failed=0
+captured_s=1287.53 acquired=1 intervals=221615 evm=0.000462402 clock_ppm=0.0083844 physical_end=0
+ldpc_frames=6980 ldpc_failed=0 verified_cycles=1744 decode_failed=0
+captured_s=1289.54 acquired=1 intervals=221615 evm=0.000462402 clock_ppm=0.0083844 physical_end=1
+ldpc_frames=6980 ldpc_failed=0 verified_cycles=1744 decode_failed=0

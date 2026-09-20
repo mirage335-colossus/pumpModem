@@ -40,7 +40,7 @@ void presentation_and_retention() {
         else check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
     }
     for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))check(!tab.visible,"Regular tabs leaked into fast interface");
-    check(app.field(F::fast_profile).options.size()==4&&app.field(F::fast_constellation).options.size()==4,
+    check(app.field(F::fast_profile).options.size()==5&&app.field(F::fast_constellation).options.size()==11,
           "Fast channel/constellation selections are incomplete");
     check(!app.field(F::fast_encryption).checked&&app.enabled(C::fast_listen)&&!app.enabled(C::fast_transmit),"Fast defaults must allow plain reception and require nonempty transmit text");
     check(!app.field(F::fast_key).enabled&&!app.enabled(C::fast_open_key)&&!app.enabled(C::fast_generate_key),"Plain mode retained active key controls");
@@ -102,9 +102,15 @@ void presentation_and_retention() {
     app.select(F::fast_profile,"wire");
     check(!app.field(F::fast_mono).checked,"Cable profile did not reset both-channel output routing");
     app.toggle(F::fast_mono,true);check(app.field(F::fast_mono).checked,"Explicit cable right-only override ignored");
-    check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_depth).selected=="62"&&
-        app.field(F::fast_coding).selected=="seven-eighths"&&app.field(F::fast_fec).selected=="high-rate",
+    check(app.field(F::fast_constellation).selected=="4194304"&&app.field(F::fast_depth).selected=="4"&&
+        app.field(F::fast_coding).selected=="eight-ninths"&&app.field(F::fast_fec).selected=="sparse",
         "Cable bulk defaults differ from modem profile");
+    app.select(F::fast_constellation,"16384");app.select(F::fast_coding,"nine-tenths");app.select(F::fast_depth,"8");
+    check(app.field(F::fast_constellation).selected=="16384"&&app.field(F::fast_coding).selected=="nine-tenths"&&
+        app.field(F::fast_depth).selected=="8","Capacity QAM/LDPC choices ignored");
+    app.select(F::fast_profile,"wire-classic");
+    check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_coding).selected=="seven-eighths",
+        "Classic cable profile did not restore its original format");
     app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast cable depth choice ignored");
     app.select(F::fast_depth,"62");check(app.field(F::fast_depth).selected=="62","Fast optimized cable depth choice ignored");
     app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
