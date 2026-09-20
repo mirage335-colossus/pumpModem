@@ -1,0 +1,28 @@
+{
+  "/tmp/fast-acoustic-ofdm-raw64-a20.f32": {
+    "bytes": 2723620,
+    "sha256": "a9fe3b8c268f129d36650b5bf8a7aaec142ac869a2ca2c5532ebbba05b2fdbca"
+  },
+  "/tmp/fast-acoustic-ofdm-raw64-a20-bits.u8": {
+    "bytes": 260096,
+    "sha256": "7d4a4d0189f05a5d7396ca86bb5b8b7d7f1ce99a2abfebaa698d83bfe2320ce5"
+  },
+  "/tmp/fast-acoustic-ofdm-raw64-a40.f32": {
+    "bytes": 2723592,
+    "sha256": "33e8b7571ca4c8dfcc3ed19aaafe2d918a77315c15d0bbd8eb3de8107d3c6dc3"
+  },
+  "/tmp/fast-acoustic-ofdm-raw64-a40-bits.u8": {
+    "bytes": 260096,
+    "sha256": "7d4a4d0189f05a5d7396ca86bb5b8b7d7f1ce99a2abfebaa698d83bfe2320ce5"
+  },
+  "/tmp/acoustic_known_symbols": {
+    "bytes": 887328,
+    "sha256": "b819ab9dec461afe0bd4d698fe163004e14c5ea88311339348c0042e2c3dfcb4",
+    "role": "historical analysis binary; frozen sources supplied instead"
+  },
+  "/tmp/acoustic_known_symbols_refresh": {
+    "bytes": 891424,
+    "sha256": "c7bc6c8e340a186deefb5e456cceec6f2e1b600d1bc6cda9490ad39704d54fe8",
+    "role": "historical analysis binary; frozen sources supplied instead"
+  }
+}

@@ -1,0 +1,9 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+captured_s=1.89733 acquired=1 intervals=0 evm=0 clock_ppm=0.0267789 physical_end=0
+captured_s=3.94533 acquired=1 intervals=61 evm=0.232063 clock_ppm=0.0349741 physical_end=0
+captured_s=5.97196 acquired=1 intervals=114 evm=0.234249 clock_ppm=0.0657947 physical_end=0
+captured_s=7.97738 acquired=1 intervals=127 evm=0.227319 clock_ppm=0.105599 physical_end=0
+captured_s=9.98269 acquired=1 intervals=127 evm=0.227319 clock_ppm=0.105599 physical_end=0
+captured_s=11.9887 acquired=1 intervals=127 evm=0.227319 clock_ppm=0.105599 physical_end=0
+captured_s=13.9934 acquired=1 intervals=127 evm=0.227319 clock_ppm=0.105599 physical_end=1

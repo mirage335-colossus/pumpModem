@@ -40,7 +40,8 @@ void presentation_and_retention() {
         else check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
     }
     for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))check(!tab.visible,"Regular tabs leaked into fast interface");
-    check(app.field(F::fast_profile).options.size()==5&&app.field(F::fast_constellation).options.size()==11,
+    const auto acoustic=fast::profile(fast::Channel::acoustic);
+    check(app.field(F::fast_profile).options.size()==5+static_cast<unsigned>(acoustic.capacity_mode)&&app.field(F::fast_constellation).options.size()==11,
           "Fast channel/constellation selections are incomplete");
     check(!app.field(F::fast_encryption).checked&&app.enabled(C::fast_listen)&&!app.enabled(C::fast_transmit),"Fast defaults must allow plain reception and require nonempty transmit text");
     check(!app.field(F::fast_key).enabled&&!app.enabled(C::fast_open_key)&&!app.enabled(C::fast_generate_key),"Plain mode retained active key controls");
@@ -96,7 +97,24 @@ void presentation_and_retention() {
     check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
     check(app.field(F::fast_detail).text.find("Shannon-Hartley")!=std::string::npos,"Fast capacity explanation missing");
     app.select(F::fast_profile,"acoustic");
-    check(app.field(F::fast_mono).checked,"Acoustic output routing default changed");
+    check(app.field(F::fast_mono).checked==!acoustic.acoustic_ofdm,"Acoustic waveform output routing default changed");
+    check(app.field(F::fast_detail).text.starts_with("Next: acoustic"),"Acoustic GUI selection silently used cable identity");
+    if(acoustic.capacity_mode) {
+        if(acoustic.acoustic_ofdm)check(app.field(F::fast_detail).text.find("OFDM")!=std::string::npos&&
+            app.field(F::fast_detail).text.find("ms echo guard")!=std::string::npos&&
+            app.field(F::fast_detail).text.find("ms blocks")!=std::string::npos&&
+            app.field(F::fast_detail).text.find("symbols/s")==std::string::npos,
+            "OFDM detail used inactive single-carrier symbol-rate fields");
+        check(app.field(F::fast_constellation).selected==std::to_string(acoustic.constellation)&&
+            app.field(F::fast_depth).selected==std::to_string(acoustic.interleave_depth)&&
+            app.field(F::fast_fec).selected=="sparse","Promoted acoustic capacity profile was not applied to GUI");
+        app.select(F::fast_coding,"half");
+        check(app.field(F::fast_coding).selected=="half","Acoustic LDPC1/2 option missing");
+        app.select(F::fast_profile,"acoustic-classic");
+        check(app.field(F::fast_profile).selected=="acoustic-classic"&&app.field(F::fast_constellation).selected=="4",
+            "Classic acoustic fallback is not selectable");
+        check(app.field(F::fast_mono).checked,"Classic acoustic fallback did not restore right-only routing");
+    }
     check(app.field(F::fast_depth).selected=="5"&&app.field(F::fast_coding).selected=="three-quarters"&&
         app.field(F::fast_fec).selected=="robust","Acoustic bulk defaults differ from modem profile");
     app.select(F::fast_profile,"wire");
@@ -108,6 +126,7 @@ void presentation_and_retention() {
     app.select(F::fast_constellation,"16384");app.select(F::fast_coding,"nine-tenths");app.select(F::fast_depth,"8");
     check(app.field(F::fast_constellation).selected=="16384"&&app.field(F::fast_coding).selected=="nine-tenths"&&
         app.field(F::fast_depth).selected=="8","Capacity QAM/LDPC choices ignored");
+    app.select(F::fast_coding,"half");check(app.field(F::fast_coding).selected=="half","Capacity LDPC1/2 choice ignored");
     app.select(F::fast_profile,"wire-classic");
     check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_coding).selected=="seven-eighths",
         "Classic cable profile did not restore its original format");

@@ -51,27 +51,29 @@ template<class Table> bool independent_syndrome(const Bytes& bits) {
         if ((sums[j] ^ bits[Table::K + j] ^ (j ? bits[Table::K + j - 1] : 0)) != 0) return false;
     return true;
 }
-constexpr std::array rates{CodeRate::three_quarters, CodeRate::seven_ninths,
+constexpr std::array rates{CodeRate::half, CodeRate::three_quarters, CodeRate::seven_ninths,
                            CodeRate::eight_ninths, CodeRate::nine_tenths};
 void fixtures() {
     // Frozen SHA-256 of 64800 unpacked 0/1 code bits from the independently
     // compiled xdsopl encoder.hh at pinned commit 32357d8..., with source()'s
     // byte pattern, positive upstream signs denoting zero and MSB-first input.
     constexpr std::array expected{
+        "ae4a2202bd42e246e012b7f095abe6fcbd7c42def4e1f2414c29907e32079aea",
         "5d505f18fa8929976fbddad7ea0f479a4dfa5a731b551ed123a54cd5dc0fe7f7",
         "91bfdb7f3945900cbc08f59643a26930235bc36331052e66355e2d8b9899dbaf",
         "ee760163d51f6d37ef6377e785951f419eec865f089a37a5e07b7588b1f3a94d",
         "89e91cee15cbb4e8e01a8ac1de3cbad2b564e849416417dc62ee2b593220b0bb"};
-    constexpr std::array<std::size_t, 4> k{48600, 50400, 57600, 58320};
+    constexpr std::array<std::size_t, 5> k{32400, 48600, 50400, 57600, 58320};
     for (std::size_t r = 0; r < rates.size(); ++r) {
         const auto rate = rates[r]; const auto bytes = source(rate);
         check(ldpc::data_bits(rate) == k[r], "DVB K geometry");
         const auto bits = ldpc::encode(bytes, rate);
         check(digest(bits) == expected[r], "independent upstream codeword fixture");
         check(ldpc::valid_codeword(bits, rate), "clean production syndrome");
-        const bool independent = r == 0 ? independent_syndrome<DVB_S2_TABLE_B7>(bits) :
-            r == 1 ? independent_syndrome<DVB_S2X_TABLE_B10>(bits) :
-            r == 2 ? independent_syndrome<DVB_S2_TABLE_B10>(bits) :
+        const bool independent = r == 0 ? independent_syndrome<DVB_S2_TABLE_B4>(bits) :
+            r == 1 ? independent_syndrome<DVB_S2_TABLE_B7>(bits) :
+            r == 2 ? independent_syndrome<DVB_S2X_TABLE_B10>(bits) :
+            r == 3 ? independent_syndrome<DVB_S2_TABLE_B10>(bits) :
                      independent_syndrome<DVB_S2_TABLE_B11>(bits);
         check(independent, "independent parity equations");
         std::vector<float> soft(bits.size());
@@ -181,7 +183,7 @@ void qam_noise(unsigned order, CodeRate rate, double db) {
 }
 void invalid_and_bounded() {
     const auto rate = CodeRate::seven_ninths;
-    rejects([&] { ldpc::data_bits(CodeRate::half); });
+    rejects([&] { ldpc::data_bits(CodeRate::seven_eighths); });
     rejects([&] { ldpc::encode(Bytes(1), rate); });
     rejects([&] { ldpc::decode(std::vector<float>(1), rate); });
     std::vector<float> soft(ldpc::coded_bits);
@@ -202,7 +204,7 @@ void invalid_and_bounded() {
     rejects([&] { ldpc::valid_codeword(nonbits, rate); });
 }
 void parallel_calls() {
-    std::array<std::future<void>, 4> jobs;
+    std::array<std::future<void>, rates.size()> jobs;
     for (std::size_t i = 0; i < jobs.size(); ++i) jobs[i] = std::async(std::launch::async, [i] {
         const auto data = source(rates[i]), bits = ldpc::encode(data, rates[i]);
         std::vector<float> soft(bits.size());
@@ -219,6 +221,8 @@ int main(int argc, char** argv) {
         const unsigned frames = argc == 2 ? static_cast<unsigned>(std::stoul(argv[1])) : 12;
         check(frames > 0 && frames <= 10000, "bounded benchmark frame count");
         fixtures(); interleaver(); invalid_and_bounded(); parallel_calls(); bpsk_noise(frames);
+        qam_noise(4, CodeRate::half, 2.);
+        qam_noise(16, CodeRate::half, 7.);
         qam_noise(4096, CodeRate::seven_ninths, 31.8);
         qam_noise(16384, CodeRate::seven_ninths, 37.8);
         qam_noise(16384, CodeRate::eight_ninths, 40.);

@@ -1,4 +1,5 @@
 #include "datapump/fast/modem.hpp"
+#include "acoustic_ofdm.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -157,12 +158,14 @@ double root_raised_cosine(double t,double alpha) {
 Complex sync_symbol(std::size_t i) { return marker[i%sync_symbols]; }
 std::size_t interval_symbols(const Profile& p,std::size_t index) {
     validate(p);
+    if(p.acoustic_ofdm)return acoustic_ofdm::interval_symbols(p,index);
     const auto count=(physical_interval_bits+label_bits(p.constellation)-1)/label_bits(p.constellation);
     const auto stride=spacing(p);
     return marker_size(p,index)+count+((count+stride-1)/stride)*pilot_symbols;
 }
 std::size_t total_interval_symbols(const Profile& p,std::size_t count) {
     validate(p);
+    if(p.acoustic_ofdm)return count?acoustic_ofdm::transmission_samples(p,count)/(p.ofdm_fft_size+p.ofdm_prefix_samples)-acoustic_ofdm::preamble_symbols(p):0;
     if(!count)return 0;
     const auto markers=p.capacity_mode?(count-1)/p.marker_spacing_intervals+1:count;
     const auto payload=interval_symbols(p,0)-sync_symbols;
@@ -171,8 +174,17 @@ std::size_t total_interval_symbols(const Profile& p,std::size_t count) {
         throw std::overflow_error("fast interval symbol count overflow");
     return count*payload+markers*sync_symbols;
 }
-std::size_t pulse_tail_symbols(const Profile& p) {validate(p);return static_cast<std::size_t>(2*radius(p));}
-std::size_t preamble_symbols(const Profile& p) {validate(p);return p.capacity_mode?2048:training_symbols;}
+std::size_t pulse_tail_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::pulse_tail_symbols(p):static_cast<std::size_t>(2*radius(p));}
+std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):p.capacity_mode?2048:training_symbols;}
+std::uint64_t transmission_samples(const Profile& p,std::size_t count) {
+    validate(p);
+    if(p.acoustic_ofdm)return acoustic_ofdm::transmission_samples(p,count);
+    const auto symbols=preamble_symbols(p)+total_interval_symbols(p,count)-1+pulse_tail_symbols(p);
+    const auto samples=std::floor(static_cast<double>(symbols)*p.sample_rate/p.symbol_rate)+1;
+    if(samples>=static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
+        throw std::overflow_error("Fast transmission sample count overflow");
+    return static_cast<std::uint64_t>(samples);
+}
 
 struct Transmitter::Impl {
     Profile config;
@@ -733,21 +745,29 @@ struct Receiver::Impl {
     }
 };
 
-Transmitter::Transmitter(Profile p,IntervalReader source,SymbolObserver observer):impl_(std::make_unique<Impl>(validated(p),std::move(source),std::move(observer))){}
+Transmitter::Transmitter(Profile p,IntervalReader source,SymbolObserver observer) {
+    validate(p);
+    if(p.acoustic_ofdm)acoustic_=std::make_unique<acoustic_ofdm::Transmitter>(p,std::move(source),std::move(observer));
+    else impl_=std::make_unique<Impl>(validated(p),std::move(source),std::move(observer));
+}
 Transmitter::~Transmitter()=default;
 Transmitter::Transmitter(Transmitter&&) noexcept=default;
 Transmitter& Transmitter::operator=(Transmitter&&) noexcept=default;
-std::size_t Transmitter::read(std::span<float> out){return impl_->read(out);}
-bool Transmitter::finished() const{return impl_->done;}
-std::uint64_t Transmitter::samples_generated() const{return impl_->sample;}
-std::size_t Transmitter::workspace_bytes() const{return sizeof(Impl)+impl_->points.capacity()*sizeof(Complex)+impl_->pulse.values.capacity()*sizeof(double)+static_cast<std::size_t>(2*impl_->pulse_radius+4)*sizeof(std::pair<std::uint64_t,Complex>);}
-Receiver::Receiver(Profile p,IntervalSink sink,SymbolObserver observer,SymbolObserver input_observer):impl_(std::make_unique<Impl>(validated(p),std::move(sink),std::move(observer),std::move(input_observer))){}
+std::size_t Transmitter::read(std::span<float> out){return acoustic_?acoustic_->read(out):impl_->read(out);}
+bool Transmitter::finished() const{return acoustic_?acoustic_->finished():impl_->done;}
+std::uint64_t Transmitter::samples_generated() const{return acoustic_?acoustic_->samples_generated():impl_->sample;}
+std::size_t Transmitter::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+impl_->points.capacity()*sizeof(Complex)+impl_->pulse.values.capacity()*sizeof(double)+static_cast<std::size_t>(2*impl_->pulse_radius+4)*sizeof(std::pair<std::uint64_t,Complex>);}
+Receiver::Receiver(Profile p,IntervalSink sink,SymbolObserver observer,SymbolObserver input_observer) {
+    validate(p);
+    if(p.acoustic_ofdm)acoustic_=std::make_unique<acoustic_ofdm::Receiver>(p,std::move(sink),std::move(observer),std::move(input_observer));
+    else impl_=std::make_unique<Impl>(validated(p),std::move(sink),std::move(observer),std::move(input_observer));
+}
 Receiver::~Receiver()=default;
 Receiver::Receiver(Receiver&&) noexcept=default;
 Receiver& Receiver::operator=(Receiver&&) noexcept=default;
-void Receiver::push(std::span<const float> samples){impl_->push(samples);}
-void Receiver::finish(){impl_->eof=true;}
-const ModemProgress& Receiver::progress() const{return impl_->state;}
-std::size_t Receiver::workspace_bytes() const{return sizeof(Impl)+(impl_->points.capacity()+impl_->raw.capacity()+impl_->filtered.capacity())*sizeof(Complex)+impl_->taps.capacity()*sizeof(double);}
+void Receiver::push(std::span<const float> samples){if(acoustic_)acoustic_->push(samples);else impl_->push(samples);}
+void Receiver::finish(){if(acoustic_)acoustic_->finish();else impl_->eof=true;}
+const ModemProgress& Receiver::progress() const{return acoustic_?acoustic_->progress():impl_->state;}
+std::size_t Receiver::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+(impl_->points.capacity()+impl_->raw.capacity()+impl_->filtered.capacity())*sizeof(Complex)+impl_->taps.capacity()*sizeof(double);}
 
 } // namespace datapump::fast

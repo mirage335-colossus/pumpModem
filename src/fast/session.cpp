@@ -19,7 +19,7 @@ void check_settings(const Settings& s) {
         throw Error("Fast storage quota must be 64 KiB..256 MiB");
 }
 void check_format(const Settings& s,const audio::StreamFormat& f) {
-    const auto high=s.profile.carrier_hz+s.profile.symbol_rate*(1+s.profile.rolloff)/2;
+    const auto high=occupied_upper_hz(s.profile);
     if(high>f.usable_passband_hz)throw Error("Fast waveform exceeds this audio device's usable passband");
 }
 }

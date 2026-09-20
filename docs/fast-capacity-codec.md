@@ -16,8 +16,10 @@ absence. EOF and cancellation do not complete a file.
 
 The capacity `interleave_depth` is the number of LDPC frames per coding cycle,
 from 1 through 16; the initial setting is four. Every LDPC frame has 64,800 coded
-bits. Supported information widths are 48,600 bits (3/4), 50,400 (7/9), 57,600
-(8/9), and 58,320 (9/10). The 7/9 matrix is DVB-S2X; the other three are DVB-S2.
+bits. Supported information widths are 32,400 bits (1/2), 48,600 (3/4), 50,400
+(7/9), 57,600 (8/9), and 58,320 (9/10). The 7/9 matrix is DVB-S2X; the other
+four are DVB-S2. The same fixed-cycle codec is usable by cable or explicitly
+selected acoustic capacity modulation; the local channel is integrity-bound.
 
 A cycle concatenates the information areas of all its LDPC frames. Its outer RS
 word uses the largest even byte count that fits. An odd number of 3/4 frames
@@ -35,6 +37,7 @@ For four LDPC frames:
 
 | LDPC rate | LDPC information bytes | RS parity bytes | RS data bytes | Parity/data | Public source slots | Encrypted source slots |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 1/2 | 16,200 | 52 | 16,148 | 0.3220% | 16,115 | 16,095 |
 | 3/4 | 24,300 | 76 | 24,224 | 0.3137% | 24,191 | 24,175 |
 | 7/9 | 25,200 | 76 | 25,124 | 0.3025% | 25,091 | 25,071 |
 | 8/9 | 28,800 | 88 | 28,712 | 0.3065% | 28,679 | 28,655 |
@@ -158,6 +161,13 @@ then compacts them in place. A final area's padding counts against this quota.
 Each source-reader request is at most 16 KiB. Coding scratch depends on at most
 16 local frames, not source size or received metadata. At maximum depth, retained
 LLRs use about 4 MiB, while one LDPC decode owns under 3 MiB of additional scratch.
+Acoustic OFDM decodes up to four frames concurrently, limited by the configured
+depth and reported hardware concurrency. Thus its LDPC scratch remains below
+12 MiB, in addition to per-worker LLR buffers and bounded frame outputs. The
+caller acts as one worker and joins the others before processing outer RS.
+Frame outputs, diagnostics and exceptions are aggregated in input order;
+parallel scheduling changes no codeword or acceptance rule. Single-carrier
+cable decoding retains the sequential path and one decoder's scratch lifetime.
 Graphs, field tables, and interleave schedules are immutable shared data. Each
 used depth/constellation pair retains a 64,800-byte rotation schedule; the entire
 finite 176-profile cache is bounded at about 10.9 MiB. Decode work is synchronous
@@ -167,11 +177,19 @@ capture FIFO headroom must be verified at high symbol rates and noisy thresholds
 ## Verification
 
 `test_fast_codec` retains its independent v1 wire vectors and tests the new
-format with all four rates, public and keyed sources, empty sources, exact cycle
+format with all five rates, public and keyed sources, empty sources, exact cycle
 boundaries, arbitrary bytes and trailing zeros, maximum 16-frame geometry,
 1 MiB streamed sources, memory quotas, and physical-end gating. It also covers
 malformed authenticated/checksummed padding, corrupted digests, wrong keys,
 missing/reordered/spliced cycles, and an erased complete 2,048-bit interval.
+Acoustic channel tests cover rates 1/2 and 3/4 at depths one and four in both
+integrity modes: independent continuation/final byte layout, mandatory final
+cycles, deferred padding interpretation, terminal integrity failure, and
+rejection under an otherwise identical cable channel identity. These tests
+exercise the codec without sound devices or a modulation receiver.
+Additional OFDM context tests bind waveform selection, FFT size, cyclic prefix
+and occupied-band settings into bootstrap integrity, while dormant OFDM fields
+leave cable identity unchanged.
 
 Independent vectors cover GF(65536) parity, source flag/byte/padding layout, and
 whitening. Three complete rotation schedules have independent Python SHA-256

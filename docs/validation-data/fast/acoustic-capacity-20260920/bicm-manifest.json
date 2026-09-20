@@ -1,0 +1,8 @@
+{
+  "source_sha256": "3ecd27d0fa4e6967881fd232363d1643ab4ddae5b351f4890ab9d2741c5e1e00",
+  "test_sha256": "ab38264179e72ec872d2759c3c79b12da0824f2f066ba880325cb1efcaf8df58",
+  "commands": [
+    "OPENBLAS_NUM_THREADS=1 python3 tools/acoustic_bicm_analysis.py --spectrum /tmp/fast-acoustic-sounder-a20/spectral-analysis-arithmetic_mean.npz --spectrum /tmp/fast-acoustic-sounder-a40/spectral-analysis-arithmetic_mean.npz --output /tmp/fast-acoustic-bicm-8192-4096",
+    "Repeat the preceding command with --fft 32768 --prefix 8192 and a different --output directory."
+  ]
+}

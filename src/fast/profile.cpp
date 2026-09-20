@@ -1,4 +1,5 @@
 #include "datapump/fast/profile.hpp"
+#include "acoustic_ofdm.hpp"
 #include <bit>
 #include <cmath>
 
@@ -22,7 +23,20 @@ Profile classic_profile(Channel channel) {
     return p;
 }
 Profile profile(Channel channel) {return channel==Channel::wire?capacity_profile():classic_profile(channel);}
-Profile capacity_profile() {return Profile{};}
+Profile capacity_profile(Channel channel) {
+    Profile p;p.channel=channel;
+    switch(channel) {
+    case Channel::wire: break;
+    case Channel::acoustic:
+        p.acoustic_ofdm=true;
+        p.constellation=16;p.code_rate=CodeRate::three_quarters;p.interleave_depth=1;
+        p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.amplitude=.20;
+        p.marker_spacing_intervals=1;p.pilot_spacing_symbols=32;
+        break;
+    default: throw Error("Capacity format requires the wire or acoustic profile");
+    }
+    return p;
+}
 std::string_view channel_name(Channel c) {
     switch(c) {
     case Channel::wire:return "wire";
@@ -67,13 +81,29 @@ CodeRate parse_code_rate(std::string_view name) {
 }
 void validate(const Profile& p) {
     (void)channel_name(p.channel);(void)code_rate_value(p.code_rate);
+    if(p.acoustic_ofdm) {
+        if(!p.capacity_mode||p.channel!=Channel::acoustic)
+            throw Error("Acoustic OFDM requires the acoustic capacity profile");
+        if(p.sample_rate!=48000)
+            throw Error("Acoustic OFDM currently requires 48000 Hz processing audio");
+        if(!std::has_single_bit(p.ofdm_fft_size)||p.ofdm_fft_size<2048||p.ofdm_fft_size>32768||
+           p.ofdm_prefix_samples<256||p.ofdm_prefix_samples>p.ofdm_fft_size)
+            throw Error("Invalid acoustic OFDM FFT or cyclic prefix");
+        if(!std::isfinite(p.ofdm_low_hz)||!std::isfinite(p.ofdm_high_hz)||p.ofdm_low_hz<100||
+           p.ofdm_high_hz>20000||p.ofdm_high_hz-p.ofdm_low_hz<1000)
+            throw Error("Invalid acoustic OFDM passband");
+        if(std::floor(p.ofdm_high_hz*p.ofdm_fft_size/p.sample_rate)-
+           std::ceil(p.ofdm_low_hz*p.ofdm_fft_size/p.sample_rate)+1<512)
+            throw Error("Acoustic OFDM requires at least 512 active frequency bins");
+    }
     if(p.capacity_mode) {
-        if(p.channel!=Channel::wire)throw Error("Capacity format currently requires the cable profile");
+        if(p.channel!=Channel::wire&&p.channel!=Channel::acoustic)
+            throw Error("Capacity format requires the wire or acoustic profile");
         if(p.constellation<4||p.constellation>4194304||!std::has_single_bit(p.constellation)||std::countr_zero(p.constellation)%2)
             throw Error("Fast QAM order must be a power of four from 4 through 4194304");
-        if(p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
+        if(p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
            p.code_rate!=CodeRate::eight_ninths&&p.code_rate!=CodeRate::nine_tenths)
-            throw Error("Fast capacity LDPC rate must be 3/4, 7/9, 8/9 or 9/10");
+            throw Error("Fast capacity LDPC rate must be 1/2, 3/4, 7/9, 8/9 or 9/10");
         if(p.robust)throw Error("Capacity format uses the approximately 0.3% outer RS code");
         if(!p.interleave_depth||p.interleave_depth>16)throw Error("Fast LDPC interleave depth must be 1..16");
         if(!p.marker_spacing_intervals||p.marker_spacing_intervals>16)throw Error("Fast marker spacing must be 1..16 intervals");
@@ -105,6 +135,15 @@ Bytes profile_id(const Profile& p) {
     const auto append=[&](std::uint64_t n) {for(int i=7;i>=0;--i)out.push_back(static_cast<std::uint8_t>(n>>(i*8)));};
     append(static_cast<unsigned>(p.channel));append(p.constellation);
     append(static_cast<unsigned>(p.code_rate));append(p.robust);append(p.interleave_depth);
+    if(p.acoustic_ofdm) {
+        // Bind every active OFDM wire parameter, with a separate domain.
+        // Existing cable/classic IDs remain byte-for-byte unchanged.
+        out.insert(out.end(),{'/','o','f','d','m','/','v','2'});
+        append(p.sample_rate);append(p.ofdm_fft_size);append(p.ofdm_prefix_samples);
+        append(std::bit_cast<std::uint64_t>(p.ofdm_low_hz));
+        append(std::bit_cast<std::uint64_t>(p.ofdm_high_hz));
+        return out;
+    }
     // Device sample rate and local output level are not peer wire geometry.
     append(std::bit_cast<std::uint64_t>(p.symbol_rate));
     append(std::bit_cast<std::uint64_t>(p.carrier_hz));
@@ -112,5 +151,8 @@ Bytes profile_id(const Profile& p) {
     if(p.capacity_mode) {append(p.marker_spacing_intervals);append(p.pilot_spacing_symbols);}
     return out;
 }
-double gross_bitrate(const Profile& p) {validate(p);return p.symbol_rate*std::log2(p.constellation);}
+double gross_bitrate(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::gross_bitrate(p):p.symbol_rate*std::log2(p.constellation);}
+double occupied_lower_hz(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::occupied_lower(p):p.carrier_hz-p.symbol_rate*(1+p.rolloff)/2;}
+double occupied_upper_hz(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::occupied_upper(p):p.carrier_hz+p.symbol_rate*(1+p.rolloff)/2;}
+double occupied_bandwidth_hz(const Profile& p) {return occupied_upper_hz(p)-occupied_lower_hz(p);}
 }

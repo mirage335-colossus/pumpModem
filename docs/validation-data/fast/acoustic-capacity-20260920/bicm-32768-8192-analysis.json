@@ -1,0 +1,3263 @@
+{
+  "method": "Exact Gray square-QAM AWGN bit LLR mutual information using Gauss-Hermite quadrature on each PAM axis.",
+  "quadrature_points": 96,
+  "snr_grid_step_db": 0.25,
+  "interpretation": "For ideal interleaved BICM, mean bit information >= code-rate times label bits is a necessary information screen. It does not locate this finite LDPC decoder's waterfall or establish frame/file success.",
+  "measured_snr_model": "Source PSD times independently estimated response power divided by conservative held-out residual PSD. Treating this as complex-symbol Es/N0 assumes stationary Gaussian-equivalent noise, independent subcarriers and adequate cyclic prefix/equalization. Residual can depend on waveform, level and time.",
+  "rate_overheads": "Rates include the specified OFDM cyclic prefix and current per-carrier pilot allocation. They exclude finite coding-cycle packing, outer RS, digests, bootstrap/training, end silence and delivery failures.",
+  "loading_model": "Fixed per-carrier power, orders4/16/64/256/1024 or off. Local screen requires every individual carrier to clear the rate and can underperform coding across frequency. Pooled Lagrange screen maximizes assigned bits while sharing nonnegative aggregate BICM margin; discrete choices leave slight slack. Neither includes loading signaling, changed LDPC mapping/waterfalls, or changes in distortion.",
+  "cases": [
+    {
+      "source_spectrum": "/tmp/fast-acoustic-sounder-a20/spectral-analysis-arithmetic_mean.npz",
+      "source_sha256": "b1e44802fbef6237f652fa474a35c48f2a7651d9a7c15272274557ad68dc438a",
+      "geometry": {
+        "fft_size": 32768,
+        "first_bin": 342,
+        "last_bin": 12288,
+        "active_bins": 11947,
+        "data_bins": 10453,
+        "pilot_stride": 8,
+        "sample_rate": 48000,
+        "low_hz": 500,
+        "high_hz": 18000,
+        "prefix_samples": 8192,
+        "prefix_fraction": 0.2
+      },
+      "per_bin_snr_db_quantiles": {
+        "0": 2.8604814532689766,
+        "0.1": 15.036699793723558,
+        "0.5": 21.06109508635622,
+        "0.9": 26.311955788866342,
+        "1": 30.780430901318656
+      },
+      "uniform_modes": [
+        {
+          "qam": 4,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998082772678795,
+          "mean_bicm_per_coded_bit": 0.9990413863393975,
+          "information_margin_bits_per_symbol": 0.9980827726787951,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 12249.609375,
+          "matched_bicm_information_bps": 24475.733464232162,
+          "tenth_percentile_carrier_bicm_bits": 1.999999925042767,
+          "mean_information_per_bit_plane": [
+            0.9990413863394006,
+            0.9990413863394006
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998082772678795,
+          "mean_bicm_per_coded_bit": 0.9990413863393975,
+          "information_margin_bits_per_symbol": 0.4980827726787951,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 18374.4140625,
+          "matched_bicm_information_bps": 24475.733464232162,
+          "tenth_percentile_carrier_bicm_bits": 1.999999925042767,
+          "mean_information_per_bit_plane": [
+            0.9990413863394006,
+            0.9990413863394006
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998082772678795,
+          "mean_bicm_per_coded_bit": 0.9990413863393975,
+          "information_margin_bits_per_symbol": 0.4425272171232395,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 19054.947916666668,
+          "matched_bicm_information_bps": 24475.733464232162,
+          "tenth_percentile_carrier_bicm_bits": 1.999999925042767,
+          "mean_information_per_bit_plane": [
+            0.9990413863394006,
+            0.9990413863394006
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998082772678795,
+          "mean_bicm_per_coded_bit": 0.9990413863393975,
+          "information_margin_bits_per_symbol": 0.2203049949010174,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 21777.083333333332,
+          "matched_bicm_information_bps": 24475.733464232162,
+          "tenth_percentile_carrier_bicm_bits": 1.999999925042767,
+          "mean_information_per_bit_plane": [
+            0.9990413863394006,
+            0.9990413863394006
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.947390557835335,
+          "mean_bicm_per_coded_bit": 0.9868476394588338,
+          "information_margin_bits_per_symbol": 1.9473905578353352,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 24499.21875,
+          "matched_bicm_information_bps": 48353.9923840462,
+          "tenth_percentile_carrier_bicm_bits": 3.93048407864335,
+          "mean_information_per_bit_plane": [
+            0.9911224629877681,
+            0.982572815929906,
+            0.9911224629877681,
+            0.982572815929906
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.947390557835335,
+          "mean_bicm_per_coded_bit": 0.9868476394588338,
+          "information_margin_bits_per_symbol": 0.9473905578353352,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 48353.9923840462,
+          "tenth_percentile_carrier_bicm_bits": 3.93048407864335,
+          "mean_information_per_bit_plane": [
+            0.9911224629877681,
+            0.982572815929906,
+            0.9911224629877681,
+            0.982572815929906
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.947390557835335,
+          "mean_bicm_per_coded_bit": 0.9868476394588338,
+          "information_margin_bits_per_symbol": 0.836279446724224,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 38109.895833333336,
+          "matched_bicm_information_bps": 48353.9923840462,
+          "tenth_percentile_carrier_bicm_bits": 3.93048407864335,
+          "mean_information_per_bit_plane": [
+            0.9911224629877681,
+            0.982572815929906,
+            0.9911224629877681,
+            0.982572815929906
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.947390557835335,
+          "mean_bicm_per_coded_bit": 0.9868476394588338,
+          "information_margin_bits_per_symbol": 0.39183500227977985,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 43554.166666666664,
+          "matched_bicm_information_bps": 48353.9923840462,
+          "tenth_percentile_carrier_bicm_bits": 3.93048407864335,
+          "mean_information_per_bit_plane": [
+            0.9911224629877681,
+            0.982572815929906,
+            0.9911224629877681,
+            0.982572815929906
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.592105481572422,
+          "mean_bicm_per_coded_bit": 0.9320175802620704,
+          "information_margin_bits_per_symbol": 2.592105481572422,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 68501.10773305842,
+          "tenth_percentile_carrier_bicm_bits": 4.688541201596822,
+          "mean_information_per_bit_plane": [
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288,
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.592105481572422,
+          "mean_bicm_per_coded_bit": 0.9320175802620704,
+          "information_margin_bits_per_symbol": 1.092105481572422,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 55123.2421875,
+          "matched_bicm_information_bps": 68501.10773305842,
+          "tenth_percentile_carrier_bicm_bits": 4.688541201596822,
+          "mean_information_per_bit_plane": [
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288,
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.592105481572422,
+          "mean_bicm_per_coded_bit": 0.9320175802620704,
+          "information_margin_bits_per_symbol": 0.9254388149057551,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 57164.84375,
+          "matched_bicm_information_bps": 68501.10773305842,
+          "tenth_percentile_carrier_bicm_bits": 4.688541201596822,
+          "mean_information_per_bit_plane": [
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288,
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.592105481572422,
+          "mean_bicm_per_coded_bit": 0.9320175802620704,
+          "information_margin_bits_per_symbol": 0.258772148239089,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 65331.24999999999,
+          "matched_bicm_information_bps": 68501.10773305842,
+          "tenth_percentile_carrier_bicm_bits": 4.688541201596822,
+          "mean_information_per_bit_plane": [
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288,
+            0.9697085655433876,
+            0.9400195932495331,
+            0.886324581993288
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.354052773993227,
+          "mean_bicm_per_coded_bit": 0.7942565967491534,
+          "information_margin_bits_per_symbol": 2.354052773993227,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 48998.4375,
+          "matched_bicm_information_bps": 77834.66442955218,
+          "tenth_percentile_carrier_bicm_bits": 4.584133218015712,
+          "mean_information_per_bit_plane": [
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716,
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.354052773993227,
+          "mean_bicm_per_coded_bit": 0.7942565967491534,
+          "information_margin_bits_per_symbol": 0.3540527739932271,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 73497.65625,
+          "matched_bicm_information_bps": 77834.66442955218,
+          "tenth_percentile_carrier_bicm_bits": 4.584133218015712,
+          "mean_information_per_bit_plane": [
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716,
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.354052773993227,
+          "mean_bicm_per_coded_bit": 0.7942565967491534,
+          "information_margin_bits_per_symbol": 0.13183055177100478,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 76219.79166666667,
+          "matched_bicm_information_bps": 77834.66442955218,
+          "tenth_percentile_carrier_bicm_bits": 4.584133218015712,
+          "mean_information_per_bit_plane": [
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716,
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.354052773993227,
+          "mean_bicm_per_coded_bit": 0.7942565967491534,
+          "information_margin_bits_per_symbol": -0.7570583371178836,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 87108.33333333333,
+          "matched_bicm_information_bps": 77834.66442955218,
+          "tenth_percentile_carrier_bicm_bits": 4.584133218015712,
+          "mean_information_per_bit_plane": [
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716,
+            0.9398640482407923,
+            0.8804403320189406,
+            0.7688317255272009,
+            0.5878902812096716
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.37083740115988,
+          "mean_bicm_per_coded_bit": 0.637083740115988,
+          "information_margin_bits_per_symbol": 1.3708374011598803,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 61248.046875,
+          "matched_bicm_information_bps": 78040.2695558487,
+          "tenth_percentile_carrier_bicm_bits": 4.457892160255508,
+          "mean_information_per_bit_plane": [
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707,
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.37083740115988,
+          "mean_bicm_per_coded_bit": 0.637083740115988,
+          "information_margin_bits_per_symbol": -1.1291625988401197,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 91872.0703125,
+          "matched_bicm_information_bps": 78040.2695558487,
+          "tenth_percentile_carrier_bicm_bits": 4.457892160255508,
+          "mean_information_per_bit_plane": [
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707,
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.37083740115988,
+          "mean_bicm_per_coded_bit": 0.637083740115988,
+          "information_margin_bits_per_symbol": -1.4069403766178974,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 95274.73958333333,
+          "matched_bicm_information_bps": 78040.2695558487,
+          "tenth_percentile_carrier_bicm_bits": 4.457892160255508,
+          "mean_information_per_bit_plane": [
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707,
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.37083740115988,
+          "mean_bicm_per_coded_bit": 0.637083740115988,
+          "information_margin_bits_per_symbol": -2.518051487729009,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 108885.41666666666,
+          "matched_bicm_information_bps": 78040.2695558487,
+          "tenth_percentile_carrier_bicm_bits": 4.457892160255508,
+          "mean_information_per_bit_plane": [
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707,
+            0.9255130395543493,
+            0.8517705863617114,
+            0.7120649372548554,
+            0.481638075266316,
+            0.21443206214270707
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9968355057960734,
+          "mean_bicm_per_coded_bit": 0.9984177528980367,
+          "information_margin_bits_per_symbol": 0.9968355057960734,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 12249.609375,
+          "matched_bicm_information_bps": 24460.45493213245,
+          "tenth_percentile_carrier_bicm_bits": 1.9999978412398571,
+          "mean_information_per_bit_plane": [
+            0.9984177528980422,
+            0.9984177528980422
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9968355057960734,
+          "mean_bicm_per_coded_bit": 0.9984177528980367,
+          "information_margin_bits_per_symbol": 0.4968355057960734,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 18374.4140625,
+          "matched_bicm_information_bps": 24460.45493213245,
+          "tenth_percentile_carrier_bicm_bits": 1.9999978412398571,
+          "mean_information_per_bit_plane": [
+            0.9984177528980422,
+            0.9984177528980422
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9968355057960734,
+          "mean_bicm_per_coded_bit": 0.9984177528980367,
+          "information_margin_bits_per_symbol": 0.4412799502405178,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 19054.947916666668,
+          "matched_bicm_information_bps": 24460.45493213245,
+          "tenth_percentile_carrier_bicm_bits": 1.9999978412398571,
+          "mean_information_per_bit_plane": [
+            0.9984177528980422,
+            0.9984177528980422
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9968355057960734,
+          "mean_bicm_per_coded_bit": 0.9984177528980367,
+          "information_margin_bits_per_symbol": 0.2190577280182957,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 21777.083333333332,
+          "matched_bicm_information_bps": 24460.45493213245,
+          "tenth_percentile_carrier_bicm_bits": 1.9999978412398571,
+          "mean_information_per_bit_plane": [
+            0.9984177528980422,
+            0.9984177528980422
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.926558709888,
+          "mean_bicm_per_coded_bit": 0.981639677472,
+          "information_margin_bits_per_symbol": 1.926558709888,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 24499.21875,
+          "matched_bicm_information_bps": 48098.81038413195,
+          "tenth_percentile_carrier_bicm_bits": 3.856323534549426,
+          "mean_information_per_bit_plane": [
+            0.9875593407389056,
+            0.9757200142050988,
+            0.9875593407389056,
+            0.9757200142050988
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.926558709888,
+          "mean_bicm_per_coded_bit": 0.981639677472,
+          "information_margin_bits_per_symbol": 0.9265587098879999,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 48098.81038413195,
+          "tenth_percentile_carrier_bicm_bits": 3.856323534549426,
+          "mean_information_per_bit_plane": [
+            0.9875593407389056,
+            0.9757200142050988,
+            0.9875593407389056,
+            0.9757200142050988
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.926558709888,
+          "mean_bicm_per_coded_bit": 0.981639677472,
+          "information_margin_bits_per_symbol": 0.8154475987768888,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 38109.895833333336,
+          "matched_bicm_information_bps": 48098.81038413195,
+          "tenth_percentile_carrier_bicm_bits": 3.856323534549426,
+          "mean_information_per_bit_plane": [
+            0.9875593407389056,
+            0.9757200142050988,
+            0.9875593407389056,
+            0.9757200142050988
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.926558709888,
+          "mean_bicm_per_coded_bit": 0.981639677472,
+          "information_margin_bits_per_symbol": 0.3710031543324446,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 43554.166666666664,
+          "matched_bicm_information_bps": 48098.81038413195,
+          "tenth_percentile_carrier_bicm_bits": 3.856323534549426,
+          "mean_information_per_bit_plane": [
+            0.9875593407389056,
+            0.9757200142050988,
+            0.9875593407389056,
+            0.9757200142050988
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.470417903184702,
+          "mean_bicm_per_coded_bit": 0.9117363171974503,
+          "information_margin_bits_per_symbol": 2.4704179031847016,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 67010.48243201917,
+          "tenth_percentile_carrier_bicm_bits": 4.395768960686186,
+          "mean_information_per_bit_plane": [
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978,
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.470417903184702,
+          "mean_bicm_per_coded_bit": 0.9117363171974503,
+          "information_margin_bits_per_symbol": 0.9704179031847016,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 55123.2421875,
+          "matched_bicm_information_bps": 67010.48243201917,
+          "tenth_percentile_carrier_bicm_bits": 4.395768960686186,
+          "mean_information_per_bit_plane": [
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978,
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.470417903184702,
+          "mean_bicm_per_coded_bit": 0.9117363171974503,
+          "information_margin_bits_per_symbol": 0.8037512365180346,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 57164.84375,
+          "matched_bicm_information_bps": 67010.48243201917,
+          "tenth_percentile_carrier_bicm_bits": 4.395768960686186,
+          "mean_information_per_bit_plane": [
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978,
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.470417903184702,
+          "mean_bicm_per_coded_bit": 0.9117363171974503,
+          "information_margin_bits_per_symbol": 0.13708456985136852,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 65331.24999999999,
+          "matched_bicm_information_bps": 67010.48243201917,
+          "tenth_percentile_carrier_bicm_bits": 4.395768960686186,
+          "mean_information_per_bit_plane": [
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978,
+            0.9604180132241399,
+            0.9218453000886021,
+            0.8529456382795978
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.07633733023927,
+          "mean_bicm_per_coded_bit": 0.7595421662799088,
+          "information_margin_bits_per_symbol": 2.0763373302392703,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 48998.4375,
+          "matched_bicm_information_bps": 74432.75872616144,
+          "tenth_percentile_carrier_bicm_bits": 4.25387031271547,
+          "mean_information_per_bit_plane": [
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332,
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.07633733023927,
+          "mean_bicm_per_coded_bit": 0.7595421662799088,
+          "information_margin_bits_per_symbol": 0.07633733023927025,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 73497.65625,
+          "matched_bicm_information_bps": 74432.75872616144,
+          "tenth_percentile_carrier_bicm_bits": 4.25387031271547,
+          "mean_information_per_bit_plane": [
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332,
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.07633733023927,
+          "mean_bicm_per_coded_bit": 0.7595421662799088,
+          "information_margin_bits_per_symbol": -0.14588489198295207,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 76219.79166666667,
+          "matched_bicm_information_bps": 74432.75872616144,
+          "tenth_percentile_carrier_bicm_bits": 4.25387031271547,
+          "mean_information_per_bit_plane": [
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332,
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.07633733023927,
+          "mean_bicm_per_coded_bit": 0.7595421662799088,
+          "information_margin_bits_per_symbol": -1.0347737808718405,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 87108.33333333333,
+          "matched_bicm_information_bps": 74432.75872616144,
+          "tenth_percentile_carrier_bicm_bits": 4.25387031271547,
+          "mean_information_per_bit_plane": [
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332,
+            0.9285342630536036,
+            0.8582372889466542,
+            0.7279584371395459,
+            0.5234386759798332
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.037430005939029,
+          "mean_bicm_per_coded_bit": 0.603743000593903,
+          "information_margin_bits_per_symbol": 1.0374300059390293,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 61248.046875,
+          "matched_bicm_information_bps": 73956.15920165705,
+          "tenth_percentile_carrier_bicm_bits": 4.152811574553722,
+          "mean_information_per_bit_plane": [
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119,
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.037430005939029,
+          "mean_bicm_per_coded_bit": 0.603743000593903,
+          "information_margin_bits_per_symbol": -1.4625699940609707,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 91872.0703125,
+          "matched_bicm_information_bps": 73956.15920165705,
+          "tenth_percentile_carrier_bicm_bits": 4.152811574553722,
+          "mean_information_per_bit_plane": [
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119,
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.037430005939029,
+          "mean_bicm_per_coded_bit": 0.603743000593903,
+          "information_margin_bits_per_symbol": -1.7403477718387483,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 95274.73958333333,
+          "matched_bicm_information_bps": 73956.15920165705,
+          "tenth_percentile_carrier_bicm_bits": 4.152811574553722,
+          "mean_information_per_bit_plane": [
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119,
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.037430005939029,
+          "mean_bicm_per_coded_bit": 0.603743000593903,
+          "information_margin_bits_per_symbol": -2.85145888294986,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 108885.41666666666,
+          "matched_bicm_information_bps": 73956.15920165705,
+          "tenth_percentile_carrier_bicm_bits": 4.152811574553722,
+          "mean_information_per_bit_plane": [
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119,
+            0.9152917928243299,
+            0.8317987290645844,
+            0.6758385869204134,
+            0.42836467849337584,
+            0.1674212156668119
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9949849022792059,
+          "mean_bicm_per_coded_bit": 0.9974924511396029,
+          "information_margin_bits_per_symbol": 0.9949849022792059,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 12249.609375,
+          "matched_bicm_information_bps": 24437.78576194282,
+          "tenth_percentile_carrier_bicm_bits": 1.9999681594705851,
+          "mean_information_per_bit_plane": [
+            0.9974924511396082,
+            0.9974924511396082
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9949849022792059,
+          "mean_bicm_per_coded_bit": 0.9974924511396029,
+          "information_margin_bits_per_symbol": 0.4949849022792059,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 18374.4140625,
+          "matched_bicm_information_bps": 24437.78576194282,
+          "tenth_percentile_carrier_bicm_bits": 1.9999681594705851,
+          "mean_information_per_bit_plane": [
+            0.9974924511396082,
+            0.9974924511396082
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9949849022792059,
+          "mean_bicm_per_coded_bit": 0.9974924511396029,
+          "information_margin_bits_per_symbol": 0.4394293467236503,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 19054.947916666668,
+          "matched_bicm_information_bps": 24437.78576194282,
+          "tenth_percentile_carrier_bicm_bits": 1.9999681594705851,
+          "mean_information_per_bit_plane": [
+            0.9974924511396082,
+            0.9974924511396082
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9949849022792059,
+          "mean_bicm_per_coded_bit": 0.9974924511396029,
+          "information_margin_bits_per_symbol": 0.2172071245014282,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 21777.083333333332,
+          "matched_bicm_information_bps": 24437.78576194282,
+          "tenth_percentile_carrier_bicm_bits": 1.9999681594705851,
+          "mean_information_per_bit_plane": [
+            0.9974924511396082,
+            0.9974924511396082
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.8989747637263523,
+          "mean_bicm_per_coded_bit": 0.9747436909315881,
+          "information_margin_bits_per_symbol": 1.8989747637263523,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 24499.21875,
+          "matched_bicm_information_bps": 47760.91781863073,
+          "tenth_percentile_carrier_bicm_bits": 3.741895375307401,
+          "mean_information_per_bit_plane": [
+            0.982818500229616,
+            0.9666688816335651,
+            0.982818500229616,
+            0.9666688816335651
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.8989747637263523,
+          "mean_bicm_per_coded_bit": 0.9747436909315881,
+          "information_margin_bits_per_symbol": 0.8989747637263523,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 47760.91781863073,
+          "tenth_percentile_carrier_bicm_bits": 3.741895375307401,
+          "mean_information_per_bit_plane": [
+            0.982818500229616,
+            0.9666688816335651,
+            0.982818500229616,
+            0.9666688816335651
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.8989747637263523,
+          "mean_bicm_per_coded_bit": 0.9747436909315881,
+          "information_margin_bits_per_symbol": 0.7878636526152412,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 38109.895833333336,
+          "matched_bicm_information_bps": 47760.91781863073,
+          "tenth_percentile_carrier_bicm_bits": 3.741895375307401,
+          "mean_information_per_bit_plane": [
+            0.982818500229616,
+            0.9666688816335651,
+            0.982818500229616,
+            0.9666688816335651
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.8989747637263523,
+          "mean_bicm_per_coded_bit": 0.9747436909315881,
+          "information_margin_bits_per_symbol": 0.34341920817079696,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 43554.166666666664,
+          "matched_bicm_information_bps": 47760.91781863073,
+          "tenth_percentile_carrier_bicm_bits": 3.741895375307401,
+          "mean_information_per_bit_plane": [
+            0.982818500229616,
+            0.9666688816335651,
+            0.982818500229616,
+            0.9666688816335651
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.323401187800683,
+          "mean_bicm_per_coded_bit": 0.8872335313001138,
+          "information_margin_bits_per_symbol": 2.323401187800683,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 65209.58509696938,
+          "tenth_percentile_carrier_bicm_bits": 4.095874854215016,
+          "mean_information_per_bit_plane": [
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332,
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.323401187800683,
+          "mean_bicm_per_coded_bit": 0.8872335313001138,
+          "information_margin_bits_per_symbol": 0.823401187800683,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 55123.2421875,
+          "matched_bicm_information_bps": 65209.58509696938,
+          "tenth_percentile_carrier_bicm_bits": 4.095874854215016,
+          "mean_information_per_bit_plane": [
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332,
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.323401187800683,
+          "mean_bicm_per_coded_bit": 0.8872335313001138,
+          "information_margin_bits_per_symbol": 0.6567345211340161,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 57164.84375,
+          "matched_bicm_information_bps": 65209.58509696938,
+          "tenth_percentile_carrier_bicm_bits": 4.095874854215016,
+          "mean_information_per_bit_plane": [
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332,
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.323401187800683,
+          "mean_bicm_per_coded_bit": 0.8872335313001138,
+          "information_margin_bits_per_symbol": -0.009932145532649983,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 65331.24999999999,
+          "matched_bicm_information_bps": 65209.58509696938,
+          "tenth_percentile_carrier_bicm_bits": 4.095874854215016,
+          "mean_information_per_bit_plane": [
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332,
+            0.9490667169246633,
+            0.8997600512803425,
+            0.8128738256953332
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.784492818144829,
+          "mean_bicm_per_coded_bit": 0.7230616022681037,
+          "information_margin_bits_per_symbol": 1.7844928181448294,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 48998.4375,
+          "matched_bicm_information_bps": 70857.77745476707,
+          "tenth_percentile_carrier_bicm_bits": 3.9333971502544913,
+          "mean_information_per_bit_plane": [
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555,
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.784492818144829,
+          "mean_bicm_per_coded_bit": 0.7230616022681037,
+          "information_margin_bits_per_symbol": -0.2155071818551706,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 73497.65625,
+          "matched_bicm_information_bps": 70857.77745476707,
+          "tenth_percentile_carrier_bicm_bits": 3.9333971502544913,
+          "mean_information_per_bit_plane": [
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555,
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.784492818144829,
+          "mean_bicm_per_coded_bit": 0.7230616022681037,
+          "information_margin_bits_per_symbol": -0.4377294040773929,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 76219.79166666667,
+          "matched_bicm_information_bps": 70857.77745476707,
+          "tenth_percentile_carrier_bicm_bits": 3.9333971502544913,
+          "mean_information_per_bit_plane": [
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555,
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.784492818144829,
+          "mean_bicm_per_coded_bit": 0.7230616022681037,
+          "information_margin_bits_per_symbol": -1.3266182929662813,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 87108.33333333333,
+          "matched_bicm_information_bps": 70857.77745476707,
+          "tenth_percentile_carrier_bicm_bits": 3.9333971502544913,
+          "mean_information_per_bit_plane": [
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555,
+            0.9160379744806717,
+            0.8339299865221987,
+            0.6841547044335954,
+            0.4581237436359555
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.706960550258043,
+          "mean_bicm_per_coded_bit": 0.5706960550258043,
+          "information_margin_bits_per_symbol": 0.7069605502580432,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 61248.046875,
+          "matched_bicm_information_bps": 69908.03745919609,
+          "tenth_percentile_carrier_bicm_bits": 3.8539548490473026,
+          "mean_information_per_bit_plane": [
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407,
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.706960550258043,
+          "mean_bicm_per_coded_bit": 0.5706960550258043,
+          "information_margin_bits_per_symbol": -1.7930394497419568,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 91872.0703125,
+          "matched_bicm_information_bps": 69908.03745919609,
+          "tenth_percentile_carrier_bicm_bits": 3.8539548490473026,
+          "mean_information_per_bit_plane": [
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407,
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.706960550258043,
+          "mean_bicm_per_coded_bit": 0.5706960550258043,
+          "information_margin_bits_per_symbol": -2.0708172275197345,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 95274.73958333333,
+          "matched_bicm_information_bps": 69908.03745919609,
+          "tenth_percentile_carrier_bicm_bits": 3.8539548490473026,
+          "mean_information_per_bit_plane": [
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407,
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.706960550258043,
+          "mean_bicm_per_coded_bit": 0.5706960550258043,
+          "information_margin_bits_per_symbol": -3.181928338630846,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 108885.41666666666,
+          "matched_bicm_information_bps": 69908.03745919609,
+          "tenth_percentile_carrier_bicm_bits": 3.8539548490473026,
+          "mean_information_per_bit_plane": [
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407,
+            0.9039894614008528,
+            0.8098983798095515,
+            0.6370837090297766,
+            0.37522405904199807,
+            0.1272846658468407
+          ]
+        }
+      ],
+      "local_bit_loading": [
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 58387.5,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 23,
+            "16": 109,
+            "64": 486,
+            "256": 1050,
+            "1024": 8785
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 69778.125,
+          "carrier_order_counts": {
+            "off": 4,
+            "4": 125,
+            "16": 764,
+            "64": 2449,
+            "256": 4859,
+            "1024": 2252
+          },
+          "unused_carriers": 4
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 69972.65625,
+          "carrier_order_counts": {
+            "off": 6,
+            "4": 144,
+            "16": 882,
+            "64": 3012,
+            "256": 4604,
+            "1024": 1805
+          },
+          "unused_carriers": 6
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 67522.91666666667,
+          "carrier_order_counts": {
+            "off": 27,
+            "4": 370,
+            "16": 1565,
+            "64": 5319,
+            "256": 2906,
+            "1024": 266
+          },
+          "unused_carriers": 27
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 57433.59375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 45,
+            "16": 169,
+            "64": 647,
+            "256": 1274,
+            "1024": 8318
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 66290.625,
+          "carrier_order_counts": {
+            "off": 11,
+            "4": 192,
+            "16": 957,
+            "64": 3245,
+            "256": 4369,
+            "1024": 1679
+          },
+          "unused_carriers": 11
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 66253.90625,
+          "carrier_order_counts": {
+            "off": 16,
+            "4": 248,
+            "16": 1071,
+            "64": 3764,
+            "256": 4107,
+            "1024": 1247
+          },
+          "unused_carriers": 16
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 63920.83333333333,
+          "carrier_order_counts": {
+            "off": 52,
+            "4": 499,
+            "16": 2010,
+            "64": 5518,
+            "256": 2261,
+            "1024": 113
+          },
+          "unused_carriers": 52
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 56107.03125,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 84,
+            "16": 270,
+            "64": 759,
+            "256": 1723,
+            "1024": 7617
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 62627.34375,
+          "carrier_order_counts": {
+            "off": 25,
+            "4": 320,
+            "16": 1158,
+            "64": 3941,
+            "256": 3876,
+            "1024": 1133
+          },
+          "unused_carriers": 25
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 62391.145833333336,
+          "carrier_order_counts": {
+            "off": 34,
+            "4": 357,
+            "16": 1353,
+            "64": 4537,
+            "256": 3308,
+            "1024": 864
+          },
+          "unused_carriers": 34
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 59937.5,
+          "carrier_order_counts": {
+            "off": 88,
+            "4": 683,
+            "16": 2771,
+            "64": 5121,
+            "256": 1768,
+            "1024": 22
+          },
+          "unused_carriers": 88
+        }
+      ],
+      "pooled_bit_loading": [
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 61248.046875,
+          "aggregate_information_margin_bits": 14329.363354324241,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 0,
+            "256": 0,
+            "1024": 10453
+          }
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 79282.6171875,
+          "aggregate_information_margin_bits": 1.3509948332650765,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 976,
+            "256": 5210,
+            "1024": 4267
+          }
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 79402.60416666667,
+          "aggregate_information_margin_bits": 1.4253489616207844,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 129,
+            "64": 1291,
+            "256": 5738,
+            "1024": 3295
+          }
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 77895.83333333333,
+          "aggregate_information_margin_bits": 1.0106864204151975,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 70,
+            "16": 718,
+            "64": 3739,
+            "256": 4963,
+            "1024": 963
+          }
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 61248.046875,
+          "aggregate_information_margin_bits": 10844.255852080676,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 0,
+            "256": 0,
+            "1024": 10453
+          }
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 75506.8359375,
+          "aggregate_information_margin_bits": 0.3068567534551221,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 97,
+            "64": 1517,
+            "256": 5985,
+            "1024": 2854
+          }
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 75565.36458333333,
+          "aggregate_information_margin_bits": 1.5056933765249596,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 5,
+            "16": 306,
+            "64": 1841,
+            "256": 6192,
+            "1024": 2109
+          }
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 73852.08333333333,
+          "aggregate_information_margin_bits": 1.0214690376432145,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 95,
+            "16": 945,
+            "64": 4658,
+            "256": 4285,
+            "1024": 470
+          }
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 61248.046875,
+          "aggregate_information_margin_bits": 7389.858631847326,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 0,
+            "256": 0,
+            "1024": 10453
+          }
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 71708.203125,
+          "aggregate_information_margin_bits": 0.07041468624390745,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 6,
+            "16": 348,
+            "64": 2131,
+            "256": 6141,
+            "1024": 1827
+          }
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 71697.13541666667,
+          "aggregate_information_margin_bits": 1.3705698517978817,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 22,
+            "16": 462,
+            "64": 2833,
+            "256": 5794,
+            "1024": 1342
+          }
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 69918.75,
+          "aggregate_information_margin_bits": 0.04238186592345983,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 123,
+            "16": 1251,
+            "64": 5566,
+            "256": 3327,
+            "1024": 186
+          }
+        }
+      ]
+    },
+    {
+      "source_spectrum": "/tmp/fast-acoustic-sounder-a40/spectral-analysis-arithmetic_mean.npz",
+      "source_sha256": "eaa90ecb9aac782d15bd815cbfb585274880a13f111404409224ff074bdb0681",
+      "geometry": {
+        "fft_size": 32768,
+        "first_bin": 342,
+        "last_bin": 12288,
+        "active_bins": 11947,
+        "data_bins": 10453,
+        "pilot_stride": 8,
+        "sample_rate": 48000,
+        "low_hz": 500,
+        "high_hz": 18000,
+        "prefix_samples": 8192,
+        "prefix_fraction": 0.2
+      },
+      "per_bin_snr_db_quantiles": {
+        "0": 5.236282269503264,
+        "0.1": 16.900286009083604,
+        "0.5": 22.356903494538027,
+        "0.9": 29.61142951489355,
+        "1": 33.55517761660613
+      },
+      "uniform_modes": [
+        {
+          "qam": 4,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9996369947148311,
+          "mean_bicm_per_coded_bit": 0.9998184973574156,
+          "information_margin_bits_per_symbol": 0.9996369947148311,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 12249.609375,
+          "matched_bicm_information_bps": 24494.77207705562,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999999855262,
+          "mean_information_per_bit_plane": [
+            0.9998184973574199,
+            0.9998184973574199
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9996369947148311,
+          "mean_bicm_per_coded_bit": 0.9998184973574156,
+          "information_margin_bits_per_symbol": 0.49963699471483114,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 18374.4140625,
+          "matched_bicm_information_bps": 24494.77207705562,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999999855262,
+          "mean_information_per_bit_plane": [
+            0.9998184973574199,
+            0.9998184973574199
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9996369947148311,
+          "mean_bicm_per_coded_bit": 0.9998184973574156,
+          "information_margin_bits_per_symbol": 0.44408143915927556,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 19054.947916666668,
+          "matched_bicm_information_bps": 24494.77207705562,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999999855262,
+          "mean_information_per_bit_plane": [
+            0.9998184973574199,
+            0.9998184973574199
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9996369947148311,
+          "mean_bicm_per_coded_bit": 0.9998184973574156,
+          "information_margin_bits_per_symbol": 0.22185921693705346,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 21777.083333333332,
+          "matched_bicm_information_bps": 24494.77207705562,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999999855262,
+          "mean_information_per_bit_plane": [
+            0.9998184973574199,
+            0.9998184973574199
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.977079057161921,
+          "mean_bicm_per_coded_bit": 0.9942697642904802,
+          "information_margin_bits_per_symbol": 1.9770790571619208,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 24499.21875,
+          "matched_bicm_information_bps": 48717.66490372682,
+          "tenth_percentile_carrier_bicm_bits": 3.9890461287767165,
+          "mean_information_per_bit_plane": [
+            0.9961642655453303,
+            0.992375263035635,
+            0.9961642655453303,
+            0.992375263035635
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.977079057161921,
+          "mean_bicm_per_coded_bit": 0.9942697642904802,
+          "information_margin_bits_per_symbol": 0.9770790571619208,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 48717.66490372682,
+          "tenth_percentile_carrier_bicm_bits": 3.9890461287767165,
+          "mean_information_per_bit_plane": [
+            0.9961642655453303,
+            0.992375263035635,
+            0.9961642655453303,
+            0.992375263035635
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.977079057161921,
+          "mean_bicm_per_coded_bit": 0.9942697642904802,
+          "information_margin_bits_per_symbol": 0.8659679460508096,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 38109.895833333336,
+          "matched_bicm_information_bps": 48717.66490372682,
+          "tenth_percentile_carrier_bicm_bits": 3.9890461287767165,
+          "mean_information_per_bit_plane": [
+            0.9961642655453303,
+            0.992375263035635,
+            0.9961642655453303,
+            0.992375263035635
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 3.977079057161921,
+          "mean_bicm_per_coded_bit": 0.9942697642904802,
+          "information_margin_bits_per_symbol": 0.4215235016063654,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 43554.166666666664,
+          "matched_bicm_information_bps": 48717.66490372682,
+          "tenth_percentile_carrier_bicm_bits": 3.9890461287767165,
+          "mean_information_per_bit_plane": [
+            0.9961642655453303,
+            0.992375263035635,
+            0.9961642655453303,
+            0.992375263035635
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.738811154795714,
+          "mean_bicm_per_coded_bit": 0.9564685257992857,
+          "information_margin_bits_per_symbol": 2.738811154795714,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 70298.19492314015,
+          "tenth_percentile_carrier_bicm_bits": 5.199404901564291,
+          "mean_information_per_bit_plane": [
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224,
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.738811154795714,
+          "mean_bicm_per_coded_bit": 0.9564685257992857,
+          "information_margin_bits_per_symbol": 1.2388111547957141,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 55123.2421875,
+          "matched_bicm_information_bps": 70298.19492314015,
+          "tenth_percentile_carrier_bicm_bits": 5.199404901564291,
+          "mean_information_per_bit_plane": [
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224,
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.738811154795714,
+          "mean_bicm_per_coded_bit": 0.9564685257992857,
+          "information_margin_bits_per_symbol": 1.0721444881290472,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 57164.84375,
+          "matched_bicm_information_bps": 70298.19492314015,
+          "tenth_percentile_carrier_bicm_bits": 5.199404901564291,
+          "mean_information_per_bit_plane": [
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224,
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 5.738811154795714,
+          "mean_bicm_per_coded_bit": 0.9564685257992857,
+          "information_margin_bits_per_symbol": 0.4054778214623811,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 65331.24999999999,
+          "matched_bicm_information_bps": 70298.19492314015,
+          "tenth_percentile_carrier_bicm_bits": 5.199404901564291,
+          "mean_information_per_bit_plane": [
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224,
+            0.9810035375917567,
+            0.9621239567249735,
+            0.9262780830811224
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.722238050531007,
+          "mean_bicm_per_coded_bit": 0.8402797563163759,
+          "information_margin_bits_per_symbol": 2.722238050531007,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 48998.4375,
+          "matched_bicm_information_bps": 82344.79024476635,
+          "tenth_percentile_carrier_bicm_bits": 5.213819312042653,
+          "mean_information_per_bit_plane": [
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172,
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.722238050531007,
+          "mean_bicm_per_coded_bit": 0.8402797563163759,
+          "information_margin_bits_per_symbol": 0.7222380505310069,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 73497.65625,
+          "matched_bicm_information_bps": 82344.79024476635,
+          "tenth_percentile_carrier_bicm_bits": 5.213819312042653,
+          "mean_information_per_bit_plane": [
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172,
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.722238050531007,
+          "mean_bicm_per_coded_bit": 0.8402797563163759,
+          "information_margin_bits_per_symbol": 0.5000158283087845,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 76219.79166666667,
+          "matched_bicm_information_bps": 82344.79024476635,
+          "tenth_percentile_carrier_bicm_bits": 5.213819312042653,
+          "mean_information_per_bit_plane": [
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172,
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.722238050531007,
+          "mean_bicm_per_coded_bit": 0.8402797563163759,
+          "information_margin_bits_per_symbol": -0.38887306058010385,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 87108.33333333333,
+          "matched_bicm_information_bps": 82344.79024476635,
+          "tenth_percentile_carrier_bicm_bits": 5.213819312042653,
+          "mean_information_per_bit_plane": [
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172,
+            0.9549493393967756,
+            0.9100508697299058,
+            0.8229978113255164,
+            0.6731210048133172
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.9086100792429015,
+          "mean_bicm_per_coded_bit": 0.6908610079242902,
+          "information_margin_bits_per_symbol": 1.9086100792429015,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 61248.046875,
+          "matched_bicm_information_bps": 84627.77479491333,
+          "tenth_percentile_carrier_bicm_bits": 5.040628224291837,
+          "mean_information_per_bit_plane": [
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341,
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.9086100792429015,
+          "mean_bicm_per_coded_bit": 0.6908610079242902,
+          "information_margin_bits_per_symbol": -0.5913899207570985,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 91872.0703125,
+          "matched_bicm_information_bps": 84627.77479491333,
+          "tenth_percentile_carrier_bicm_bits": 5.040628224291837,
+          "mean_information_per_bit_plane": [
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341,
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.9086100792429015,
+          "mean_bicm_per_coded_bit": 0.6908610079242902,
+          "information_margin_bits_per_symbol": -0.8691676985348762,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 95274.73958333333,
+          "matched_bicm_information_bps": 84627.77479491333,
+          "tenth_percentile_carrier_bicm_bits": 5.040628224291837,
+          "mean_information_per_bit_plane": [
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341,
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 0.0,
+          "mean_bicm_bits_per_payload_symbol": 6.9086100792429015,
+          "mean_bicm_per_coded_bit": 0.6908610079242902,
+          "information_margin_bits_per_symbol": -1.9802788096459878,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 108885.41666666666,
+          "matched_bicm_information_bps": 84627.77479491333,
+          "tenth_percentile_carrier_bicm_bits": 5.040628224291837,
+          "mean_information_per_bit_plane": [
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341,
+            0.9403551483164044,
+            0.8808737533474306,
+            0.764969307341671,
+            0.5624529243229158,
+            0.3056539062930341
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9993042598557098,
+          "mean_bicm_per_coded_bit": 0.9996521299278549,
+          "information_margin_bits_per_symbol": 0.9993042598557098,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 12249.609375,
+          "matched_bicm_information_bps": 24490.696205005937,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999977294958,
+          "mean_information_per_bit_plane": [
+            0.9996521299278609,
+            0.9996521299278609
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9993042598557098,
+          "mean_bicm_per_coded_bit": 0.9996521299278549,
+          "information_margin_bits_per_symbol": 0.4993042598557098,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 18374.4140625,
+          "matched_bicm_information_bps": 24490.696205005937,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999977294958,
+          "mean_information_per_bit_plane": [
+            0.9996521299278609,
+            0.9996521299278609
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9993042598557098,
+          "mean_bicm_per_coded_bit": 0.9996521299278549,
+          "information_margin_bits_per_symbol": 0.44374870430015423,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 19054.947916666668,
+          "matched_bicm_information_bps": 24490.696205005937,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999977294958,
+          "mean_information_per_bit_plane": [
+            0.9996521299278609,
+            0.9996521299278609
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 1.9993042598557098,
+          "mean_bicm_per_coded_bit": 0.9996521299278549,
+          "information_margin_bits_per_symbol": 0.22152648207793213,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 21777.083333333332,
+          "matched_bicm_information_bps": 24490.696205005937,
+          "tenth_percentile_carrier_bicm_bits": 1.9999999977294958,
+          "mean_information_per_bit_plane": [
+            0.9996521299278609,
+            0.9996521299278609
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.9653145377551064,
+          "mean_bicm_per_coded_bit": 0.9913286344387766,
+          "information_margin_bits_per_symbol": 1.9653145377551064,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 24499.21875,
+          "matched_bicm_information_bps": 48573.55413650874,
+          "tenth_percentile_carrier_bicm_bits": 3.967599260098152,
+          "mean_information_per_bit_plane": [
+            0.9941851527565415,
+            0.9884721161210153,
+            0.9941851527565415,
+            0.9884721161210153
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.9653145377551064,
+          "mean_bicm_per_coded_bit": 0.9913286344387766,
+          "information_margin_bits_per_symbol": 0.9653145377551064,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 48573.55413650874,
+          "tenth_percentile_carrier_bicm_bits": 3.967599260098152,
+          "mean_information_per_bit_plane": [
+            0.9941851527565415,
+            0.9884721161210153,
+            0.9941851527565415,
+            0.9884721161210153
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.9653145377551064,
+          "mean_bicm_per_coded_bit": 0.9913286344387766,
+          "information_margin_bits_per_symbol": 0.8542034266439953,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 38109.895833333336,
+          "matched_bicm_information_bps": 48573.55413650874,
+          "tenth_percentile_carrier_bicm_bits": 3.967599260098152,
+          "mean_information_per_bit_plane": [
+            0.9941851527565415,
+            0.9884721161210153,
+            0.9941851527565415,
+            0.9884721161210153
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 3.9653145377551064,
+          "mean_bicm_per_coded_bit": 0.9913286344387766,
+          "information_margin_bits_per_symbol": 0.4097589821995511,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 43554.166666666664,
+          "matched_bicm_information_bps": 48573.55413650874,
+          "tenth_percentile_carrier_bicm_bits": 3.967599260098152,
+          "mean_information_per_bit_plane": [
+            0.9941851527565415,
+            0.9884721161210153,
+            0.9941851527565415,
+            0.9884721161210153
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.647055026667794,
+          "mean_bicm_per_coded_bit": 0.9411758377779657,
+          "information_margin_bits_per_symbol": 2.647055026667794,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 69174.21819581068,
+          "tenth_percentile_carrier_bicm_bits": 4.932831399629059,
+          "mean_information_per_bit_plane": [
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703,
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.647055026667794,
+          "mean_bicm_per_coded_bit": 0.9411758377779657,
+          "information_margin_bits_per_symbol": 1.1470550266677941,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 55123.2421875,
+          "matched_bicm_information_bps": 69174.21819581068,
+          "tenth_percentile_carrier_bicm_bits": 4.932831399629059,
+          "mean_information_per_bit_plane": [
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703,
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.647055026667794,
+          "mean_bicm_per_coded_bit": 0.9411758377779657,
+          "information_margin_bits_per_symbol": 0.9803883600011272,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 57164.84375,
+          "matched_bicm_information_bps": 69174.21819581068,
+          "tenth_percentile_carrier_bicm_bits": 4.932831399629059,
+          "mean_information_per_bit_plane": [
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703,
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 5.647055026667794,
+          "mean_bicm_per_coded_bit": 0.9411758377779657,
+          "information_margin_bits_per_symbol": 0.3137216933344611,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 65331.24999999999,
+          "matched_bicm_information_bps": 69174.21819581068,
+          "tenth_percentile_carrier_bicm_bits": 4.932831399629059,
+          "mean_information_per_bit_plane": [
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703,
+            0.97421737155979,
+            0.9486581007131374,
+            0.9006520410609703
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.474794306202317,
+          "mean_bicm_per_coded_bit": 0.8093492882752896,
+          "information_margin_bits_per_symbol": 2.474794306202317,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 48998.4375,
+          "matched_bicm_information_bps": 79313.70103445252,
+          "tenth_percentile_carrier_bicm_bits": 4.8746947582152975,
+          "mean_information_per_bit_plane": [
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045,
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.474794306202317,
+          "mean_bicm_per_coded_bit": 0.8093492882752896,
+          "information_margin_bits_per_symbol": 0.474794306202317,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 73497.65625,
+          "matched_bicm_information_bps": 79313.70103445252,
+          "tenth_percentile_carrier_bicm_bits": 4.8746947582152975,
+          "mean_information_per_bit_plane": [
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045,
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.474794306202317,
+          "mean_bicm_per_coded_bit": 0.8093492882752896,
+          "information_margin_bits_per_symbol": 0.2525720839800947,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 76219.79166666667,
+          "matched_bicm_information_bps": 79313.70103445252,
+          "tenth_percentile_carrier_bicm_bits": 4.8746947582152975,
+          "mean_information_per_bit_plane": [
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045,
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.474794306202317,
+          "mean_bicm_per_coded_bit": 0.8093492882752896,
+          "information_margin_bits_per_symbol": -0.6363168049087937,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 87108.33333333333,
+          "matched_bicm_information_bps": 79313.70103445252,
+          "tenth_percentile_carrier_bicm_bits": 4.8746947582152975,
+          "mean_information_per_bit_plane": [
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045,
+            0.9455197762857029,
+            0.8913211786042061,
+            0.7872341276455478,
+            0.6133220705657045
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.583406470699683,
+          "mean_bicm_per_coded_bit": 0.6583406470699683,
+          "information_margin_bits_per_symbol": 1.5834064706996829,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 61248.046875,
+          "matched_bicm_information_bps": 80644.15762291849,
+          "tenth_percentile_carrier_bicm_bits": 4.725559917240508,
+          "mean_information_per_bit_plane": [
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623,
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.583406470699683,
+          "mean_bicm_per_coded_bit": 0.6583406470699683,
+          "information_margin_bits_per_symbol": -0.9165935293003171,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 91872.0703125,
+          "matched_bicm_information_bps": 80644.15762291849,
+          "tenth_percentile_carrier_bicm_bits": 4.725559917240508,
+          "mean_information_per_bit_plane": [
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623,
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.583406470699683,
+          "mean_bicm_per_coded_bit": 0.6583406470699683,
+          "information_margin_bits_per_symbol": -1.1943713070780948,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 95274.73958333333,
+          "matched_bicm_information_bps": 80644.15762291849,
+          "tenth_percentile_carrier_bicm_bits": 4.725559917240508,
+          "mean_information_per_bit_plane": [
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623,
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 1.0,
+          "mean_bicm_bits_per_payload_symbol": 6.583406470699683,
+          "mean_bicm_per_coded_bit": 0.6583406470699683,
+          "information_margin_bits_per_symbol": -2.3054824181892064,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 108885.41666666666,
+          "matched_bicm_information_bps": 80644.15762291849,
+          "tenth_percentile_carrier_bicm_bits": 4.725559917240508,
+          "mean_information_per_bit_plane": [
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623,
+            0.9317119163207934,
+            0.8637236296883268,
+            0.7325006137432969,
+            0.510861164198038,
+            0.25290591139938623
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998732457886746,
+          "mean_bicm_per_coded_bit": 0.999366228943373,
+          "information_margin_bits_per_symbol": 0.998732457886746,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 12249.609375,
+          "matched_bicm_information_bps": 24483.691854246277,
+          "tenth_percentile_carrier_bicm_bits": 1.9999998695903694,
+          "mean_information_per_bit_plane": [
+            0.9993662289433813,
+            0.9993662289433813
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998732457886746,
+          "mean_bicm_per_coded_bit": 0.999366228943373,
+          "information_margin_bits_per_symbol": 0.49873245788674603,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 18374.4140625,
+          "matched_bicm_information_bps": 24483.691854246277,
+          "tenth_percentile_carrier_bicm_bits": 1.9999998695903694,
+          "mean_information_per_bit_plane": [
+            0.9993662289433813,
+            0.9993662289433813
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998732457886746,
+          "mean_bicm_per_coded_bit": 0.999366228943373,
+          "information_margin_bits_per_symbol": 0.44317690233119045,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 19054.947916666668,
+          "matched_bicm_information_bps": 24483.691854246277,
+          "tenth_percentile_carrier_bicm_bits": 1.9999998695903694,
+          "mean_information_per_bit_plane": [
+            0.9993662289433813,
+            0.9993662289433813
+          ]
+        },
+        {
+          "qam": 4,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 1.998732457886746,
+          "mean_bicm_per_coded_bit": 0.999366228943373,
+          "information_margin_bits_per_symbol": 0.22095468010896835,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 21777.083333333332,
+          "matched_bicm_information_bps": 24483.691854246277,
+          "tenth_percentile_carrier_bicm_bits": 1.9999998695903694,
+          "mean_information_per_bit_plane": [
+            0.9993662289433813,
+            0.9993662289433813
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.948636101296474,
+          "mean_bicm_per_coded_bit": 0.9871590253241185,
+          "information_margin_bits_per_symbol": 1.948636101296474,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 24499.21875,
+          "matched_bicm_information_bps": 48369.249804904735,
+          "tenth_percentile_carrier_bicm_bits": 3.9223921268205246,
+          "mean_information_per_bit_plane": [
+            0.9913712762153697,
+            0.9829467744328599,
+            0.9913712762153697,
+            0.9829467744328599
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.948636101296474,
+          "mean_bicm_per_coded_bit": 0.9871590253241185,
+          "information_margin_bits_per_symbol": 0.9486361012964739,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 48369.249804904735,
+          "tenth_percentile_carrier_bicm_bits": 3.9223921268205246,
+          "mean_information_per_bit_plane": [
+            0.9913712762153697,
+            0.9829467744328599,
+            0.9913712762153697,
+            0.9829467744328599
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.948636101296474,
+          "mean_bicm_per_coded_bit": 0.9871590253241185,
+          "information_margin_bits_per_symbol": 0.8375249901853627,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 38109.895833333336,
+          "matched_bicm_information_bps": 48369.249804904735,
+          "tenth_percentile_carrier_bicm_bits": 3.9223921268205246,
+          "mean_information_per_bit_plane": [
+            0.9913712762153697,
+            0.9829467744328599,
+            0.9913712762153697,
+            0.9829467744328599
+          ]
+        },
+        {
+          "qam": 16,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 3.948636101296474,
+          "mean_bicm_per_coded_bit": 0.9871590253241185,
+          "information_margin_bits_per_symbol": 0.39308054574091855,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 43554.166666666664,
+          "matched_bicm_information_bps": 48369.249804904735,
+          "tenth_percentile_carrier_bicm_bits": 3.9223921268205246,
+          "mean_information_per_bit_plane": [
+            0.9913712762153697,
+            0.9829467744328599,
+            0.9913712762153697,
+            0.9829467744328599
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.53232065423706,
+          "mean_bicm_per_coded_bit": 0.9220534423728434,
+          "information_margin_bits_per_symbol": 2.5323206542370604,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 36748.828125,
+          "matched_bicm_information_bps": 67768.76695164843,
+          "tenth_percentile_carrier_bicm_bits": 4.649091957592463,
+          "mean_information_per_bit_plane": [
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542,
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.53232065423706,
+          "mean_bicm_per_coded_bit": 0.9220534423728434,
+          "information_margin_bits_per_symbol": 1.0323206542370604,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 55123.2421875,
+          "matched_bicm_information_bps": 67768.76695164843,
+          "tenth_percentile_carrier_bicm_bits": 4.649091957592463,
+          "mean_information_per_bit_plane": [
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542,
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.53232065423706,
+          "mean_bicm_per_coded_bit": 0.9220534423728434,
+          "information_margin_bits_per_symbol": 0.8656539875703935,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 57164.84375,
+          "matched_bicm_information_bps": 67768.76695164843,
+          "tenth_percentile_carrier_bicm_bits": 4.649091957592463,
+          "mean_information_per_bit_plane": [
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542,
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542
+          ]
+        },
+        {
+          "qam": 64,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 5.53232065423706,
+          "mean_bicm_per_coded_bit": 0.9220534423728434,
+          "information_margin_bits_per_symbol": 0.1989873209037274,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 65331.24999999999,
+          "matched_bicm_information_bps": 67768.76695164843,
+          "tenth_percentile_carrier_bicm_bits": 4.649091957592463,
+          "mean_information_per_bit_plane": [
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542,
+            0.9656595719829028,
+            0.9317271875173708,
+            0.8687735676182542
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.211366414518273,
+          "mean_bicm_per_coded_bit": 0.7764208018147841,
+          "information_margin_bits_per_symbol": 2.211366414518273,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 48998.4375,
+          "matched_bicm_information_bps": 76086.81226284317,
+          "tenth_percentile_carrier_bicm_bits": 4.538642974289556,
+          "mean_information_per_bit_plane": [
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648,
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.211366414518273,
+          "mean_bicm_per_coded_bit": 0.7764208018147841,
+          "information_margin_bits_per_symbol": 0.21136641451827298,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 73497.65625,
+          "matched_bicm_information_bps": 76086.81226284317,
+          "tenth_percentile_carrier_bicm_bits": 4.538642974289556,
+          "mean_information_per_bit_plane": [
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648,
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.211366414518273,
+          "mean_bicm_per_coded_bit": 0.7764208018147841,
+          "information_margin_bits_per_symbol": -0.010855807703949338,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 76219.79166666667,
+          "matched_bicm_information_bps": 76086.81226284317,
+          "tenth_percentile_carrier_bicm_bits": 4.538642974289556,
+          "mean_information_per_bit_plane": [
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648,
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648
+          ]
+        },
+        {
+          "qam": 256,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.211366414518273,
+          "mean_bicm_per_coded_bit": 0.7764208018147841,
+          "information_margin_bits_per_symbol": -0.8997446965928377,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 87108.33333333333,
+          "matched_bicm_information_bps": 76086.81226284317,
+          "tenth_percentile_carrier_bicm_bits": 4.538642974289556,
+          "mean_information_per_bit_plane": [
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648,
+            0.9350800758245725,
+            0.8706613716329328,
+            0.7484238449207687,
+            0.5515179148808648
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "1/2",
+          "rate": 0.5,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.255759000323321,
+          "mean_bicm_per_coded_bit": 0.6255759000323321,
+          "information_margin_bits_per_symbol": 1.2557590003233212,
+          "ideal_information_feasible": true,
+          "ideal_coded_source_bps": 61248.046875,
+          "matched_bicm_information_bps": 76630.60409810118,
+          "tenth_percentile_carrier_bicm_bits": 4.415976140883345,
+          "mean_information_per_bit_plane": [
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153,
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "3/4",
+          "rate": 0.75,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.255759000323321,
+          "mean_bicm_per_coded_bit": 0.6255759000323321,
+          "information_margin_bits_per_symbol": -1.2442409996766788,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 91872.0703125,
+          "matched_bicm_information_bps": 76630.60409810118,
+          "tenth_percentile_carrier_bicm_bits": 4.415976140883345,
+          "mean_information_per_bit_plane": [
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153,
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "7/9",
+          "rate": 0.7777777777777778,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.255759000323321,
+          "mean_bicm_per_coded_bit": 0.6255759000323321,
+          "information_margin_bits_per_symbol": -1.5220187774544565,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 95274.73958333333,
+          "matched_bicm_information_bps": 76630.60409810118,
+          "tenth_percentile_carrier_bicm_bits": 4.415976140883345,
+          "mean_information_per_bit_plane": [
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153,
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153
+          ]
+        },
+        {
+          "qam": 1024,
+          "code_rate": "8/9",
+          "rate": 0.8888888888888888,
+          "snr_penalty_db": 2.0,
+          "mean_bicm_bits_per_payload_symbol": 6.255759000323321,
+          "mean_bicm_per_coded_bit": 0.6255759000323321,
+          "information_margin_bits_per_symbol": -2.633129888565568,
+          "ideal_information_feasible": false,
+          "ideal_coded_source_bps": 108885.41666666666,
+          "matched_bicm_information_bps": 76630.60409810118,
+          "tenth_percentile_carrier_bicm_bits": 4.415976140883345,
+          "mean_information_per_bit_plane": [
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153,
+            0.9221288556220324,
+            0.8447873573091972,
+            0.6973187354257716,
+            0.45817967706964297,
+            0.2054648747350153
+          ]
+        }
+      ],
+      "local_bit_loading": [
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 59658.984375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 2,
+            "16": 44,
+            "64": 260,
+            "256": 696,
+            "1024": 9451
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 74241.2109375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 40,
+            "16": 446,
+            "64": 1945,
+            "256": 4642,
+            "1024": 3380
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 74621.09375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 58,
+            "16": 542,
+            "64": 2273,
+            "256": 4926,
+            "1024": 2654
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 74693.75,
+          "carrier_order_counts": {
+            "off": 5,
+            "4": 163,
+            "16": 1119,
+            "64": 4568,
+            "256": 3242,
+            "1024": 1356
+          },
+          "unused_carriers": 5
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 58917.1875,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 7,
+            "16": 66,
+            "64": 385,
+            "256": 993,
+            "1024": 9002
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 71091.2109375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 70,
+            "16": 602,
+            "64": 2455,
+            "256": 4826,
+            "1024": 2500
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 71646.09375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 87,
+            "16": 687,
+            "64": 2933,
+            "256": 4687,
+            "1024": 2059
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 70672.91666666667,
+          "carrier_order_counts": {
+            "off": 8,
+            "4": 251,
+            "16": 1631,
+            "64": 4991,
+            "256": 2423,
+            "1024": 1149
+          },
+          "unused_carriers": 8
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 57808.59375,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 11,
+            "16": 113,
+            "64": 528,
+            "256": 1496,
+            "1024": 8305
+          },
+          "unused_carriers": 0
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 68162.6953125,
+          "carrier_order_counts": {
+            "off": 4,
+            "4": 109,
+            "16": 770,
+            "64": 3121,
+            "256": 4480,
+            "1024": 1969
+          },
+          "unused_carriers": 4
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 68441.40625,
+          "carrier_order_counts": {
+            "off": 6,
+            "4": 156,
+            "16": 906,
+            "64": 3667,
+            "256": 4014,
+            "1024": 1704
+          },
+          "unused_carriers": 6
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 66285.41666666667,
+          "carrier_order_counts": {
+            "off": 14,
+            "4": 385,
+            "16": 2168,
+            "64": 5256,
+            "256": 1822,
+            "1024": 808
+          },
+          "unused_carriers": 14
+        }
+      ],
+      "pooled_bit_loading": [
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 61248.046875,
+          "aggregate_information_margin_bits": 19950.701158326043,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 0,
+            "256": 0,
+            "1024": 10453
+          }
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 85354.1015625,
+          "aggregate_information_margin_bits": 0.12968514196745673,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 87,
+            "256": 3534,
+            "1024": 6832
+          }
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 85562.23958333333,
+          "aggregate_information_margin_bits": 2.1881150042556783,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 605,
+            "256": 4118,
+            "1024": 5730
+          }
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 0.0,
+          "ideal_coded_source_bps": 84856.24999999999,
+          "aggregate_information_margin_bits": 0.6836097913268304,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 7,
+            "16": 299,
+            "64": 2459,
+            "256": 5691,
+            "1024": 1997
+          }
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 61248.046875,
+          "aggregate_information_margin_bits": 16551.347838223777,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 0,
+            "256": 0,
+            "1024": 10453
+          }
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 81704.8828125,
+          "aggregate_information_margin_bits": 2.63222958713186,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 515,
+            "256": 4754,
+            "1024": 5184
+          }
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 81872.65625,
+          "aggregate_information_margin_bits": 1.991744318033625,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 38,
+            "64": 929,
+            "256": 5380,
+            "1024": 4106
+          }
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 1.0,
+          "ideal_coded_source_bps": 80824.99999999999,
+          "aggregate_information_margin_bits": 0.8236443633696808,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 23,
+            "16": 547,
+            "64": 3414,
+            "256": 4908,
+            "1024": 1561
+          }
+        },
+        {
+          "code_rate": "1/2",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 61248.046875,
+          "aggregate_information_margin_bits": 13126.448830379682,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 0,
+            "256": 0,
+            "1024": 10453
+          }
+        },
+        {
+          "code_rate": "3/4",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 78016.9921875,
+          "aggregate_information_margin_bits": 0.3993887704068584,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 0,
+            "64": 1059,
+            "256": 5764,
+            "1024": 3630
+          }
+        },
+        {
+          "code_rate": "7/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 78139.32291666667,
+          "aggregate_information_margin_bits": 1.4527809211685963,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 0,
+            "16": 104,
+            "64": 1550,
+            "256": 5988,
+            "1024": 2811
+          }
+        },
+        {
+          "code_rate": "8/9",
+          "snr_penalty_db": 2.0,
+          "ideal_coded_source_bps": 76672.91666666667,
+          "aggregate_information_margin_bits": 0.8482505811939518,
+          "carrier_order_counts": {
+            "off": 0,
+            "4": 34,
+            "16": 774,
+            "64": 4636,
+            "256": 3732,
+            "1024": 1277
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -11,6 +11,11 @@ struct Profile {
     Channel channel=Channel::wire;
     // v2 uses Gray QAM, LDPC, sparse sync, and compact fixed-cycle sources.
     bool capacity_mode=true;
+    bool acoustic_ofdm=false;
+    unsigned ofdm_fft_size=8192;
+    unsigned ofdm_prefix_samples=4096;
+    double ofdm_low_hz=500;
+    double ofdm_high_hz=18000;
     unsigned marker_spacing_intervals=16;
     unsigned pilot_spacing_symbols=256;
     // Cable bulk-file defaults. Other channels retain their separate presets.
@@ -27,7 +32,8 @@ struct Profile {
 };
 Profile profile(Channel channel);
 Profile classic_profile(Channel channel);
-Profile capacity_profile();
+// Acoustic capacity is explicit until its physical channel is qualified.
+Profile capacity_profile(Channel channel=Channel::wire);
 void validate(const Profile& profile);
 std::string_view channel_name(Channel channel);
 Channel parse_channel(std::string_view name);
@@ -37,4 +43,7 @@ CodeRate parse_code_rate(std::string_view rate);
 // Fixed canonical local context for authentication, never transmitted as a header.
 Bytes profile_id(const Profile& profile);
 double gross_bitrate(const Profile& profile);
+double occupied_lower_hz(const Profile& profile);
+double occupied_upper_hz(const Profile& profile);
+double occupied_bandwidth_hz(const Profile& profile);
 }

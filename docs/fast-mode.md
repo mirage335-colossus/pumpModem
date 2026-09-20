@@ -203,6 +203,14 @@ future work. The [codec specification](fast-capacity-codec.md) gives exact
 ratios and overhead, and the [live capacity study](fast-capacity-live-study.md)
 separates measured results from projections.
 
+Speaker/microphone capacity mode uses a separate
+[OFDM waveform](fast-acoustic-ofdm.md) with a cyclic prefix, frequency-specific
+equalization and noise estimates, independent training, and channel refreshes.
+The [acoustic study](fast-acoustic-live-study.md) records real speaker/microphone
+measurements, failed and successful candidates, and the gap between conditional
+channel capacity and delivered file throughput. Cable settings do not describe
+the acoustic channel.
+
 ## Fixed intervals, without received lengths
 
 Every physical interval still contains exactly **2,048 inner-coded bits**.

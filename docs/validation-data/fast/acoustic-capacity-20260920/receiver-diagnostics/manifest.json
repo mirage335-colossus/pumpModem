@@ -1,0 +1,21 @@
+{
+  "a20-known-bins.csv": "ccd23e49a3cda72bc45dbd5e98ef13b2b1547d0cd8b13af7205ce639c48eaa2f",
+  "a20-known-blocks.csv": "870c3000858549bf4fce5e199e2dad4baf7248975eed6b841960aef13105db07",
+  "a20-variance-bins.csv": "e4ac07cafeae7a3486e77b0114dffaaa9943fc9f52590a920b5b7e1a2d40d43a",
+  "a20-variance-blocks.csv": "0a0e786ee7f56838e5349a7b1c3a5573b7a5ac98a270d6ca9155dc8d259be7c2",
+  "a40-known-bins.csv": "42d23286692fae2f3b3c767cbecb32dd8e51129666944e219f1c7cd525ed227c",
+  "a40-known-blocks.csv": "5848e13cddc85ff1dbd9a45dd337caa13ca51ebd914c485377d0d9da3a4df526",
+  "a40-variance-bins.csv": "587452d84998d2714d0f3f1993d0e6ecd009066f16b218fe396db068dae0efb6",
+  "a40-variance-blocks.csv": "374c18c327592b4fd06648d2d76bb5705b48a45936744ab188f94bfd2c28466d",
+  "acoustic-known-symbols.cpp": "6955c808981abee7e84a638303fbca995061d4c4d465f87144a6d94d7bba2e9b",
+  "acoustic_ofdm.hpp": "9374123f0e9bf434749677e9cf3ad46375dd2c94b636c30f72ca84e67cec650d",
+  "coded-a40-bins.csv": "1af4e6df1c5d23232797f7381120006ed302187264e1dce24e10bc612daacded",
+  "coded-a40-blocks.csv": "e363a7557acf7dc51e7286343724f8d55ed10a26ff8df3113280a4d976c0de4d",
+  "confidence-comparison.json": "0471186f3196cf754ac5e3be426f7153e1c34813d8ce1f40b08a0e6ed5acf83f",
+  "input-hashes.json": "465283b8a5ba798e8eace43c21de6bcce1c51db914031c415e5d50a6fce1a16f",
+  "longcp-bins.csv": "c1af7a64f9d56910cf3f115cc6f0fb0d5a76872c309f62c229c5c60af6db66d3",
+  "longcp-blocks.csv": "b7d54c507d5d95d69d3cb9e140f7640fdd54888621b4f458858272452667e283",
+  "method.md": "ac3cd9e7cd65f613614fbf6886acfb9c8a5662dc2db9b4a48dea00b56b8981c3",
+  "receiver-after-confidence.cpp": "f0ac0d8dea5901408d19de0b81af28708944040dfdda165e9b24bd087213fab5",
+  "receiver-before-confidence.cpp": "1fa6352f070f39f39a98de8bd1d3551d3a9d2f3972f1b208421b7f6cf0232597"
+}

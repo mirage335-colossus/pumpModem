@@ -53,7 +53,7 @@ std::string quoted(const std::string& value) {
 }
 struct Options {
     Profile p=classic_profile(Channel::wire);
-    std::string mode="raw",device="default",capture_save,replay,tx_bits_save;
+    std::string mode="raw",device="default",capture_save,replay,tx_bits_save,rx_symbols_save;
     std::uint64_t intervals=100,bytes=4096,seed=417;
     double pre=1,tail=8;
     bool offline=false,stereo=false,quiet=false,require_success=false,abort_on_failure=false;
@@ -118,7 +118,7 @@ int run(const Options& o) {
         decoder=std::make_unique<StreamDecoder>(p,std::nullopt,256ULL*1024*1024);
     }
     const auto estimated_intervals=encoder?estimate_transmission(p,false,o.bytes).intervals:o.intervals;
-    const double estimated_signal=(preamble_symbols(p)+total_interval_symbols(p,estimated_intervals)+pulse_tail_symbols(p))/p.symbol_rate;
+    const double estimated_signal=double(transmission_samples(p,estimated_intervals))/p.sample_rate;
     std::uint64_t tx_intervals=0,rx_intervals=0,wrong=0,erasures=0,compared=0,exact_intervals=0;
     std::uint64_t aligned_wrong=0,aligned_erased=0,aligned_compared=0,unalignable=0;
     std::map<long long,std::uint64_t> alignment_offsets;
@@ -142,6 +142,12 @@ int run(const Options& o) {
         }
         return next;
     });
+    std::ofstream saved_symbols;
+    if(!o.rx_symbols_save.empty()) {
+        if(std::filesystem::exists(o.rx_symbols_save))throw Error("RX symbol destination already exists");
+        saved_symbols.open(o.rx_symbols_save,std::ios::binary);
+        if(!saved_symbols)throw Error("Cannot create RX symbol destination");
+    }
     Receiver rx(p,[&](std::span<const float> soft) {
         if(decoder)decoder->push_interval(soft);
         else {
@@ -177,6 +183,11 @@ int run(const Options& o) {
             } else ++unalignable;
         }
         ++rx_intervals;
+    },[&](std::complex<float> point) {
+        if(saved_symbols.is_open()) {
+            const std::array<float,2> iq{point.real(),point.imag()};
+            saved_symbols.write(reinterpret_cast<const char*>(iq.data()),sizeof(iq));
+        }
     });
     Level total,before,signal,tail,tx_level;
     std::uint64_t processed=0,signal_samples=0;
@@ -298,9 +309,13 @@ int run(const Options& o) {
     const auto missing=rx_intervals<tx_intervals?tx_intervals-rx_intervals:0;
     const double air=double(signal_samples)/p.sample_rate;
     std::cout<<std::setprecision(10)<<"{\"mode\":"<<quoted(o.mode)<<",\"offline\":"<<o.offline
+        <<",\"profile\":"<<quoted(std::string(channel_name(p.channel)))
         <<",\"device\":"<<quoted(o.device)<<",\"stereo\":"<<o.stereo
         <<",\"apsk\":"<<p.constellation<<",\"code_rate\":"<<code_rate_value(p.code_rate)
         <<",\"format\":"<<quoted(p.capacity_mode?"capacity":"classic")
+        <<",\"waveform\":"<<quoted(p.acoustic_ofdm?"ofdm":"single-carrier")
+        <<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples
+        <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
         <<",\"preamble_symbols\":"<<preamble_symbols(p)
         <<",\"aborted_on_decode_failure\":"<<(o.abort_on_failure&&decode_failed.load())
         <<",\"marker_spacing\":"<<(p.capacity_mode?p.marker_spacing_intervals:1)<<",\"pilot_spacing\":"<<(p.capacity_mode?p.pilot_spacing_symbols:32)
@@ -345,11 +360,21 @@ int run(const Options& o) {
 }
 int main(int argc,char** argv) {try {
     Options o;
-    for(int i=1;i<argc;++i)if(std::string_view(argv[i])=="--capacity"||std::string_view(argv[i])=="--qam")o.p=capacity_profile();
+    Channel selected_channel=Channel::wire;
+    bool capacity=false;
+    for(int i=1;i<argc;++i) {
+        const std::string_view option=argv[i];
+        if(option=="--capacity"||option=="--qam")capacity=true;
+        if(option=="--profile") {
+            if(i+1==argc)throw Error("Missing option value: --profile");
+            selected_channel=parse_channel(argv[++i]);
+        }
+    }
+    o.p=capacity?capacity_profile(selected_channel):classic_profile(selected_channel);
     for(int i=1;i<argc;++i) {
         const std::string option=argv[i];
         if(option=="--help") {
-            std::cout<<"fast_cable_probe [--offline | --replay PCM.f32] [--capacity] [--mode raw|codec] [--intervals N] [--bytes N]\n"
+            std::cout<<"fast_cable_probe [--offline | --replay PCM.f32] [--profile wire|acoustic|ssb|fm] [--capacity] [--mode raw|codec] [--intervals N] [--bytes N]\n"
                 <<"  [--qam power-of-four:4..4194304 | --apsk 4|16|64|256] [--code-rate 1/2|3/4|7/8|7/9|8/9|9/10]\n"
                 <<"  [--rs robust|high-rate|0.3%] [--depth 1..16(capacity)|1..64(classic)] [--marker-spacing 1..16] [--pilot-spacing 16..1024]\n"
                 <<"  [--amplitude 0..0.8] [--symbol-rate Hz] [--carrier Hz] [--rolloff 0.02..0.5] [--sample-rate Hz]\n"
@@ -365,16 +390,19 @@ int main(int argc,char** argv) {try {
         }
         if(option=="--offline"){o.offline=true;continue;}
         if(option=="--capacity")continue;
+        if(option=="--single-carrier"){o.p.acoustic_ofdm=false;continue;}
         if(option=="--stereo"){o.stereo=true;continue;}
         if(option=="--quiet"){o.quiet=true;continue;}
         if(option=="--abort-on-failure"){o.abort_on_failure=true;continue;}
         if(option=="--require-success"){o.require_success=true;continue;}
         if(i+1==argc)throw Error("Missing option value: "+option);
         const std::string value=argv[++i];
+        if(option=="--profile")continue;
         if(option=="--mode")o.mode=value;
         else if(option=="--device")o.device=value;
         else if(option=="--capture-save")o.capture_save=value;
         else if(option=="--tx-bits-save")o.tx_bits_save=value;
+        else if(option=="--rx-symbols-save")o.rx_symbols_save=value;
         else if(option=="--replay"){o.replay=value;o.offline=true;}
         else if(option=="--intervals")o.intervals=std::stoull(value);
         else if(option=="--bytes")o.bytes=std::stoull(value);
@@ -384,6 +412,10 @@ int main(int argc,char** argv) {try {
         else if(option=="--pilot-spacing")o.p.pilot_spacing_symbols=std::stoul(value);
         else if(option=="--depth")o.p.interleave_depth=std::stoul(value);
         else if(option=="--sample-rate")o.p.sample_rate=std::stoul(value);
+        else if(option=="--ofdm-fft")o.p.ofdm_fft_size=std::stoul(value);
+        else if(option=="--ofdm-prefix")o.p.ofdm_prefix_samples=std::stoul(value);
+        else if(option=="--ofdm-low")o.p.ofdm_low_hz=std::stod(value);
+        else if(option=="--ofdm-high")o.p.ofdm_high_hz=std::stod(value);
         else if(option=="--symbol-rate")o.p.symbol_rate=std::stod(value);
         else if(option=="--carrier")o.p.carrier_hz=std::stod(value);
         else if(option=="--rolloff")o.p.rolloff=std::stod(value);

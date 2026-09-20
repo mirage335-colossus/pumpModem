@@ -22,6 +22,9 @@ The [implemented capacity format](fast-capacity-codec.md) and
 Fast v2 development; its compact source flags and sparse framing do not apply to
 the regular transport paths below.
 Its proposed coding and marker changes do not alter this compatibility contract.
+The independent [acoustic OFDM format](fast-acoustic-ofdm.md) and
+[speaker/microphone live study](fast-acoustic-live-study.md) cover frequency
+equalization, training, physical completion and measured acoustic limits.
 
 ## Preserve all three transmit paths
 

@@ -10,6 +10,7 @@
 #include <vector>
 
 namespace datapump::fast {
+namespace acoustic_ofdm { class Transmitter; class Receiver; }
 
 inline constexpr std::size_t sync_symbols = 64;
 inline constexpr std::size_t training_symbols = 128;
@@ -50,6 +51,8 @@ std::size_t interval_symbols(const Profile& profile, std::size_t interval_index=
 std::size_t total_interval_symbols(const Profile& profile, std::size_t interval_count);
 std::size_t pulse_tail_symbols(const Profile& profile);
 std::size_t preamble_symbols(const Profile& profile);
+// Exact waveform length before physical-end silence, from local geometry only.
+std::uint64_t transmission_samples(const Profile& profile, std::size_t interval_count);
 
 class Transmitter {
 public:
@@ -68,6 +71,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::unique_ptr<acoustic_ofdm::Transmitter> acoustic_;
 };
 
 class Receiver {
@@ -91,6 +95,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    std::unique_ptr<acoustic_ofdm::Receiver> acoustic_;
 };
 
 } // namespace datapump::fast

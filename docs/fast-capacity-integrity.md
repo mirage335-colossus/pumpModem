@@ -8,11 +8,21 @@ candidate event, and it is not an authentication claim for public mode.
 
 ## Three different decisions
 
-1. The DSP proposes timing from the full 64-symbol QPSK word. Capacity mode
-   additionally requires exact agreement with all 128 quadrant sign bits after
-   fitting a common phase. The detector also refines timing and sometimes clock
-   period. This provisional lock selects only the already configured, fixed
-   2,048-bit interval geometry.
+1. The selected DSP proposes waveform timing using locally fixed training.
+   Single-carrier capacity uses the full 64-symbol QPSK word and requires
+   agreement with all 128 quadrant sign bits after fitting a common phase.
+   Acoustic OFDM uses 16 training blocks: two repeated blocks seed the sample
+   clock, 13 independently phased full-band blocks fit the channel and noise,
+   and a separately seeded final block verifies the fitted channel. Its 128
+   verification tones supply 256 sign bits, allowing at most 16 disagreements
+   plus an energy residual check. Subsequent OFDM blocks separate tracking
+   pilots from verification pilots; tracking fits do not use the verification
+   tones. A full-band refresh block between coding cycles must pass the presence
+   check using the previous channel estimate before updating that estimate.
+   The [OFDM waveform specification](fast-acoustic-ofdm.md) defines these blocks.
+   These provisional locks select only already configured, fixed 2,048-bit
+   interval coordinates. They do not expose decoded bytes or authorize source
+   completion.
 2. Before the codec retains any source area, its first complete fixed coding
    cycle must decode and pass the bootstrap check: a 32-byte salt, a full
    32-byte SHA-256 or keyed tag binding the local profile and salt, and canonical
@@ -58,14 +68,14 @@ new search counter:
   subsequent intervals do not initiate another bootstrap or another alignment.
 - The retained source-area quota is capped at 256 MiB (`2^28` bytes).
 - Across all supported rates, depths 1–16 and public/keyed modes, the smallest
-  retained source area is 6,000 bytes: keyed 3/4 with one LDPC frame.
-- At most `floor(2^28 / 6000) = 44,739` source areas can be retained. Integrity is
+  retained source area is 3,984 bytes: keyed 1/2 with one LDPC frame.
+- At most `floor(2^28 / 3984) = 67,378` source areas can be retained. Integrity is
   checked before the quota test, so conservatively include one additional
   source check that could trigger the quota failure, plus the bootstrap.
 
-There are therefore at most **44,741 integrity checks per decoder**, fewer than
-`2^16`. Under the stated model, accidental acceptance of any incorrect protected
-area is bounded by **less than `2^-240` per decoder**. Acceptance of a completed
+There are therefore at most **67,380 integrity checks per decoder**, fewer than
+`2^17`. Under the stated model, accidental acceptance of any incorrect protected
+area is bounded by **less than `2^-239` per decoder**. Acceptance of a completed
 wrong file requires such an acceptance and also the final-format checks, so its
 bound is no larger. This is comfortably below the requested `2^-80` target for
 an **accepted binary alignment**, without claiming that provisional marker
@@ -94,6 +104,27 @@ certified aggregate probability bound for those raw provisional locks. Neither
 the nominal marker length nor an independent-fair-sign calculation should be
 quoted as a full-receiver result.
 
+For OFDM, an illustrative **conditional independent-fair-sign model** gives
+`sum(comb(256, k), k=0..16) / 2^256 = 2^-172.8418516` for one 256-sign check.
+The residual-energy check can only reduce acceptance, so omitting it is
+conservative within that model. A separately bounded collection of at most
+`2^64` such checks would give less than `2^-108.84` by a union bound **if the same
+conditional per-check model remained valid for every selected candidate**.
+The OFDM receiver now enforces a nonwrapping PCM coordinate limit of
+`2^64 - 1 - 8*(FFT_size + prefix_samples)` per instance. Each completed search
+advances by at least half an FFT; after acquisition, verification advances by
+whole OFDM blocks. With the validated local geometry these together permit
+fewer than `2^64` verification checks before the input limit. This is a finite
+per-instance accounting bound, not a bound across unlimited receiver restarts.
+This arithmetic is not evidence that real noise, encoded payload, deterministic
+pilots and adaptively selected windows satisfy those assumptions. In
+particular, training-only selection of strong tones avoids fitting the current
+verification block, but does not prove independent verification signs for
+every structured waveform or overlapping candidate. The accepted-byte claim
+therefore continues to use the explicit 256-bit integrity model above, not an
+unqualified raw OFDM false-lock claim. A finite counter or search budget by
+itself does not establish a probability model.
+
 Public SHA-256 is **not authentication**. Someone who intentionally constructs
 a valid public bootstrap and recomputes the public cycle checksums can transmit
 an accepted public file. That is outside the accidental-corruption model. Keyed
@@ -105,6 +136,6 @@ in another waveform is likewise not an independent random candidate.
 The existing regression tests exercise corrupted digests, wrong keys, spliced
 or reordered cycles, malformed protected padding, missing final cycles, memory
 quotas and physical-end gating. Such tests check the acceptance logic. They
-cannot experimentally measure probabilities as small as `2^-80` or `2^-240`,
+cannot experimentally measure probabilities as small as `2^-80` or `2^-239`,
 and the numerical bound does not establish successful delivery probability on
 a noisy cable or resistance to denial of service through provisional locks.

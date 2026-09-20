@@ -76,6 +76,53 @@ class FastCLI(unittest.TestCase):
                 self.assertEqual(report["mono"], mono)
         self.run_pump("fast-info", "--mono", "--stereo", ok=False)
 
+    def test_explicit_acoustic_capacity_profile(self):
+        legacy = json.loads(self.run_pump("fast-info", "--profile", "acoustic").stdout)
+        self.assertEqual(legacy["format"], "classic")
+        self.assertEqual(legacy["symbol_rate"], 500)
+        info = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
+                                      "--format", "capacity").stdout)
+        self.assertEqual(info["profile"], "acoustic")
+        self.assertEqual(info["format"], "capacity")
+        self.assertEqual(info["constellation"], 16)
+        self.assertEqual(info["code_rate"], "3/4")
+        self.assertEqual(info["ldpc_blocks_per_cycle"], 1)
+        self.assertEqual(info["symbol_rate"], 48000 / (8192 + 4096))
+        self.assertEqual(info["waveform"], "ofdm")
+        self.assertEqual(info["ofdm_fft_size"], 8192)
+        self.assertEqual(info["ofdm_prefix_samples"], 4096)
+        self.assertGreater(info["occupied_bandwidth_hz"], 17480)
+        self.assertLessEqual(info["occupied_bandwidth_hz"], 17500)
+        self.assertEqual(info["amplitude"], .20)
+        self.assertNotIn("marker_spacing_intervals", info)
+        self.assertNotIn("pilot_spacing_symbols", info)
+        self.assertFalse(info["mono"])
+        implied = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
+                                         "--qam", "16").stdout)
+        self.assertEqual(implied, info)
+        half = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
+                                      "--format", "capacity", "--code-rate", "1/2").stdout)
+        self.assertEqual(half["profile"], "acoustic")
+        self.assertEqual(half["code_rate"], "1/2")
+        self.assertEqual(half["rs_parity_bytes"], 16)
+        self.assertAlmostEqual(half["rs_parity_data_ratio"], 16 / 4034, delta=5e-9)
+        for profile in ("ssb", "fm"):
+            self.run_pump("fast-info", "--profile", profile, "--format", "capacity", ok=False)
+
+    def test_acoustic_ofdm_geometry_validation(self):
+        acoustic = ("--profile", "acoustic", "--format", "capacity")
+        for name, value in (("ofdm-fft", "3000"), ("ofdm-prefix", "0"),
+                            ("ofdm-prefix", "32768"), ("ofdm-low", "19000"),
+                            ("ofdm-high", "24000"), ("sample-rate", "44100"),
+                            ("symbol-rate", "2000"), ("marker-spacing", "4")):
+            with self.subTest(name=name, value=value):
+                self.run_pump("fast-info", *acoustic, "--" + name, value, ok=False)
+        self.run_pump("fast-info", "--profile", "wire", "--ofdm-fft", "8192", ok=False)
+        info = json.loads(self.run_pump("fast-info", *acoustic, "--ofdm-fft", "16384",
+                                       "--ofdm-prefix", "2048", "--estimate-bytes", "100000").stdout)
+        self.assertEqual(info["ofdm_fft_size"], 16384)
+        self.assertGreater(info["estimated_seconds"], 6.25)
+
     def test_capacity_source_and_geometry(self):
         # Exercise the public CLI, S16 WAV, LDPC/RS, source endpoint, and an
         # independent source-byte comparison rather than only codec roundtrips.

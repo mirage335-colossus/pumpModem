@@ -4,7 +4,7 @@
 [xdsopl/LDPC](https://github.com/xdsopl/LDPC), pinned commit
 `32357d8ad55a6a302c34e093759f0454e45cca56`:
 
-- `dvb_s2_tables.hh`: `DVB_S2_TABLE_B7` (3/4), `B10` (8/9), `B11` (9/10).
+- `dvb_s2_tables.hh`: `DVB_S2_TABLE_B4` (1/2), `B7` (3/4), `B10` (8/9), `B11` (9/10).
 - `dvb_s2x_tables.hh`: `DVB_S2X_TABLE_B10` (7/9).
 
 All have normal frame length 64,800 bits. The project uses only LDPC, without
@@ -17,6 +17,9 @@ algorithm motivated the layered ordering, but no upstream decoder code is
 compiled: there are no variable-length stack arrays or shared mutable decoder
 objects. `tests/test_fast_ldpc.cpp` freezes codeword hashes made by the separately
 compiled upstream encoder and independently checks its parity-check equations.
+The rate-1/2 acoustic extension uses the same normal frame and decoder; its
+[independent fixture and validation](../../docs/validation-data/fast/acoustic-capacity-20260920/ldpc-half-method.md)
+are recorded separately from the earlier cable sweep.
 
 ## Decoder contract and checks
 

@@ -55,6 +55,7 @@ template<class Table> Graph make_graph() {
 }
 const Graph& graph(CodeRate rate) {
     switch (rate) {
+    case CodeRate::half: { static const auto g = make_graph<DVB_S2_TABLE_B4>(); return g; }
     case CodeRate::three_quarters: { static const auto g = make_graph<DVB_S2_TABLE_B7>(); return g; }
     case CodeRate::seven_ninths: { static const auto g = make_graph<DVB_S2X_TABLE_B10>(); return g; }
     case CodeRate::eight_ninths: { static const auto g = make_graph<DVB_S2_TABLE_B10>(); return g; }

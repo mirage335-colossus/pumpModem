@@ -1,0 +1,22 @@
+{
+  "a20-known": {
+    "symbols": 43350.0,
+    "coded_ber": 0.06541046382874016,
+    "unit_scale_information_bits_per_data_tone": 4.426517063467044
+  },
+  "a20-variance": {
+    "symbols": 43350.0,
+    "coded_ber": 0.06541046382874016,
+    "unit_scale_information_bits_per_data_tone": 4.607525962101979
+  },
+  "a40-known": {
+    "symbols": 43350.0,
+    "coded_ber": 0.04311100516732284,
+    "unit_scale_information_bits_per_data_tone": 4.711198827183224
+  },
+  "a40-variance": {
+    "symbols": 43350.0,
+    "coded_ber": 0.04311100516732284,
+    "unit_scale_information_bits_per_data_tone": 5.070703963561248
+  }
+}

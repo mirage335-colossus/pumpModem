@@ -430,7 +430,7 @@ void capacity_interleaver_balance() {
 }
 void capacity_roundtrips() {
     const auto crypto=key();
-    for(auto rate:{CodeRate::three_quarters,CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})for(bool encrypted:{false,true}) {
+    for(auto rate:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})for(bool encrypted:{false,true}) {
         auto p=capacity_profile();p.code_rate=rate;p.interleave_depth=1;
         const auto c=capacity_source_bytes_per_cycle(p,encrypted);const auto width=cycle_intervals(p)*physical_interval_bits;
         for(auto size:{std::size_t{0},std::size_t{1},c-1,c,c+1}) {
@@ -523,6 +523,201 @@ void capacity_malformed() {
     }
     recovered.finish(true);check(recovered.result() && Bytes(recovered.result()->bytes().begin(),recovered.result()->bytes().end())==source,"capacity LDPC/frame interleaver repairs a timed interval erasure");
 }
+void capacity_acoustic_contracts() {
+    // The codec sees fixed 2048-bit intervals behind either SC or OFDM. Use
+    // identical local SC geometry for both channel identities to isolate the
+    // integrity domain from any future acoustic waveform/default selection.
+    for(auto rate:{CodeRate::half,CodeRate::three_quarters})for(unsigned depth:{1U,4U})for(bool encrypted:{false,true}) {
+        auto p=capacity_profile();p.channel=Channel::acoustic;p.constellation=16;
+        p.code_rate=rate;p.interleave_depth=depth;
+        const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
+        const auto width=cycle_intervals(p)*physical_interval_bits;
+        const auto slots=capacity_source_bytes_per_cycle(p,encrypted);
+        Bytes source(slots);for(std::size_t i=0;i<source.size();++i)source[i]=static_cast<std::uint8_t>(73*i+11);
+        source[source.size()-2]=0x80;source.back()=0;
+        const auto wire=transmit(p,crypto,source);
+        check(wire.size()==3*width,"acoustic exact source boundary requires bootstrap, continuation and final cycles");
+        const auto boot=systematic(p,std::span(wire).first(width));
+        const auto salt=std::span(boot).first(32);
+        const auto body=[&](std::size_t cycle) {
+            const auto group=systematic(p,std::span(wire).subspan(cycle*width,width),cycle);
+            if(crypto)return fast::testing::open_group(p,*crypto,salt,cycle-1,group);
+            return Bytes(group.begin(),group.end()-32);
+        };
+        const auto continuation=body(1),final=body(2);
+        check(continuation[0]==0 && std::equal(source.begin(),source.end(),continuation.begin()+1),
+            "acoustic continuation flag protects exact arbitrary source bytes");
+        check(final[0]==1 && final[1]==0x80 && std::all_of(final.begin()+2,final.end(),[](auto b){return !b;}),
+            "acoustic final empty cycle has independent flag/delimiter/zero-fill layout");
+        StreamDecoder received(p,crypto);feed(received,wire);
+        check(!received.snapshot().failed && !received.snapshot().physical_end &&
+              !received.snapshot().complete && !received.snapshot().source_bytes && !received.result(),
+            "acoustic valid protected final cycle cannot expose source or physical completion");
+        received.finish(false);
+        check(!received.snapshot().failed && !received.snapshot().physical_end && !received.result(),
+            "acoustic codec EOF cannot substitute for scored physical absence");
+        received.finish(true);
+        check(received.snapshot().complete && received.snapshot().authenticated==encrypted &&
+              Bytes(received.result()->bytes().begin(),received.result()->bytes().end())==source,
+            "acoustic source becomes available only after explicit physical completion");
+        check(received.snapshot().ldpc_frames==3*depth && !received.snapshot().ldpc_failed_frames,
+            "acoustic half and three-quarter LDPC depth geometry");
+        const auto seal_final=[&](const Bytes& area) {
+            return crypto?fast::testing::seal_group(p,*crypto,salt,1,Bytes(16),area):public_group(p,salt,1,area);
+        };
+        for(unsigned defect=0;defect<4;++defect) {
+            auto area=final;
+            if(defect==0)area[0]=2;
+            if(defect==1)area[0]=0;
+            if(defect==2)area[1]=0;
+            if(defect==3)area.back()=7;
+            const auto replacement=code_systematic(p,seal_final(area),2);
+            StreamDecoder malformed(p,crypto);feed(malformed,std::span(wire).first(2*width));feed(malformed,replacement);
+            check(!malformed.snapshot().failed && !malformed.result(),
+                "acoustic integrity-valid source syntax remains deferred");
+            malformed.finish(false);
+            check(!malformed.snapshot().failed && !malformed.result(),"acoustic malformed padding is not interpreted at EOF");
+            malformed.finish(true);
+            check(malformed.snapshot().failed && !malformed.snapshot().complete && !malformed.result(),
+                "acoustic malformed final flag or padding rejected at physical end");
+        }
+        auto corrupted_group=seal_final(final);corrupted_group.back()^=1;
+        const auto corrupted=code_systematic(p,corrupted_group,2);
+        StreamDecoder bad_integrity(p,crypto);feed(bad_integrity,std::span(wire).first(2*width));feed(bad_integrity,corrupted);
+        check(bad_integrity.snapshot().failed && !bad_integrity.snapshot().physical_end && !bad_integrity.result(),
+            "acoustic LDPC/RS success cannot bypass corrupted full integrity check");
+        feed(bad_integrity,std::span(wire).last(width));bad_integrity.finish(true);
+        check(bad_integrity.snapshot().failed && !bad_integrity.result(),"acoustic integrity failure remains terminal");
+        StreamDecoder truncated(p,crypto);feed(truncated,std::span(wire).first(2*width));truncated.finish(true);
+        check(truncated.snapshot().failed && !truncated.result(),"acoustic lost final cycle cannot complete a protected prefix");
+        auto wrong_channel=p;wrong_channel.channel=Channel::wire;
+        check(profile_id(wrong_channel)!=profile_id(p),"acoustic and cable channel domains differ at identical geometry");
+        StreamDecoder mismatch(wrong_channel,crypto);feed(mismatch,std::span(wire).first(width));
+        check(mismatch.snapshot().failed && !mismatch.result(),"acoustic bootstrap cannot be accepted under cable identity");
+    }
+}
+void capacity_ofdm_context() {
+    auto cable=capacity_profile(),unused=cable;
+    unused.ofdm_fft_size=4096;unused.ofdm_prefix_samples=2048;
+    unused.ofdm_low_hz=1000;unused.ofdm_high_hz=12000;
+    check(profile_id(cable)==profile_id(unused),"unused OFDM settings cannot alter cable wire identity");
+    for(bool encrypted:{false,true}) {
+        const auto p=capacity_profile(Channel::acoustic);
+        check(p.acoustic_ofdm,"explicit acoustic capacity selects OFDM");
+        const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
+        const Bytes source{0,0x80,0xff,0};const auto wire=transmit(p,crypto,source);
+        const auto width=cycle_intervals(p)*physical_interval_bits;
+        StreamDecoder good(p,crypto);feed(good,wire);good.finish(false);
+        check(!good.result() && !good.snapshot().physical_end,"OFDM codec context does not complete at source EOF");
+        good.finish(true);
+        check(good.snapshot().complete && Bytes(good.result()->bytes().begin(),good.result()->bytes().end())==source,
+            "OFDM profile retains compact source and physical-end contract");
+        std::array<Profile,5> mismatch{p,p,p,p,p};
+        mismatch[0].acoustic_ofdm=false;
+        mismatch[1].ofdm_prefix_samples=p.ofdm_prefix_samples==256?512:p.ofdm_prefix_samples/2;
+        mismatch[2].ofdm_fft_size=p.ofdm_fft_size==32768?16384:2*p.ofdm_fft_size;
+        mismatch[3].ofdm_low_hz+=125;
+        mismatch[4].ofdm_high_hz-=125;
+        for(const auto& changed:mismatch) {
+            check(profile_id(changed)!=profile_id(p),"OFDM waveform geometry is integrity-bound");
+            StreamDecoder wrong(changed,crypto);feed(wrong,std::span(wire).first(width));
+            check(wrong.snapshot().failed && !wrong.result(),"OFDM bootstrap rejects mismatched local waveform geometry");
+        }
+    }
+}
+void capacity_parallel_decode() {
+    // Independent serial orchestration of the same public FEC primitives. The
+    // receiver must retain this ordering even when later workers finish first.
+    const auto serial=[](const Profile& p,std::span<const std::uint8_t> rotations,std::span<const float> wire,std::uint64_t ordinal,DecodeSnapshot& stats) {
+        const auto mask=fast::testing::capacity_whitening_mask(wire.size(),ordinal);
+        Bytes decoded;std::vector<float> soft(ldpc::coded_bits);
+        for(unsigned frame=0;frame<p.interleave_depth;++frame) {
+            for(std::size_t column=0;column<soft.size();++column) {
+                const auto position=column*p.interleave_depth+
+                    (frame+rotations[column])%p.interleave_depth;
+                soft[column]=mask[position]?-wire[position]:wire[position];
+            }
+            const auto input=ldpc::deinterleave(soft);
+            const auto result=ldpc::decode(input,p.code_rate);
+            ++stats.ldpc_frames;stats.ldpc_iterations+=result.iterations;
+            if(!result.converged)++stats.ldpc_failed_frames;
+            for(std::size_t bit=0;bit<result.bytes.size()*8;++bit)
+                if(input[bit]!=0 && ((input[bit]>0)!=bool((result.bytes[bit/8]>>(7-bit%8))&1U)))++stats.ldpc_changed_bits;
+            decoded.insert(decoded.end(),result.bytes.begin(),result.bytes.end());
+        }
+        if(decoded.size()%2) {
+            if(decoded.back())throw Error("Noncanonical capacity LDPC alignment fill");
+            decoded.pop_back();
+        }
+        const auto before=decoded;
+        (void)outer_rs::correct(decoded,capacity_parity_symbols(p));
+        for(std::size_t i=0;i<decoded.size();++i)if(decoded[i]!=before[i])++stats.corrected_bytes;
+        decoded.resize(decoded.size()-2*capacity_parity_symbols(p));return decoded;
+    };
+    for(unsigned scenario=0;scenario<5;++scenario) {
+        auto p=capacity_profile(Channel::acoustic);p.constellation=64;
+        p.code_rate=CodeRate::three_quarters;p.interleave_depth=scenario==4?16:4;
+        const Bytes source{0,0x80,0xff,9,0};const auto crypto=key();
+        auto encoder=fast::testing::deterministic_encoder(p,crypto,byte_source(source),0x706172616c6c656cULL);
+        Bytes wire;std::array<std::uint8_t,physical_interval_bits> interval{};
+        while(encoder.next_interval(interval))wire.insert(wire.end(),interval.begin(),interval.end());
+        Bytes rotations(ldpc::coded_bits);
+        for(std::size_t i=0;i<rotations.size();++i)rotations[i]=static_cast<std::uint8_t>(fast::testing::capacity_interleave_rotation(p,i));
+        const auto width=cycle_intervals(p)*physical_interval_bits;
+        std::vector<float> soft(wire.size());std::mt19937 rng(0x6c647063U+scenario);
+        std::normal_distribution<float> noise(0.F,1.F);
+        for(std::size_t i=0;i<soft.size();++i) {
+            const auto sign=wire[i]?1.F:-1.F;
+            soft[i]=scenario==1?2.F*(sign+.45F*noise(rng))/(.45F*.45F):12.F*sign;
+            if(scenario==2 && i<width)soft[i]=noise(rng)*.25F;
+        }
+        if(scenario==3) {
+            // Fail frame two while earlier frames are valid. A later worker's
+            // failure may finish first but cannot change the retained prefix.
+            const auto at=[&](unsigned frame,std::size_t column) {
+                return column*p.interleave_depth+(frame+fast::testing::capacity_interleave_rotation(p,column))%p.interleave_depth;
+            };
+            soft[at(2,10)]=std::numeric_limits<float>::quiet_NaN();
+            soft[at(3,0)]=std::numeric_limits<float>::infinity();
+        }
+        DecodeSnapshot expected;std::string error;double serial_ms=0,scheduled_ms=0;
+        StreamDecoder rx(p,crypto);
+        for(std::size_t cycle=0;cycle<wire.size()/width;++cycle) {
+            const auto clean_systematic=systematic(p,std::span(wire).subspan(cycle*width,width),cycle);
+            auto start=std::chrono::steady_clock::now();
+            try {
+                const auto decoded=serial(p,rotations,std::span(soft).subspan(cycle*width,width),cycle,expected);
+                check(decoded==clean_systematic,
+                    "serial acoustic FEC recovers exact clean/noisy coding area");
+            }catch(const Error& e) {error=e.what();}
+            serial_ms+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+            start=std::chrono::steady_clock::now();
+            for(std::size_t i=cycle*width;i<(cycle+1)*width;i+=physical_interval_bits)
+                rx.push_interval(std::span(soft).subspan(i,physical_interval_bits));
+            scheduled_ms+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+            const auto actual=rx.snapshot();
+            check(actual.ldpc_frames==expected.ldpc_frames && actual.ldpc_failed_frames==expected.ldpc_failed_frames &&
+                actual.ldpc_iterations==expected.ldpc_iterations && actual.ldpc_changed_bits==expected.ldpc_changed_bits &&
+                actual.corrected_bytes==expected.corrected_bytes,"parallel acoustic FEC diagnostics equal serial frame order");
+            if(!error.empty()) {
+                check(actual.failed && actual.status==error && !rx.result(),"parallel acoustic worker/RS exception propagates and fails closed");
+                break;
+            }
+            check(!actual.failed && !rx.result(),"parallel acoustic coding success still awaits physical completion");
+        }
+        if(scenario==2)check(!error.empty() && expected.ldpc_failed_frames==4 && expected.ldpc_iterations==4*ldpc::default_iterations,
+            "fully corrupt acoustic cycle exercises four bounded maximum-iteration workers");
+        if(scenario==3)check(error=="Nonfinite Fast LDPC likelihood" && expected.ldpc_frames==2,
+            "parallel worker exceptions retain only the serial preceding frame statistics");
+        rx.finish(true);
+        if(scenario<2 || scenario==4)check(error.empty() && rx.result() &&
+            Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"parallel acoustic output is exact at physical end");
+        else check(rx.snapshot().failed && !rx.result(),"parallel acoustic decode failure remains terminal at physical end");
+        std::cout<<"acoustic LDPC scheduling scenario="<<scenario<<" depth="<<p.interleave_depth
+            <<" serial_ms="<<serial_ms<<" scheduled_ms="<<scheduled_ms<<" frames="<<expected.ldpc_frames
+            <<" iterations="<<expected.ldpc_iterations<<" failed_frames="<<expected.ldpc_failed_frames<<'\n';
+    }
+}
 void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
     auto p=capacity?capacity_profile():classic_profile(Channel::wire);p.interleave_depth=4;const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;std::size_t generated=0,max_request=0;
     StreamEncoder tx(p,crypto,[&](std::span<std::uint8_t> output) {
@@ -548,10 +743,11 @@ void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
     check(offset==total,"save exact size");input.close();std::filesystem::remove(path);
 }
 }
-int main(int argc,char**) {
+int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--parallel") {capacity_parallel_decode();return 0;}
         independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
-        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();
+        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
         streamed(argc>1?2*1024*1024:100*1024);streamed(argc>1?2*1024*1024:100*1024,false);
         streamed(1024*1024,true,true);streamed(1024*1024,false,true);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";

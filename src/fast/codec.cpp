@@ -9,12 +9,15 @@
 #include <openssl/rand.h>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cmath>
 #include <cstdio>
+#include <exception>
 #include <fstream>
 #include <limits>
 #include <mutex>
+#include <thread>
 #include <utility>
 
 namespace datapump::fast {
@@ -245,19 +248,65 @@ Bytes capacity_encode(const Profile& p,std::span<const std::uint8_t> systematic)
 }
 Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapshot& stats) {
     Bytes decoded;decoded.reserve(capacity_info_bytes(p));
-    std::vector<float> block_soft(ldpc::coded_bits);
     const auto& rotations=capacity_rotations(p);
-    for(std::size_t block=0;block<p.interleave_depth;++block) {
-        for(std::size_t column=0;column<ldpc::coded_bits;++column)block_soft[column]=wire[column*p.interleave_depth+(block+rotations[column])%p.interleave_depth];
-        // A failed LDPC syndrome can still leave only a few erroneous symbols.
-        // Let the outer RS repair those; the full-cycle digest is mandatory.
-        auto input=ldpc::deinterleave(block_soft);
-        auto result=ldpc::decode(input,p.code_rate);
-        ++stats.ldpc_frames;stats.ldpc_iterations+=result.iterations;
-        if(!result.converged)++stats.ldpc_failed_frames;
-        for(std::size_t bit=0;bit<result.bytes.size()*8;++bit)
-            if(input[bit]!=0 && ((input[bit]>0)!=bool((result.bytes[bit/8]>>(7-bit%8))&1U)))++stats.ldpc_changed_bits;
-        append(decoded,result.bytes);
+    const auto workers=p.acoustic_ofdm?
+        std::min({4U,p.interleave_depth,std::max(1U,std::thread::hardware_concurrency())}):1U;
+    if(workers==1) {
+        // Preserve the cable decoder's sequential path and scratch lifetime.
+        std::vector<float> block_soft(ldpc::coded_bits);
+        for(std::size_t block=0;block<p.interleave_depth;++block) {
+            for(std::size_t column=0;column<ldpc::coded_bits;++column)block_soft[column]=wire[column*p.interleave_depth+(block+rotations[column])%p.interleave_depth];
+            // A failed LDPC syndrome can still leave only a few erroneous symbols.
+            // Let the outer RS repair those; the full-cycle digest is mandatory.
+            auto input=ldpc::deinterleave(block_soft);
+            auto result=ldpc::decode(input,p.code_rate);
+            ++stats.ldpc_frames;stats.ldpc_iterations+=result.iterations;
+            if(!result.converged)++stats.ldpc_failed_frames;
+            for(std::size_t bit=0;bit<result.bytes.size()*8;++bit)
+                if(input[bit]!=0 && ((input[bit]>0)!=bool((result.bytes[bit/8]>>(7-bit%8))&1U)))++stats.ldpc_changed_bits;
+            append(decoded,result.bytes);
+        }
+    } else {
+        struct Frame {
+            ldpc::DecodeResult result;
+            std::uint64_t changed_bits=0;
+            std::exception_ptr error;
+        };
+        std::array<Frame,16> frames;
+        std::atomic<unsigned> next{0};
+        const auto work=[&] {
+            for(;;) {
+                const auto block=next.fetch_add(1,std::memory_order_relaxed);
+                if(block>=p.interleave_depth)return;
+                auto& frame=frames[block];
+                try {
+                    std::vector<float> block_soft(ldpc::coded_bits);
+                    for(std::size_t column=0;column<ldpc::coded_bits;++column)
+                        block_soft[column]=wire[column*p.interleave_depth+(block+rotations[column])%p.interleave_depth];
+                    const auto input=ldpc::deinterleave(block_soft);
+                    frame.result=ldpc::decode(input,p.code_rate);
+                    for(std::size_t bit=0;bit<frame.result.bytes.size()*8;++bit)
+                        if(input[bit]!=0 && ((input[bit]>0)!=bool((frame.result.bytes[bit/8]>>(7-bit%8))&1U)))++frame.changed_bits;
+                }catch(...) {frame.error=std::current_exception();}
+            }
+        };
+        {
+            // The caller is one worker. Join all others before touching shared
+            // output/statistics, including when thread creation itself throws.
+            std::array<std::jthread,3> threads;
+            for(unsigned i=1;i<workers;++i)threads[i-1]=std::jthread(work);
+            work();
+        }
+        // Input order determines output, diagnostics and the first exception;
+        // scheduling never changes which prefix of frame statistics is kept.
+        for(unsigned block=0;block<p.interleave_depth;++block) {
+            const auto& frame=frames[block];
+            if(frame.error)std::rethrow_exception(frame.error);
+            ++stats.ldpc_frames;stats.ldpc_iterations+=frame.result.iterations;
+            if(!frame.result.converged)++stats.ldpc_failed_frames;
+            stats.ldpc_changed_bits+=frame.changed_bits;
+            append(decoded,frame.result.bytes);
+        }
     }
     if(decoded.size()%2) {
         if(decoded.back())throw Error("Noncanonical capacity LDPC alignment fill");
@@ -404,9 +453,7 @@ TransmitEstimate estimate_transmission(const Profile& p,bool encrypted,std::uint
     const auto capacity=static_cast<std::uint64_t>(p.interleave_depth)*source_bytes_per_group(p,encrypted)*8;
     const auto cycles=p.capacity_mode?2+bytes/capacity_source_bytes_per_cycle(p,encrypted):1+(9*(bytes+1)+capacity-1)/capacity;
     TransmitEstimate out;out.intervals=cycles*cycle_intervals(p);
-    // Last symbol coordinate plus the 16-symbol RRC tail, then 6.25 s silence.
-    const auto symbols=preamble_symbols(p)+total_interval_symbols(p,out.intervals)-1+pulse_tail_symbols(p);
-    out.samples=static_cast<std::uint64_t>(std::floor(static_cast<double>(symbols)*p.sample_rate/p.symbol_rate))+1+
+    out.samples=transmission_samples(p,out.intervals)+
         static_cast<std::uint64_t>(p.sample_rate)*25/4;
     out.seconds=static_cast<double>(out.samples)/p.sample_rate;
     out.source_bps=8.0*static_cast<double>(bytes)/out.seconds;

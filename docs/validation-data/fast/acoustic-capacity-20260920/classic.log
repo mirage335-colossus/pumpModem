@@ -1,0 +1,44 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+captured_s=1.91894 acquired=1 intervals=0 evm=0.226273 clock_ppm=0 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=3.9244 acquired=1 intervals=1 evm=0.270638 clock_ppm=0.414942 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=5.92954 acquired=1 intervals=1 evm=0.318443 clock_ppm=0.414942 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=7.93485 acquired=1 intervals=2 evm=0.330667 clock_ppm=-0.518066 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=9.94017 acquired=1 intervals=3 evm=0.3348 clock_ppm=-0.104903 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=11.9455 acquired=1 intervals=4 evm=0.395442 clock_ppm=0.349727 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=13.9509 acquired=1 intervals=5 evm=0.395186 clock_ppm=0.264041 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=15.9561 acquired=1 intervals=6 evm=0.328842 clock_ppm=0.264041 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=17.9616 acquired=1 intervals=6 evm=0.313994 clock_ppm=0.561229 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=19.9671 acquired=1 intervals=7 evm=0.344734 clock_ppm=-0.0298236 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=21.9935 acquired=1 intervals=8 evm=0.336453 clock_ppm=0.700661 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=23.9988 acquired=1 intervals=9 evm=0.372439 clock_ppm=-0.825726 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=26.0042 acquired=1 intervals=10 evm=0.33515 clock_ppm=-0.17067 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=28.0095 acquired=1 intervals=10 evm=0.324872 clock_ppm=-0.17067 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=30.0151 acquired=1 intervals=11 evm=0.26341 clock_ppm=0.13808 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=32.0201 acquired=1 intervals=12 evm=0.255625 clock_ppm=-0.115062 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=34.0255 acquired=1 intervals=13 evm=0.272366 clock_ppm=-0.672535 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=0 decode_failed=0
+captured_s=36.0308 acquired=1 intervals=14 evm=0.223534 clock_ppm=-0.672535 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=5 decode_failed=0
+captured_s=38.0362 acquired=1 intervals=14 evm=0.223534 clock_ppm=-0.672535 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=5 decode_failed=0
+captured_s=40.0415 acquired=1 intervals=14 evm=0.223534 clock_ppm=-0.672535 physical_end=0
+ldpc_frames=0 ldpc_failed=0 verified_cycles=5 decode_failed=0
+captured_s=42.0469 acquired=1 intervals=14 evm=0.223534 clock_ppm=-0.672535 physical_end=1
+ldpc_frames=0 ldpc_failed=0 verified_cycles=5 decode_failed=0

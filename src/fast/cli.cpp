@@ -28,16 +28,19 @@ const char* help=R"(Fast QAM/LDPC and APSK text and file transfer (separate from
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
   --format classic|capacity          Default capacity for wire, classic for other profiles
+                                    Explicit capacity also supports acoustic
   --qam 4|16|64|256|1024|4096|16384|65536|262144|1048576|4194304
                                     Cable default 4194304-QAM, LDPC 8/9
   --apsk 4|16|64|256                 Select classic format; default 256 (classic wire)
-  --code-rate 1/2|3/4|7/8|7/9|8/9|9/10   Capacity supports 3/4, 7/9, 8/9, 9/10 LDPC
+  --code-rate 1/2|3/4|7/8|7/9|8/9|9/10   Capacity supports 1/2, 3/4, 7/9, 8/9, 9/10 LDPC
   --rs robust|high-rate|0.3%          Capacity uses approximately 0.3% parity/data
   --interleave 1..16 (capacity), 1..64 (classic); default 4 / 62 / 16 / 5
   --sample-rate 44100..192000        Default 48000 Hz
   --symbol-rate HZ --carrier HZ --rolloff N --amplitude N
   --marker-spacing 1..16            Capacity intervals per full marker (default 16)
   --pilot-spacing 16..1024           Capacity data symbols per pilot group (default 256)
+  --ofdm-fft 2048..32768 --ofdm-prefix SAMPLES
+  --ofdm-low HZ --ofdm-high HZ      Acoustic OFDM passband; 48000 Hz audio required
   --estimate-bytes N                fast-info: estimate airtime for a local source size
   --keyfile KEY                     Enable encryption using this keyfile
   --encrypt                        Require encryption and --keyfile
@@ -59,7 +62,7 @@ struct Args {
     std::map<std::string,std::string> values;
     Args(int argc,char** argv) {
         const std::set<std::string> flags{"help","json","stereo","mono","encrypt","no-encryption"};
-        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes"};
+        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes","ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high"};
         for(int i=2;i<argc;++i) {
             std::string name=argv[i];if(!name.starts_with("--"))throw Error("Expected a fast --option");name.erase(0,2);
             if(values.contains(name))throw Error("Duplicate fast option: "+name);
@@ -103,8 +106,9 @@ Settings settings(const Args& a,bool load_key) {
     const auto format=a.get("format",a.has("apsk")?"classic":a.has("qam")||channel==Channel::wire?"capacity":"classic");
     if(format!="classic"&&format!="capacity")throw Error("Fast format must be classic or capacity");
     if((format=="classic"&&a.has("qam"))||(format=="capacity"&&a.has("apsk")))throw Error("Constellation option conflicts with selected format");
-    if(format=="capacity"&&channel!=Channel::wire)throw Error("Capacity format currently requires --profile wire");
-    s.profile=format=="capacity"?capacity_profile():classic_profile(channel);
+    if(format=="capacity"&&channel!=Channel::wire&&channel!=Channel::acoustic)
+        throw Error("Capacity format requires --profile wire or acoustic");
+    s.profile=format=="capacity"?capacity_profile(channel):classic_profile(channel);
     const auto order=a.integer(a.has("qam")?"qam":"apsk",s.profile.constellation),depth=a.integer("interleave",s.profile.interleave_depth),rate=a.integer("sample-rate",48000);
     if(order>4194304||depth>64||rate>192000)throw Error("Fast profile value exceeds local bound");
     s.profile.constellation=static_cast<unsigned>(order);s.profile.interleave_depth=static_cast<unsigned>(depth);s.profile.sample_rate=static_cast<std::uint32_t>(rate);
@@ -118,9 +122,18 @@ Settings settings(const Args& a,bool load_key) {
     if(markers>16||pilots>1024)throw Error("Fast marker/pilot spacing exceeds local bound");
     if(!s.profile.capacity_mode&&(a.has("marker-spacing")||a.has("pilot-spacing")))throw Error("Marker/pilot spacing options require capacity format");
     s.profile.marker_spacing_intervals=static_cast<unsigned>(markers);s.profile.pilot_spacing_symbols=static_cast<unsigned>(pilots);
+    if(s.profile.acoustic_ofdm) {
+        for(const auto* option:{"symbol-rate","carrier","rolloff","marker-spacing","pilot-spacing"})
+            if(a.has(option))throw Error(std::string("--")+option+" is only applicable to single-carrier waveforms");
+        const auto fft=a.integer("ofdm-fft",s.profile.ofdm_fft_size),prefix=a.integer("ofdm-prefix",s.profile.ofdm_prefix_samples);
+        if(fft>32768||prefix>32768)throw Error("OFDM geometry exceeds its local bound");
+        s.profile.ofdm_fft_size=static_cast<unsigned>(fft);s.profile.ofdm_prefix_samples=static_cast<unsigned>(prefix);
+        s.profile.ofdm_low_hz=a.real("ofdm-low",s.profile.ofdm_low_hz);s.profile.ofdm_high_hz=a.real("ofdm-high",s.profile.ofdm_high_hz);
+    } else for(const auto* option:{"ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high"})
+        if(a.has(option))throw Error("OFDM options require the acoustic capacity profile");
     if(a.has("mono")&&a.has("stereo"))throw Error("--mono and --stereo conflict");
     s.device=a.get("device","default");
-    s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire);
+    s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire && !s.profile.acoustic_ofdm);
     auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
     validate(s.profile);
     if(encryption_enabled(a)&&load_key) {
@@ -166,14 +179,14 @@ int cli_main(int argc,char** argv) {
         // Fractional baud is part of the authenticated local profile. Preserve
         // enough decimal digits for a JSON reader to reconstruct that value.
         std::cout<<std::setprecision(std::numeric_limits<double>::max_digits10);
-        std::cout<<"{\"profile\":\""<<channel_name(p.channel)<<"\",\"sample_rate\":"<<p.sample_rate<<",\"symbol_rate\":"<<p.symbol_rate
+        std::cout<<"{\"profile\":\""<<channel_name(p.channel)<<"\",\"sample_rate\":"<<p.sample_rate<<",\"symbol_rate\":"<<(p.acoustic_ofdm?double(p.sample_rate)/(p.ofdm_fft_size+p.ofdm_prefix_samples):p.symbol_rate)
             <<",\"format\":\""<<(p.capacity_mode?"capacity":"classic")<<"\",\"code_rate\":\""<<code_rate_name(p.code_rate)<<"\""
-            <<",\"carrier_hz\":"<<p.carrier_hz<<",\"occupied_bandwidth_hz\":"<<p.symbol_rate*(1+p.rolloff)<<",\"constellation\":"<<p.constellation
+            <<",\"carrier_hz\":"<<(p.acoustic_ofdm?(occupied_lower_hz(p)+occupied_upper_hz(p))*.5:p.carrier_hz)<<",\"occupied_bandwidth_hz\":"<<occupied_bandwidth_hz(p)<<",\"constellation\":"<<p.constellation
             <<",\"amplitude\":"<<p.amplitude
             <<",\"mono\":"<<(s.mono?"true":"false")
-            <<",\"shannon_snr_db_assumed\":30,\"shannon_capacity_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(1001.)
-            <<",\"shannon_capacity_at_40db_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(10001.)
-            <<",\"shannon_capacity_at_60db_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(1000001.)
+            <<",\"shannon_snr_db_assumed\":30,\"shannon_capacity_bps\":"<<occupied_bandwidth_hz(p)*std::log2(1001.)
+            <<",\"shannon_capacity_at_40db_bps\":"<<occupied_bandwidth_hz(p)*std::log2(10001.)
+            <<",\"shannon_capacity_at_60db_bps\":"<<occupied_bandwidth_hz(p)*std::log2(1000001.)
             <<",\"gross_bitrate\":"<<gross_bitrate(p)<<",\"physical_interval_bits\":2048,\"interval_symbols\":"<<interval_symbols(p)
             <<",\"cycle_intervals\":"<<cycle_intervals(p)<<",\"ciphertext_bytes\":"<<ciphertext_bytes(p)
             <<",\"encrypted\":"<<(encrypted?"true":"false")<<",\"source_bytes_per_group\":"<<source_bytes_per_group(p,encrypted);
@@ -182,9 +195,13 @@ int cli_main(int argc,char** argv) {
             const auto info=static_cast<std::size_t>(std::llround(64800*code_rate_value(p.code_rate)))/8*p.interleave_depth;
             std::cout<<",\"source_bytes_per_cycle\":"<<capacity_source_bytes_per_cycle(p,encrypted)
                 <<",\"ldpc_blocks_per_cycle\":"<<p.interleave_depth
-                <<",\"rs_parity_bytes\":"<<parity<<",\"rs_parity_data_ratio\":"<<static_cast<double>(parity)/((info&~std::size_t{1})-parity)
-                <<",\"marker_spacing_intervals\":"<<p.marker_spacing_intervals<<",\"pilot_spacing_symbols\":"<<p.pilot_spacing_symbols;
+                <<",\"rs_parity_bytes\":"<<parity<<",\"rs_parity_data_ratio\":"<<static_cast<double>(parity)/((info&~std::size_t{1})-parity);
+            if(!p.acoustic_ofdm)std::cout<<",\"marker_spacing_intervals\":"<<p.marker_spacing_intervals<<",\"pilot_spacing_symbols\":"<<p.pilot_spacing_symbols;
         }
+        std::cout<<",\"waveform\":\""<<(p.acoustic_ofdm?"ofdm":"single-carrier")<<"\"";
+        if(p.acoustic_ofdm)std::cout<<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples
+            <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
+            <<",\"occupied_lower_hz\":"<<occupied_lower_hz(p)<<",\"occupied_upper_hz\":"<<occupied_upper_hz(p);
         if(a.has("estimate-bytes")) {
             const auto estimate=estimate_transmission(p,encrypted,a.integer("estimate-bytes",0));
             std::cout<<",\"estimated_seconds\":"<<estimate.seconds<<",\"estimated_source_bps\":"<<estimate.source_bps
