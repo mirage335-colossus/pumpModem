@@ -4,6 +4,28 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast LDPC, RS and channel-capacity study — 19 September 2026
+
+[The offline coding study](fast-coding-study.md) records a 120-point
+constellation-information sweep, independent GMI cross-check, 33 finite LDPC
+trial runs and 32 sampled production-receiver channel points. The best tested
+uniform-QAM candidates use DVB-S2X B10 LDPC(64800,50400), rate 7/9, with
+256/1024/4096-QAM at 20/25/30 dB in-band AWGN SNR. Each final candidate recovered
+800/800 words, 5,040,000 information bytes, exactly. This is an ideal symbol
+channel experiment without outer RS, integrity fields or production framing;
+0/800 failures gives a 0.374% one-sided 95% FER upper bound.
+
+The sampled receiver audit retains and identifies 64/64 intervals and observes
+physical completion at every point. Its acoustic echo results favor smaller
+constellations than the ideal AWGN study. It measures soft-bit information,
+not decoded LDPC file throughput. RS choices are calculated with an independent
+erasure model; no outer RS implementation or interruption qualification was
+added. Diagnostic builds, analytical binomial/confidence checks, CSV integrity
+checks and plot inspection pass. Raw data and reproducibility instructions
+are linked from the study. Runtime code, wire formats, defaults and tests are
+unchanged; the existing runtime regression suites were not rerun for this
+documentation/diagnostic-only change.
+
 ## Fast bulk-file coding defaults — 19 September 2026
 
 Fast defaults now use rate-3/4 convolutional coding, robust RS(128,112),
