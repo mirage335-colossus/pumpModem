@@ -4,6 +4,43 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Physical cable SNR measurement — 20 September 2026 UTC
+
+The [SNR report](cable-snr-live-study.md) records live ALC257 headphone-to-mic
+measurements through the default analog endpoints. At a 997 Hz, .99-peak tone,
+100% playback, and zero-dB capture gain, three repeated plateaus measured
+**78.96 dB SNR on the better individual input** and **81.48 dB after averaging
+both inputs**, integrated unweighted over 20–20,000 Hz. The combined-input
+SINAD was 80.22 dB. Across 300–18,300 Hz, the corresponding SNRs were 80.01 and
+82.50 dB. These are tested best-case results, not a calibrated hardware limit.
+
+Five repetitions at .95 peak/95% playback measured 79.92 dB combined-input SNR
+and 79.06 dB SINAD over 20–20,000 Hz. Eight sampled frequencies from 313 to
+18,203 Hz showed similar noise performance. The production S16 audio API,
+measured separately at .90 peak/95% playback, gave 76.31 dB SNR and 75.95 dB
+SINAD. The path comparison includes channel selection and client precision;
+its difference is not attributed solely to the sample format. A 19-tone
+wideband signal gave a 71.62 dB combined-input linear residual ratio at its
+lower average power; this is not a calibrated modem SNR or file-success rate.
+
+The +6/+12 dB capture-gain screens did not improve stable SNR. Two transient
+windows remain in the results and retained raw samples. Digital silence and
+60-dB-lower tone controls had closely matching noise powers, without evidence
+of a large silence-only muting benefit in these captures. All original mixer
+levels were restored: playback 95%, hardware Capture/Digital/Mic Boost 0 dB.
+
+The [evidence archive](validation-data/fast/cable-snr-20260920/README.md) retains
+original selected PCM windows, complete-run hashes, device and mixer metadata,
+full numerical analysis, reproduction tools, and the independent FFT audit.
+Eleven synthetic SNR/SINAD/multitone tests pass; the independent FFT estimates
+agree within 0.0221 dB SNR and 0.0151 dB SINAD across 21 strong-tone windows.
+All 53 retained PCM windows pass their SHA-256 checks and reproduce the reported
+metrics within 0.001 dB.
+The standalone production-audio capture diagnostic builds cleanly and completes
+its real-device comparison. This work changes diagnostics and documentation
+only; modem runtime, framing, defaults, and existing regression expectations
+are unchanged. Their full runtime suites were not rerun for this work.
+
 ## Physical cable throughput and revised cable defaults — 20 September 2026 UTC
 
 The [live cable study](fast-cable-live-study.md) records actual simultaneous

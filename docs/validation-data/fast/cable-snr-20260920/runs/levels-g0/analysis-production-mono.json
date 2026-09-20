@@ -1,0 +1,3111 @@
+{
+  "capture_file": "/tmp/pump-snr-20260920-levels-g0/production-capture.f32",
+  "channel": "production-mono",
+  "sample_rate": 48000,
+  "alignment_offset_samples": 38693,
+  "sync_squared_coherence": 0.8570585928468805,
+  "metadata": {
+    "mode": "levels",
+    "gain_db": 0.0,
+    "sample_rate": 48000,
+    "frequencies": [
+      997
+    ],
+    "segments": [
+      {
+        "kind": "silence",
+        "start_sample": 0,
+        "samples": 48000,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "sync",
+        "start_sample": 48000,
+        "samples": 19200,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "silence",
+        "start_sample": 67200,
+        "samples": 48000,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 115200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.03
+      },
+      {
+        "kind": "silence",
+        "start_sample": 259200,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 288000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.06
+      },
+      {
+        "kind": "silence",
+        "start_sample": 432000,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 460800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.12
+      },
+      {
+        "kind": "silence",
+        "start_sample": 604800,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 633600,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.25
+      },
+      {
+        "kind": "silence",
+        "start_sample": 777600,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 806400,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.35
+      },
+      {
+        "kind": "silence",
+        "start_sample": 950400,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 979200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.5
+      },
+      {
+        "kind": "silence",
+        "start_sample": 1123200,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 1152000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.7
+      },
+      {
+        "kind": "silence",
+        "start_sample": 1296000,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "tone",
+        "start_sample": 1324800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.9
+      },
+      {
+        "kind": "silence",
+        "start_sample": 1468800,
+        "samples": 28800,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      },
+      {
+        "kind": "silence",
+        "start_sample": 1497600,
+        "samples": 96000,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      }
+    ],
+    "transmit_seconds": 33.2,
+    "live": true,
+    "pcm_format": "float32le",
+    "channels": 2,
+    "utc": "2026-09-20T09:41:41Z",
+    "pactl_info": "Server String: /run/user/1000/pulse/native\nLibrary Protocol Version: 35\nServer Protocol Version: 35\nIs Local: yes\nClient Index: 41679\nTile Size: 65472\nUser Name: user\nHost Name: aidev\nServer Name: PulseAudio (on PipeWire 1.4.2)\nServer Version: 15.0.0\nDefault Sample Specification: float32le 2ch 48000Hz\nDefault Channel Map: front-left,front-right\nDefault Sink: alsa_output.pci-0000_07_00.6.analog-stereo\nDefault Source: alsa_input.pci-0000_07_00.6.analog-stereo\nCookie: c340:fd4e\n",
+    "sources": "Source #59\n\tState: SUSPENDED\n\tName: alsa_output.pci-0000_07_00.6.analog-stereo.monitor\n\tDescription: Monitor of Ryzen HD Audio Controller Analog Stereo\n\tDriver: PipeWire\n\tSample Specification: s32le 2ch 48000Hz\n\tChannel Map: front-left,front-right\n\tOwner Module: 4294967295\n\tMute: no\n\tVolume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB\n\t        balance 0.00\n\tBase Volume: 65536 / 100% / 0.00 dB\n\tMonitor of Sink: alsa_output.pci-0000_07_00.6.analog-stereo\n\tLatency: 0 usec, configured 0 usec\n\tFlags: HARDWARE DECIBEL_VOLUME LATENCY \n\tProperties:\n\t\talsa.card = \"1\"\n\t\talsa.card_name = \"HD-Audio Generic\"\n\t\talsa.class = \"generic\"\n\t\talsa.components = \"HDA:10ec0257,17aa5092,00100001\"\n\t\talsa.device = \"0\"\n\t\talsa.driver_name = \"snd_hda_intel\"\n\t\talsa.id = \"ALC257 Analog\"\n\t\talsa.long_card_name = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\talsa.mixer_name = \"Realtek ALC257\"\n\t\talsa.name = \"ALC257 Analog\"\n\t\talsa.resolution_bits = \"16\"\n\t\talsa.subclass = \"generic-mix\"\n\t\talsa.subdevice = \"0\"\n\t\talsa.subdevice_name = \"subdevice #0\"\n\t\talsa.sync.id = \"00000000:00000000:00000000:00000000\"\n\t\tapi.alsa.card.longname = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\tapi.alsa.card.name = \"HD-Audio Generic\"\n\t\tapi.alsa.path = \"front:1\"\n\t\tapi.alsa.pcm.card = \"1\"\n\t\tapi.alsa.pcm.stream = \"playback\"\n\t\taudio.channels = \"2\"\n\t\taudio.position = \"FL,FR\"\n\t\tcard.profile.device = \"3\"\n\t\tdevice.api = \"alsa\"\n\t\tdevice.class = \"monitor\"\n\t\tdevice.icon_name = \"audio-card-analog\"\n\t\tdevice.id = \"49\"\n\t\tdevice.profile.description = \"Analog Stereo\"\n\t\tdevice.profile.name = \"analog-stereo\"\n\t\tdevice.routes = \"2\"\n\t\tfactory.name = \"api.alsa.pcm.sink\"\n\t\tmedia.class = \"Audio/Sink\"\n\t\tdevice.description = \"Ryzen HD Audio Controller\"\n\t\tnode.name = \"alsa_output.pci-0000_07_00.6.analog-stereo\"\n\t\tnode.nick = \"ALC257 Analog\"\n\t\tnode.pause-on-idle = \"false\"\n\t\tobject.path = \"alsa:acp:Generic_1:3:playback\"\n\t\tport.group = \"playback\"\n\t\tpriority.driver = \"1009\"\n\t\tpriority.session = \"1009\"\n\t\tfactory.id = \"19\"\n\t\tclock.quantum-limit = \"8192\"\n\t\tclient.id = \"47\"\n\t\tnode.driver = \"true\"\n\t\tnode.loop.name = \"data-loop.0\"\n\t\tlibrary.name = \"audioconvert/libspa-audioconvert\"\n\t\tobject.id = \"35\"\n\t\tobject.serial = \"59\"\n\t\tapi.acp.auto-port = \"false\"\n\t\tapi.acp.auto-profile = \"false\"\n\t\tapi.alsa.card = \"1\"\n\t\tapi.alsa.split-enable = \"true\"\n\t\tapi.alsa.use-acp = \"true\"\n\t\tapi.dbus.ReserveDevice1 = \"Audio1\"\n\t\tapi.dbus.ReserveDevice1.Priority = \"-20\"\n\t\tdevice.bus = \"pci\"\n\t\tdevice.bus_path = \"pci-0000:07:00.6\"\n\t\tdevice.enum.api = \"udev\"\n\t\tdevice.name = \"alsa_card.pci-0000_07_00.6\"\n\t\tdevice.nick = \"HD-Audio Generic\"\n\t\tdevice.plugged.usec = \"6549184\"\n\t\tdevice.product.id = \"0x15e3\"\n\t\tdevice.product.name = \"Ryzen HD Audio Controller\"\n\t\tdevice.subsystem = \"sound\"\n\t\tsysfs.path = \"/devices/pci0000:00/0000:00:08.1/0000:07:00.6/sound/card1\"\n\t\tdevice.vendor.id = \"0x1022\"\n\t\tdevice.vendor.name = \"Advanced Micro Devices, Inc. [AMD]\"\n\t\tspa.object.id = \"4\"\n\t\tdevice.string = \"1\"\n\tPorts:\n\t\tanalog-output-speaker: Speakers (type: Speaker, priority: 10000, availability group: Legacy 3, not available)\n\t\tanalog-output-headphones: Headphones (type: Headphones, priority: 9900, availability group: Legacy 4, available)\n\tActive Port: analog-output-headphones\n\tFormats:\n\t\tpcm\n\nSource #60\n\tState: SUSPENDED\n\tName: alsa_input.pci-0000_07_00.6.analog-stereo\n\tDescription: Ryzen HD Audio Controller Analog Stereo\n\tDriver: PipeWire\n\tSample Specification: s32le 2ch 48000Hz\n\tChannel Map: front-left,front-right\n\tOwner Module: 4294967295\n\tMute: no\n\tVolume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n\t        balance 0.00\n\tBase Volume: 6554 /  10% / -60.00 dB\n\tMonitor of Sink: n/a\n\tLatency: 0 usec, configured 0 usec\n\tFlags: HARDWARE HW_MUTE_CTRL HW_VOLUME_CTRL DECIBEL_VOLUME LATENCY \n\tProperties:\n\t\talsa.card = \"1\"\n\t\talsa.card_name = \"HD-Audio Generic\"\n\t\talsa.class = \"generic\"\n\t\talsa.components = \"HDA:10ec0257,17aa5092,00100001\"\n\t\talsa.device = \"0\"\n\t\talsa.driver_name = \"snd_hda_intel\"\n\t\talsa.id = \"ALC257 Analog\"\n\t\talsa.long_card_name = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\talsa.mixer_name = \"Realtek ALC257\"\n\t\talsa.name = \"ALC257 Analog\"\n\t\talsa.resolution_bits = \"16\"\n\t\talsa.subclass = \"generic-mix\"\n\t\talsa.subdevice = \"0\"\n\t\talsa.subdevice_name = \"subdevice #0\"\n\t\talsa.sync.id = \"00000000:00000000:00000000:00000000\"\n\t\tapi.alsa.card.longname = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\tapi.alsa.card.name = \"HD-Audio Generic\"\n\t\tapi.alsa.path = \"front:1\"\n\t\tapi.alsa.pcm.card = \"1\"\n\t\tapi.alsa.pcm.stream = \"capture\"\n\t\taudio.channels = \"2\"\n\t\taudio.position = \"FL,FR\"\n\t\tcard.profile.device = \"0\"\n\t\tdevice.api = \"alsa\"\n\t\tdevice.class = \"sound\"\n\t\tdevice.icon_name = \"audio-card-analog\"\n\t\tdevice.id = \"49\"\n\t\tdevice.profile.description = \"Analog Stereo\"\n\t\tdevice.profile.name = \"analog-stereo\"\n\t\tdevice.routes = \"2\"\n\t\tfactory.name = \"api.alsa.pcm.source\"\n\t\tmedia.class = \"Audio/Source\"\n\t\tdevice.description = \"Ryzen HD Audio Controller\"\n\t\tnode.name = \"alsa_input.pci-0000_07_00.6.analog-stereo\"\n\t\tnode.nick = \"ALC257 Analog\"\n\t\tnode.pause-on-idle = \"false\"\n\t\tobject.path = \"alsa:acp:Generic_1:0:capture\"\n\t\tport.group = \"capture\"\n\t\tpriority.driver = \"2009\"\n\t\tpriority.session = \"2009\"\n\t\tfactory.id = \"19\"\n\t\tclock.quantum-limit = \"8192\"\n\t\tclient.id = \"47\"\n\t\tnode.driver = \"true\"\n\t\tnode.loop.name = \"data-loop.0\"\n\t\tlibrary.name = \"audioconvert/libspa-audioconvert\"\n\t\tobject.id = \"46\"\n\t\tobject.serial = \"60\"\n\t\tapi.acp.auto-port = \"false\"\n\t\tapi.acp.auto-profile = \"false\"\n\t\tapi.alsa.card = \"1\"\n\t\tapi.alsa.split-enable = \"true\"\n\t\tapi.alsa.use-acp = \"true\"\n\t\tapi.dbus.ReserveDevice1 = \"Audio1\"\n\t\tapi.dbus.ReserveDevice1.Priority = \"-20\"\n\t\tdevice.bus = \"pci\"\n\t\tdevice.bus_path = \"pci-0000:07:00.6\"\n\t\tdevice.enum.api = \"udev\"\n\t\tdevice.name = \"alsa_card.pci-0000_07_00.6\"\n\t\tdevice.nick = \"HD-Audio Generic\"\n\t\tdevice.plugged.usec = \"6549184\"\n\t\tdevice.product.id = \"0x15e3\"\n\t\tdevice.product.name = \"Ryzen HD Audio Controller\"\n\t\tdevice.subsystem = \"sound\"\n\t\tsysfs.path = \"/devices/pci0000:00/0000:00:08.1/0000:07:00.6/sound/card1\"\n\t\tdevice.vendor.id = \"0x1022\"\n\t\tdevice.vendor.name = \"Advanced Micro Devices, Inc. [AMD]\"\n\t\tspa.object.id = \"4\"\n\t\tdevice.string = \"1\"\n\tPorts:\n\t\tanalog-input-internal-mic: Internal Microphone (type: Mic, priority: 8900, availability group: Legacy 1, not available)\n\t\tanalog-input-mic: Microphone (type: Mic, priority: 8700, availability group: Legacy 2, available)\n\tActive Port: analog-input-mic\n\tFormats:\n\t\tpcm\n",
+    "sinks": "Sink #59\n\tState: SUSPENDED\n\tName: alsa_output.pci-0000_07_00.6.analog-stereo\n\tDescription: Ryzen HD Audio Controller Analog Stereo\n\tDriver: PipeWire\n\tSample Specification: s32le 2ch 48000Hz\n\tChannel Map: front-left,front-right\n\tOwner Module: 4294967295\n\tMute: no\n\tVolume: front-left: 62259 /  95% / -1.34 dB,   front-right: 62259 /  95% / -1.34 dB\n\t        balance 0.00\n\tBase Volume: 65536 / 100% / 0.00 dB\n\tMonitor Source: alsa_output.pci-0000_07_00.6.analog-stereo.monitor\n\tLatency: 0 usec, configured 0 usec\n\tFlags: HARDWARE HW_MUTE_CTRL HW_VOLUME_CTRL DECIBEL_VOLUME LATENCY \n\tProperties:\n\t\talsa.card = \"1\"\n\t\talsa.card_name = \"HD-Audio Generic\"\n\t\talsa.class = \"generic\"\n\t\talsa.components = \"HDA:10ec0257,17aa5092,00100001\"\n\t\talsa.device = \"0\"\n\t\talsa.driver_name = \"snd_hda_intel\"\n\t\talsa.id = \"ALC257 Analog\"\n\t\talsa.long_card_name = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\talsa.mixer_name = \"Realtek ALC257\"\n\t\talsa.name = \"ALC257 Analog\"\n\t\talsa.resolution_bits = \"16\"\n\t\talsa.subclass = \"generic-mix\"\n\t\talsa.subdevice = \"0\"\n\t\talsa.subdevice_name = \"subdevice #0\"\n\t\talsa.sync.id = \"00000000:00000000:00000000:00000000\"\n\t\tapi.alsa.card.longname = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\tapi.alsa.card.name = \"HD-Audio Generic\"\n\t\tapi.alsa.path = \"front:1\"\n\t\tapi.alsa.pcm.card = \"1\"\n\t\tapi.alsa.pcm.stream = \"playback\"\n\t\taudio.channels = \"2\"\n\t\taudio.position = \"FL,FR\"\n\t\tcard.profile.device = \"3\"\n\t\tdevice.api = \"alsa\"\n\t\tdevice.class = \"sound\"\n\t\tdevice.icon_name = \"audio-card-analog\"\n\t\tdevice.id = \"49\"\n\t\tdevice.profile.description = \"Analog Stereo\"\n\t\tdevice.profile.name = \"analog-stereo\"\n\t\tdevice.routes = \"2\"\n\t\tfactory.name = \"api.alsa.pcm.sink\"\n\t\tmedia.class = \"Audio/Sink\"\n\t\tdevice.description = \"Ryzen HD Audio Controller\"\n\t\tnode.name = \"alsa_output.pci-0000_07_00.6.analog-stereo\"\n\t\tnode.nick = \"ALC257 Analog\"\n\t\tnode.pause-on-idle = \"false\"\n\t\tobject.path = \"alsa:acp:Generic_1:3:playback\"\n\t\tport.group = \"playback\"\n\t\tpriority.driver = \"1009\"\n\t\tpriority.session = \"1009\"\n\t\tfactory.id = \"19\"\n\t\tclock.quantum-limit = \"8192\"\n\t\tclient.id = \"47\"\n\t\tnode.driver = \"true\"\n\t\tnode.loop.name = \"data-loop.0\"\n\t\tlibrary.name = \"audioconvert/libspa-audioconvert\"\n\t\tobject.id = \"35\"\n\t\tobject.serial = \"59\"\n\t\tapi.acp.auto-port = \"false\"\n\t\tapi.acp.auto-profile = \"false\"\n\t\tapi.alsa.card = \"1\"\n\t\tapi.alsa.split-enable = \"true\"\n\t\tapi.alsa.use-acp = \"true\"\n\t\tapi.dbus.ReserveDevice1 = \"Audio1\"\n\t\tapi.dbus.ReserveDevice1.Priority = \"-20\"\n\t\tdevice.bus = \"pci\"\n\t\tdevice.bus_path = \"pci-0000:07:00.6\"\n\t\tdevice.enum.api = \"udev\"\n\t\tdevice.name = \"alsa_card.pci-0000_07_00.6\"\n\t\tdevice.nick = \"HD-Audio Generic\"\n\t\tdevice.plugged.usec = \"6549184\"\n\t\tdevice.product.id = \"0x15e3\"\n\t\tdevice.product.name = \"Ryzen HD Audio Controller\"\n\t\tdevice.subsystem = \"sound\"\n\t\tsysfs.path = \"/devices/pci0000:00/0000:00:08.1/0000:07:00.6/sound/card1\"\n\t\tdevice.vendor.id = \"0x1022\"\n\t\tdevice.vendor.name = \"Advanced Micro Devices, Inc. [AMD]\"\n\t\tspa.object.id = \"4\"\n\t\tdevice.string = \"1\"\n\tPorts:\n\t\tanalog-output-speaker: Speakers (type: Speaker, priority: 10000, availability group: Legacy 3, not available)\n\t\tanalog-output-headphones: Headphones (type: Headphones, priority: 9900, availability group: Legacy 4, available)\n\tActive Port: analog-output-headphones\n\tFormats:\n\t\tpcm\n",
+    "source_volume_before": "Volume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n        balance 0.00\n",
+    "mixer_before": "Simple mixer control 'Master',0\n  Capabilities: pvolume pvolume-joined pswitch pswitch-joined\n  Playback channels: Mono\n  Limits: Playback 0 - 87\n  Mono: Playback 86 [99%] [-0.75dB] [on]\nSimple mixer control 'Headphone',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 87 [100%] [0.00dB] [on]\n  Front Right: Playback 87 [100%] [0.00dB] [on]\nSimple mixer control 'Speaker',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 0 [0%] [-65.25dB] [off]\n  Front Right: Playback 0 [0%] [-65.25dB] [off]\nSimple mixer control 'PCM',0\n  Capabilities: pvolume\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 255\n  Mono:\n  Front Left: Playback 253 [99%] [-0.40dB]\n  Front Right: Playback 253 [99%] [-0.40dB]\nSimple mixer control 'Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\nSimple mixer control 'Capture',0\n  Capabilities: cvolume cswitch\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 63\n  Front Left: Capture 23 [37%] [0.00dB] [on]\n  Front Right: Capture 23 [37%] [0.00dB] [on]\nSimple mixer control 'Auto-Mute Mode',0\n  Capabilities: enum\n  Items: 'Disabled' 'Enabled'\n  Item0: 'Disabled'\nSimple mixer control 'Digital',0\n  Capabilities: cvolume\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 120\n  Front Left: Capture 60 [50%] [0.00dB]\n  Front Right: Capture 60 [50%] [0.00dB]\nSimple mixer control 'Internal Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\n",
+    "source_volume_test": "Volume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n        balance 0.00\n",
+    "mixer_test": "Simple mixer control 'Master',0\n  Capabilities: pvolume pvolume-joined pswitch pswitch-joined\n  Playback channels: Mono\n  Limits: Playback 0 - 87\n  Mono: Playback 86 [99%] [-0.75dB] [on]\nSimple mixer control 'Headphone',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 87 [100%] [0.00dB] [on]\n  Front Right: Playback 87 [100%] [0.00dB] [on]\nSimple mixer control 'Speaker',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 0 [0%] [-65.25dB] [off]\n  Front Right: Playback 0 [0%] [-65.25dB] [off]\nSimple mixer control 'PCM',0\n  Capabilities: pvolume\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 255\n  Mono:\n  Front Left: Playback 253 [99%] [-0.40dB]\n  Front Right: Playback 253 [99%] [-0.40dB]\nSimple mixer control 'Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\nSimple mixer control 'Capture',0\n  Capabilities: cvolume cswitch\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 63\n  Front Left: Capture 23 [37%] [0.00dB] [on]\n  Front Right: Capture 23 [37%] [0.00dB] [on]\nSimple mixer control 'Auto-Mute Mode',0\n  Capabilities: enum\n  Items: 'Disabled' 'Enabled'\n  Item0: 'Disabled'\nSimple mixer control 'Digital',0\n  Capabilities: cvolume\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 120\n  Front Left: Capture 60 [50%] [0.00dB]\n  Front Right: Capture 60 [50%] [0.00dB]\nSimple mixer control 'Internal Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\n",
+    "capture_command": [
+      "parecord",
+      "--raw",
+      "--format=float32le",
+      "--rate=48000",
+      "--channels=2",
+      "--latency-msec=40",
+      "--client-name=DataPump-SNR-measurement",
+      "--device=@DEFAULT_SOURCE@"
+    ],
+    "playback_command": [
+      "paplay",
+      "--raw",
+      "--format=float32le",
+      "--rate=48000",
+      "--channels=2",
+      "--latency-msec=40",
+      "--client-name=DataPump-SNR-measurement",
+      "--device=@DEFAULT_SINK@",
+      "--volume=65536",
+      "/tmp/pump-snr-20260920-levels-g0/transmit-stereo.f32"
+    ],
+    "playback_start_wall_offset": 1.0211738370126113,
+    "playback_returncode": 0,
+    "capture_returncode": 0,
+    "captured_seconds": 34.56,
+    "capture_peak_by_channel": [
+      0.18664324283599854,
+      0.18705856800079346
+    ],
+    "capture_near_fullscale_by_channel": [
+      0,
+      0
+    ],
+    "capture_sha256": "7bf29ad1a5d368cc53d3e61e6d988906ea33fc2fb98f57f1581fe34bf05ec7c2",
+    "transmit_sha256": "fe8ac27bb3e442bc226f5a055fe3519dfef7e984afe2bb1e037bb3705f9d3278",
+    "source_volume_restored": "Volume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n        balance 0.00\n",
+    "wall_seconds": 35.205350511008874
+  },
+  "measurements": [
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.5752474466959636e-05,
+        "rms": 0.004393046668078184,
+        "rms_dbfs": -47.14468366252795,
+        "peak": 0.006317138671875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000042011541,
+      "frequency_offset_hz": 4.201154069960467e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000084023086,
+          "unaliased_frequency_hz": 1994.0000084023081,
+          "aliased": false,
+          "power_fs2": 5.936825500344472e-15,
+          "dbc": -95.11953415153143
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.000012603461,
+          "unaliased_frequency_hz": 2991.000012603462,
+          "aliased": false,
+          "power_fs2": 5.878666718456044e-13,
+          "dbc": -75.16228859894997
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000016804617,
+          "unaliased_frequency_hz": 3988.0000168046163,
+          "aliased": false,
+          "power_fs2": 2.7000035109526445e-15,
+          "dbc": -98.54143370260951
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.00002100577,
+          "unaliased_frequency_hz": 4985.000021005771,
+          "aliased": false,
+          "power_fs2": 4.335914918868737e-13,
+          "dbc": -76.48426947449181
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000025206922,
+          "unaliased_frequency_hz": 5982.000025206924,
+          "aliased": false,
+          "power_fs2": 7.550398392883466e-15,
+          "dbc": -94.07537831597146
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.5752474306772166e-05,
+      "fitted_signal_power_fs2": 1.9297795469429176e-05,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 1.9297795469429176e-05,
+          "signal_rms_dbfs": -47.14492300844369,
+          "noise_power_fs2": 3.2504100971875864e-10,
+          "noise_rms_dbfs": -94.88061841571984,
+          "noise_and_distortion_power_fs2": 3.2611092302108196e-10,
+          "noise_and_distortion_rms_dbfs": -94.86634654342359,
+          "fitted_harmonic_power_fs2": 1.0376453911366587e-12,
+          "snr_db": 47.735695407276154,
+          "sinad_db": 47.7214235349799,
+          "thd_db": -72.69458737728601,
+          "thd_percent": 0.02318839187304811
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 1.9297795469429176e-05,
+          "signal_rms_dbfs": -47.14492300844369,
+          "noise_power_fs2": 3.978286184659889e-10,
+          "noise_rms_dbfs": -94.00303978389049,
+          "noise_and_distortion_power_fs2": 3.988985317683124e-10,
+          "noise_and_distortion_rms_dbfs": -93.99137562201301,
+          "fitted_harmonic_power_fs2": 1.0376453911366587e-12,
+          "snr_db": 46.8581167754468,
+          "sinad_db": 46.84645261356931,
+          "thd_db": -72.69458737728601,
+          "thd_percent": 0.02318839187304811
+        }
+      ],
+      "segment_index": 3,
+      "window": "steady",
+      "capture_start_sample": 177893,
+      "capture_end_sample": 273893,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 115200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.03
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.5226999918619792e-05,
+        "rms": 0.004392998600299012,
+        "rms_dbfs": -47.14477870219877,
+        "peak": 0.006317138671875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000207425476,
+      "frequency_offset_hz": 2.0742547576446668e-05,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000414850947,
+          "unaliased_frequency_hz": 1994.0000414850952,
+          "aliased": false,
+          "power_fs2": 3.2202764361400505e-15,
+          "dbc": -97.7760674859112
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.000062227642,
+          "unaliased_frequency_hz": 2991.000062227643,
+          "aliased": false,
+          "power_fs2": 7.154707358467574e-13,
+          "dbc": -74.30908027787056
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000829701894,
+          "unaliased_frequency_hz": 3988.0000829701903,
+          "aliased": false,
+          "power_fs2": 5.941462253967503e-14,
+          "dbc": -85.11606560350378
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000103712737,
+          "unaliased_frequency_hz": 4985.000103712738,
+          "aliased": false,
+          "power_fs2": 4.429715408068243e-13,
+          "dbc": -76.39124077358592
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000124455284,
+          "unaliased_frequency_hz": 5982.000124455286,
+          "aliased": false,
+          "power_fs2": 3.100420209916424e-14,
+          "dbc": -87.94079343601409
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.5226999123098118e-05,
+      "fitted_signal_power_fs2": 1.929744904077279e-05,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 1.929744904077279e-05,
+          "signal_rms_dbfs": -47.145000972480844,
+          "noise_power_fs2": 3.2548693082393657e-10,
+          "noise_rms_dbfs": -94.87466444837715,
+          "noise_and_distortion_power_fs2": 3.2683097533283483e-10,
+          "noise_and_distortion_rms_dbfs": -94.85676790026311,
+          "fitted_harmonic_power_fs2": 1.252081377728561e-12,
+          "snr_db": 47.7296634758963,
+          "sinad_db": 47.711766927782264,
+          "thd_db": -71.87867346441456,
+          "thd_percent": 0.025472192419803134
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 1.929744904077279e-05,
+          "signal_rms_dbfs": -47.145000972480844,
+          "noise_power_fs2": 3.9778033070186385e-10,
+          "noise_rms_dbfs": -94.00356695517358,
+          "noise_and_distortion_power_fs2": 3.99124375210762e-10,
+          "noise_and_distortion_rms_dbfs": -93.98891748296485,
+          "fitted_harmonic_power_fs2": 1.252081377728561e-12,
+          "snr_db": 46.858565982692745,
+          "sinad_db": 46.843916510484,
+          "thd_db": -71.87867346441456,
+          "thd_percent": 0.025472192419803134
+        }
+      ],
+      "segment_index": 3,
+      "window": "first-second",
+      "capture_start_sample": 177893,
+      "capture_end_sample": 225893,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 115200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.03
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.6277949015299478e-05,
+        "rms": 0.004393094735331416,
+        "rms_dbfs": -47.144588624936915,
+        "peak": 0.00628662109375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.9999859631969,
+      "frequency_offset_hz": -1.403680312250799e-05,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999719263942,
+          "unaliased_frequency_hz": 1993.9999719263938,
+          "aliased": false,
+          "power_fs2": 9.837980086999848e-15,
+          "dbc": -92.92609556443406
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.9999578895913,
+          "unaliased_frequency_hz": 2990.9999578895904,
+          "aliased": false,
+          "power_fs2": 4.738677874095826e-13,
+          "dbc": -76.09858308387552
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.9999438527884,
+          "unaliased_frequency_hz": 3987.9999438527875,
+          "aliased": false,
+          "power_fs2": 2.943759895040154e-14,
+          "dbc": -88.16613111318566
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.9999298159855,
+          "unaliased_frequency_hz": 4984.999929815985,
+          "aliased": false,
+          "power_fs2": 4.245003461385536e-13,
+          "dbc": -76.5763744690976
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999915779183,
+          "unaliased_frequency_hz": 5981.999915779181,
+          "aliased": false,
+          "power_fs2": 3.36731206098653e-14,
+          "dbc": -87.5823212972118
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.6277949547387788e-05,
+      "fitted_signal_power_fs2": 1.9298141906759463e-05,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 1.9298141906759463e-05,
+          "signal_rms_dbfs": -47.1448450438541,
+          "noise_power_fs2": 3.249015899130936e-10,
+          "noise_rms_dbfs": -94.88248163420195,
+          "noise_and_distortion_power_fs2": 3.2588273698973173e-10,
+          "noise_and_distortion_rms_dbfs": -94.8693864483916,
+          "fitted_harmonic_power_fs2": 9.71316833195403e-13,
+          "snr_db": 47.73763659034785,
+          "sinad_db": 47.7245414045375,
+          "thd_db": -72.9815458036739,
+          "thd_percent": 0.02243482621876366
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 1.9298141906759463e-05,
+          "signal_rms_dbfs": -47.1448450438541,
+          "noise_power_fs2": 3.9909510906650463e-10,
+          "noise_rms_dbfs": -93.98923594487198,
+          "noise_and_distortion_power_fs2": 4.0007625614314313e-10,
+          "noise_and_distortion_rms_dbfs": -93.97857222507533,
+          "fitted_harmonic_power_fs2": 9.71316833195403e-13,
+          "snr_db": 46.84439090101787,
+          "sinad_db": 46.833727181221235,
+          "thd_db": -72.9815458036739,
+          "thd_percent": 0.02243482621876366
+        }
+      ],
+      "segment_index": 3,
+      "window": "second-second",
+      "capture_start_sample": 225893,
+      "capture_end_sample": 273893,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 115200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.03
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.6829490661621092e-05,
+        "rms": 0.008788808199174967,
+        "rms_dbfs": -41.12140026328943,
+        "peak": 0.012542724609375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000028658069,
+      "frequency_offset_hz": 2.8658068913500756e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000057316138,
+          "unaliased_frequency_hz": 1994.0000057316138,
+          "aliased": false,
+          "power_fs2": 2.3220917623034492e-14,
+          "dbc": -95.21974213365512
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000085974207,
+          "unaliased_frequency_hz": 2991.0000085974207,
+          "aliased": false,
+          "power_fs2": 1.14226364634532e-12,
+          "dbc": -78.30087235991196
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000114632276,
+          "unaliased_frequency_hz": 3988.0000114632276,
+          "aliased": false,
+          "power_fs2": 2.326806995729631e-15,
+          "dbc": -105.21093230291163
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.0000143290345,
+          "unaliased_frequency_hz": 4985.0000143290345,
+          "aliased": false,
+          "power_fs2": 1.8777099066473078e-13,
+          "dbc": -86.14225093578276
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000017194841,
+          "unaliased_frequency_hz": 5982.000017194841,
+          "aliased": false,
+          "power_fs2": 2.9412349786361224e-14,
+          "dbc": -94.1932386898282
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.6829490442139382e-05,
+      "fitted_signal_power_fs2": 7.724201438371449e-05,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 7.724201438371449e-05,
+          "signal_rms_dbfs": -41.121464088397666,
+          "noise_power_fs2": 3.2928237088023756e-10,
+          "noise_rms_dbfs": -94.82431519923924,
+          "noise_and_distortion_power_fs2": 3.3016411372576803e-10,
+          "noise_and_distortion_rms_dbfs": -94.81270132944333,
+          "fitted_harmonic_power_fs2": 1.3849947114151763e-12,
+          "snr_db": 53.70285111084158,
+          "sinad_db": 53.69123724104568,
+          "thd_db": -77.46405476104597,
+          "thd_percent": 0.013390514433385287
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 7.724201438371449e-05,
+          "signal_rms_dbfs": -41.121464088397666,
+          "noise_power_fs2": 4.0277916767268956e-10,
+          "noise_rms_dbfs": -93.94932999882977,
+          "noise_and_distortion_power_fs2": 4.0366091051822007e-10,
+          "noise_and_distortion_rms_dbfs": -93.93983304511369,
+          "fitted_harmonic_power_fs2": 1.3849947114151763e-12,
+          "snr_db": 52.82786591043211,
+          "sinad_db": 52.81836895671603,
+          "thd_db": -77.46405476104597,
+          "thd_percent": 0.013390514433385287
+        }
+      ],
+      "segment_index": 5,
+      "window": "steady",
+      "capture_start_sample": 350693,
+      "capture_end_sample": 446693,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 288000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.06
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.9973119099934894e-05,
+        "rms": 0.008788834512588118,
+        "rms_dbfs": -41.12137425805011,
+        "peak": 0.012542724609375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000049901666,
+      "frequency_offset_hz": 4.990166644347482e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000099803328,
+          "unaliased_frequency_hz": 1994.0000099803333,
+          "aliased": false,
+          "power_fs2": 1.3535419314177796e-14,
+          "dbc": -97.56383536789673
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.000014970501,
+          "unaliased_frequency_hz": 2991.0000149705,
+          "aliased": false,
+          "power_fs2": 1.4621526853889476e-12,
+          "dbc": -77.22862524907589
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000199606657,
+          "unaliased_frequency_hz": 3988.0000199606666,
+          "aliased": false,
+          "power_fs2": 4.380074431617063e-14,
+          "dbc": -92.46373760493618
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000024950834,
+          "unaliased_frequency_hz": 4985.000024950833,
+          "aliased": false,
+          "power_fs2": 2.4842385385976445e-13,
+          "dbc": -84.92661956312061
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000029941002,
+          "unaliased_frequency_hz": 5982.000029941,
+          "aliased": false,
+          "power_fs2": 2.953975101611567e-14,
+          "dbc": -94.17448420705585
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.997311871911251e-05,
+      "fitted_signal_power_fs2": 7.724230961983004e-05,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 7.724230961983004e-05,
+          "signal_rms_dbfs": -41.12144748873078,
+          "noise_power_fs2": 3.255326507915297e-10,
+          "noise_rms_dbfs": -94.874054453525,
+          "noise_and_distortion_power_fs2": 3.2744886371157686e-10,
+          "noise_and_distortion_rms_dbfs": -94.84856512288617,
+          "fitted_harmonic_power_fs2": 1.7974524538951761e-12,
+          "snr_db": 53.752606964794225,
+          "sinad_db": 53.72711763415539,
+          "thd_db": -76.3319783985173,
+          "thd_percent": 0.015254608986458128
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 7.724230961983004e-05,
+          "signal_rms_dbfs": -41.12144748873078,
+          "noise_power_fs2": 3.9930288510133943e-10,
+          "noise_rms_dbfs": -93.98697551866607,
+          "noise_and_distortion_power_fs2": 4.012190980213866e-10,
+          "noise_and_distortion_rms_dbfs": -93.96618402750575,
+          "fitted_harmonic_power_fs2": 1.7974524538951761e-12,
+          "snr_db": 52.86552802993529,
+          "sinad_db": 52.84473653877497,
+          "thd_db": -76.3319783985173,
+          "thd_percent": 0.015254608986458128
+        }
+      ],
+      "segment_index": 5,
+      "window": "first-second",
+      "capture_start_sample": 350693,
+      "capture_end_sample": 398693,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 288000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.06
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.3685862223307292e-05,
+        "rms": 0.008788781885683035,
+        "rms_dbfs": -41.12142626868446,
+        "peak": 0.012542724609375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000029155169,
+      "frequency_offset_hz": 2.915516915891203e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000058310325,
+          "unaliased_frequency_hz": 1994.0000058310338,
+          "aliased": false,
+          "power_fs2": 3.8647675762174006e-14,
+          "dbc": -93.00728551202775
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000087465523,
+          "unaliased_frequency_hz": 2991.0000087465505,
+          "aliased": false,
+          "power_fs2": 8.621284130843495e-13,
+          "dbc": -79.52279973816638
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000116620686,
+          "unaliased_frequency_hz": 3988.0000116620677,
+          "aliased": false,
+          "power_fs2": 1.7143970771293072e-14,
+          "dbc": -96.53740514540588
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000014577585,
+          "unaliased_frequency_hz": 4985.000014577585,
+          "aliased": false,
+          "power_fs2": 1.5247473869777466e-13,
+          "dbc": -87.04654034385491
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000017493101,
+          "unaliased_frequency_hz": 5982.000017493101,
+          "aliased": false,
+          "power_fs2": 5.421597297476497e-14,
+          "dbc": -91.53724675999909
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.3685861999225988e-05,
+      "fitted_signal_power_fs2": 7.724171931840564e-05,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 7.724171931840564e-05,
+          "signal_rms_dbfs": -41.12148067852432,
+          "noise_power_fs2": 3.323812633714179e-10,
+          "noise_rms_dbfs": -94.78363465765632,
+          "noise_and_distortion_power_fs2": 3.3362697657503945e-10,
+          "noise_and_distortion_rms_dbfs": -94.7673884021653,
+          "fitted_harmonic_power_fs2": 1.1246107712903561e-12,
+          "snr_db": 53.662153979132,
+          "sinad_db": 53.64590772364099,
+          "thd_db": -78.36849693371158,
+          "thd_percent": 0.012066328742116937
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 7.724171931840564e-05,
+          "signal_rms_dbfs": -41.12148067852432,
+          "noise_power_fs2": 4.156851562832289e-10,
+          "noise_rms_dbfs": -93.81235483454775,
+          "noise_and_distortion_power_fs2": 4.169308694868504e-10,
+          "noise_and_distortion_rms_dbfs": -93.79935948597664,
+          "fitted_harmonic_power_fs2": 1.1246107712903561e-12,
+          "snr_db": 52.690874156023426,
+          "sinad_db": 52.677878807452316,
+          "thd_db": -78.36849693371158,
+          "thd_percent": 0.012066328742116937
+        }
+      ],
+      "segment_index": 5,
+      "window": "second-second",
+      "capture_start_sample": 398693,
+      "capture_end_sample": 446693,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 288000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.06
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.3895670572916666e-05,
+        "rms": 0.017582241339098595,
+        "rms_dbfs": -35.09851525969703,
+        "peak": 0.02496337890625,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.9999987117665,
+      "frequency_offset_hz": -1.2882335340691498e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999974235325,
+          "unaliased_frequency_hz": 1993.999997423533,
+          "aliased": false,
+          "power_fs2": 3.5170985674763036e-13,
+          "dbc": -89.43962116546555
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.9999961352987,
+          "unaliased_frequency_hz": 2990.9999961352996,
+          "aliased": false,
+          "power_fs2": 3.3206574982510246e-12,
+          "dbc": -79.68922572653534
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.999994847065,
+          "unaliased_frequency_hz": 3987.999994847066,
+          "aliased": false,
+          "power_fs2": 2.6980879705021022e-14,
+          "dbc": -100.59090550601631
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.999993558831,
+          "unaliased_frequency_hz": 4984.999993558832,
+          "aliased": false,
+          "power_fs2": 6.437003388442071e-13,
+          "dbc": -86.81462918492446
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999992270597,
+          "unaliased_frequency_hz": 5981.999992270599,
+          "aliased": false,
+          "power_fs2": 6.048858919588905e-16,
+          "dbc": -117.08473200865438
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.389567077032883e-05,
+      "fitted_signal_power_fs2": 0.0003091339165834336,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0003091339165834336,
+          "signal_rms_dbfs": -35.09853343765674,
+          "noise_power_fs2": 3.177136045808261e-10,
+          "noise_rms_dbfs": -94.97964188169767,
+          "noise_and_distortion_power_fs2": 3.223136364830167e-10,
+          "noise_and_distortion_rms_dbfs": -94.91721319917248,
+          "fitted_harmonic_power_fs2": 4.343653459439842e-12,
+          "snr_db": 59.88110844404093,
+          "sinad_db": 59.81867976151574,
+          "thd_db": -78.52291486673889,
+          "thd_percent": 0.011853708870223042
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0003091339165834336,
+          "signal_rms_dbfs": -35.09853343765674,
+          "noise_power_fs2": 3.9394628538154266e-10,
+          "noise_rms_dbfs": -94.04562990237132,
+          "noise_and_distortion_power_fs2": 3.9854631728373334e-10,
+          "noise_and_distortion_rms_dbfs": -93.9952119955811,
+          "fitted_harmonic_power_fs2": 4.343653459439842e-12,
+          "snr_db": 58.94709646471458,
+          "sinad_db": 58.89667855792435,
+          "thd_db": -78.52291486673889,
+          "thd_percent": 0.011853708870223042
+        }
+      ],
+      "segment_index": 7,
+      "window": "steady",
+      "capture_start_sample": 523493,
+      "capture_end_sample": 619493,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 460800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.12
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.6274134318033855e-05,
+        "rms": 0.017582349354065722,
+        "rms_dbfs": -35.09846189885504,
+        "peak": 0.024932861328125,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.9999977203161,
+      "frequency_offset_hz": -2.2796839402872138e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999954406303,
+          "unaliased_frequency_hz": 1993.9999954406321,
+          "aliased": false,
+          "power_fs2": 3.108793160391339e-13,
+          "dbc": -89.97560379667104
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.999993160949,
+          "unaliased_frequency_hz": 2990.999993160948,
+          "aliased": false,
+          "power_fs2": 3.5962016435551003e-12,
+          "dbc": -79.343081722567
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.9999908812642,
+          "unaliased_frequency_hz": 3987.9999908812642,
+          "aliased": false,
+          "power_fs2": 3.2093632027590676e-14,
+          "dbc": -99.83733338574191
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.999988601579,
+          "unaliased_frequency_hz": 4984.99998860158,
+          "aliased": false,
+          "power_fs2": 6.901609569727626e-13,
+          "dbc": -86.51201820218974
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999986321898,
+          "unaliased_frequency_hz": 5981.999986321896,
+          "aliased": false,
+          "power_fs2": 1.2087452786668405e-14,
+          "dbc": -104.07817416689731
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.6274134667643096e-05,
+      "fitted_signal_power_fs2": 0.00030913786799596993,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.00030913786799596993,
+          "signal_rms_dbfs": -35.09847792560838,
+          "noise_power_fs2": 3.204740177466378e-10,
+          "noise_rms_dbfs": -94.94207174902326,
+          "noise_and_distortion_power_fs2": 3.2462400872357665e-10,
+          "noise_and_distortion_rms_dbfs": -94.88619363528335,
+          "fitted_harmonic_power_fs2": 4.641423001381256e-12,
+          "snr_db": 59.84359382341487,
+          "sinad_db": 59.787715709674956,
+          "thd_db": -78.23501057293288,
+          "thd_percent": 0.012253198564286912
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.00030913786799596993,
+          "signal_rms_dbfs": -35.09847792560838,
+          "noise_power_fs2": 3.9573893362026965e-10,
+          "noise_rms_dbfs": -94.0259122083667,
+          "noise_and_distortion_power_fs2": 3.998889245972096e-10,
+          "noise_and_distortion_rms_dbfs": -93.98060624005825,
+          "fitted_harmonic_power_fs2": 4.641423001381256e-12,
+          "snr_db": 58.92743428275833,
+          "sinad_db": 58.882128314449886,
+          "thd_db": -78.23501057293288,
+          "thd_percent": 0.012253198564286912
+        }
+      ],
+      "segment_index": 7,
+      "window": "first-second",
+      "capture_start_sample": 523493,
+      "capture_end_sample": 571493,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 460800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.12
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.1517206827799479e-05,
+        "rms": 0.017582133323467884,
+        "rms_dbfs": -35.09856862119466,
+        "peak": 0.02496337890625,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000013616279,
+      "frequency_offset_hz": 1.3616279375128215e-06,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000027232563,
+          "unaliased_frequency_hz": 1994.0000027232559,
+          "aliased": false,
+          "power_fs2": 3.9581694124059557e-13,
+          "dbc": -88.92646727356225
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000040848827,
+          "unaliased_frequency_hz": 2991.0000040848836,
+          "aliased": false,
+          "power_fs2": 3.05607150162838e-12,
+          "dbc": -80.04977594701418
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000054465127,
+          "unaliased_frequency_hz": 3988.0000054465118,
+          "aliased": false,
+          "power_fs2": 2.4183795567563503e-14,
+          "dbc": -101.06616642758843
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000006808139,
+          "unaliased_frequency_hz": 4985.00000680814,
+          "aliased": false,
+          "power_fs2": 6.020811302078601e-13,
+          "dbc": -87.10486089509956
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000008169765,
+          "unaliased_frequency_hz": 5982.000008169767,
+          "aliased": false,
+          "power_fs2": 9.549301339318445e-15,
+          "dbc": -105.10169507505758
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.1517206619298316e-05,
+      "fitted_signal_power_fs2": 0.00030912996572039943,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.00030912996572039943,
+          "signal_rms_dbfs": -35.09858894269476,
+          "noise_power_fs2": 3.1663368527142406e-10,
+          "noise_rms_dbfs": -94.99442884327428,
+          "noise_and_distortion_power_fs2": 3.2060468759636117e-10,
+          "noise_and_distortion_rms_dbfs": -94.94030132068119,
+          "fitted_harmonic_power_fs2": 4.0877026699837174e-12,
+          "snr_db": 59.89583990057952,
+          "sinad_db": 59.84171237798642,
+          "thd_db": -78.786618070289,
+          "thd_percent": 0.011499238895362916
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.00030912996572039943,
+          "signal_rms_dbfs": -35.09858894269476,
+          "noise_power_fs2": 4.0065205405402013e-10,
+          "noise_rms_dbfs": -93.9723262638597,
+          "noise_and_distortion_power_fs2": 4.0462305637896117e-10,
+          "noise_and_distortion_rms_dbfs": -93.92949373733131,
+          "fitted_harmonic_power_fs2": 4.0877026699837174e-12,
+          "snr_db": 58.87373732116494,
+          "sinad_db": 58.83090479463657,
+          "thd_db": -78.786618070289,
+          "thd_percent": 0.011499238895362916
+        }
+      ],
+      "segment_index": 7,
+      "window": "second-second",
+      "capture_start_sample": 571493,
+      "capture_end_sample": 619493,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 460800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.12
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.3190269470214843e-05,
+        "rms": 0.0366344902414464,
+        "rms_dbfs": -28.72219694335235,
+        "peak": 0.05194091796875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.9999990471551,
+      "frequency_offset_hz": -9.528448572382331e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999980943103,
+          "unaliased_frequency_hz": 1993.9999980943103,
+          "aliased": false,
+          "power_fs2": 8.944684845517127e-12,
+          "dbc": -81.76214827239535
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.9999971414654,
+          "unaliased_frequency_hz": 2990.9999971414654,
+          "aliased": false,
+          "power_fs2": 1.602440685289966e-12,
+          "dbc": -89.22997907625819
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.9999961886206,
+          "unaliased_frequency_hz": 3987.9999961886206,
+          "aliased": false,
+          "power_fs2": 1.4711415160117317e-12,
+          "dbc": -89.60125419041265
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.999995235776,
+          "unaliased_frequency_hz": 4984.999995235776,
+          "aliased": false,
+          "power_fs2": 2.6083407381479932e-12,
+          "dbc": -87.11415546185648
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999994282931,
+          "unaliased_frequency_hz": 5981.999994282931,
+          "aliased": false,
+          "power_fs2": 1.4982348288713533e-13,
+          "dbc": -99.52199981880122
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.319026977063769e-05,
+      "fitted_signal_power_fs2": 0.00134208453079798,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.00134208453079798,
+          "signal_rms_dbfs": -28.722201293958154,
+          "noise_power_fs2": 3.174749905332779e-10,
+          "noise_rms_dbfs": -94.98290481084427,
+          "noise_and_distortion_power_fs2": 3.322564928110146e-10,
+          "noise_and_distortion_rms_dbfs": -94.78526523509552,
+          "fitted_harmonic_power_fs2": 1.4776431267853953e-11,
+          "snr_db": 66.26070351688612,
+          "sinad_db": 66.06306394113737,
+          "thd_db": -79.58210312582129,
+          "thd_percent": 0.010492883323345975
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.00134208453079798,
+          "signal_rms_dbfs": -28.722201293958154,
+          "noise_power_fs2": 3.964218821219232e-10,
+          "noise_rms_dbfs": -94.01842380870636,
+          "noise_and_distortion_power_fs2": 4.112033843996598e-10,
+          "noise_and_distortion_rms_dbfs": -93.85943319547684,
+          "fitted_harmonic_power_fs2": 1.4776431267853953e-11,
+          "snr_db": 65.29622251474821,
+          "sinad_db": 65.13723190151867,
+          "thd_db": -79.58210312582129,
+          "thd_percent": 0.010492883323345975
+        }
+      ],
+      "segment_index": 9,
+      "window": "steady",
+      "capture_start_sample": 696293,
+      "capture_end_sample": 792293,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 633600,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.25
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.3689041137695312e-05,
+        "rms": 0.03663438019083297,
+        "rms_dbfs": -28.722223035947394,
+        "peak": 0.0518798828125,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000003411374,
+      "frequency_offset_hz": 3.411373654671479e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000006822738,
+          "unaliased_frequency_hz": 1994.0000006822747,
+          "aliased": false,
+          "power_fs2": 9.723902380510772e-12,
+          "dbc": -81.39936709240399
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000010234107,
+          "unaliased_frequency_hz": 2991.000001023412,
+          "aliased": false,
+          "power_fs2": 1.6135900435821096e-12,
+          "dbc": -89.19984094032868
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000013645476,
+          "unaliased_frequency_hz": 3988.0000013645495,
+          "aliased": false,
+          "power_fs2": 1.4812590884683916e-12,
+          "dbc": -89.57146271460458
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000001705688,
+          "unaliased_frequency_hz": 4985.000001705686,
+          "aliased": false,
+          "power_fs2": 2.477948049359914e-12,
+          "dbc": -87.33685102425011
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000002046825,
+          "unaliased_frequency_hz": 5982.000002046824,
+          "aliased": false,
+          "power_fs2": 1.333598764838285e-13,
+          "dbc": -100.02752114913926
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.3689041030219687e-05,
+      "fitted_signal_power_fs2": 0.0013420765854194768,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0013420765854194768,
+          "signal_rms_dbfs": -28.722227005038015,
+          "noise_power_fs2": 3.238729635316817e-10,
+          "noise_rms_dbfs": -94.89625304781059,
+          "noise_and_distortion_power_fs2": 3.391418598802196e-10,
+          "noise_and_distortion_rms_dbfs": -94.69618602457219,
+          "fitted_harmonic_power_fs2": 1.5430059438405017e-11,
+          "snr_db": 66.17402604277258,
+          "sinad_db": 65.97395901953416,
+          "thd_db": -79.3940970047637,
+          "thd_percent": 0.01072247765236813
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0013420765854194768,
+          "signal_rms_dbfs": -28.722227005038015,
+          "noise_power_fs2": 4.002825948222542e-10,
+          "noise_rms_dbfs": -93.97633293574609,
+          "noise_and_distortion_power_fs2": 4.155514911707959e-10,
+          "noise_and_distortion_rms_dbfs": -93.81375154922415,
+          "fitted_harmonic_power_fs2": 1.5430059438405017e-11,
+          "snr_db": 65.25410593070808,
+          "sinad_db": 65.09152454418613,
+          "thd_db": -79.3940970047637,
+          "thd_percent": 0.01072247765236813
+        }
+      ],
+      "segment_index": 9,
+      "window": "first-second",
+      "capture_start_sample": 696293,
+      "capture_end_sample": 744293,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 633600,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.25
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.2691497802734375e-05,
+        "rms": 0.03663460029172925,
+        "rms_dbfs": -28.722170850914065,
+        "peak": 0.05194091796875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.99999961968,
+      "frequency_offset_hz": -3.8031998883525375e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999992393605,
+          "unaliased_frequency_hz": 1993.99999923936,
+          "aliased": false,
+          "power_fs2": 8.203883261035083e-12,
+          "dbc": -82.13762970672309
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.999998859039,
+          "unaliased_frequency_hz": 2990.99999885904,
+          "aliased": false,
+          "power_fs2": 1.599169113688746e-12,
+          "dbc": -89.23888049284989
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.999998478721,
+          "unaliased_frequency_hz": 3987.99999847872,
+          "aliased": false,
+          "power_fs2": 1.4612806591456257e-12,
+          "dbc": -89.63048806320762
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.999998098399,
+          "unaliased_frequency_hz": 4984.9999980984,
+          "aliased": false,
+          "power_fs2": 2.7627930961980804e-12,
+          "dbc": -86.86434080424297
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999997718078,
+          "unaliased_frequency_hz": 5981.99999771808,
+          "aliased": false,
+          "power_fs2": 1.67815127656998e-13,
+          "dbc": -99.02951334887675
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.2691497922736494e-05,
+      "fitted_signal_power_fs2": 0.001342092478730955,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.001342092478730955,
+          "signal_rms_dbfs": -28.722175574764364,
+          "noise_power_fs2": 3.200093257939807e-10,
+          "noise_rms_dbfs": -94.94837365174314,
+          "noise_and_distortion_power_fs2": 3.3485167224823423e-10,
+          "noise_and_distortion_rms_dbfs": -94.75147527857062,
+          "fitted_harmonic_power_fs2": 1.4194941257724533e-11,
+          "snr_db": 66.22619807697878,
+          "sinad_db": 66.02929970380626,
+          "thd_db": -79.75648842878938,
+          "thd_percent": 0.010284319932837222
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.001342092478730955,
+          "signal_rms_dbfs": -28.722175574764364,
+          "noise_power_fs2": 3.8849849298456696e-10,
+          "noise_rms_dbfs": -94.10610661521383,
+          "noise_and_distortion_power_fs2": 4.033408394388324e-10,
+          "noise_and_distortion_rms_dbfs": -93.94327802180405,
+          "fitted_harmonic_power_fs2": 1.4194941257724533e-11,
+          "snr_db": 65.38393104044947,
+          "sinad_db": 65.22110244703968,
+          "thd_db": -79.75648842878938,
+          "thd_percent": 0.010284319932837222
+        }
+      ],
+      "segment_index": 9,
+      "window": "second-second",
+      "capture_start_sample": 744293,
+      "capture_end_sample": 792293,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 633600,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.25
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.7611503601074218e-05,
+        "rms": 0.05128744382980796,
+        "rms_dbfs": -25.799778913312828,
+        "peak": 0.0726318359375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000000525173,
+      "frequency_offset_hz": 5.251729362498736e-08,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000001050357,
+          "unaliased_frequency_hz": 1994.0000001050346,
+          "aliased": false,
+          "power_fs2": 1.692652831771435e-11,
+          "dbc": -81.9145401804751
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000001575536,
+          "unaliased_frequency_hz": 2991.0000001575518,
+          "aliased": false,
+          "power_fs2": 5.58385579032049e-14,
+          "dbc": -106.73087716583474
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000000210068,
+          "unaliased_frequency_hz": 3988.000000210069,
+          "aliased": false,
+          "power_fs2": 3.695437255603172e-13,
+          "dbc": -98.52356077332844
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000000262586,
+          "unaliased_frequency_hz": 4985.000000262587,
+          "aliased": false,
+          "power_fs2": 1.225205708149244e-12,
+          "dbc": -93.31812898687389
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.0000003151035,
+          "unaliased_frequency_hz": 5982.0000003151035,
+          "aliased": false,
+          "power_fs2": 7.929482848544247e-13,
+          "dbc": -95.20777046104021
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.761150357804156e-05,
+      "fitted_signal_power_fs2": 0.0026304006923730697,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0026304006923730697,
+          "signal_rms_dbfs": -25.799780898252003,
+          "noise_power_fs2": 3.219674657985261e-10,
+          "noise_rms_dbfs": -94.92188010720396,
+          "noise_and_distortion_power_fs2": 3.4065007731098234e-10,
+          "noise_and_distortion_rms_dbfs": -94.6769150816087,
+          "fitted_harmonic_power_fs2": 1.937006459418154e-11,
+          "snr_db": 69.12209920895195,
+          "sinad_db": 68.87713418335669,
+          "thd_db": -81.32890841192919,
+          "thd_percent": 0.008581329527075191
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0026304006923730697,
+          "signal_rms_dbfs": -25.799780898252003,
+          "noise_power_fs2": 3.9949317472427667e-10,
+          "noise_rms_dbfs": -93.98490636136987,
+          "noise_and_distortion_power_fs2": 4.1817578623673225e-10,
+          "noise_and_distortion_rms_dbfs": -93.78641117879467,
+          "fitted_harmonic_power_fs2": 1.937006459418154e-11,
+          "snr_db": 68.18512546311786,
+          "sinad_db": 67.98663028054267,
+          "thd_db": -81.32890841192919,
+          "thd_percent": 0.008581329527075191
+        }
+      ],
+      "segment_index": 11,
+      "window": "steady",
+      "capture_start_sample": 869093,
+      "capture_end_sample": 965093,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 806400,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.35
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.5439351399739584e-05,
+        "rms": 0.05128750398872582,
+        "rms_dbfs": -25.799768724982588,
+        "peak": 0.0726318359375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.000000816699,
+      "frequency_offset_hz": 8.166989573510364e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.000001633398,
+          "unaliased_frequency_hz": 1994.000001633398,
+          "aliased": false,
+          "power_fs2": 1.7656126007467887e-11,
+          "dbc": -81.73127521282609
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000024500987,
+          "unaliased_frequency_hz": 2991.000002450097,
+          "aliased": false,
+          "power_fs2": 9.783588004297184e-14,
+          "dbc": -104.29524785019636
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000003266796,
+          "unaliased_frequency_hz": 3988.000003266796,
+          "aliased": false,
+          "power_fs2": 5.521815471878037e-13,
+          "dbc": -96.77941051615663
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000004083493,
+          "unaliased_frequency_hz": 4985.000004083495,
+          "aliased": false,
+          "power_fs2": 1.3417189922400849e-12,
+          "dbc": -92.92361373576779
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000004900194,
+          "unaliased_frequency_hz": 5982.000004900194,
+          "aliased": false,
+          "power_fs2": 6.949816258290749e-13,
+          "dbc": -95.78049618190914
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.5439351041861675e-05,
+      "fitted_signal_power_fs2": 0.0026304069352027317,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0026304069352027317,
+          "signal_rms_dbfs": -25.799770590988686,
+          "noise_power_fs2": 3.2202694596188544e-10,
+          "noise_rms_dbfs": -94.92107786711207,
+          "noise_and_distortion_power_fs2": 3.4291868314844923e-10,
+          "noise_and_distortion_rms_dbfs": -94.64808852688392,
+          "fitted_harmonic_power_fs2": 2.034284405276782e-11,
+          "snr_db": 69.12130727612339,
+          "sinad_db": 68.84831793589524,
+          "thd_db": -81.11611271071627,
+          "thd_percent": 0.00879416003243095
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0026304069352027317,
+          "signal_rms_dbfs": -25.799770590988686,
+          "noise_power_fs2": 4.077631521511301e-10,
+          "noise_rms_dbfs": -93.89592022158826,
+          "noise_and_distortion_power_fs2": 4.2865488933771353e-10,
+          "noise_and_distortion_rms_dbfs": -93.67892218244774,
+          "fitted_harmonic_power_fs2": 2.034284405276782e-11,
+          "snr_db": 68.09614963059957,
+          "sinad_db": 67.87915159145905,
+          "thd_db": -81.11611271071627,
+          "thd_percent": 0.00879416003243095
+        }
+      ],
+      "segment_index": 11,
+      "window": "first-second",
+      "capture_start_sample": 869093,
+      "capture_end_sample": 917093,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 806400,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.35
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.9783655802408855e-05,
+        "rms": 0.05128738367081954,
+        "rms_dbfs": -25.799789101666967,
+        "peak": 0.0726318359375,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000006603166,
+      "frequency_offset_hz": 6.603165729757166e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000013206336,
+          "unaliased_frequency_hz": 1994.0000013206331,
+          "aliased": false,
+          "power_fs2": 1.624197485631802e-11,
+          "dbc": -82.09382046211076
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000019809486,
+          "unaliased_frequency_hz": 2991.0000019809495,
+          "aliased": false,
+          "power_fs2": 2.795498907427108e-14,
+          "dbc": -109.73561553190183
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000002641267,
+          "unaliased_frequency_hz": 3988.0000026412663,
+          "aliased": false,
+          "power_fs2": 2.519515667922825e-13,
+          "dbc": -100.18703816633689
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000003301582,
+          "unaliased_frequency_hz": 4985.000003301583,
+          "aliased": false,
+          "power_fs2": 1.1140786768306978e-12,
+          "dbc": -93.73105018019537
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000003961897,
+          "unaliased_frequency_hz": 5982.000003961899,
+          "aliased": false,
+          "power_fs2": 8.995912372788759e-13,
+          "dbc": -94.65975663631532
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.9783655512566377e-05,
+      "fitted_signal_power_fs2": 0.0026303944531915016,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0026303944531915016,
+          "signal_rms_dbfs": -25.79979119951655,
+          "noise_power_fs2": 3.1863525943363437e-10,
+          "noise_rms_dbfs": -94.96706167862627,
+          "noise_and_distortion_power_fs2": 3.370101759742375e-10,
+          "noise_and_distortion_rms_dbfs": -94.72356985470685,
+          "fitted_harmonic_power_fs2": 1.8535551326294148e-11,
+          "snr_db": 69.16727047910972,
+          "sinad_db": 68.92377865519032,
+          "thd_db": -81.52015371721808,
+          "thd_percent": 0.008394451304347161
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0026303944531915016,
+          "signal_rms_dbfs": -25.79979119951655,
+          "noise_power_fs2": 3.951305210271419e-10,
+          "noise_rms_dbfs": -94.03259422857849,
+          "noise_and_distortion_power_fs2": 4.135054375677422e-10,
+          "noise_and_distortion_rms_dbfs": -93.83518775131655,
+          "fitted_harmonic_power_fs2": 1.8535551326294148e-11,
+          "snr_db": 68.23280302906193,
+          "sinad_db": 68.0353965518,
+          "thd_db": -81.52015371721808,
+          "thd_percent": 0.008394451304347161
+        }
+      ],
+      "segment_index": 11,
+      "window": "second-second",
+      "capture_start_sample": 917093,
+      "capture_end_sample": 965093,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 806400,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.35
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.564661661783854e-05,
+        "rms": 0.07326781300434373,
+        "rms_dbfs": -22.701735433399165,
+        "peak": 0.103729248046875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000003487016,
+      "frequency_offset_hz": 3.4870163290179335e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000006974042,
+          "unaliased_frequency_hz": 1994.0000006974033,
+          "aliased": false,
+          "power_fs2": 3.3402631271922156e-12,
+          "dbc": -92.06045665121991
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000010461044,
+          "unaliased_frequency_hz": 2991.000001046105,
+          "aliased": false,
+          "power_fs2": 5.248573787337838e-13,
+          "dbc": -100.09785037431995
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000013948084,
+          "unaliased_frequency_hz": 3988.0000013948065,
+          "aliased": false,
+          "power_fs2": 5.759075854591253e-12,
+          "dbc": -89.6947354576808
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000001743509,
+          "unaliased_frequency_hz": 4985.000001743509,
+          "aliased": false,
+          "power_fs2": 6.9752224300320855e-15,
+          "dbc": -118.86268283357646
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000002092209,
+          "unaliased_frequency_hz": 5982.00000209221,
+          "aliased": false,
+          "power_fs2": 8.518688822604388e-13,
+          "dbc": -97.99453590282147
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.564661639942686e-05,
+      "fitted_signal_power_fs2": 0.005368171036859712,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.005368171036859712,
+          "signal_rms_dbfs": -22.70173655435743,
+          "noise_power_fs2": 3.192448644700138e-10,
+          "noise_rms_dbfs": -94.95876080283102,
+          "noise_and_distortion_power_fs2": 3.3041553968625134e-10,
+          "noise_and_distortion_rms_dbfs": -94.80939535681901,
+          "fitted_harmonic_power_fs2": 1.0483040465207723e-11,
+          "snr_db": 72.25702424847358,
+          "sinad_db": 72.10765880246159,
+          "thd_db": -87.09339082359949,
+          "thd_percent": 0.0044190657038835155
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.005368171036859712,
+          "signal_rms_dbfs": -22.70173655435743,
+          "noise_power_fs2": 3.9642547484655117e-10,
+          "noise_rms_dbfs": -94.01838444928953,
+          "noise_and_distortion_power_fs2": 4.0759615006278956e-10,
+          "noise_and_distortion_rms_dbfs": -93.89769926761741,
+          "fitted_harmonic_power_fs2": 1.0483040465207723e-11,
+          "snr_db": 71.31664789493209,
+          "sinad_db": 71.19596271325997,
+          "thd_db": -87.09339082359949,
+          "thd_percent": 0.0044190657038835155
+        }
+      ],
+      "segment_index": 13,
+      "window": "steady",
+      "capture_start_sample": 1041893,
+      "capture_end_sample": 1137893,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 979200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.5
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.2866973876953126e-05,
+        "rms": 0.07326765411060088,
+        "rms_dbfs": -22.701754270252003,
+        "peak": 0.103729248046875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000009190485,
+      "frequency_offset_hz": 9.19048488867702e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.000001838096,
+          "unaliased_frequency_hz": 1994.000001838097,
+          "aliased": false,
+          "power_fs2": 3.1652471425447706e-12,
+          "dbc": -92.29416819306752
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.000002757144,
+          "unaliased_frequency_hz": 2991.0000027571455,
+          "aliased": false,
+          "power_fs2": 6.148320621010375e-13,
+          "dbc": -99.41067937810831
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000003676192,
+          "unaliased_frequency_hz": 3988.000003676194,
+          "aliased": false,
+          "power_fs2": 5.3172993965747235e-12,
+          "dbc": -90.04133330257616
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.00000459524,
+          "unaliased_frequency_hz": 4985.000004595242,
+          "aliased": false,
+          "power_fs2": 1.4484271641505307e-14,
+          "dbc": -115.68927783619492
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000005514292,
+          "unaliased_frequency_hz": 5982.000005514291,
+          "aliased": false,
+          "power_fs2": 9.613323331613321e-13,
+          "dbc": -97.46950895216594
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.2866973301280985e-05,
+      "fitted_signal_power_fs2": 0.005368147553361123,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.005368147553361123,
+          "signal_rms_dbfs": -22.701755552962524,
+          "noise_power_fs2": 3.222076702628714e-10,
+          "noise_rms_dbfs": -94.91864125266305,
+          "noise_and_distortion_power_fs2": 3.318366632073552e-10,
+          "noise_and_distortion_rms_dbfs": -94.7907563232914,
+          "fitted_harmonic_power_fs2": 1.007319520602337e-11,
+          "snr_db": 72.21688569970053,
+          "sinad_db": 72.08900077032888,
+          "thd_db": -87.2665719458319,
+          "thd_percent": 0.004331829980451363
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.005368147553361123,
+          "signal_rms_dbfs": -22.701755552962524,
+          "noise_power_fs2": 4.02850420238493e-10,
+          "noise_rms_dbfs": -93.94856178979934,
+          "noise_and_distortion_power_fs2": 4.124794131829742e-10,
+          "noise_and_distortion_rms_dbfs": -93.84597722178654,
+          "fitted_harmonic_power_fs2": 1.007319520602337e-11,
+          "snr_db": 71.24680623683682,
+          "sinad_db": 71.144221668824,
+          "thd_db": -87.2665719458319,
+          "thd_percent": 0.004331829980451363
+        }
+      ],
+      "segment_index": 13,
+      "window": "first-second",
+      "capture_start_sample": 1041893,
+      "capture_end_sample": 1089893,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 979200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.5
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.8426259358723957e-05,
+        "rms": 0.073267971897742,
+        "rms_dbfs": -22.70171659662803,
+        "peak": 0.10369873046875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000003549487,
+      "frequency_offset_hz": 3.5494872463459615e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.000000709897,
+          "unaliased_frequency_hz": 1994.0000007098974,
+          "aliased": false,
+          "power_fs2": 3.5205379244128163e-12,
+          "dbc": -91.83219217628027
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000010648473,
+          "unaliased_frequency_hz": 2991.0000010648464,
+          "aliased": false,
+          "power_fs2": 4.455601267436523e-13,
+          "dbc": -100.80921925860174
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000001419794,
+          "unaliased_frequency_hz": 3988.000001419795,
+          "aliased": false,
+          "power_fs2": 6.2189887531486356e-12,
+          "dbc": -89.36108473267096
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000001774744,
+          "unaliased_frequency_hz": 4985.000001774743,
+          "aliased": false,
+          "power_fs2": 1.495454897356378e-14,
+          "dbc": -115.55054925349557
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000002129695,
+          "unaliased_frequency_hz": 5982.000002129693,
+          "aliased": false,
+          "power_fs2": 7.652820960966873e-13,
+          "dbc": -98.46006691617136
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.8426259136406824e-05,
+      "fitted_signal_power_fs2": 0.0053681945235295354,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0053681945235295354,
+          "signal_rms_dbfs": -22.701717553269877,
+          "noise_power_fs2": 3.2086227234864757e-10,
+          "noise_rms_dbfs": -94.93681345148329,
+          "noise_and_distortion_power_fs2": 3.33039075228113e-10,
+          "noise_and_distortion_rms_dbfs": -94.77504808054155,
+          "fitted_harmonic_power_fs2": 1.0965323449375355e-11,
+          "snr_db": 72.2350958982134,
+          "sinad_db": 72.07333052727168,
+          "thd_db": -86.89806797879072,
+          "thd_percent": 0.004519564628483049
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.0053681945235295354,
+          "signal_rms_dbfs": -22.701717553269877,
+          "noise_power_fs2": 3.9411945933947214e-10,
+          "noise_rms_dbfs": -94.04372121655285,
+          "noise_and_distortion_power_fs2": 4.0629626221893714e-10,
+          "noise_and_distortion_rms_dbfs": -93.91157173009933,
+          "fitted_harmonic_power_fs2": 1.0965323449375355e-11,
+          "snr_db": 71.34200366328298,
+          "sinad_db": 71.20985417682947,
+          "thd_db": -86.89806797879072,
+          "thd_percent": 0.004519564628483049
+        }
+      ],
+      "segment_index": 13,
+      "window": "second-second",
+      "capture_start_sample": 1089893,
+      "capture_end_sample": 1137893,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 979200,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.5
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.5817324320475262e-05,
+        "rms": 0.10258009890086238,
+        "rms_dbfs": -19.778737731048103,
+        "peak": 0.14520263671875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.9999995356002,
+      "frequency_offset_hz": -4.643998181563802e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999990712022,
+          "unaliased_frequency_hz": 1993.9999990712004,
+          "aliased": false,
+          "power_fs2": 1.0997132604465168e-11,
+          "dbc": -89.80846707487032
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.9999986067996,
+          "unaliased_frequency_hz": 2990.9999986068005,
+          "aliased": false,
+          "power_fs2": 9.572208135703093e-12,
+          "dbc": -90.4111403610196
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.9999981424007,
+          "unaliased_frequency_hz": 3987.9999981424007,
+          "aliased": false,
+          "power_fs2": 2.3386548800030158e-14,
+          "dbc": -116.53160032507985
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.999997678002,
+          "unaliased_frequency_hz": 4984.999997678001,
+          "aliased": false,
+          "power_fs2": 9.360114995865781e-15,
+          "dbc": -120.50844984940215
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999997213599,
+          "unaliased_frequency_hz": 5981.999997213601,
+          "aliased": false,
+          "power_fs2": 3.6029803035127592e-12,
+          "dbc": -94.65464281374382
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.5817324728608716e-05,
+      "fitted_signal_power_fs2": 0.01052267529590743,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.01052267529590743,
+          "signal_rms_dbfs": -19.778738306632214,
+          "noise_power_fs2": 3.180817904553287e-10,
+          "noise_rms_dbfs": -94.97461192669222,
+          "noise_and_distortion_power_fs2": 3.4132304559188954e-10,
+          "noise_and_distortion_rms_dbfs": -94.66834387855259,
+          "fitted_harmonic_power_fs2": 2.4205067707476917e-11,
+          "snr_db": 75.19587362006,
+          "sinad_db": 74.88960557192038,
+          "thd_db": -86.382198675306,
+          "thd_percent": 0.004796120281900537
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.01052267529590743,
+          "signal_rms_dbfs": -19.778738306632214,
+          "noise_power_fs2": 3.916969375533247e-10,
+          "noise_rms_dbfs": -94.07049823930541,
+          "noise_and_distortion_power_fs2": 4.149381926898848e-10,
+          "noise_and_distortion_rms_dbfs": -93.82016589005495,
+          "fitted_harmonic_power_fs2": 2.4205067707476917e-11,
+          "snr_db": 74.29175993267319,
+          "sinad_db": 74.04142758342273,
+          "thd_db": -86.382198675306,
+          "thd_percent": 0.004796120281900537
+        }
+      ],
+      "segment_index": 15,
+      "window": "steady",
+      "capture_start_sample": 1214693,
+      "capture_end_sample": 1310693,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 1152000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.7
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.2297312418619791e-05,
+        "rms": 0.10257983028723411,
+        "rms_dbfs": -19.778760475726752,
+        "peak": 0.145172119140625,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.9999990261833,
+      "frequency_offset_hz": -9.738166681927396e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.999998052368,
+          "unaliased_frequency_hz": 1993.9999980523667,
+          "aliased": false,
+          "power_fs2": 1.1339391211513802e-11,
+          "dbc": -89.67534159073503
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.99999707855,
+          "unaliased_frequency_hz": 2990.99999707855,
+          "aliased": false,
+          "power_fs2": 1.0149029375420144e-11,
+          "dbc": -90.15699388348436
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.9999961047324,
+          "unaliased_frequency_hz": 3987.9999961047333,
+          "aliased": false,
+          "power_fs2": 3.8811770422974126e-14,
+          "dbc": -114.33160444078868
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.999995130915,
+          "unaliased_frequency_hz": 4984.999995130916,
+          "aliased": false,
+          "power_fs2": 4.7890119013071745e-18,
+          "dbc": -153.41877981561532
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.9999941571,
+          "unaliased_frequency_hz": 5981.9999941571,
+          "aliased": false,
+          "power_fs2": 3.5996119030661155e-12,
+          "dbc": -94.65868218627378
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.229731327461871e-05,
+      "fitted_signal_power_fs2": 0.010522620260186442,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.010522620260186442,
+          "signal_rms_dbfs": -19.778761021171782,
+          "noise_power_fs2": 3.128679796343662e-10,
+          "noise_rms_dbfs": -95.04638882298663,
+          "noise_and_distortion_power_fs2": 3.3949444010456453e-10,
+          "noise_and_distortion_rms_dbfs": -94.6916733375956,
+          "fitted_harmonic_power_fs2": 2.512684904943494e-11,
+          "snr_db": 75.26762780181484,
+          "sinad_db": 74.91291231642383,
+          "thd_db": -86.21985867159009,
+          "thd_percent": 0.0048866031028691375
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.010522620260186442,
+          "signal_rms_dbfs": -19.778761021171782,
+          "noise_power_fs2": 3.888690360165334e-10,
+          "noise_rms_dbfs": -94.10196636493905,
+          "noise_and_distortion_power_fs2": 4.1549549648673845e-10,
+          "noise_and_distortion_rms_dbfs": -93.81433679127906,
+          "fitted_harmonic_power_fs2": 2.512684904943494e-11,
+          "snr_db": 74.32320534376726,
+          "sinad_db": 74.03557577010727,
+          "thd_db": -86.21985867159009,
+          "thd_percent": 0.0048866031028691375
+        }
+      ],
+      "segment_index": 15,
+      "window": "first-second",
+      "capture_start_sample": 1214693,
+      "capture_end_sample": 1262693,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 1152000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.7
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.933733622233073e-05,
+        "rms": 0.10258036751378727,
+        "rms_dbfs": -19.778714986488573,
+        "peak": 0.14520263671875,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000008578554,
+      "frequency_offset_hz": 8.578554115956649e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000017157108,
+          "unaliased_frequency_hz": 1994.0000017157108,
+          "aliased": false,
+          "power_fs2": 1.0682665176831443e-11,
+          "dbc": -89.93448824480998
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000025735644,
+          "unaliased_frequency_hz": 2991.0000025735662,
+          "aliased": false,
+          "power_fs2": 9.012568778441125e-12,
+          "dbc": -90.67279849131516
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000034314216,
+          "unaliased_frequency_hz": 3988.0000034314216,
+          "aliased": false,
+          "power_fs2": 3.140050198224076e-14,
+          "dbc": -115.25191850191497
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000004289279,
+          "unaliased_frequency_hz": 4985.000004289277,
+          "aliased": false,
+          "power_fs2": 3.745071654537665e-14,
+          "dbc": -114.48668309662109
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.0000051471325,
+          "unaliased_frequency_hz": 5982.0000051471325,
+          "aliased": false,
+          "power_fs2": 3.609627500118428e-12,
+          "dbc": -94.64666054469927
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.933733546856162e-05,
+      "fitted_signal_power_fs2": 0.01052273034044861,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.01052273034044861,
+          "signal_rms_dbfs": -19.77871558857117,
+          "noise_power_fs2": 3.14659456245013e-10,
+          "noise_rms_dbfs": -95.0215921216592,
+          "noise_and_distortion_power_fs2": 3.387171060368055e-10,
+          "noise_and_distortion_rms_dbfs": -94.70162869875014,
+          "fitted_harmonic_power_fs2": 2.3373712673918614e-11,
+          "snr_db": 75.24287653308802,
+          "sinad_db": 74.92291311017898,
+          "thd_db": -86.53400740058612,
+          "thd_percent": 0.004713023768413322
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.01052273034044861,
+          "signal_rms_dbfs": -19.77871558857117,
+          "noise_power_fs2": 3.932403502027861e-10,
+          "noise_rms_dbfs": -94.05341925806013,
+          "noise_and_distortion_power_fs2": 4.172979999945987e-10,
+          "noise_and_distortion_rms_dbfs": -93.7955369674861,
+          "fitted_harmonic_power_fs2": 2.3373712673918614e-11,
+          "snr_db": 74.27470366948896,
+          "sinad_db": 74.01682137891493,
+          "thd_db": -86.53400740058612,
+          "thd_percent": 0.004713023768413322
+        }
+      ],
+      "segment_index": 15,
+      "window": "second-second",
+      "capture_start_sample": 1262693,
+      "capture_end_sample": 1310693,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 1152000,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.7
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 2.0,
+      "levels": {
+        "samples": 96000,
+        "dc": -1.5673319498697915e-05,
+        "rms": 0.13189043270742476,
+        "rms_dbfs": -17.595734138059893,
+        "peak": 0.1866455078125,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000000703758,
+      "frequency_offset_hz": 7.037579052848741e-08,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000001407534,
+          "unaliased_frequency_hz": 1994.0000001407516,
+          "aliased": false,
+          "power_fs2": 2.6331924632139195e-11,
+          "dbc": -88.19943936159046
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000002111265,
+          "unaliased_frequency_hz": 2991.0000002111274,
+          "aliased": false,
+          "power_fs2": 5.50590664393296e-12,
+          "dbc": -94.99597696145828
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.000000281503,
+          "unaliased_frequency_hz": 3988.000000281503,
+          "aliased": false,
+          "power_fs2": 1.293269995883875e-13,
+          "dbc": -111.28737337559123
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.00000035188,
+          "unaliased_frequency_hz": 4985.000000351879,
+          "aliased": false,
+          "power_fs2": 2.550018372851321e-12,
+          "dbc": -98.33883230001192
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000000422253,
+          "unaliased_frequency_hz": 5982.000000422255,
+          "aliased": false,
+          "power_fs2": 1.6559571489278133e-14,
+          "dbc": -120.2137744514257
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.5673319419077184e-05,
+      "fitted_signal_power_fs2": 0.017395084370802175,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.00014583333333333335,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.017395084370802175,
+          "signal_rms_dbfs": -17.595734604671275,
+          "noise_power_fs2": 3.268675492075745e-10,
+          "noise_rms_dbfs": -94.8562819321478,
+          "noise_and_distortion_power_fs2": 3.622019485099685e-10,
+          "noise_and_distortion_rms_dbfs": -94.4104921767505,
+          "fitted_harmonic_power_fs2": 3.4533736220001144e-11,
+          "snr_db": 77.2605473274765,
+          "sinad_db": 76.81475757207922,
+          "thd_db": -87.02182972131853,
+          "thd_percent": 0.004455623788122565
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.017395084370802175,
+          "signal_rms_dbfs": -17.595734604671275,
+          "noise_power_fs2": 4.0696383235772645e-10,
+          "noise_rms_dbfs": -93.90444185628381,
+          "noise_and_distortion_power_fs2": 4.4229823166011844e-10,
+          "noise_and_distortion_rms_dbfs": -93.54284796967244,
+          "fitted_harmonic_power_fs2": 3.4533736220001144e-11,
+          "snr_db": 76.30870725161253,
+          "sinad_db": 75.94711336500117,
+          "thd_db": -87.02182972131853,
+          "thd_percent": 0.004455623788122565
+        }
+      ],
+      "segment_index": 17,
+      "window": "steady",
+      "capture_start_sample": 1387493,
+      "capture_end_sample": 1483493,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 1324800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.9
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.6056060791015624e-05,
+        "rms": 0.1318902399425382,
+        "rms_dbfs": -17.595746832959133,
+        "peak": 0.1866455078125,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 996.999999598914,
+      "frequency_offset_hz": -4.0108602661348414e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1993.9999991978293,
+          "unaliased_frequency_hz": 1993.999999197828,
+          "aliased": false,
+          "power_fs2": 2.6454688730122353e-11,
+          "dbc": -88.17922617160713
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2990.999998796742,
+          "unaliased_frequency_hz": 2990.999998796742,
+          "aliased": false,
+          "power_fs2": 4.812183552327134e-12,
+          "dbc": -95.58083088696785
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3987.999998395655,
+          "unaliased_frequency_hz": 3987.999998395656,
+          "aliased": false,
+          "power_fs2": 2.133116764951038e-13,
+          "dbc": -109.11410644082926
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4984.9999979945715,
+          "unaliased_frequency_hz": 4984.99999799457,
+          "aliased": false,
+          "power_fs2": 2.461370838903942e-12,
+          "dbc": -98.4924822209706
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5981.999997593484,
+          "unaliased_frequency_hz": 5981.999997593484,
+          "aliased": false,
+          "power_fs2": 3.147454816985675e-14,
+          "dbc": -117.42465768736221
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.6056061244746406e-05,
+      "fitted_signal_power_fs2": 0.017395033644966907,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.017395033644966907,
+          "signal_rms_dbfs": -17.59574726915855,
+          "noise_power_fs2": 3.253738433226121e-10,
+          "noise_rms_dbfs": -94.8761736276131,
+          "noise_and_distortion_power_fs2": 3.5990151569532745e-10,
+          "noise_and_distortion_rms_dbfs": -94.43816324348114,
+          "fitted_harmonic_power_fs2": 3.397302934601839e-11,
+          "snr_db": 77.28042635845453,
+          "sinad_db": 76.84241597432259,
+          "thd_db": -87.09290998819326,
+          "thd_percent": 0.0044193103422747885
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.017395033644966907,
+          "signal_rms_dbfs": -17.59574726915855,
+          "noise_power_fs2": 4.10738026501432e-10,
+          "noise_rms_dbfs": -93.86435087905438,
+          "noise_and_distortion_power_fs2": 4.452656988741309e-10,
+          "noise_and_distortion_rms_dbfs": -93.51380759536332,
+          "fitted_harmonic_power_fs2": 3.397302934601839e-11,
+          "snr_db": 76.26860360989583,
+          "sinad_db": 75.91806032620475,
+          "thd_db": -87.09290998819326,
+          "thd_percent": 0.0044193103422747885
+        }
+      ],
+      "segment_index": 17,
+      "window": "first-second",
+      "capture_start_sample": 1387493,
+      "capture_end_sample": 1435493,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 1324800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.9
+      }
+    },
+    {
+      "analysis": "stationary_single_tone",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.529057820638021e-05,
+        "rms": 0.13189062547202957,
+        "rms_dbfs": -17.59572144319776,
+        "peak": 0.1866455078125,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "frequency_hint_hz": 997.0,
+      "frequency_hz": 997.0000005171712,
+      "frequency_offset_hz": 5.171712018636754e-07,
+      "frequency_search_hz": 3.0,
+      "max_harmonic_requested": 6,
+      "harmonics": [
+        {
+          "order": 2,
+          "frequency_hz": 1994.0000010343429,
+          "unaliased_frequency_hz": 1994.0000010343424,
+          "aliased": false,
+          "power_fs2": 2.621451749506652e-11,
+          "dbc": -88.21885937479203
+        },
+        {
+          "order": 3,
+          "frequency_hz": 2991.0000015515143,
+          "unaliased_frequency_hz": 2991.0000015515134,
+          "aliased": false,
+          "power_fs2": 6.246456665135815e-12,
+          "dbc": -94.44794074570645
+        },
+        {
+          "order": 4,
+          "frequency_hz": 3988.0000020686857,
+          "unaliased_frequency_hz": 3988.000002068685,
+          "aliased": false,
+          "power_fs2": 6.910309643231374e-14,
+          "dbc": -114.0093029791032
+        },
+        {
+          "order": 5,
+          "frequency_hz": 4985.000002585857,
+          "unaliased_frequency_hz": 4985.000002585856,
+          "aliased": false,
+          "power_fs2": 2.640930727322412e-12,
+          "dbc": -98.18670796332594
+        },
+        {
+          "order": 6,
+          "frequency_hz": 5982.000003103029,
+          "unaliased_frequency_hz": 5982.000003103027,
+          "aliased": false,
+          "power_fs2": 3.993407887445574e-14,
+          "dbc": -116.39084134588218
+        }
+      ],
+      "excluded_harmonics": [],
+      "fitted_dc": -1.529057762121594e-05,
+      "fitted_signal_power_fs2": 0.01739513509630423,
+      "fitted_parameter_count": 14,
+      "fitted_parameter_fraction": 0.0002916666666666667,
+      "noise_projection_bias_corrected": false,
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "Sub-bin fundamental fit; fixed harmonic multiples folded at Nyquist; Hann residual periodograms with window-energy normalization. SNR excludes fitted orders through max_harmonic; SINAD retains harmonic distortion. Separate silence is not substituted for in-tone noise.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.01739513509630423,
+          "signal_rms_dbfs": -17.595721940304124,
+          "noise_power_fs2": 3.253079521247027e-10,
+          "noise_rms_dbfs": -94.87705320297408,
+          "noise_and_distortion_power_fs2": 3.598057521355703e-10,
+          "noise_and_distortion_rms_dbfs": -94.4393189796443,
+          "fitted_harmonic_power_fs2": 3.5210942062831516e-11,
+          "snr_db": 77.28133126266995,
+          "sinad_db": 76.84359703934017,
+          "thd_db": -86.93750161268157,
+          "thd_percent": 0.004499092470408374
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "fundamental_in_band": true,
+          "signal_power_fs2": 0.01739513509630423,
+          "signal_rms_dbfs": -17.595721940304124,
+          "noise_power_fs2": 4.0529921983406796e-10,
+          "noise_rms_dbfs": -93.92224232236805,
+          "noise_and_distortion_power_fs2": 4.397970198449324e-10,
+          "noise_and_distortion_rms_dbfs": -93.56747717833997,
+          "fitted_harmonic_power_fs2": 3.5210942062831516e-11,
+          "snr_db": 76.32652038206393,
+          "sinad_db": 75.97175523803584,
+          "thd_db": -86.93750161268157,
+          "thd_percent": 0.004499092470408374
+        }
+      ],
+      "segment_index": 17,
+      "window": "second-second",
+      "capture_start_sample": 1435493,
+      "capture_end_sample": 1483493,
+      "tx_segment": {
+        "kind": "tone",
+        "start_sample": 1324800,
+        "samples": 144000,
+        "frequency_hz": 997,
+        "tx_peak_requested": 0.9
+      }
+    },
+    {
+      "analysis": "separate_silence",
+      "sample_rate": 48000.0,
+      "duration_seconds": 1.0,
+      "levels": {
+        "samples": 48000,
+        "dc": -1.3654073079427084e-05,
+        "rms": 3.332162262672736e-05,
+        "rms_dbfs": -89.54547716770858,
+        "peak": 0.0001220703125,
+        "near_full_scale_threshold": 0.999,
+        "near_full_scale_samples": 0,
+        "near_full_scale_fraction": 0.0,
+        "s16_full_scale_threshold": 0.999969482421875,
+        "s16_full_scale_samples": 0,
+        "outside_unit_range_samples": 0
+      },
+      "qualified": true,
+      "qualification_reasons": [],
+      "method": "DC-removed Hann periodogram with window-energy normalization; separate noise-floor measurement, not in-tone SNR.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "noise_power_fs2": 3.286151245390061e-10,
+          "noise_rms_dbfs": -94.83312452000558
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "noise_power_fs2": 4.025007321705593e-10,
+          "noise_rms_dbfs": -93.95233325290289
+        }
+      ],
+      "segment_index": 19,
+      "window": "steady",
+      "capture_start_sample": 1560293,
+      "capture_end_sample": 1608293,
+      "tx_segment": {
+        "kind": "silence",
+        "start_sample": 1497600,
+        "samples": 96000,
+        "frequency_hz": 0,
+        "tx_peak_requested": 0
+      }
+    }
+  ]
+}

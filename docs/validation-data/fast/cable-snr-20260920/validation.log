@@ -1,0 +1,6 @@
+...........
+----------------------------------------------------------------------
+Ran 11 tests in 3.019s
+
+OK
+PASS: 53 original PCM windows retain their SHA-256 and reproduce reported metrics within 0.001 dB.

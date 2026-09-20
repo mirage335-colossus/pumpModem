@@ -1,0 +1,2021 @@
+{
+  "method": "Independent one-sided Hann FFT power integration at the exact archived steady capture windows. Exclude DC, fundamental, and folded harmonics 2..6 with +/-2 and +/-3 native-bin masks. No analyzer core is called for this independent check. Masking omits some adjacent noise and slow sidebands, so slight positive SNR bias is expected.",
+  "sampling_caveat": "The ADC/DAC may share a clock; these near-coherent stationary tones do not prove performance for independent clocks or nonstationary signals.",
+  "independent_fft_rows": [
+    {
+      "dataset": "levels-g0",
+      "segment_index": 11,
+      "tx_peak": 0.35,
+      "capture_start_sample": 858095,
+      "capture_end_sample": 954095,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0026371172328033135,
+              "noise_power_fs2": 1.4744468629386764e-10,
+              "noise_and_distortion_power_fs2": 1.5904834296213854e-10,
+              "snr_db": 72.52500310956842,
+              "sinad_db": 72.19600287953887,
+              "reported_snr_db": 72.52175008000948,
+              "reported_sinad_db": 72.19566805909159,
+              "snr_difference_db": 0.0032530295589339175,
+              "sinad_difference_db": 0.0003348204472786165
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0026371172328033135,
+              "noise_power_fs2": 1.8876455342791497e-10,
+              "noise_and_distortion_power_fs2": 2.0036821009618584e-10,
+              "snr_db": 71.45208991781394,
+              "sinad_db": 71.19300618126225,
+              "reported_snr_db": 71.45519793625866,
+              "reported_sinad_db": 71.19806502206704,
+              "snr_difference_db": -0.0031080184447205284,
+              "sinad_difference_db": -0.005058840804792908
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0026371172328185075,
+              "noise_power_fs2": 1.4739194852182302e-10,
+              "noise_and_distortion_power_fs2": 1.5903314873651283e-10,
+              "snr_db": 72.52655676479952,
+              "sinad_db": 72.196417790115,
+              "reported_snr_db": 72.52175008000948,
+              "reported_sinad_db": 72.19566805909159,
+              "snr_difference_db": 0.004806684790040094,
+              "sinad_difference_db": 0.0007497310234185761
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0026371172328185075,
+              "noise_power_fs2": 1.8871181565587035e-10,
+              "noise_and_distortion_power_fs2": 2.003530158705601e-10,
+              "snr_db": 71.45330343610986,
+              "sinad_db": 71.19333552587506,
+              "reported_snr_db": 71.45519793625866,
+              "reported_sinad_db": 71.19806502206704,
+              "snr_difference_db": -0.0018945001487935542,
+              "sinad_difference_db": -0.004729496191984595
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g0",
+      "segment_index": 13,
+      "tx_peak": 0.5,
+      "capture_start_sample": 1030895,
+      "capture_end_sample": 1126895,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0053820052591134785,
+              "noise_power_fs2": 1.4924068242343322e-10,
+              "noise_and_distortion_power_fs2": 1.5574012249915648e-10,
+              "snr_db": 75.57056891561567,
+              "sinad_db": 75.38543605846314,
+              "reported_snr_db": 75.56859078770105,
+              "reported_sinad_db": 75.38563751976153,
+              "snr_difference_db": 0.001978127914611605,
+              "sinad_difference_db": -0.00020146129838849447
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0053820052591134785,
+              "noise_power_fs2": 1.886824748125906e-10,
+              "noise_and_distortion_power_fs2": 1.9518191488831386e-10,
+              "snr_db": 74.55212553865805,
+              "sinad_db": 74.40504543348496,
+              "reported_snr_db": 74.55529438818975,
+              "reported_sinad_db": 74.40978384342516,
+              "snr_difference_db": -0.0031688495317041543,
+              "sinad_difference_db": -0.004738409940202359
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.005382005259152785,
+              "noise_power_fs2": 1.4917099931000517e-10,
+              "noise_and_distortion_power_fs2": 1.5570081596529313e-10,
+              "snr_db": 75.57259718692805,
+              "sinad_db": 75.3865322927237,
+              "reported_snr_db": 75.56859078770105,
+              "reported_sinad_db": 75.38563751976153,
+              "snr_difference_db": 0.004006399226994972,
+              "sinad_difference_db": 0.0008947729621695544
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.005382005259152785,
+              "noise_power_fs2": 1.8861279169916257e-10,
+              "noise_and_distortion_power_fs2": 1.9514260835445053e-10,
+              "snr_db": 74.55372974604002,
+              "sinad_db": 74.40592012161855,
+              "reported_snr_db": 74.55529438818975,
+              "reported_sinad_db": 74.40978384342516,
+              "snr_difference_db": -0.0015646421497308438,
+              "sinad_difference_db": -0.0038637218066099877
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g0",
+      "segment_index": 15,
+      "tx_peak": 0.7,
+      "capture_start_sample": 1203695,
+      "capture_end_sample": 1299695,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.010549636509770989,
+              "noise_power_fs2": 1.417214102491826e-10,
+              "noise_and_distortion_power_fs2": 1.7177707349821627e-10,
+              "snr_db": 78.71802030888084,
+              "sinad_db": 77.8827229661654,
+              "reported_snr_db": 78.71499148032464,
+              "reported_sinad_db": 77.88283321537703,
+              "snr_difference_db": 0.003028828556196572,
+              "sinad_difference_db": -0.00011024921163027557
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.010549636509770989,
+              "noise_power_fs2": 1.849317191872691e-10,
+              "noise_and_distortion_power_fs2": 2.149873824363028e-10,
+              "snr_db": 77.56226089141835,
+              "sinad_db": 76.90824524159207,
+              "reported_snr_db": 77.56049164628874,
+              "reported_sinad_db": 76.9088084805601,
+              "snr_difference_db": 0.001769245129608521,
+              "sinad_difference_db": -0.0005632389680272354
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.010549636509867856,
+              "noise_power_fs2": 1.415611931754318e-10,
+              "noise_and_distortion_power_fs2": 1.7168020755515836e-10,
+              "snr_db": 78.72293281661547,
+              "sinad_db": 77.8851726650756,
+              "reported_snr_db": 78.71499148032464,
+              "reported_sinad_db": 77.88283321537703,
+              "snr_difference_db": 0.00794133629082694,
+              "sinad_difference_db": 0.002339449698567364
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.010549636509867856,
+              "noise_power_fs2": 1.847715021135183e-10,
+              "noise_and_distortion_power_fs2": 2.1489051649324489e-10,
+              "snr_db": 77.5660250672286,
+              "sinad_db": 76.9102024646188,
+              "reported_snr_db": 77.56049164628874,
+              "reported_sinad_db": 76.9088084805601,
+              "snr_difference_db": 0.005533420939855205,
+              "sinad_difference_db": 0.0013939840587084973
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g0",
+      "segment_index": 17,
+      "tx_peak": 0.9,
+      "capture_start_sample": 1376495,
+      "capture_end_sample": 1472495,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.017439032550755164,
+              "noise_power_fs2": 1.4760783579980416e-10,
+              "noise_and_distortion_power_fs2": 1.95864582678296e-10,
+              "snr_db": 80.72412975574521,
+              "sinad_db": 79.49566476753628,
+              "reported_snr_db": 80.72468298259751,
+              "reported_sinad_db": 79.49813513473526,
+              "snr_difference_db": -0.0005532268523040784,
+              "sinad_difference_db": -0.0024703671989811937
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.017439032550755164,
+              "noise_power_fs2": 1.8851996196581937e-10,
+              "noise_and_distortion_power_fs2": 2.367767088443112e-10,
+              "snr_db": 79.66165044839349,
+              "sinad_db": 78.67183408659736,
+              "reported_snr_db": 79.66409322418014,
+              "reported_sinad_db": 78.67547806332486,
+              "snr_difference_db": -0.002442775786647644,
+              "sinad_difference_db": -0.003643976727502718
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.017439032550926596,
+              "noise_power_fs2": 1.4740951032071478e-10,
+              "noise_and_distortion_power_fs2": 1.95693149453492e-10,
+              "snr_db": 80.72996884798344,
+              "sinad_db": 79.49946765549026,
+              "reported_snr_db": 80.72468298259751,
+              "reported_sinad_db": 79.49813513473526,
+              "snr_difference_db": 0.005285865385928901,
+              "sinad_difference_db": 0.0013325207549996776
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.017439032550926596,
+              "noise_power_fs2": 1.8832163648673e-10,
+              "noise_and_distortion_power_fs2": 2.366052756195072e-10,
+              "snr_db": 79.6662216884211,
+              "sinad_db": 78.67497964389595,
+              "reported_snr_db": 79.66409322418014,
+              "reported_sinad_db": 78.67547806332486,
+              "snr_difference_db": 0.002128464240968242,
+              "sinad_difference_db": -0.0004984194289079369
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g6",
+      "segment_index": 11,
+      "tx_peak": 0.35,
+      "capture_start_sample": 857972,
+      "capture_end_sample": 953972,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.010546180585603217,
+              "noise_power_fs2": 5.818612142613418e-10,
+              "noise_and_distortion_power_fs2": 6.281206157296601e-10,
+              "snr_db": 72.58275794690222,
+              "sinad_db": 72.25052155877938,
+              "reported_snr_db": 72.5797462040761,
+              "reported_sinad_db": 72.25021351834773,
+              "snr_difference_db": 0.0030117428261178247,
+              "sinad_difference_db": 0.0003080404316477825
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.010546180585603217,
+              "noise_power_fs2": 7.391715862489246e-10,
+              "noise_and_distortion_power_fs2": 7.854309877172428e-10,
+              "snr_db": 71.54349939365825,
+              "sinad_db": 71.2798717206902,
+              "reported_snr_db": 71.54337083808643,
+              "reported_sinad_db": 71.28173670840607,
+              "snr_difference_db": 0.00012855557181978838,
+              "sinad_difference_db": -0.0018649877158765094
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.010546180585699587,
+              "noise_power_fs2": 5.816205201011242e-10,
+              "noise_and_distortion_power_fs2": 6.280242465731801e-10,
+              "snr_db": 72.58455483199842,
+              "sinad_db": 72.25118792452614,
+              "reported_snr_db": 72.5797462040761,
+              "reported_sinad_db": 72.25021351834773,
+              "snr_difference_db": 0.0048086279223156225,
+              "sinad_difference_db": 0.0009744061784004998
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.010546180585699587,
+              "noise_power_fs2": 7.389308920887068e-10,
+              "noise_and_distortion_power_fs2": 7.853346185607627e-10,
+              "snr_db": 71.54491380370084,
+              "sinad_db": 71.28040461491562,
+              "reported_snr_db": 71.54337083808643,
+              "reported_sinad_db": 71.28173670840607,
+              "snr_difference_db": 0.001542965614405034,
+              "sinad_difference_db": -0.0013320934904470505
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g6",
+      "segment_index": 13,
+      "tx_peak": 0.5,
+      "capture_start_sample": 1030772,
+      "capture_end_sample": 1126772,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.021523758630411508,
+              "noise_power_fs2": 6.031447006613221e-10,
+              "noise_and_distortion_power_fs2": 6.287497659542074e-10,
+              "snr_db": 75.52496596794568,
+              "sinad_db": 75.34440276777627,
+              "reported_snr_db": 75.52173964079974,
+              "reported_sinad_db": 75.3435595107535,
+              "snr_difference_db": 0.0032263271459385123,
+              "sinad_difference_db": 0.0008432570227796532
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.021523758630411508,
+              "noise_power_fs2": 7.658523911858941e-10,
+              "noise_and_distortion_power_fs2": 7.914574564787792e-10,
+              "snr_db": 74.48773040506606,
+              "sinad_db": 74.34490538154695,
+              "reported_snr_db": 74.48699410840487,
+              "reported_sinad_db": 74.34598260854906,
+              "snr_difference_db": 0.0007362966611879074,
+              "sinad_difference_db": -0.0010772270021135455
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.021523758630466495,
+              "noise_power_fs2": 6.029725963020836e-10,
+              "noise_and_distortion_power_fs2": 6.286947806960632e-10,
+              "snr_db": 75.52620538263434,
+              "sinad_db": 75.34478258245636,
+              "reported_snr_db": 75.52173964079974,
+              "reported_sinad_db": 75.3435595107535,
+              "snr_difference_db": 0.004465741834607684,
+              "sinad_difference_db": 0.0012230717028671734
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.021523758630466495,
+              "noise_power_fs2": 7.656802868266556e-10,
+              "noise_and_distortion_power_fs2": 7.914024712206352e-10,
+              "snr_db": 74.48870647271079,
+              "sinad_db": 74.34520711127891,
+              "reported_snr_db": 74.48699410840487,
+              "reported_sinad_db": 74.34598260854906,
+              "snr_difference_db": 0.0017123643059164806,
+              "sinad_difference_db": -0.0007754972701548013
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g6",
+      "segment_index": 15,
+      "tx_peak": 0.7,
+      "capture_start_sample": 1203572,
+      "capture_end_sample": 1299572,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.042189920914679394,
+              "noise_power_fs2": 5.737314868526157e-10,
+              "noise_and_distortion_power_fs2": 6.994564321272455e-10,
+              "snr_db": 78.66500026322022,
+              "sinad_db": 77.80448043039827,
+              "reported_snr_db": 78.66045889497072,
+              "reported_sinad_db": 77.80294024872931,
+              "snr_difference_db": 0.00454136824950524,
+              "sinad_difference_db": 0.0015401816689575298
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.042189920914679394,
+              "noise_power_fs2": 7.295738354945029e-10,
+              "noise_and_distortion_power_fs2": 8.552987807691325e-10,
+              "snr_db": 77.62139460678148,
+              "sinad_db": 76.93090858352873,
+              "reported_snr_db": 77.61852365354392,
+              "reported_sinad_db": 76.93024704388927,
+              "snr_difference_db": 0.00287095323756148,
+              "sinad_difference_db": 0.0006615396394664685
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.042189920914716766,
+              "noise_power_fs2": 5.735463620092174e-10,
+              "noise_and_distortion_power_fs2": 6.994190576058801e-10,
+              "snr_db": 78.66640181906737,
+              "sinad_db": 77.80471249606508,
+              "reported_snr_db": 78.66045889497072,
+              "reported_sinad_db": 77.80294024872931,
+              "snr_difference_db": 0.0059429240966579755,
+              "sinad_difference_db": 0.001772247335765087
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.042189920914716766,
+              "noise_power_fs2": 7.293887106511046e-10,
+              "noise_and_distortion_power_fs2": 8.552614062477672e-10,
+              "snr_db": 77.62249674197852,
+              "sinad_db": 76.93109836403278,
+              "reported_snr_db": 77.61852365354392,
+              "reported_sinad_db": 76.93024704388927,
+              "snr_difference_db": 0.003973088434605643,
+              "sinad_difference_db": 0.0008513201435107476
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g6",
+      "segment_index": 17,
+      "tx_peak": 0.9,
+      "capture_start_sample": 1376372,
+      "capture_end_sample": 1472372,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.06974369957128336,
+              "noise_power_fs2": 6.011014047955725e-10,
+              "noise_and_distortion_power_fs2": 7.896112109569156e-10,
+              "snr_db": 80.64557237974412,
+              "sinad_db": 79.46091675056292,
+              "reported_snr_db": 80.64060407984557,
+              "reported_sinad_db": 79.45855958057135,
+              "snr_difference_db": 0.004968299898550299,
+              "sinad_difference_db": 0.002357169991569208
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.06974369957128336,
+              "noise_power_fs2": 7.58997701558607e-10,
+              "noise_and_distortion_power_fs2": 9.475075077199499e-10,
+              "snr_db": 79.63264520164589,
+              "sinad_db": 78.66922321053846,
+              "reported_snr_db": 79.63610717586009,
+              "reported_sinad_db": 78.67318592721749,
+              "snr_difference_db": -0.003461974214204133,
+              "sinad_difference_db": -0.003962716679026812
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.06974369957180653,
+              "noise_power_fs2": 6.002258149687408e-10,
+              "noise_and_distortion_power_fs2": 7.890880394925888e-10,
+              "snr_db": 80.65190310951098,
+              "sinad_db": 79.46379520243866,
+              "reported_snr_db": 80.64060407984557,
+              "reported_sinad_db": 79.45855958057135,
+              "snr_difference_db": 0.011299029665408966,
+              "sinad_difference_db": 0.0052356218673139665
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.06974369957180653,
+              "noise_power_fs2": 7.581221117317753e-10,
+              "noise_and_distortion_power_fs2": 9.469843362556233e-10,
+              "snr_db": 79.63765817256045,
+              "sinad_db": 78.67162185363244,
+              "reported_snr_db": 79.63610717586009,
+              "reported_sinad_db": 78.67318592721749,
+              "snr_difference_db": 0.0015509967003595193,
+              "sinad_difference_db": -0.0015640735850439569
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g12",
+      "segment_index": 11,
+      "tx_peak": 0.35,
+      "capture_start_sample": 869748,
+      "capture_end_sample": 965748,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.042182509096133004,
+              "noise_power_fs2": 2.3404715345129062e-09,
+              "noise_and_distortion_power_fs2": 2.5266898868141228e-09,
+              "snr_db": 72.5582904535494,
+              "sinad_db": 72.22580466762057,
+              "reported_snr_db": 72.55711495060903,
+              "reported_sinad_db": 72.22623962578103,
+              "snr_difference_db": 0.0011755029403701656,
+              "sinad_difference_db": -0.00043495816046856817
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.042182509096133004,
+              "noise_power_fs2": 3.0106571302505496e-09,
+              "noise_and_distortion_power_fs2": 3.1968754825517657e-09,
+              "snr_db": 71.46471110287658,
+              "sinad_db": 71.20406687889526,
+              "reported_snr_db": 71.46763562313994,
+              "reported_sinad_db": 71.20802639667895,
+              "snr_difference_db": -0.002924520263363206,
+              "sinad_difference_db": -0.003959517783684419
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.04218250909661549,
+              "noise_power_fs2": 2.3396493191771076e-09,
+              "noise_and_distortion_power_fs2": 2.526207394090259e-09,
+              "snr_db": 72.55981641242839,
+              "sinad_db": 72.22663406877032,
+              "reported_snr_db": 72.55711495060903,
+              "reported_sinad_db": 72.22623962578103,
+              "snr_difference_db": 0.0027014618193561546,
+              "sinad_difference_db": 0.00039444298928970056
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.04218250909661549,
+              "noise_power_fs2": 3.009834914914751e-09,
+              "noise_and_distortion_power_fs2": 3.1963929898279016e-09,
+              "snr_db": 71.46589733017419,
+              "sinad_db": 71.20472239319038,
+              "reported_snr_db": 71.46763562313994,
+              "reported_sinad_db": 71.20802639667895,
+              "snr_difference_db": -0.00173829296575434,
+              "sinad_difference_db": -0.0033040034885658542
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g12",
+      "segment_index": 13,
+      "tx_peak": 0.5,
+      "capture_start_sample": 1042548,
+      "capture_end_sample": 1138548,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.08609122822619515,
+              "noise_power_fs2": 2.383617181943077e-09,
+              "noise_and_distortion_power_fs2": 2.47872130059904e-09,
+              "snr_db": 75.57722396443012,
+              "sinad_db": 75.40731204906182,
+              "reported_snr_db": 75.57416965282857,
+              "reported_sinad_db": 75.4068552831476,
+              "snr_difference_db": 0.0030543116015451233,
+              "sinad_difference_db": 0.00045676591420829027
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.08609122822619515,
+              "noise_power_fs2": 3.036066235452137e-09,
+              "noise_and_distortion_power_fs2": 3.1311703541081004e-09,
+              "snr_db": 74.5264766176748,
+              "sinad_db": 74.39252207315712,
+              "reported_snr_db": 74.52424275512202,
+              "reported_sinad_db": 74.39231982636629,
+              "snr_difference_db": 0.0022338625527851264,
+              "sinad_difference_db": 0.00020224679083469255
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0860912282268569,
+              "noise_power_fs2": 2.382292262192313e-09,
+              "noise_and_distortion_power_fs2": 2.478059549930458e-09,
+              "snr_db": 75.57963863624141,
+              "sinad_db": 75.40847165116006,
+              "reported_snr_db": 75.57416965282857,
+              "reported_sinad_db": 75.4068552831476,
+              "snr_difference_db": 0.005468983412839634,
+              "sinad_difference_db": 0.001616368012449243
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0860912282268569,
+              "noise_power_fs2": 3.0347413157013734e-09,
+              "noise_and_distortion_power_fs2": 3.1305086034395185e-09,
+              "snr_db": 74.52837226450973,
+              "sinad_db": 74.39344002081056,
+              "reported_snr_db": 74.52424275512202,
+              "reported_sinad_db": 74.39231982636629,
+              "snr_difference_db": 0.004129509387709618,
+              "sinad_difference_db": 0.0011201944442689182
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g12",
+      "segment_index": 15,
+      "tx_peak": 0.7,
+      "capture_start_sample": 1215348,
+      "capture_end_sample": 1311348,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.1687550567134415,
+              "noise_power_fs2": 2.2989230348720097e-09,
+              "noise_and_distortion_power_fs2": 2.7741345085702057e-09,
+              "snr_db": 78.65732363385035,
+              "sinad_db": 77.84129280505223,
+              "reported_snr_db": 78.65194167084081,
+              "reported_sinad_db": 77.83868446597943,
+              "snr_difference_db": 0.005381963009540414,
+              "sinad_difference_db": 0.002608339072807553
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.1687550567134415,
+              "noise_power_fs2": 2.942366228024018e-09,
+              "noise_and_distortion_power_fs2": 3.417577701722214e-09,
+              "snr_db": 77.58560068085393,
+              "sinad_db": 76.93538397820043,
+              "reported_snr_db": 77.58585793142227,
+              "reported_sinad_db": 76.93711046627936,
+              "snr_difference_db": -0.00025725056833891813,
+              "sinad_difference_db": -0.0017264880789298331
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.16875505671395805,
+              "noise_power_fs2": 2.2976485138120122e-09,
+              "noise_and_distortion_power_fs2": 2.773617951279125e-09,
+              "snr_db": 78.65973202660484,
+              "sinad_db": 77.84210155773924,
+              "reported_snr_db": 78.65194167084081,
+              "reported_sinad_db": 77.83868446597943,
+              "snr_difference_db": 0.007790355764029755,
+              "sinad_difference_db": 0.003417091759814639
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.16875505671395805,
+              "noise_power_fs2": 2.9410917069640203e-09,
+              "noise_and_distortion_power_fs2": 3.417061144431133e-09,
+              "snr_db": 77.58748228681462,
+              "sinad_db": 76.93604045176436,
+              "reported_snr_db": 77.58585793142227,
+              "reported_sinad_db": 76.93711046627936,
+              "snr_difference_db": 0.0016243553923516174,
+              "sinad_difference_db": -0.0010700145150082108
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "levels-g12",
+      "segment_index": 17,
+      "tx_peak": 0.9,
+      "capture_start_sample": 1388148,
+      "capture_end_sample": 1484148,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.27896786753958797,
+              "noise_power_fs2": 2.379940800065736e-09,
+              "noise_and_distortion_power_fs2": 3.1389009280773843e-09,
+              "snr_db": 80.68988028335173,
+              "sinad_db": 79.48776574203603,
+              "reported_snr_db": 80.68768862969947,
+              "reported_sinad_db": 79.48744610368968,
+              "snr_difference_db": 0.0021916536522610386,
+              "sinad_difference_db": 0.0003196383463546226
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.27896786753958797,
+              "noise_power_fs2": 3.02963442930573e-09,
+              "noise_and_distortion_power_fs2": 3.788594557317379e-09,
+              "snr_db": 79.64163955109557,
+              "sinad_db": 78.67076051627409,
+              "reported_snr_db": 79.6490657626743,
+              "reported_sinad_db": 78.67781197815071,
+              "snr_difference_db": -0.007426211578732023,
+              "sinad_difference_db": -0.007051461876628196
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.27896786754126884,
+              "noise_power_fs2": 2.377784320249585e-09,
+              "noise_and_distortion_power_fs2": 3.1372199905752444e-09,
+              "snr_db": 80.69381723780441,
+              "sinad_db": 79.49009208952593,
+              "reported_snr_db": 80.68768862969947,
+              "reported_sinad_db": 79.48744610368968,
+              "snr_difference_db": 0.006128608104944533,
+              "sinad_difference_db": 0.002645985836252862
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.27896786754126884,
+              "noise_power_fs2": 3.0274779494895792e-09,
+              "noise_and_distortion_power_fs2": 3.786913619815238e-09,
+              "snr_db": 79.64473193992184,
+              "sinad_db": 78.67268783754793,
+              "reported_snr_db": 79.6490657626743,
+              "reported_sinad_db": 78.67781197815071,
+              "snr_difference_db": -0.004333822752457195,
+              "sinad_difference_db": -0.0051241406027884295
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "frequency-g0",
+      "segment_index": 5,
+      "tx_peak": 0.95,
+      "capture_start_sample": 340921,
+      "capture_end_sample": 436921,
+      "independent_checks": [
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.01942818201906058,
+              "noise_power_fs2": 1.5217433384670961e-10,
+              "noise_and_distortion_power_fs2": 1.9560371899405692e-10,
+              "snr_db": 81.06090754368942,
+              "sinad_db": 79.97055055917231,
+              "reported_snr_db": 81.0531590428779,
+              "reported_sinad_db": 79.96688703448389,
+              "snr_difference_db": 0.007748500811530334,
+              "sinad_difference_db": 0.003663524688420239
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.01942818201906058,
+              "noise_power_fs2": 1.9374970027172111e-10,
+              "noise_and_distortion_power_fs2": 2.371790854190684e-10,
+              "snr_db": 80.01191124314181,
+              "sinad_db": 79.13355773588437,
+              "reported_snr_db": 80.00943400913559,
+              "reported_sinad_db": 79.13348679345609,
+              "snr_difference_db": 0.0024772340062213516,
+              "sinad_difference_db": 7.094242828031838e-05
+            }
+          ]
+        },
+        {
+          "window_samples": 96000,
+          "fft_bin_width_hz": 0.5,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.01942818201910519,
+              "noise_power_fs2": 1.521002834685614e-10,
+              "noise_and_distortion_power_fs2": 1.9555911355238777e-10,
+              "snr_db": 81.06302140199828,
+              "sinad_db": 79.97154103658207,
+              "reported_snr_db": 81.0531590428779,
+              "reported_sinad_db": 79.96688703448389,
+              "snr_difference_db": 0.009862359120390352,
+              "sinad_difference_db": 0.004654002098178012
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.01942818201910519,
+              "noise_power_fs2": 1.936756498935729e-10,
+              "noise_and_distortion_power_fs2": 2.3713447997739924e-10,
+              "snr_db": 80.01357141696283,
+              "sinad_db": 79.13437457516059,
+              "reported_snr_db": 80.00943400913559,
+              "reported_sinad_db": 79.13348679345609,
+              "snr_difference_db": 0.004137407827244033,
+              "sinad_difference_db": 0.0008877817045060965
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "repeat-g0",
+      "segment_index": 4,
+      "tx_peak": 0.95,
+      "capture_start_sample": 274873,
+      "capture_end_sample": 418873,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019426416360485085,
+              "noise_power_fs2": 1.5394598317609226e-10,
+              "noise_and_distortion_power_fs2": 1.9851096135915794e-10,
+              "snr_db": 81.01024331010157,
+              "sinad_db": 79.90608200009183,
+              "reported_snr_db": 81.006299373645,
+              "reported_sinad_db": 79.90448969751004,
+              "snr_difference_db": 0.003943936456565211,
+              "sinad_difference_db": 0.0015923025817841108
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019426416360485085,
+              "noise_power_fs2": 1.969804244833446e-10,
+              "noise_and_distortion_power_fs2": 2.4154540266641034e-10,
+              "snr_db": 79.93969623603607,
+              "sinad_db": 79.05393916626895,
+              "reported_snr_db": 79.93778322771057,
+              "reported_sinad_db": 79.05358468538577,
+              "snr_difference_db": 0.001913008325502119,
+              "sinad_difference_db": 0.0003544808831748014
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019426416360700482,
+              "noise_power_fs2": 1.5370466648053899e-10,
+              "noise_and_distortion_power_fs2": 1.9829556640294797e-10,
+              "snr_db": 81.01705639706375,
+              "sinad_db": 79.91079688477795,
+              "reported_snr_db": 81.006299373645,
+              "reported_sinad_db": 79.90448969751004,
+              "snr_difference_db": 0.010757023418747735,
+              "sinad_difference_db": 0.006307187267907466
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019426416360700482,
+              "noise_power_fs2": 1.9673910778779132e-10,
+              "noise_and_distortion_power_fs2": 2.413300077102003e-10,
+              "snr_db": 79.94501995074928,
+              "sinad_db": 79.05781365837473,
+              "reported_snr_db": 79.93778322771057,
+              "reported_sinad_db": 79.05358468538577,
+              "snr_difference_db": 0.007236723038715809,
+              "sinad_difference_db": 0.004228972988954638
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "repeat-g0",
+      "segment_index": 7,
+      "tx_peak": 0.95,
+      "capture_start_sample": 706873,
+      "capture_end_sample": 850873,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019426125671237072,
+              "noise_power_fs2": 1.5490186315988763e-10,
+              "noise_and_distortion_power_fs2": 1.9905239617539102e-10,
+              "snr_db": 80.98329552455594,
+              "sinad_db": 79.89418783990328,
+              "reported_snr_db": 80.97897965807199,
+              "reported_sinad_db": 79.89288366627149,
+              "snr_difference_db": 0.004315866483949549,
+              "sinad_difference_db": 0.0013041736317944697
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019426125671237072,
+              "noise_power_fs2": 1.976955370670459e-10,
+              "noise_and_distortion_power_fs2": 2.4184607008254933e-10,
+              "snr_db": 79.92389328618408,
+              "sinad_db": 79.04847159298748,
+              "reported_snr_db": 79.92264363266318,
+              "reported_sinad_db": 79.04914208653835,
+              "snr_difference_db": 0.0012496535209010062,
+              "sinad_difference_db": -0.0006704935508707877
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019426125671259828,
+              "noise_power_fs2": 1.5483816348743888e-10,
+              "noise_and_distortion_power_fs2": 1.9902964011685e-10,
+              "snr_db": 80.98508182366695,
+              "sinad_db": 79.89468436222106,
+              "reported_snr_db": 80.97897965807199,
+              "reported_sinad_db": 79.89288366627149,
+              "snr_difference_db": 0.006102165594953135,
+              "sinad_difference_db": 0.0018006959495693309
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019426125671259828,
+              "noise_power_fs2": 1.976318373945972e-10,
+              "noise_and_distortion_power_fs2": 2.418233140240083e-10,
+              "snr_db": 79.92529285617951,
+              "sinad_db": 79.0488802535771,
+              "reported_snr_db": 79.92264363266318,
+              "reported_sinad_db": 79.04914208653835,
+              "snr_difference_db": 0.0026492235163289024,
+              "sinad_difference_db": -0.0002618329612573689
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "repeat-g0",
+      "segment_index": 10,
+      "tx_peak": 0.95,
+      "capture_start_sample": 1138873,
+      "capture_end_sample": 1282873,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019425652546894632,
+              "noise_power_fs2": 1.534839942867346e-10,
+              "noise_and_distortion_power_fs2": 1.9737141132290348e-10,
+              "snr_db": 81.02312523739135,
+              "sinad_db": 79.93091369954965,
+              "reported_snr_db": 81.00584514216665,
+              "reported_sinad_db": 79.91862241417455,
+              "snr_difference_db": 0.01728009522470586,
+              "sinad_difference_db": 0.012291285375098937
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019425652546894632,
+              "noise_power_fs2": 1.9723201471337957e-10,
+              "noise_and_distortion_power_fs2": 2.4111943174954845e-10,
+              "snr_db": 79.9339820551105,
+              "sinad_db": 79.06143405084359,
+              "reported_snr_db": 79.92266356412443,
+              "reported_sinad_db": 79.0531176653326,
+              "snr_difference_db": 0.011318490986070628,
+              "sinad_difference_db": 0.00831638551098024
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.01942565254702058,
+              "noise_power_fs2": 1.5331723242569764e-10,
+              "noise_and_distortion_power_fs2": 1.972454649314369e-10,
+              "snr_db": 81.02784645473332,
+              "sinad_db": 79.93368589853728,
+              "reported_snr_db": 81.00584514216665,
+              "reported_sinad_db": 79.91862241417455,
+              "snr_difference_db": 0.022001312566672482,
+              "sinad_difference_db": 0.015063484362727309
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.01942565254702058,
+              "noise_power_fs2": 1.9706525285234264e-10,
+              "noise_and_distortion_power_fs2": 2.4099348535808186e-10,
+              "snr_db": 79.9376556165004,
+              "sinad_db": 79.0637031385536,
+              "reported_snr_db": 79.92266356412443,
+              "reported_sinad_db": 79.0531176653326,
+              "snr_difference_db": 0.01499205237595902,
+              "sinad_difference_db": 0.01058547322099912
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "repeat-g0",
+      "segment_index": 13,
+      "tx_peak": 0.95,
+      "capture_start_sample": 1570873,
+      "capture_end_sample": 1714873,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019425658265466814,
+              "noise_power_fs2": 1.5571895677535136e-10,
+              "noise_and_distortion_power_fs2": 1.9947494714197198e-10,
+              "snr_db": 80.96034258854837,
+              "sinad_db": 79.88487385732004,
+              "reported_snr_db": 80.95111277185802,
+              "reported_sinad_db": 79.87869943822218,
+              "snr_difference_db": 0.00922981669035039,
+              "sinad_difference_db": 0.0061744190978600955
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019425658265466814,
+              "noise_power_fs2": 1.986186227865899e-10,
+              "noise_and_distortion_power_fs2": 2.423746131532106e-10,
+              "snr_db": 79.90355778210326,
+              "sinad_db": 79.03888615472243,
+              "reported_snr_db": 79.89736082809151,
+              "reported_sinad_db": 79.0346574034386,
+              "snr_difference_db": 0.006196954011755906,
+              "sinad_difference_db": 0.004228751283832821
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0194256582655701,
+              "noise_power_fs2": 1.555846838132471e-10,
+              "noise_and_distortion_power_fs2": 1.9937166103890282e-10,
+              "snr_db": 80.96408902790103,
+              "sinad_db": 79.88712317247848,
+              "reported_snr_db": 80.95111277185802,
+              "reported_sinad_db": 79.87869943822218,
+              "snr_difference_db": 0.012976256043003787,
+              "sinad_difference_db": 0.008423734256297166
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0194256582655701,
+              "noise_power_fs2": 1.9848434982448568e-10,
+              "noise_and_distortion_power_fs2": 2.4227132705014134e-10,
+              "snr_db": 79.90649475378133,
+              "sinad_db": 79.04073726218618,
+              "reported_snr_db": 79.89736082809151,
+              "reported_sinad_db": 79.0346574034386,
+              "snr_difference_db": 0.009133925689823741,
+              "sinad_difference_db": 0.006079858747582989
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "repeat-g0",
+      "segment_index": 16,
+      "tx_peak": 0.95,
+      "capture_start_sample": 2002873,
+      "capture_end_sample": 2146873,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.019425544229800445,
+              "noise_power_fs2": 1.5477862124783066e-10,
+              "noise_and_distortion_power_fs2": 1.9756234118863478e-10,
+              "snr_db": 80.98662221231544,
+              "sinad_db": 79.92669030847266,
+              "reported_snr_db": 80.97836446363058,
+              "reported_sinad_db": 79.92206345020229,
+              "snr_difference_db": 0.00825774868485496,
+              "sinad_difference_db": 0.004626858270370349
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.019425544229800445,
+              "noise_power_fs2": 1.968089226923014e-10,
+              "noise_and_distortion_power_fs2": 2.395926426331055e-10,
+              "snr_db": 79.94328410845566,
+              "sinad_db": 79.08899717234719,
+              "reported_snr_db": 79.93984201795256,
+              "reported_sinad_db": 79.08769121904191,
+              "snr_difference_db": 0.0034420905030998483,
+              "sinad_difference_db": 0.0013059533052768302
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.01942554422992509,
+              "noise_power_fs2": 1.5461572324630137e-10,
+              "noise_and_distortion_power_fs2": 1.9743769930352732e-10,
+              "snr_db": 80.99119538641538,
+              "sinad_db": 79.92943113276196,
+              "reported_snr_db": 80.97836446363058,
+              "reported_sinad_db": 79.92206345020229,
+              "snr_difference_db": 0.012830922784800691,
+              "sinad_difference_db": 0.007367682559674904
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.01942554422992509,
+              "noise_power_fs2": 1.9664602469077214e-10,
+              "noise_and_distortion_power_fs2": 2.394680007479981e-10,
+              "snr_db": 79.94688023595324,
+              "sinad_db": 79.09125706514168,
+              "reported_snr_db": 79.93984201795256,
+              "reported_sinad_db": 79.08769121904191,
+              "snr_difference_db": 0.00703821800068738,
+              "sinad_difference_db": 0.003565846099760961
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "maximum-g0",
+      "segment_index": 4,
+      "tx_peak": 0.99,
+      "capture_start_sample": 263508,
+      "capture_end_sample": 407508,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.02745807067294968,
+              "noise_power_fs2": 1.532151107759926e-10,
+              "noise_and_distortion_power_fs2": 2.1931481644580726e-10,
+              "snr_db": 82.53368418977072,
+              "sinad_db": 80.9760204581033,
+              "reported_snr_db": 82.53292189905616,
+              "reported_sinad_db": 80.97652382000004,
+              "snr_difference_db": 0.0007622907145616864,
+              "sinad_difference_db": -0.0005033618967331677
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.02745807067294968,
+              "noise_power_fs2": 1.912635729927253e-10,
+              "noise_and_distortion_power_fs2": 2.5736327866254e-10,
+              "snr_db": 81.57037753930469,
+              "sinad_db": 80.28123437901834,
+              "reported_snr_db": 81.56958551414203,
+              "reported_sinad_db": 80.28152850108043,
+              "snr_difference_db": 0.0007920251626529762,
+              "sinad_difference_db": -0.00029412206208689895
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.02745807067303677,
+              "noise_power_fs2": 1.5310736918854574e-10,
+              "noise_and_distortion_power_fs2": 2.1922772911138042e-10,
+              "snr_db": 82.53673924332381,
+              "sinad_db": 80.97774533291727,
+              "reported_snr_db": 82.53292189905616,
+              "reported_sinad_db": 80.97652382000004,
+              "snr_difference_db": 0.0038173442676452396,
+              "sinad_difference_db": 0.001221512917226164
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.02745807067303677,
+              "noise_power_fs2": 1.9115583140527845e-10,
+              "noise_and_distortion_power_fs2": 2.5727619132811313e-10,
+              "snr_db": 81.57282467341258,
+              "sinad_db": 80.28270420602175,
+              "reported_snr_db": 81.56958551414203,
+              "reported_sinad_db": 80.28152850108043,
+              "snr_difference_db": 0.0032391592705494077,
+              "sinad_difference_db": 0.00117570494131769
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "maximum-g0",
+      "segment_index": 7,
+      "tx_peak": 0.99,
+      "capture_start_sample": 695508,
+      "capture_end_sample": 839508,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0274563570208422,
+              "noise_power_fs2": 1.5404123207419787e-10,
+              "noise_and_distortion_power_fs2": 2.1992657981181207e-10,
+              "snr_db": 82.5100592982907,
+              "sinad_db": 80.96365193081057,
+              "reported_snr_db": 82.50302602566259,
+              "reported_sinad_db": 80.95966720035678,
+              "snr_difference_db": 0.007033272628106602,
+              "sinad_difference_db": 0.003984730453794327
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0274563570208422,
+              "noise_power_fs2": 1.971969494697141e-10,
+              "noise_and_distortion_power_fs2": 2.6308229720732823e-10,
+              "snr_db": 81.43742721072601,
+              "sinad_db": 80.18551288010583,
+              "reported_snr_db": 81.43891611872947,
+              "reported_sinad_db": 80.18741802216121,
+              "snr_difference_db": -0.0014889080034521385,
+              "sinad_difference_db": -0.0019051420553779508
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.027456357020907454,
+              "noise_power_fs2": 1.5394636985772564e-10,
+              "noise_and_distortion_power_fs2": 2.1986132821237913e-10,
+              "snr_db": 82.51273460978754,
+              "sinad_db": 80.9649406615595,
+              "reported_snr_db": 82.50302602566259,
+              "reported_sinad_db": 80.95966720035678,
+              "snr_difference_db": 0.009708584124950903,
+              "sinad_difference_db": 0.005273461202719432
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.027456357020907454,
+              "noise_power_fs2": 1.9710208725324185e-10,
+              "noise_and_distortion_power_fs2": 2.630170456078953e-10,
+              "snr_db": 81.43951690074888,
+              "sinad_db": 80.18659018272453,
+              "reported_snr_db": 81.43891611872947,
+              "reported_sinad_db": 80.18741802216121,
+              "snr_difference_db": 0.0006007820194184887,
+              "sinad_difference_db": -0.0008278394366811881
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "dataset": "maximum-g0",
+      "segment_index": 10,
+      "tx_peak": 0.99,
+      "capture_start_sample": 1127508,
+      "capture_end_sample": 1271508,
+      "independent_checks": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 2,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.027455565913493976,
+              "noise_power_fs2": 1.5545428653878887e-10,
+              "noise_and_distortion_power_fs2": 2.2055265864051144e-10,
+              "snr_db": 82.47027697907023,
+              "sinad_db": 80.95118102479395,
+              "reported_snr_db": 82.46094216064526,
+              "reported_sinad_db": 80.94556526477545,
+              "snr_difference_db": 0.009334818424974856,
+              "sinad_difference_db": 0.005615760018500282
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.027455565913493976,
+              "noise_power_fs2": 1.9646662321351154e-10,
+              "noise_and_distortion_power_fs2": 2.6156499531523413e-10,
+              "snr_db": 81.45341619065591,
+              "sinad_db": 80.21050776967672,
+              "reported_snr_db": 81.44678437903951,
+              "reported_sinad_db": 80.20634025681929,
+              "snr_difference_db": 0.006631811616401251,
+              "sinad_difference_db": 0.00416751285743544
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.027455565913568406,
+              "noise_power_fs2": 1.5534514726531834e-10,
+              "noise_and_distortion_power_fs2": 2.2047823260329235e-10,
+              "snr_db": 82.47332708670899,
+              "sinad_db": 80.95264680954882,
+              "reported_snr_db": 82.46094216064526,
+              "reported_sinad_db": 80.94556526477545,
+              "snr_difference_db": 0.012384926063731427,
+              "sinad_difference_db": 0.0070815447733707515
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.027455565913568406,
+              "noise_power_fs2": 1.9635748394004101e-10,
+              "noise_and_distortion_power_fs2": 2.6149056927801505e-10,
+              "snr_db": 81.4558294124931,
+              "sinad_db": 80.21174369258772,
+              "reported_snr_db": 81.44678437903951,
+              "reported_sinad_db": 80.20634025681929,
+              "snr_difference_db": 0.009045033453588758,
+              "sinad_difference_db": 0.0054034357684287215
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "pooled_plateaus": {
+    "repeat-g0": {
+      "count": 5,
+      "tx_peak": 0.95,
+      "output_volume_percent": 95,
+      "input_gain_db": 0,
+      "window_seconds": 3.0,
+      "aggregation": "Sum signal/noise/distortion powers weighted by window duration; no overlapping first/second-second windows pooled.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "pooled_snr_db": 80.98407178349531,
+          "pooled_sinad_db": 79.9033216930349,
+          "snr_min_db": 80.95111277185802,
+          "snr_max_db": 81.006299373645,
+          "sinad_min_db": 79.87869943822218,
+          "sinad_max_db": 79.92206345020229,
+          "mean_signal_power_fs2": 0.01942582433888391,
+          "mean_noise_power_fs2": 1.5487177607733906e-10,
+          "mean_noise_and_distortion_power_fs2": 1.9863111840803964e-10
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "pooled_snr_db": 79.92403214003983,
+          "pooled_sinad_db": 79.05560355685321,
+          "snr_min_db": 79.89736082809151,
+          "snr_max_db": 79.93984201795256,
+          "sinad_min_db": 79.0346574034386,
+          "sinad_max_db": 79.08769121904191,
+          "mean_signal_power_fs2": 0.01942582433888391,
+          "mean_noise_power_fs2": 1.9768614989362623e-10,
+          "mean_noise_and_distortion_power_fs2": 2.414454922243273e-10
+        }
+      ]
+    },
+    "maximum-g0": {
+      "count": 3,
+      "tx_peak": 0.99,
+      "output_volume_percent": 100,
+      "input_gain_db": 0,
+      "window_seconds": 3.0,
+      "aggregation": "Sum signal/noise/distortion powers weighted by window duration; no overlapping first/second-second windows pooled.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "pooled_snr_db": 82.49886401155179,
+          "pooled_sinad_db": 80.9605674679352,
+          "snr_min_db": 82.46094216064526,
+          "snr_max_db": 82.53292189905616,
+          "sinad_min_db": 80.94556526477545,
+          "sinad_max_db": 80.97652382000004,
+          "mean_signal_power_fs2": 0.027456634158848067,
+          "mean_noise_power_fs2": 1.5444039222749936e-10,
+          "mean_noise_and_distortion_power_fs2": 2.2008505385314917e-10
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "pooled_snr_db": 81.48468675439311,
+          "pooled_sinad_db": 80.22490717626339,
+          "snr_min_db": 81.43891611872947,
+          "snr_max_db": 81.56958551414203,
+          "sinad_min_db": 80.18741802216121,
+          "sinad_max_db": 80.28152850108043,
+          "mean_signal_power_fs2": 0.027456634158848067,
+          "mean_noise_power_fs2": 1.9506467192303814e-10,
+          "mean_noise_and_distortion_power_fs2": 2.6070933354868825e-10
+        }
+      ]
+    }
+  },
+  "maximum_channel_comparison": {
+    "left": {
+      "count": 3,
+      "method": "Existing analyzer applied separately to the same three center windows; also independent FFT mask values retained.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "pooled_snr_db": 80.0091113224413,
+          "pooled_sinad_db": 79.06058782283738,
+          "snr_min_db": 79.97552424421787,
+          "snr_max_db": 80.04784942162581,
+          "sinad_min_db": 79.0489664453422,
+          "sinad_max_db": 79.0767127042137,
+          "mean_signal_power_fs2": 0.027396406405203872,
+          "mean_noise_power_fs2": 2.733899010308623e-10,
+          "mean_noise_and_distortion_power_fs2": 3.4012207327770253e-10
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "pooled_snr_db": 78.96181660832605,
+          "pooled_sinad_db": 78.19982348017201,
+          "snr_min_db": 78.8872268668746,
+          "snr_max_db": 79.04300438617169,
+          "sinad_min_db": 78.13669864303165,
+          "sinad_max_db": 78.25544340098385,
+          "mean_signal_power_fs2": 0.027396406405203872,
+          "mean_noise_power_fs2": 3.479460729009756e-10,
+          "mean_noise_and_distortion_power_fs2": 4.146782451478158e-10
+        }
+      ],
+      "independent_fft": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.02739765195287128,
+              "noise_power_fs2": 2.705009488619873e-10,
+              "noise_and_distortion_power_fs2": 3.3852744916635237e-10,
+              "snr_db": 80.05544551433124,
+              "sinad_db": 79.08119455503353
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.02739765195287128,
+              "noise_power_fs2": 3.4117319917888635e-10,
+              "noise_and_distortion_power_fs2": 4.091996994832515e-10,
+              "snr_db": 79.04738436411856,
+              "sinad_db": 78.25778038200721
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.027396240304230275,
+              "noise_power_fs2": 2.7268439416897927e-10,
+              "noise_and_distortion_power_fs2": 3.3960454361577655e-10,
+              "snr_db": 80.02030683123272,
+              "sinad_db": 79.06717474842394
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.027396240304230275,
+              "noise_power_fs2": 3.5308731727692243e-10,
+              "noise_and_distortion_power_fs2": 4.2000746672371976e-10,
+              "snr_db": 78.89808848739933,
+              "sinad_db": 78.14433955759574
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.02739539689363563,
+              "noise_power_fs2": 2.747870259433373e-10,
+              "noise_and_distortion_power_fs2": 3.405077101484842e-10,
+              "snr_db": 79.98681373024579,
+              "sinad_db": 79.05550646570946
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.02739539689363563,
+              "noise_power_fs2": 3.477444970630951e-10,
+              "noise_and_distortion_power_fs2": 4.13465181268242e-10,
+              "snr_db": 78.96417330544514,
+              "sinad_db": 78.21238654082873
+            }
+          ]
+        }
+      ]
+    },
+    "right": {
+      "count": 3,
+      "method": "Existing analyzer applied separately to the same three center windows; also independent FFT mask values retained.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "pooled_snr_db": 79.4350734730272,
+          "pooled_sinad_db": 78.56507599296219,
+          "snr_min_db": 79.38262018655927,
+          "snr_max_db": 79.47269651319675,
+          "sinad_min_db": 78.52189217673956,
+          "sinad_max_db": 78.59315142594262,
+          "mean_signal_power_fs2": 0.027516928041882008,
+          "mean_noise_power_fs2": 3.133953878784258e-10,
+          "mean_noise_and_distortion_power_fs2": 3.829061562309163e-10
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "pooled_snr_db": 78.42764768805041,
+          "pooled_sinad_db": 77.724016973586,
+          "snr_min_db": 78.36345995880833,
+          "snr_max_db": 78.47084175477606,
+          "sinad_min_db": 77.66920086796904,
+          "sinad_max_db": 77.75850057959269,
+          "mean_signal_power_fs2": 0.027516928041882008,
+          "mean_noise_power_fs2": 3.952166015200952e-10,
+          "mean_noise_and_distortion_power_fs2": 4.647273698725853e-10
+        }
+      ],
+      "independent_fft": [
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.0275185559395056,
+              "noise_power_fs2": 3.1200844255025456e-10,
+              "noise_and_distortion_power_fs2": 3.8142638790827725e-10,
+              "snr_db": 79.4545929454358,
+              "sinad_db": 78.58214904987919
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.0275185559395056,
+              "noise_power_fs2": 3.930472485288986e-10,
+              "noise_and_distortion_power_fs2": 4.624651938869214e-10,
+              "snr_db": 78.45180879769518,
+              "sinad_db": 77.74546587795874
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.027516539624048843,
+              "noise_power_fs2": 3.1042330862290373e-10,
+              "noise_and_distortion_power_fs2": 3.803229959049729e-10,
+              "snr_db": 79.47639494270338,
+              "sinad_db": 78.59441232315572
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.027516539624048843,
+              "noise_power_fs2": 3.9163748508687694e-10,
+              "noise_and_distortion_power_fs2": 4.6153717236894617e-10,
+              "snr_db": 78.46709564697865,
+              "sinad_db": 77.75387132762317
+            }
+          ]
+        },
+        {
+          "window_samples": 144000,
+          "fft_bin_width_hz": 0.3333333333333333,
+          "fundamental_fft_hz": 997.0,
+          "excluded_half_width_native_bins": 3,
+          "bands": [
+            {
+              "low_hz": 300.0,
+              "high_hz": 18300.0,
+              "signal_power_fs2": 0.027515800936576087,
+              "noise_power_fs2": 3.1656255338370025e-10,
+              "noise_and_distortion_power_fs2": 3.8622569589124515e-10,
+              "snr_db": 79.39122618601915,
+              "sinad_db": 78.52740994530818
+            },
+            {
+              "low_hz": 20.0,
+              "high_hz": 20000.0,
+              "signal_power_fs2": 0.027515800936576087,
+              "noise_power_fs2": 4.004502562790007e-10,
+              "noise_and_distortion_power_fs2": 4.701133987865457e-10,
+              "snr_db": 78.37033582942092,
+              "sinad_db": 77.67379529609984
+            }
+          ]
+        }
+      ]
+    },
+    "mono": {
+      "count": 3,
+      "tx_peak": 0.99,
+      "output_volume_percent": 100,
+      "input_gain_db": 0,
+      "window_seconds": 3.0,
+      "aggregation": "Sum signal/noise/distortion powers weighted by window duration; no overlapping first/second-second windows pooled.",
+      "bands": [
+        {
+          "low_hz": 300.0,
+          "high_hz": 18300.0,
+          "pooled_snr_db": 82.49886401155179,
+          "pooled_sinad_db": 80.9605674679352,
+          "snr_min_db": 82.46094216064526,
+          "snr_max_db": 82.53292189905616,
+          "sinad_min_db": 80.94556526477545,
+          "sinad_max_db": 80.97652382000004,
+          "mean_signal_power_fs2": 0.027456634158848067,
+          "mean_noise_power_fs2": 1.5444039222749936e-10,
+          "mean_noise_and_distortion_power_fs2": 2.2008505385314917e-10
+        },
+        {
+          "low_hz": 20.0,
+          "high_hz": 20000.0,
+          "pooled_snr_db": 81.48468675439311,
+          "pooled_sinad_db": 80.22490717626339,
+          "snr_min_db": 81.43891611872947,
+          "snr_max_db": 81.56958551414203,
+          "sinad_min_db": 80.18741802216121,
+          "sinad_max_db": 80.28152850108043,
+          "mean_signal_power_fs2": 0.027456634158848067,
+          "mean_noise_power_fs2": 1.9506467192303814e-10,
+          "mean_noise_and_distortion_power_fs2": 2.6070933354868825e-10
+        }
+      ]
+    }
+  },
+  "frequency_response": {
+    "points": [
+      {
+        "frequency_hz": 313.0,
+        "signal_rms_dbfs": -17.126474869714556,
+        "gain_db": -13.6706470188517,
+        "gain_relative_to_997_db": -0.010777603633348676
+      },
+      {
+        "frequency_hz": 997.0,
+        "signal_rms_dbfs": -17.115697266081206,
+        "gain_db": -13.65986941521835,
+        "gain_relative_to_997_db": 0.0
+      },
+      {
+        "frequency_hz": 3001.0,
+        "signal_rms_dbfs": -17.11104145890449,
+        "gain_db": -13.655213608041636,
+        "gain_relative_to_997_db": 0.004655807176714433
+      },
+      {
+        "frequency_hz": 4999.0,
+        "signal_rms_dbfs": -17.11246007075189,
+        "gain_db": -13.656632219889035,
+        "gain_relative_to_997_db": 0.0032371953293157674
+      },
+      {
+        "frequency_hz": 8999.0,
+        "signal_rms_dbfs": -17.116418784743452,
+        "gain_db": -13.660590933880597,
+        "gain_relative_to_997_db": -0.0007215186622460124
+      },
+      {
+        "frequency_hz": 12997.0,
+        "signal_rms_dbfs": -17.1218356679949,
+        "gain_db": -13.666007817132044,
+        "gain_relative_to_997_db": -0.006138401913693414
+      },
+      {
+        "frequency_hz": 16993.0,
+        "signal_rms_dbfs": -17.128508966168084,
+        "gain_db": -13.67268111530523,
+        "gain_relative_to_997_db": -0.012811700086878375
+      },
+      {
+        "frequency_hz": 18203.0,
+        "signal_rms_dbfs": -17.132595174138284,
+        "gain_db": -13.676767323275424,
+        "gain_relative_to_997_db": -0.016897908057073252
+      }
+    ],
+    "min_gain_db": -13.676767323275424,
+    "max_gain_db": -13.655213608041636,
+    "peak_to_peak_gain_db": 0.021553715233787685,
+    "note": "Same commanded0.95peak and fixed output95% control at8frequencies313..18203Hz; gain includes fixed output/control path and mono averaging. No dense passband flatness inferred."
+  },
+  "independent_summary": {
+    "strong997_center_windows": 21,
+    "max_abs_snr_difference_db": 0.022001312566672482,
+    "max_abs_sinad_difference_db": 0.015063484362727309,
+    "all_within_0_1_db": true
+  }
+}

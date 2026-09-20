@@ -1,0 +1,12 @@
+[
+  {
+    "key": "measurement_12",
+    "analysis_measurement_index": 12,
+    "sha256": "7a824d01f5fec1e605eec1fe42537981eb881bf282063debe12271ed87123178"
+  },
+  {
+    "key": "measurement_21",
+    "analysis_measurement_index": 21,
+    "sha256": "e4a9d77bab830de3e63a60fdf66eebceeffc25519a7da20935071a737faf1d9d"
+  }
+]

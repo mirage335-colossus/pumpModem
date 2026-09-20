@@ -45,6 +45,9 @@ headphone-to-microphone path and explains the bulk cable default: 256-APSK,
 rate 7/8, high-rate RS, depth 62, amplitude 0.35 and both output channels.
 Its calculated 50 MB airtime is about
 2 hours 1 minute; long-file success probability remains unqualified.
+The [physical SNR measurement](docs/cable-snr-live-study.md) separately measures
+about 79 dB on one input channel and 81.5 dB with both inputs averaged over
+20 Hz–20 kHz under the tested best-case tone conditions.
 Future throughput work should start with the
 [Fast coding and capacity study](docs/fast-coding-study.md): measured LDPC and
 channel results, sparse RS models, shaping extrapolations and development priorities.

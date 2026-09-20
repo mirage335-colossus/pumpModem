@@ -1,0 +1,56 @@
+{
+  "sample_rate": 48000,
+  "raw_capture_policy": "Selected complete steady windows, with both original input channels. All per-window analysis records and complete-record hashes are retained; long full PCM records remain under /tmp/pump-snr-20260920-* for this session. Disturbed level windows are included.",
+  "runs": [
+    {
+      "name": "levels-g0",
+      "raw_windows": 2,
+      "npz_bytes": 1939519,
+      "full_capture_sha256": "7bf29ad1a5d368cc53d3e61e6d988906ea33fc2fb98f57f1581fe34bf05ec7c2"
+    },
+    {
+      "name": "levels-g6",
+      "raw_windows": 2,
+      "npz_bytes": 1826972,
+      "full_capture_sha256": "3d05d6fac5fbf143a976edf0cd9e12761809a102eebb09d75f8bfc40479764da"
+    },
+    {
+      "name": "levels-g12",
+      "raw_windows": 2,
+      "npz_bytes": 1927521,
+      "full_capture_sha256": "0dd680ad973a5e4cbf8e69dceb4e8fca1a3c2fda39b3a28c92acadef1ba8e471"
+    },
+    {
+      "name": "frequency-g0",
+      "raw_windows": 9,
+      "npz_bytes": 8092336,
+      "full_capture_sha256": "6e183febd7f47022ab54193b8dac874d53d5845fd3d394ed81fff68e27f51111"
+    },
+    {
+      "name": "repeat-g0",
+      "raw_windows": 16,
+      "npz_bytes": 12065980,
+      "full_capture_sha256": "93dbb82bd6a36f016a22f6a2e1b302c22ae7b0833d2fcd5e027d58e4a789e199"
+    },
+    {
+      "name": "maximum-g0",
+      "raw_windows": 10,
+      "npz_bytes": 7333831,
+      "full_capture_sha256": "2152f8346af9bcde36da6b4330aa8d6f68f55b696e764499139d6de8e669dd14"
+    },
+    {
+      "name": "multitone-g0",
+      "raw_windows": 10,
+      "npz_bytes": 7387890,
+      "full_capture_sha256": "10cf27ae864142ed48f750c2aa3c07608e44f0c1e797156aecb13f5e19ae1b98"
+    }
+  ],
+  "production_full_capture_sha256": "4abe6013a0fe93bda67cbc51feb9faa8a2e57333bbdf84345af9780a9bd67798",
+  "tool_sha256": {
+    "tools/cable_snr_live.py": "e0c5e4b63e6eb21b23311b0e358c8951f4c4d46b189364eade13cdb0a6530116",
+    "tools/cable_snr_analysis.py": "1aea9a17dd05a57cc2a57364a6d646c85bc0d87b5792421ec903a9770b8c9a1f",
+    "tools/cable_snr_report.py": "aae40332c4442b1cb49377d1116fd376c744e3fad468b4cceeab84dfa921f4ad",
+    "tools/cable_audio_capture.cpp": "8714466f0454b7659e5edaa9cbd5ada8253b570661bb1972c393d67ee0caba07",
+    "tests/test_cable_snr_analysis.py": "7b5838355774108b659ac5e992e3cb7b9be9066a78aea61d9b3bab246922213f"
+  }
+}

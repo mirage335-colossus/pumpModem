@@ -1,0 +1,200 @@
+{
+  "mode": "levels",
+  "gain_db": 0.0,
+  "sample_rate": 48000,
+  "frequencies": [
+    997
+  ],
+  "segments": [
+    {
+      "kind": "silence",
+      "start_sample": 0,
+      "samples": 48000,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "sync",
+      "start_sample": 48000,
+      "samples": 19200,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "silence",
+      "start_sample": 67200,
+      "samples": 48000,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 115200,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.03
+    },
+    {
+      "kind": "silence",
+      "start_sample": 259200,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 288000,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.06
+    },
+    {
+      "kind": "silence",
+      "start_sample": 432000,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 460800,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.12
+    },
+    {
+      "kind": "silence",
+      "start_sample": 604800,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 633600,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.25
+    },
+    {
+      "kind": "silence",
+      "start_sample": 777600,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 806400,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.35
+    },
+    {
+      "kind": "silence",
+      "start_sample": 950400,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 979200,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.5
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1123200,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 1152000,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.7
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1296000,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "tone",
+      "start_sample": 1324800,
+      "samples": 144000,
+      "frequency_hz": 997,
+      "tx_peak_requested": 0.9
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1468800,
+      "samples": 28800,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    },
+    {
+      "kind": "silence",
+      "start_sample": 1497600,
+      "samples": 96000,
+      "frequency_hz": 0,
+      "tx_peak_requested": 0
+    }
+  ],
+  "transmit_seconds": 33.2,
+  "live": true,
+  "pcm_format": "float32le",
+  "channels": 2,
+  "utc": "2026-09-20T09:41:41Z",
+  "pactl_info": "Server String: /run/user/1000/pulse/native\nLibrary Protocol Version: 35\nServer Protocol Version: 35\nIs Local: yes\nClient Index: 41679\nTile Size: 65472\nUser Name: user\nHost Name: aidev\nServer Name: PulseAudio (on PipeWire 1.4.2)\nServer Version: 15.0.0\nDefault Sample Specification: float32le 2ch 48000Hz\nDefault Channel Map: front-left,front-right\nDefault Sink: alsa_output.pci-0000_07_00.6.analog-stereo\nDefault Source: alsa_input.pci-0000_07_00.6.analog-stereo\nCookie: c340:fd4e\n",
+  "sources": "Source #59\n\tState: SUSPENDED\n\tName: alsa_output.pci-0000_07_00.6.analog-stereo.monitor\n\tDescription: Monitor of Ryzen HD Audio Controller Analog Stereo\n\tDriver: PipeWire\n\tSample Specification: s32le 2ch 48000Hz\n\tChannel Map: front-left,front-right\n\tOwner Module: 4294967295\n\tMute: no\n\tVolume: front-left: 65536 / 100% / 0.00 dB,   front-right: 65536 / 100% / 0.00 dB\n\t        balance 0.00\n\tBase Volume: 65536 / 100% / 0.00 dB\n\tMonitor of Sink: alsa_output.pci-0000_07_00.6.analog-stereo\n\tLatency: 0 usec, configured 0 usec\n\tFlags: HARDWARE DECIBEL_VOLUME LATENCY \n\tProperties:\n\t\talsa.card = \"1\"\n\t\talsa.card_name = \"HD-Audio Generic\"\n\t\talsa.class = \"generic\"\n\t\talsa.components = \"HDA:10ec0257,17aa5092,00100001\"\n\t\talsa.device = \"0\"\n\t\talsa.driver_name = \"snd_hda_intel\"\n\t\talsa.id = \"ALC257 Analog\"\n\t\talsa.long_card_name = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\talsa.mixer_name = \"Realtek ALC257\"\n\t\talsa.name = \"ALC257 Analog\"\n\t\talsa.resolution_bits = \"16\"\n\t\talsa.subclass = \"generic-mix\"\n\t\talsa.subdevice = \"0\"\n\t\talsa.subdevice_name = \"subdevice #0\"\n\t\talsa.sync.id = \"00000000:00000000:00000000:00000000\"\n\t\tapi.alsa.card.longname = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\tapi.alsa.card.name = \"HD-Audio Generic\"\n\t\tapi.alsa.path = \"front:1\"\n\t\tapi.alsa.pcm.card = \"1\"\n\t\tapi.alsa.pcm.stream = \"playback\"\n\t\taudio.channels = \"2\"\n\t\taudio.position = \"FL,FR\"\n\t\tcard.profile.device = \"3\"\n\t\tdevice.api = \"alsa\"\n\t\tdevice.class = \"monitor\"\n\t\tdevice.icon_name = \"audio-card-analog\"\n\t\tdevice.id = \"49\"\n\t\tdevice.profile.description = \"Analog Stereo\"\n\t\tdevice.profile.name = \"analog-stereo\"\n\t\tdevice.routes = \"2\"\n\t\tfactory.name = \"api.alsa.pcm.sink\"\n\t\tmedia.class = \"Audio/Sink\"\n\t\tdevice.description = \"Ryzen HD Audio Controller\"\n\t\tnode.name = \"alsa_output.pci-0000_07_00.6.analog-stereo\"\n\t\tnode.nick = \"ALC257 Analog\"\n\t\tnode.pause-on-idle = \"false\"\n\t\tobject.path = \"alsa:acp:Generic_1:3:playback\"\n\t\tport.group = \"playback\"\n\t\tpriority.driver = \"1009\"\n\t\tpriority.session = \"1009\"\n\t\tfactory.id = \"19\"\n\t\tclock.quantum-limit = \"8192\"\n\t\tclient.id = \"47\"\n\t\tnode.driver = \"true\"\n\t\tnode.loop.name = \"data-loop.0\"\n\t\tlibrary.name = \"audioconvert/libspa-audioconvert\"\n\t\tobject.id = \"35\"\n\t\tobject.serial = \"59\"\n\t\tapi.acp.auto-port = \"false\"\n\t\tapi.acp.auto-profile = \"false\"\n\t\tapi.alsa.card = \"1\"\n\t\tapi.alsa.split-enable = \"true\"\n\t\tapi.alsa.use-acp = \"true\"\n\t\tapi.dbus.ReserveDevice1 = \"Audio1\"\n\t\tapi.dbus.ReserveDevice1.Priority = \"-20\"\n\t\tdevice.bus = \"pci\"\n\t\tdevice.bus_path = \"pci-0000:07:00.6\"\n\t\tdevice.enum.api = \"udev\"\n\t\tdevice.name = \"alsa_card.pci-0000_07_00.6\"\n\t\tdevice.nick = \"HD-Audio Generic\"\n\t\tdevice.plugged.usec = \"6549184\"\n\t\tdevice.product.id = \"0x15e3\"\n\t\tdevice.product.name = \"Ryzen HD Audio Controller\"\n\t\tdevice.subsystem = \"sound\"\n\t\tsysfs.path = \"/devices/pci0000:00/0000:00:08.1/0000:07:00.6/sound/card1\"\n\t\tdevice.vendor.id = \"0x1022\"\n\t\tdevice.vendor.name = \"Advanced Micro Devices, Inc. [AMD]\"\n\t\tspa.object.id = \"4\"\n\t\tdevice.string = \"1\"\n\tPorts:\n\t\tanalog-output-speaker: Speakers (type: Speaker, priority: 10000, availability group: Legacy 3, not available)\n\t\tanalog-output-headphones: Headphones (type: Headphones, priority: 9900, availability group: Legacy 4, available)\n\tActive Port: analog-output-headphones\n\tFormats:\n\t\tpcm\n\nSource #60\n\tState: SUSPENDED\n\tName: alsa_input.pci-0000_07_00.6.analog-stereo\n\tDescription: Ryzen HD Audio Controller Analog Stereo\n\tDriver: PipeWire\n\tSample Specification: s32le 2ch 48000Hz\n\tChannel Map: front-left,front-right\n\tOwner Module: 4294967295\n\tMute: no\n\tVolume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n\t        balance 0.00\n\tBase Volume: 6554 /  10% / -60.00 dB\n\tMonitor of Sink: n/a\n\tLatency: 0 usec, configured 0 usec\n\tFlags: HARDWARE HW_MUTE_CTRL HW_VOLUME_CTRL DECIBEL_VOLUME LATENCY \n\tProperties:\n\t\talsa.card = \"1\"\n\t\talsa.card_name = \"HD-Audio Generic\"\n\t\talsa.class = \"generic\"\n\t\talsa.components = \"HDA:10ec0257,17aa5092,00100001\"\n\t\talsa.device = \"0\"\n\t\talsa.driver_name = \"snd_hda_intel\"\n\t\talsa.id = \"ALC257 Analog\"\n\t\talsa.long_card_name = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\talsa.mixer_name = \"Realtek ALC257\"\n\t\talsa.name = \"ALC257 Analog\"\n\t\talsa.resolution_bits = \"16\"\n\t\talsa.subclass = \"generic-mix\"\n\t\talsa.subdevice = \"0\"\n\t\talsa.subdevice_name = \"subdevice #0\"\n\t\talsa.sync.id = \"00000000:00000000:00000000:00000000\"\n\t\tapi.alsa.card.longname = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\tapi.alsa.card.name = \"HD-Audio Generic\"\n\t\tapi.alsa.path = \"front:1\"\n\t\tapi.alsa.pcm.card = \"1\"\n\t\tapi.alsa.pcm.stream = \"capture\"\n\t\taudio.channels = \"2\"\n\t\taudio.position = \"FL,FR\"\n\t\tcard.profile.device = \"0\"\n\t\tdevice.api = \"alsa\"\n\t\tdevice.class = \"sound\"\n\t\tdevice.icon_name = \"audio-card-analog\"\n\t\tdevice.id = \"49\"\n\t\tdevice.profile.description = \"Analog Stereo\"\n\t\tdevice.profile.name = \"analog-stereo\"\n\t\tdevice.routes = \"2\"\n\t\tfactory.name = \"api.alsa.pcm.source\"\n\t\tmedia.class = \"Audio/Source\"\n\t\tdevice.description = \"Ryzen HD Audio Controller\"\n\t\tnode.name = \"alsa_input.pci-0000_07_00.6.analog-stereo\"\n\t\tnode.nick = \"ALC257 Analog\"\n\t\tnode.pause-on-idle = \"false\"\n\t\tobject.path = \"alsa:acp:Generic_1:0:capture\"\n\t\tport.group = \"capture\"\n\t\tpriority.driver = \"2009\"\n\t\tpriority.session = \"2009\"\n\t\tfactory.id = \"19\"\n\t\tclock.quantum-limit = \"8192\"\n\t\tclient.id = \"47\"\n\t\tnode.driver = \"true\"\n\t\tnode.loop.name = \"data-loop.0\"\n\t\tlibrary.name = \"audioconvert/libspa-audioconvert\"\n\t\tobject.id = \"46\"\n\t\tobject.serial = \"60\"\n\t\tapi.acp.auto-port = \"false\"\n\t\tapi.acp.auto-profile = \"false\"\n\t\tapi.alsa.card = \"1\"\n\t\tapi.alsa.split-enable = \"true\"\n\t\tapi.alsa.use-acp = \"true\"\n\t\tapi.dbus.ReserveDevice1 = \"Audio1\"\n\t\tapi.dbus.ReserveDevice1.Priority = \"-20\"\n\t\tdevice.bus = \"pci\"\n\t\tdevice.bus_path = \"pci-0000:07:00.6\"\n\t\tdevice.enum.api = \"udev\"\n\t\tdevice.name = \"alsa_card.pci-0000_07_00.6\"\n\t\tdevice.nick = \"HD-Audio Generic\"\n\t\tdevice.plugged.usec = \"6549184\"\n\t\tdevice.product.id = \"0x15e3\"\n\t\tdevice.product.name = \"Ryzen HD Audio Controller\"\n\t\tdevice.subsystem = \"sound\"\n\t\tsysfs.path = \"/devices/pci0000:00/0000:00:08.1/0000:07:00.6/sound/card1\"\n\t\tdevice.vendor.id = \"0x1022\"\n\t\tdevice.vendor.name = \"Advanced Micro Devices, Inc. [AMD]\"\n\t\tspa.object.id = \"4\"\n\t\tdevice.string = \"1\"\n\tPorts:\n\t\tanalog-input-internal-mic: Internal Microphone (type: Mic, priority: 8900, availability group: Legacy 1, not available)\n\t\tanalog-input-mic: Microphone (type: Mic, priority: 8700, availability group: Legacy 2, available)\n\tActive Port: analog-input-mic\n\tFormats:\n\t\tpcm\n",
+  "sinks": "Sink #59\n\tState: SUSPENDED\n\tName: alsa_output.pci-0000_07_00.6.analog-stereo\n\tDescription: Ryzen HD Audio Controller Analog Stereo\n\tDriver: PipeWire\n\tSample Specification: s32le 2ch 48000Hz\n\tChannel Map: front-left,front-right\n\tOwner Module: 4294967295\n\tMute: no\n\tVolume: front-left: 62259 /  95% / -1.34 dB,   front-right: 62259 /  95% / -1.34 dB\n\t        balance 0.00\n\tBase Volume: 65536 / 100% / 0.00 dB\n\tMonitor Source: alsa_output.pci-0000_07_00.6.analog-stereo.monitor\n\tLatency: 0 usec, configured 0 usec\n\tFlags: HARDWARE HW_MUTE_CTRL HW_VOLUME_CTRL DECIBEL_VOLUME LATENCY \n\tProperties:\n\t\talsa.card = \"1\"\n\t\talsa.card_name = \"HD-Audio Generic\"\n\t\talsa.class = \"generic\"\n\t\talsa.components = \"HDA:10ec0257,17aa5092,00100001\"\n\t\talsa.device = \"0\"\n\t\talsa.driver_name = \"snd_hda_intel\"\n\t\talsa.id = \"ALC257 Analog\"\n\t\talsa.long_card_name = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\talsa.mixer_name = \"Realtek ALC257\"\n\t\talsa.name = \"ALC257 Analog\"\n\t\talsa.resolution_bits = \"16\"\n\t\talsa.subclass = \"generic-mix\"\n\t\talsa.subdevice = \"0\"\n\t\talsa.subdevice_name = \"subdevice #0\"\n\t\talsa.sync.id = \"00000000:00000000:00000000:00000000\"\n\t\tapi.alsa.card.longname = \"HD-Audio Generic at 0xfd5c0000 irq 94\"\n\t\tapi.alsa.card.name = \"HD-Audio Generic\"\n\t\tapi.alsa.path = \"front:1\"\n\t\tapi.alsa.pcm.card = \"1\"\n\t\tapi.alsa.pcm.stream = \"playback\"\n\t\taudio.channels = \"2\"\n\t\taudio.position = \"FL,FR\"\n\t\tcard.profile.device = \"3\"\n\t\tdevice.api = \"alsa\"\n\t\tdevice.class = \"sound\"\n\t\tdevice.icon_name = \"audio-card-analog\"\n\t\tdevice.id = \"49\"\n\t\tdevice.profile.description = \"Analog Stereo\"\n\t\tdevice.profile.name = \"analog-stereo\"\n\t\tdevice.routes = \"2\"\n\t\tfactory.name = \"api.alsa.pcm.sink\"\n\t\tmedia.class = \"Audio/Sink\"\n\t\tdevice.description = \"Ryzen HD Audio Controller\"\n\t\tnode.name = \"alsa_output.pci-0000_07_00.6.analog-stereo\"\n\t\tnode.nick = \"ALC257 Analog\"\n\t\tnode.pause-on-idle = \"false\"\n\t\tobject.path = \"alsa:acp:Generic_1:3:playback\"\n\t\tport.group = \"playback\"\n\t\tpriority.driver = \"1009\"\n\t\tpriority.session = \"1009\"\n\t\tfactory.id = \"19\"\n\t\tclock.quantum-limit = \"8192\"\n\t\tclient.id = \"47\"\n\t\tnode.driver = \"true\"\n\t\tnode.loop.name = \"data-loop.0\"\n\t\tlibrary.name = \"audioconvert/libspa-audioconvert\"\n\t\tobject.id = \"35\"\n\t\tobject.serial = \"59\"\n\t\tapi.acp.auto-port = \"false\"\n\t\tapi.acp.auto-profile = \"false\"\n\t\tapi.alsa.card = \"1\"\n\t\tapi.alsa.split-enable = \"true\"\n\t\tapi.alsa.use-acp = \"true\"\n\t\tapi.dbus.ReserveDevice1 = \"Audio1\"\n\t\tapi.dbus.ReserveDevice1.Priority = \"-20\"\n\t\tdevice.bus = \"pci\"\n\t\tdevice.bus_path = \"pci-0000:07:00.6\"\n\t\tdevice.enum.api = \"udev\"\n\t\tdevice.name = \"alsa_card.pci-0000_07_00.6\"\n\t\tdevice.nick = \"HD-Audio Generic\"\n\t\tdevice.plugged.usec = \"6549184\"\n\t\tdevice.product.id = \"0x15e3\"\n\t\tdevice.product.name = \"Ryzen HD Audio Controller\"\n\t\tdevice.subsystem = \"sound\"\n\t\tsysfs.path = \"/devices/pci0000:00/0000:00:08.1/0000:07:00.6/sound/card1\"\n\t\tdevice.vendor.id = \"0x1022\"\n\t\tdevice.vendor.name = \"Advanced Micro Devices, Inc. [AMD]\"\n\t\tspa.object.id = \"4\"\n\t\tdevice.string = \"1\"\n\tPorts:\n\t\tanalog-output-speaker: Speakers (type: Speaker, priority: 10000, availability group: Legacy 3, not available)\n\t\tanalog-output-headphones: Headphones (type: Headphones, priority: 9900, availability group: Legacy 4, available)\n\tActive Port: analog-output-headphones\n\tFormats:\n\t\tpcm\n",
+  "source_volume_before": "Volume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n        balance 0.00\n",
+  "mixer_before": "Simple mixer control 'Master',0\n  Capabilities: pvolume pvolume-joined pswitch pswitch-joined\n  Playback channels: Mono\n  Limits: Playback 0 - 87\n  Mono: Playback 86 [99%] [-0.75dB] [on]\nSimple mixer control 'Headphone',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 87 [100%] [0.00dB] [on]\n  Front Right: Playback 87 [100%] [0.00dB] [on]\nSimple mixer control 'Speaker',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 0 [0%] [-65.25dB] [off]\n  Front Right: Playback 0 [0%] [-65.25dB] [off]\nSimple mixer control 'PCM',0\n  Capabilities: pvolume\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 255\n  Mono:\n  Front Left: Playback 253 [99%] [-0.40dB]\n  Front Right: Playback 253 [99%] [-0.40dB]\nSimple mixer control 'Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\nSimple mixer control 'Capture',0\n  Capabilities: cvolume cswitch\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 63\n  Front Left: Capture 23 [37%] [0.00dB] [on]\n  Front Right: Capture 23 [37%] [0.00dB] [on]\nSimple mixer control 'Auto-Mute Mode',0\n  Capabilities: enum\n  Items: 'Disabled' 'Enabled'\n  Item0: 'Disabled'\nSimple mixer control 'Digital',0\n  Capabilities: cvolume\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 120\n  Front Left: Capture 60 [50%] [0.00dB]\n  Front Right: Capture 60 [50%] [0.00dB]\nSimple mixer control 'Internal Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\n",
+  "source_volume_test": "Volume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n        balance 0.00\n",
+  "mixer_test": "Simple mixer control 'Master',0\n  Capabilities: pvolume pvolume-joined pswitch pswitch-joined\n  Playback channels: Mono\n  Limits: Playback 0 - 87\n  Mono: Playback 86 [99%] [-0.75dB] [on]\nSimple mixer control 'Headphone',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 87 [100%] [0.00dB] [on]\n  Front Right: Playback 87 [100%] [0.00dB] [on]\nSimple mixer control 'Speaker',0\n  Capabilities: pvolume pswitch\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 87\n  Mono:\n  Front Left: Playback 0 [0%] [-65.25dB] [off]\n  Front Right: Playback 0 [0%] [-65.25dB] [off]\nSimple mixer control 'PCM',0\n  Capabilities: pvolume\n  Playback channels: Front Left - Front Right\n  Limits: Playback 0 - 255\n  Mono:\n  Front Left: Playback 253 [99%] [-0.40dB]\n  Front Right: Playback 253 [99%] [-0.40dB]\nSimple mixer control 'Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\nSimple mixer control 'Capture',0\n  Capabilities: cvolume cswitch\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 63\n  Front Left: Capture 23 [37%] [0.00dB] [on]\n  Front Right: Capture 23 [37%] [0.00dB] [on]\nSimple mixer control 'Auto-Mute Mode',0\n  Capabilities: enum\n  Items: 'Disabled' 'Enabled'\n  Item0: 'Disabled'\nSimple mixer control 'Digital',0\n  Capabilities: cvolume\n  Capture channels: Front Left - Front Right\n  Limits: Capture 0 - 120\n  Front Left: Capture 60 [50%] [0.00dB]\n  Front Right: Capture 60 [50%] [0.00dB]\nSimple mixer control 'Internal Mic Boost',0\n  Capabilities: volume\n  Playback channels: Front Left - Front Right\n  Capture channels: Front Left - Front Right\n  Limits: 0 - 3\n  Front Left: 0 [0%] [0.00dB]\n  Front Right: 0 [0%] [0.00dB]\n",
+  "capture_command": [
+    "parecord",
+    "--raw",
+    "--format=float32le",
+    "--rate=48000",
+    "--channels=2",
+    "--latency-msec=40",
+    "--client-name=DataPump-SNR-measurement",
+    "--device=@DEFAULT_SOURCE@"
+  ],
+  "playback_command": [
+    "paplay",
+    "--raw",
+    "--format=float32le",
+    "--rate=48000",
+    "--channels=2",
+    "--latency-msec=40",
+    "--client-name=DataPump-SNR-measurement",
+    "--device=@DEFAULT_SINK@",
+    "--volume=65536",
+    "/tmp/pump-snr-20260920-levels-g0/transmit-stereo.f32"
+  ],
+  "playback_start_wall_offset": 1.0211738370126113,
+  "playback_returncode": 0,
+  "capture_returncode": 0,
+  "captured_seconds": 34.56,
+  "capture_peak_by_channel": [
+    0.18664324283599854,
+    0.18705856800079346
+  ],
+  "capture_near_fullscale_by_channel": [
+    0,
+    0
+  ],
+  "capture_sha256": "7bf29ad1a5d368cc53d3e61e6d988906ea33fc2fb98f57f1581fe34bf05ec7c2",
+  "transmit_sha256": "fe8ac27bb3e442bc226f5a055fe3519dfef7e984afe2bb1e037bb3705f9d3278",
+  "source_volume_restored": "Volume: front-left: 6553 /  10% / -60.00 dB,   front-right: 6553 /  10% / -60.00 dB\n        balance 0.00\n",
+  "wall_seconds": 35.205350511008874
+}
