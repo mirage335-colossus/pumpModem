@@ -40,6 +40,9 @@ interleaved Reed–Solomon. Wire, SSB, FM and acoustic profiles offer QPSK throu
 256-APSK. Regular waveform, encryption and short/pending-message behavior remain
 unchanged. See [Fast operation, format and measured limits](docs/fast-mode.md)
 and the earlier [design and code-path audit](docs/fast-mode-plan.md).
+Future throughput work should start with the
+[Fast coding and capacity study](docs/fast-coding-study.md): measured LDPC and
+channel results, sparse RS models, shaping extrapolations and development priorities.
 
 The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accepts
 `--text` or `--input`; encryption is off by default and enabled by `--keyfile`.

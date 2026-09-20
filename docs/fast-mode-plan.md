@@ -3,6 +3,9 @@
 Status: original design and source audit, reviewed 2026-09-19. The implementation
 now exists; [Fast mode](fast-mode.md) specifies its actual behavior and limits.
 The recommendations below remain the design history, not the wire specification.
+Subsequent [throughput and coding research](fast-coding-study.md) records the
+revised throughput-first objective, LDPC/RS candidates, measured limits and
+future optimization priorities; consult it before extending this original plan.
 The subsequent user revision adds text sources and optional encryption. Public
 mode uses separate checksum domains; encrypted wire vectors remain unchanged.
 

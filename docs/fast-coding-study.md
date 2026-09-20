@@ -4,6 +4,13 @@ Date: 2026-09-19. This is an offline engineering study, not a new wire format.
 The production modem, saved defaults, independent wire vectors, short-message
 paths and physical-completion behavior are unchanged.
 
+Development entry points: [current Fast format](fast-mode.md),
+[compatibility contract](development.md),
+[evidence inventory and reproduction](validation-data/fast/coding-study-20260919/README.md).
+The measurements describe the 2026-09-19 baseline; reassess them when waveform,
+decoder, mapping or framing changes. Findings below are research inputs, not
+new default settings or a replacement wire specification.
+
 ## Objective and scope
 
 Maximize successful payload throughput for 100 KB and 5 MB files at a given
@@ -18,6 +25,36 @@ modulation, bit mapping, block length and the channel. Increasing block length
 and allowing unbounded latency also changes the optimization problem. The
 results below identify practical candidates and measured limitations, not a
 proof of global optimality over all codes.
+
+Each SNR sweep point selects a candidate independently. This neither implements
+automatic rate adaptation nor establishes performance at an unspecified
+worst-case SNR. A deployed choice needs a measured noise/impairment floor or
+distribution and matching locally configured settings at both peers.
+
+The design intent is **high-SNR throughput**, using coding gain to spend more
+of the available link margin on speed at the worst reasonably expected noise
+level. It is not a requirement to maximize survival close to an extreme weak
+signal floor. Compare expected successful file bytes per total elapsed time;
+do not require every 100 KB attempt to succeed if occasional retries are faster.
+For long transfers, the suggested roughly 0.3% outer budget targets a rare
+sub-two-second interruption in ten minutes or longer, plus rare residual inner
+errors. Short transfers may omit that budget. More decoder computation is
+acceptable when it produces useful throughput without overrunning live audio.
+
+The requested priorities also include investigating less frequent alignment
+markers when the net gain exceeds roughly **10%**, and treating small parity
+savings as worthwhile if the operating boundary barely changes. Neither a high
+code rate nor more redundancy is an objective by itself.
+
+## Development decision summary
+
+| Finding or proposal | Evidence status | How to use it |
+|---|---|---|
+| LDPC(64800,50400), rate 7/9, with Gray QAM selected by SNR | Measured ideal symbol-AWGN decoding; 800 successful words per final point | Reproducible implementation baseline, not a proven global optimum or production profile |
+| Roughly 0.4–1% outer RS for a 5 MB file at residual word FER up to 0.3% | Independent-erasure goodput model with an explicit minimum and integrity allowance | Recompute from the measured whole-word failure distribution; include failed repair words and burst correlation |
+| Shaped, optimized rate-5/6 LDPC plus about 0.57% RS; approximately 0.89 dB combined gap | Extrapolation from a published operating point and the RS model | Research target for the Gaussian symbol channel; not measured Fast throughput or occupied-band capacity attainment |
+| Smaller constellations can win with acoustic echo | Measured current PCM receiver soft-bit metric | Guide subsequent decoded-PCM comparisons; not an acoustic LDPC success result |
+| Sparse markers, different interleaving, smaller blocks and lower source overhead | Analytical opportunities, not validated protocol changes | Compare complete airtime and failure/reacquisition behavior before changing defaults or vectors |
 
 ## Capacity definitions
 
@@ -231,13 +268,18 @@ LDPC and choosing RS from an average bit error rate. Burst-correlated failures
 require measured erasure patterns instead of this independence model.
 `tools/fast_coding_analysis.py` performs the binomial optimization and reports
 both observed FER and its one-sided confidence bound. It searches up to 10%
-repair overhead and rounds the configured 0.3% minimum **up** to complete
+repair overhead rounded up to a whole shard, and rounds the configured 0.3% minimum **up** to complete
 repair words; it never calls three repair words per 688 source words 0.3%.
 
 For the selected LDPC baseline, each information word contains 6,300 bytes.
 Reserving eight bytes for a modeled integrity field leaves 6,292 source bytes;
 a decimal 5 MB file therefore needs **K=795** source shards. The following
 noise-only optimization rounds the requested 0.3% minimum up to three shards:
+
+Here K is a planning/model parameter derived from a known source size. It does
+not authorize a received length to control framing, allocation or completion.
+The illustrative eight-byte integrity field is overhead accounting, not a
+specified checksum/MAC or permission to weaken existing authentication.
 
 | Residual word FER | Noise-only throughput-optimal repairs | Parity/data |
 |---|---:|---:|
@@ -319,6 +361,17 @@ failed-file attempts reduces expected spectral efficiency from 8.5 to about
 8.434 bits/complex use. At the same operating SNR, the combined gap becomes
 approximately **0.89 dB** to the ideal Gaussian symbol-channel limit.
 
+The calculation, including byte/RS-symbol rounding, is reproducible as follows:
+
+```text
+source bytes/shard = 2 * floor(45900 / 16) - 8 = 5728
+K = ceil(5000000 / 5728) = 873; r = 5; q = 0.001
+Psuccess = P[Binomial(878, 0.001) <= 5] = 0.9997020761
+eta = 40000000 * Psuccess / (878 * 5400) = 8.434169 bits/complex use
+SNRlinear = (2^8.5 - 1) * 10^(0.69/10)
+gap_dB = 10 * log10(SNRlinear / (2^eta - 1)) = 0.888732
+```
+
 This 0.89 dB figure is an extrapolation from a published LDPC/shaping result
 and the explicit RS model, not a tested concatenated modem result. It assumes
 the published FER and independent detected erasures, and excludes interruptions,
@@ -344,6 +397,93 @@ pilot, source-cell and integrity-layout overhead are also necessary to turn a
 small coding gap into a small **file-throughput** gap. Four-interval markers
 alone offer 15.8% more steady throughput at current 256-APSK, but their
 tracking and reacquisition effects are not established by these code tests.
+
+## Interleaving, rate and framing tradeoffs still to evaluate
+
+The motivating airtime comparisons favored interleave depth 5 for the files
+and settings under discussion. That observation is not a universal result for
+every size or code rate. The current byte-interleaver depth D changes bootstrap
+size, final fill, cycle rounding and burst distribution, not the nominal FEC
+rate. Its existing fixed geometry gives:
+
+| Convolutional rate | Intervals/cycle at D=5 | At D=16 | At D=64 |
+|---|---:|---:|---:|
+| 1/2 | 11 | 33 | 129 |
+| 3/4 | 7 | 22 | 86 |
+| 7/8 | 6 | 19 | 74 |
+
+Each cycle carries D outer groups. At rate 3/4, depth 5 therefore has **1.79%
+less asymptotic throughput** than depth 16, but can finish a finite file sooner
+because its startup and final cycles are smaller. At rate 7/8 the asymptotic
+difference is **1.04%**. Compare exact source sizes, public/encrypted layouts,
+bootstrap and final fill; archive the estimator inputs along with results.
+No depth should be selected from one rounded airtime example alone.
+
+Keep three mechanisms distinct: current RS byte-interleave depth; the seeded
+bit permutation inside each experimental LDPC word; and the proposed long-span
+outer RS repair group. Changing one does not establish the burst performance
+of the others. Interleaving can distribute a dropout into recoverable partial
+words or turn it into many failed words, depending on the decoder and margin.
+
+Rate 7/8 carries **16.67%** more information than 3/4 before other overhead.
+Neglecting startup, final fill and retry costs, it improves successful
+throughput when its success probability exceeds **6/7** of the slower mode's.
+For real comparisons use exact attempt duration and include retry turnaround.
+The current punctured convolutional code has not been established as optimal;
+the independent LDPC results motivate a different inner-code design.
+
+Always state the parity denominator. For parity/data ratio rho, the rate factor
+is `1/(1+rho)`. For example, reducing it from 5% to 0.5% yields **4.48%** more
+payload rate if success probability is unchanged. A 5% relative reduction of
+5% parity/data (to 4.75%) yields only **0.24%**. Report the absolute parity
+counts, percentage-point change and resulting goodput to avoid ambiguity.
+
+At 256-APSK, the existing interval has 256 data symbols, 32 pilots and a
+64-symbol marker: 352 total. Amortizing one marker over four otherwise identical
+intervals gives 304 symbols per interval and `352/304 - 1 = 15.79%` higher
+steady throughput. This crosses the requested approximate 10% investigation
+threshold, but excludes acquisition, final fill, longer loss propagation and
+reacquisition cost. It proposes a Fast-format change only; regular-mode
+192-bit markers and 128-coded-byte intervals retain their separate contract.
+
+## Next development work and evidence to retain
+
+For identical independent attempts taking T seconds with file-success
+probability P, expected time to success is `T/P` and goodput is
+`source_bytes * P / T`. If a failed attempt adds turnaround W, expected time
+becomes `(T + (1-P)*W)/P`. These expressions need a different model when channel
+conditions remain correlated between retries or attempts change profile.
+
+1. Establish a complete-file baseline for each channel at 100,000 and 5,000,000
+   source bytes, public and encrypted. Record exact profiles, code/mapping,
+   marker cadence, interleave, padding, airtime, startup/end silence and retry
+   turnaround. Optimize `source_bytes / expected_time_to_success`, including
+   failed attempts, rather than nominal mapper rate or first-attempt success.
+2. Integrate the measured uniform-QAM/LDPC candidates into an isolated diagnostic
+   path and compare against current convolutional modes through sampled PCM.
+   Sweep SNR around each transition with multiple independent seeds; retain
+   whole-word errors, convergence failures, wrong valid codewords, erasures,
+   file outcomes, CPU deadlines and memory. Estimate uncertainty at each point;
+   0/800 is not evidence for zero FER. Separate pilot selection from validation.
+3. Select RS and interleaving jointly from those results. Sweep interruption
+   position, duration and alignment through data, repair, training and markers;
+   distinguish unused burst budget from random-error capacity. Report correlated
+   erasure patterns and detection failures, not just average BER. Include the
+   zero-RS short-file option and account for local geometry and bounded storage.
+4. Compare Gray QAM, probabilistic shaping, mapping and LDPC matrices/rates
+   together. Then measure the gain from marker/pilot cadence, source-cell layout
+   and pulse-shaping rolloff. Keep Gaussian bandwidth bounds, symbol bounds,
+   bit metrics, decoded information rate and actual file goodput separate.
+5. Qualify all three channel classes. Wire needs timing drift and linearity;
+   radio audio needs the intended radio path and its filtering/level behavior;
+   acoustic needs varied echoes, transducer response and sound interruptions.
+   Archive clean received power/SNR normalization and device or impulse-response
+   details. One static echo fixture cannot select a universal acoustic mode.
+6. Record any resulting choice with its measured improvement, confidence limits,
+   CPU/latency tradeoff, remaining uncertainty and wire-compatibility scope.
+   Preserve physical completion, missing-slot positions and pending progress.
+   Follow the current development contract and relevant independent vectors
+   and Fast/shared-GUI checks when implementation changes actually occur.
 
 ## Reproducing the information-rate calculation
 

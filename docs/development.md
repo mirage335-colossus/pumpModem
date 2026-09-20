@@ -13,6 +13,11 @@ This is a maintenance contract for the existing implementation. The
 [migration plan](packetless-stream-plan.md) and older validation entries describe
 historical designs; they do not override these current requirements.
 
+For independent Fast Modem throughput work, consult the
+[coding and capacity study](fast-coding-study.md), including its development
+priorities and evidence limits, alongside the [current Fast format](fast-mode.md).
+Its proposed coding and marker changes do not alter this compatibility contract.
+
 ## Preserve all three transmit paths
 
 | Input | Required existing behavior |

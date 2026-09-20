@@ -26,6 +26,14 @@ are linked from the study. Runtime code, wire formats, defaults and tests are
 unchanged; the existing runtime regression suites were not rerun for this
 documentation/diagnostic-only change.
 
+The documentation follow-up links this study from the README, development
+contract, Fast specification, historical Fast plan and regular-throughput scope
+note. It adds an evidence inventory, reproducible shaping extrapolation,
+interleave/rate/parity tradeoffs and a future development sequence. Relative
+artifact links, analytical examples and archived RS-model reproduction were
+checked. This follow-up changes documentation only; it adds no new channel
+measurement or runtime test result.
+
 ## Fast bulk-file coding defaults — 19 September 2026
 
 Fast defaults now use rate-3/4 convolutional coding, robust RS(128,112),

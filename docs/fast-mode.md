@@ -125,6 +125,12 @@ transmission. [47 CFR 97.113](https://www.govinfo.gov/content/pkg/CFR-2025-title
 
 ## Airtime, payload rate and theoretical capacity
 
+For future optimization, see the [Fast coding and capacity study](fast-coding-study.md).
+It records the throughput-first objective, LDPC/RS and constellation tradeoffs,
+interleave/padding effects, three channel comparisons and near-Shannon
+extrapolations. Its proposed codes, shaping and marker cadence are not implemented
+settings; this document continues to describe the current wire format.
+
 The GUI estimates airtime from the exact local source size, nine-bit source
 cells, bootstrap, complete interleave cycles, sync/pilots, pulse tail and 6.25
 seconds of end silence. Active TX percentage counts generated audio samples,

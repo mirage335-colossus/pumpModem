@@ -1,5 +1,9 @@
 # Throughput and pattern confidence
 
+This document concerns the regular pattern modem. For the independent Fast
+Modem, see [current airtime and format](fast-mode.md#airtime-payload-rate-and-theoretical-capacity)
+and the [coding, capacity and throughput optimization study](fast-coding-study.md).
+
 Automatic planning previously imposed 64 chips on every bit, even when the
 selected link had ample signal energy. The chip clock is nominally `B/2`, so
 12 kHz bandwidth could carry only 93.75 gross bit/s. That was a planner and
