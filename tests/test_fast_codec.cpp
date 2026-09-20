@@ -90,7 +90,8 @@ void independent_vectors() {
         check(coding::decode(soft,source.size(),rate).bytes==source,"independent inner vector decode");
     }
     // Freeze the original local profile as well as its independent wire bytes.
-    auto p=profile(Channel::wire);p.code_rate=CodeRate::half;Bytes salt(32),iv(16),plain(176);
+    auto p=profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::half;
+    p.robust=true;p.interleave_depth=16;Bytes salt(32),iv(16),plain(176);
     std::iota(salt.begin(),salt.end(),32);std::iota(iv.begin(),iv.end(),0);std::iota(plain.begin(),plain.end(),0);
     const auto expected_crypto=unhex(
         "000102030405060708090a0b0c0d0e0f1e03c7f5409c338d0198fd87e3fffc4691e3b226d5c20647f492e61bd1b833a5"
@@ -178,7 +179,8 @@ void roundtrips() {
             if(size==capacity)check(wire.size()==3*cycle_intervals(p)*physical_interval_bits,"mandatory endpoint may occupy extra final cycle");
         }
     }
-    auto p=profile(Channel::wire);p.interleave_depth=1;const auto wire=transmit(p,crypto,Bytes(123,0));
+    // Preserve the original robust-RS memory boundary independently of defaults.
+    auto p=profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto wire=transmit(p,crypto,Bytes(123,0));
     StreamDecoder zero(p,crypto);feed(zero,wire);zero.finish(true);check(Bytes(zero.result()->bytes().begin(),zero.result()->bytes().end())==Bytes(123,0),"all-zero file");
     StreamDecoder wrong(p,key(1));feed(wrong,wire);wrong.finish(true);check(wrong.snapshot().failed && !wrong.result(),"wrong bootstrap key fails");
     auto missing=wire;missing.resize(missing.size()-physical_interval_bits);
@@ -217,7 +219,7 @@ void public_roundtrips() {
             check(final.status.find("not authenticated")!=std::string::npos && Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"public status and exact source match");
         }
     }
-    auto p=profile(Channel::wire);p.interleave_depth=1;const auto crypto=key();const auto public_wire=transmit(p,std::nullopt,utf8);
+    auto p=profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto crypto=key();const auto public_wire=transmit(p,std::nullopt,utf8);
     StreamDecoder keyed_rx(p,crypto);feed(keyed_rx,public_wire);keyed_rx.finish(true);
     check(keyed_rx.snapshot().failed && !keyed_rx.result(),"keyed receiver never falls back to public mode");
     StreamDecoder public_rx(p,std::nullopt);feed(public_rx,transmit(p,crypto,utf8));public_rx.finish(true);
@@ -229,7 +231,8 @@ void public_roundtrips() {
     check(exact.snapshot().complete && exact.snapshot().spool_bytes==192,"public exact in-place memory quota");
 }
 void public_malformed() {
-    auto p=profile(Channel::wire);p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
+    // Keep the explicit source/checksum boundary offsets in the robust layout.
+    auto p=profile(Channel::wire);p.robust=true;p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
     const auto pristine=transmit(p,std::nullopt,{});const auto bootstrap=systematic(p,std::span(pristine).first(width));
     const auto salt=std::span(bootstrap).first(32);const auto good_group=systematic(p,std::span(pristine).subspan(width,width));
     const auto invalid=[&](const Bytes& wire,const char* why) {
@@ -284,7 +287,9 @@ void canonical_sources() {
     check(!last.result(),"lost whole final group cannot validate prefix");
 }
 void burst_and_soft() {
-    auto p=profile(Channel::wire);p.interleave_depth=16;const auto crypto=key();Bytes source(2100);
+    // This fixed burst fixture predates the cable throughput preset.
+    auto p=profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
+    p.robust=true;p.interleave_depth=16;const auto crypto=key();Bytes source(2100);
     std::iota(source.begin(),source.end(),0);const auto wire=transmit(p,crypto,source);
     StreamDecoder rx(p,crypto);std::array<float,physical_interval_bits> soft{};
     const auto start=cycle_intervals(p)+3;

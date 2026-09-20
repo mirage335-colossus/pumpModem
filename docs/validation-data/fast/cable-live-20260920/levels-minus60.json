@@ -1,0 +1,135 @@
+{
+  "tx_amplitude": 0.05,
+  "tone_hz": [
+    0,
+    1000,
+    5000,
+    10000,
+    15000,
+    0
+  ],
+  "play_error": "",
+  "record_error": "",
+  "blocks": [
+    {
+      "seconds": 0.0,
+      "rms_dbfs": -15.7,
+      "peak": 0.2982,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 0.25,
+      "rms_dbfs": -58.26,
+      "peak": 0.0022,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 0.5,
+      "rms_dbfs": -71.37,
+      "peak": 0.0005,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 0.75,
+      "rms_dbfs": -43.64,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 1.0,
+      "rms_dbfs": -42.71,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 1.25,
+      "rms_dbfs": -42.71,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 1.5,
+      "rms_dbfs": -42.71,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 1.75,
+      "rms_dbfs": -42.71,
+      "peak": 0.0105,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 2.0,
+      "rms_dbfs": -42.71,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 2.25,
+      "rms_dbfs": -42.72,
+      "peak": 0.0107,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 2.5,
+      "rms_dbfs": -42.72,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 2.75,
+      "rms_dbfs": -49.89,
+      "peak": 0.0104,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 3.0,
+      "rms_dbfs": -90.44,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 3.25,
+      "rms_dbfs": -88.56,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 3.5,
+      "rms_dbfs": -88.7,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 3.75,
+      "rms_dbfs": -88.42,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 4.0,
+      "rms_dbfs": -85.36,
+      "peak": 0.0002,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 4.25,
+      "rms_dbfs": -89.75,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 4.5,
+      "rms_dbfs": -91.1,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    },
+    {
+      "seconds": 4.75,
+      "rms_dbfs": -89.9,
+      "peak": 0.0001,
+      "clip_fraction": 0.0
+    }
+  ]
+}

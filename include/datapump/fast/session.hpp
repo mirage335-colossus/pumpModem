@@ -15,7 +15,8 @@ struct Settings {
     // Peers must select the same mode; receivers never fall back from encryption.
     std::optional<Crypto> key;
     std::string device="default";
-    bool mono=true;
+    // The default cable route drives both outputs; this is local device setup.
+    bool mono=false;
     std::uint64_t quota_bytes=256ULL*1024*1024;
 };
 struct Snapshot {

@@ -1,0 +1,397 @@
+{
+  "airtime_success_break_even": [
+    {
+      "from": "default",
+      "new_success_divided_by_old_must_exceed": 0.6171805825937376,
+      "source_bytes": 100000,
+      "to": "256-APSK"
+    },
+    {
+      "from": "256-APSK",
+      "new_success_divided_by_old_must_exceed": 0.8966210433872811,
+      "source_bytes": 100000,
+      "to": "7/8"
+    },
+    {
+      "from": "7/8",
+      "new_success_divided_by_old_must_exceed": 0.9423508084162093,
+      "source_bytes": 100000,
+      "to": "high-rate-RS"
+    },
+    {
+      "from": "high-rate-RS",
+      "new_success_divided_by_old_must_exceed": 1.0482966401591594,
+      "source_bytes": 100000,
+      "to": "depth62"
+    },
+    {
+      "from": "default",
+      "new_success_divided_by_old_must_exceed": 0.5516311954326443,
+      "source_bytes": 5000000,
+      "to": "256-APSK"
+    },
+    {
+      "from": "256-APSK",
+      "new_success_divided_by_old_must_exceed": 0.8645324253856328,
+      "source_bytes": 5000000,
+      "to": "7/8"
+    },
+    {
+      "from": "7/8",
+      "new_success_divided_by_old_must_exceed": 0.923661593159787,
+      "source_bytes": 5000000,
+      "to": "high-rate-RS"
+    },
+    {
+      "from": "high-rate-RS",
+      "new_success_divided_by_old_must_exceed": 0.9676073309119353,
+      "source_bytes": 5000000,
+      "to": "depth62"
+    },
+    {
+      "from": "default",
+      "new_success_divided_by_old_must_exceed": 0.5501638140056493,
+      "source_bytes": 50000000,
+      "to": "256-APSK"
+    },
+    {
+      "from": "256-APSK",
+      "new_success_divided_by_old_must_exceed": 0.8637265909452295,
+      "source_bytes": 50000000,
+      "to": "7/8"
+    },
+    {
+      "from": "7/8",
+      "new_success_divided_by_old_must_exceed": 0.9231694333962908,
+      "source_bytes": 50000000,
+      "to": "high-rate-RS"
+    },
+    {
+      "from": "high-rate-RS",
+      "new_success_divided_by_old_must_exceed": 0.9645255617642189,
+      "source_bytes": 50000000,
+      "to": "depth62"
+    }
+  ],
+  "assumptions": [
+    "Decimal file bytes; production v1 airtime includes 6.25 s silence",
+    "Cycle/word/file success models require stationary independent trials",
+    "LDPC model uses 6292 source bytes per word and detected erasures",
+    "LDPC model has no bursts, sync failure, CPU overrun or interruptions",
+    "QPSK-marker surrogate does not establish production APSK false locks"
+  ],
+  "confidence": {
+    "fer_upper_after_zero_of_800": 0.0037376628261006086,
+    "lower_success_after_13_of_13": 0.7941833348134493,
+    "lower_success_after_14_of_14": 0.8073638243498646,
+    "one_sided_level": 0.95
+  },
+  "existing_codec": [
+    {
+      "cycles_including_bootstrap": 10,
+      "hypothetical_uncoded_ber_for_80pct_file": 2.789294002419498e-07,
+      "max_independent_cycle_failure_for_80pct_file": 0.022067231457071488,
+      "profile": "wire/256-APSK/7/8/high-rate-RS/depth62/public",
+      "seconds": 22.920875,
+      "source_bytes": 100000,
+      "zero_failure_cycles_for_95pct_upper_below_threshold": 135
+    },
+    {
+      "cycles_including_bootstrap": 438,
+      "hypothetical_uncoded_ber_for_80pct_file": 5.578588767294917e-09,
+      "max_independent_cycle_failure_for_80pct_file": 0.000509330410024643,
+      "profile": "wire/256-APSK/7/8/high-rate-RS/depth62/public",
+      "seconds": 736.0259375,
+      "source_bytes": 5000000,
+      "zero_failure_cycles_for_95pct_upper_below_threshold": 5881
+    },
+    {
+      "cycles_including_bootstrap": 4363,
+      "hypothetical_uncoded_ber_for_80pct_file": 5.578588781299211e-10,
+      "max_independent_cycle_failure_for_80pct_file": 5.11432145602358e-05,
+      "profile": "wire/256-APSK/7/8/high-rate-RS/depth62/public",
+      "seconds": 7275.59927083,
+      "source_bytes": 50000000,
+      "zero_failure_cycles_for_95pct_upper_below_threshold": 58574
+    }
+  ],
+  "ldpc_goodput_optimum": [
+    {
+      "data_words": 16,
+      "parity_per_data": 0.0,
+      "relative_goodput": 0.9984011994401819,
+      "repairs": 0,
+      "source_bytes": 100000,
+      "success_probability": 0.9984011994401819,
+      "word_fer": 0.0001
+    },
+    {
+      "data_words": 16,
+      "parity_per_data": 0.0,
+      "relative_goodput": 0.9952107848947314,
+      "repairs": 0,
+      "source_bytes": 100000,
+      "success_probability": 0.9952107848947314,
+      "word_fer": 0.0003
+    },
+    {
+      "data_words": 16,
+      "parity_per_data": 0.0,
+      "relative_goodput": 0.98411944181564,
+      "repairs": 0,
+      "source_bytes": 100000,
+      "success_probability": 0.98411944181564,
+      "word_fer": 0.001
+    },
+    {
+      "data_words": 16,
+      "parity_per_data": 0.0,
+      "relative_goodput": 0.953065026364389,
+      "repairs": 0,
+      "source_bytes": 100000,
+      "success_probability": 0.953065026364389,
+      "word_fer": 0.003
+    },
+    {
+      "data_words": 16,
+      "parity_per_data": 0.0,
+      "relative_goodput": 0.9418449208830277,
+      "repairs": 0,
+      "source_bytes": 100000,
+      "success_probability": 0.9418449208830277,
+      "word_fer": 0.0037376628261006086
+    },
+    {
+      "data_words": 16,
+      "parity_per_data": 0.0625,
+      "relative_goodput": 0.9295915430306411,
+      "repairs": 1,
+      "source_bytes": 100000,
+      "success_probability": 0.9876910144700561,
+      "word_fer": 0.01
+    },
+    {
+      "data_words": 795,
+      "parity_per_data": 0.0025157232704402514,
+      "relative_goodput": 0.9974115792908537,
+      "repairs": 2,
+      "source_bytes": 5000000,
+      "success_probability": 0.9999207908110822,
+      "word_fer": 0.0001
+    },
+    {
+      "data_words": 795,
+      "parity_per_data": 0.0037735849056603774,
+      "relative_goodput": 0.9961286723761809,
+      "repairs": 3,
+      "source_bytes": 5000000,
+      "success_probability": 0.9998876484983552,
+      "word_fer": 0.0003
+    },
+    {
+      "data_words": 795,
+      "parity_per_data": 0.005031446540880503,
+      "relative_goodput": 0.9936092529385189,
+      "repairs": 4,
+      "source_bytes": 5000000,
+      "success_probability": 0.9986085447772033,
+      "word_fer": 0.001
+    },
+    {
+      "data_words": 795,
+      "parity_per_data": 0.010062893081761006,
+      "relative_goodput": 0.9891825285323816,
+      "repairs": 8,
+      "source_bytes": 5000000,
+      "success_probability": 0.999136566555349,
+      "word_fer": 0.003
+    },
+    {
+      "data_words": 795,
+      "parity_per_data": 0.011320754716981131,
+      "relative_goodput": 0.9877321834138466,
+      "repairs": 9,
+      "source_bytes": 5000000,
+      "success_probability": 0.9989140571883429,
+      "word_fer": 0.0037376628261006086
+    },
+    {
+      "data_words": 795,
+      "parity_per_data": 0.021383647798742137,
+      "relative_goodput": 0.9773400178456187,
+      "repairs": 17,
+      "source_bytes": 5000000,
+      "success_probability": 0.9982391125668457,
+      "word_fer": 0.01
+    },
+    {
+      "data_words": 7947,
+      "parity_per_data": 0.0007550018875047187,
+      "relative_goodput": 0.9992256344357707,
+      "repairs": 6,
+      "source_bytes": 50000000,
+      "success_probability": 0.9999800516758128,
+      "word_fer": 0.0001
+    },
+    {
+      "data_words": 7947,
+      "parity_per_data": 0.0012583364791745313,
+      "relative_goodput": 0.9987024367843925,
+      "repairs": 10,
+      "source_bytes": 50000000,
+      "success_probability": 0.9999591404924388,
+      "word_fer": 0.0003
+    },
+    {
+      "data_words": 7947,
+      "parity_per_data": 0.0025166729583490626,
+      "relative_goodput": 0.9974019225048472,
+      "repairs": 20,
+      "source_bytes": 50000000,
+      "success_probability": 0.9999120569518204,
+      "word_fer": 0.001
+    },
+    {
+      "data_words": 7947,
+      "parity_per_data": 0.005410846860450485,
+      "relative_goodput": 0.994467894681419,
+      "repairs": 43,
+      "source_bytes": 50000000,
+      "success_probability": 0.9998488081671748,
+      "word_fer": 0.003
+    },
+    {
+      "data_words": 7947,
+      "parity_per_data": 0.0062916823958726565,
+      "relative_goodput": 0.9934823560422262,
+      "repairs": 50,
+      "source_bytes": 50000000,
+      "success_probability": 0.9997330314923473,
+      "word_fer": 0.0037376628261006086
+    },
+    {
+      "data_words": 7947,
+      "parity_per_data": 0.014093368566754751,
+      "relative_goodput": 0.9857555549681648,
+      "repairs": 112,
+      "source_bytes": 50000000,
+      "success_probability": 0.9996481713210571,
+      "word_fer": 0.01
+    }
+  ],
+  "ldpc_sparse_outer_model": [
+    {
+      "data_words": 16,
+      "max_independent_word_fer_for_80pct_file": 0.048763151250810086,
+      "parity_per_data": 0.0625,
+      "repair_words": 1,
+      "source_bytes": 100000,
+      "success_at_word_fer_0_001": 0.9998653528846903,
+      "success_at_word_fer_0_003": 0.9988121476298797,
+      "success_at_zero_of_800_fer_upper95": 0.9981697008628065,
+      "zero_failure_words_for_95pct_upper_below_threshold": 60
+    },
+    {
+      "data_words": 795,
+      "max_independent_word_fer_for_80pct_file": 0.0028794498091594964,
+      "parity_per_data": 0.0037735849056603774,
+      "repair_words": 3,
+      "source_bytes": 5000000,
+      "success_at_word_fer_0_001": 0.9910385896149627,
+      "success_at_word_fer_0_003": 0.7801663741454605,
+      "success_at_zero_of_800_fer_upper95": 0.651125389006862,
+      "zero_failure_words_for_95pct_upper_below_threshold": 1039
+    },
+    {
+      "data_words": 7947,
+      "max_independent_word_fer_for_80pct_file": 0.0026005354157295785,
+      "parity_per_data": 0.003020007550018875,
+      "repair_words": 24,
+      "source_bytes": 50000000,
+      "success_at_word_fer_0_001": 0.9999989189159222,
+      "success_at_word_fer_0_003": 0.5610717057881236,
+      "success_at_zero_of_800_fer_upper95": 0.16576558585361503,
+      "zero_failure_words_for_95pct_upper_below_threshold": 1151
+    }
+  ],
+  "qpsk_marker_surrogate": [
+    {
+      "accepted_sequences": "54662129332",
+      "all_sequences": "79228162514264337593543950336",
+      "conditional_union_negative_log2_bound": 30.330177390810032,
+      "conditional_union_upper_bound": 7.408099921804752e-10,
+      "false_match_per_symbol_aligned_window": 6.899330692183927e-19,
+      "negative_log2_probability": 60.330177390810036,
+      "qpsk_symbols": 48,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    },
+    {
+      "accepted_sequences": "2753996933308",
+      "all_sequences": "5192296858534827628530496329220096",
+      "conditional_union_negative_log2_bound": 40.67533590837979,
+      "conditional_union_upper_bound": 5.695132175657178e-13,
+      "false_match_per_symbol_aligned_window": 5.3040051606084945e-22,
+      "negative_log2_probability": 70.6753359083798,
+      "qpsk_symbols": 56,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    },
+    {
+      "accepted_sequences": "169068278743108",
+      "all_sequences": "340282366920938463463374607431768211456",
+      "conditional_union_negative_log2_bound": 50.73540067056919,
+      "conditional_union_upper_bound": 5.334854216537861e-16,
+      "false_match_per_symbol_aligned_window": 4.968470164144282e-25,
+      "negative_log2_probability": 80.73540067056919,
+      "qpsk_symbols": 64,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    },
+    {
+      "accepted_sequences": "11220217612396268",
+      "all_sequences": "22300745198530623141535718272648361505980416",
+      "conditional_union_negative_log2_bound": 60.683049824992715,
+      "conditional_union_upper_bound": 5.402338270563757e-19,
+      "false_match_per_symbol_aligned_window": 5.03131958708517e-28,
+      "negative_log2_probability": 90.68304982499271,
+      "qpsk_symbols": 72,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    },
+    {
+      "accepted_sequences": "1715005477999367796",
+      "all_sequences": "1461501637330902918203684832716283019655932542976",
+      "conditional_union_negative_log2_bound": 69.42708110742537,
+      "conditional_union_upper_bound": 1.2599870318859585e-21,
+      "false_match_per_symbol_aligned_window": 1.1734543665181459e-30,
+      "negative_log2_probability": 99.42708110742537,
+      "qpsk_symbols": 80,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    },
+    {
+      "accepted_sequences": "76027960737556941324",
+      "all_sequences": "95780971304118053647396689196894323976171195136475136",
+      "conditional_union_negative_log2_bound": 79.95683610228366,
+      "conditional_union_upper_bound": 8.523029170182882e-25,
+      "false_match_per_symbol_aligned_window": 7.937689470297547e-34,
+      "negative_log2_probability": 109.95683610228366,
+      "qpsk_symbols": 88,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    },
+    {
+      "accepted_sequences": "3718446014180429032116",
+      "all_sequences": "6277101735386680763835789423207666416102355444464034512896",
+      "conditional_union_negative_log2_bound": 90.34481018066522,
+      "conditional_union_upper_bound": 6.360660021174038e-28,
+      "false_match_per_symbol_aligned_window": 5.923826267173549e-37,
+      "negative_log2_probability": 120.34481018066522,
+      "qpsk_symbols": 96,
+      "squared_coherence_threshold": 0.72,
+      "surrogate_search_windows": 1073741824
+    }
+  ],
+  "scope": "Analytical planning only; not observed hardware reliability"
+}

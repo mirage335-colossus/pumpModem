@@ -9,16 +9,17 @@ enum class Channel { wire, ssb, fm, acoustic };
 enum class CodeRate { half, three_quarters, seven_eighths };
 struct Profile {
     Channel channel=Channel::wire;
-    unsigned constellation=16;
-    // Bulk-file default: retain outer burst correction, reduce inner redundancy.
-    CodeRate code_rate=CodeRate::three_quarters;
-    bool robust=true;
-    unsigned interleave_depth=16;
+    // Cable bulk-file defaults. Other channels retain their separate presets.
+    unsigned constellation=256;
+    CodeRate code_rate=CodeRate::seven_eighths;
+    bool robust=false;
+    unsigned interleave_depth=62;
     std::uint32_t sample_rate=48000;
     double symbol_rate=15000;
     double carrier_hz=9300;
     double rolloff=0.20;
-    double amplitude=0.5;
+    // Headroom for the superposition of 256-APSK pulse-shaped symbols.
+    double amplitude=0.35;
 };
 Profile profile(Channel channel);
 void validate(const Profile& profile);

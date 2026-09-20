@@ -1,0 +1,11 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start 98: fast_snr
+1/1 Test #98: fast_snr .........................   Passed  389.18 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Label Time Summary:
+fast_regression    = 389.18 sec*proc (1 test)
+
+Total Test time (real) = 389.19 sec

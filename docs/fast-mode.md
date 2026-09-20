@@ -83,15 +83,26 @@ completion. Both native backends render the same immutable plot snapshots.
 
 ## Channel profiles
 
-Defaults use 48 kHz samples, 20% root-raised-cosine rolloff, a 16-symbol pulse
-span, rate-3/4 convolutional coding and robust RS. Interleave depth is 16 except
-for acoustic (5). These defaults target files of 100 KB (100,000 bytes) and larger. The CLI
-also accepts 44.1–192 kHz sample rates. Device passband validation is separate
+Defaults use 48 kHz samples, 20% root-raised-cosine rolloff and a 16-symbol pulse
+span. The cable preset uses **256-APSK, rate-7/8 convolutional coding, high-rate
+RS and interleave depth 62**, selected for 50 MB bulk transfers after
+[physical cable tests](fast-cable-live-study.md). It is a provisional operating
+point, not a demonstrated 80% success guarantee for 50 MB. Radio and acoustic
+presets retain rate 3/4 and robust RS, with depth 16 for radio and 5 for acoustic.
+Cable output amplitude is 0.35 to leave digital headroom for the dense
+constellation's shaped peaks. The former amplitude 0.5 can clip before the
+sound card, even when the system playback volume is below 100%. Input gain
+still needs to avoid analog/ADC clipping; the live cable needed microphone
+boost disabled. SSB/FM amplitude remains 0.5 and acoustic remains 0.35.
+Cable output drives both stereo channels by default; the other presets retain
+right-only output. `--mono` selects right-only output explicitly and `--stereo`
+selects both. Routing is local and need not match between peers.
+The CLI also accepts 44.1–192 kHz sample rates. Device passband validation is separate
 from these nominal waveform settings.
 
 | Profile | Symbol rate | Carrier | Ideal shaped audio support | Default constellation | Gross rate at 256-APSK |
 | --- | ---: | ---: | --- | --- | ---: |
-| `wire` | 15,000/s | 9,300 Hz | 300–18,300 Hz | 16-APSK | 120 kbit/s |
+| `wire` | 15,000/s | 9,300 Hz | 300–18,300 Hz | 256-APSK | 120 kbit/s |
 | `ssb` | 2,000/s | 1,500 Hz | 300–2,700 Hz | 16-APSK | 16 kbit/s |
 | `fm` | 2,000/s | 1,500 Hz | 300–2,700 Hz | QPSK | 16 kbit/s |
 | `acoustic` | 500/s | 1,800 Hz | 1,500–2,100 Hz | QPSK | 4 kbit/s |
@@ -138,11 +149,12 @@ including that silence; it stays below 100% until playback drains. Device queues
 can make audible playback lag the producer. A source file changed after inspection
 can invalidate the estimate. An empty draft estimate is an empty source transfer.
 
-The GUI exposes interleave depths 1, 4, 5, 16 and 64. Depth 16 remains the cable/radio default (acoustic uses 5);
-64 reduces padding loss for long cable transfers at the expense of larger
-coding cycles and short-message latency. Both peers must match. At 256-APSK,
+The GUI exposes interleave depths 1, 4, 5, 16, 62 and 64. Cable defaults to 62,
+radio to 16 and acoustic to 5. Depth 62 minimizes calculated 50 MB airtime among
+depths 1–64 at the cable settings; rounding makes it slightly more efficient
+than 64. Both peers must match. At 256-APSK,
 7/8 coding and high-rate RS, the long public-data ceiling is about 53.1 kbit/s
-at depth 16 and 54.5 kbit/s at depth 64, before start/end overhead. The 120
+at depth 16, 54.5 kbit/s at depth 64 and 55.0 kbit/s at depth 62. The 120
 kbit/s gross figure is mapper capacity; markers, pilots, coding, checksums and
 nine-bit source cells consume the remainder.
 
@@ -187,24 +199,32 @@ of DVB compatibility. The frozen marker uses the implementation's xorshift32
 sequence seeded with `0x65a39c17`; training permutes it and rotates by pi/2.
 Independent wire fingerprints and mapper tests protect these constants.
 
-The bulk defaults retain robust RS: its 16 parity bytes per codeword correct
-up to eight unknown byte errors (or 16 erasures), twice the high-rate choice.
-High-rate RS increases source capacity by only 8–9%; rate 3/4 inner coding
-provides the larger throughput gain while retaining that outer correction budget.
-Rate 1/2 remains available for difficult links and 7/8 for cleaner links.
+The cable default uses high-rate RS: eight parity bytes per 128-byte codeword
+correct up to four unknown byte errors or eight erasures. This is 6.25% of
+coded bytes, or 6.67% parity relative to systematic bytes. Radio and acoustic
+retain robust RS, with twice that correction budget. Rate 1/2 remains available
+for difficult links, 3/4 for intermediate conditions and 7/8 for cleaner links.
 No setting is universally optimal for an unmeasured channel.
 
-At the default code rate, depth 16 rounds to 22 physical intervals and depth 5
-to seven. Tests compare exact airtime against continuous interleaving at the
-same FEC rate: cycle rounding, bootstrap and final fill together stay below 10%
-for every source of at least 100,000 bytes, encrypted and public, in all profiles.
-Exact estimates are also checked at 100,000 bytes, 100 KiB, 1 MiB and 16 MiB.
-This is interleave overhead, not total protocol overhead or a measured error rate.
+The cable default has 71 physical intervals per coding cycle. Its calculated
+public-source airtimes are 22.921 seconds for 100,000 bytes, 736.026 seconds for
+5,000,000 bytes and 7,275.599 seconds for 50,000,000 bytes. The last is about
+2 hours 1 minute; encryption raises it to 7,882.072 seconds. These estimates
+include 6.25 seconds of end silence. They predict duration, not success.
+
+At rate 3/4, depth 16 rounds to 22 physical intervals and depth 5 to seven.
+Tests retain the former preset's below-10% cycle-rounding/bootstrap/final-fill
+bound for sources of at least 100,000 bytes, as well as radio/acoustic coverage.
+The new depth-62 cable preset deliberately accepts more short-file padding to
+optimize 50 MB; a 100 KB transfer costs 1.549 seconds more than its best
+size-specific depth. Exact new-default estimates and the depth sweep are tested.
 A 16-byte encrypted Fast message takes less than 45 seconds in every profile,
 including the existing 6.25-second silence; no special short-message framing is
-introduced. Estimated 16-byte airtimes are 8.14 s (wire), 20.40 s (SSB),
-33.07 s (FM) and 40.58 s (acoustic). Both peers must select the same revised defaults. To communicate
-with previous defaults select rate 1/2 and depth 16 (acoustic: 4).
+introduced. Estimated 16-byte airtimes are 9.59 s (wire), 20.40 s (SSB),
+33.07 s (FM) and 40.58 s (acoustic). Both peers must select matching settings.
+To communicate with the immediately preceding cable default, select 16-APSK,
+rate 3/4, robust RS and depth 16. The earlier rate-1/2 format also remains
+selectable. No wire primitive or integrity context encoding has changed.
 
 The standalone `fast_regression` tool now defaults to 100,000 source bytes;
 use `--bytes` explicitly for smaller diagnostic fixtures.
@@ -222,7 +242,7 @@ Encrypted groups contain a 16-byte IV, the fixed ciphertext source area and a
 32-byte HMAC-SHA256 tag. Public groups contain the fixed plaintext source area
 and a 32-byte SHA-256 checksum. Both use identical physical coding geometry.
 
-An interleave cycle contains `D` outer groups (`D=16` for cable/radio, `D=5` for acoustic, CLI range
+An interleave cycle contains `D` outer groups (`D=62` for cable, `D=16` for radio, `D=5` for acoustic, CLI range
 1–64). Its `2D` RS rows are transmitted column-first. A K=7 convolutional code
 uses generators 0171 and 0133, with selectable rates 1/2, 3/4 or 7/8.
 The puncture pairs are `[11]`, `[11,10,01]` and
@@ -380,7 +400,7 @@ explicitly selects public mode. Invalid keys never cause a public fallback.
 
 `fast-listen` handles one reception. Ctrl+C or `--seconds N` cancels without
 manufacturing completion. `--rs robust|high-rate`, `--interleave`, `--sample-rate`, `--quota-mb`,
-`--stereo` and named/pad-backed existing keyfiles are available in the CLI.
+`--mono`, `--stereo` and named/pad-backed existing keyfiles are available in the CLI.
 `fast-info` reports local geometry and selected protection without loading a key.
 Completed receive output contains metadata only; JSON distinguishes
 `encrypted`, `authenticated`, and `checksum_groups`. The former `text_preview`
@@ -400,12 +420,13 @@ salt/IV generation for reproducible waveforms; production uses OpenSSL random
 generation and exposes no setting for this fixture generator.
 
 ```sh
-./build/fast_regression --profile wire --bytes 1024 --seed 417 > wire.csv
+./build/fast_regression --profile wire --apsk 16 --code-rate 3/4 \
+  --rs robust --depth 16 --amplitude 0.5 --bytes 1024 --seed 417 > wire.csv
 ./build/fast_regression --profile ssb --bytes 1024 --seed 417 > ssb.csv
 ./build/fast_regression --profile fm --bytes 1024 --seed 417 > fm.csv
 ./build/fast_regression --profile acoustic --bytes 1024 --seed 417 > acoustic.csv
 ./build/fast_regression --profile wire --apsk 256 --code-rate 7/8 \
-  --bytes 2097152 --snr 60 --seed 417 --require-success > large.csv
+  --rs robust --depth 16 --amplitude 0.5 --bytes 2097152 --snr 60 --seed 417 --require-success > large.csv
 ```
 
 SNR refers to signal power versus noise in the declared shaped bandwidth
@@ -417,8 +438,9 @@ counts, source goodput including end silence, scratch/spool bytes and CPU/wall
 time. Callback timing is reported separately from mean real-time ratio;
 occasional FEC work exceeds one PCM chunk duration and requires the live queue.
 
-The recorded four-profile sweep contains 92 seeded sampled tests. Wire and SSB
-default 16-APSK fail closed at 10 dB and recover exact files at 15–120 dB;
+The recorded four-profile sweep contains 92 seeded sampled tests. The previous
+wire preset and current SSB preset use 16-APSK, fail closed at 10 dB and recover
+exact files at 15–120 dB;
 FM and acoustic default QPSK recover at every tested point. A single seed and
 file per point do not estimate a reliable BER/PER curve. Separate DSP tests
 cover fractional start phase, 44.1 kHz, sample-clock offset, additive impulses,
@@ -426,7 +448,9 @@ hum, phase slips, missing markers and non-signal input.
 
 When Python is available, CTest's `fast_snr` runs this entire matrix and checks
 exact completion at the established passing points, all 23 levels, argument
-bounds and option-order independence. Improvements at lower SNR are allowed;
+bounds and option-order independence. The original wire settings remain explicit
+in this matrix; a separate bulk test covers the new cable default at 30 dB.
+Improvements at lower SNR are allowed;
 any completed file with incorrect bytes is always a failure.
 
 Measured results and CSV artifacts are recorded in [validation](validation.md).

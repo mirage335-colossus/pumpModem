@@ -13,6 +13,7 @@ using namespace datapump;
 using namespace std::chrono_literals;
 namespace fixture {
 std::atomic<unsigned> opened=0,active=0,played=0;
+std::atomic<bool> last_mono=true;
 std::mutex mutex;
 std::vector<float> input;
 std::vector<float> output;
@@ -41,7 +42,8 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
         std::this_thread::sleep_for(3ms);
     }
 }
-void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,bool) {
+void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,bool mono) {
+    fixture::last_mono=mono;
     ++fixture::active;struct Done {~Done(){--fixture::active;}} done;
     if(format)format({rate,rate,rate*.49,4096});
     std::vector<float> block(rate/20);
@@ -97,8 +99,10 @@ void fast_cancel() {
     {std::ofstream file(path,std::ios::binary);std::string bytes(65536,'x');file.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));}
     struct Remove {std::filesystem::path path;~Remove(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{path};
     fast::Session session;fast::Settings s;s.device="fixture";s.key=Crypto::random();session.configure(s);
+    check(!s.mono,"Default cable API settings must drive both output channels");
     const auto before=fixture::played.load();session.transmit(path);
     await([&]{return fixture::played>before;},"fast playback did not start");
+    check(!fixture::last_mono.load(),"Session lost default cable stereo output routing");
     bool blocked=false;try{session.configure(s);}catch(const Error&){blocked=true;}
     check(blocked,"active fast settings changed midstream");session.cancel();
     await([&]{return !session.active();},"fast cancellation did not release audio");
@@ -111,11 +115,13 @@ void text_audio_roundtrip() {
     const auto text=std::string("Fast text: café\nline two")+std::string(1,'\0')+" tail";
     for(bool encrypted:{false,true}) {
         fast::Settings s;s.device="fixture";s.profile.interleave_depth=1;
+        if(encrypted)s.mono=true; // An explicit local routing override stays usable.
         if(encrypted)s.key=Crypto(Bytes(32,37));
         fixture::reset({},true,true);
         fast::Session tx;tx.configure(s);tx.transmit_text(text);
         await([&]{return !tx.active();},"text audio TX did not finish");
         const auto sent=tx.poll();
+        check(fixture::last_mono.load()==s.mono,"Session ignored explicit local output routing");
         check(sent.error.empty()&&sent.source_bytes==text.size()&&sent.encrypted==encrypted,
               "text audio source or encryption selection changed");
         check(sent.estimated_seconds>6.25&&sent.transmit_fraction==1,"TX estimate and terminal progress missing");
@@ -127,6 +133,9 @@ void text_audio_roundtrip() {
         fast::Session rx;rx.configure(s);rx.listen();
         await([&]{return !rx.active();},"text audio RX did not finish");
         const auto received=rx.poll();
+        if(!received.complete || !received.physical_complete || !received.file || !received.error.empty())
+            std::cerr<<"text RX: "<<received.status<<"; error="<<received.error
+                <<"; physical_end="<<received.physical_complete<<"; intervals="<<received.intervals<<'\n';
         check(received.complete&&received.physical_complete&&received.file&&received.error.empty(),
               "text audio reception did not observe a valid physical end");
         check(Bytes(received.file->bytes().begin(),received.file->bytes().end())==Bytes(text.begin(),text.end()),"text audio changed UTF-8, newline or zero bytes");

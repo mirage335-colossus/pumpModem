@@ -1,0 +1,37 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  8: fast_codec
+ 1/11 Test  #8: fast_codec .......................   Passed    1.12 sec
+      Start  9: fast_modem
+ 2/11 Test  #9: fast_modem .......................   Passed   25.21 sec
+      Start 10: fast_files
+ 3/11 Test #10: fast_files .......................   Passed    3.96 sec
+      Start 11: fast_session
+ 4/11 Test #11: fast_session .....................***Failed    0.95 sec
+text audio reception did not observe a valid physical end
+
+      Start 12: fast_transfer
+ 5/11 Test #12: fast_transfer ....................   Passed   59.68 sec
+      Start 13: fast_telemetry
+ 6/11 Test #13: fast_telemetry ...................   Passed    1.08 sec
+      Start 14: fast_boundary
+ 7/11 Test #14: fast_boundary ....................   Passed    0.04 sec
+      Start 15: gui_fast
+ 8/11 Test #15: gui_fast .........................   Passed    2.57 sec
+      Start 16: gui_fast_live
+ 9/11 Test #16: gui_fast_live ....................   Passed    2.71 sec
+      Start 96: fast_cable_benchmark
+10/11 Test #96: fast_cable_benchmark .............   Passed    0.93 sec
+      Start 97: fast_cli
+11/11 Test #97: fast_cli .........................   Passed    3.83 sec
+
+91% tests passed, 1 tests failed out of 11
+
+Label Time Summary:
+gui    =   5.29 sec*proc (2 tests)
+
+Total Test time (real) = 102.10 sec
+
+The following tests FAILED:
+	 11 - fast_session (Failed)
+Errors while running CTest

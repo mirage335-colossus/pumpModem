@@ -4,6 +4,76 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Physical cable throughput and revised cable defaults — 20 September 2026 UTC
+
+The [live cable study](fast-cable-live-study.md) records actual simultaneous
+ALC257 headphone-output/microphone-input tests through the production default
+ALSA device selection. Device inspection confirmed analog ports, not a monitor
+source. The initial microphone path's +60 dB gain severely clipped a 5%-amplitude
+tone; setting the Pulse source to 10% selected 0 dB Capture/Mic Boost hardware
+levels. Playback remained at 95%. These host-specific calibrated levels were
+retained for cable operation.
+
+Six 100,000-byte screening transfers all recovered exactly. Three faster,
+tighter-rolloff 100 KB trials also recovered, with 15/12/74 corrected bytes.
+Raw probes and matched offline controls show increasing error margin consumed
+by the tighter waveforms, not a measured whole-file failure cliff. Generated
+amplitude-0.5 PCM also had occasional excursions beyond full scale before S16
+conversion. The new cable amplitude 0.35 has a conservative generated-PCM peak
+bound of 0.894854 for the existing 20% rolloff; this precedes optional resampling
+and any external gain. Radio/acoustic amplitudes remain unchanged.
+
+One full **5,000,000-byte** transfer at 256-APSK, 7/8, high-rate RS, depth 62 and
+amplitude 0.5 recovered exactly in **735.879 seconds** from TX process launch to
+RX delivery, with **seven corrected bytes, zero erased bytes**, and matching
+SHA-256 `d4b49bedb47fd93ed6b86110602a65641a2dd21b40b5d244afd7560453bc0c2f`.
+Fourteen fresh **100,000-byte** transfers at the final amplitude **0.35** all
+recovered exactly, with zero corrected or erased bytes. These are distinct
+configurations, not pooled trials. Both series used stereo output. Their
+[raw records and reproduction instructions](validation-data/fast/cable-live-20260920/README.md)
+retain every trial, device warning, source hash, executable hash and assumption.
+
+Wire defaults now select 256-APSK, convolutional 7/8, high-rate RS(128,120),
+depth 62, amplitude 0.35 and both-channel output. A separate 100 KB check of
+the former right-only output failed with excessive RS erasures; it remains in
+the archive as a negative control. After fixing the cable output default, an
+additional 100 KB transfer with no routing flag recovered exactly. Other channel
+CLI/GUI presets retain right-only output, with explicit `--mono`/`--stereo`
+overrides available. All regular modem runtime code is unchanged. The exact public 50 MB estimate falls from 17,195.124 to
+7,275.599 seconds; encrypted airtime is 7,882.072 seconds. Depth 62 minimizes
+that size's airtime over depths 1–64. GUI selection includes 62 and retains all
+previous choices. CLI profile information now includes amplitude and routing. The standalone
+SNR diagnostic accepts explicit RS and amplitude choices and records depth,
+RS and amplitude so the previous 92-case matrix retains its exact settings.
+
+No actual 50 MB file was transferred within the user's 30-minute live-test
+budget. Fourteen 100 KB successes give an 80.736% one-sided 95% lower success
+bound only for that directly tested configuration and size, under independent,
+stationary attempts. The 5 MB success is one observation, and 50 MB reliability
+remains unqualified. No LDPC, 0.3% RS, marker shortening or sparse marker cadence
+was introduced. The marker analysis does not certify a file-wide 2^-80
+false-match probability for the existing tolerant detector.
+
+The Release application and diagnostic tools build successfully. Original Fast
+crypto/wire fingerprints remain unchanged; earlier PCM/SNR/burst fixtures pin
+their old profile explicitly rather than changing their expected outcomes.
+New tests cover the exact 50 MB estimates, depth selection, new-default physical
+completion, pulse peak bound, and benchmark statistics/process cleanup.
+The final focused Fast/GUI/CLI/benchmark checks pass, including all nine Python
+benchmark checks. One concurrent `fast_session` run failed its text-reception
+assertion; an unchanged isolated run and seven diagnostic repeats passed. The
+fixture feeds audio 16.7 times faster than real time, so scheduling/queue pressure
+is plausible but unproven. The failure message now preserves status/error details;
+its geometry, deadline and assertions remain unchanged. Its final isolated CTest
+run passes in 1.92 seconds. The full 92-case SNR matrix and new-default bulk case
+pass in 389.18 seconds. Four additional routing/session/GUI/CLI suites pass
+in 10.03 seconds after the routing change. All **29 development-contract suites
+pass** in 1,704.77 seconds, including independent short-message vectors, physical
+completion, receiver probability and pending GUI behavior. The
+[archived validation logs](validation-data/fast/cable-live-20260920/README.md#build-and-regression-evidence)
+retain successful checks and the earlier concurrent session failure. No native
+GUI adapter code was changed.
+
 ## Fast LDPC, RS and channel-capacity study — 19 September 2026
 
 [The offline coding study](fast-coding-study.md) records a 120-point

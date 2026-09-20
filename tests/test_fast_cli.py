@@ -48,11 +48,21 @@ class FastCLI(unittest.TestCase):
         cls.plain_tx = json.loads(plain.stdout)
 
     def test_bulk_defaults(self):
-        for profile, intervals in (("wire", 22), ("ssb", 22), ("fm", 22), ("acoustic", 7)):
+        for profile, intervals in (("wire", 71), ("ssb", 22), ("fm", 22), ("acoustic", 7)):
             result = self.run_pump("fast-info", "--profile", profile)
             info = json.loads(result.stdout)
             self.assertEqual(info["cycle_intervals"], intervals)
-            self.assertEqual(info["source_bytes_per_group"], 192)
+            self.assertEqual(info["source_bytes_per_group"], 208 if profile == "wire" else 192)
+            self.assertEqual(info["constellation"], {"wire": 256, "ssb": 16, "fm": 4, "acoustic": 4}[profile])
+            self.assertEqual(info["amplitude"], 0.35 if profile in ("wire", "acoustic") else 0.5)
+            self.assertEqual(info["mono"], profile != "wire")
+
+    def test_local_output_routing(self):
+        for profile in ("wire", "ssb", "fm", "acoustic"):
+            for flag, mono in (("--mono", True), ("--stereo", False)):
+                report = json.loads(self.run_pump("fast-info", "--profile", profile, flag).stdout)
+                self.assertEqual(report["mono"], mono)
+        self.run_pump("fast-info", "--mono", "--stereo", ok=False)
 
     def run_pump(self, *args, ok=True):
         result = subprocess.run([PUMP, *map(str, args)], capture_output=True, timeout=90)
@@ -69,7 +79,7 @@ class FastCLI(unittest.TestCase):
                 self.assertGreater(report["cycle_intervals"], 0)
                 self.assertIn(report["ciphertext_bytes"], (176, 192))
                 self.assertFalse(report["encrypted"])
-                self.assertEqual(report["source_bytes_per_group"], 192)
+                self.assertEqual(report["source_bytes_per_group"], 208 if profile == "wire" else 192)
                 self.assertNotIn("packet_bytes", report)
         for modulation in (4, 16, 64, 256):
             report = json.loads(self.run_pump("fast-info", "--apsk", modulation).stdout)
@@ -77,12 +87,12 @@ class FastCLI(unittest.TestCase):
             self.assertEqual(report["physical_interval_bits"], 2048)
         cycles = []
         for rate in ("1/2", "3/4", "7/8"):
-            report = json.loads(self.run_pump("fast-info", "--code-rate", rate).stdout)
+            report = json.loads(self.run_pump("fast-info", "--code-rate", rate, "--interleave", "16").stdout)
             cycles.append(report["cycle_intervals"])
         self.assertEqual(cycles, [33, 22, 19])
         encrypted = json.loads(self.run_pump("fast-info", *self.key_options).stdout)
         self.assertTrue(encrypted["encrypted"])
-        self.assertEqual(encrypted["source_bytes_per_group"], 176)
+        self.assertEqual(encrypted["source_bytes_per_group"], 192)
         public = json.loads(self.run_pump("fast-info", *self.key_options, "--no-encryption", "--rs", "high-rate").stdout)
         self.assertFalse(public["encrypted"])
         self.assertEqual(public["source_bytes_per_group"], 208)
@@ -91,6 +101,8 @@ class FastCLI(unittest.TestCase):
         help_text = self.run_pump("fast-tx", "--help").stdout
         self.assertIn(b"2048", help_text)
         self.assertIn(b"EOF/cancellation is not physical end", help_text)
+        self.assertIn(b"--mono", help_text)
+        self.assertIn(b"--stereo", help_text)
         for option, value in (("profile", "unknown"), ("apsk", "32"),
                               ("interleave", "0"), ("interleave", "65"),
                               ("sample-rate", "8000"), ("sample-rate", "192001"),

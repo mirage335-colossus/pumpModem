@@ -25,17 +25,18 @@ const char* help=R"(Fast APSK text and file transfer (separate from regular mode
 
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
-  --apsk 4|16|64|256                 Profile default 16 (wire/SSB), 4 (FM/acoustic)
-  --code-rate 1/2|3/4|7/8            Default 3/4
-  --rs robust|high-rate              Default robust: two RS(128,112) words
-  --interleave 1..64                 Default 16 outer groups (acoustic: 5)
+  --apsk 4|16|64|256                 Default 256 (wire), 16 (SSB), 4 (FM/acoustic)
+  --code-rate 1/2|3/4|7/8            Default 7/8 (wire), 3/4 (others)
+  --rs robust|high-rate              Default high-rate (wire), robust (others)
+  --interleave 1..64                 Default 62 (wire), 16 (radio), 5 (acoustic)
   --sample-rate 44100..192000        Default 48000 Hz
   --keyfile KEY                     Enable encryption using this keyfile
   --encrypt                        Require encryption and --keyfile
   --no-encryption                  Explicit plaintext; ignore keyfile options
   --key-name NAME [--pad PATH]       Existing named symmetric keyfile
   --quota-mb N                      Local storage quota, default 256 MiB
-  --stereo                          Both audio output channels
+  --stereo                          Both outputs (wire default)
+  --mono                            Right output only (other profile defaults)
   --json                            Machine-readable result
 
 Every physical interval has 2048 inner-coded bits plus fixed sync/pilots.
@@ -43,11 +44,12 @@ Encryption is off without --keyfile. Plaintext checksums do not authenticate.
 Text is at most 32768 UTF-8 bytes and uses the same wire format as file bytes.
 WAV output includes 6.25 seconds of silence. EOF/cancellation is not physical end.
 SNR simulation is available only in the fast_regression test executable.
+Output routing is local; peers need not use the same --mono/--stereo setting.
 )";
 struct Args {
     std::map<std::string,std::string> values;
     Args(int argc,char** argv) {
-        const std::set<std::string> flags{"help","json","stereo","encrypt","no-encryption"};
+        const std::set<std::string> flags{"help","json","stereo","mono","encrypt","no-encryption"};
         const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds"};
         for(int i=2;i<argc;++i) {
             std::string name=argv[i];if(!name.starts_with("--"))throw Error("Expected a fast --option");name.erase(0,2);
@@ -87,7 +89,9 @@ Settings settings(const Args& a,bool load_key) {
     const auto code=a.get("code-rate",s.profile.code_rate==CodeRate::half?"1/2":s.profile.code_rate==CodeRate::three_quarters?"3/4":"7/8");
     if(code=="1/2")s.profile.code_rate=CodeRate::half;else if(code=="3/4")s.profile.code_rate=CodeRate::three_quarters;else if(code=="7/8")s.profile.code_rate=CodeRate::seven_eighths;else throw Error("Fast code rate must be 1/2, 3/4 or 7/8");
     const auto rs=a.get("rs",s.profile.robust?"robust":"high-rate");if(rs!="robust"&&rs!="high-rate")throw Error("Fast RS must be robust or high-rate");s.profile.robust=rs=="robust";
-    s.device=a.get("device","default");s.mono=!a.has("stereo");
+    if(a.has("mono")&&a.has("stereo"))throw Error("--mono and --stereo conflict");
+    s.device=a.get("device","default");
+    s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire);
     auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
     validate(s.profile);
     if(encryption_enabled(a)&&load_key) {
@@ -129,6 +133,8 @@ int cli_main(int argc,char** argv) {
         const auto& p=s.profile;
         std::cout<<"{\"profile\":\""<<channel_name(p.channel)<<"\",\"sample_rate\":"<<p.sample_rate<<",\"symbol_rate\":"<<p.symbol_rate
             <<",\"carrier_hz\":"<<p.carrier_hz<<",\"occupied_bandwidth_hz\":"<<p.symbol_rate*(1+p.rolloff)<<",\"constellation\":"<<p.constellation
+            <<",\"amplitude\":"<<p.amplitude
+            <<",\"mono\":"<<(s.mono?"true":"false")
             <<",\"shannon_snr_db_assumed\":30,\"shannon_capacity_bps\":"<<p.symbol_rate*(1+p.rolloff)*std::log2(1001.)
             <<",\"gross_bitrate\":"<<gross_bitrate(p)<<",\"physical_interval_bits\":2048,\"interval_symbols\":"<<interval_symbols(p)
             <<",\"cycle_intervals\":"<<cycle_intervals(p)<<",\"ciphertext_bytes\":"<<ciphertext_bytes(p)

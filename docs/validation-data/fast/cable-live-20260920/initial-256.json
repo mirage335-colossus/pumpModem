@@ -1,0 +1,8 @@
+{
+  "tx": "{\"complete\":false,\"physical_complete\":false,\"cancelled\":false,\"source_bytes\":62,\"intervals\":38,\"encrypted\":false,\"authenticated\":false,\"authenticated_groups\":0,\"checksum_groups\":0,\"corrected_bytes\":0,\"erased_bytes\":0,\"estimated_seconds\":7.15127,\"transmit_fraction\":1,\"evm\":0,\"goodput_bps\":68.9173,\"status\":\"Transmission sent; receiver observes physical absence\",\"error\":\"\"}\n",
+  "tx_error": "ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave\n",
+  "tx_rc": 0,
+  "rx": "{\"complete\":true,\"physical_complete\":true,\"cancelled\":false,\"source_bytes\":62,\"intervals\":38,\"encrypted\":false,\"authenticated\":false,\"authenticated_groups\":0,\"checksum_groups\":16,\"corrected_bytes\":0,\"erased_bytes\":0,\"estimated_seconds\":0,\"transmit_fraction\":0,\"evm\":0.00472653,\"goodput_bps\":62.3996,\"status\":\"Checksum-verified and physically complete (not authenticated)\",\"error\":\"\"}\n",
+  "rx_error": "ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave\n",
+  "rx_rc": 0
+}

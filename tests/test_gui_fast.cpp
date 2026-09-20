@@ -34,6 +34,7 @@ void presentation_and_retention() {
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
     app.select(mode,"fast");
     check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
+    check(!app.field(F::fast_mono).checked,"Cable must default to both output channels");
     for(const auto& c:ui::console_screen()) {
         if(c.scope==ui::ScreenScope::regular||c.scope==ui::ScreenScope::legacy)check(!app.control(c).visible,"Other modem controls leaked into the fast interface");
         else check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
@@ -57,6 +58,8 @@ void presentation_and_retention() {
     app.edit(F::message,"stale");app.dispatch(C::use_text);app.navigate(ui::Page::planner);
     check(app.field(F::binary).text==bits&&app.field(F::fec).selected==fec,"Inactive regular callbacks mutated retained settings");
     app.select(control(F::fast_profile),"ssb");app.select(control(F::fast_constellation),"256");
+    check(app.field(F::fast_mono).checked,"Radio output routing default changed");
+    app.toggle(F::fast_mono,false);check(!app.field(F::fast_mono).checked,"Explicit radio stereo override ignored");
     app.select(control(F::fast_source),"file");
     app.edit(control(F::fast_file),"/tmp/independent-source.bin");
     check(!app.control(control(F::fast_text)).visible&&app.control(action(C::fast_choose_file)).visible&&app.command_label(C::fast_transmit)=="Transmit file",
@@ -93,12 +96,17 @@ void presentation_and_retention() {
     check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
     check(app.field(F::fast_detail).text.find("Shannon-Hartley")!=std::string::npos,"Fast capacity explanation missing");
     app.select(F::fast_profile,"acoustic");
+    check(app.field(F::fast_mono).checked,"Acoustic output routing default changed");
     check(app.field(F::fast_depth).selected=="5"&&app.field(F::fast_coding).selected=="three-quarters"&&
         app.field(F::fast_fec).selected=="robust","Acoustic bulk defaults differ from modem profile");
     app.select(F::fast_profile,"wire");
-    check(app.field(F::fast_depth).selected=="16"&&app.field(F::fast_coding).selected=="three-quarters"&&
-        app.field(F::fast_fec).selected=="robust","Cable bulk defaults differ from modem profile");
+    check(!app.field(F::fast_mono).checked,"Cable profile did not reset both-channel output routing");
+    app.toggle(F::fast_mono,true);check(app.field(F::fast_mono).checked,"Explicit cable right-only override ignored");
+    check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_depth).selected=="62"&&
+        app.field(F::fast_coding).selected=="seven-eighths"&&app.field(F::fast_fec).selected=="high-rate",
+        "Cable bulk defaults differ from modem profile");
     app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast cable depth choice ignored");
+    app.select(F::fast_depth,"62");check(app.field(F::fast_depth).selected=="62","Fast optimized cable depth choice ignored");
     app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
 }
 void live_plot_presentation() {

@@ -1,0 +1,5 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 44100Hz, get 48000Hz)
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 44100Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 44100Hz, get 48000Hz)

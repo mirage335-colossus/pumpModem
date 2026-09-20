@@ -12,6 +12,10 @@ using namespace datapump;
 using namespace datapump::fast;
 namespace {
 void require(bool condition,const char* message) {if(!condition)throw std::runtime_error(message);}
+Profile previous_wire_profile() {
+    auto p=profile(Channel::wire);p.constellation=16;p.code_rate=CodeRate::three_quarters;
+    p.robust=true;p.interleave_depth=16;p.amplitude=.5;return p;
+}
 Crypto key(unsigned offset=0) {Bytes bytes(32);for(unsigned i=0;i<bytes.size();++i)bytes[i]=static_cast<std::uint8_t>(i+offset);return Crypto(bytes);}
 Bytes fixture(std::size_t count) {
     Bytes source(count);std::mt19937 rng(7194);
@@ -59,8 +63,10 @@ Result receive(Profile p,std::span<const float> pcm,double tail=7,unsigned key_o
 int main() {try {
     // Compare with an ideal continuous interleaver at the SAME FEC rate.
     // This isolates cycle rounding/bootstrap/final fill from deliberate parity.
+    // Preserve the earlier wire preset's guarantees; its new bulk preset trades
+    // some short-file padding for the best existing-code 50 MB airtime.
     for(auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
-        const auto p=profile(channel);
+        const auto p=channel==Channel::wire?previous_wire_profile():profile(channel);
         require(p.code_rate==CodeRate::three_quarters && p.robust,"bulk FEC defaults changed");
         for(bool encrypted:{false,true})for(auto bytes:{100000ULL,102400ULL,1048576ULL,16777216ULL}) {
             const auto actual=estimate_transmission(p,encrypted,bytes);
@@ -82,8 +88,38 @@ int main() {try {
         require(estimate_transmission(p,true,16).seconds<45,"short fast message exceeds 45 seconds");
     }
     const auto source=fixture(733);
+    {
+        const auto cable=profile(Channel::wire);
+        require(cable.constellation==256 && cable.code_rate==CodeRate::seven_eighths &&
+            !cable.robust && cable.interleave_depth==62,"optimized cable defaults changed");
+        require(profile_id(Profile{})==profile_id(cable),"direct/API cable defaults differ from factory");
+        const auto public_bulk=estimate_transmission(cable,false,50000000);
+        const auto encrypted_bulk=estimate_transmission(cable,true,50000000);
+        require(public_bulk.intervals==309773 && public_bulk.samples==349228765,
+            "50 MB public cable airtime changed");
+        require(encrypted_bulk.intervals==335617 && encrypted_bulk.samples==378339447,
+            "50 MB encrypted cable airtime changed");
+        for(unsigned depth=1;depth<=64;++depth) {
+            auto alternative=cable;alternative.interleave_depth=depth;
+            require(public_bulk.samples<=estimate_transmission(alternative,false,50000000).samples &&
+                encrypted_bulk.samples<=estimate_transmission(alternative,true,50000000).samples,
+                "cable default depth does not minimize 50 MB airtime");
+        }
+        require(estimate_transmission(cable,true,60).seconds<45,"60-byte optimized cable message exceeds 45 seconds");
+        const auto pcm=waveform(cable,source);
+        require(pcm.size()+static_cast<std::uint64_t>(cable.sample_rate)*25/4==
+            estimate_transmission(cable,true,source.size()).samples,"optimized cable estimate differs from generated PCM");
+        const auto exact=receive(cable,pcm);
+        require(exact.modem.physical_complete && exact.codec.complete && exact.bytes==source,
+            "optimized cable clean sampled file failed");
+        for(double silence:{0.,5.5}) {
+            const auto pending=receive(cable,pcm,silence);
+            require(!pending.modem.physical_complete && !pending.codec.complete && pending.bytes.empty(),
+                "optimized cable completed before six seconds of observed absence");
+        }
+    }
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
-        auto p=profile(channel);p.interleave_depth=4;
+        auto p=channel==Channel::wire?previous_wire_profile():profile(channel);p.interleave_depth=4;
         auto pcm=waveform(p,source);
         std::mt19937 rng(1527);std::normal_distribution<float> noise(0,.001f);
         for(auto& sample:pcm)sample+=noise(rng);
@@ -91,7 +127,8 @@ int main() {try {
         if(!result.codec.complete)std::cerr<<channel_name(channel)<<": "<<result.codec.status<<'\n';
         require(result.modem.physical_complete && result.codec.complete && result.bytes==source,"sampled channel profile file failed");
     }
-    auto p=profile(Channel::wire);
+    // Retain the original sampled corruption/interruption fixtures exactly.
+    auto p=previous_wire_profile();
     const auto defaults=waveform(p,source);
     require(defaults==waveform(p,source,4096),"deterministic ciphertext/waveform depends on source/audio chunking");
     const auto default_result=receive(p,defaults);
@@ -182,7 +219,7 @@ int main() {try {
             }
         }
     }
-    auto cable=profile(Channel::wire);cable.constellation=256;cable.code_rate=CodeRate::seven_eighths;cable.robust=false;
+    auto cable=profile(Channel::wire);cable.constellation=256;cable.code_rate=CodeRate::seven_eighths;cable.robust=false;cable.interleave_depth=16;
     const auto normal=estimate_transmission(cable,false,2*1024*1024);
     cable.interleave_depth=64;
     require(estimate_transmission(cable,false,2*1024*1024).source_bps>normal.source_bps,"deeper cable cycle did not reduce padding overhead");

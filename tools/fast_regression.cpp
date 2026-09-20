@@ -31,6 +31,13 @@ double snr_option(std::string_view text) {
         throw Error("SNR must be a finite number in 10..120 dB");
     return value;
 }
+double amplitude_option(std::string_view text) {
+    double value=0;
+    const auto parsed=std::from_chars(text.data(),text.data()+text.size(),value,std::chars_format::general);
+    if(parsed.ec!=std::errc{} || parsed.ptr!=text.data()+text.size() || !std::isfinite(value) || value<=0 || value>.8)
+        throw Error("Amplitude must be finite, greater than zero and at most 0.8");
+    return value;
+}
 std::uint8_t fixture_byte(std::uint64_t index,std::uint64_t seed) {
     auto v=index+seed*0x9e3779b97f4a7c15ULL;
     v=(v^(v>>30))*0xbf58476d1ce4e5b9ULL;v=(v^(v>>27))*0x94d049bb133111ebULL;
@@ -119,7 +126,8 @@ bool run(const Profile& p,std::uint64_t bytes,std::uint64_t seed,double snr) {
         <<encoder.intervals_emitted()<<','<<rx.progress().intervals<<','<<decoded.corrected_bytes<<','<<decoded.erased_bytes<<','
         <<rx.progress().evm<<','<<(exact?bytes*8/(seconds+6):0)<<','<<energy/static_cast<double>(signal_samples)<<','
         <<noise_variance<<','<<bandwidth<<','<<equivalent_bandwidth(p)<<','<<snr+10*std::log10(bandwidth/p.symbol_rate)<<','
-        <<workspace<<','<<decoded.spool_bytes<<','<<wall<<','<<cpu<<','<<(wall/(seconds+7))<<','<<maximum_callback<<','<<callback_deadline_misses<<'\n';
+        <<workspace<<','<<decoded.spool_bytes<<','<<wall<<','<<cpu<<','<<(wall/(seconds+7))<<','<<maximum_callback<<','<<callback_deadline_misses
+        <<','<<p.interleave_depth<<','<<(p.robust?"robust":"high-rate")<<','<<p.amplitude<<'\n';
     if(prematurely_complete)throw Error("Fast decoder completed before physical absence");
     if(decoded.complete && !exact)throw Error("Fast decoder claimed completion with incorrect file contents");
     return exact;
@@ -129,14 +137,15 @@ int main(int argc,char** argv) {try {
     auto selected_channel=Channel::wire;std::uint64_t bytes=100000,seed=417;
     std::optional<unsigned> apsk,depth;
     std::optional<CodeRate> rate;
-    std::optional<double> snr;bool require_success=false;
+    std::optional<bool> robust;
+    std::optional<double> snr,amplitude;bool require_success=false;
     // Options select local waveform/coding configuration. SNR is the sole
     // channel-quality parameter; this utility is never exposed in the GUI.
     for(int i=1;i<argc;++i) {
         const std::string_view option(argv[i]);
         if(option=="--require-success") {require_success=true;continue;}
         if(option=="--help") {
-            std::cout<<"fast_regression [--snr 10..120] [--profile wire|ssb|fm|acoustic] [--apsk 4|16|64|256] [--bytes 0..67108864] [--seed N] [--code-rate 1/2|3/4|7/8] [--depth 1..64] [--require-success]\n"
+            std::cout<<"fast_regression [--snr 10..120] [--profile wire|ssb|fm|acoustic] [--apsk 4|16|64|256] [--bytes 0..67108864] [--seed N] [--code-rate 1/2|3/4|7/8] [--rs robust|high-rate] [--depth 1..64] [--amplitude (0,0.8]] [--require-success]\n"
                 <<"Default source is 100,000 bytes. Without --snr, runs all 23 levels, 10 to 120 dB inclusive. Source, test-only IV/salt and AWGN seeds are reproducible.\n";return 0;
         }
         if(i+1==argc)throw Error("Missing regression option value");
@@ -146,7 +155,13 @@ int main(int argc,char** argv) {try {
         else if(option=="--bytes")bytes=integer_option(value,option,0,64ULL*1024*1024);
         else if(option=="--seed")seed=integer_option(value,option,0,std::numeric_limits<std::uint64_t>::max());
         else if(option=="--snr")snr=snr_option(value);
+        else if(option=="--amplitude")amplitude=amplitude_option(value);
         else if(option=="--depth")depth=static_cast<unsigned>(integer_option(value,option,1,64));
+        else if(option=="--rs") {
+            if(value=="robust")robust=true;
+            else if(value=="high-rate")robust=false;
+            else throw Error("Fast regression RS must be robust or high-rate");
+        }
         else if(option=="--code-rate") {
             if(value=="1/2")rate=CodeRate::half;
             else if(value=="3/4")rate=CodeRate::three_quarters;
@@ -158,8 +173,10 @@ int main(int argc,char** argv) {try {
     if(apsk)p.constellation=*apsk;
     if(depth)p.interleave_depth=*depth;
     if(rate)p.code_rate=*rate;
+    if(robust)p.robust=*robust;
+    if(amplitude)p.amplitude=*amplitude;
     validate(p);
-    std::cout<<std::setprecision(9)<<"profile,apsk,code_rate,source_bytes,seed,snr_db,acquired,physical_end,complete,exact,tx_intervals,rx_intervals,corrected_bytes,erased_bytes,evm,goodput_bps,signal_power,fullband_noise_variance,declared_bandwidth_hz,matched_enbw_hz,es_n0_db,modem_and_soft_workspace_bytes,spool_bytes,wall_seconds,cpu_seconds,realtime_ratio,max_rx_callback_seconds,callback_deadline_misses\n";
+    std::cout<<std::setprecision(9)<<"profile,apsk,code_rate,source_bytes,seed,snr_db,acquired,physical_end,complete,exact,tx_intervals,rx_intervals,corrected_bytes,erased_bytes,evm,goodput_bps,signal_power,fullband_noise_variance,declared_bandwidth_hz,matched_enbw_hz,es_n0_db,modem_and_soft_workspace_bytes,spool_bytes,wall_seconds,cpu_seconds,realtime_ratio,max_rx_callback_seconds,callback_deadline_misses,interleave_depth,rs,amplitude\n";
     bool success=true;
     if(snr)success=run(p,bytes,seed,*snr);
     else for(int level=10;level<=120;level+=5)success=run(p,bytes,seed,level)&&success;

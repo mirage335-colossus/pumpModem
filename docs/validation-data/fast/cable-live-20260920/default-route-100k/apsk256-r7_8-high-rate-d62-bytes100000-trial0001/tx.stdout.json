@@ -1,0 +1,1 @@
+{"complete":false,"physical_complete":false,"cancelled":true,"source_bytes":100000,"intervals":710,"encrypted":false,"authenticated":false,"authenticated_groups":0,"checksum_groups":0,"corrected_bytes":0,"erased_bytes":0,"estimated_seconds":22.9209,"transmit_fraction":0.999,"evm":0,"goodput_bps":35041.1,"status":"Cancelled; transfer incomplete","error":""}

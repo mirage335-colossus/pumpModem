@@ -1,0 +1,1 @@
+{"complete":false,"physical_complete":true,"cancelled":false,"source_bytes":0,"intervals":710,"encrypted":false,"authenticated":false,"authenticated_groups":0,"checksum_groups":0,"corrected_bytes":0,"erased_bytes":0,"estimated_seconds":0,"transmit_fraction":0,"evm":0.0692029,"goodput_bps":0,"status":"Too many Reed-Solomon erasures","error":"Too many Reed-Solomon erasures"}

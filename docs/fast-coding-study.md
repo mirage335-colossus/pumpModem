@@ -11,6 +11,12 @@ The measurements describe the 2026-09-19 baseline; reassess them when waveform,
 decoder, mapping or framing changes. Findings below are research inputs, not
 new default settings or a replacement wire specification.
 
+The subsequent [live cable study](fast-cable-live-study.md) tests the connected
+DAC/ADC path and selects faster existing convolutional/RS settings with more
+transmitter headroom. It retains the distinction between measured small-file
+outcomes and 50 MB reliability projections; the LDPC and sparse-parity proposals
+below remain unimplemented.
+
 ## Objective and scope
 
 Maximize successful payload throughput for 100 KB and 5 MB files at a given

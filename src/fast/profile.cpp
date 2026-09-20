@@ -5,6 +5,10 @@
 namespace datapump::fast {
 Profile profile(Channel channel) {
     Profile p;p.channel=channel;
+    if(channel!=Channel::wire) {
+        p.constellation=16;p.code_rate=CodeRate::three_quarters;
+        p.robust=true;p.interleave_depth=16;p.amplitude=.5;
+    }
     switch(channel) {
     case Channel::wire: break;
     case Channel::ssb: p.symbol_rate=2000;p.carrier_hz=1500;break;

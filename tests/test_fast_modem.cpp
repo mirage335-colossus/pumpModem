@@ -63,8 +63,37 @@ int main() {try {
     require(std::abs(qpsk[2]-std::complex<double>(.7071067811865476,-.7071067811865476))<1e-12,"QPSK Gray label vector");
     require(sync_symbol(0)==std::complex<double>(.7071067811865475244,.7071067811865475244),"fixed marker vector");
     const auto input=data(5);
+    {
+        const auto cable=profile(Channel::wire);
+        require(cable.amplitude==.35,"cable pulse-shaping headroom default changed");
+        require(profile(Channel::ssb).amplitude==.5 && profile(Channel::fm).amplitude==.5 &&
+            profile(Channel::acoustic).amplitude==.35,"other channel output levels changed");
+        auto changed_level=cable;changed_level.amplitude=.5;
+        require(profile_id(cable)==profile_id(changed_level),"local output level entered the peer integrity context");
+        double maximum_radius=1; // Training, markers and pilots use unit QPSK.
+        for(const auto point:constellation(cable.constellation))maximum_radius=std::max(maximum_radius,std::abs(point));
+        double pulse_envelope=0;
+        // The current 16-symbol pulse uses a linearly interpolated 2048-point
+        // per-symbol table. Sum |h(t-k)| over every table phase; between table
+        // nodes the absolute sum is convex, so its maximum is at a node. This
+        // triangle bound covers arbitrary payload symbols and carrier phase,
+        // including training/payload transitions, before device resampling.
+        for(unsigned phase=0;phase<=2048;++phase) {
+            double envelope=0;
+            for(int symbol=-8;symbol<=8;++symbol) {
+                const double time=static_cast<double>(phase)/2048-symbol;
+                if(std::abs(time)<=8)envelope+=std::abs(root_raised_cosine(time,cable.rolloff));
+            }
+            pulse_envelope=std::max(pulse_envelope,envelope);
+        }
+        const auto peak_bound=cable.amplitude*maximum_radius*pulse_envelope;
+        require(peak_bound<=.95,"cable pulse-shaped PCM can clip before device playback");
+        for(const auto sample:transmit(cable,input,173))
+            require(std::abs(sample)<=peak_bound+1e-6,"cable PCM exceeds its pulse-envelope bound");
+    }
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
         auto p=profile(channel);
+        if(channel==Channel::wire)p.amplitude=.5; // Preserve original PCM fixtures.
         for(const auto order:{4u,16u,64u,256u}) {
             p.constellation=order;
             auto pcm=transmit(p,input,173);
@@ -78,7 +107,7 @@ int main() {try {
             require(result.output==input,"clean sampled APSK failed");
         }
     }
-    auto p=profile(Channel::wire);p.sample_rate=44100;p.constellation=16;
+    auto p=profile(Channel::wire);p.sample_rate=44100;p.constellation=16;p.amplitude=.5;
     auto pcm=transmit(p,input,1);
     require(pcm==transmit(p,input,4096),"TX PCM depends on callback chunks");
     // Fractional start and carrier phase arise independently by shifting TX's
@@ -112,7 +141,7 @@ int main() {try {
     }
     // Actual noisy PCM is demodulated without any transmitter decisions or
     // clock/phase side channel. The known pilot sequence is independent evidence.
-    p=profile(Channel::wire);p.constellation=16;
+    p=profile(Channel::wire);p.constellation=16;p.amplitude=.5;
     auto noisy=transmit(p,input,257);
     std::mt19937 noise_rng(7123);std::normal_distribution<float> added_noise(0,.008f);
     for(auto& value:noisy) {

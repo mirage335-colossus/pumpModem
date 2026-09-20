@@ -179,7 +179,7 @@ void input_observations() {
     }
 }
 void observers() {
-    const auto p=profile(Channel::wire);const auto bits=input();
+    auto p=profile(Channel::wire);p.constellation=16;p.amplitude=.5;const auto bits=input();
     const auto plain=transmit(p,bits);
     std::vector<std::complex<float>> mapped;
     const auto tapped=transmit(p,bits,[&](auto symbol){mapped.push_back(symbol);});

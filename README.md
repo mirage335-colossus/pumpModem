@@ -40,6 +40,11 @@ interleaved Reed–Solomon. Wire, SSB, FM and acoustic profiles offer QPSK throu
 256-APSK. Regular waveform, encryption and short/pending-message behavior remain
 unchanged. See [Fast operation, format and measured limits](docs/fast-mode.md)
 and the earlier [design and code-path audit](docs/fast-mode-plan.md).
+The [live cable study](docs/fast-cable-live-study.md) measures the connected
+headphone-to-microphone path and explains the bulk cable default: 256-APSK,
+rate 7/8, high-rate RS, depth 62, amplitude 0.35 and both output channels.
+Its calculated 50 MB airtime is about
+2 hours 1 minute; long-file success probability remains unqualified.
 Future throughput work should start with the
 [Fast coding and capacity study](docs/fast-coding-study.md): measured LDPC and
 channel results, sparse RS models, shaping extrapolations and development priorities.
@@ -48,8 +53,9 @@ The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accep
 `--text` or `--input`; encryption is off by default and enabled by `--keyfile`.
 Both peers select the same protection mode. Public checksums detect corruption
 without authentication, and neither Fast mode has an LPI claim. Its separate SNR regression executable is
-built only for testing. A sampled 2 MiB transfer achieved 44.14 kbit/s; physical
-audio/radio qualification remains outstanding. The following regular-mode
+built only for testing. A sampled 2 MiB transfer achieved 44.14 kbit/s;
+bounded physical cable measurements are now available, while general audio/radio
+qualification remains outstanding. The following regular-mode
 description and its settings do not apply to Fast.
 
 Encrypted pattern chips use circular I/Q noise with private amplitude and phase,

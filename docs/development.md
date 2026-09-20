@@ -15,7 +15,8 @@ historical designs; they do not override these current requirements.
 
 For independent Fast Modem throughput work, consult the
 [coding and capacity study](fast-coding-study.md), including its development
-priorities and evidence limits, alongside the [current Fast format](fast-mode.md).
+priorities and evidence limits, the [physical cable study](fast-cable-live-study.md),
+and the [current Fast format](fast-mode.md).
 Its proposed coding and marker changes do not alter this compatibility contract.
 
 ## Preserve all three transmit paths
