@@ -16,6 +16,11 @@ constexpr double pi=std::numbers::pi;
 constexpr std::size_t training_blocks=16;
 constexpr std::size_t signature_tones=128;
 constexpr unsigned signature_errors=16;
+// Once acquired, the fixed block/cycle ordinal is already established. Allow
+// noisier evidence to maintain it instead of confusing a few bad pilot signs
+// with six seconds of silence. This never admits a new training/alignment
+// candidate, and verification tones remain excluded from every current fit.
+constexpr unsigned continuity_errors=32;
 Profile checked(Profile p) {
     validate(p);if(!p.acoustic_ofdm)throw Error("Acoustic OFDM engine requires its matching profile");return p;
 }
@@ -244,11 +249,12 @@ struct Receiver::Impl {
     std::pair<double,C> delay_fit(const std::vector<C>& cross,std::span<const std::size_t> bins,double radius) const {
         auto score=[&](double delay) {C sum=0;for(auto k:bins)sum+=cross[k]*std::polar(1.,2*pi*k*delay/g.n);return sum;};
         double best=0;C sum=score(0);double power=std::norm(sum);
-        for(int j=-40;j<=40;++j) {
-            const auto d=radius*j/40;const auto v=score(d);
+        const auto subdivisions=radius>8?160:40;
+        for(int j=-subdivisions;j<=subdivisions;++j) {
+            const auto d=radius*j/subdivisions;const auto v=score(d);
             if(std::norm(v)>power){power=std::norm(v);best=d;sum=v;}
         }
-        const auto step=radius/40,left=std::norm(score(best-step)),right=std::norm(score(best+step));
+        const auto step=radius/subdivisions,left=std::norm(score(best-step)),right=std::norm(score(best+step));
         const auto curvature=left-2*power+right;
         if(curvature< -1e-20)best+=std::clamp(.5*(left-right)/curvature,-1.,1.)*step;
         return {best,score(best)};
@@ -258,7 +264,7 @@ struct Receiver::Impl {
         std::sort(order.begin(),order.end(),[&](auto a,auto b){return std::norm(channel[a])/variance[a]>std::norm(channel[b])/variance[b];});
         order.resize(signature_tones);return order;
     }
-    bool verify(const std::vector<C>& observed,std::uint64_t ordinal,std::span<const std::size_t> bins,C gain=1.,double delay=0) const {
+    bool verify(const std::vector<C>& observed,std::uint64_t ordinal,std::span<const std::size_t> bins,C gain=1.,double delay=0,unsigned max_errors=signature_errors) const {
         unsigned errors=0;double signal=0,residual=0;
         for(auto k:bins) {
             const auto expected=channel[k]*known(k,ordinal)*gain*std::polar(1.,-2*pi*k*delay/g.n);
@@ -268,7 +274,7 @@ struct Receiver::Impl {
             errors+=(normalized.imag()>0)!=(symbol.imag()>0);
             signal+=std::norm(expected);residual+=std::norm(observed[k]-expected);
         }
-        return errors<=signature_errors&&signal>1e-16&&residual<signal;
+        return errors<=max_errors&&signal>1e-16&&residual<signal;
     }
     void acquire() {
         auto a=spectrum(candidate,1.),b=spectrum(candidate+g.length,1.);
@@ -348,9 +354,14 @@ struct Receiver::Impl {
         for(auto k:g.track) {
             cross[k]=y[k]*std::conj(channel[k]*known(k,block));normalization+=std::norm(channel[k]);
         }
-        const auto [delay,correlation]=delay_fit(cross,g.track,6.);
+        // A brief disturbance can leave the old +/-6-sample search behind the
+        // true window. Search half a millisecond while retaining its 0.15-sample
+        // spacing; only independent verification permits this fit to advance
+        // timing, refresh the channel or deliver data at the existing ordinal.
+        const auto [delay,correlation]=delay_fit(cross,g.track,24.);
         const auto common=normalization>1e-30?correlation/normalization:C{};
-        const bool present=std::abs(common)>.1&&std::abs(common)<10&&verify(y,block,signature,common,delay);
+        const bool present=std::abs(common)>.1&&std::abs(common)<10&&
+            verify(y,block,signature,common,delay,continuity_errors);
         ++state.symbols;
         if(present)absent=0;else absent+=g.length*period/p.sample_rate;
         if(absent>=6){state.physical_complete=true;pending_soft.clear();return;}

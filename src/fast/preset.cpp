@@ -1,5 +1,6 @@
 #include "datapump/fast/preset.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/modem.hpp"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -118,6 +119,8 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
     // the sampled radio default exactly, including sparse framing and depth.
     if(expected==nominal)return result;
     const auto default_profile=profile(c);
+    const auto refresh_blocks=default_profile.acoustic_ofdm?
+        total_interval_symbols(default_profile,cycle_intervals(default_profile))+1:0;
     const auto max_efficiency=std::log2(default_profile.constellation)*code_rate_value(default_profile.code_rate);
     double best=-1;
     constexpr std::array rates{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters,
@@ -149,6 +152,15 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
                 if(p.symbol_rate<100)p.interleave_depth=1;
             }
             if(!valid(p))continue;
+            if(ofdm) {
+                // Narrowing reduces data tones, so retaining eight LDPC frames
+                // made channel refreshes drift from about 10 to 37/74 seconds
+                // at Auto 3/0 dB. Keep the nominal refresh cadence where one
+                // frame permits it. Powers of two are also explicit GUI choices.
+                while(p.interleave_depth>1&&
+                    total_interval_symbols(p,cycle_intervals(p))+1>refresh_blocks)
+                    p.interleave_depth/=2;
+            }
             // Count actual fixed-cycle, marker, pilot and padding overhead,
             // rather than selecting solely by constellation bits per symbol.
             const auto throughput=estimate_transmission(p,false,50000000).source_bps;

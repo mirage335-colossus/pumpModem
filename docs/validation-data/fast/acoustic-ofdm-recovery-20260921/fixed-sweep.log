@@ -1,0 +1,8 @@
+START fixed-snr3-b60
+{"name": "fixed-snr3-b60", "exact": 1, "signal_seconds": 31.488, "physical_end_capture_seconds": 38.7615625, "rx_intervals": 128, "tx_intervals": 128, "ldpc_failed_frames": 0, "fifo_overflow": 0, "fifo_maximum_seconds": 0.1492708333, "decode_status": "Checksum-verified and physically complete (not authenticated)"}
+START fixed-snr0-b60
+{"name": "fixed-snr0-b60", "exact": 1, "signal_seconds": 33.024, "physical_end_capture_seconds": 40.27660417, "rx_intervals": 64, "tx_intervals": 64, "ldpc_failed_frames": 0, "fifo_overflow": 0, "fifo_maximum_seconds": 0.3841458333, "decode_status": "Checksum-verified and physically complete (not authenticated)"}
+START fixed-snr3-b20000
+{"name": "fixed-snr3-b20000", "exact": 1, "signal_seconds": 41.472, "physical_end_capture_seconds": 48.72416667, "rx_intervals": 192, "tx_intervals": 192, "ldpc_failed_frames": 0, "fifo_overflow": 0, "fifo_maximum_seconds": 0.3200208333, "decode_status": "Checksum-verified and physically complete (not authenticated)"}
+START fixed-snr0-b20000
+{"name": "fixed-snr0-b20000", "exact": 1, "signal_seconds": 65.28, "physical_end_capture_seconds": 72.53220833, "rx_intervals": 160, "tx_intervals": 160, "ldpc_failed_frames": 0, "fifo_overflow": 0, "fifo_maximum_seconds": 0.3015, "decode_status": "Checksum-verified and physically complete (not authenticated)"}

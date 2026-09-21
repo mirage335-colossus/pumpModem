@@ -17,10 +17,15 @@ candidate event, and it is not an authentication claim for public mode.
    verification tones supply 256 sign bits, allowing at most 16 disagreements
    plus an energy residual check. The final block's other tones fit common
    gain, phase and timing; its verification tones remain excluded from those
-   fits, and their selection uses only earlier training. Subsequent OFDM blocks separate tracking
-   pilots from verification pilots; tracking fits do not use the verification
-   tones. A full-band refresh block between coding cycles must pass the presence
-   check using the previous channel estimate before updating that estimate.
+   fits, and their selection uses only earlier training. Subsequent OFDM blocks
+   separate tracking pilots from verification pilots; tracking fits do not use
+   the verification tones. At the already established block ordinal, maintenance
+   permits at most 32 of 256 sign disagreements, with the same residual-energy
+   guard. This does not admit a new acquisition or search another boundary.
+   The ±24-sample maintenance timing search uses only tracking pilots, on a
+   0.15-sample grid before subgrid refinement, followed by one held-out check.
+   A full-band refresh block between coding cycles must pass that check using
+   the previous channel estimate before updating the estimate.
    The [OFDM waveform specification](fast-acoustic-ofdm.md) defines these blocks.
    These provisional locks select only already configured, fixed 2,048-bit
    interval coordinates. They do not expose decoded bytes or authorize source
@@ -130,18 +135,31 @@ certified aggregate probability bound for those raw provisional locks. Neither
 the nominal marker length nor an independent-fair-sign calculation should be
 quoted as a full-receiver result.
 
-For OFDM, an illustrative **conditional independent-fair-sign model** gives
-`sum(comb(256, k), k=0..16) / 2^256 = 2^-172.8418516` for one 256-sign check.
-The residual-energy check can only reduce acceptance, so omitting it is
-conservative within that model. A separately bounded collection of at most
-`2^64` such checks would give less than `2^-108.84` by a union bound **if the same
-conditional per-check model remained valid for every selected candidate**.
+For OFDM acquisition, an illustrative **conditional independent-fair-sign
+model** gives `sum(comb(256, k), k=0..16) / 2^256 = 2^-172.8418516` for one
+256-sign check. A separately bounded collection of at most `2^64` acquisition
+checks would give less than `2^-108.84` by a union bound **if the same conditional
+per-check model remained valid for every selected candidate**.
+
+Established-cadence maintenance instead allows 32 errors. Its corresponding
+conditional probability is
+`sum(comb(256, k), k=0..32) / 2^256 = 2^-120.3608158` **per check**. The older
+`2^-108.84` acquisition aggregate calculation does not apply to maintenance.
+The residual-energy guard can only reduce acceptance within the stated model.
+The wider timing search selects one correction using other pilots before the
+held-out check; it does not test the verification signs at every trial delay.
+Neither this separation nor the per-check arithmetic establishes a
+receiver-wide maintenance probability for real audio. For a separately bounded
+number `M` of checks, a union bound would require the same conditional model
+to hold for each check and would scale with `M`.
+
 The OFDM receiver now enforces a nonwrapping PCM coordinate limit of
 `2^64 - 1 - 8*(FFT_size + prefix_samples)` per instance. Each completed search
 advances by at least half an FFT; after acquisition, verification advances by
 whole OFDM blocks. With the validated local geometry these together permit
 fewer than `2^64` verification checks before the input limit. This is a finite
-per-instance accounting bound, not a bound across unlimited receiver restarts.
+per-instance accounting bound, not a claim that acquisition and maintenance
+share the same per-check probability, nor a bound across unlimited restarts.
 This arithmetic is not evidence that real noise, encoded payload, deterministic
 pilots and adaptively selected windows satisfy those assumptions. In
 particular, training-only selection of strong tones avoids fitting the current
@@ -150,6 +168,13 @@ every structured waveform or overlapping candidate. The accepted-byte claim
 therefore continues to use the explicit 256-bit integrity model above, not an
 unqualified raw OFDM false-lock claim. A finite counter or search budget by
 itself does not establish a probability model.
+
+The maintenance change leaves the transmitted training and verification
+waveforms, bootstrap, cycle digests/HMACs and accepted-byte quota bound
+unchanged. The accompanying Auto interleave-depth changes must match between
+peers because depth is bound into the profile identity. See the
+[OFDM recovery diagnosis](fast-acoustic-ofdm-recovery.md) for the receiver and
+preset changes and their experimental limits.
 
 Public SHA-256 is **not authentication**. Someone who intentionally constructs
 a valid public bootstrap and recomputes the public cycle checksums can transmit

@@ -1,0 +1,6 @@
+-- Could NOT find Gettext (missing: GETTEXT_MSGMERGE_EXECUTABLE GETTEXT_MSGFMT_EXECUTABLE)
+Staged 46 Rev modules and embedded 18 resources
+-- DataPump GUI backend: rev
+-- Configuring done (3.5s)
+-- Generating done (0.2s)
+-- Build files have been written to: /home/user/___quick/p/_cur/dataPump/pumpModem/build-rev

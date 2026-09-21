@@ -1,0 +1,10 @@
+auto0_echo premature_end_seconds=39.2533 signal_seconds=86.016 delivered_bits=145408
+auto0_echo: OFDM channel change ended a continuing transmitter
+auto3_delay premature_end_seconds=26.1973 signal_seconds=48.3843 delivered_bits=110592
+auto3_delay: OFDM channel change ended a continuing transmitter
+auto0_clock premature_end_seconds=27.7333 signal_seconds=86.0226 delivered_bits=63488
+auto0_clock: OFDM channel change ended a continuing transmitter
+muted_block_positions erased_bits=11224 EOF_incomplete=1
+corrupted_acquisition_marker rejected=1
+noise_only acquired=0 complete=0
+3 of 6 OFDM presence cases failed

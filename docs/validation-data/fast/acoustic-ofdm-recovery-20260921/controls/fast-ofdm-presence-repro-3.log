@@ -1,0 +1,9 @@
+profile expected=3 qam=4 rate=2/3 D=8 FFT=32768 bandwidth=8768.55 intervals=254 seconds=48.384 noise_sigma=0.0736943
+case=awgn acquired=12.4587 complete=54.6133 premature=0 accepted_bits=520192 errors=13674 erased=0 pass_blocks=47 fail_blocks=6 max_failed=6 final_clock_ppm=0.0715276
+case=echo0.3 acquired=12.4587 complete=54.6133 premature=0 accepted_bits=520192 errors=21128 erased=22448 pass_blocks=45 fail_blocks=8 max_failed=6 final_clock_ppm=0.0730565
+case=echo0.5 acquired=12.4587 complete=29.2693 premature=1 accepted_bits=155648 errors=3728 erased=33672 pass_blocks=11 fail_blocks=10 max_failed=7 final_clock_ppm=-0.0630273
+case=echo0.7 acquired=12.4587 complete=26.1973 premature=1 accepted_bits=110592 errors=2851 erased=0 pass_blocks=10 fail_blocks=7 max_failed=7 final_clock_ppm=-0.0957137
+case=delay16 acquired=12.4587 complete=26.1973 premature=1 accepted_bits=110592 errors=2851 erased=0 pass_blocks=10 fail_blocks=7 max_failed=7 final_clock_ppm=-0.0957137
+case=clock100ppm acquired=12.4587 complete=26.1973 premature=1 accepted_bits=110592 errors=2851 erased=0 pass_blocks=10 fail_blocks=7 max_failed=7 final_clock_ppm=-0.0957137
+case=silence_after20 acquired=12.4587 complete=26.1973 premature=0 accepted_bits=110592 errors=2851 erased=0 pass_blocks=10 fail_blocks=7 max_failed=7 final_clock_ppm=-0.0957137
+case=noise_only acquired=-1 complete=-1 premature=0 accepted_bits=0 errors=0 erased=0 pass_blocks=0 fail_blocks=0 max_failed=0 final_clock_ppm=0

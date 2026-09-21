@@ -9,7 +9,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <iomanip>
 #include <iostream>
+#include <sstream>
 #include <thread>
 using namespace datapump;
 using namespace datapump::gui;
@@ -70,6 +72,32 @@ void snr_and_symbol_rate_controls() {
             "Acoustic expected-SNR dropdown omitted a notable target or 40 dB span");
     check(std::any_of(choices.begin(),choices.end(),[](const auto& option){return option.id!="manual"&&std::stod(option.id)<=-27;}),
         "Acoustic expected-SNR range does not cover 40 dB below its default");
+    const auto check_narrow_preset=[&](const char* snr,const char* depth) {
+        controller.select(F::fast_expected_snr,snr);
+        const auto expected=fast::resolve_snr_preset(fast::Channel::acoustic,std::stod(snr)).profile;
+        check(expected.acoustic_ofdm&&std::to_string(expected.interleave_depth)==depth,
+            "Narrow acoustic preset lost its shorter refresh-cycle depth");
+        const auto& selected_depth=controller.field(F::fast_depth);
+        check(selected_depth.selected==depth&&std::any_of(selected_depth.options.begin(),selected_depth.options.end(),
+            [&](const auto& option){return option.id==selected_depth.selected&&option.enabled;}),
+            "Automatic acoustic depth has no selectable dropdown entry");
+        check(controller.field(F::fast_expected_snr).selected==snr&&
+            controller.field(F::fast_symbol_rate).selected=="auto"&&
+            controller.field(F::fast_constellation).selected==std::to_string(expected.constellation)&&
+            controller.field(F::fast_coding).selected=="two-thirds"&&
+            expected.code_rate==fast::CodeRate::two_thirds,
+            "Narrow acoustic preset did not apply matching QAM, LDPC and automatic timing");
+        const auto& rate=controller.field(F::fast_symbol_rate);
+        check(std::any_of(rate.options.begin(),rate.options.end(),[&](const auto& option){
+            return option.id==fast::symbol_rate_option_id(expected);
+        }),"Automatic acoustic timing has no matching explicit rate option");
+        std::ostringstream band;
+        band<<std::fixed<<std::setprecision(0)<<fast::occupied_lower_hz(expected)<<"–"<<fast::occupied_upper_hz(expected)<<" Hz";
+        check(controller.field(F::fast_detail).text.find(band.str())!=std::string::npos,
+            "Narrow acoustic selection retained a different profile passband");
+    };
+    check_narrow_preset("3","2");
+    check_narrow_preset("0","1");
     controller.select(F::fast_expected_snr,"10");
     const auto p=fast::resolve_snr_preset(fast::Channel::acoustic,10).profile;
     check(controller.field(F::fast_expected_snr).selected=="10"&&

@@ -1,0 +1,2 @@
+profile expected=3 qam=4 rate=2/3 D=8 FFT=32768 bandwidth=8768.55 intervals=254 seconds=48.384 noise_sigma=0.0736943
+case=static_echo0.9 acquired=12.4587 complete=54.6133 premature=0 accepted_bits=520192 errors=36382 erased=0 pass_blocks=47 fail_blocks=6 max_failed=6 final_clock_ppm=0.0565676

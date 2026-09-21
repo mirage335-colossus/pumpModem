@@ -1,0 +1,1 @@
+expected=3 echo=0.5 qam=4 code=2/3 D=8 TX_seconds=85.248 source_intervals=508 acquired=12.4587 completed=91.4773 premature=0 RX_intervals=508 raw_errors=72553 raw_erasures=0 exact=1 ldpc_frames=16 ldpc_failed=0 failed_cycles=0 status=Verified and physically complete

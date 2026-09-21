@@ -5134,3 +5134,51 @@ repeated for this study. These are small calibration samples, not statistical
 whole-file reliability measurements. [Findings](fast-cable-level-calibration.md)
 and [reproduction evidence](validation-data/fast/cable-level-calibration-20260921/README.md)
 include exact metrics, limitations and hashes of the retained recordings.
+
+### Acoustic OFDM Auto 3/0 dB premature-end recovery (2026-09-21)
+
+The user reported the fixed-coding-geometry error while transmission continued.
+These presets use OFDM, unlike the previously corrected -10 dB single carrier.
+Sampled production PCM reproduced premature ends after echo, delay and clock
+changes: the strict acquisition-strength signature gated maintained tracking,
+and eight failed blocks manufactured an apparent 6.144-second absence. Narrow
+depth-eight presets also waited 36.864/74.496 seconds between channel refreshes.
+
+Acquisition remains at 16/256 allowed sign errors; maintaining an established
+block ordinal now permits 32/256, retaining independent verification and the
+residual-energy guard. Pilot-only timing search expands from +/-6 to +/-24
+samples without coarsening the 0.15-sample grid. Coding integrity, fixed physical
+coordinates and six-second observed absence are unchanged. The documented
+conditional maintenance probability is distinct from acquisition and from
+accepted-byte integrity; the old acquisition aggregate claim is not applied
+to the new maintenance threshold.
+
+Automatic OFDM depth now shrinks with the number of data tones to retain the
+nominal refresh cadence where the one-frame minimum permits. Auto 6/3/0 dB use
+depth 4/2/1, with estimated public 50 MB throughput costs of 3.88/7.87/13.84%.
+The nominal 13 dB setting is unchanged. Shared GUI depth choices now include 2,
+and both endpoints must restart and reselect matching Auto settings.
+
+Both original unmodified live baselines passed, so the user's exact physical
+trigger was not observed. Adding a controlled 16-sample delay to the recorded
+0 dB audio reproduces the error at 27.25 seconds with 26/508 intervals; final
+receiver replay recovers exact bytes and all 508 intervals at 167.80 seconds.
+Four fresh live runs with the new presets, 60 bytes and 20 KB each at 3/0 dB,
+all recover exact source SHA-256 values with zero failed LDPC frames. No audio
+errors or queue overruns occurred, maximum FIFO was 0.385 seconds, and system
+volume settings were unchanged. Six live captures total 477.35 seconds; preset
+labels are not claims of calibrated live SNR or statistical reliability.
+
+New regressions independently preserve the original depth-eight failures and
+check complete keyed 20 KB files at the new defaults, explicit erased positions,
+corrupted acquisition training, noise-only input, partial absence, noisy physical
+completion and EOF. The integrated Fast/shared-GUI/selected ordinary compatibility
+group passes **33/33 in 311.33 seconds**, including the unchanged 92-case Fast
+SNR matrix. Both Release GUI executables and the CLI rebuilt. No native adapter
+or ordinary modem algorithm changed, so native rendering and the unchanged
+long ordinary probability calibration were not repeated. A repository-local
+temporary directory avoided the full host `/tmp` filesystem during tests.
+
+[Diagnosis and tradeoffs](fast-acoustic-ofdm-recovery.md) and
+[reproduction records](validation-data/fast/acoustic-ofdm-recovery-20260921/README.md)
+preserve exact commands, captures' hashes, counterfactual prototypes and logs.

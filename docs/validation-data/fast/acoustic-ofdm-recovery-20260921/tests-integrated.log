@@ -1,0 +1,76 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start 107: fast_snr
+      Start  20: fast_low_rate
+ 1/33 Test  #20: fast_low_rate ....................   Passed   21.83 sec
+      Start  12: fast_transfer
+ 2/33 Test  #12: fast_transfer ....................   Passed   36.49 sec
+      Start  15: fast_qam
+ 3/33 Test  #15: fast_qam .........................   Passed   20.21 sec
+      Start  25: gui_fast_live
+ 4/33 Test  #25: gui_fast_live ....................   Passed   55.59 sec
+      Start  18: fast_radio
+ 5/33 Test  #18: fast_radio .......................   Passed   11.10 sec
+      Start  16: fast_acoustic
+ 6/33 Test  #16: fast_acoustic ....................   Passed    7.41 sec
+      Start   9: fast_modem
+ 7/33 Test   #9: fast_modem .......................   Passed   17.13 sec
+      Start   8: fast_codec
+ 8/33 Test   #8: fast_codec .......................   Passed   32.69 sec
+      Start  11: fast_session
+ 9/33 Test  #11: fast_session .....................   Passed   21.30 sec
+      Start  88: gui_controller
+10/33 Test #107: fast_snr .........................   Passed  266.81 sec
+      Start 106: fast_cli
+11/33 Test #106: fast_cli .........................   Passed   22.39 sec
+      Start  21: fast_pilot_presence
+12/33 Test  #88: gui_controller ...................   Passed   71.09 sec
+      Start  14: fast_ldpc
+13/33 Test  #14: fast_ldpc ........................   Passed    1.79 sec
+      Start  10: fast_files
+14/33 Test  #10: fast_files .......................   Passed    4.01 sec
+      Start 105: fast_cable_benchmark
+15/33 Test #105: fast_cable_benchmark .............   Passed    1.03 sec
+      Start  24: gui_fast
+16/33 Test  #21: fast_pilot_presence ..............   Passed   13.79 sec
+      Start  22: fast_output_power
+17/33 Test  #22: fast_output_power ................   Passed    0.19 sec
+      Start  13: fast_telemetry
+18/33 Test  #13: fast_telemetry ...................   Passed    0.65 sec
+      Start  96: gui_adapter_boundary
+19/33 Test  #24: gui_fast .........................   Passed    2.17 sec
+      Start  32: stream_receive
+20/33 Test  #96: gui_adapter_boundary .............   Passed    0.44 sec
+      Start  94: gui_application
+21/33 Test  #32: stream_receive ...................   Passed    1.82 sec
+      Start  19: fast_presets
+22/33 Test  #19: fast_presets .....................   Passed    0.04 sec
+      Start  54: transfer
+23/33 Test  #54: transfer .........................   Passed    0.21 sec
+      Start  23: fast_boundary
+24/33 Test  #23: fast_boundary ....................   Passed    0.03 sec
+      Start  81: gui_inspection
+25/33 Test  #94: gui_application ..................   Passed    1.75 sec
+      Start  29: stream_codec
+26/33 Test  #81: gui_inspection ...................   Passed    0.12 sec
+      Start  34: compression_short
+27/33 Test  #29: stream_codec .....................   Passed    0.06 sec
+      Start  87: gui_binary_editor
+28/33 Test  #34: compression_short ................   Passed    0.04 sec
+      Start  73: gui_link_boundary
+29/33 Test  #73: gui_link_boundary ................   Passed    0.00 sec
+      Start  72: gui_contract
+30/33 Test  #72: gui_contract .....................   Passed    0.00 sec
+      Start  31: attachment
+31/33 Test  #31: attachment .......................   Passed    0.02 sec
+      Start  17: fast_ofdm_presence
+32/33 Test  #87: gui_binary_editor ................   Passed    0.05 sec
+33/33 Test  #17: fast_ofdm_presence ...............   Passed    5.19 sec
+
+100% tests passed, 0 tests failed out of 33
+
+Label Time Summary:
+fast_regression    = 266.81 sec*proc (1 test)
+gui                = 131.22 sec*proc (9 tests)
+
+Total Test time (real) = 311.33 sec

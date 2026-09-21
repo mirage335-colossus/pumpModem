@@ -68,9 +68,15 @@ decoder tests do not constitute full acoustic or cable waveform trials.
 Synchronization imposes an additional floor. The current single-carrier
 capacity marker requires exact agreement on 128 signs. Its presets retain
 at least about **13 dB in the selected band**, even when LDPC payload symbols
-could decode at lower SNR. OFDM has 256 independently checked marker signs
-with an error allowance; its selection floor is **6 dB**. Marker length and
-false-match policy have not been weakened to make the menu look faster.
+could decode at lower SNR. OFDM acquisition has 256 independently checked marker
+signs with at most 16 disagreements; its selection floor is **6 dB**. After
+acquisition, maintenance at the established block ordinal permits at most
+32 disagreements with the same residual-energy guard. Tracking fits still
+exclude the current verification tones, and maintenance does not search a new
+boundary. The conditional independent-fair-sign probabilities are approximately
+`2^-172.84` per acquisition check and `2^-120.36` per maintenance check, not
+receiver-wide guarantees. The [integrity analysis](fast-capacity-integrity.md)
+distinguishes these from the unchanged accepted-byte integrity bound.
 
 Acoustic presets first consider narrower OFDM. The current FFT and independent
 marker design require at least 512 active bins and a 1 kHz configured band.
@@ -80,6 +86,29 @@ average PCM power. Radio keeps its 1.5 kHz carrier. These restrictions cause a s
 throughput drop at the OFDM-to-single-carrier transition. Lower-SNR acquisition,
 longer coherent training, and a new multiblock marker design could reduce this
 gap in a future wire revision; stronger LDPC alone would not fix acquisition.
+
+Each OFDM candidate now halves its interleave depth until its known-channel
+refresh interval fits the nominal 13-block, 9.984-second interval, or depth
+one is reached. This happens before candidates are compared for throughput.
+The nominal Auto 13 dB setting is unchanged. Compared with the previous
+depth-eight settings, the affected menu points are:
+
+| Expected SNR | New depth | Refresh interval | Estimated public 50 MB throughput loss |
+| --- | ---: | ---: | ---: |
+| 6 dB | 4 | 9.984 s | 3.88% |
+| 3 dB | 2 | 9.984 s | 7.87% |
+| 0 dB | 1 | 10.752 s | 13.84% |
+
+These costs use the exact unencrypted 50,000,000-byte transmission estimate,
+including framing and end silence; they are not measured goodput. Still
+narrower depth-one presets can exceed ten seconds between refreshes. Manual
+depth eight remains available. Restart both peers with the updated application
+and reselect matching Auto settings: an older running application retains its
+old profiles, and depth is part of the matching wire geometry. The associated
+receiver change expands pilot-only timing tracking from ±6 to ±24 samples,
+retaining a 0.15-sample search grid. The
+[OFDM recovery diagnosis](fast-acoustic-ofdm-recovery.md) records the evidence
+and remaining limitations.
 
 Extremely weak presets reach roughly 1–2 symbols/s. Their 2,048-symbol
 single-carrier preamble alone can last many minutes, and the 64,800-bit LDPC

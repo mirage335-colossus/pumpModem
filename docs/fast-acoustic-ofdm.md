@@ -89,10 +89,17 @@ every room has the same delay distribution. Start reception before transmission:
 later coding cycles do not repeat the acquisition preamble.
 
 Every data block fits common gain, phase, and phase-versus-frequency timing
-correction from its tracking pilots. The independent verification pilots then
-score presence against the existing channel estimate. The clock loop updates
-the sample grid, using 32-tap windowed-sinc interpolation. Full sampled tests
-recover exact 16-QAM bits at ±100 ppm relative clock error.
+correction from its tracking pilots. The timing search now covers ±24 samples
+(±0.5 ms at 48 kHz), using a 0.15-sample grid before subgrid refinement; the
+previous ±6-sample search could lose a continuing signal after a timing change.
+The independent verification pilots then score presence against the existing
+channel estimate. Acquisition still permits at most 16 disagreements among
+256 signs. Once acquired, maintenance at the established block ordinal permits
+at most 32, retaining the same residual-energy guard. This maintenance check
+does not search for another boundary or fit its verification tones. Only an
+admitted observation may update timing or the channel estimate. The clock loop
+updates the sample grid, using 32-tap windowed-sinc interpolation. Full sampled
+tests recover exact 16-QAM bits at ±100 ppm relative clock error.
 
 One full-band known channel-refresh block precedes each coding cycle after the
 first. Its presence is checked against the **previous** channel estimate before
@@ -103,6 +110,16 @@ source bits. This
 prevents a channel fit from making its own verification word pass. Refresh is
 needed because the measured speaker/microphone frequency response changed
 enough over tens of seconds to defeat a one-time estimate.
+
+Reduced-SNR Auto presets now cap interleave depth to keep the refresh interval
+near the nominal 13-block, 9.984-second interval where one LDPC frame permits it.
+Auto 6, 3 and 0 dB use depths four, two and one respectively, giving refresh
+intervals of 9.984, 9.984 and 10.752 seconds. Still narrower depth-one presets
+can take longer. The nominal Auto 13 dB setting remains unchanged, and manual
+depth eight remains available. These depth changes alter local coding geometry;
+restart both peers with the updated application and reselect matching Auto
+settings. The [OFDM recovery diagnosis](fast-acoustic-ofdm-recovery.md) records
+the reproduced failures, verification and throughput costs.
 
 The soft demapper uses separable Gray-PAM max-log distances. A deeply faded bin
 has low confidence through its frequency-dependent channel/noise normalization.
@@ -161,9 +178,14 @@ before/after regressions and real-device checks.
 
 ## Integrity scope
 
-The provisional signature is 256 held-out QPSK signs with at most 16 errors,
-plus a residual-energy guard. The conditional random-error model, search
-accounting, limitations of a receiver-wide false-lock claim, and the separate
-256-bit protection of accepted coding cycles are specified in
+The provisional acquisition signature is 256 held-out QPSK signs with at most
+16 errors, plus a residual-energy guard. Established-cadence maintenance uses
+the same number of signs and guard with at most 32 errors. Under a conditional
+independent-fair-sign model, these are respectively approximately `2^-172.84`
+and `2^-120.36` per check; neither is an unconditional receiver-wide claim.
+The earlier acquisition aggregate calculation does not apply to maintenance.
+The conditional model, search accounting, limitations of a receiver-wide
+false-lock claim, and the unchanged separate 256-bit protection of accepted
+coding cycles are specified in
 [the integrity analysis](fast-capacity-integrity.md). Correlation or LDPC
 success alone is not an accepted byte-boundary guarantee.

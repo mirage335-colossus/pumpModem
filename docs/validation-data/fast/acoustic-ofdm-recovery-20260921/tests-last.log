@@ -1,0 +1,684 @@
+Start testing: Sep 21 05:49 CDT
+----------------------------------------------------------
+20/109 Testing: fast_low_rate
+20/109 Test: fast_low_rate
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_low_rate"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_low_rate" start time: Sep 21 05:49 CDT
+Output:
+----------------------------------------------------------
+baud=5 qam=16 reference_snr=100 narrowed_snr=126.021 intervals=1 errors=0 erasures=0 complete=1 evm=0.000700949 rx_workspace=1378792 waveform_seconds=563 wall_seconds=1.73457
+baud=15 qam=16 reference_snr=100 narrowed_snr=121.249 intervals=1 errors=0 erasures=0 complete=1 evm=0.000731333 rx_workspace=1681192 waveform_seconds=181.267 wall_seconds=0.936262
+baud=100 qam=4 reference_snr=100 narrowed_snr=112.041 intervals=1 errors=0 erasures=0 complete=1 evm=0.000966369 rx_workspace=2126376 waveform_seconds=31.77 wall_seconds=0.638144
+baud=500 qam=4 reference_snr=100 narrowed_snr=105.051 intervals=1 errors=0 erasures=0 complete=1 evm=0.000965976 rx_workspace=1704168 waveform_seconds=6.35402 wall_seconds=0.543816
+baud=500 qam=4194304 reference_snr=100 narrowed_snr=106.726 intervals=1 errors=0 erasures=0 complete=1 evm=0.000134683 rx_workspace=2411496 waveform_seconds=5.69802 wall_seconds=8.58319
+baud=10.935 qam=16 reference_snr=-10 narrowed_snr=13 intervals=32 errors=2983 erasures=0 complete=1 evm=0.271284 rx_workspace=1316568 waveform_seconds=1837.68 wall_seconds=9.2303
+negative-reference-SNR LDPC converged=1 iterations=9
+Fast low-rate sampled tests passed
+<end of output>
+Test time =  21.83 sec
+----------------------------------------------------------
+Test Passed.
+"fast_low_rate" end time: Sep 21 05:49 CDT
+"fast_low_rate" time elapsed: 00:00:21
+----------------------------------------------------------
+
+12/109 Testing: fast_transfer
+12/109 Test: fast_transfer
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_transfer"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_transfer" start time: Sep 21 05:49 CDT
+Output:
+----------------------------------------------------------
+wire encrypted=0 100KB bps=19079.9 cycle overhead=0.0589918
+wire encrypted=1 100KB bps=17879.1 cycle overhead=0.0497693
+ssb encrypted=0 100KB bps=2921.4 cycle overhead=0.0683413
+ssb encrypted=1 100KB bps=2712.22 cycle overhead=0.0570146
+fm encrypted=0 100KB bps=1554.58 cycle overhead=0.0691491
+fm encrypted=1 100KB bps=1442.12 cycle overhead=0.057633
+acoustic encrypted=0 100KB bps=393.625 cycle overhead=0.0660023
+acoustic encrypted=1 100KB bps=363.202 cycle overhead=0.0593224
+fast sampled encrypted-file regressions passed
+<end of output>
+Test time =  36.49 sec
+----------------------------------------------------------
+Test Passed.
+"fast_transfer" end time: Sep 21 05:50 CDT
+"fast_transfer" time elapsed: 00:00:36
+----------------------------------------------------------
+
+15/109 Testing: fast_qam
+15/109 Test: fast_qam
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_qam"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_qam" start time: Sep 21 05:50 CDT
+Output:
+----------------------------------------------------------
+4096QAM 48000 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000707429
+4096QAM 44100 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000695762
+16384QAM 48000 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000713289
+16384QAM 44100 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000643392
+65536QAM 48000 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000661879
+65536QAM 44100 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000617564
+1048576QAM 44100 Hz alpha 0.02 ppm 0 echo 0 carrier 0 noise 0 intervals 32 errors 0 erasures 0 EVM 0.000202038
+1048576QAM 44100 Hz alpha 0.02 ppm 100 echo 0 carrier 0 noise 0 intervals 32 errors 0 erasures 0 EVM 0.000335261
+1048576QAM 44100 Hz alpha 0.02 ppm -100 echo 0 carrier 0 noise 0 intervals 32 errors 0 erasures 0 EVM 0.000274857
+4194304QAM 44100 Hz alpha 0.02 ppm 0 echo 0 carrier 0 noise 0 intervals 32 errors 41 erasures 0 EVM 0.000173323
+4194304QAM 44100 Hz alpha 0.02 ppm 100 echo 0 carrier 0 noise 0 intervals 32 errors 138 erasures 0 EVM 0.00035073
+4194304QAM 44100 Hz alpha 0.02 ppm -100 echo 0 carrier 0 noise 0 intervals 32 errors 375 erasures 0 EVM 0.000229481
+65536QAM 48000 Hz alpha 0.1 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000544167
+65536QAM 48000 Hz alpha 0.02 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000204718
+65536QAM 48000 Hz alpha 0.02 ppm 0 echo 0 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000213768
+65536QAM 48000 Hz alpha 0.02 ppm 0 echo 0 carrier 0 noise 0.0002 intervals 12 errors 0 erasures 0 EVM 0.0009078
+65536QAM 48000 Hz alpha 0.2 ppm 100 echo 0 carrier 0 noise 0 intervals 40 errors 0 erasures 0 EVM 0.000812653
+16384QAM 48000 Hz alpha 0.2 ppm -100 echo 0 carrier 0 noise 0 intervals 40 errors 0 erasures 0 EVM 0.000632168
+65536QAM 48000 Hz alpha 0.2 ppm 0 echo 0 carrier 0.7 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000644714
+16384QAM 48000 Hz alpha 0.2 ppm 0 echo 0.04 carrier 0 noise 0 intervals 12 errors 0 erasures 0 EVM 0.000709872
+4096QAM 48000 Hz alpha 0.2 ppm 0 echo 0 carrier 0 noise 0.00015 intervals 12 errors 0 erasures 0 EVM 0.000906621
+<end of output>
+Test time =  20.21 sec
+----------------------------------------------------------
+Test Passed.
+"fast_qam" end time: Sep 21 05:50 CDT
+"fast_qam" time elapsed: 00:00:20
+----------------------------------------------------------
+
+25/109 Testing: gui_fast_live
+25/109 Test: gui_fast_live
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_gui_fast_live"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_fast_live" start time: Sep 21 05:50 CDT
+Output:
+----------------------------------------------------------
+Fast GUI wire live PCM/constellation and retained snapshot checks passed
+Fast GUI acoustic live PCM/constellation and retained snapshot checks passed
+<end of output>
+Test time =  55.59 sec
+----------------------------------------------------------
+Test Passed.
+"gui_fast_live" end time: Sep 21 05:51 CDT
+"gui_fast_live" time elapsed: 00:00:55
+----------------------------------------------------------
+
+18/109 Testing: fast_radio
+18/109 Test: fast_radio
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_radio"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_radio" start time: Sep 21 05:51 CDT
+Output:
+----------------------------------------------------------
+ssb encrypted=0 old_bps=3102.63 new_bps=8697.46 speedup=2.80325
+ssb encrypted=1 old_bps=2844.05 new_bps=8689.06 speedup=3.05517
+fm encrypted=0 old_bps=1633 new_bps=8697.46 speedup=5.32606
+fm encrypted=1 old_bps=1496.9 new_bps=8689.06 speedup=5.8047
+ssb input_snr_db=20 impaired=1 complete=1 intervals=64 ldpc_failed=0 evm=0.110896 status=Verified and physically complete
+fm input_snr_db=20 impaired=0 complete=1 intervals=64 ldpc_failed=0 evm=0.111564 status=Verified and physically complete
+Fast radio capacity tests passed
+<end of output>
+Test time =  11.10 sec
+----------------------------------------------------------
+Test Passed.
+"fast_radio" end time: Sep 21 05:51 CDT
+"fast_radio" time elapsed: 00:00:11
+----------------------------------------------------------
+
+16/109 Testing: fast_acoustic
+16/109 Test: fast_acoustic
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_acoustic"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_acoustic" start time: Sep 21 05:51 CDT
+Output:
+----------------------------------------------------------
+OFDM raw echo=0 noise=0 ppm=0 acquired=1 intervals=32 errors=0 clock=-5.66214e-09 EVM=2.23294e-08
+OFDM raw echo=0.6 noise=0.0001 ppm=0 acquired=1 intervals=32 errors=0 clock=-0.00060391 EVM=0.00246811
+OFDM raw echo=0.45 noise=0.0001 ppm=0 acquired=1 intervals=32 errors=0 clock=0.000298849 EVM=0.00224848
+OFDM raw echo=0 noise=0 ppm=100 acquired=1 intervals=32 errors=0 clock=99.9532 EVM=5.03386e-05
+OFDM raw echo=0 noise=0 ppm=-100 acquired=1 intervals=32 errors=0 clock=-99.9855 EVM=1.70837e-05
+OFDM codec64QAM peak=0.214029 exact bytes=4096
+OFDM raw echo=0.45 noise=0.0001 ppm=100 acquired=1 intervals=32 errors=0 clock=99.9716 EVM=0.00225931
+acoustic OFDM tests passed
+<end of output>
+Test time =   7.41 sec
+----------------------------------------------------------
+Test Passed.
+"fast_acoustic" end time: Sep 21 05:51 CDT
+"fast_acoustic" time elapsed: 00:00:07
+----------------------------------------------------------
+
+9/109 Testing: fast_modem
+9/109 Test: fast_modem
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_modem"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_modem" start time: Sep 21 05:51 CDT
+Output:
+----------------------------------------------------------
+fast sampled modem tests passed
+<end of output>
+Test time =  17.13 sec
+----------------------------------------------------------
+Test Passed.
+"fast_modem" end time: Sep 21 05:52 CDT
+"fast_modem" time elapsed: 00:00:17
+----------------------------------------------------------
+
+8/109 Testing: fast_codec
+8/109 Test: fast_codec
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_codec"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_codec" start time: Sep 21 05:52 CDT
+Output:
+----------------------------------------------------------
+acoustic LDPC scheduling scenario=0 depth=4 serial_ms=15.8255 scheduled_ms=11.612 frames=8 iterations=0 failed_frames=0
+acoustic LDPC scheduling scenario=1 depth=4 serial_ms=180.679 scheduled_ms=73.1134 frames=8 iterations=18 failed_frames=0
+acoustic LDPC scheduling scenario=2 depth=4 serial_ms=1949.55 scheduled_ms=692.491 frames=4 iterations=200 failed_frames=4
+acoustic LDPC scheduling scenario=3 depth=4 serial_ms=2.81697 scheduled_ms=2.13373 frames=2 iterations=0 failed_frames=0
+acoustic LDPC scheduling scenario=4 depth=16 serial_ms=137.595 scheduled_ms=118.096 frames=32 iterations=0 failed_frames=0
+fast fixed-cadence crypto/FEC/source tests passed
+<end of output>
+Test time =  32.69 sec
+----------------------------------------------------------
+Test Passed.
+"fast_codec" end time: Sep 21 05:52 CDT
+"fast_codec" time elapsed: 00:00:32
+----------------------------------------------------------
+
+11/109 Testing: fast_session
+11/109 Test: fast_session
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_session"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_session" start time: Sep 21 05:52 CDT
+Output:
+----------------------------------------------------------
+fast session ownership, text transfer and damaged-cycle continuation passed
+<end of output>
+Test time =  21.30 sec
+----------------------------------------------------------
+Test Passed.
+"fast_session" end time: Sep 21 05:53 CDT
+"fast_session" time elapsed: 00:00:21
+----------------------------------------------------------
+
+107/109 Testing: fast_snr
+107/109 Test: fast_snr
+Command: "/usr/bin/python3" "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_snr.py" "/home/user/___quick/p/_cur/dataPump/pumpModem/build/fast_regression"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_snr" start time: Sep 21 05:49 CDT
+Output:
+----------------------------------------------------------
+wire: all 23 SNR levels checked
+ssb: all 23 SNR levels checked
+fm: all 23 SNR levels checked
+acoustic: all 23 SNR levels checked
+Fast 92-case SNR matrix and bounded argument checks passed
+<end of output>
+Test time = 266.81 sec
+----------------------------------------------------------
+Test Passed.
+"fast_snr" end time: Sep 21 05:53 CDT
+"fast_snr" time elapsed: 00:04:26
+----------------------------------------------------------
+
+106/109 Testing: fast_cli
+106/109 Test: fast_cli
+Command: "/usr/bin/python3" "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_cli.py" "/home/user/___quick/p/_cur/dataPump/pumpModem/build/pump"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_cli" start time: Sep 21 05:53 CDT
+Output:
+----------------------------------------------------------
+....................
+----------------------------------------------------------------------
+Ran 20 tests in 22.329s
+
+OK
+<end of output>
+Test time =  22.39 sec
+----------------------------------------------------------
+Test Passed.
+"fast_cli" end time: Sep 21 05:54 CDT
+"fast_cli" time elapsed: 00:00:22
+----------------------------------------------------------
+
+88/109 Testing: gui_controller
+88/109 Test: gui_controller
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_gui_controller"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_controller" start time: Sep 21 05:53 CDT
+Output:
+----------------------------------------------------------
+Shared GUI controller checks passed
+<end of output>
+Test time =  71.09 sec
+----------------------------------------------------------
+Test Passed.
+"gui_controller" end time: Sep 21 05:54 CDT
+"gui_controller" time elapsed: 00:01:11
+----------------------------------------------------------
+
+14/109 Testing: fast_ldpc
+14/109 Test: fast_ldpc
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_ldpc"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_ldpc" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+LDPC K=32400 frames=12 raw_errors=679 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=12.2731
+LDPC K=48600 frames=12 raw_errors=700 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=11.5173
+LDPC K=50400 frames=12 raw_errors=711 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=12.8189
+LDPC K=57600 frames=12 raw_errors=725 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=10.3798
+LDPC K=58320 frames=12 raw_errors=687 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=10.408
+LDPC K=43200 frames=12 raw_errors=681 wrong_frames=0 mean_iterations=1 full_pipeline_ms/frame=11.6495
+QAM=4 K=32400 EsN0=2 raw_errors=6650 iterations=6 decoder_ms=76.1555
+QAM=16 K=32400 EsN0=7 raw_errors=7727 iterations=9 decoder_ms=111.538
+QAM=256 K=43200 EsN0=20 raw_errors=4219 iterations=6 decoder_ms=64.3442
+QAM=4096 K=50400 EsN0=31.8 raw_errors=3095 iterations=6 decoder_ms=72.371
+QAM=16384 K=50400 EsN0=37.8 raw_errors=2662 iterations=5 decoder_ms=54.4718
+QAM=16384 K=57600 EsN0=40 raw_errors=1550 iterations=11 decoder_ms=98.8668
+QAM=16384 K=58320 EsN0=42 raw_errors=783 iterations=3 decoder_ms=24.6805
+QAM=65536 K=58320 EsN0=48 raw_errors=678 iterations=3 decoder_ms=22.8987
+Fast LDPC tests passed
+<end of output>
+Test time =   1.79 sec
+----------------------------------------------------------
+Test Passed.
+"fast_ldpc" end time: Sep 21 05:54 CDT
+"fast_ldpc" time elapsed: 00:00:01
+----------------------------------------------------------
+
+10/109 Testing: fast_files
+10/109 Test: fast_files
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_files"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_files" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+fast bounded local WAV/file tests passed
+<end of output>
+Test time =   4.01 sec
+----------------------------------------------------------
+Test Passed.
+"fast_files" end time: Sep 21 05:54 CDT
+"fast_files" time elapsed: 00:00:04
+----------------------------------------------------------
+
+105/109 Testing: fast_cable_benchmark
+105/109 Test: fast_cable_benchmark
+Command: "/usr/bin/python3" "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_cable_benchmark.py" "/home/user/___quick/p/_cur/dataPump/pumpModem/build/pump"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_cable_benchmark" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+.........
+----------------------------------------------------------------------
+Ran 9 tests in 0.949s
+
+OK
+<end of output>
+Test time =   1.03 sec
+----------------------------------------------------------
+Test Passed.
+"fast_cable_benchmark" end time: Sep 21 05:54 CDT
+"fast_cable_benchmark" time elapsed: 00:00:01
+----------------------------------------------------------
+
+21/109 Testing: fast_pilot_presence
+21/109 Test: fast_pilot_presence
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_pilot_presence"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_pilot_presence" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+pilot recovery baud=73.0898 erased_first=256 exact_later_intervals=3 noisy_tail=1 phase_step=0
+pilot recovery baud=73.0898 erased_first=256 exact_later_intervals=3 noisy_tail=0 phase_step=1
+pilot recovery baud=5 erased_first=256 exact_later_intervals=3 noisy_tail=0 phase_step=0
+marker phase recovery baud=5 erased_intervals=4 exact_intervals=8 acquired_silence_noise_controls=2
+Fast pilot presence tests passed
+<end of output>
+Test time =  13.79 sec
+----------------------------------------------------------
+Test Passed.
+"fast_pilot_presence" end time: Sep 21 05:54 CDT
+"fast_pilot_presence" time elapsed: 00:00:13
+----------------------------------------------------------
+
+22/109 Testing: fast_output_power
+22/109 Test: fast_output_power
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_output_power"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_output_power" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+OFDM RMS 0.08882782651, peak 0.4004768133, samples 147456
+Ordinary single carrier RMS 0.08876339666, peak 0.2542103231, relative power -0.0063024577 dB, samples 98304
+Narrow single carrier RMS 0.08876274091, peak 0.2681914866, relative power -0.006366626011 dB, samples 2689952
+Fast acoustic output-power continuity passed
+<end of output>
+Test time =   0.19 sec
+----------------------------------------------------------
+Test Passed.
+"fast_output_power" end time: Sep 21 05:54 CDT
+"fast_output_power" time elapsed: 00:00:00
+----------------------------------------------------------
+
+13/109 Testing: fast_telemetry
+13/109 Test: fast_telemetry
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_telemetry"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_telemetry" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+fast immutable telemetry, waveform/spectrum and observer isolation passed
+<end of output>
+Test time =   0.65 sec
+----------------------------------------------------------
+Test Passed.
+"fast_telemetry" end time: Sep 21 05:54 CDT
+"fast_telemetry" time elapsed: 00:00:00
+----------------------------------------------------------
+
+24/109 Testing: gui_fast
+24/109 Test: gui_fast
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_gui_fast"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_fast" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+Fast GUI isolation tests passed
+<end of output>
+Test time =   2.17 sec
+----------------------------------------------------------
+Test Passed.
+"gui_fast" end time: Sep 21 05:54 CDT
+"gui_fast" time elapsed: 00:00:02
+----------------------------------------------------------
+
+96/109 Testing: gui_adapter_boundary
+96/109 Test: gui_adapter_boundary
+Command: "/usr/bin/cmake" "-DROOT=/home/user/___quick/p/_cur/dataPump/pumpModem" "-P" "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/gui_adapter_boundary.cmake"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_adapter_boundary" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+<end of output>
+Test time =   0.44 sec
+----------------------------------------------------------
+Test Passed.
+"gui_adapter_boundary" end time: Sep 21 05:54 CDT
+"gui_adapter_boundary" time elapsed: 00:00:00
+----------------------------------------------------------
+
+32/109 Testing: stream_receive
+32/109 Test: stream_receive
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_stream_receive"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"stream_receive" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+stream receive integration passed
+<end of output>
+Test time =   1.82 sec
+----------------------------------------------------------
+Test Passed.
+"stream_receive" end time: Sep 21 05:54 CDT
+"stream_receive" time elapsed: 00:00:01
+----------------------------------------------------------
+
+19/109 Testing: fast_presets
+19/109 Test: fast_presets
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_presets"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_presets" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+wire 65dB 4194304QAM 8/9 SC 18000Hz 310719bit/s
+wire 63dB 1048576QAM 9/10 SC 18000Hz 289270bit/s
+wire 60dB 1048576QAM 9/10 SC 18000Hz 289270bit/s
+wire 56dB 262144QAM 9/10 SC 18000Hz 263299bit/s
+wire 53dB 1048576QAM 7/9 SC 18000Hz 250114bit/s
+wire 50dB 65536QAM 9/10 SC 18000Hz 236297bit/s
+wire 46dB 1048576QAM 2/3 SC 18000Hz 214445bit/s
+wire 43dB 16384QAM 8/9 SC 18000Hz 204821bit/s
+wire 40dB 4096QAM 9/10 SC 18000Hz 179696bit/s
+wire 36dB 4096QAM 7/9 SC 18000Hz 155335bit/s
+wire 33dB 1024QAM 9/10 SC 18000Hz 151082bit/s
+wire 30dB 4096QAM 2/3 SC 18000Hz 133153bit/s
+wire 26dB 1024QAM 2/3 SC 18000Hz 111937bit/s
+wire 25dB 256QAM 7/9 SC 18000Hz 105406bit/s
+acoustic 13dB 16QAM 3/4 OFDM 17499Hz 38674.8bit/s
+acoustic 10dB 16QAM 1/2 OFDM 17499Hz 25799.1bit/s
+acoustic 6dB 4QAM 2/3 OFDM 17499Hz 17202.8bit/s
+acoustic 3dB 4QAM 2/3 OFDM 8768.55Hz 8592.06bit/s
+acoustic 0dB 4QAM 2/3 OFDM 4394.53Hz 3976.83bit/s
+acoustic -3dB 4QAM 2/3 OFDM 2201.66Hz 1920.04bit/s
+acoustic -6dB 4QAM 2/3 OFDM 1103.03Hz 632.779bit/s
+acoustic -10dB 16QAM 3/4 SC 87.7078Hz 196.417bit/s
+acoustic -13dB 16QAM 3/4 SC 43.958Hz 98.4418bit/s
+acoustic -16dB 16QAM 3/4 SC 22.0312Hz 49.3378bit/s
+acoustic -20dB 16QAM 3/4 SC 8.77078Hz 19.6417bit/s
+acoustic -23dB 16QAM 3/4 SC 4.3958Hz 9.84419bit/s
+acoustic -26dB 16QAM 3/4 SC 2.20312Hz 4.93378bit/s
+acoustic -27dB 16QAM 3/4 SC 1.75Hz 3.91904bit/s
+ssb 20dB 64QAM 3/4 SC 2400Hz 8697.46bit/s
+ssb 16dB 16QAM 9/10 SC 2400Hz 7121.07bit/s
+ssb 13dB 16QAM 3/4 SC 2400Hz 5933.21bit/s
+ssb 10dB 16QAM 3/4 SC 1202.85Hz 2973.79bit/s
+ssb 6dB 16QAM 3/4 SC 478.863Hz 1183.92bit/s
+ssb 3dB 16QAM 3/4 SC 240Hz 593.37bit/s
+ssb 0dB 16QAM 3/4 SC 120.285Hz 297.391bit/s
+ssb -3dB 16QAM 3/4 SC 60.2853Hz 147.279bit/s
+ssb -6dB 16QAM 3/4 SC 30.2142Hz 73.8144bit/s
+ssb -10dB 16QAM 3/4 SC 12.0285Hz 29.3861bit/s
+ssb -13dB 16QAM 3/4 SC 6.02853Hz 14.7279bit/s
+ssb -16dB 16QAM 3/4 SC 3.02142Hz 7.38145bit/s
+ssb -20dB 16QAM 3/4 SC 1.20285Hz 2.93861bit/s
+fm 20dB 64QAM 3/4 SC 2400Hz 8697.46bit/s
+fm 16dB 16QAM 9/10 SC 2400Hz 7121.07bit/s
+fm 13dB 16QAM 3/4 SC 2400Hz 5933.21bit/s
+fm 10dB 16QAM 3/4 SC 1202.85Hz 2973.79bit/s
+fm 6dB 16QAM 3/4 SC 478.863Hz 1183.92bit/s
+fm 3dB 16QAM 3/4 SC 240Hz 593.37bit/s
+fm 0dB 16QAM 3/4 SC 120.285Hz 297.391bit/s
+fm -3dB 16QAM 3/4 SC 60.2853Hz 147.279bit/s
+fm -6dB 16QAM 3/4 SC 30.2142Hz 73.8144bit/s
+fm -10dB 16QAM 3/4 SC 12.0285Hz 29.3861bit/s
+fm -13dB 16QAM 3/4 SC 6.02853Hz 14.7279bit/s
+fm -16dB 16QAM 3/4 SC 3.02142Hz 7.38145bit/s
+fm -20dB 16QAM 3/4 SC 1.20285Hz 2.93861bit/s
+Fast SNR presets passed
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"fast_presets" end time: Sep 21 05:54 CDT
+"fast_presets" time elapsed: 00:00:00
+----------------------------------------------------------
+
+54/109 Testing: transfer
+54/109 Test: transfer
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_transfer"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"transfer" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+stream transfer passed
+<end of output>
+Test time =   0.21 sec
+----------------------------------------------------------
+Test Passed.
+"transfer" end time: Sep 21 05:54 CDT
+"transfer" time elapsed: 00:00:00
+----------------------------------------------------------
+
+23/109 Testing: fast_boundary
+23/109 Test: fast_boundary
+Command: "/usr/bin/cmake" "-DROOT=/home/user/___quick/p/_cur/dataPump/pumpModem" "-P" "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/fast_boundary.cmake"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_boundary" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+-- Regular/fast DSP dependency boundary passed
+<end of output>
+Test time =   0.03 sec
+----------------------------------------------------------
+Test Passed.
+"fast_boundary" end time: Sep 21 05:54 CDT
+"fast_boundary" time elapsed: 00:00:00
+----------------------------------------------------------
+
+94/109 Testing: gui_application
+94/109 Test: gui_application
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_gui_application"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_application" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+Shared GUI application/records/declarations passed
+<end of output>
+Test time =   1.75 sec
+----------------------------------------------------------
+Test Passed.
+"gui_application" end time: Sep 21 05:54 CDT
+"gui_application" time elapsed: 00:00:01
+----------------------------------------------------------
+
+81/109 Testing: gui_inspection
+81/109 Test: gui_inspection
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_inspection"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_inspection" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+inspection tests passed
+<end of output>
+Test time =   0.12 sec
+----------------------------------------------------------
+Test Passed.
+"gui_inspection" end time: Sep 21 05:54 CDT
+"gui_inspection" time elapsed: 00:00:00
+----------------------------------------------------------
+
+29/109 Testing: stream_codec
+29/109 Test: stream_codec
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_stream_codec"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"stream_codec" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+fixed stream codec passed
+<end of output>
+Test time =   0.06 sec
+----------------------------------------------------------
+Test Passed.
+"stream_codec" end time: Sep 21 05:54 CDT
+"stream_codec" time elapsed: 00:00:00
+----------------------------------------------------------
+
+34/109 Testing: compression_short
+34/109 Test: compression_short
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_compression_short"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"compression_short" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+exact short dictionary tests passed
+<end of output>
+Test time =   0.04 sec
+----------------------------------------------------------
+Test Passed.
+"compression_short" end time: Sep 21 05:54 CDT
+"compression_short" time elapsed: 00:00:00
+----------------------------------------------------------
+
+73/109 Testing: gui_link_boundary
+73/109 Test: gui_link_boundary
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_gui_link_boundary"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_link_boundary" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+GUI interface compiles without application internals or a toolkit.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"gui_link_boundary" end time: Sep 21 05:54 CDT
+"gui_link_boundary" time elapsed: 00:00:00
+----------------------------------------------------------
+
+72/109 Testing: gui_contract
+72/109 Test: gui_contract
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_gui_contract"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_contract" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+GUI interface compiles without application internals or a toolkit.
+<end of output>
+Test time =   0.00 sec
+----------------------------------------------------------
+Test Passed.
+"gui_contract" end time: Sep 21 05:54 CDT
+"gui_contract" time elapsed: 00:00:00
+----------------------------------------------------------
+
+31/109 Testing: attachment
+31/109 Test: attachment
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_attachment"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"attachment" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+Attachment application convention passed
+<end of output>
+Test time =   0.02 sec
+----------------------------------------------------------
+Test Passed.
+"attachment" end time: Sep 21 05:54 CDT
+"attachment" time elapsed: 00:00:00
+----------------------------------------------------------
+
+87/109 Testing: gui_binary_editor
+87/109 Test: gui_binary_editor
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_binary_editor"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"gui_binary_editor" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+Binary editor synchronization and lossless byte editing passed
+<end of output>
+Test time =   0.05 sec
+----------------------------------------------------------
+Test Passed.
+"gui_binary_editor" end time: Sep 21 05:54 CDT
+"gui_binary_editor" time elapsed: 00:00:00
+----------------------------------------------------------
+
+17/109 Testing: fast_ofdm_presence
+17/109 Test: fast_ofdm_presence
+Command: "/home/user/___quick/p/_cur/dataPump/pumpModem/build/test_fast_ofdm_presence"
+Directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+"fast_ofdm_presence" start time: Sep 21 05:54 CDT
+Output:
+----------------------------------------------------------
+auto0_echo intervals=254 errors=41061 erasures=0 clock_ppm=0.0873196
+auto3_delay intervals=254 errors=14074 erasures=0 clock_ppm=4.1888
+auto0_clock intervals=254 errors=18041 erasures=0 clock_ppm=96.1266
+muted_block_positions erased_bits=11224 EOF_incomplete=1
+corrupted_acquisition_marker rejected=1
+noise_only acquired=0 complete=0
+current_auto3_keyed_file bytes=20000 depth=2 intervals=192 ldpc_frames=6 changed_bits=13837 failed_frames=0
+current_auto0_keyed_file bytes=20000 depth=1 intervals=160 ldpc_frames=5 changed_bits=11561 failed_frames=0
+Fast OFDM presence tests passed (8 cases)
+<end of output>
+Test time =   5.19 sec
+----------------------------------------------------------
+Test Passed.
+"fast_ofdm_presence" end time: Sep 21 05:54 CDT
+"fast_ofdm_presence" time elapsed: 00:00:05
+----------------------------------------------------------
+
+End testing: Sep 21 05:54 CDT
+
+fast_regression = 266.81 sec*proc
+
+gui = 131.22 sec*proc
+

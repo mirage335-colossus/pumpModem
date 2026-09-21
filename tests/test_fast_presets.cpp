@@ -1,5 +1,6 @@
 #include "datapump/fast/preset.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/modem.hpp"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -63,6 +64,17 @@ int main() {try {
     const auto acoustic=expected_snr_options(Channel::acoustic);
     for(const double value:{13,10,6,3,0,-3,-6,-10,-20,-27})
         require(std::find(acoustic.begin(),acoustic.end(),value)!=acoustic.end(),"notable acoustic SNR missing");
+    const auto nominal_acoustic=profile(Channel::acoustic);
+    const auto nominal_refresh=total_interval_symbols(nominal_acoustic,cycle_intervals(nominal_acoustic))+1;
+    for(const auto snr:acoustic) {
+        const auto p=resolve_snr_preset(Channel::acoustic,snr).profile;
+        if(p.acoustic_ofdm)
+            require(p.interleave_depth==1||total_interval_symbols(p,cycle_intervals(p))+1<=nominal_refresh,
+                "narrow OFDM interleave depth leaves excessively stale channel estimation");
+    }
+    require(resolve_snr_preset(Channel::acoustic,3).profile.interleave_depth==2&&
+        resolve_snr_preset(Channel::acoustic,0).profile.interleave_depth==1,
+        "reported 3/0 dB presets lost their tested channel-refresh depths");
     auto wire=profile(Channel::wire);
     for(const auto bad:{"", "sc:nan", "sc:0", "sc:-10", "sc:1000000", "sc:12x", "ofdm:32768"})
         rejects([&]{apply_symbol_rate_option(wire,bad);});
