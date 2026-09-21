@@ -55,7 +55,7 @@ struct Options {
     Profile p=classic_profile(Channel::wire);
     std::string mode="raw",device="default",capture_save,replay,tx_bits_save,rx_symbols_save;
     std::uint64_t intervals=100,bytes=4096,seed=417;
-    double pre=1,tail=8;
+    double pre=1,tail=8,training_gain_start=1;
     bool offline=false,stereo=false,quiet=false,require_success=false,abort_on_failure=false;
 };
 struct Level {
@@ -239,6 +239,13 @@ int run(const Options& o) {
     const auto produce=[&](std::span<float> pcm) {
         if(!tx.finished()&&!(o.abort_on_failure&&decode_failed.load())) {
             const auto n=tx.read(pcm);
+            if(o.training_gain_start!=1) {
+                const auto training=double(preamble_symbols(p))*(p.ofdm_fft_size+p.ofdm_prefix_samples);
+                for(std::size_t i=0;i<n;++i) {
+                    const auto fraction=std::min(1.,double(signal_samples+i)/training);
+                    pcm[i]*=static_cast<float>(o.training_gain_start+(1-o.training_gain_start)*fraction);
+                }
+            }
             signal_samples+=n;for(std::size_t i=0;i<n;++i)tx_level.add(pcm[i]);
             if(n)return n;
         }
@@ -318,6 +325,7 @@ int run(const Options& o) {
         <<",\"ofdm_pilot_stride\":"<<p.ofdm_pilot_stride
         <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
         <<",\"preamble_symbols\":"<<preamble_symbols(p)
+        <<",\"training_gain_start\":"<<o.training_gain_start
         <<",\"aborted_on_decode_failure\":"<<(o.abort_on_failure&&decode_failed.load())
         <<",\"marker_spacing\":"<<(p.capacity_mode?p.marker_spacing_intervals:1)<<",\"pilot_spacing\":"<<(p.capacity_mode?p.pilot_spacing_symbols:32)
         <<",\"rs\":"<<quoted(p.capacity_mode?"0.3%":p.robust?"robust":"high-rate")<<",\"depth\":"<<p.interleave_depth
@@ -381,6 +389,7 @@ int main(int argc,char** argv) {try {
                 <<"  [--amplitude 0..0.8] [--symbol-rate Hz] [--carrier Hz] [--rolloff 0.02..0.5] [--sample-rate Hz]\n"
                 <<"  [--seed N] [--device default] [--stereo] [--pre seconds] [--tail seconds>=6.5] [--quiet] [--require-success]\n"
                 <<"  [--abort-on-failure] [--capture-save PCM.f32] [--tx-bits-save BITS.u8]\n"
+                <<"  [--training-gain-start 0.05..1] Diagnostic OFDM startup gain ramp, reaching unity after training.\n"
                 <<"Default is classic cable; --capacity or --qam selects the capacity preset. Without --offline/--replay, uses real capture/playback simultaneously.\n"
                 <<"Diagnostic routing defaults to right-only; --stereo matches the cable application's both-channel default. JSON stdout, progress stderr.\n"
                 <<"Capture/replay files are headerless native float32 mono at --sample-rate, from the production S16 hardware path. TX bits are literal uint8 values 0 or 1.\n"
@@ -424,6 +433,7 @@ int main(int argc,char** argv) {try {
         else if(option=="--amplitude")o.p.amplitude=std::stod(value);
         else if(option=="--pre")o.pre=std::stod(value);
         else if(option=="--tail")o.tail=std::stod(value);
+        else if(option=="--training-gain-start")o.training_gain_start=std::stod(value);
         else if(option=="--rs") {
             if(value=="robust")o.p.robust=true;
             else if(value=="high-rate")o.p.robust=false;
@@ -434,6 +444,8 @@ int main(int argc,char** argv) {try {
         } else throw Error("Unknown option: "+option);
     }
     validate(o.p);
+    if(!std::isfinite(o.training_gain_start)||o.training_gain_start<.05||o.training_gain_start>1||
+       (o.training_gain_start!=1&&!o.p.acoustic_ofdm))throw Error("Training gain ramp requires OFDM and a starting gain in 0.05..1");
     if(o.mode!="raw"&&o.mode!="codec")throw Error("Mode must be raw or codec");
     if(!o.intervals||o.intervals>100000||o.bytes>64ULL*1024*1024)throw Error("Fixture size exceeds diagnostic limit (100,000 intervals or 64 MiB)");
     if(!std::isfinite(o.pre)||o.pre<.5||o.pre>10||!std::isfinite(o.tail)||o.tail<6.5||o.tail>30)throw Error("Invalid pre/tail duration");

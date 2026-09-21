@@ -230,8 +230,12 @@ struct Receiver::Impl {
             // Measured nearby-speaker response has short precursor energy and
             // a long causal tail. Keep one millisecond of precursor allowance
             // instead of wasting a quarter of the cyclic prefix on precursors.
-            candidate=static_cast<double>(start+offset)-std::min(48.,g.cp*.1);
-            if(candidate>=16){pending=true;}
+            // Capture may begin within the first cyclic prefix. Do not reject
+            // a complete training body merely because its optional precursor
+            // allowance precedes the first available sample.
+            candidate=std::max(static_cast<double>(first),
+                static_cast<double>(start+offset)-std::min(48.,g.cp*.1));
+            pending=true;
         }
         next_search+=g.n/2;
     }
@@ -274,28 +278,41 @@ struct Receiver::Impl {
         period=std::clamp(1+delay/g.length,.999,1.001);
         // Independent phases expose channel memory and nonlinear residual that
         // two identical training waveforms can accidentally fit away.
-        std::vector<C> anchor(g.n),sum(g.n);
+        // Use the last fitting block as the amplitude/timing reference so
+        // startup gain settling does not anchor reception to its weakest part.
+        // Block 15 remains independent and is never included in this estimate.
+        auto anchor=spectrum(candidate+(training_blocks-2)*g.length*period,period);
+        for(auto k:g.active)anchor[k]/=known(k,training_blocks-2);
+        std::vector<C> sum(g.n);
         std::vector<double> squared(g.n),raw_variance(g.n);
         const auto count=training_blocks-3;
+        double weight_sum=0;
         for(std::size_t ordinal=2;ordinal<training_blocks-1;++ordinal) {
             auto current=spectrum(candidate+ordinal*g.length*period,period);
             for(auto k:g.active)current[k]/=known(k,ordinal);
             double residual_delay=0;C common=1.;
-            if(ordinal==2)anchor=current;
-            else {
+            if(ordinal!=training_blocks-2) {
                 double power=0;
                 for(auto k:g.active){cross[k]=current[k]*std::conj(anchor[k]);power+=std::norm(anchor[k]);}
                 const auto fitted=delay_fit(cross,g.active,6.);residual_delay=fitted.first;
                 if(power>1e-30&&std::abs(fitted.second)>1e-20)common=fitted.second/power;
             }
+            // Dividing by a gain g multiplies stationary additive input-noise
+            // variance by 1/|g|^2. Inverse-variance weighting prevents the weak
+            // early blocks from dominating the channel estimate after settling.
+            const auto weight=std::norm(common);weight_sum+=weight;
             for(auto k:g.active) {
                 const auto aligned=current[k]*std::polar(1.,2*pi*k*residual_delay/g.n)/common;
-                sum[k]+=aligned;squared[k]+=std::norm(aligned);
+                sum[k]+=weight*aligned;squared[k]+=weight*std::norm(aligned);
             }
         }
         for(auto k:g.active) {
-            channel[k]=sum[k]/static_cast<double>(count);
-            raw_variance[k]=std::max(0.,squared[k]-count*std::norm(channel[k]))/(count-1)*(1+1./count);
+            channel[k]=sum[k]/weight_sum;
+            // Weighted residual/(count-1) estimates input-noise variance in
+            // the reference block's units. The fitted-mean uncertainty is
+            // noise/weight_sum; prediction adds both uncertainties. Do not
+            // treat this whole predictive variance as channel-state variance.
+            raw_variance[k]=std::max(0.,squared[k]-weight_sum*std::norm(channel[k]))/(count-1)*(1+1./weight_sum);
         }
         for(auto k:g.active) {
             double sum=0;std::size_t count=0;
@@ -304,9 +321,25 @@ struct Receiver::Impl {
         }
         const auto check=strongest(g.active);
         auto verification=spectrum(candidate+(training_blocks-1)*g.length*period,period);
-        if(!verify(verification,training_blocks-1,check)){pending=false;return;}
+        // Startup gain control or slow timing motion can change the final
+        // block relative to the fitting blocks without changing its
+        // marker. Fit those common quantities using only the OTHER tones: all
+        // 128 marker tones remain held out of channel, gain and timing fitting.
+        std::vector<bool> held_out(g.n,false);
+        for(auto k:check)held_out[k]=true;
+        std::vector<std::size_t> calibration;calibration.reserve(g.active.size()-check.size());
+        double normalization=0;
+        for(auto k:g.active)if(!held_out[k]) {
+            calibration.push_back(k);
+            cross[k]=verification[k]*std::conj(channel[k]*known(k,training_blocks-1));
+            normalization+=std::norm(channel[k]);
+        }
+        const auto [final_delay,correlation]=delay_fit(cross,calibration,6.);
+        const auto common=normalization>1e-30?correlation/normalization:C{};
+        if(std::abs(common)<=.1||std::abs(common)>=10||
+            !verify(verification,training_blocks-1,check,common,final_delay)){pending=false;return;}
         signature=strongest(g.verify);locked=true;pending=false;state.acquired=true;
-        next_window=candidate+training_blocks*g.length*period;
+        next_window=candidate+training_blocks*g.length*period+final_delay*.8;
         state.clock_error_ppm=(period-1)*1e6;state.symbols=training_blocks;
     }
     void process_block() {

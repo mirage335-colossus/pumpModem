@@ -15,7 +15,9 @@ candidate event, and it is not an authentication claim for public mode.
    clock, 13 independently phased full-band blocks fit the channel and noise,
    and a separately seeded final block verifies the fitted channel. Its 128
    verification tones supply 256 sign bits, allowing at most 16 disagreements
-   plus an energy residual check. Subsequent OFDM blocks separate tracking
+   plus an energy residual check. The final block's other tones fit common
+   gain, phase and timing; its verification tones remain excluded from those
+   fits, and their selection uses only earlier training. Subsequent OFDM blocks separate tracking
    pilots from verification pilots; tracking fits do not use the verification
    tones. A full-band refresh block between coding cycles must pass the presence
    check using the previous channel estimate before updating that estimate.

@@ -55,17 +55,34 @@ remain part of live validation.
 The fixed startup contains 16 complete known blocks. The first two repeat one
 training waveform to seed relative DAC/ADC sample-clock estimation. The next
 13 use independently selected QPSK phases across all active bins. Training-only
-phase, gain, and delay fits align those observations before per-bin channel and
-residual-variance estimation. Independent phases expose residual inter-block
+phase, gain, and delay fits align those observations to the last fitting block
+before per-bin channel and residual-variance estimation. Each aligned observation
+is weighted by its squared relative gain, the inverse-variance weight under
+stationary additive input noise. This avoids amplifying weak startup noise and
+then giving it the same influence as a clearer block. With `w = |gain|²`, the
+predictive variance estimate is `weighted_residual / 12 * (1 + 1 / sum(w))`.
+The reference and all weights use fitting blocks 2–14 only.
+Because gains are estimated and real noise can change with gain, this is an
+approximate noise model; independent data-pilot residuals remain an additional
+likelihood floor.
+Independent phases expose residual inter-block
 echo and signal-dependent error that identical training can conceal. The final
-block is held out of channel and timing fitting and verifies acquisition.
+block verifies acquisition on 128 tones selected using the earlier channel/noise
+estimate. Its other tones fit only common gain, phase and timing; all 128 marker
+tones remain excluded from those fits and from channel fitting. This accommodates
+startup gain settling without letting a marker fit itself. The previous receiver
+checked the final block without that common correction and rejected noiseless
+startup gain ramps above roughly 6 dB in a reproduced case.
 
 The initial candidate comes from FFT correlation against the first training
 waveform. Correlation proposes a candidate; it does not itself admit a stream.
 The transform window starts up to one millisecond before the strongest
 correlation peak, preserving almost all of the prefix for the measured causal
-room response. This precursor allowance is a measured-path design choice, not
-a claim that every room has the same delay distribution.
+room response. The allowance clamps to available PCM when capture starts within
+the first cyclic prefix; a complete first training body is still required.
+This precursor allowance is a measured-path design choice, not a claim that
+every room has the same delay distribution. Start reception before transmission:
+later coding cycles do not repeat the acquisition preamble.
 
 Every data block fits common gain, phase, and phase-versus-frequency timing
 correction from its tracking pilots. The independent verification pilots then
@@ -88,7 +105,7 @@ has low confidence through its frequency-dependent channel/noise normalization.
 Residual noise is estimated in received-bin units from nearby independent
 tracking pilots, then divided by channel power; the original global normalized
 floor produced overconfident errors in deep fades. Training variance supplies
-a lower bound. This is an unbiased frequency-domain equalization likelihood;
+a lower bound. These are frequency-dependent likelihood estimates;
 the plotted unweighted constellation EVM can be dominated by a few deep nulls
 and must not be presented as hardware SNR or Shannon capacity.
 
@@ -129,7 +146,10 @@ overrun explicitly fails the transfer rather than deleting sample time.
 
 `tests/test_fast_acoustic.cpp` covers delayed echoes, sample-clock mismatch,
 exact coded recovery, mapper peak control, false training candidates, noise,
-bounded large-input handling, and EOF/physical-end behavior.
+startup gain settling, capture offsets within the first prefix, bounded
+large-input handling, and EOF/physical-end behavior. The
+[reception diagnosis](fast-acoustic-reception-diagnosis.md) records the
+before/after regressions and real-device checks.
 
 ## Integrity scope
 

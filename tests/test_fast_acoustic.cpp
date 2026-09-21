@@ -113,6 +113,69 @@ void changing_gain_and_noisy_refresh() {
         Bytes(decoder.result()->bytes().begin(),decoder.result()->bytes().end())==source,
         "OFDM changing gain/echo and noisy refresh lost the multi-cycle source");
 }
+void startup_gain_and_capture_offsets() {
+    auto p=config();std::mt19937 rng(711);
+    std::vector<Bytes> bits(cycle_intervals(p),Bytes(physical_interval_bits));
+    for(auto& interval:bits)for(auto& bit:interval)bit=static_cast<std::uint8_t>(rng()&1);
+    const auto original=transmit(p,bits);
+    const auto block=p.ofdm_fft_size+p.ofdm_prefix_samples;
+    for(const auto [gain,cut]:std::array<std::pair<double,std::size_t>,3>{{{3.,0},{.25,0},{1.,p.ofdm_prefix_samples}}}) {
+        auto pcm=original;
+        // An input AGC settling during training must not invalidate the final
+        // independent marker. Every transmitted sample remains unclipped.
+        for(std::size_t i=0;i<pcm.size();++i) {
+            const auto progress=std::clamp((double(i)/block-3.)/11.,0.,1.);
+            pcm[i]*=static_cast<float>(1.+(gain-1.)*progress);
+        }
+        pcm.erase(pcm.begin(),pcm.begin()+static_cast<std::ptrdiff_t>(cut));
+        if(!cut)pcm.insert(pcm.begin(),1371,0);
+        pcm.resize(pcm.size()+48000*8);
+        std::size_t delivered=0,wrong=0;
+        Receiver receiver(p,[&](std::span<const float> soft) {
+            require(delivered<bits.size(),"OFDM startup produced spurious intervals");
+            for(std::size_t i=0;i<soft.size();++i)wrong+=(soft[i]>0)!=bool(bits[delivered][i]);
+            ++delivered;
+        });
+        for(std::size_t i=0;i<pcm.size();i+=1201)
+            receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(1201,pcm.size()-i)));
+        require(receiver.progress().acquired&&receiver.progress().physical_complete&&
+            delivered==bits.size()&&!wrong,"OFDM startup gain/capture-prefix recovery");
+    }
+}
+void noisy_startup_gain() {
+    auto p=config();p.constellation=64;p.interleave_depth=4;
+    Bytes source(30000);std::mt19937 rng(712);
+    for(auto& byte:source)byte=static_cast<std::uint8_t>(rng());
+    Crypto crypto(Bytes(32,0x4d));
+    auto encoder=fast::testing::deterministic_encoder(p,crypto,byte_source(source),713);
+    std::vector<Bytes> bits;
+    for(;;) {
+        Bytes interval(physical_interval_bits);
+        if(!encoder.next_interval(interval))break;
+        bits.push_back(std::move(interval));
+    }
+    auto signal=transmit(p,bits);const auto block=p.ofdm_fft_size+p.ofdm_prefix_samples;
+    for(std::size_t i=0;i<signal.size();++i) {
+        const auto fraction=std::clamp((double(i)/block-2.)/12.,0.,1.);
+        signal[i]*=static_cast<float>(.2+.8*fraction);
+    }
+    std::vector<float> pcm(1371,0);pcm.insert(pcm.end(),signal.begin(),signal.end());
+    pcm.resize(pcm.size()+48000*8);
+    std::mt19937 noise_rng(714);std::normal_distribution<float> gaussian(0,.006F);
+    // Fixed additive noise and a 35.5 ms reflection: weak startup blocks have
+    // much noisier normalized channel estimates than the later settled blocks.
+    for(std::size_t i=pcm.size();i-->0;)
+        pcm[i]+=static_cast<float>(i>=1703?.45*pcm[i-1703]:0)+gaussian(noise_rng);
+    StreamDecoder decoder(p,crypto);
+    Receiver receiver(p,[&](std::span<const float> soft){decoder.push_interval(soft);});
+    for(std::size_t i=0;i<pcm.size();i+=1201)
+        receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(1201,pcm.size()-i)));
+    decoder.finish(receiver.progress().physical_complete);
+    require(receiver.progress().physical_complete&&decoder.snapshot().complete&&
+        !decoder.snapshot().ldpc_failed_frames&&decoder.result()&&
+        Bytes(decoder.result()->bytes().begin(),decoder.result()->bytes().end())==source,
+        "OFDM noisy startup gain lost the exact coded source");
+}
 void bad_training() {
     auto p=config();std::vector<Bytes> bits(cycle_intervals(p),Bytes(physical_interval_bits,1));auto pcm=transmit(p,bits);
     pcm.resize(2*(p.ofdm_fft_size+p.ofdm_prefix_samples));pcm.insert(pcm.begin(),1371,0);pcm.resize(pcm.size()+48000*8,0);
@@ -143,4 +206,4 @@ void missing_block() {
     require(rx.progress().physical_complete&&intervals==bits.size(),"OFDM missing block deleted fixed positions");
     require(erased>2048&&!wrong,"OFDM missing block corrupted later fixed coordinates");
 }
-int main(){try{raw_case();raw_case(.6,.0001);raw_case(.45,.0001,0,3360);raw_case(0,0,100);raw_case(0,0,-100);coded_and_absence();changing_gain_and_noisy_refresh();bad_training();missing_block();auto sparse=config();sparse.ofdm_fft_size=16384;sparse.ofdm_pilot_stride=16;sparse.constellation=64;raw_case(.45,.0001,100,3360,sparse);std::cout<<"acoustic OFDM tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{raw_case();raw_case(.6,.0001);raw_case(.45,.0001,0,3360);raw_case(0,0,100);raw_case(0,0,-100);coded_and_absence();changing_gain_and_noisy_refresh();startup_gain_and_capture_offsets();noisy_startup_gain();bad_training();missing_block();auto sparse=config();sparse.ofdm_fft_size=16384;sparse.ofdm_pilot_stride=16;sparse.constellation=64;raw_case(.45,.0001,100,3360,sparse);std::cout<<"acoustic OFDM tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

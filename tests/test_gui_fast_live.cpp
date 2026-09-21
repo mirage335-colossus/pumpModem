@@ -45,7 +45,9 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
                          fixture::input.begin()+static_cast<std::ptrdiff_t>(fixture::position+count));
             fixture::position+=count;}
         if(!block.empty()&&!consume(block))break;
-        std::this_thread::sleep_for(6ms);
+        // Preserve real capture pacing: injecting eight times real-time audio
+        // can overflow the production FIFO for reasons unrelated to the GUI.
+        std::this_thread::sleep_for(50ms);
     }
 }
 }
@@ -127,7 +129,7 @@ void run_transfer(fast_ui::Controller& controller,bool receive) {
     controller.activate(receive?ui::Command::fast_listen:ui::Command::fast_transmit);
     check(controller.active(),"GUI did not start Fast audio");
     for(std::size_t i=0;i<ids.size();++i)empty[i]=render(controller.bitmap(ids[i]));
-    const auto deadline=std::chrono::steady_clock::now()+15s;
+    const auto deadline=std::chrono::steady_clock::now()+60s;
     std::array<std::uint64_t,3> revisions{};
     std::array<BitmapSource,3> retained;
     std::array<Bytes,3> retained_pixels;
@@ -168,33 +170,45 @@ void run_transfer(fast_ui::Controller& controller,bool receive) {
 }
 int main() {
     try {
-        fast_ui::Controller controller([] {return true;});
-        const std::string message="Live Fast plot check: café\nExact received text.";
-        controller.edit(ui::Field::fast_device,"fixture");
-        controller.edit(ui::Field::fast_text,message);
-        unsynchronized_audio(controller);
-        run_transfer(controller,false);
-        {std::lock_guard lock(fixture::mutex);fixture::input=std::move(fixture::transmitted);fixture::position=0;}
-        check(!fixture::input.empty(),"Live Fast TX produced no PCM");
-        run_transfer(controller,true);
-        check(controller.enabled(ui::Command::fast_save),"Live plots prevented a physically complete reception");
-        const auto path=std::filesystem::temp_directory_path()/("datapump-fast-save-"+
-            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
-        struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{path};
-        controller.activate(ui::Command::fast_save);
-        const auto requests=controller.take_services();check(requests.size()==1,"Explicit Save did not request a destination");
-        check(!std::filesystem::exists(path),"Receive wrote content before Save destination was chosen");
-        controller.complete_service({requests.front().id,false,path.string(),{}});
-        const auto deadline=std::chrono::steady_clock::now()+5s;
-        while(controller.field(ui::Field::fast_status).text!="Saved complete received bytes.") {
-            controller.poll();check(std::chrono::steady_clock::now()<deadline,"Explicit Fast Save did not finish");
-            std::this_thread::sleep_for(1ms);
+        // Exercise the ordinary controller/session path for both shipped
+        // capacity defaults. Acoustic OFDM has independent startup, coding
+        // cycle and physical-end geometry from the cable waveform.
+        for(const auto profile:{"wire","acoustic"}) {
+            {
+                std::lock_guard lock(fixture::mutex);
+                fixture::transmitted.clear();fixture::input.clear();fixture::position=0;
+            }
+            fast_ui::Controller controller([] {return true;});
+            controller.select(ui::Field::fast_profile,profile);
+            const std::string message="Live Fast plot check: café\nExact received text.";
+            controller.edit(ui::Field::fast_device,"fixture");
+            controller.edit(ui::Field::fast_text,message);
+            unsynchronized_audio(controller);
+            run_transfer(controller,false);
+            {std::lock_guard lock(fixture::mutex);fixture::input=std::move(fixture::transmitted);fixture::position=0;}
+            check(!fixture::input.empty(),"Live Fast TX produced no PCM");
+            run_transfer(controller,true);
+            if(!controller.enabled(ui::Command::fast_save))
+                throw Error(std::string("Fast GUI ")+profile+" did not complete reception: "+
+                    controller.field(ui::Field::fast_status).text);
+            const auto path=std::filesystem::temp_directory_path()/("datapump-fast-save-"+
+                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
+            struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{path};
+            controller.activate(ui::Command::fast_save);
+            const auto requests=controller.take_services();check(requests.size()==1,"Explicit Save did not request a destination");
+            check(!std::filesystem::exists(path),"Receive wrote content before Save destination was chosen");
+            controller.complete_service({requests.front().id,false,path.string(),{}});
+            const auto deadline=std::chrono::steady_clock::now()+5s;
+            while(controller.field(ui::Field::fast_status).text!="Saved complete received bytes.") {
+                controller.poll();check(std::chrono::steady_clock::now()<deadline,"Explicit Fast Save did not finish");
+                std::this_thread::sleep_for(1ms);
+            }
+            std::ifstream saved(path,std::ios::binary);
+            const std::string exact((std::istreambuf_iterator<char>(saved)),std::istreambuf_iterator<char>());
+            check(exact==message,"Plot telemetry changed the saved source bytes");
+            controller.close();
+            check(controller.ready_to_close(),"Live plot controller failed to close after idle");
+            std::cout<<"Fast GUI "<<profile<<" live PCM/constellation and retained snapshot checks passed\n";
         }
-        std::ifstream saved(path,std::ios::binary);
-        const std::string exact((std::istreambuf_iterator<char>(saved)),std::istreambuf_iterator<char>());
-        check(exact==message,"Plot telemetry changed the saved source bytes");
-        controller.close();
-        check(controller.ready_to_close(),"Live plot controller failed to close after idle");
-        std::cout<<"Fast GUI live PCM/constellation and retained snapshot checks passed\n";
     }catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

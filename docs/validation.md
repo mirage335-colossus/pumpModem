@@ -4,6 +4,32 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast acoustic reception diagnosis — 21 September 2026 UTC
+
+The [reception diagnosis](fast-acoustic-reception-diagnosis.md) reproduces and
+repairs startup gain sensitivity, rejection of a valid training body at capture
+start, and excessive influence from noisy low-gain training blocks. Final-block
+gain/timing fitting excludes all 128 verification tones; inverse-noise weighted
+training uses only earlier fitting blocks. Wire geometry and throughput remain
+unchanged.
+
+On the current physical speakers/microphone at unchanged 75% output and 27%
+input, a fresh **500,000-byte** transfer with a 14 dB startup gain ramp passed
+in **103.632 seconds**, with matching SHA-256 hashes and **96/96 LDPC frames**.
+The final shared GUI application path also transmitted, received and saved exact
+60-byte text through real audio in **35.285 seconds**. A saved real 100 KB stress
+recording changed from no synchronization in the old receiver, through incomplete
+FEC after the synchronization fixes, to exact recovery with weighted estimation.
+Replays preserve the original successful 100 KB and 5 MB captures; deterministic
+noisy echo/gain controls reproduce the before/after decoding distinction.
+The final Release build and all twelve selected acoustic/Fast/session/shared-GUI
+CTest targets passed; the diagnosis records their exact scope.
+
+These findings establish concrete receiver defects, but the user's original
+failed attempt was not recorded and cannot be assigned a unique cause. Full
+methods, limitations, source fixtures and logs are in the diagnosis and
+[`validation-data/fast/acoustic-reception-20260921/`](validation-data/fast/acoustic-reception-20260921/).
+
 ## Fast speaker/microphone OFDM and live bulk transfer — 20 September 2026
 
 The [acoustic study](fast-acoustic-live-study.md) records live sounders of the
