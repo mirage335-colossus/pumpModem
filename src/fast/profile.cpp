@@ -22,15 +22,16 @@ Profile classic_profile(Channel channel) {
     }
     return p;
 }
-Profile profile(Channel channel) {return channel==Channel::wire?capacity_profile():classic_profile(channel);}
+Profile profile(Channel channel) {return channel==Channel::wire||channel==Channel::acoustic?capacity_profile(channel):classic_profile(channel);}
 Profile capacity_profile(Channel channel) {
     Profile p;p.channel=channel;
     switch(channel) {
     case Channel::wire: break;
     case Channel::acoustic:
         p.acoustic_ofdm=true;
-        p.constellation=16;p.code_rate=CodeRate::three_quarters;p.interleave_depth=1;
-        p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.amplitude=.20;
+        p.constellation=64;p.code_rate=CodeRate::three_quarters;p.interleave_depth=8;
+        p.ofdm_fft_size=32768;p.ofdm_prefix_samples=4096;p.ofdm_pilot_stride=16;
+        p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.amplitude=.40;
         p.marker_spacing_intervals=1;p.pilot_spacing_symbols=32;
         break;
     default: throw Error("Capacity format requires the wire or acoustic profile");
@@ -54,6 +55,7 @@ Channel parse_channel(std::string_view s) {
 double code_rate_value(CodeRate r) {
     switch(r) {
     case CodeRate::half:return .5;
+    case CodeRate::two_thirds:return 2./3.;
     case CodeRate::three_quarters:return .75;
     case CodeRate::seven_eighths:return .875;
     case CodeRate::seven_ninths:return 7./9.;
@@ -65,6 +67,7 @@ double code_rate_value(CodeRate r) {
 std::string_view code_rate_name(CodeRate r) {
     switch(r) {
     case CodeRate::half:return "1/2";
+    case CodeRate::two_thirds:return "2/3";
     case CodeRate::three_quarters:return "3/4";
     case CodeRate::seven_eighths:return "7/8";
     case CodeRate::seven_ninths:return "7/9";
@@ -74,10 +77,10 @@ std::string_view code_rate_name(CodeRate r) {
     throw Error("Unknown fast code rate");
 }
 CodeRate parse_code_rate(std::string_view name) {
-    for(auto r:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_eighths,
+    for(auto r:{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters,CodeRate::seven_eighths,
                 CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})
         if(code_rate_name(r)==name)return r;
-    throw Error("Fast code rate must be 1/2, 3/4, 7/8, 7/9, 8/9 or 9/10");
+    throw Error("Fast code rate must be 1/2, 2/3, 3/4, 7/8, 7/9, 8/9 or 9/10");
 }
 void validate(const Profile& p) {
     (void)channel_name(p.channel);(void)code_rate_value(p.code_rate);
@@ -89,6 +92,8 @@ void validate(const Profile& p) {
         if(!std::has_single_bit(p.ofdm_fft_size)||p.ofdm_fft_size<2048||p.ofdm_fft_size>32768||
            p.ofdm_prefix_samples<256||p.ofdm_prefix_samples>p.ofdm_fft_size)
             throw Error("Invalid acoustic OFDM FFT or cyclic prefix");
+        if(p.ofdm_pilot_stride<2||p.ofdm_pilot_stride>32)
+            throw Error("Acoustic OFDM pilot stride must be 2..32");
         if(!std::isfinite(p.ofdm_low_hz)||!std::isfinite(p.ofdm_high_hz)||p.ofdm_low_hz<100||
            p.ofdm_high_hz>20000||p.ofdm_high_hz-p.ofdm_low_hz<1000)
             throw Error("Invalid acoustic OFDM passband");
@@ -101,9 +106,9 @@ void validate(const Profile& p) {
             throw Error("Capacity format requires the wire or acoustic profile");
         if(p.constellation<4||p.constellation>4194304||!std::has_single_bit(p.constellation)||std::countr_zero(p.constellation)%2)
             throw Error("Fast QAM order must be a power of four from 4 through 4194304");
-        if(p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
+        if(p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::two_thirds&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
            p.code_rate!=CodeRate::eight_ninths&&p.code_rate!=CodeRate::nine_tenths)
-            throw Error("Fast capacity LDPC rate must be 1/2, 3/4, 7/9, 8/9 or 9/10");
+            throw Error("Fast capacity LDPC rate must be 1/2, 2/3, 3/4, 7/9, 8/9 or 9/10");
         if(p.robust)throw Error("Capacity format uses the approximately 0.3% outer RS code");
         if(!p.interleave_depth||p.interleave_depth>16)throw Error("Fast LDPC interleave depth must be 1..16");
         if(!p.marker_spacing_intervals||p.marker_spacing_intervals>16)throw Error("Fast marker spacing must be 1..16 intervals");
@@ -138,8 +143,8 @@ Bytes profile_id(const Profile& p) {
     if(p.acoustic_ofdm) {
         // Bind every active OFDM wire parameter, with a separate domain.
         // Existing cable/classic IDs remain byte-for-byte unchanged.
-        out.insert(out.end(),{'/','o','f','d','m','/','v','2'});
-        append(p.sample_rate);append(p.ofdm_fft_size);append(p.ofdm_prefix_samples);
+        out.insert(out.end(),{'/','o','f','d','m','/','v','3'});
+        append(p.sample_rate);append(p.ofdm_fft_size);append(p.ofdm_prefix_samples);append(p.ofdm_pilot_stride);
         append(std::bit_cast<std::uint64_t>(p.ofdm_low_hz));
         append(std::bit_cast<std::uint64_t>(p.ofdm_high_hz));
         return out;

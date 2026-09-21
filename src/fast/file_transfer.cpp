@@ -123,7 +123,7 @@ Snapshot transmit_source_wave(const Settings& s,SourceReader reader,const std::f
         if(progress)progress(result);
     }
     if(stop.stop_requested())throw Error("Fast WAV transmission cancelled");
-    block.fill(0);auto silence=static_cast<std::uint64_t>(s.profile.sample_rate)*25/4;
+    block.fill(0);auto silence=end_silence_samples(s.profile);
     while(silence){if(stop.stop_requested())throw Error("Fast WAV transmission cancelled");auto n=static_cast<std::size_t>(std::min<std::uint64_t>(silence,block.size()));writer.write(std::span(block).first(n));silence-=n;}
     writer.finish();result.transmit_fraction=1;result.transmitting=false;result.status="Fast waveform saved with observed-silence tail";
     result.elapsed_seconds=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();return result;

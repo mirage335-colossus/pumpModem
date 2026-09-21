@@ -1,0 +1,6 @@
+acoustic LDPC scheduling scenario=0 depth=4 serial_ms=21.4828 scheduled_ms=9.66389 frames=8 iterations=0 failed_frames=0
+acoustic LDPC scheduling scenario=1 depth=4 serial_ms=186.151 scheduled_ms=70.9764 frames=8 iterations=18 failed_frames=0
+acoustic LDPC scheduling scenario=2 depth=4 serial_ms=1767.74 scheduled_ms=653.185 frames=4 iterations=200 failed_frames=4
+acoustic LDPC scheduling scenario=3 depth=4 serial_ms=6.8678 scheduled_ms=2.19295 frames=2 iterations=0 failed_frames=0
+acoustic LDPC scheduling scenario=4 depth=16 serial_ms=146.369 scheduled_ms=98.2436 frames=32 iterations=0 failed_frames=0
+fast fixed-cadence crypto/FEC/source tests passed

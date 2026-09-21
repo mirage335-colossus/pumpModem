@@ -1,0 +1,21 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+ALSA lib pcm_dmix.c:1000:(snd_pcm_dmix_open) unable to open slave
+captured_s=1.94046 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+captured_s=3.94552 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+captured_s=5.95104 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+captured_s=7.95683 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+captured_s=9.96173 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+captured_s=11.967 acquired=0 intervals=0 evm=0 clock_ppm=0 physical_end=0
+captured_s=13.9722 acquired=1 intervals=0 evm=0 clock_ppm=-0.145508 physical_end=0
+captured_s=15.9776 acquired=1 intervals=78 evm=0.291743 clock_ppm=-0.0916888 physical_end=0
+captured_s=17.9828 acquired=1 intervals=127 evm=0.494306 clock_ppm=-0.076118 physical_end=0
+captured_s=19.9888 acquired=1 intervals=179 evm=0.289494 clock_ppm=-0.0653792 physical_end=0
+captured_s=21.9936 acquired=1 intervals=254 evm=0.240951 clock_ppm=-0.0630881 physical_end=0
+captured_s=23.9993 acquired=1 intervals=280 evm=0.45095 clock_ppm=-0.0640184 physical_end=0
+captured_s=26.0045 acquired=1 intervals=359 evm=0.178714 clock_ppm=-0.0676861 physical_end=0
+captured_s=28.01 acquired=1 intervals=407 evm=0.211966 clock_ppm=-0.0649597 physical_end=0
+captured_s=30.0363 acquired=1 intervals=459 evm=0.233218 clock_ppm=-0.0617748 physical_end=0
+captured_s=32.0416 acquired=1 intervals=508 evm=0.318597 clock_ppm=-0.0606808 physical_end=0
+captured_s=34.0471 acquired=1 intervals=508 evm=0.318597 clock_ppm=-0.0606808 physical_end=0
+captured_s=36.0527 acquired=1 intervals=508 evm=0.318597 clock_ppm=-0.0606808 physical_end=0
+captured_s=38.0579 acquired=1 intervals=508 evm=0.318597 clock_ppm=-0.0606808 physical_end=1

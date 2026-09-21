@@ -185,6 +185,16 @@ std::uint64_t transmission_samples(const Profile& p,std::size_t count) {
         throw std::overflow_error("Fast transmission sample count overflow");
     return static_cast<std::uint64_t>(samples);
 }
+std::uint64_t end_silence_samples(const Profile& p) {
+    validate(p);
+    if(!p.acoustic_ofdm)return static_cast<std::uint64_t>(p.sample_rate)*25/4;
+    const auto block=static_cast<double>(p.ofdm_fft_size+p.ofdm_prefix_samples);
+    // Cover six seconds of complete blocks at the tracked clock extremes,
+    // plus acquisition-window/prefix offset and one complete guard block.
+    const auto absent_blocks=std::ceil(6.*p.sample_rate/(block*.999));
+    return std::max(static_cast<std::uint64_t>(p.sample_rate)*25/4,
+        static_cast<std::uint64_t>(std::ceil((absent_blocks+2)*block*1.001))+32);
+}
 
 struct Transmitter::Impl {
     Profile config;

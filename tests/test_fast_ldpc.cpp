@@ -52,7 +52,7 @@ template<class Table> bool independent_syndrome(const Bytes& bits) {
     return true;
 }
 constexpr std::array rates{CodeRate::half, CodeRate::three_quarters, CodeRate::seven_ninths,
-                           CodeRate::eight_ninths, CodeRate::nine_tenths};
+                           CodeRate::eight_ninths, CodeRate::nine_tenths, CodeRate::two_thirds};
 void fixtures() {
     // Frozen SHA-256 of 64800 unpacked 0/1 code bits from the independently
     // compiled xdsopl encoder.hh at pinned commit 32357d8..., with source()'s
@@ -62,8 +62,9 @@ void fixtures() {
         "5d505f18fa8929976fbddad7ea0f479a4dfa5a731b551ed123a54cd5dc0fe7f7",
         "91bfdb7f3945900cbc08f59643a26930235bc36331052e66355e2d8b9899dbaf",
         "ee760163d51f6d37ef6377e785951f419eec865f089a37a5e07b7588b1f3a94d",
-        "89e91cee15cbb4e8e01a8ac1de3cbad2b564e849416417dc62ee2b593220b0bb"};
-    constexpr std::array<std::size_t, 5> k{32400, 48600, 50400, 57600, 58320};
+        "89e91cee15cbb4e8e01a8ac1de3cbad2b564e849416417dc62ee2b593220b0bb",
+        "4260e4c155f2dcc15812133d4a08ca5331ff7dea55fb93f0255402f8617642eb"};
+    constexpr std::array<std::size_t, 6> k{32400, 48600, 50400, 57600, 58320, 43200};
     for (std::size_t r = 0; r < rates.size(); ++r) {
         const auto rate = rates[r]; const auto bytes = source(rate);
         check(ldpc::data_bits(rate) == k[r], "DVB K geometry");
@@ -74,7 +75,8 @@ void fixtures() {
             r == 1 ? independent_syndrome<DVB_S2_TABLE_B7>(bits) :
             r == 2 ? independent_syndrome<DVB_S2X_TABLE_B10>(bits) :
             r == 3 ? independent_syndrome<DVB_S2_TABLE_B10>(bits) :
-                     independent_syndrome<DVB_S2_TABLE_B11>(bits);
+            r == 4 ? independent_syndrome<DVB_S2_TABLE_B11>(bits) :
+                     independent_syndrome<DVB_S2_TABLE_B6>(bits);
         check(independent, "independent parity equations");
         std::vector<float> soft(bits.size());
         for (std::size_t b = 0; b < bits.size(); ++b) soft[b] = bits[b] ? 14.F : -14.F;
@@ -223,6 +225,7 @@ int main(int argc, char** argv) {
         fixtures(); interleaver(); invalid_and_bounded(); parallel_calls(); bpsk_noise(frames);
         qam_noise(4, CodeRate::half, 2.);
         qam_noise(16, CodeRate::half, 7.);
+        qam_noise(256, CodeRate::two_thirds, 20.);
         qam_noise(4096, CodeRate::seven_ninths, 31.8);
         qam_noise(16384, CodeRate::seven_ninths, 37.8);
         qam_noise(16384, CodeRate::eight_ninths, 40.);

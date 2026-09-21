@@ -430,7 +430,7 @@ void capacity_interleaver_balance() {
 }
 void capacity_roundtrips() {
     const auto crypto=key();
-    for(auto rate:{CodeRate::half,CodeRate::three_quarters,CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})for(bool encrypted:{false,true}) {
+    for(auto rate:{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters,CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths})for(bool encrypted:{false,true}) {
         auto p=capacity_profile();p.code_rate=rate;p.interleave_depth=1;
         const auto c=capacity_source_bytes_per_cycle(p,encrypted);const auto width=cycle_intervals(p)*physical_interval_bits;
         for(auto size:{std::size_t{0},std::size_t{1},c-1,c,c+1}) {
@@ -527,7 +527,7 @@ void capacity_acoustic_contracts() {
     // The codec sees fixed 2048-bit intervals behind either SC or OFDM. Use
     // identical local SC geometry for both channel identities to isolate the
     // integrity domain from any future acoustic waveform/default selection.
-    for(auto rate:{CodeRate::half,CodeRate::three_quarters})for(unsigned depth:{1U,4U})for(bool encrypted:{false,true}) {
+    for(auto rate:{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters})for(unsigned depth:{1U,4U})for(bool encrypted:{false,true}) {
         auto p=capacity_profile();p.channel=Channel::acoustic;p.constellation=16;
         p.code_rate=rate;p.interleave_depth=depth;
         const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
@@ -599,6 +599,7 @@ void capacity_acoustic_contracts() {
 void capacity_ofdm_context() {
     auto cable=capacity_profile(),unused=cable;
     unused.ofdm_fft_size=4096;unused.ofdm_prefix_samples=2048;
+    unused.ofdm_pilot_stride=16;
     unused.ofdm_low_hz=1000;unused.ofdm_high_hz=12000;
     check(profile_id(cable)==profile_id(unused),"unused OFDM settings cannot alter cable wire identity");
     for(bool encrypted:{false,true}) {
@@ -612,12 +613,13 @@ void capacity_ofdm_context() {
         good.finish(true);
         check(good.snapshot().complete && Bytes(good.result()->bytes().begin(),good.result()->bytes().end())==source,
             "OFDM profile retains compact source and physical-end contract");
-        std::array<Profile,5> mismatch{p,p,p,p,p};
+        std::array<Profile,6> mismatch{p,p,p,p,p,p};
         mismatch[0].acoustic_ofdm=false;
         mismatch[1].ofdm_prefix_samples=p.ofdm_prefix_samples==256?512:p.ofdm_prefix_samples/2;
         mismatch[2].ofdm_fft_size=p.ofdm_fft_size==32768?16384:2*p.ofdm_fft_size;
         mismatch[3].ofdm_low_hz+=125;
         mismatch[4].ofdm_high_hz-=125;
+        mismatch[5].ofdm_pilot_stride=p.ofdm_pilot_stride==8?16:8;
         for(const auto& changed:mismatch) {
             check(profile_id(changed)!=profile_id(p),"OFDM waveform geometry is integrity-bound");
             StreamDecoder wrong(changed,crypto);feed(wrong,std::span(wire).first(width));

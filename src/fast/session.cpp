@@ -47,13 +47,15 @@ struct Session::Impl {
         std::mutex queue_mutex;std::condition_variable_any changed;
         std::deque<std::vector<float>> queue;std::size_t queued_samples=0;
         bool done=false,overrun=false;std::string capture_error;
+        const auto queue_limit=static_cast<std::size_t>(s.profile.sample_rate)*(s.profile.acoustic_ofdm?4:1);
         std::jthread capture([&](std::stop_token capture_stop) {
             try {
                 audio::capture(s.profile.sample_rate,s.device,[&](std::span<const float> samples) {
                     std::lock_guard lock(queue_mutex);
-                    // One second is a fixed local queue bound. Capture never
+                    // OFDM uses four seconds for bounded parallel LDPC cycles;
+                    // single-carrier keeps its one-second bound. Capture never
                     // waits for DSP/FEC and never silently concatenates a gap.
-                    if(samples.size()>s.profile.sample_rate-queued_samples) {
+                    if(samples.size()>queue_limit-queued_samples) {
                         overrun=true;changed.notify_all();return false;
                     }
                     queue.emplace_back(samples.begin(),samples.end());queued_samples+=samples.size();
@@ -125,7 +127,7 @@ struct Session::Impl {
         },[&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);});
         // The playback producer is bounded; unlike capture it can wait for the
         // source reader. No full source, waveform or bit-vector is retained.
-        auto silence=static_cast<std::uint64_t>(s.profile.sample_rate)*25/4;
+        auto silence=end_silence_samples(s.profile);
         audio::playback(s.profile.sample_rate,s.device,[&](std::span<float> output) {
             if(stop.stop_requested())return std::size_t{0};
             auto count=transmitter.read(output);

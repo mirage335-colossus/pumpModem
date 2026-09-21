@@ -4,23 +4,31 @@ The acoustic capacity waveform is implemented separately in
 `src/fast/acoustic_ofdm.cpp`. The existing single-carrier cable, classic Fast,
 and ordinary transport waveforms are unchanged. The acoustic profile uses the
 capacity source/LDPC/outer-RS codec with fixed local coding-cycle geometry. Its
-profile identity has an additional `/ofdm/v2` domain and binds the constellation,
+profile identity has an additional `/ofdm/v3` domain and binds the constellation,
 code rate, interleave depth, 48,000 Hz processing rate, FFT size, cyclic-prefix
-length, and lower/upper occupied-band parameters. Both peers must match these
+length, pilot stride, and lower/upper occupied-band parameters. Both peers must match these
 settings. Single-carrier symbol rate, carrier, RRC rolloff, pilot spacing, and
 marker spacing do not control this waveform.
 
+The default acoustic preset is 64-QAM, LDPC 3/4, depth eight, N32768/P4096,
+pilot stride sixteen, 500–18,000 Hz, amplitude 0.40, and stereo output. It was
+selected after a complete 5 MB physical transfer. Its 11,947 active tones
+contain 747 pilots and 11,200 data tones; eight data blocks and one refresh
+per steady cycle yield 56.04 kbit/s of public source capacity. The waveform's
+startup and final silence remain significant for small files.
+
 ## Fixed frequency and time geometry
 
-The reference geometry is an 8,192-point real OFDM transform with 4,096 prefix
+An illustrative geometry is an 8,192-point real OFDM transform with 4,096 prefix
 samples and a requested 500–18,000 Hz band. Positive-frequency bins run from
 `ceil(low * N / 48000)` through `floor(high * N / 48000)`, inclusive. Their
 negative-frequency conjugates produce real PCM. DC, Nyquist, and unallocated
 bins are zero. This geometry has 2,987 active positive-frequency bins, with
 centres from 503.90625 to 18,000 Hz. A complete physical block lasts 256 ms.
 
-Every eighth active bin is a known QPSK pilot at this geometry. The pilot stride
-is locally derived as `max(2, min(8, floor(active_bins / 258)))`; smaller valid
+With requested pilot stride eight, every eighth active bin is a known QPSK pilot
+at this geometry. The effective stride is locally derived as
+`max(2, min(requested_stride, floor(active_bins / 258)))`; smaller valid
 bands use a denser comb to retain enough verification coordinates. Alternate
 pilots serve independent purposes: 187 fit tracking parameters and 187 are
 eligible for verification. The receiver selects 128 verification tones using
@@ -67,7 +75,10 @@ recover exact 16-QAM bits at ±100 ppm relative clock error.
 
 One full-band known channel-refresh block precedes each coding cycle after the
 first. Its presence is checked against the **previous** channel estimate before
-its known symbols update all frequency bins. It carries no source bits. This
+its known symbols update all frequency bins. The gain-aligned prior estimate
+receives weight 0.75 and the new measurement weight 0.25: replacing the averaged
+estimate with one noisy block degraded held-out live recordings. It carries no
+source bits. This
 prevents a channel fit from making its own verification word pass. Refresh is
 needed because the measured speaker/microphone frequency response changed
 enough over tens of seconds to defeat a one-time estimate.
@@ -109,6 +120,13 @@ Only complete scored physical blocks contribute to absence. The receiver waits
 for the entire `N+P` duration, and requires consecutive failed durations of at
 least six seconds. EOF, cancellation, successful LDPC correction, the final
 source flag, and a verified digest never manufacture physical completion.
+Transmitters append enough silence for those complete blocks, including the
+allowed sample-clock range and FFT-window offset. `end_silence_samples()` is
+shared by live playback, WAV output, and the estimator; the old fixed 6.25-second
+tail was insufficient at some valid large-block geometries. Production acoustic
+capture has a fixed four-second queue for parallel LDPC cycle decoding. An
+overrun explicitly fails the transfer rather than deleting sample time.
+
 `tests/test_fast_acoustic.cpp` covers delayed echoes, sample-clock mismatch,
 exact coded recovery, mapper peak control, false training candidates, noise,
 bounded large-input handling, and EOF/physical-end behavior.

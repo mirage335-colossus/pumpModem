@@ -453,8 +453,7 @@ TransmitEstimate estimate_transmission(const Profile& p,bool encrypted,std::uint
     const auto capacity=static_cast<std::uint64_t>(p.interleave_depth)*source_bytes_per_group(p,encrypted)*8;
     const auto cycles=p.capacity_mode?2+bytes/capacity_source_bytes_per_cycle(p,encrypted):1+(9*(bytes+1)+capacity-1)/capacity;
     TransmitEstimate out;out.intervals=cycles*cycle_intervals(p);
-    out.samples=transmission_samples(p,out.intervals)+
-        static_cast<std::uint64_t>(p.sample_rate)*25/4;
+    out.samples=transmission_samples(p,out.intervals)+end_silence_samples(p);
     out.seconds=static_cast<double>(out.samples)/p.sample_rate;
     out.source_bps=8.0*static_cast<double>(bytes)/out.seconds;
     return out;

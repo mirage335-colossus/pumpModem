@@ -315,6 +315,7 @@ int run(const Options& o) {
         <<",\"format\":"<<quoted(p.capacity_mode?"capacity":"classic")
         <<",\"waveform\":"<<quoted(p.acoustic_ofdm?"ofdm":"single-carrier")
         <<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples
+        <<",\"ofdm_pilot_stride\":"<<p.ofdm_pilot_stride
         <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
         <<",\"preamble_symbols\":"<<preamble_symbols(p)
         <<",\"aborted_on_decode_failure\":"<<(o.abort_on_failure&&decode_failed.load())
@@ -414,6 +415,7 @@ int main(int argc,char** argv) {try {
         else if(option=="--sample-rate")o.p.sample_rate=std::stoul(value);
         else if(option=="--ofdm-fft")o.p.ofdm_fft_size=std::stoul(value);
         else if(option=="--ofdm-prefix")o.p.ofdm_prefix_samples=std::stoul(value);
+        else if(option=="--ofdm-pilots")o.p.ofdm_pilot_stride=std::stoul(value);
         else if(option=="--ofdm-low")o.p.ofdm_low_hz=std::stod(value);
         else if(option=="--ofdm-high")o.p.ofdm_high_hz=std::stod(value);
         else if(option=="--symbol-rate")o.p.symbol_rate=std::stod(value);

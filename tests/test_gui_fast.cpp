@@ -110,6 +110,8 @@ void presentation_and_retention() {
             app.field(F::fast_fec).selected=="sparse","Promoted acoustic capacity profile was not applied to GUI");
         app.select(F::fast_coding,"half");
         check(app.field(F::fast_coding).selected=="half","Acoustic LDPC1/2 option missing");
+        app.select(F::fast_coding,"two-thirds");
+        check(app.field(F::fast_coding).selected=="two-thirds","Acoustic LDPC2/3 option missing");
         app.select(F::fast_profile,"acoustic-classic");
         check(app.field(F::fast_profile).selected=="acoustic-classic"&&app.field(F::fast_constellation).selected=="4",
             "Classic acoustic fallback is not selectable");

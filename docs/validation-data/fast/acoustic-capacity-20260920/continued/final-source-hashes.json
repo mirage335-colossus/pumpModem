@@ -1,0 +1,20 @@
+{
+  "src/fast/acoustic_ofdm.cpp": "d14551b035e4a6935dc45b4fbf10234af2b4aa7ad8e5f7cb795bfb74290ddf68",
+  "src/fast/profile.cpp": "050159b3f978344efa070b1dc412f8311c3b8ee62fdffbdf490cbe959e348681",
+  "src/fast/ldpc.cpp": "7450d46a42a4ea9975ee2a08a06c3e2c1dbc58d32910a8e30c4b1e505bba0ddf",
+  "src/fast/codec.cpp": "6108791f78d587c0cea50c0f3286bb31bf4f8f9d5700c334acbe105fffce9b43",
+  "src/fast/modem.cpp": "99e672ed6ed9aacbdf4b2763d48578214e2cd83716ad91deb466553b3b2630e2",
+  "src/fast/session.cpp": "b738137965a2c9fcea71b4fe45a460021668d183c52b9533bf8f727f8dabc393",
+  "src/fast/cli.cpp": "c75573ce2a5174df35242007fbef8b4c133d8530aa099179982ef7f82df9c160",
+  "src/gui/fast/controller.cpp": "1ee3efbf00f0fb0b09a47374b656b3c817c834a8ef8649928c6e73eb25084688",
+  "include/datapump/fast/profile.hpp": "bc96cc19ca8963142e042be2ac77d33302842d25bb126c17096b46c8d048c563",
+  "tools/fast_cable_probe.cpp": "b134db05294758f0d9571bb047b00c385c41e0ac1ff9f7319f3664d443b90efc",
+  "tools/acoustic_known_symbols.cpp": "e86916b1cbdff0afa98f6ef5b27b098165607deb4071fc0c982885d5cb14893a",
+  "third_party/ldpc/tables.hpp": "49053c158e84924ac9f131022c6a9d70569ee76b68914ae0b077bb581742fda5",
+  "tests/test_fast_acoustic.cpp": "01714e7b9881f812896879f1b763f5b6e385a347ff55f66aef5902b7c06b7ae3",
+  "tests/test_fast_files.cpp": "730c391cafb35baa09d4358e184e303d3818caf6e24f7cfd65557458bb6a06d9",
+  "tests/test_fast_codec.cpp": "8758f5a65693b3b64551e71bd5e6255806029aa5149df189e6ce6935a78f7463",
+  "tests/test_fast_ldpc.cpp": "4ad59402a4dac0b8a8c77a0e6556dd8fa1fe760053f26ea8a7c1938613d50023",
+  "tests/test_fast_cli.py": "992a311353b6351ad2c7037d0b961c6e8bffe626c6f4c0737f7f74a92465c883",
+  "tests/test_gui_fast.cpp": "144f855976df5e892053b950663ae8ddae4a2643bd475e44d317f8ac204b2cb2"
+}

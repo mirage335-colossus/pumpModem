@@ -110,10 +110,20 @@ measured trials, failures and limits.
 | `wire --format classic` | Classic | 15,000 | 9,300 Hz | 300–18,300 Hz | 256-APSK | 120 kbit/s |
 | `ssb` | Classic | 2,000 | 1,500 Hz | 300–2,700 Hz | 16-APSK | 8 kbit/s |
 | `fm` | Classic | 2,000 | 1,500 Hz | 300–2,700 Hz | QPSK | 4 kbit/s |
-| `acoustic` | Classic | 500 | 1,800 Hz | 1,500–2,100 Hz | QPSK | 1 kbit/s |
+| `acoustic` | Capacity OFDM | 1.302 blocks/s | Multicarrier | 501–18,000 Hz | 64-QAM | 75.26 kbit/s coded |
+| `acoustic --format classic` | Classic | 500 | 1,800 Hz | 1,500–2,100 Hz | QPSK | 1 kbit/s |
+
+The acoustic default uses a 32,768-point FFT, an 85.33 ms cyclic prefix,
+pilot stride 16, LDPC 3/4, depth 8, nominal waveform amplitude 0.40, and both
+output channels. Its steady source rate is 56.04 kbit/s; the table's OFDM coded
+rate already includes the guard, pilots, refresh blocks, and mapper rounding.
+A real 5,000,000-byte speaker/microphone transfer completed exactly in 746.47
+seconds, with no failed LDPC frames. See the [acoustic live study](fast-acoustic-live-study.md)
+for measurements, failed faster configurations, and the limits of this result.
+The GUI keeps **Speakers / microphone · classic APSK** as a separate fallback.
 
 Capacity mode offers square Gray-labelled QAM orders from 4 through 4,194,304
-in powers of four, with LDPC rates 3/4, 7/9, 8/9 and 9/10. This includes
+in powers of four, with LDPC rates 1/2, 2/3, 3/4, 7/9, 8/9 and 9/10. This includes
 4096-QAM and 16384-QAM for links needing more margin. The GUI offers depths
 1, 4, 8 and 16; the CLI accepts every depth from 1 through 16. A depth is the
 number of LDPC frames in one locally fixed cycle. Marker spacing and pilot
@@ -123,7 +133,7 @@ automatic fallback, or adaptive bit loading.
 **Audio cable · classic APSK** preserves the earlier cable preset: 256-APSK,
 convolutional 7/8, RS(128,120), depth 62, amplitude 0.35, and 20% rolloff.
 SSB/FM retain convolutional 3/4, robust RS, depth 16 and amplitude 0.5;
-acoustic retains QPSK, convolutional 3/4, robust RS, depth 5 and amplitude
+classic acoustic retains QPSK, convolutional 3/4, robust RS, depth 5 and amplitude
 0.35. All classic profiles offer QPSK and 16/64/256-APSK. Their pulse span
 remains 16 symbols. The [earlier cable study](fast-cable-live-study.md) and
 44.14 kbit/s sampled 2 MiB benchmark describe this classic implementation,

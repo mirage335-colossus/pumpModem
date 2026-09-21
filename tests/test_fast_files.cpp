@@ -1,5 +1,6 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/modem.hpp"
 #include <array>
 #include <chrono>
 #include <filesystem>
@@ -143,7 +144,36 @@ void dense_s16_file() {
     check(input.gcount()==static_cast<std::streamsize>(content.size())&&actual==content&&input.peek()==std::char_traits<char>::eof(),
           "dense S16 transfer must preserve every byte and its exact endpoint");
 }
+void acoustic_wave_tail() {
+    Directory directory;
+    const Bytes content{0,255,0x80,42,0,0};
+    const auto source=directory.path/"acoustic-source.bin";write(source,content);
+    for(const auto [fft,prefix]:{std::pair{16384U,4096U},std::pair{32768U,32768U}}) {
+        Settings settings;settings.profile=capacity_profile(Channel::acoustic);
+        settings.profile.ofdm_fft_size=fft;settings.profile.ofdm_prefix_samples=prefix;
+        settings.profile.constellation=64;settings.profile.interleave_depth=1;
+        const auto wave=directory.path/(std::to_string(fft)+".wav");
+        const auto estimate=estimate_transmission(settings.profile,false,content.size());
+        transmit_wave(settings,source,wave);
+        check(std::filesystem::file_size(wave)==44+2*estimate.samples,"OFDM WAV duration differs from exact estimate");
+        const auto received=receive_wave(settings,wave);
+        check(received.complete&&received.physical_complete&&received.file&&
+            Bytes(received.file->bytes().begin(),received.file->bytes().end())==content,
+            "OFDM WAV tail does not cover complete physical absence blocks");
+        if(fft==16384) {
+            const auto shortened=directory.path/"old-fixed-tail.wav";
+            std::filesystem::copy_file(wave,shortened);
+            const auto old_tail=static_cast<std::uint64_t>(settings.profile.sample_rate)*25/4;
+            const auto size=std::filesystem::file_size(shortened)-2*(end_silence_samples(settings.profile)-old_tail);
+            std::filesystem::resize_file(shortened,size);
+            {std::fstream file(shortened,std::ios::in|std::ios::out|std::ios::binary);put32(file,4,static_cast<std::uint32_t>(size-8));put32(file,40,static_cast<std::uint32_t>(size-44));}
+            const auto pending=receive_wave(settings,shortened);
+            check(!pending.physical_complete&&!pending.complete&&!pending.file,
+                "OFDM EOF or fractional absent block fabricated physical completion");
+        }
+    }
+}
 int main() {
-    try{test_files();text_wave_roundtrips();dense_s16_file();std::cout<<"fast bounded local WAV/file tests passed\n";}
+    try{test_files();text_wave_roundtrips();dense_s16_file();acoustic_wave_tail();std::cout<<"fast bounded local WAV/file tests passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

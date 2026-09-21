@@ -77,43 +77,52 @@ class FastCLI(unittest.TestCase):
         self.run_pump("fast-info", "--mono", "--stereo", ok=False)
 
     def test_explicit_acoustic_capacity_profile(self):
-        legacy = json.loads(self.run_pump("fast-info", "--profile", "acoustic").stdout)
+        legacy = json.loads(self.run_pump("fast-info", "--profile", "acoustic", "--format", "classic").stdout)
         self.assertEqual(legacy["format"], "classic")
         self.assertEqual(legacy["symbol_rate"], 500)
         info = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
                                       "--format", "capacity").stdout)
         self.assertEqual(info["profile"], "acoustic")
         self.assertEqual(info["format"], "capacity")
-        self.assertEqual(info["constellation"], 16)
+        self.assertEqual(info["constellation"], 64)
         self.assertEqual(info["code_rate"], "3/4")
-        self.assertEqual(info["ldpc_blocks_per_cycle"], 1)
-        self.assertEqual(info["symbol_rate"], 48000 / (8192 + 4096))
+        self.assertEqual(info["ldpc_blocks_per_cycle"], 8)
+        self.assertEqual(info["symbol_rate"], 48000 / (32768 + 4096))
         self.assertEqual(info["waveform"], "ofdm")
-        self.assertEqual(info["ofdm_fft_size"], 8192)
+        self.assertEqual(info["ofdm_fft_size"], 32768)
         self.assertEqual(info["ofdm_prefix_samples"], 4096)
         self.assertGreater(info["occupied_bandwidth_hz"], 17480)
         self.assertLessEqual(info["occupied_bandwidth_hz"], 17500)
-        self.assertEqual(info["amplitude"], .20)
+        self.assertEqual(info["amplitude"], .40)
         self.assertNotIn("marker_spacing_intervals", info)
         self.assertNotIn("pilot_spacing_symbols", info)
         self.assertFalse(info["mono"])
         implied = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
-                                         "--qam", "16").stdout)
+                                         "--qam", "64").stdout)
         self.assertEqual(implied, info)
+        self.assertEqual(json.loads(self.run_pump("fast-info", "--profile", "acoustic").stdout), info)
+        self.assertEqual(info["ofdm_pilot_stride"], 16)
         half = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
-                                      "--format", "capacity", "--code-rate", "1/2").stdout)
+                                      "--format", "capacity", "--code-rate", "1/2", "--interleave", "1").stdout)
         self.assertEqual(half["profile"], "acoustic")
         self.assertEqual(half["code_rate"], "1/2")
         self.assertEqual(half["rs_parity_bytes"], 16)
         self.assertAlmostEqual(half["rs_parity_data_ratio"], 16 / 4034, delta=5e-9)
+        two_thirds = json.loads(self.run_pump("fast-info", "--profile", "acoustic",
+            "--format", "capacity", "--code-rate", "2/3", "--interleave", "4").stdout)
+        self.assertEqual(two_thirds["code_rate"], "2/3")
+        self.assertEqual(two_thirds["rs_parity_bytes"], 68)
+        self.assertEqual(two_thirds["source_bytes_per_cycle"], 21499)
+        self.run_pump("fast-info", "--format", "classic", "--code-rate", "2/3", ok=False)
         for profile in ("ssb", "fm"):
             self.run_pump("fast-info", "--profile", profile, "--format", "capacity", ok=False)
 
     def test_acoustic_ofdm_geometry_validation(self):
         acoustic = ("--profile", "acoustic", "--format", "capacity")
         for name, value in (("ofdm-fft", "3000"), ("ofdm-prefix", "0"),
-                            ("ofdm-prefix", "32768"), ("ofdm-low", "19000"),
-                            ("ofdm-high", "24000"), ("sample-rate", "44100"),
+                            ("ofdm-prefix", "65536"), ("ofdm-low", "19000"),
+                            ("ofdm-high", "24000"), ("ofdm-pilots", "1"),
+                            ("ofdm-pilots", "33"), ("sample-rate", "44100"),
                             ("symbol-rate", "2000"), ("marker-spacing", "4")):
             with self.subTest(name=name, value=value):
                 self.run_pump("fast-info", *acoustic, "--" + name, value, ok=False)
@@ -242,7 +251,7 @@ class FastCLI(unittest.TestCase):
         for option, value in (("profile", "unknown"), ("apsk", "32"),
                               ("interleave", "0"), ("interleave", "65"),
                               ("sample-rate", "8000"), ("sample-rate", "192001"),
-                              ("code-rate", "2/3"), ("rs", "off"),
+                              ("code-rate", "2/5"), ("rs", "off"),
                               ("quota-mb", "0"), ("quota-mb", "16385"),
                               ("apsk", "18446744073709551616")):
             with self.subTest(option=option, value=value):

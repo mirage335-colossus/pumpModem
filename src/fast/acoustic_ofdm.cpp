@@ -75,7 +75,7 @@ struct Geometry {
         last(static_cast<std::size_t>(std::floor(p.ofdm_high_hz*n/p.sample_rate))),
         bps(std::countr_zero(p.constellation)),cycle_bits(0),cycle_intervals(fast::cycle_intervals(p)),blocks(0) {
         if(last<=first||last>=n/2||last-first+1<512)throw Error("Acoustic OFDM requires at least 512 active frequency bins");
-        const auto stride=std::max<std::size_t>(2,std::min<std::size_t>(8,(last-first+1)/(2*signature_tones+2)));
+        const auto stride=std::max<std::size_t>(2,std::min<std::size_t>(p.ofdm_pilot_stride,(last-first+1)/(2*signature_tones+2)));
         for(auto k=first;k<=last;++k) {
             active.push_back(k);
             if((k-first)%stride==0) {
@@ -215,7 +215,12 @@ struct Receiver::Impl {
         for(std::size_t i=0;i<work.size();++i) {
             const auto v=pcm[static_cast<std::size_t>(start+i-first)];work[i]=v;energy[i+1]=energy[i]+v*v;
         }
-        fft(work);for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+        fft(work);
+        // Display-only unsynchronized input bins. The search FFT has twice the
+        // modem size, hence 2*k identifies the configured physical frequency.
+        if(input_observer)for(std::size_t k=g.first;k<=g.last;k+=std::max<std::size_t>(1,g.active.size()/128))
+            observe(input_observer,work[2*k]/static_cast<double>(g.n));
+        for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
         double best=0;std::size_t offset=0;
         for(std::size_t i=0;i<g.n;++i) {
             const auto score=std::norm(work[i])/(reference_energy*(energy[i+g.n]-energy[i])+1e-30);
@@ -334,7 +339,10 @@ struct Receiver::Impl {
             // Presence was independently checked against the PREVIOUS channel;
             // fitting this block cannot make its own marker pass.
             if(present) {
-                for(auto k:g.active)channel[k]=y[k]*std::polar(1.,2*pi*k*delay/g.n)/known(k,block);
+                // A single noisy refresh must not replace the averaged estimate.
+                // Align the prior gain before combining independently phased blocks.
+                for(auto k:g.active)channel[k]=.75*channel[k]*common+
+                    .25*y[k]*std::polar(1.,2*pi*k*delay/g.n)/known(k,block);
                 signature=strongest(g.verify);
                 next_window+=delay*.8;period=std::clamp(period+.03*delay/g.length,.999,1.001);
                 state.clock_error_ppm=(period-1)*1e6;
@@ -351,7 +359,7 @@ struct Receiver::Impl {
             C value=norm>1e-30?y[k]/h:C{};
             observe(input_observer,y[k]);
             if(present)observe(observer,value);
-            // Unbiased frequency-domain MMSE output and its per-bin variance.
+            // Per-bin channel equalization and its noise variance.
             // Deep fades receive small LLRs instead of amplified confidence.
             const auto nearest=static_cast<std::size_t>(std::lower_bound(g.track.begin(),g.track.end(),k)-g.track.begin());
             double local_error=0;std::size_t local_count=0;

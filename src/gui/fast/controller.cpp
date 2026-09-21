@@ -26,6 +26,7 @@ std::string number(double value,int precision=1) {
 std::string coding_id(fast::CodeRate r) {
     switch(r) {
     case fast::CodeRate::half:return "half";
+    case fast::CodeRate::two_thirds:return "two-thirds";
     case fast::CodeRate::three_quarters:return "three-quarters";
     case fast::CodeRate::seven_eighths:return "seven-eighths";
     case fast::CodeRate::seven_ninths:return "seven-ninths";
@@ -35,7 +36,7 @@ std::string coding_id(fast::CodeRate r) {
     throw Error("Unknown Fast coding selection");
 }
 fast::CodeRate coding_rate(const std::string& id) {
-    for(auto r:{fast::CodeRate::half,fast::CodeRate::three_quarters,fast::CodeRate::seven_eighths,
+    for(auto r:{fast::CodeRate::half,fast::CodeRate::two_thirds,fast::CodeRate::three_quarters,fast::CodeRate::seven_eighths,
                 fast::CodeRate::seven_ninths,fast::CodeRate::eight_ninths,fast::CodeRate::nine_tenths})
         if(coding_id(r)==id)return r;
     throw Error("Unknown Fast coding selection");
@@ -96,7 +97,7 @@ struct Controller::Impl {
         settings.profile=capacity?fast::capacity_profile(channel):fast::classic_profile(channel);
         if(capacity) {
             f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
-            f(F::fast_coding).options={{"half","LDPC 1/2"},{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
+            f(F::fast_coding).options={{"half","LDPC 1/2"},{"two-thirds","LDPC 2/3"},{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
             f(F::fast_depth).options={{"1","1 LDPC block"},{"4","4 LDPC blocks"},{"8","8 LDPC blocks"},{"16","16 LDPC blocks"}};
             f(F::fast_fec).options={{"sparse","RS · approximately 0.3%"}};
         } else {

@@ -4,6 +4,52 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast speaker/microphone OFDM and live bulk transfer — 20 September 2026
+
+The [acoustic study](fast-acoustic-live-study.md) records live sounders of the
+unchanged default speaker/microphone hardware, guard/constellation/pilot and
+channel-estimator experiments, and a complete **5,000,000-byte** transfer in
+**746.471 seconds**. All 840 LDPC frames converged with matching independent
+source/received hashes, no missing intervals, clipping, or audio/FIFO error.
+The production CLI also transferred 100,000 bytes exactly in 47.976 seconds.
+
+The new speaker/microphone default uses 64-QAM, LDPC 3/4, depth 8, a 32,768-point
+OFDM transform with an 85.33 ms prefix, pilot stride 16, 500–18,000 Hz, nominal
+amplitude 0.40, and stereo output. Steady public source rate is 56.04 kbit/s;
+RS parity/data is 0.30546%. The measured acoustic noise/response model predicts
+121–131 kbit/s, so this implementation does not claim to have reached Shannon
+capacity. 1024-QAM/LDPC 1/2/depth 16 passed a shorter 500 KB trial and provides
+61.15 kbit/s modeled steady throughput. Its long-file reliability is unqualified.
+A standard 2/3 LDPC option was independently verified but did not make the
+higher-rate 256-QAM trial reliable as its channel margin changed.
+
+Acoustic acquisition uses sixteen training blocks and independent verification;
+frequency-specific likelihoods down-weight deep fades, and smoothed full-band
+refreshes maintain the response. The acoustic capture queue is fixed at four
+seconds for up to four concurrent LDPC workers. Cable capture retains its
+one-second limit. A shared end-tail calculation covers six seconds of complete
+physical absence blocks in both live playback and WAV output. Codec flags, EOF,
+and cancellation never manufacture reception completion. The classic acoustic
+fallback and existing cable/Regular formats remain separate.
+
+The Release build passed. All 43 selected Fast/shared-GUI and development-contract
+targets passed after updating one stale CLI invalid-rate fixture (2/3 is now a
+supported rate; 2/5 remains rejected). The initial CTest run passed 42/43; the
+corrected complete 18-case CLI suite then passed separately. All eleven
+independent acoustic measurement/BICM controls passed. Coverage includes fixed
+wire vectors, short dictionary endpoints, pending GUI behavior, whole-symbol
+absence, noisy multi-cycle echo/gain changes, extended OFDM WAV tails, all six
+independent LDPC fixtures, and the preserved 92-case classic Fast SNR matrix.
+Native adapter code was unchanged; these are shared GUI checks, not a new native
+Windows/Rev rendering qualification. Logs and exact scope are in the archive.
+
+Total live acoustic experimentation was approximately 29 minutes 38 seconds,
+within the user's 30-minute budget. No 50 MB acoustic transfer or 80% success
+probability was demonstrated; the 119.44-minute default-profile estimate is a
+projection. Detailed successful/failed trials, fixed-recording controls, source
+hashes, and normal CLI results are archived in
+[`validation-data/fast/acoustic-capacity-20260920/continued/`](validation-data/fast/acoustic-capacity-20260920/continued/).
+
 ## Fast capacity implementation and full-file cable test — 20 September 2026
 
 The [capacity cable study](fast-capacity-live-study.md) records a successful

@@ -1,6 +1,6 @@
 # Fast capacity codec, version 2
 
-The cable-default capacity format replaces Fast v1's convolutional code, frequent
+The cable/acoustic-default capacity format replaces Fast v1's convolutional code, frequent
 integrity groups, and nine-bit source cells. It uses compact bytes, one protected
 source flag per fixed coding cycle, shortened GF(65536) Reed–Solomon, and standard
 64,800-bit DVB-S2/S2X LDPC frames. The classic Fast and Regular transport paths
@@ -15,10 +15,10 @@ absence. EOF and cancellation do not complete a file.
 ## Fixed cycle geometry
 
 The capacity `interleave_depth` is the number of LDPC frames per coding cycle,
-from 1 through 16; the initial setting is four. Every LDPC frame has 64,800 coded
-bits. Supported information widths are 32,400 bits (1/2), 48,600 (3/4), 50,400
+from 1 through 16; the cable default is four. Every LDPC frame has 64,800 coded
+bits. Supported information widths are 32,400 bits (1/2), 43,200 (2/3), 48,600 (3/4), 50,400
 (7/9), 57,600 (8/9), and 58,320 (9/10). The 7/9 matrix is DVB-S2X; the other
-four are DVB-S2. The same fixed-cycle codec is usable by cable or explicitly
+five are DVB-S2. The same fixed-cycle codec is usable by cable or explicitly
 selected acoustic capacity modulation; the local channel is integrity-bound.
 
 A cycle concatenates the information areas of all its LDPC frames. Its outer RS
@@ -38,6 +38,7 @@ For four LDPC frames:
 | LDPC rate | LDPC information bytes | RS parity bytes | RS data bytes | Parity/data | Public source slots | Encrypted source slots |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
 | 1/2 | 16,200 | 52 | 16,148 | 0.3220% | 16,115 | 16,095 |
+| 2/3 | 21,600 | 68 | 21,532 | 0.3158% | 21,499 | 21,471 |
 | 3/4 | 24,300 | 76 | 24,224 | 0.3137% | 24,191 | 24,175 |
 | 7/9 | 25,200 | 76 | 25,124 | 0.3025% | 25,091 | 25,071 |
 | 8/9 | 28,800 | 88 | 28,712 | 0.3065% | 28,679 | 28,655 |
@@ -177,12 +178,12 @@ capture FIFO headroom must be verified at high symbol rates and noisy thresholds
 ## Verification
 
 `test_fast_codec` retains its independent v1 wire vectors and tests the new
-format with all five rates, public and keyed sources, empty sources, exact cycle
+format with all six rates, public and keyed sources, empty sources, exact cycle
 boundaries, arbitrary bytes and trailing zeros, maximum 16-frame geometry,
 1 MiB streamed sources, memory quotas, and physical-end gating. It also covers
 malformed authenticated/checksummed padding, corrupted digests, wrong keys,
 missing/reordered/spliced cycles, and an erased complete 2,048-bit interval.
-Acoustic channel tests cover rates 1/2 and 3/4 at depths one and four in both
+Acoustic channel tests cover rates 1/2, 2/3 and 3/4 at depths one and four in both
 integrity modes: independent continuation/final byte layout, mandatory final
 cycles, deferred padding interpretation, terminal integrity failure, and
 rejection under an otherwise identical cable channel identity. These tests

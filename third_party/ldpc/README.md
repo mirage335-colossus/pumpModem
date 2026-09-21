@@ -4,7 +4,7 @@
 [xdsopl/LDPC](https://github.com/xdsopl/LDPC), pinned commit
 `32357d8ad55a6a302c34e093759f0454e45cca56`:
 
-- `dvb_s2_tables.hh`: `DVB_S2_TABLE_B4` (1/2), `B7` (3/4), `B10` (8/9), `B11` (9/10).
+- `dvb_s2_tables.hh`: `DVB_S2_TABLE_B4` (1/2), `B6` (2/3), `B7` (3/4), `B10` (8/9), `B11` (9/10).
 - `dvb_s2x_tables.hh`: `DVB_S2X_TABLE_B10` (7/9).
 
 All have normal frame length 64,800 bits. The project uses only LDPC, without
@@ -63,3 +63,5 @@ AddressSanitizer and UndefinedBehaviorSanitizer passed the same tests with two
 BPSK frames per rate. This container requires `ASAN_OPTIONS=detect_leaks=0`
 because LeakSanitizer cannot run under its ptrace supervision; leak scanning is
 therefore not part of that validation result.
+
+The acoustic 2/3 extension uses B6, with an [independent upstream fixture](../../docs/validation-data/fast/acoustic-capacity-20260920/ldpc-twothirds-method.md).

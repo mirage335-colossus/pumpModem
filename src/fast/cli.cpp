@@ -27,20 +27,21 @@ const char* help=R"(Fast QAM/LDPC and APSK text and file transfer (separate from
 
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
-  --format classic|capacity          Default capacity for wire, classic for other profiles
-                                    Explicit capacity also supports acoustic
+  --format classic|capacity          Default capacity for wire/acoustic; classic for ssb/fm
+                                    Acoustic: OFDM, 64-QAM, LDPC 3/4, depth 8
   --qam 4|16|64|256|1024|4096|16384|65536|262144|1048576|4194304
                                     Cable default 4194304-QAM, LDPC 8/9
   --apsk 4|16|64|256                 Select classic format; default 256 (classic wire)
-  --code-rate 1/2|3/4|7/8|7/9|8/9|9/10   Capacity supports 1/2, 3/4, 7/9, 8/9, 9/10 LDPC
+  --code-rate 1/2|2/3|3/4|7/8|7/9|8/9|9/10   Capacity supports 1/2, 2/3, 3/4, 7/9, 8/9, 9/10 LDPC
   --rs robust|high-rate|0.3%          Capacity uses approximately 0.3% parity/data
-  --interleave 1..16 (capacity), 1..64 (classic); default 4 / 62 / 16 / 5
+  --interleave 1..16 (capacity), 1..64 (classic); defaults: cable 4, acoustic 8; classic 62 / 16 / 5
   --sample-rate 44100..192000        Default 48000 Hz
   --symbol-rate HZ --carrier HZ --rolloff N --amplitude N
-  --marker-spacing 1..16            Capacity intervals per full marker (default 16)
-  --pilot-spacing 16..1024           Capacity data symbols per pilot group (default 256)
-  --ofdm-fft 2048..32768 --ofdm-prefix SAMPLES
-  --ofdm-low HZ --ofdm-high HZ      Acoustic OFDM passband; 48000 Hz audio required
+  --marker-spacing 1..16            Single-carrier capacity intervals per full marker (16)
+  --pilot-spacing 16..1024           Single-carrier capacity data symbols per pilot group (256)
+  --ofdm-fft 2048..32768 --ofdm-prefix SAMPLES --ofdm-pilots 2..32
+  --ofdm-low HZ --ofdm-high HZ      Acoustic OFDM defaults: FFT 32768, prefix 4096, pilots 16
+                                    Band 500..18000 Hz; 48000 Hz audio required
   --estimate-bytes N                fast-info: estimate airtime for a local source size
   --keyfile KEY                     Enable encryption using this keyfile
   --encrypt                        Require encryption and --keyfile
@@ -54,7 +55,8 @@ Matching local settings (no negotiation or received lengths):
 Every physical interval has 2048 inner-coded bits plus fixed sync/pilots.
 Encryption is off without --keyfile. Plaintext checksums do not authenticate.
 Text is at most 32768 UTF-8 bytes and uses the same wire format as file bytes.
-WAV output includes 6.25 seconds of silence. EOF/cancellation is not physical end.
+WAV output includes at least 6.25 seconds of silence, extended for complete OFDM blocks.
+EOF/cancellation is not physical end.
 SNR simulation is available only in the fast_regression test executable.
 Output routing is local; peers need not use the same --mono/--stereo setting.
 )";
@@ -62,7 +64,7 @@ struct Args {
     std::map<std::string,std::string> values;
     Args(int argc,char** argv) {
         const std::set<std::string> flags{"help","json","stereo","mono","encrypt","no-encryption"};
-        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes","ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high"};
+        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes","ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots"};
         for(int i=2;i<argc;++i) {
             std::string name=argv[i];if(!name.starts_with("--"))throw Error("Expected a fast --option");name.erase(0,2);
             if(values.contains(name))throw Error("Duplicate fast option: "+name);
@@ -103,7 +105,7 @@ bool encryption_enabled(const Args& a) {
 Settings settings(const Args& a,bool load_key) {
     Settings s;const auto channel=parse_channel(a.get("profile","wire"));
     if(a.has("qam")&&a.has("apsk"))throw Error("--qam and --apsk conflict");
-    const auto format=a.get("format",a.has("apsk")?"classic":a.has("qam")||channel==Channel::wire?"capacity":"classic");
+    const auto format=a.get("format",a.has("apsk")?"classic":a.has("qam")||channel==Channel::wire||channel==Channel::acoustic?"capacity":"classic");
     if(format!="classic"&&format!="capacity")throw Error("Fast format must be classic or capacity");
     if((format=="classic"&&a.has("qam"))||(format=="capacity"&&a.has("apsk")))throw Error("Constellation option conflicts with selected format");
     if(format=="capacity"&&channel!=Channel::wire&&channel!=Channel::acoustic)
@@ -128,8 +130,11 @@ Settings settings(const Args& a,bool load_key) {
         const auto fft=a.integer("ofdm-fft",s.profile.ofdm_fft_size),prefix=a.integer("ofdm-prefix",s.profile.ofdm_prefix_samples);
         if(fft>32768||prefix>32768)throw Error("OFDM geometry exceeds its local bound");
         s.profile.ofdm_fft_size=static_cast<unsigned>(fft);s.profile.ofdm_prefix_samples=static_cast<unsigned>(prefix);
+        const auto pilot_stride=a.integer("ofdm-pilots",s.profile.ofdm_pilot_stride);
+        if(pilot_stride>32)throw Error("OFDM pilot stride exceeds its local bound");
+        s.profile.ofdm_pilot_stride=static_cast<unsigned>(pilot_stride);
         s.profile.ofdm_low_hz=a.real("ofdm-low",s.profile.ofdm_low_hz);s.profile.ofdm_high_hz=a.real("ofdm-high",s.profile.ofdm_high_hz);
-    } else for(const auto* option:{"ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high"})
+    } else for(const auto* option:{"ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots"})
         if(a.has(option))throw Error("OFDM options require the acoustic capacity profile");
     if(a.has("mono")&&a.has("stereo"))throw Error("--mono and --stereo conflict");
     s.device=a.get("device","default");
@@ -199,7 +204,7 @@ int cli_main(int argc,char** argv) {
             if(!p.acoustic_ofdm)std::cout<<",\"marker_spacing_intervals\":"<<p.marker_spacing_intervals<<",\"pilot_spacing_symbols\":"<<p.pilot_spacing_symbols;
         }
         std::cout<<",\"waveform\":\""<<(p.acoustic_ofdm?"ofdm":"single-carrier")<<"\"";
-        if(p.acoustic_ofdm)std::cout<<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples
+        if(p.acoustic_ofdm)std::cout<<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples<<",\"ofdm_pilot_stride\":"<<p.ofdm_pilot_stride
             <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
             <<",\"occupied_lower_hz\":"<<occupied_lower_hz(p)<<",\"occupied_upper_hz\":"<<occupied_upper_hz(p);
         if(a.has("estimate-bytes")) {

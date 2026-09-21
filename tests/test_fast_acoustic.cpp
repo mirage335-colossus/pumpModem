@@ -43,8 +43,8 @@ std::vector<float> resample(const std::vector<float>& input,double ppm) {
     }
     return output;
 }
-void raw_case(double echo=0,double noise=0,double ppm=0,std::size_t echo_delay=1703) {
-    auto p=config();std::mt19937 rng(9817);
+void raw_case(double echo=0,double noise=0,double ppm=0,std::size_t echo_delay=1703,Profile p=config()) {
+    std::mt19937 rng(9817);
     std::vector<Bytes> input(cycle_intervals(p),Bytes(physical_interval_bits));
     for(auto& interval:input)for(auto& bit:interval)bit=static_cast<std::uint8_t>(rng()&1);
     auto signal=transmit(p,input);std::vector<float> pcm(1371,0);pcm.insert(pcm.end(),signal.begin(),signal.end());
@@ -87,15 +87,42 @@ void coded_and_absence() {
     require(!truncated.progress().physical_complete,"OFDM EOF fabricated absence");
     std::cout<<"OFDM codec64QAM peak="<<peak<<" exact bytes="<<source.size()<<'\n';
 }
+void changing_gain_and_noisy_refresh() {
+    auto p=config();
+    Bytes source(20000);std::mt19937 rng(0x6d756c74);
+    for(auto& byte:source)byte=static_cast<std::uint8_t>(rng());
+    StreamEncoder encoder(p,std::nullopt,byte_source(source));std::vector<Bytes> bits;
+    for(;;) {Bytes interval(physical_interval_bits);if(!encoder.next_interval(interval))break;bits.push_back(std::move(interval));}
+    auto signal=transmit(p,bits);const auto block=p.ofdm_fft_size+p.ofdm_prefix_samples;
+    const auto cycle=transmission_samples(p,cycle_intervals(p))/block-preamble_symbols(p);
+    const auto refresh_start=(preamble_symbols(p)+cycle)*block;
+    std::vector<float> pcm(1371,0);pcm.insert(pcm.end(),signal.begin(),signal.end());
+    pcm.resize(pcm.size()+48000*8);
+    std::normal_distribution<float> noise(0,.006F);
+    // Long delayed reflection, slowly varying gain, and one noisy full-band
+    // refresh exercise maintained estimation beyond the initial preamble.
+    for(std::size_t i=pcm.size();i-->0;) {
+        const auto echo=i>=1703?.45*pcm[i-1703]:0.;
+        pcm[i]=static_cast<float>((pcm[i]+echo)*(1+.08*std::sin(double(i)/48000*.7)));
+        if(i>=1371+refresh_start&&i<1371+refresh_start+block)pcm[i]+=noise(rng);
+    }
+    StreamDecoder decoder(p,std::nullopt);Receiver receiver(p,[&](std::span<const float> soft){decoder.push_interval(soft);});
+    for(std::size_t i=0;i<pcm.size();i+=1201)receiver.push(std::span(pcm).subspan(i,std::min<std::size_t>(1201,pcm.size()-i)));
+    decoder.finish(receiver.progress().physical_complete);
+    require(decoder.snapshot().complete&&decoder.result()&&
+        Bytes(decoder.result()->bytes().begin(),decoder.result()->bytes().end())==source,
+        "OFDM changing gain/echo and noisy refresh lost the multi-cycle source");
+}
 void bad_training() {
     auto p=config();std::vector<Bytes> bits(cycle_intervals(p),Bytes(physical_interval_bits,1));auto pcm=transmit(p,bits);
     pcm.resize(2*(p.ofdm_fft_size+p.ofdm_prefix_samples));pcm.insert(pcm.begin(),1371,0);pcm.resize(pcm.size()+48000*8,0);
-    std::size_t delivered=0;Receiver rx(p,[&](std::span<const float>){++delivered;});rx.push(pcm);
+    std::size_t delivered=0,input_points=0;Receiver rx(p,[&](std::span<const float>){++delivered;},{},[&](std::complex<float>){++input_points;});rx.push(pcm);
     require(!rx.progress().acquired&&!delivered,"OFDM rejected held-out marker admitted a stream");
     require(rx.workspace_bytes()<8*1024*1024,"OFDM failed acquisition retained unbounded PCM");
     std::vector<float> noise(48000*12);std::mt19937 rng(378);std::normal_distribution<float> normal(0,.1F);
     for(auto& value:noise)value=normal(rng);
     rx.push(noise);require(!rx.progress().acquired&&!delivered,"OFDM noise acquired");
+    require(input_points>0,"OFDM unsynchronized input observations missing");
     require(rx.workspace_bytes()<8*1024*1024,"OFDM noise workspace unbounded");
 }
 void missing_block() {
@@ -116,4 +143,4 @@ void missing_block() {
     require(rx.progress().physical_complete&&intervals==bits.size(),"OFDM missing block deleted fixed positions");
     require(erased>2048&&!wrong,"OFDM missing block corrupted later fixed coordinates");
 }
-int main(){try{raw_case();raw_case(.6,.0001);raw_case(.45,.0001,0,3360);raw_case(0,0,100);raw_case(0,0,-100);coded_and_absence();bad_training();missing_block();std::cout<<"acoustic OFDM tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+int main(){try{raw_case();raw_case(.6,.0001);raw_case(.45,.0001,0,3360);raw_case(0,0,100);raw_case(0,0,-100);coded_and_absence();changing_gain_and_noisy_refresh();bad_training();missing_block();auto sparse=config();sparse.ofdm_fft_size=16384;sparse.ofdm_pilot_stride=16;sparse.constellation=64;raw_case(.45,.0001,100,3360,sparse);std::cout<<"acoustic OFDM tests passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

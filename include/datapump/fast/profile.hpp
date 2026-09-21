@@ -6,7 +6,7 @@
 namespace datapump::fast {
 inline constexpr std::size_t physical_interval_bits=2048;
 enum class Channel { wire, ssb, fm, acoustic };
-enum class CodeRate { half, three_quarters, seven_eighths, seven_ninths, eight_ninths, nine_tenths };
+enum class CodeRate { half, three_quarters, seven_eighths, seven_ninths, eight_ninths, nine_tenths, two_thirds };
 struct Profile {
     Channel channel=Channel::wire;
     // v2 uses Gray QAM, LDPC, sparse sync, and compact fixed-cycle sources.
@@ -14,6 +14,7 @@ struct Profile {
     bool acoustic_ofdm=false;
     unsigned ofdm_fft_size=8192;
     unsigned ofdm_prefix_samples=4096;
+    unsigned ofdm_pilot_stride=8;
     double ofdm_low_hz=500;
     double ofdm_high_hz=18000;
     unsigned marker_spacing_intervals=16;
@@ -32,7 +33,7 @@ struct Profile {
 };
 Profile profile(Channel channel);
 Profile classic_profile(Channel channel);
-// Acoustic capacity is explicit until its physical channel is qualified.
+// Bulk-file capacity presets; acoustic uses its independently tested OFDM path.
 Profile capacity_profile(Channel channel=Channel::wire);
 void validate(const Profile& profile);
 std::string_view channel_name(Channel channel);
