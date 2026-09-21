@@ -102,6 +102,65 @@ void collector() {
     const auto quiet=telemetry.publish(false,now+300ms);
     require(quiet && !quiet->waveform_rms && !quiet->waveform_peak,"audio meters retained older loud samples");
 }
+void acoustic_batches() {
+    const auto p=capacity_profile(Channel::acoustic);
+    const auto id=next_diagnostics_stream_id();
+    require(initial_diagnostics(p,false,id)->acoustic_ofdm,"OFDM diagnostic identity missing");
+    Telemetry telemetry(p,false,id);
+    const auto memory=telemetry.workspace_bytes();
+    const auto now=Telemetry::Clock::time_point{};
+    std::array<float,1024> pcm{};telemetry.record_samples(pcm);
+    constexpr unsigned tones=11200;
+    // A monotonic frequency ramp makes retaining only the final high bins
+    // visibly wrong. Both observers must represent the whole publication batch.
+    for(unsigned i=0;i<tones;++i) {
+        telemetry.record_symbol({static_cast<float>(i),-static_cast<float>(i)});
+        telemetry.record_input({-static_cast<float>(i),static_cast<float>(i)});
+    }
+    const auto frame=telemetry.publish(true,now);
+    require(frame&&frame->acoustic_ofdm&&frame->constellation_count==512&&frame->input_count==512,
+            "OFDM batch sampling changed diagnostic bounds or identity");
+    const auto coverage=[](const auto& points,bool input) {
+        std::array<unsigned,8> bands{};
+        float low=tones,high=0;
+        for(const auto point:points) {
+            const auto bin=input?-point.real():point.real();
+            require(bin>=0&&bin<tones&&bin==std::floor(bin)&&point.imag()==-point.real(),
+                    "OFDM sampled point was synthesized or outside its batch");
+            low=std::min(low,bin);high=std::max(high,bin);
+            ++bands[static_cast<unsigned>(bin)*bands.size()/tones];
+        }
+        require(low<tones*.05&&high>tones*.95,"OFDM sampled plot omits the low or high frequency edge");
+        for(const auto count:bands)require(count>20&&count<110,"OFDM sampled plot overrepresents one frequency region");
+    };
+    coverage(frame->constellation_points,false);coverage(frame->input_points,true);
+    require(frame->constellation_sample==pcm.size()&&frame->input_sample==pcm.size(),
+            "OFDM point freshness does not follow actual observations");
+    require(!telemetry.publish(true,now+99ms),"OFDM batch sampling bypassed publication cadence");
+    for(unsigned i=0;i<150;++i)telemetry.record_samples(pcm);
+    const auto nan=std::numeric_limits<float>::quiet_NaN();
+    telemetry.record_symbol({nan,0});telemetry.record_input({0,nan});
+    const auto quiet=telemetry.publish(true,now+100ms);
+    require(quiet&&quiet->constellation_points==frame->constellation_points&&quiet->input_points==frame->input_points&&
+            quiet->constellation_count==512&&quiet->input_count==512&&quiet->samples>frame->samples+2*p.sample_rate&&
+            quiet->constellation_sample==frame->constellation_sample&&quiet->input_sample==frame->input_sample,
+            "Empty OFDM batch discarded points or marked retained symbols fresh");
+    telemetry.record_samples(pcm);
+    for(unsigned i=0;i<17;++i)telemetry.record_symbol({-1000.F-i,1000.F+i});
+    const auto next=telemetry.publish(true,now+200ms);
+    require(next&&next->constellation_count==17&&next->input_count==512&&
+            next->input_points==frame->input_points&&next->constellation_sample==next->samples,
+            "New OFDM symbol batch mixed old points or discarded independent input history");
+    for(unsigned i=0;i<17;++i)require(next->constellation_points[i]==std::complex<float>(-1000.F-i,1000.F+i),
+            "Short OFDM batch did not preserve every actual observation");
+    telemetry.record_input({.25F,.5F});
+    const auto last=telemetry.publish(true,now+300ms);
+    require(last&&last->input_count==1&&last->input_points.front()==std::complex<float>(.25F,.5F)&&
+            last->constellation_count==17&&last->constellation_points==next->constellation_points,
+            "New OFDM input batch did not independently replace its prior points");
+    coverage(frame->constellation_points,false);coverage(frame->input_points,true);
+    require(telemetry.workspace_bytes()==memory,"OFDM batch sampling grew diagnostic storage");
+}
 using Interval=std::array<std::uint8_t,physical_interval_bits>;
 std::vector<Interval> input() {
     std::vector<Interval> result(3);
@@ -262,5 +321,5 @@ void sessions() {
     other.close();await([&]{return other.ready_to_close();},"second diagnostic session did not close");
 }
 }
-int main(){try{collector();input_observations();observers();sessions();std::cout<<"fast immutable telemetry, waveform/spectrum and observer isolation passed\n";return 0;}
+int main(){try{collector();acoustic_batches();input_observations();observers();sessions();std::cout<<"fast immutable telemetry, waveform/spectrum and observer isolation passed\n";return 0;}
 catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

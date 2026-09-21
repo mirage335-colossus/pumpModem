@@ -1,0 +1,80 @@
+{
+  "q64-stereo": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.8424290022701875,
+      "cycles": 0.84242900227075,
+      "planes": 0.8424290022705
+    },
+    "passed": true
+  },
+  "q64-mono": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.6225428277389062,
+      "cycles": 0.622542827739,
+      "planes": 0.622542827739
+    },
+    "passed": true
+  },
+  "q16-mono": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.9435504991470938,
+      "cycles": 0.94355049914725,
+      "planes": 0.9435504991470001
+    },
+    "passed": true
+  },
+  "q16-stereo": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.9151870481893437,
+      "cycles": 0.9151870481897499,
+      "planes": 0.9151870481894999
+    },
+    "passed": true
+  },
+  "q64-mono-repeat": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.6586507436106562,
+      "cycles": 0.6586507436107499,
+      "planes": 0.6586507436110001
+    },
+    "passed": true
+  },
+  "q64-mono-a20": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.7969905724349375,
+      "cycles": 0.7969905724352501,
+      "planes": 0.7969905724351667
+    },
+    "passed": true
+  },
+  "q64-r23-mono-a20": {
+    "coded_bits": 2073600,
+    "frames": 32,
+    "all_frame_bits": 64800,
+    "code_rate": 0.6666666666666666,
+    "aggregate_gmi_per_bit": {
+      "frames": 0.7200104180237813,
+      "cycles": 0.72001041802375,
+      "planes": 0.7200104180241668
+    },
+    "passed": true
+  }
+}

@@ -110,16 +110,19 @@ measured trials, failures and limits.
 | `wire --format classic` | Classic | 15,000 | 9,300 Hz | 300–18,300 Hz | 256-APSK | 120 kbit/s |
 | `ssb` | Classic | 2,000 | 1,500 Hz | 300–2,700 Hz | 16-APSK | 8 kbit/s |
 | `fm` | Classic | 2,000 | 1,500 Hz | 300–2,700 Hz | QPSK | 4 kbit/s |
-| `acoustic` | Capacity OFDM | 1.302 blocks/s | Multicarrier | 501–18,000 Hz | 64-QAM | 75.26 kbit/s coded |
+| `acoustic` | Capacity OFDM | 1.302 blocks/s | Multicarrier | 501–18,000 Hz | 16-QAM | 52.10 kbit/s coded |
 | `acoustic --format classic` | Classic | 500 | 1,800 Hz | 1,500–2,100 Hz | QPSK | 1 kbit/s |
 
 The acoustic default uses a 32,768-point FFT, an 85.33 ms cyclic prefix,
-pilot stride 16, LDPC 3/4, depth 8, nominal waveform amplitude 0.40, and both
-output channels. Its steady source rate is 56.04 kbit/s; the table's OFDM coded
+pilot stride 16, LDPC 3/4, depth 8, nominal waveform amplitude 0.40, and
+right-channel-only output (**Mono**). Its steady source rate is 38.80 kbit/s; the table's OFDM coded
 rate already includes the guard, pilots, refresh blocks, and mapper rounding.
-A real 5,000,000-byte speaker/microphone transfer completed exactly in 746.47
-seconds, with no failed LDPC frames. See the [acoustic live study](fast-acoustic-live-study.md)
-for measurements, failed faster configurations, and the limits of this result.
+A real 5,000,000-byte transfer with the earlier 64-QAM/stereo preset completed
+exactly in 746.47 seconds, but later tests reproduced 64-QAM decoding failures
+on a stationary path. See the [routing diagnosis](fast-acoustic-routing-diagnosis.md)
+for the default change and the [acoustic live study](fast-acoustic-live-study.md)
+for earlier measurements and their limits. Select `--qam 64 --stereo` explicitly
+to reproduce the earlier preset; matching QAM is required at both peers.
 The GUI keeps **Speakers / microphone · classic APSK** as a separate fallback.
 
 Capacity mode offers square Gray-labelled QAM orders from 4 through 4,194,304

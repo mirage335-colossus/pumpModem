@@ -28,7 +28,7 @@ const char* help=R"(Fast QAM/LDPC and APSK text and file transfer (separate from
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
   --format classic|capacity          Default capacity for wire/acoustic; classic for ssb/fm
-                                    Acoustic: OFDM, 64-QAM, LDPC 3/4, depth 8
+                                    Acoustic: OFDM, 16-QAM, LDPC 3/4, depth 8
   --qam 4|16|64|256|1024|4096|16384|65536|262144|1048576|4194304
                                     Cable default 4194304-QAM, LDPC 8/9
   --apsk 4|16|64|256                 Select classic format; default 256 (classic wire)
@@ -48,8 +48,8 @@ Matching local settings (no negotiation or received lengths):
   --no-encryption                  Explicit plaintext; ignore keyfile options
   --key-name NAME [--pad PATH]       Existing named symmetric keyfile
   --quota-mb N                      Local storage quota, default 256 MiB
-  --stereo                          Both outputs (wire default)
-  --mono                            Right output only (other profile defaults)
+  --stereo                          Same waveform on both outputs (wire default)
+  --mono                            Right output only; left silent (other profile defaults)
   --json                            Machine-readable result
 
 Every physical interval has 2048 inner-coded bits plus fixed sync/pilots.
@@ -138,7 +138,7 @@ Settings settings(const Args& a,bool load_key) {
         if(a.has(option))throw Error("OFDM options require the acoustic capacity profile");
     if(a.has("mono")&&a.has("stereo"))throw Error("--mono and --stereo conflict");
     s.device=a.get("device","default");
-    s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire && !s.profile.acoustic_ofdm);
+    s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire);
     auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
     validate(s.profile);
     if(encryption_enabled(a)&&load_key) {

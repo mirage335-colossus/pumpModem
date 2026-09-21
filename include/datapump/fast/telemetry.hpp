@@ -17,13 +17,18 @@ struct Diagnostics {
     std::uint64_t stream_id=0,revision=0,samples=0;
     std::uint32_t sample_rate=0;
     unsigned constellation=0;
-    bool transmitting=false,acquired=false,spectrum_valid=false;
+    bool transmitting=false,acquired=false,spectrum_valid=false,acoustic_ofdm=false;
+    // Local PCM coordinates of the last finite observations. These only tell
+    // the display when retained points have stopped updating.
+    std::uint64_t constellation_sample=0,input_sample=0;
     std::size_t waveform_count=0,constellation_count=0,input_count=0;
     float waveform_rms=0,waveform_peak=0;
     std::array<float,1024> waveform{};
     // Latest 512 samples, Hann-windowed, amplitude dBFS. Bin k is k*Fs/512
     // Hz; DC uses one-sided DC scaling. Values below -120 dBFS are clamped.
     std::array<float,256> spectrum_db{};
+    // OFDM samples the whole latest nonempty publication batch; single-carrier
+    // retains its latest 512 observations in chronological order.
     std::array<std::complex<float>,512> constellation_points{};
     // Matched-filter input samples before timing/gain/carrier correction.
     // These are separate from acquired payload symbols and may contain noise.
@@ -51,13 +56,14 @@ private:
     std::uint64_t stream_id_,revision_=0,samples_=0;
     std::uint32_t sample_rate_;
     unsigned constellation_;
-    bool transmitting_,published_=false;
+    bool transmitting_,acoustic_ofdm_,published_=false;
     Clock::time_point last_publication_{};
     std::array<float,1024> waveform_{};
     std::array<std::complex<float>,512> points_{};
     std::array<std::complex<float>,512> input_{};
     std::size_t waveform_position_=0,waveform_count_=0,point_position_=0,point_count_=0;
     std::size_t input_position_=0,input_count_=0;
+    std::uint64_t point_batch_seen_=0,input_batch_seen_=0,point_sample_=0,input_sample_=0;
 };
 
 } // namespace datapump::fast

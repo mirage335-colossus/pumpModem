@@ -61,8 +61,13 @@ wire revisions.
 The preserved **classic APSK** profile supports the earlier 256-APSK,
 convolutional 7/8, high-rate RS and depth-62 cable settings. Its roughly
 2h 01m calculated 50 MB airtime and 44.14 kbit/s sampled 2 MiB result are
-historical reference points, not cable capacity limits. SSB, FM and acoustic
-profiles retain their classic coding and waveforms. The
+historical reference points, not cable capacity limits. SSB and FM retain their
+classic coding and waveforms. Speakers/microphone now defaults to a separate
+16-QAM/LDPC 3/4 OFDM waveform with right-channel-only output, providing
+38.80 kbit/s of steady source capacity. Higher QAM orders and the classic
+acoustic profile remain selectable. The
+[acoustic routing diagnosis](docs/fast-acoustic-routing-diagnosis.md) explains
+the current default and measured decoding limits. The
 [earlier cable study](docs/fast-cable-live-study.md) documents those settings.
 The separate [physical SNR measurement](docs/cable-snr-live-study.md) found about
 79 dB on one input and 81.5 dB with both inputs averaged under best-case tone

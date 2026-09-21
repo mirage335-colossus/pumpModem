@@ -1,0 +1,14 @@
+gmake: jobserver mkfifo: /tmp/GMfifo4: File exists
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[100%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[100%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[100%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/telemetry.cpp.o
+[100%] Linking CXX static library libdatapump_fast.a
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/acoustic_known_symbols.dir/tools/acoustic_known_symbols.cpp.o
+[100%] Linking CXX executable acoustic_known_symbols
+[100%] Built target acoustic_known_symbols

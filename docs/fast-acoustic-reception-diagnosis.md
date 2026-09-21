@@ -5,6 +5,9 @@ OFDM profile. Two synchronization faults and a noisy-startup channel-estimation
 fault were reproduced and repaired. None is established as the cause of that particular attempt: no recording or
 receiver status from the failed attempt was available. The current live path
 also successfully received ordinary transmissions before the fixes.
+The subsequent [routing diagnosis](fast-acoustic-routing-diagnosis.md) addresses
+the user's later report of received intervals followed by decoding failure and
+records the change to 16-QAM/right-channel-only defaults.
 
 ## Devices and reproduction conditions
 
@@ -16,7 +19,7 @@ investigation. The running GUI executable was verified as `build/datapump-gui`,
 the current OFDM build, excluding the stale alternative build directories as an
 explanation for that running instance.
 
-The ordinary acoustic settings remain 64-QAM, LDPC 3/4, depth eight,
+The acoustic settings during this investigation were 64-QAM, LDPC 3/4, depth eight,
 N32768/P4096, pilot stride 16, 500–18,000 Hz, amplitude 0.40, stereo output.
 The fixes change receiver estimation only: waveform, profile identity, source
 coding, throughput and six-second physical-absence completion are unchanged.

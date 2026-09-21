@@ -16,6 +16,13 @@ std::string number(double value,int precision=1) {
 }
 double finite_sample(float value) {return std::isfinite(value)?std::clamp(static_cast<double>(value),-1.,1.):0.;}
 bool input_view(const fast::Diagnostics& d) {return !d.transmitting&&!d.constellation_count;}
+bool older_points(const fast::Diagnostics& d) {
+    if(!d.acoustic_ofdm)return false;
+    const bool input=input_view(d);
+    if(!(input?d.input_count:d.constellation_count))return false;
+    const auto last=input?d.input_sample:d.constellation_sample;
+    return d.samples>last&&d.samples-last>std::uint64_t{2}*d.sample_rate;
+}
 std::span<const std::complex<float>> display_points(const fast::Diagnostics& d) {
     if(input_view(d))return std::span(d.input_points).first(std::min(d.input_count,d.input_points.size()));
     return std::span(d.constellation_points).first(std::min(d.constellation_count,d.constellation_points.size()));
@@ -86,7 +93,8 @@ bool FastPlots::update(std::shared_ptr<const fast::Diagnostics> diagnostics,bool
 std::size_t FastPlots::history_size() const {return frame_->history.size();}
 std::string FastPlots::title(B id) const {
     const auto& d=frame_->diagnostics;
-    const auto prefix=!d?"":!frame_->active?"Retained ":frame_->stale?"Stalled ":"Live ";
+    const auto prefix=!d?"":!frame_->active?"Retained ":frame_->stale?"Stalled ":
+        id==B::fast_constellation&&older_points(*d)?"Last ":"Live ";
     const auto direction=d?(d->transmitting?"TX ":"RX "):"";
     if(id==B::fast_waveform)return std::string(prefix)+direction+"waveform";
     if(id==B::fast_waterfall)return std::string(prefix)+direction+"waterfall";
@@ -109,9 +117,11 @@ std::string FastPlots::caption(B id,unsigned width) const {
         return "0–"+number(d->sample_rate/2000.,0)+(width<340?"kHz · −120…0dBFS · ↑new":" kHz · −120…0 dBFS · newest at top");
     }
     if(id==B::fast_constellation) {
-        if(input_view(*d)&&d->input_count)return "Unsynchronized · auto ±"+input_scale(frame_->extent);
-        if(!d->constellation_count)return d->transmitting?"Waiting for mapped payload symbols":"Awaiting APSK synchronization";
-        return std::to_string(std::min(d->constellation_count,d->constellation_points.size()))+" points · I/Q ±"+number(frame_->extent)+
+        if(input_view(*d)&&d->input_count)return std::string(d->acoustic_ofdm?"Unsynchronized · sampled · auto ±":"Unsynchronized · auto ±")+input_scale(frame_->extent);
+        if(!d->constellation_count)return d->transmitting?"Waiting for mapped payload symbols":
+            d->acoustic_ofdm?"Awaiting OFDM synchronization":"Awaiting APSK synchronization";
+        return std::to_string(std::min(d->constellation_count,d->constellation_points.size()))+
+            (d->acoustic_ofdm?" sampled points · I/Q ±":" points · I/Q ±")+number(frame_->extent)+
             (!d->transmitting&&!d->acquired?" · reacquiring":"");
     }
     return {};

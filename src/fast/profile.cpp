@@ -29,7 +29,7 @@ Profile capacity_profile(Channel channel) {
     case Channel::wire: break;
     case Channel::acoustic:
         p.acoustic_ofdm=true;
-        p.constellation=64;p.code_rate=CodeRate::three_quarters;p.interleave_depth=8;
+        p.constellation=16;p.code_rate=CodeRate::three_quarters;p.interleave_depth=8;
         p.ofdm_fft_size=32768;p.ofdm_prefix_samples=4096;p.ofdm_pilot_stride=16;
         p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.amplitude=.40;
         p.marker_spacing_intervals=1;p.pilot_spacing_symbols=32;

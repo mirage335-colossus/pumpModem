@@ -10,12 +10,16 @@ length, pilot stride, and lower/upper occupied-band parameters. Both peers must 
 settings. Single-carrier symbol rate, carrier, RRC rolloff, pilot spacing, and
 marker spacing do not control this waveform.
 
-The default acoustic preset is 64-QAM, LDPC 3/4, depth eight, N32768/P4096,
-pilot stride sixteen, 500–18,000 Hz, amplitude 0.40, and stereo output. It was
-selected after a complete 5 MB physical transfer. Its 11,947 active tones
-contain 747 pilots and 11,200 data tones; eight data blocks and one refresh
-per steady cycle yield 56.04 kbit/s of public source capacity. The waveform's
-startup and final silence remain significant for small files.
+The default acoustic preset is 16-QAM, LDPC 3/4, depth eight, N32768/P4096,
+pilot stride sixteen, 500–18,000 Hz, amplitude 0.40, and right-channel-only
+output (the existing **Mono** option). Its 11,947 active tones contain 747
+pilots and 11,200 data tones; twelve data blocks and one refresh per steady
+cycle yield 38.80 kbit/s of public source capacity. The previous 64-QAM preset
+completed a 5 MB transfer, but later stationary-device tests reproduced an
+interval-decoding failure. The [routing diagnosis](fast-acoustic-routing-diagnosis.md)
+records that evidence and the more conservative default. Explicit 64-QAM and
+stereo output remain available. Both peers must select the same QAM setting.
+The waveform's startup and final silence remain significant for small files.
 
 ## Fixed frequency and time geometry
 
@@ -108,6 +112,10 @@ floor produced overconfident errors in deep fades. Training variance supplies
 a lower bound. These are frequency-dependent likelihood estimates;
 the plotted unweighted constellation EVM can be dominated by a few deep nulls
 and must not be presented as hardware SNR or Shannon capacity.
+The GUI samples across each new OFDM observation batch; retaining only the
+last 512 ascending-frequency bins previously biased the plot toward the top
+of the occupied band. Retained observations are labeled **Last RX** after
+two seconds of further PCM without new points.
 
 ## Exact duration and bounded reception
 

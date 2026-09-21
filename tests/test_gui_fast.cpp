@@ -97,7 +97,7 @@ void presentation_and_retention() {
     check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
     check(app.field(F::fast_detail).text.find("Shannon-Hartley")!=std::string::npos,"Fast capacity explanation missing");
     app.select(F::fast_profile,"acoustic");
-    check(app.field(F::fast_mono).checked==!acoustic.acoustic_ofdm,"Acoustic waveform output routing default changed");
+    check(app.field(F::fast_mono).checked,"Acoustic profile must default to the right speaker only");
     check(app.field(F::fast_detail).text.starts_with("Next: acoustic"),"Acoustic GUI selection silently used cable identity");
     if(acoustic.capacity_mode) {
         if(acoustic.acoustic_ofdm)check(app.field(F::fast_detail).text.find("OFDM")!=std::string::npos&&
@@ -105,9 +105,15 @@ void presentation_and_retention() {
             app.field(F::fast_detail).text.find("ms blocks")!=std::string::npos&&
             app.field(F::fast_detail).text.find("symbols/s")==std::string::npos,
             "OFDM detail used inactive single-carrier symbol-rate fields");
-        check(app.field(F::fast_constellation).selected==std::to_string(acoustic.constellation)&&
-            app.field(F::fast_depth).selected==std::to_string(acoustic.interleave_depth)&&
-            app.field(F::fast_fec).selected=="sparse","Promoted acoustic capacity profile was not applied to GUI");
+        check(app.field(F::fast_constellation).selected=="16"&&app.field(F::fast_depth).selected=="8"&&
+            app.field(F::fast_coding).selected=="three-quarters"&&app.field(F::fast_fec).selected=="sparse",
+            "Acoustic 16-QAM, LDPC3/4, depth8 defaults were not applied to GUI");
+        app.select(F::fast_constellation,"64");app.toggle(F::fast_mono,false);
+        check(app.field(F::fast_constellation).selected=="64"&&!app.field(F::fast_mono).checked,
+            "Explicit acoustic 64-QAM and both-speaker output remain unavailable");
+        app.select(F::fast_profile,"acoustic");
+        check(app.field(F::fast_constellation).selected=="16"&&app.field(F::fast_mono).checked,
+            "Reselecting acoustic did not restore its modulation and output defaults");
         app.select(F::fast_coding,"half");
         check(app.field(F::fast_coding).selected=="half","Acoustic LDPC1/2 option missing");
         app.select(F::fast_coding,"two-thirds");
@@ -201,6 +207,32 @@ void live_plot_presentation() {
     plots.update(next,true,start+std::chrono::seconds(22));check(plots.history_size()==1,"New stream failed to start fresh waterfall history");
     next=std::make_shared<fast::Diagnostics>(*next);next->stream_id=19;
     plots.update(next,true,start+std::chrono::seconds(23));check(plots.history_size()==1,"Stream identity change mixed distinct waterfall histories");
+
+    P acoustic_plots;
+    auto acoustic=std::make_shared<fast::Diagnostics>(*data);
+    acoustic->acoustic_ofdm=true;acoustic->constellation_sample=acoustic->samples;
+    acoustic_plots.update(acoustic,true,start);
+    check(acoustic_plots.caption(B::fast_constellation).find("sampled points")!=std::string::npos&&
+          acoustic_plots.title(B::fast_constellation)=="Live RX equalized constellation",
+          "OFDM plot did not identify its fresh representative sample");
+    acoustic=std::make_shared<fast::Diagnostics>(*acoustic);
+    ++acoustic->revision;acoustic->samples+=3*acoustic->sample_rate;
+    acoustic_plots.update(acoustic,true,start+std::chrono::seconds(3));
+    check(acoustic_plots.title(B::fast_constellation)=="Last RX equalized constellation"&&
+          acoustic_plots.title(B::fast_waveform)=="Live RX waveform",
+          "Fresh PCM falsely marked an unchanged OFDM constellation live or stopped audio");
+    acoustic=std::make_shared<fast::Diagnostics>(*acoustic);
+    ++acoustic->revision;acoustic->constellation_sample=acoustic->samples;
+    acoustic_plots.update(acoustic,true,start+std::chrono::milliseconds(3100));
+    check(acoustic_plots.title(B::fast_constellation)=="Live RX equalized constellation",
+          "New OFDM points failed to restore constellation freshness");
+    acoustic=std::make_shared<fast::Diagnostics>(*acoustic);
+    ++acoustic->revision;acoustic->constellation_count=0;acoustic->input_count=1;
+    acoustic->input_points[0]={.001F,.002F};acoustic->input_sample=0;
+    acoustic_plots.update(acoustic,true,start+std::chrono::milliseconds(3200));
+    check(acoustic_plots.title(B::fast_constellation)=="Last RX input I/Q"&&
+          acoustic_plots.caption(B::fast_constellation).find("sampled")!=std::string::npos,
+          "OFDM unsynchronized input history lacks sampling or freshness labels");
 }
 void service_generations() {
     using F=ui::Field;using C=ui::Command;

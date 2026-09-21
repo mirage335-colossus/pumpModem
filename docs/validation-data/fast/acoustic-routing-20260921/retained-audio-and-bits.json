@@ -1,0 +1,42 @@
+[
+  {
+    "path": "/tmp/acoustic-routing-95-q64-stereo.f32",
+    "bytes": 9260836,
+    "sha256": "bb19a13465a19133c679304d067138f609384a8ad6a5ac5189371830ae13be12"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q64-stereo-bits.u8",
+    "bytes": 2080768,
+    "sha256": "70f30af70718914b4638291f6d06fec463d3d5e5656827d8f0a786e9d3d6f276"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q64-mono.f32",
+    "bytes": 9260840,
+    "sha256": "24c399cf2301d31b1bf470d0d2710e9bb35ed0f5710975cdc5961da7769d7d0b"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q64-mono-bits.u8",
+    "bytes": 2080768,
+    "sha256": "3eaadaf19947bd68d36c087ba814bbcd5b345aff4a0c441b7a1d1e4565f9f41a"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q16-mono.f32",
+    "bytes": 11620096,
+    "sha256": "ed987bf3867bba0efa34e12ba7fd17fd71b4f62052135cb7ce8b0f587aca6b2f"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q16-mono-bits.u8",
+    "bytes": 2080768,
+    "sha256": "b2ee456c3c08274aa432abb40cc92fec7e51b80a22077fe5a109a7d4c09fcc88"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q16-stereo.f32",
+    "bytes": 11620368,
+    "sha256": "25dd6171d321d0fdf807440fa26c4574190987353a9eed3e9188002ba0f3197a"
+  },
+  {
+    "path": "/tmp/acoustic-routing-95-q16-stereo-bits.u8",
+    "bytes": 2080768,
+    "sha256": "3c726faf86da3f0b54e57f4a2c4d32a66b38dfaaff41713a204562b1121df1c8"
+  }
+]

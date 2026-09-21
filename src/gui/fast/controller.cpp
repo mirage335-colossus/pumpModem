@@ -106,7 +106,9 @@ struct Controller::Impl {
             f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long transfers"},{"64","64"}};
             f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         }
-        settings.mono=channel!=fast::Channel::wire&&!settings.profile.acoustic_ofdm;
+        // One speaker avoids interference between two copies of the waveform.
+        // This routes playback to the right output; capture is unchanged.
+        settings.mono=channel!=fast::Channel::wire;
         f(F::fast_mono).checked=settings.mono;
         f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
         f(F::fast_constellation).selected=std::to_string(settings.profile.constellation);

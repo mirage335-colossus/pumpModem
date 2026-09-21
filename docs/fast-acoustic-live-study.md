@@ -6,31 +6,16 @@ validated cable waveform and regular transport remain separate. Fast acoustic
 OFDM uses the capacity codec (LDPC, approximately 0.3% outer RS, eight-bit source
 bytes and integrity-protected fixed-cycle completion/padding).
 
-## Selected default and completed bulk transfer
+## Earlier selected preset and completed bulk transfer
 
-The speaker/microphone default is now **64-QAM, LDPC 3/4, depth 8**, with a
+This section records the earlier **64-QAM, LDPC 3/4, depth 8** preset, with a
 32,768-point FFT, 4096-sample cyclic prefix, pilot stride 16, 500–18,000 Hz,
-nominal amplitude 0.40 and both output channels. The classic acoustic option
-remains available; the cable default is unchanged.
-
-A complete **5,000,000-byte** live transfer took **746.471 seconds** includnd completed bulk transfer
-
-The speaker/microphone default is now **64-QAM, LDPC 3/4, depth 8**, with a
-32,768-point FFT, 4096-sample cyclic prefix, pilot stride 16, 500–18,000 Hz,
-nominal amplitude 0.40 and both output channels. The classic acoustic option
-remains available; the cable default is unchanged.
+nominal amplitude 0.40 and both output channels. The current default is
+16-QAM with right-channel-only output following later decoding failures;
+see the [routing diagnosis](fast-acoustic-routing-diagnosis.md). Rates and
+references to the selected default below describe this earlier study.
 
 A complete **5,000,000-byte** live transfer took **746.471 seconds** including
-startup and final silence. Both file hashes were
-`7269849ebd08cdadfdca97dc85d62c038cbd28caf5ee99d487201322a68552bb`.
-All 840 LDPC frames converged; the decoder changed 1,893,045 hard bit decisions
-in 4,723 total iterations. No missing intervals, FIFO overflow, audio errors,
-or digital signal clipping occurred. Maximum DSP chunk time was 0.274 seconds
-and maximum queued capture was 0.256 seconds. Source goodput including the
-probe's eight-second tail was 53.67 kbit/s; including its additional start/stop
-wall time gives 53.59 kbit/s. This is a completed transfer, not an extrapolation.
-
-Known-bit replay of all 105 recorded cycles gave 4.777–5.2ing
 startup and final silence. Both file hashes were
 `7269849ebd08cdadfdca97dc85d62c038cbd28caf5ee99d487201322a68552bb`.
 All 840 LDPC frames converged; the decoder changed 1,893,045 hard bit decisions

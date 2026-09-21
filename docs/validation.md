@@ -4,6 +4,45 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast acoustic 16/64-QAM and output routing — 21 September 2026 UTC
+
+The [routing diagnosis](fast-acoustic-routing-diagnosis.md) reproduces the
+reported failure after interval reception. At unchanged 95% playback and 27%
+capture, 100 KB tests passed with both 16-QAM routes and with 64-QAM stereo;
+64-QAM right-only failed twice. Halving amplitude also failed, including a
+fresh trial with stronger LDPC 2/3. Each failure still received all 1016
+physical intervals. Known-bit replay found insufficient decoder information
+margin and a persistent frequency-dependent prediction mismatch in part of
+one failed recording. Freezing or fully replacing the refresh estimate did
+not recover that file; neither experiment was retained. The precise physical
+or receiver-internal source of the changing mismatch remains unresolved.
+
+The acoustic preset now uses **16-QAM, LDPC 3/4, depth 8, right-output-only**
+playback, with 38.80 kbit/s steady public-source capacity. Cable/classic presets
+and explicit 64-QAM/stereo choices remain available. A real 500,000-byte
+confirmation passed exactly in **140.497 seconds**, with 96/96 LDPC frames,
+3048/3048 intervals, no overflow, and matching source/received SHA-256.
+The final shared GUI Application transmit/listen/Save workflow passed exact
+60-byte text through real default-device audio in **41.456 seconds**. It used
+two Application instances with real production audio, not native widget clicks.
+
+The acoustic constellation display now samples across a publication batch
+instead of retaining only its highest-frequency points, and labels observations
+that stop updating while PCM continues. Focused telemetry checks cover frequency
+coverage, bounded storage, finite filtering, immutable frames, independent input
+retention, and freshness. Single-carrier chronological sampling is unchanged.
+The Release build and **20/20** selected CTest targets passed in **142.80 seconds**,
+including Fast codec/acoustic/session/transfer/files/CLI, both shared Fast GUI
+suites, telemetry, GUI self-check/controller/application, and regular short-text,
+fixed-stream, attachment, inspection, and explicit-binary regressions.
+Both Release GUI variants rebuilt; the Rev shared GUI self-check also passed.
+No native adapter implementation changed.
+
+These sequential transfers do not establish an 80% success rate for 50 MB or
+attainment of acoustic Shannon capacity. Methods, unsuccessful controls, exact
+results, and retained-input hashes are in the
+[evidence archive](validation-data/fast/acoustic-routing-20260921/README.md).
+
 ## Fast acoustic reception diagnosis — 21 September 2026 UTC
 
 The [reception diagnosis](fast-acoustic-reception-diagnosis.md) reproduces and

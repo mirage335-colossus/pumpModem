@@ -1,0 +1,117 @@
+{
+  "qam": 16,
+  "bits_per_tone": 4,
+  "code_rate": 0.75,
+  "compared_coded_bits": 2073600,
+  "frame_count": 32,
+  "fully_observed_frames": 32,
+  "incomplete_frame_indices": [],
+  "hard_ber": 0.01584104938271605,
+  "erased_bits": 0,
+  "confident_wrong_bits": 43,
+  "gmi_per_coded_bit": 0.9435504991470938,
+  "minimum_frame_gmi_per_bit": 0.93649714496,
+  "maximum_frame_gmi_per_bit": 0.952987721616,
+  "cycles": [
+    {
+      "index": 0.0,
+      "compared_bits": 518400.0,
+      "errors": 9007.0,
+      "ber": 0.0173746141975,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 12.0,
+      "mean_signed_llr": 18.3397611241,
+      "gmi_per_bit": 0.93771709037,
+      "oracle_scale": 1.0,
+      "oracle_gmi_per_bit": 0.93771709037
+    },
+    {
+      "index": 1.0,
+      "compared_bits": 518400.0,
+      "errors": 8687.0,
+      "ber": 0.0167573302469,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 21.0,
+      "mean_signed_llr": 17.9170549803,
+      "gmi_per_bit": 0.93873754566,
+      "oracle_scale": 1.0,
+      "oracle_gmi_per_bit": 0.93873754566
+    },
+    {
+      "index": 2.0,
+      "compared_bits": 518400.0,
+      "errors": 7204.0,
+      "ber": 0.0138966049383,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 2.0,
+      "mean_signed_llr": 19.0340560403,
+      "gmi_per_bit": 0.952174153065,
+      "oracle_scale": 1.5,
+      "oracle_gmi_per_bit": 0.953130392769
+    },
+    {
+      "index": 3.0,
+      "compared_bits": 518400.0,
+      "errors": 7950.0,
+      "ber": 0.0153356481481,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 8.0,
+      "mean_signed_llr": 18.4227035319,
+      "gmi_per_bit": 0.945573207494,
+      "oracle_scale": 1.5,
+      "oracle_gmi_per_bit": 0.946130121556
+    }
+  ],
+  "planes": [
+    {
+      "index": 0.0,
+      "compared_bits": 518400.0,
+      "errors": 5226.0,
+      "ber": 0.0100810185185,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 6.0,
+      "mean_signed_llr": 19.6429840302,
+      "gmi_per_bit": 0.961617677034,
+      "oracle_scale": 1.5,
+      "oracle_gmi_per_bit": 0.96382812422
+    },
+    {
+      "index": 1.0,
+      "compared_bits": 518400.0,
+      "errors": 11191.0,
+      "ber": 0.0215875771605,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 17.0,
+      "mean_signed_llr": 17.2151875559,
+      "gmi_per_bit": 0.925489129298,
+      "oracle_scale": 1.0,
+      "oracle_gmi_per_bit": 0.925489129298
+    },
+    {
+      "index": 2.0,
+      "compared_bits": 518400.0,
+      "errors": 5166.0,
+      "ber": 0.00996527777778,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 4.0,
+      "mean_signed_llr": 19.6478996166,
+      "gmi_per_bit": 0.961901247275,
+      "oracle_scale": 1.5,
+      "oracle_gmi_per_bit": 0.964090004574
+    },
+    {
+      "index": 3.0,
+      "compared_bits": 518400.0,
+      "errors": 11265.0,
+      "ber": 0.0217303240741,
+      "erased_bits": 0.0,
+      "confident_wrong_bits": 16.0,
+      "mean_signed_llr": 17.207504474,
+      "gmi_per_bit": 0.925193942981,
+      "oracle_scale": 1.0,
+      "oracle_gmi_per_bit": 0.925193942981
+    }
+  ],
+  "diagnostic_limits": "Empirical GMI of decoder metrics, not a strict channel-capacity upper bound. Code information load .75 is a margin reference, not a finite-code success guarantee. Oracle scale is chosen after capture using known bits. Bands include fixed alignment bits; frame/cycle/plane metrics exclude them.",
+  "code_information_load_per_tone": 3.0
+}

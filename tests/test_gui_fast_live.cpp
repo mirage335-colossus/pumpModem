@@ -19,12 +19,14 @@ namespace fixture {
 std::mutex mutex;
 std::vector<float> transmitted,input;
 std::size_t position=0;
+bool last_mono=false;
 }
 // Only hardware is replaced. The real Fast encoder, sampled modem, receiver,
 // telemetry worker and shared GUI controller process all samples and symbols.
 namespace datapump::audio {
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,
-              std::stop_token stop,StreamFormatCallback format,bool) {
+              std::stop_token stop,StreamFormatCallback format,bool mono) {
+    {std::lock_guard lock(fixture::mutex);fixture::last_mono=mono;}
     if(format)format({rate,rate,rate*.49,4096});
     std::vector<float> block(rate/20);
     while(!stop.stop_requested()) {
@@ -185,7 +187,10 @@ int main() {
             controller.edit(ui::Field::fast_text,message);
             unsynchronized_audio(controller);
             run_transfer(controller,false);
-            {std::lock_guard lock(fixture::mutex);fixture::input=std::move(fixture::transmitted);fixture::position=0;}
+            {std::lock_guard lock(fixture::mutex);
+                check(fixture::last_mono==(std::string(profile)=="acoustic"),
+                      "GUI session did not pass the selected default output routing to playback");
+                fixture::input=std::move(fixture::transmitted);fixture::position=0;}
             check(!fixture::input.empty(),"Live Fast TX produced no PCM");
             run_transfer(controller,true);
             if(!controller.enabled(ui::Command::fast_save))
