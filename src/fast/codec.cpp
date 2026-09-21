@@ -1,5 +1,6 @@
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
+#include "datapump/fast/attachment.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/fast/ldpc.hpp"
 #include "datapump/fast/outer_rs.hpp"
@@ -450,11 +451,13 @@ Decoded decode(std::span<const float> soft,std::size_t source_bytes,CodeRate rat
 }
 }
 
-struct ReceivedFile::Impl { Bytes data; };
+struct ReceivedFile::Impl { Bytes data;std::string filename;std::size_t prefix_bytes=0; };
 ReceivedFile::ReceivedFile(std::shared_ptr<Impl> impl):impl_(std::move(impl)){}
 ReceivedFile::~ReceivedFile()=default;
-std::uint64_t ReceivedFile::size()const{return impl_->data.size();}
-std::span<const std::uint8_t> ReceivedFile::bytes()const{return impl_->data;}
+std::uint64_t ReceivedFile::size()const{return impl_->data.size()-impl_->prefix_bytes;}
+bool ReceivedFile::is_attachment()const{return impl_->prefix_bytes!=0;}
+const std::string& ReceivedFile::filename()const{return impl_->filename;}
+std::span<const std::uint8_t> ReceivedFile::bytes()const{return std::span<const std::uint8_t>(impl_->data).subspan(impl_->prefix_bytes);}
 void ReceivedFile::save(const std::filesystem::path& path)const {
 #ifdef _WIN32
     auto* raw=_wfopen(path.c_str(),L"wbx");
@@ -464,7 +467,7 @@ void ReceivedFile::save(const std::filesystem::path& path)const {
     if(!raw)throw Error("Cannot exclusively create fast destination");
     File output(raw);
     try {
-        write_file(output.get(),impl_->data);
+        write_file(output.get(),bytes());
         if(std::fflush(output.get())!=0)throw Error("Fast destination write failed");
         auto* closed=output.release();if(std::fclose(closed)!=0)throw Error("Fast destination close failed");
     }catch(...) {
@@ -474,7 +477,7 @@ void ReceivedFile::save(const std::filesystem::path& path)const {
 
 TransmitEstimate estimate_transmission(const Profile& p,bool encrypted,std::uint64_t bytes) {
     validate(p);
-    if(bytes>xz_size_bound(256ULL*1024*1024))throw Error("Fast encoded source exceeds local memory budget");
+    if(bytes>xz_size_bound(attachment::source_limit(256ULL*1024*1024)))throw Error("Fast encoded source exceeds local memory budget");
     const auto capacity=static_cast<std::uint64_t>(p.interleave_depth)*source_bytes_per_group(p,encrypted)*8;
     const auto cycles=p.capacity_mode?2+bytes/capacity_source_bytes_per_cycle(p,encrypted):1+(9*(bytes+1)+capacity-1)/capacity;
     TransmitEstimate out;out.intervals=cycles*cycle_intervals(p);
@@ -771,8 +774,12 @@ void StreamDecoder::finish(bool physical_end) {
         auto output=impl_->interpret();
         if(impl_->source_encoding==SourceEncoding::xz) {
             impl_->stats.source_bytes=0;
-            output->data=decode_xz(output->data,impl_->quota);
-            impl_->stats.source_bytes=output->data.size();
+            output->data=decode_xz(output->data,attachment::source_limit(impl_->quota));
+            auto description=attachment::inspect(output->data);
+            const auto content_bytes=output->data.size()-description.prefix_bytes;
+            if(content_bytes>impl_->quota)throw Error("Fast decoded content exceeds local source quota");
+            output->filename=std::move(description.filename);output->prefix_bytes=description.prefix_bytes;
+            impl_->stats.source_bytes=content_bytes;
         }
         impl_->received=std::shared_ptr<const ReceivedFile>(new ReceivedFile(std::move(output)));
         impl_->stats.complete=true;impl_->stats.authenticated=impl_->crypto.has_value();

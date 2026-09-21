@@ -1,4 +1,5 @@
 #include "datapump/fast/compression.hpp"
+#include "datapump/fast/attachment.hpp"
 #include <lzma.h>
 #include <algorithm>
 #include <array>
@@ -6,7 +7,8 @@
 
 namespace datapump::fast {
 namespace {
-constexpr std::uint64_t maximum_source=256ULL*1024*1024;
+constexpr std::uint64_t maximum_content=256ULL*1024*1024;
+constexpr std::uint64_t maximum_source=maximum_content+attachment::prefix_limit;
 constexpr std::uint64_t decoder_memory=64ULL*1024*1024;
 [[noreturn]] void fail(lzma_ret status) {
     if(status==LZMA_MEM_ERROR||status==LZMA_MEMLIMIT_ERROR)
@@ -77,6 +79,13 @@ PreparedXzSource prepare_xz_source(SourceReader source,std::uint64_t quota,std::
                 std::max<std::uint64_t>(required,result.encoded.capacity()*2))));
         result.encoded.insert(result.encoded.end(),chunk.begin(),chunk.begin()+static_cast<std::ptrdiff_t>(n));
     }
+    return result;
+}
+PreparedXzSource prepare_xz_attachment(SourceReader source,std::string_view filename,std::uint64_t quota,std::stop_token stop) {
+    quota=std::min(quota,maximum_content);
+    const auto prefix_bytes=attachment::prefix(filename).size();
+    auto result=prepare_xz_source(attachment::source(std::move(source),filename,quota),attachment::source_limit(quota),stop);
+    result.source_bytes-=prefix_bytes;
     return result;
 }
 Bytes decode_xz(std::span<const std::uint8_t> source,std::uint64_t quota) {

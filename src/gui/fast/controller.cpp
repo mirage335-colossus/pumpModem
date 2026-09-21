@@ -8,6 +8,7 @@
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
+#include "datapump/fast/attachment.hpp"
 #include "datapump/fast/preset.hpp"
 #include "datapump/crypto.hpp"
 #include <algorithm>
@@ -56,21 +57,20 @@ struct Controller::Impl {
     std::array<ui::FieldState,static_cast<std::size_t>(F::count)> fields;
     fast::Session session;
     fast::Settings settings;
-    struct ProfileSelection {fast::Profile profile;std::string snr,rate;audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;};
-    std::map<fast::Channel,ProfileSelection> profile_selections;
+    std::map<fast::Channel,audio::ChannelMode> profile_routing;
     std::map<std::pair<fast::Channel,double>,fast::SnrPreset> resolved_presets;
     std::optional<fast::Channel> selected_channel;
     fast::Snapshot snapshot;
     std::optional<std::uint64_t> file_size;
     FastPlots plots;
     plots::PlotSnapshot qr;
-    std::string qr_text,qr_error;
+    std::string qr_text,qr_error,qr_brightness;
     std::uint64_t qr_revision=1;
     fast::Profile receiving_profile;
     struct HistoryEntry {std::string id;fast::Snapshot snapshot;};
     std::vector<HistoryEntry> history;
     std::string current_history;
-    bool selected=false,listen_enabled=true;
+    bool selected=false,current_transmitting=false;
     std::chrono::steady_clock::time_point retry_after{};
     std::string estimate_key;
     std::optional<fast::TransmitEstimate> source_estimate;
@@ -92,7 +92,7 @@ struct Controller::Impl {
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
         f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"}};
-        f(F::fast_profile).selected="wire";
+        f(F::fast_profile).selected="acoustic";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
         f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long cable transfers"},{"64","64"}};
@@ -100,17 +100,18 @@ struct Controller::Impl {
         f(F::fast_device).text="default";
         f(F::fast_mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
         f(F::fast_mono).selected="left";f(F::fast_mono).checked=true;
+        f(F::fast_qr_brightness).options={{"normal","Normal"},{"dim","Dim"},{"dark","Dark"},{"off","Off"}};
+        f(F::fast_qr_brightness).selected="dark";
         f(F::fast_encryption).checked=false;
         f(F::fast_source).options={{"text","Text"},{"file","File"}};f(F::fast_source).selected="text";
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
         f(F::fast_status).text="Choose matching settings at both ends.";
-        set_profile(fast::Channel::wire);refresh();
+        set_profile(fast::Channel::acoustic);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
-    void remember_profile() {
-        if(selected_channel)profile_selections[*selected_channel]={settings.profile,
-            f(F::fast_expected_snr).selected,f(F::fast_symbol_rate).selected,settings.channel_mode};
+    void remember_routing() {
+        if(selected_channel)profile_routing[*selected_channel]=settings.channel_mode;
     }
     void sync_profile_fields() {
         f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
@@ -144,20 +145,14 @@ struct Controller::Impl {
         f(F::fast_symbol_rate).selected=fast::symbol_rate_option_id(settings.profile);
     }
     void set_profile(fast::Channel channel) {
-        remember_profile();selected_channel=channel;
-        const auto saved=profile_selections.find(channel);
-        if(saved==profile_selections.end()) {
-            const auto snr=fast::default_expected_snr(channel);
-            settings.profile=resolved_preset(channel,snr).profile;
-            f(F::fast_expected_snr).selected=number(snr,0);
-            f(F::fast_symbol_rate).selected="auto";
-            settings.channel_mode=audio::ChannelMode::left_mono;settings.mono=true;
-        } else {
-            settings.profile=saved->second.profile;settings.channel_mode=saved->second.channel_mode;
-            settings.mono=settings.channel_mode!=audio::ChannelMode::stereo;
-            f(F::fast_expected_snr).selected=saved->second.snr;
-            f(F::fast_symbol_rate).selected=saved->second.rate;
-        }
+        remember_routing();selected_channel=channel;
+        const auto snr=fast::default_expected_snr(channel);
+        settings.profile=resolved_preset(channel,snr).profile;
+        f(F::fast_expected_snr).selected=number(snr,0);
+        f(F::fast_symbol_rate).selected="auto";
+        const auto saved=profile_routing.find(channel);
+        settings.channel_mode=saved==profile_routing.end()?audio::ChannelMode::left_mono:saved->second;
+        settings.mono=settings.channel_mode!=audio::ChannelMode::stereo;
         f(F::fast_expected_snr).options={{"manual","Manual"}};
         for(const auto snr:fast::expected_snr_options(channel)) {
             const auto id=number(snr,0);
@@ -186,7 +181,8 @@ struct Controller::Impl {
     std::shared_ptr<const fast::ReceivedFile> selected_file() const {
         const auto id=!f(F::fast_files).selected.empty()?f(F::fast_files).selected:f(F::fast_history).selected;
         const auto found=std::find_if(history.begin(),history.end(),[&](const auto& entry){return entry.id==id;});
-        return found==history.end()?nullptr:found->snapshot.file;
+        if(found==history.end()||!found->snapshot.file||!found->snapshot.file->is_attachment())return nullptr;
+        return found->snapshot.file;
     }
     std::shared_ptr<const fast::ReceivedFile> selected_signal() const {
         const auto found=std::find_if(history.begin(),history.end(),[&](const auto& entry){return entry.id==f(F::fast_history).selected;});
@@ -197,10 +193,12 @@ struct Controller::Impl {
         const bool edit=editable();
         const bool key_ready=!f(F::fast_encryption).checked||settings.key.has_value();
         switch(command) {
-        case C::fast_cancel:return session.active()||pending_start!=C::none||(listen_enabled&&selected);
+        case C::fast_cancel: {
+            const auto current=session.poll();return pending_start==C::fast_transmit||(current.active&&current.transmitting);
+        }
         case C::fast_save:return bool(selected_file())&&!key_loading;
         case C::fast_copy_signal:case C::fast_paste_signal: {
-            const auto file=selected_signal();return file&&file->size()<=fast::text_byte_limit&&
+            const auto file=selected_signal();return file&&!file->is_attachment()&&file->size()<=fast::text_byte_limit&&
                 valid_clipboard_text(file->bytes())&&(command!=C::fast_paste_signal||edit);
         }
         case C::fast_clear_received:case C::fast_toggle_qr_expanded:return true;
@@ -213,10 +211,13 @@ struct Controller::Impl {
     }
     void update_qr() {
         const auto text=f(F::fast_source).selected=="text"?f(F::fast_text).text:std::string{};
-        if(text==qr_text)return;
-        qr_text=text;qr_error.clear();std::optional<QrCode> code;
+        const auto brightness=f(F::fast_qr_brightness).selected;
+        if(text==qr_text&&brightness==qr_brightness)return;
+        qr_text=text;qr_brightness=brightness;qr_error.clear();std::optional<QrCode> code;
         try {if(!text.empty())code=encode_qr(text);}catch(const Error& error){qr_error=error.what();}
-        qr=plots::PlotSnapshot::qr(std::move(code),plots::QrBrightness::dark);++qr_revision;
+        const auto mode=brightness=="normal"?plots::QrBrightness::normal:brightness=="dim"?plots::QrBrightness::dim:
+            brightness=="off"?plots::QrBrightness::off:plots::QrBrightness::dark;
+        qr=plots::PlotSnapshot::qr(std::move(code),mode);++qr_revision;
     }
     void refresh_history() {
         auto& signals=f(F::fast_history);auto& files=f(F::fast_files);
@@ -227,21 +228,27 @@ struct Controller::Impl {
             if(capture.active&&!capture.transmitting)label+=" · "+std::to_string(capture.intervals)+" intervals";
             if(capture.file) {
                 const auto bytes=capture.file->bytes();
-                if(bytes.size()<=fast::text_byte_limit&&valid_clipboard_text(bytes)) {
+                if(!capture.file->is_attachment()&&bytes.size()<=fast::text_byte_limit&&valid_clipboard_text(bytes)) {
                     std::string preview(bytes.begin(),bytes.end());
                     std::replace(preview.begin(),preview.end(),'\n',' ');std::replace(preview.begin(),preview.end(),'\r',' ');
                     // Bound the visible preview on a UTF-8 boundary.
                     if(preview.size()>160) {preview.resize(160);while(!preview.empty()&&!valid_clipboard_text(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(preview.data()),preview.size())))preview.pop_back();preview+="…";}
                     label+=" · "+preview;
                 }
-                files.records.push_back({entry.id,{{"received-"+entry.id+".bin · "+std::to_string(capture.file->size())+" bytes",5,1,-8,26,12}},true,true});
+                if(capture.file->is_attachment()) {
+                    label+=" · "+capture.file->filename();
+                    files.records.push_back({entry.id,{{capture.file->filename()+" · "+std::to_string(capture.file->size())+" bytes",5,1,-8,26,12}},true,true});
+                }
             }
             signals.records.push_back({entry.id,{{std::move(label),5,1,-8,26,12}},true,
-                capture.file&&capture.file->size()<=fast::text_byte_limit&&valid_clipboard_text(capture.file->bytes())});
+                capture.file&&!capture.file->is_attachment()&&capture.file->size()<=fast::text_byte_limit&&valid_clipboard_text(capture.file->bytes())});
         }
     }
     void record_snapshot() {
-        const bool observed=snapshot.transmitting||snapshot.intervals||(snapshot.diagnostics&&snapshot.diagnostics->acquired);
+        // Session clears its active TX flag on teardown; keep local direction
+        // through that terminal update so sent content never enters Signals.
+        if(current_transmitting||snapshot.transmitting||(snapshot.diagnostics&&snapshot.diagnostics->transmitting))return;
+        const bool observed=snapshot.intervals||(snapshot.diagnostics&&snapshot.diagnostics->acquired);
         if(current_history.empty()&&!observed&&!snapshot.file)return;
         if(current_history.empty()) {
             current_history=std::to_string(++history_id);history.push_back({current_history,{}});
@@ -250,7 +257,10 @@ struct Controller::Impl {
         const auto found=std::find_if(history.begin(),history.end(),[&](const auto& entry){return entry.id==current_history;});
         if(found==history.end())return;
         found->snapshot=snapshot;
-        if(snapshot.file) {f(F::fast_files).selected=current_history;f(F::fast_history).selected=current_history;}
+        if(snapshot.file) {
+            if(snapshot.file->is_attachment())f(F::fast_files).selected=current_history;
+            f(F::fast_history).selected=current_history;
+        }
         std::uint64_t retained=0;for(const auto& entry:history)if(entry.snapshot.file)retained+=entry.snapshot.file->size();
         while(history.size()>64||retained>settings.quota_bytes) {
             if(history.front().snapshot.file)retained-=history.front().snapshot.file->size();
@@ -291,9 +301,6 @@ struct Controller::Impl {
         f(F::fast_key_path).enabled=f(F::fast_encryption).checked;
         f(F::fast_text).visible=f(F::fast_source).selected=="text";
         f(F::fast_file).visible=!f(F::fast_text).visible;
-        f(F::fast_source_detail).text=f(F::fast_text).visible?
-            "XZ · UTF-8 text · "+std::to_string(f(F::fast_text).text.size())+" / "+std::to_string(fast::text_byte_limit)+" bytes":
-            "XZ-compressed file · "+(file_size?std::to_string(*file_size)+" bytes":"choose a file");
         update_qr();
         const auto& p=settings.profile;
         const double gross=fast::gross_bitrate(p);
@@ -314,7 +321,8 @@ struct Controller::Impl {
                 if(f(F::fast_text).visible)source_estimate=fast::estimate_xz_transmission(p,f(F::fast_encryption).checked,
                     fast::byte_source(Bytes(f(F::fast_text).text.begin(),f(F::fast_text).text.end())),settings.quota_bytes);
                 else {
-                    source_estimate=fast::estimate_transmission(p,f(F::fast_encryption).checked,fast::xz_size_bound(*size));
+                    const auto prefix=fast::attachment::prefix(fast::attachment::filename_from_path(path_from_text(f(F::fast_file).text)));
+                    source_estimate=fast::estimate_transmission(p,f(F::fast_encryption).checked,fast::xz_size_bound(*size+prefix.size()));
                     source_estimate->source_bps=8.*static_cast<double>(*size)/source_estimate->seconds;
                 }
             }catch(const Error&) {} // A draft estimate cannot interrupt reception.
@@ -370,7 +378,7 @@ struct Controller::Impl {
         // A worker may finish after the last UI poll. Retain its final result
         // before launch replaces the Session snapshot and reception identity.
         observe_snapshot(session.poll());
-        configure_session();plots.reset();current_history.clear();
+        configure_session();plots.reset();current_history.clear();current_transmitting=command==C::fast_transmit;
         receiving_profile=settings.profile;
         if(command==C::fast_transmit) {
             if(f(F::fast_source).selected=="text")session.transmit_text(f(F::fast_text).text);
@@ -428,7 +436,7 @@ void Controller::poll() {
             p.pending_start=C::none;p.retry_after=std::chrono::steady_clock::now()+std::chrono::seconds(2);report_error(e.what());
         }
     }
-    if(!p.closing&&p.selected&&p.listen_enabled&&!snapshot.active&&!p.session.active()&&p.pending_start==C::none&&
+    if(!p.closing&&p.selected&&!snapshot.active&&!p.session.active()&&p.pending_start==C::none&&
         !p.key_loading&&(!p.f(F::fast_encryption).checked||p.settings.key)&&std::chrono::steady_clock::now()>=p.retry_after) {
         activate(C::fast_listen);
     }
@@ -438,7 +446,7 @@ void Controller::set_selected(bool selected) {
     auto& p=*impl_;if(p.closing||p.selected==selected)return;
     p.selected=selected;p.retry_after={};
     if(!selected) {p.pending_start=C::none;if(p.session.poll().listening)p.session.cancel();}
-    else p.listen_enabled=true;
+
     ++p.revision;p.refresh();
 }
 void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pending_start=C::none;p.session.close();p.pending.clear();p.services.clear();p.refresh();}
@@ -463,7 +471,10 @@ void Controller::select(F field,std::string id) {
     const auto& options=p.f(field).options;
     if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;}))return;
     try {
-        if(field==F::fast_profile)p.set_profile(fast::parse_channel(id));
+        if(field==F::fast_profile) {
+            if(id==p.f(field).selected)return;
+            p.set_profile(fast::parse_channel(id));
+        }
         else if(field==F::fast_expected_snr) {
             if(id=="manual")p.make_manual();
             else {
@@ -487,9 +498,9 @@ void Controller::select(F field,std::string id) {
             p.settings.mono=id!="stereo";p.f(field).checked=p.settings.mono;
         }
         else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;
-        else if(field==F::fast_source) {} // Source drafts have independent retained fields.
+        else if(field==F::fast_source||field==F::fast_qr_brightness) {} // Independent local presentation fields.
         else return;
-        p.f(field).selected=std::move(id);p.estimate_key.clear();if(field!=F::fast_source&&field!=F::fast_mono)p.settings_changed();++p.revision;p.refresh();
+        p.f(field).selected=std::move(id);p.estimate_key.clear();if(field!=F::fast_source&&field!=F::fast_mono&&field!=F::fast_qr_brightness)p.settings_changed();++p.revision;p.refresh();
     }catch(const std::exception& e) {report_error(e.what());}
 }
 void Controller::toggle(F field,bool value) {
@@ -521,14 +532,12 @@ void Controller::activate(C command) {
             p.observe_snapshot(p.session.poll());
             p.session.clear_received();p.snapshot.file.reset();p.history.clear();p.current_history.clear();p.f(F::fast_history).selected.clear();p.f(F::fast_files).selected.clear();
             p.refresh_history();p.f(F::fast_status).text="Received content cleared from memory.";break;
-        case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save complete received bytes","received.bin");break;
+        case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save received attachment",p.selected_file()->filename());break;
         case C::fast_cancel:
-            if(p.pending_start!=C::fast_transmit&&!p.session.poll().transmitting)p.listen_enabled=false;
             if(p.pending_start!=C::none)p.f(F::fast_status).text="Cancelled before audio was acquired.";
             p.pending_start=C::none;p.session.cancel();break;
         case C::fast_transmit:case C::fast_listen:
             fast::validate(p.settings.profile);
-            if(command==C::fast_listen)p.listen_enabled=true;
             p.acquire_deadline=std::chrono::steady_clock::now()+std::chrono::seconds(2);
             if(p.session.active()) {
                 p.pending_start=command;p.session.cancel();
@@ -549,7 +558,7 @@ void Controller::activate(C command) {
 bool Controller::enabled(C command) const {return impl_->enabled(command);}
 std::string Controller::command_label(C command) const {
     if(command==C::fast_transmit)return impl_->f(F::fast_source).selected=="text"?"Transmit text":"Transmit file";
-    if(command==C::fast_cancel)return impl_->session.poll().transmitting||impl_->pending_start==C::fast_transmit?"Cancel":"Pause listening";
+    if(command==C::fast_cancel)return "Cancel";
     return {};
 }
 const ui::FieldState& Controller::field(F field) const {return impl_->f(field);}

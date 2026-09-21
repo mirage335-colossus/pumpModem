@@ -5,7 +5,9 @@ waveform bandwidth and symbol timing together. **Symbol rate** allows an
 explicit timing override. These are local presets: no probe, SNR measurement,
 negotiation, or automatic change during a transmission is performed. Configure
 both peers identically. Manual rate, QAM, LDPC or depth changes make the SNR
-selector **Manual**; each channel retains its selections when switching views.
+selector **Manual**. Switching channel profiles restores the selected channel's
+default SNR and its corresponding waveform settings. Speakers/microphone is the
+initial GUI channel; output routing selections remain retained.
 
 ## Reference bandwidth
 

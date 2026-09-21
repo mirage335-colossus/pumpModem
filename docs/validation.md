@@ -4,6 +4,50 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast receive browser and named attachments — 21 September 2026 UTC
+
+Fast opens on Speakers / microphone at 3 dB expected SNR. Switching channel
+profiles reapplies their default SNR/waveform while retaining routing choices.
+The composer omits the source-byte summary and listening controls; Cancel
+applies only to transmission. QR brightness provides Normal, Dim, Dark and Off.
+Signals contains receptions only and single-click activation copies completed
+text. Files in memory contains completed attachments only, with their filenames.
+
+Fast file sources prepend exactly `#ATTACHMENT### filename.ext #ATTACHMENT### `
+before XZ compression. Only an exact, bounded, valid leading basename envelope
+is interpreted, after physical completion and decompression. Counts and saved
+bytes exclude the prefix. Invalid/nonleading markers remain ordinary content;
+additional prefix storage cannot bypass content quotas. Fast owns this convention
+independently of the unchanged regular attachment syntax and modem framing.
+
+Both Release GUI builds passed. `gui_fast` and `gui_fast_live` passed, including
+continuous reception, acoustic defaults, profile resets, QR changes while
+listening, receive-only history, text/attachment separation, completion between
+polls and exact named-file saves over sampled wire/acoustic paths. All 18 selected
+shared GUI/regular compatibility checks passed in 72.38 seconds:
+`gui_application`, `gui_layout`, `gui_contract`, `gui_bindings`,
+`gui_adapter_boundary`, `gui_overlay`, `gui_inspection`, `gui_binary_editor`,
+`gui_controller`, `gui_legacy`, `gui_legacy_live`, `compression_short`, `transfer`,
+`stream_codec`, `stream_receive`, `attachment`, `pattern_correlator` and
+`fast_boundary`.
+
+The seven focused Fast suites passed: `fast_attachment`, `fast_compression`,
+`fast_codec`, `fast_files`, `fast_session`, all 21 `fast_cli` cases and
+`fast_boundary`. Coverage includes an independent exact prefix vector, frozen
+raw wire vectors, empty/binary files, UTF-8 basenames, ambiguous delimiters,
+malformed/nonleading/nested markers, quota edges, deferred interpretation and
+public/keyed sampled text/file round trips. No regular runtime code changed.
+
+FLTK native adapter and document conformance passed on isolated Xvfb displays.
+Rev native adapter/platform conformance and both 1×/2× coordinate checks also
+passed (four suites, 102.68 seconds).
+A captured default screen confirmed acoustic continuous reception and the new
+controls; visual review shortened the Cancel label to fit its button. Both GUIs
+rebuilt and the Fast, application and layout tests passed again after that label
+change. `git diff --check` passed. Tests use
+the workspace build directory for temporary files. This does not establish
+physical-link throughput/reliability or native Windows-window behavior.
+
 ## Fast console, audio channels and XZ source — 21 September 2026 UTC
 
 Ordinary GUI launches now select Fast Modem and continuously listen. Fast owns

@@ -47,7 +47,9 @@ class ReceivedFile {
 public:
     ~ReceivedFile();
     std::uint64_t size() const;
-    // Immutable raw bytes for programmatic consumers; no text interpretation.
+    bool is_attachment() const;
+    const std::string& filename() const;
+    // Exact content bytes; a completed attachment's leading envelope is omitted.
     std::span<const std::uint8_t> bytes() const;
     // Exclusive creation: an existing destination is never overwritten.
     void save(const std::filesystem::path&) const;

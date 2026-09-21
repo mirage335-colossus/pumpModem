@@ -1,17 +1,18 @@
 # Fast text and file transfer
 
 Fast Modem is a separate streaming QAM/LDPC and classic APSK modem. Ordinary
-desktop launches select it by default and listen continuously. The modem dropdown
+desktop launches select it with Speakers / microphone and listen continuously. The modem dropdown
 lists Fast Modem, Robust Modem and Legacy Modem. Explicit Robust simulation or
 settings launches retain their workflow. Console opens first; Developer mode
 reveals Modem details with manual symbol rate, constellation and coding controls.
 Channel profile and Expected SNR sit below the diagnostic plots. Cable defaults
-to an expected 36 dB SNR; speakers/microphone defaults to 3 dB.
+to an expected 36 dB SNR; speakers/microphone defaults to 3 dB. Switching channel
+profiles reapplies that profile's default SNR and waveform settings.
 
 Enter a Message or Attach file, then transmit. Use text restores the retained
 text draft. Sending pauses listening and resumes it afterward, including after
-cancelling transmission. Pause listening stops automatic listening until Listen
-is selected. Encryption is optional and initially off;
+cancelling transmission. Cancel applies to transmission; listening needs no
+separate control. Encryption is optional and initially off;
 enabling it requires a key. Both peers need matching local settings and source
 format, including encryption and the same key material when enabled. Save becomes
 available only after physical completion and integrity checks. Encrypted transfers
@@ -20,14 +21,20 @@ never overwritten.
 
 Text is limited to 32,768 source bytes, including UTF-8 bytes. The GUI accepts
 valid UTF-8 without NUL; files preserve arbitrary binary data. Text and files use
-the same XZ source format. No application-level message type, text encoding tag,
-filename or modem-length header is sent. XZ metadata, including decoded block
+XZ compression. File sources begin with the bounded application prefix
+`#ATTACHMENT### filename.ext #ATTACHMENT### ` before compression; text sources
+have no added prefix. Only a valid prefix at byte zero identifies an attachment.
+Its filename is a suggested Save basename, never a destination path. The
+prefix is interpreted after decompression and physical completion, and is
+excluded from saved file bytes. XZ metadata, including decoded block
 sizes, is interpreted only after physical completion; it never chooses modem
 framing, allocation or completion. UTF-8, newlines and file bytes keep their exact
 values after compression and bounded post-completion decompression.
-The GUI Signals browser previews completed valid UTF-8 and supports copy/paste.
-Files in memory retains completed exact bytes for saving; pending rows remain
-unavailable for copy/save. The CLI reports counts and integrity.
+The GUI Signals browser shows received signals only. A single click copies a
+completed text message; Paste as message restores it to the composer. Files in
+memory lists completed attachments with their filenames, excluding text messages.
+Pending rows remain unavailable for copy/save. QR brightness offers Normal, Dim,
+Dark and Off. The CLI reports counts and integrity.
 Switching Text/File retains both drafts. Loading a key does not enable
 encryption; switching encryption off retains the key for later use.
 
@@ -274,9 +281,10 @@ the acoustic channel.
 ## Fixed intervals, without received lengths
 
 Every physical interval still contains exactly **2,048 inner-coded bits**.
-There are no received packet lengths, payload counts, filenames, message types,
-addresses or negotiated profiles. Allocation and boundaries follow matching
-local settings. Source completion flags never choose a modem boundary.
+There are no modem packet lengths, payload counts, addresses or negotiated
+profiles. Allocation and boundaries follow matching local settings. Attachment
+filenames belong to the post-completion source interpretation, never modem
+framing. Source completion flags never choose a modem boundary.
 
 Capacity transmission starts with **2,048 known QPSK training symbols**. A full
 64-symbol public QPSK marker precedes interval zero and every 16th interval

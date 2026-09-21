@@ -26,8 +26,23 @@ void fast_default_console() {
     check(app.page()==P::console&&visible(P::console)&&!visible(P::fast_modem),
           "Fast must open Console and hide modem details initially");
     check(app.control(control(F::developer_mode)).visible&&app.control(control(F::fast_text)).visible&&
-          !app.control(control(F::fast_symbol_rate)).visible&&app.field(F::fast_mono).selected=="left",
+          !app.control(control(F::fast_symbol_rate)).visible&&app.field(F::fast_mono).selected=="left"&&
+          app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_expected_snr).selected=="3",
           "Fast default surface or channel routing is incorrect");
+    check(control(F::fast_history).activate_on_select&&control(F::fast_history).activate_record==C::fast_copy_signal,
+          "A single signal selection must copy completed text");
+    for(const auto& declaration:ui::console_screen())if(declaration.scope==ui::ScreenScope::fast)
+        check(declaration.command!=C::fast_listen,"Continuous listening must not retain a Listen button");
+    check(!app.enabled(C::fast_cancel),"Idle Fast mode must not expose a pause-listening action");
+    const auto& brightness=control(F::fast_qr_brightness);
+    check(brightness.kind==ui::Kind::choice&&app.control(brightness).visible&&app.field(F::fast_qr_brightness).selected=="dark",
+          "Fast QR brightness must start at Dark and remain accessible");
+    app.edit(F::fast_text,"Fast QR brightness");
+    for(const auto* mode:{"normal","dim","dark","off"}) {
+        app.select(brightness,mode);
+        check(app.field(F::fast_qr_brightness).selected==mode&&app.field(F::qr_brightness).selected=="dark",
+              "Fast QR brightness changed the independent regular setting");
+    }
     app.toggle(F::developer_mode,true);app.navigate(P::fast_modem);
     app.select(control(F::fast_constellation),"16");
     const auto selected=app.field(F::fast_constellation).selected;
@@ -39,6 +54,7 @@ void fast_default_console() {
     app.edit(F::fast_text,"Fast message");app.activate(C::fast_toggle_qr_expanded);
     check(app.overlay()&&app.overlay()->controls[0].bitmap==ui::Bitmap::fast_qr,
           "Fast message QR did not expand independently");
+    check(app.field(F::fast_qr_brightness).selected=="off","Expanding Fast QR discarded its brightness");
     check(app.overlay_key({ui::Key::escape})&&!app.overlay(),"Escape did not dismiss Fast QR");
     app.close();
 }

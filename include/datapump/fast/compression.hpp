@@ -2,6 +2,7 @@
 
 #include "datapump/fast/codec.hpp"
 #include <stop_token>
+#include <string_view>
 
 namespace datapump::fast {
 // The production source is one XZ stream with LZMA2 and CRC32, independent of
@@ -13,6 +14,10 @@ struct PreparedXzSource { Bytes encoded; std::uint64_t source_bytes=0; };
 // variable compression work stalling the live audio producer.
 PreparedXzSource prepare_xz_source(SourceReader,std::uint64_t source_quota=256ULL*1024*1024,
                                   std::stop_token={});
+// File payload quotas/counts exclude the bounded source envelope; encoding
+// storage includes it. Text continues to use prepare_xz_source without a prefix.
+PreparedXzSource prepare_xz_attachment(SourceReader,std::string_view filename,
+    std::uint64_t content_quota=256ULL*1024*1024,std::stop_token={});
 // Decoding is invoked only after physical completion and coding/integrity checks.
 Bytes decode_xz(std::span<const std::uint8_t>,std::uint64_t output_quota);
 // Bound for this pinned streaming encoder (one block, no intermediate flush),

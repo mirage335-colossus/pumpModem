@@ -333,6 +333,8 @@ class FastCLI(unittest.TestCase):
         self.assertFalse(result["cancelled"])
         self.assertEqual(result["source_bytes"], len(SOURCE_BYTES))
         self.assertEqual(destination.read_bytes(), SOURCE_BYTES)
+        self.assertTrue(result["is_attachment"])
+        self.assertEqual(result["filename"], self.source.name)
         self.assertGreater(result["authenticated_groups"], 0)
         self.assertTrue(result["encrypted"])
         self.assertTrue(result["authenticated"])
@@ -362,6 +364,8 @@ class FastCLI(unittest.TestCase):
         self.assertGreater(result["coding_cycles"], 1)
         self.assertGreaterEqual(result["verified_bytes"], len(SOURCE_BYTES))
         self.assertEqual(destination.read_bytes(), SOURCE_BYTES)
+        self.assertTrue(result["is_attachment"])
+        self.assertEqual(result["filename"], self.source.name)
         human = self.run_pump("fast-rx", "--input", self.plain_wave, *PROFILE).stdout
         human.decode("utf-8")  # Invalid source bytes must not corrupt console text.
         self.assertNotIn(b"\x1b", human)
@@ -386,6 +390,8 @@ class FastCLI(unittest.TestCase):
                     self.assertEqual(result["encrypted"], encrypted)
                     self.assertNotIn("text_preview", result)
                     self.assertEqual(destination.read_bytes(), text.encode("utf-8"))
+                    self.assertFalse(result["is_attachment"])
+                    self.assertEqual(result["filename"], "")
         plain_text = self.directory / "text-False-0.wav"
         human = self.run_pump("fast-rx", "--input", plain_text, *PROFILE).stdout.decode("utf-8")
         self.assertNotIn("Received text (escaped):", human)
@@ -393,6 +399,31 @@ class FastCLI(unittest.TestCase):
         self.assertIn("encryption off", human)
         self.assertIn("checksum", human.lower())
         self.assertNotIn("; authenticated", human)
+
+    def test_attachment_marker_only_at_byte_zero_and_empty_file(self):
+        marker = "#ATTACHMENT### café.bin #ATTACHMENT### "
+        for index, text in enumerate((marker + "payload", "prefix " + marker + "payload",
+                                     "#ATTACHMENT### ../bad #ATTACHMENT### payload")):
+            wave = self.directory / f"attachment-marker-{index}.wav"
+            destination = self.directory / f"attachment-marker-{index}.bin"
+            self.run_pump("fast-tx", "--text", text, "--output", wave, *PROFILE)
+            result = json.loads(self.run_pump("fast-rx", "--input", wave, "--save", destination,
+                                             *PROFILE, "--json").stdout)
+            self.assertEqual(result["is_attachment"], index == 0)
+            self.assertEqual(result["filename"], "café.bin" if index == 0 else "")
+            self.assertEqual(destination.read_bytes(), b"payload" if index == 0 else text.encode("utf-8"))
+        source = self.directory / "empty-attachment.bin"
+        source.write_bytes(b"")
+        wave = self.directory / "empty-attachment.wav"
+        destination = self.directory / "empty-attachment-out.bin"
+        tx = json.loads(self.run_pump("fast-tx", "--input", source, "--output", wave, *PROFILE, "--json").stdout)
+        result = json.loads(self.run_pump("fast-rx", "--input", wave, "--save", destination,
+                                         *PROFILE, "--json").stdout)
+        self.assertEqual(tx["source_bytes"], 0)
+        self.assertEqual(result["source_bytes"], 0)
+        self.assertTrue(result["is_attachment"])
+        self.assertEqual(result["filename"], source.name)
+        self.assertEqual(destination.read_bytes(), b"")
 
     def test_explicit_plaintext_tx_without_preview(self):
         text = "x" * 4095 + "🙂 trailing text\n"

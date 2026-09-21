@@ -1,6 +1,7 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
+#include "datapump/fast/attachment.hpp"
 #include "datapump/fast/modem.hpp"
 #include <array>
 #include <chrono>
@@ -46,6 +47,7 @@ void test_files() {
     });
     if(!rx.complete)throw std::runtime_error("S16 WAV loopback incomplete: "+rx.status);
     check(rx.physical_complete && rx.file && Bytes(rx.file->bytes().begin(),rx.file->bytes().end())==content && rx_progress,"streamed S16 WAV exact roundtrip");
+    check(rx.file->is_attachment()&&rx.file->filename()=="source.bin"&&rx.source_bytes==content.size(),"File envelope metadata or original byte count changed");
     rx.file->save(destination);check(std::filesystem::file_size(destination)==content.size(),"explicit save source size");
     rejects([&]{rx.file->save(destination);},"save must exclusively create destination");
     rejects([&]{transmit_wave(settings,source,wave);},"WAV generation must exclusively create destination");
@@ -97,6 +99,7 @@ void text_wave_roundtrips() {
         });
         check(rx.complete && rx.physical_complete && rx.file && Bytes(rx.file->bytes().begin(),rx.file->bytes().end())==expected,
               "text S16 WAV preserves UTF-8, newline and embedded zero bytes");
+        check(!rx.file->is_attachment()&&rx.file->filename().empty(),"Ordinary text acquired an attachment envelope");
         check(rx.encrypted==encrypted && rx.authenticated==encrypted,
               "public text never claims authentication");
         check(encrypted?(rx.authenticated_groups>0 && rx.checksum_groups==0):
@@ -112,12 +115,22 @@ void text_wave_roundtrips() {
         transmit_wave(settings,source,file_wave);
         const auto file_rx=receive_wave(settings,file_wave);
         check(file_rx.complete && file_rx.file && Bytes(file_rx.file->bytes().begin(),file_rx.file->bytes().end())==expected,
-              "file and text use identical source interpretation");
+              "file payload differs from equivalent text bytes");
+        check(file_rx.file->is_attachment()&&file_rx.file->filename()==std::string(prefix)+"-source.bin"&&file_rx.source_bytes==expected.size(),
+              "File transfer did not retain its exact filename metadata");
         const auto empty_wave=directory.path/(std::string(prefix)+"-empty.wav");
         transmit_text_wave(settings,"",empty_wave);
         const auto empty=receive_wave(settings,empty_wave);
         check(empty.complete && empty.file && empty.source_bytes==0 && Bytes(empty.file->bytes().begin(),empty.file->bytes().end()).empty(),
               "empty text preserves exact endpoint in both protection modes");
+        check(!empty.file->is_attachment(),"Empty text became an attachment");
+        const auto empty_source=directory.path/(std::string(prefix)+"-empty.bin");write(empty_source,{});
+        const auto empty_file_wave=directory.path/(std::string(prefix)+"-empty-file.wav");
+        transmit_wave(settings,empty_source,empty_file_wave);
+        const auto empty_file=receive_wave(settings,empty_file_wave);
+        check(empty_file.complete&&empty_file.file&&empty_file.file->is_attachment()&&empty_file.file->size()==0&&
+              empty_file.source_bytes==0&&empty_file.file->filename()==std::string(prefix)+"-empty.bin",
+              "Empty attachment lost type, name or exact empty content");
         const auto oversize_wave=directory.path/(std::string(prefix)+"-oversize.wav");
         rejects([&]{transmit_text_wave(settings,std::string(text_byte_limit+1,'x'),oversize_wave);},
                 "text local size limit rejected");
@@ -154,7 +167,8 @@ void acoustic_wave_tail() {
         settings.profile.ofdm_fft_size=fft;settings.profile.ofdm_prefix_samples=prefix;
         settings.profile.constellation=64;settings.profile.interleave_depth=1;
         const auto wave=directory.path/(std::to_string(fft)+".wav");
-        const auto estimate=estimate_xz_transmission(settings.profile,false,byte_source(content));
+        const auto prepared=prepare_xz_attachment(byte_source(content),attachment::filename_from_path(source));
+        const auto estimate=estimate_transmission(settings.profile,false,prepared.encoded.size());
         transmit_wave(settings,source,wave);
         check(std::filesystem::file_size(wave)==44+2*estimate.samples,"OFDM WAV duration differs from exact estimate");
         const auto received=receive_wave(settings,wave);

@@ -1,6 +1,7 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
+#include "datapump/fast/attachment.hpp"
 #include "datapump/fast/modem.hpp"
 #include <algorithm>
 #include <array>
@@ -135,7 +136,7 @@ Snapshot transmit_wave(const Settings& s,const std::filesystem::path& source,con
     check_settings(s);
     if(!std::filesystem::is_regular_file(source))throw Error("Fast source must be a readable regular file");
     if(std::filesystem::file_size(source)>s.quota_bytes)throw Error("Fast source exceeds local quota");
-    return transmit_source_wave(s,prepare_xz_source(file_source(source),s.quota_bytes,stop),wave,std::move(progress),stop);
+    return transmit_source_wave(s,prepare_xz_attachment(file_source(source),attachment::filename_from_path(source),s.quota_bytes,stop),wave,std::move(progress),stop);
 }
 Snapshot transmit_text_wave(const Settings& s,const std::string& text,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
     check_settings(s);

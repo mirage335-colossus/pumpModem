@@ -52,6 +52,11 @@ void supported_sizes() {
                             Rect{0, 0, default_width, default_height},
                             Rect{0, 0, 1387, 1001}, Rect{0, 0, 1920, 1080}}) {
         const DesktopLayout layout(size.w, size.h);
+        const auto fast_qr=layout[Slot::fast_qr],fast_brightness=layout[Slot::fast_qr_brightness];
+        check(fast_brightness.x==fast_qr.x&&fast_brightness.w==fast_qr.w&&
+              fast_brightness.y+fast_brightness.h<fast_qr.y&&fast_qr.w==fast_qr.h&&
+              fast_qr.y+fast_qr.h<layout[Slot::fast_generate_key].y,
+              "Fast QR brightness must fit above its preview without overlapping key controls");
         for (std::size_t index = 1; index < static_cast<std::size_t>(Slot::count); ++index) {
             const auto slot = static_cast<Slot>(index);
             const auto rect = layout[slot];

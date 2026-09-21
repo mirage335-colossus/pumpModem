@@ -358,7 +358,8 @@ void fast_mode_visibility() {
     auto* selector=mode_choice(*window);
     auto* encryption=dynamic_cast<NativeCheckbox*>(find_button(*window,"Encryption"));
     auto* choose=find_button(*window,"Attach file");auto* transmit=find_button(*window,"Transmit text");
-    auto* listen=find_button(*window,"Listen");auto* regular=find_button(*window,"Transmit");
+    auto* regular=find_button(*window,"Transmit");
+    require(!find_button(*window,"Listen")&&!find_button(*window,"Pause listening"),"Fast retained listening controls");
     const auto field_widget=[&]<class Widget>(const char* label) -> Widget* {
         auto* heading=find_label(*window,label);if(!heading)return nullptr;
         for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
@@ -377,17 +378,20 @@ void fast_mode_visibility() {
     auto* expected_snr=field_widget.template operator()<NativeChoice>("Expected SNR");
     auto* symbol_rate=field_widget.template operator()<NativeChoice>("Symbol rate");
     auto* text=field_widget.template operator()<NativeEditor>("Message");
+    NativeChoice* brightness=nullptr;
     const std::function<void(Fl_Group&)> find_fast_editor=[&](Fl_Group& group) {
         const auto expected=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_text];
         for(int i=0;i<group.children();++i) {
             auto* child=group.child(i);
             if(auto* editor=dynamic_cast<NativeEditor*>(child);editor&&editor->x()==expected.x&&editor->y()==expected.y)text=editor;
+            const auto qr_choice=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_qr_brightness];
+            if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->x()==qr_choice.x&&choice->y()==qr_choice.y)brightness=choice;
             if(auto* nested=dynamic_cast<Fl_Group*>(child))find_fast_editor(*nested);
         }
     };
     find_fast_editor(*window);
     auto* file=field_widget.template operator()<NativeInput>("Source file");
-    require(selector&&encryption&&expected_snr&&symbol_rate&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    require(selector&&encryption&&expected_snr&&symbol_rate&&text&&file&&choose&&transmit&&brightness&&regular,"Fast fixture lacks native controls");
     require(selector->value()==1&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
         "Modem selector did not default to Robust Modem or retained the obsolete Fast toggle");
     app.application.toggle(ui::Field::fast_mode,true);
@@ -403,8 +407,13 @@ void fast_mode_visibility() {
         window->size(size.first,size.second);refresh();
         selector->picked(selector->menu());refresh();
         require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&choose->visible_r()&&text->visible_r()&&
-            transmit->visible_r()&&listen->visible_r()&&listen->active_r()&&!encryption->value()&&!regular->visible_r(),
+            transmit->visible_r()&&brightness->visible_r()&&brightness->active_r()&&!encryption->value()&&!regular->visible_r(),
             "Fast Modem selection did not show the default plain-text interface");
+        for(int i=0;i<4;++i) {
+            brightness->picked(brightness->menu()+i);refresh();
+            require(app.application.field(ui::Field::fast_qr_brightness).selected==std::array{"normal","dim","dark","off"}[i],
+                "Fast native QR choice did not update its independent brightness");
+        }
         require(find_button(*window,"Console")->visible_r()&&!find_button(*window,"Modem details")->visible_r(),"Fast console did not hide developer tab by default");
         app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::fast_modem);refresh();
         require(symbol_rate->visible_r()&&!text->visible_r(),"Fast modem page did not separate details from message controls");
@@ -473,7 +482,7 @@ void fast_mode_visibility() {
         text->changed("Native fast café\nSecond line");refresh();
         require(transmit->active_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line","Fast native text composer did not preserve UTF-8/newline input");
         encryption->value(1);encryption->do_callback();refresh();
-        require(!listen->active_r()&&!transmit->active_r(),"Fast encrypted native actions accepted a missing key");
+        require(!app.application.enabled(ui::Command::fast_listen)&&!transmit->active_r(),"Fast encrypted native actions accepted a missing key");
         encryption->value(0);encryption->do_callback();refresh();
         app.application.select(ui::Field::fast_source,"file");refresh();
         require(!text->visible_r()&&choose->visible_r()&&file->visible_r()&&std::string(transmit->label())=="Transmit file",

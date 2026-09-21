@@ -119,13 +119,20 @@ void fast_cancel() {
 }
 void text_audio_roundtrip() {
     const auto text=std::string("Fast text: café\nline two")+std::string(1,'\0')+" tail";
-    for(bool encrypted:{false,true}) {
+    for(bool encrypted:{false,true})for(bool attachment:{false,true}) {
         fast::Settings s;s.device="fixture";s.profile.interleave_depth=1;
         s.channel_mode=encrypted?audio::ChannelMode::right_mono:audio::ChannelMode::stereo;
         s.mono=encrypted; // Explicit local routing overrides stay usable.
         if(encrypted)s.key=Crypto(Bytes(32,37));
         fixture::reset({},true,true);
-        fast::Session tx;tx.configure(s);tx.transmit_text(text);
+        const auto path=std::filesystem::temp_directory_path()/("datapump-fast-session-file-"+
+            std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
+        struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code error;std::filesystem::remove(path,error);}} cleanup{path};
+        fast::Session tx;tx.configure(s);
+        if(attachment) {
+            std::ofstream file(path,std::ios::binary);file.write(text.data(),static_cast<std::streamsize>(text.size()));file.close();
+            tx.transmit(path);
+        } else tx.transmit_text(text);
         await([&]{return !tx.active();},"text audio TX did not finish");
         const auto sent=tx.poll();
         check(fixture::last_channels.load()==audio::output_channels(s.mono,s.channel_mode),"Session ignored explicit local output routing");
@@ -146,6 +153,9 @@ void text_audio_roundtrip() {
         check(received.complete&&received.physical_complete&&received.file&&received.error.empty(),
               "text audio reception did not observe a valid physical end");
         check(Bytes(received.file->bytes().begin(),received.file->bytes().end())==Bytes(text.begin(),text.end()),"text audio changed UTF-8, newline or zero bytes");
+        check(received.file->is_attachment()==attachment&&
+            received.file->filename()==(attachment?path.filename().string():std::string{}),
+            "Live text/file attachment classification or filename changed");
         check(received.encrypted==encrypted&&received.authenticated==encrypted,
               "public text was labelled authenticated or encryption state lost");
         check(encrypted?(received.authenticated_groups>0&&received.checksum_groups==0):

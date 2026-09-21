@@ -83,9 +83,9 @@ void snr_and_symbol_rate_controls() {
     using F=ui::Field;using C=ui::Command;
     unsigned acquisitions=0;
     fast_ui::Controller controller([&] {++acquisitions;return false;});
-    check(controller.field(F::fast_expected_snr).selected=="36"&&
+    check(controller.field(F::fast_profile).selected=="acoustic"&&controller.field(F::fast_expected_snr).selected=="3"&&
         controller.field(F::fast_symbol_rate).selected=="auto",
-        "Cable GUI did not start at the automatic nominal SNR and timing");
+        "Fast GUI did not default to speakers/microphone at 3 dB");
     for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
         const auto& c=control(field);
         check(c.kind==ui::Kind::choice&&c.persistent==(field==F::fast_expected_snr)&&c.scope==ui::ScreenScope::fast&&c.help[0],
@@ -154,10 +154,12 @@ void snr_and_symbol_rate_controls() {
         "Acoustic overrides leaked into the cable profile");
     controller.select(F::fast_expected_snr,"40");
     controller.select(F::fast_profile,"acoustic");
-    check(controller.field(F::fast_expected_snr).selected=="manual"&&
-        controller.field(F::fast_symbol_rate).selected==rate->id&&
-        controller.field(F::fast_constellation).selected=="64"&&!controller.field(F::fast_mono).checked,
-        "Switching channels discarded retained SNR, timing, constellation or routing");
+    const auto default_acoustic=fast::resolve_snr_preset(fast::Channel::acoustic,3).profile;
+    check(controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_symbol_rate).selected=="auto"&&
+        controller.field(F::fast_constellation).selected==std::to_string(default_acoustic.constellation)&&!controller.field(F::fast_mono).checked,
+        "Changing channel did not reset the SNR/profile preset while preserving output routing");
+    controller.select(F::fast_constellation,"64");
     controller.select(F::fast_symbol_rate,"auto");
     check(controller.field(F::fast_constellation).selected=="64"&&
         controller.field(F::fast_expected_snr).selected=="manual"&&
@@ -180,17 +182,19 @@ void snr_and_symbol_rate_controls() {
         [&](const auto& option){return option.id==fast::symbol_rate_option_id(narrow_auto);}),
         "Manual narrow SC Auto timing has no matching explicit dropdown option");
     controller.select(F::fast_profile,"wire");
-    check(controller.field(F::fast_expected_snr).selected=="40",
-        "Cable SNR selection was discarded by profile switching");
-    controller.activate(C::fast_listen);
+    check(controller.field(F::fast_expected_snr).selected=="36",
+        "Returning to cable restored an old expected SNR instead of its 36 dB default");
+    controller.set_selected(true);controller.activate(C::fast_listen);
     check(acquisitions==1&&controller.active()&&controller.field(F::fast_expected_snr).enabled&&
         controller.field(F::fast_symbol_rate).enabled,"Pending listening disabled editable modem settings");
     controller.select(F::fast_expected_snr,"36");controller.edit(F::fast_text,"Draft while waiting for input");
     check(controller.field(F::fast_expected_snr).selected=="36"&&controller.enabled(C::fast_transmit),
         "Listening could not accept a new profile or transmit draft");
-    controller.activate(C::fast_cancel);
+    check(!controller.enabled(C::fast_cancel),"A pending listener exposed Cancel transmission");
+    controller.activate(C::fast_cancel);check(controller.active(),"Cancel transmission stopped a listener");
+    controller.set_selected(false);
     check(!controller.active()&&controller.field(F::fast_expected_snr).enabled&&controller.field(F::fast_symbol_rate).enabled,
-        "Cancellation did not release the SNR/rate controls");
+        "Leaving Fast mode did not release pending audio acquisition");
     controller.close();
 }
 void presentation_and_retention() {
@@ -206,7 +210,10 @@ void presentation_and_retention() {
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
     app.select(mode,"fast");
     check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
-    check(app.field(F::fast_mono).selected=="left","Cable must default to left mono");
+    check(app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_expected_snr).selected=="3"&&
+        app.field(F::fast_mono).selected=="left","Fast must default to speakers/microphone with left mono");
+    check(app.field(F::fast_qr_brightness).selected=="dark"&&app.field(F::fast_qr_brightness).options.size()==4,
+        "Fast QR brightness choices/default differ from the shared convention");
     for(const auto& c:ui::console_screen()) {
         if(c.scope==ui::ScreenScope::regular||c.scope==ui::ScreenScope::legacy)check(!app.control(c).visible,"Other modem controls leaked into the fast interface");
         else if(c.scope==ui::ScreenScope::fast&&c.page==ui::Page::console)

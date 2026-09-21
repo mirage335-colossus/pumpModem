@@ -29,10 +29,10 @@ enum class Slot {
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
     fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
-    fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_source_detail, fast_text, fast_file, fast_choose_file,
-    fast_transmit, fast_listen, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
+    fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_text, fast_file, fast_choose_file,
+    fast_transmit, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
     fast_correction, fast_auth, fast_detail, fast_history, fast_status,
-    fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr,
+    fast_waveform, fast_waterfall, fast_constellation_plot, fast_airtime, fast_diagnostics, fast_snr, fast_files, fast_use_text, fast_copy_signal, fast_paste_signal, fast_qr, fast_qr_brightness,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_transmit, legacy_waterfall, legacy_status, legacy_mono,
     count
 };
@@ -84,21 +84,20 @@ struct DesktopLayout {
         out[Slot::fast_airtime]={352,13,std::max(0,width-675),28};
         out[Slot::fast_text]={margin,114,fast_width-190,128};
         out[Slot::fast_file]={margin,114,fast_width-190,field_height};
-        out[Slot::fast_qr]={width-margin-170,103,170,170};
+        out[Slot::fast_qr_brightness]={width-margin-170,92,170,22};
+        out[Slot::fast_qr]={width-margin-170,123,170,170};
         out[Slot::fast_choose_file]={margin,258,124,action_height};
         out[Slot::fast_use_text]={margin+134,258,106,action_height};
         out[Slot::fast_transmit]={margin+250,258,144,action_height};
         out[Slot::fast_cancel]={margin+404,258,144,action_height};
-        out[Slot::fast_listen]={margin+558,258,120,action_height};
-        out[Slot::fast_source_detail]={margin,299,fast_width,24};
-        out[Slot::fast_encryption]={margin,337,130,28};
-        out[Slot::fast_key]={margin+145,337,fast_width-455,field_height};
-        out[Slot::fast_open_key]={width-margin-292,336,140,action_height};
-        out[Slot::fast_generate_key]={width-margin-140,336,140,action_height};
-        out[Slot::fast_key_path]={margin,372,fast_width,18};
+        out[Slot::fast_encryption]={margin,314,130,28};
+        out[Slot::fast_key]={margin+145,314,fast_width-455,field_height};
+        out[Slot::fast_open_key]={width-margin-292,313,140,action_height};
+        out[Slot::fast_generate_key]={width-margin-140,313,140,action_height};
+        out[Slot::fast_key_path]={margin,349,fast_width,18};
         const int signals_width=(fast_width-fast_gap)*2/3;
-        out[Slot::fast_history]={margin,420,signals_width,std::max(100,height-835)};
-        out[Slot::fast_files]={margin+signals_width+fast_gap,420,fast_width-signals_width-fast_gap,std::max(100,height-835)};
+        out[Slot::fast_history]={margin,400,signals_width,std::max(100,height-815)};
+        out[Slot::fast_files]={margin+signals_width+fast_gap,400,fast_width-signals_width-fast_gap,std::max(100,height-815)};
         out[Slot::fast_copy_signal]={margin,height-403,124,action_height};
         out[Slot::fast_paste_signal]={margin+134,height-403,140,action_height};
         out[Slot::fast_save]={margin+signals_width+fast_gap,height-403,160,action_height};

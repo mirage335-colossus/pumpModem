@@ -42,19 +42,24 @@ integrity, settings details and the matching-peer/capacity explanations. Hiding
 that tab returns to Console without changing settings.
 
 The independent Fast composer provides **Message**, **Attach file**, **Use text**,
-transmit/cancel, an expandable message QR code, optional encryption and retained
-key selection. Text and file drafts survive source changes. Both are XZ-compressed;
-there is no transmitted content-type marker. **Signals** shows pending and
-completed transfers in stable rows. Completed valid UTF-8 can be copied or pasted
-as a new message. **Files in memory** retains completed exact bytes for explicit
-saving; neither pending data nor cancellation grants copy/save eligibility.
+transmit/cancel, an expandable message QR code with Normal/Dim/Dark/Off brightness,
+optional encryption and retained key selection. Text and file drafts survive
+source changes. Both are XZ-compressed; attachments have a bounded filename
+prefix at source byte zero, interpreted only after physical completion.
+**Signals** shows received pending and completed signals in stable rows;
+transmissions do not create rows. A single click copies completed valid UTF-8
+text, which can also be pasted as a new message. **Files in memory** lists only
+completed attachments with their suggested filenames and exact payload bytes.
+Text messages do not appear there. Neither pending data nor cancellation grants
+copy/save eligibility.
 History is bounded to 64 entries and the local source-memory quota. Existing save
 destinations are never overwritten. Only keyed transfers claim authentication.
 
 Fast listens continuously when selected on a normal live launch. Sending pauses
 reception and resumes listening afterward, including after cancelling a
 transmission. A received stream is retained before the next listener starts.
-Pause listening stops automatic listening until Listen is selected. Changing
+Cancel is available only for a pending or active transmission; no listening
+buttons or source-byte summary clutter the composer. Changing
 modes stops Fast listening; transmitting work continues to be polled. Starting
 Fast obtains idle audio ownership without cancelling a pending
 Robust reception. Fast's regression simulator has no GUI control.
@@ -66,7 +71,9 @@ feeds receiver decisions. RX constellation points precede slicing; TX points com
 from the mapper. Titles distinguish active, stalled and retained captures. The
 waterfall retains at most 96 rows, with display publication limited to ten frames
 per second. **Audio device**, **Channel profile** and **Expected SNR** sit at the
-bottom. Defaults are 36 dB for cable and 3 dB for speakers/microphone. The final
+bottom. Speakers/microphone is the default channel, at 3 dB expected SNR; cable
+defaults to 36 dB. Changing profiles restores their default SNR and waveform
+settings, while retaining output routing choices. The final
 row contains channel routing, expected steady modem bitrate after coding and
 recurring overhead, the assumed-SNR Shannon–Hartley limit, and occupied frequency
 range/bandwidth. Gross and measured source rates stay on Modem details.

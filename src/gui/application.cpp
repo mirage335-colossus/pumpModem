@@ -436,6 +436,8 @@ BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width
         view.title=impl_->fast_controller.bitmap_title(control.bitmap);
         if(view.title.empty())view.title=control.label;
         view.caption=impl_->fast_controller.bitmap_caption(control.bitmap,width);
+        if(control.bitmap==ui::Bitmap::fast_qr)
+            view.caption_tone=impl_->fast_controller.field(ui::Field::fast_qr_brightness).selected=="normal"?ui::TextTone::inverse:ui::TextTone::muted;
         return view;
     }
     BitmapPresentation view;view.source=impl_->bitmaps.get(control.bitmap);view.revision=impl_->bitmaps.version(control.bitmap);

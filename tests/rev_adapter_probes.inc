@@ -45,6 +45,15 @@
                         !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
                         "Rev Fast did not default to plain text and keyless receive");
                     require(!tabs.at(ui::Page::console)->resolved.hidden&&tabs.at(ui::Page::fast_modem)->resolved.hidden,"Rev Fast default tabs are incorrect");
+                    auto* brightness=by_field(ui::Field::fast_qr_brightness).choice;
+                    require(brightness&&allows_input(brightness),"Rev Fast QR brightness is unavailable");
+                    for(const auto* value:{"normal","dim","dark","off"}) {
+                        brightness->params.value=value;brightness->onChange(click);settle();
+                        require(application.field(ui::Field::fast_qr_brightness).selected==value,
+                            "Rev Fast QR choice did not update its independent brightness");
+                    }
+                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast)
+                        require(binding.control.command!=ui::Command::fast_listen,"Rev Fast retained a listening control");
                     application.toggle(ui::Field::developer_mode,true);application.select_page(ui::Page::fast_modem);settle();
                     for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
                         application.select(ui::Field::fast_profile,channel);settle();

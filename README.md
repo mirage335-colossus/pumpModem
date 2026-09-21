@@ -88,8 +88,8 @@ Fast now has **Expected SNR** and **Symbol rate** dropdowns. Expected SNR sets
 matching local waveform/coding defaults, starting at **36 dB for audio cable**
 and **3 dB for speakers/microphone**. The menu retains higher qualified settings
 and reaches down to 40 dB below each highest setting. Weak presets narrow their bandwidth; the displayed SNR stays referenced
-to the original channel bandwidth. Manual overrides and settings for each
-channel are retained. These are assumed operating targets, not automatic SNR
+to the original channel bandwidth. Switching channel profiles restores the
+selected channel's default SNR and waveform settings. These are assumed operating targets, not automatic SNR
 measurements. See [SNR presets and rate selection](docs/fast-snr-presets.md).
 
 The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accepts
@@ -354,8 +354,9 @@ for both stereo outputs. All three GUIs offer **Left mono**, **Right mono**, and
 channel with every selection; WAV output and simulation keep their existing
 single-channel waveform.
 
-Ordinary desktop launches now open **Fast Modem** and listen continuously. Its
-Console provides text/file composition, QR, received signals and files in memory;
+Ordinary desktop launches now open **Fast Modem** on **Speakers / microphone**
+and listen continuously. Its Console provides text/file composition, QR brightness,
+received signals with single-click text copying, and received attachments in memory;
 Developer mode reveals a separate Modem details tab. Fast compresses text and
 files with XZ. The dropdown order is Fast Modem, Robust Modem, Legacy Modem.
 

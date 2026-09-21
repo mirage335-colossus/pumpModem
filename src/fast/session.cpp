@@ -2,6 +2,7 @@
 #include "session_state.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/compression.hpp"
+#include "datapump/fast/attachment.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/audio.hpp"
 #include <algorithm>
@@ -185,7 +186,7 @@ struct Session::Impl {
                     std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
                     if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
                     if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
-                    send(stop,s,prepare_xz_source(file_source(path),s.quota_bytes,stop),false,stream_id);
+                    send(stop,s,prepare_xz_attachment(file_source(path),attachment::filename_from_path(path),s.quota_bytes,stop),false,stream_id);
                 }
             }
             catch(const std::exception& e) {update([&](auto& out){if(!stop.stop_requested())out.error=e.what();out.status="Fast transfer incomplete";});}

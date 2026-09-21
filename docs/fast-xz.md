@@ -1,8 +1,9 @@
 # Fast source compression
 
 Production Fast Modem text and file transfers encode one XZ stream before the
-independent Fast coding and modulation layers. Text and files use identical
-source bytes, with no type or filename prefix. XZ preserves arbitrary bytes,
+independent Fast coding and modulation layers. Text has no added source prefix.
+Files prepend the bounded [attachment convention](#attachment-source-prefix)
+before compression. XZ preserves arbitrary payload bytes,
 including NUL, trailing zeros, partial UTF-8 sequences in files, and empty files.
 
 The encoder uses LZMA2, preset 6 with a fixed 4 MiB dictionary, and the XZ CRC32
@@ -35,8 +36,10 @@ file copy, waveform or complete bit-vector is retained. This prevents variable
 compression time from stalling live playback. Decoding
 has a 64 MiB codec memory limit, independent of any dictionary requested by the
 XZ source, and expands into a separately bounded output buffer. Both the opaque
-receive spool and decompressed output are bounded by the configured source
-quota, at most 256 MiB each. They may coexist during post-end decoding, plus
+receive spool and decompressed content are bounded by the configured source
+quota, at most 256 MiB each. Decompression permits only the fixed additional
+attachment-prefix allowance, then checks the remaining content against its
+original quota. They may coexist during post-end decoding, plus
 bounded codec scratch and vector reallocation overhead; no temporary files
 are created. A quota violation leaves
 the transfer incomplete and unavailable for saving. The transmit quota limits
@@ -49,7 +52,7 @@ increases either local quota.
 Actual transmission compresses the source once; the retained bytes determine
 exact airtime and feed playback. This includes the XZ container, local coding
 fill, modem framing and physical absence tail. Source byte counts and source
-goodput refer to original bytes. Editing a source file after preparation does
+goodput refer to original payload bytes, excluding an attachment prefix. Editing a source file after preparation does
 not change the transmitted bytes or airtime. A compose view may use the XZ
 worst-case bound while file content has not yet been compressed. The displayed modem bitrate remains independent of compression
 ratio and per-message startup/end overhead.
@@ -60,6 +63,27 @@ Production `Session` and WAV transfer APIs explicitly wrap sources in XZ and
 select `SourceEncoding::xz` in both the encoder and decoder. The decoder waits
 for physical completion before decompression. This preserves the frozen
 coding vectors without importing or modifying regular modem compression.
+
+## Attachment source prefix
+
+A file source starts with exactly `#ATTACHMENT### filename.ext #ATTACHMENT### `,
+followed by its original bytes. The basename is valid UTF-8, 1–255 bytes, with
+no path separators, control characters or ambiguous closing delimiter. Its name
+is only a suggestion for an explicit Save action. Ordinary text has no added
+envelope. This Fast convention is independent of the regular modem's convention.
+
+Recognition is bounded and starts strictly at decoded source byte zero, after
+physical completion, integrity validation and XZ decoding. A marker after a BOM,
+newline or other content is ordinary content. Invalid or missing envelopes also
+remain ordinary bytes. The exact valid leading envelope is reserved: text that
+starts with it is interpreted as an attachment. Nested markers in the file's
+payload are never interpreted again. No source length or filename influences
+modem geometry, allocation, acquisition or completion.
+
+Completed attachment metadata identifies its suggested name; `bytes()`, `size()`,
+Save, source byte counts and goodput all describe only the file payload. Text
+messages stay in Signals and do not populate Files in memory. Both peers need
+the attachment-aware source implementation to recover named file payloads.
 
 `fast_compression` tests independently generated XZ bytes, fragmented readers,
 random/incompressible sources, empty and trailing-zero content, source and output
