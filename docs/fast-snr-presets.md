@@ -142,3 +142,9 @@ reproduced on a physical speaker/microphone link and corrected. A failed pilot
 no longer prevents later good pilots from restoring reception; the narrow
 acoustic fallback's unintended 10 dB output-power increase was also removed.
 See the [diagnosis and measured comparisons](fast-acoustic-low-snr-recovery.md).
+
+Subsequent [physical cable level calibration](fast-cable-level-calibration.md)
+retained amplitude 0.30 for cable and radio single-carrier profiles. Their
+settled output power already stays constant as bandwidth narrows; no extra
+bandwidth-dependent attenuation was justified by the connected cable tests.
+The radio audio waveform was tested through that cable, not through an IC-7100.

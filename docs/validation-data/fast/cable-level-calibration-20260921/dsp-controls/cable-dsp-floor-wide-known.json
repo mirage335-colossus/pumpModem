@@ -1,0 +1,63 @@
+{
+  "analysis": "known-source Gray QAM residual",
+  "qualified": true,
+  "order": 4194304,
+  "bits_per_symbol": 22,
+  "intervals": 64,
+  "symbols_per_interval": 94,
+  "zero_label_padding_bits_per_interval": 20,
+  "summary": {
+    "symbols": 6016,
+    "signal_energy": 6042.084023972553,
+    "error_energy": 0.00032099245171327055,
+    "known_evm": 0.0002304910305590238,
+    "known_evm_percent": 0.02304910305590238,
+    "known_signal_to_residual_db": 72.74691940587834,
+    "nearest_decision_evm": 0.00022992836133386188,
+    "nearest_label_mismatches": 15,
+    "gain_real": 1.0000009509382723,
+    "gain_imag": -2.7728172280056156e-06,
+    "gain_magnitude": 1.0000009509421166,
+    "gain_db": 8.259774350169362e-06,
+    "phase_degrees": -0.00015887057344937008,
+    "after_global_complex_gain_evm": 0.00023047217043699157,
+    "after_global_complex_gain_signal_to_residual_db": 72.74763016516789,
+    "known_payload_bits": 131072,
+    "known_payload_bit_errors": 15,
+    "known_payload_ber": 0.00011444091796875
+  },
+  "heldout_global_gain": {
+    "split": "even intervals fit, odd intervals held out",
+    "fitted_real": 1.0000029468053049,
+    "fitted_imag": -4.306661547286957e-07,
+    "symbols": 3008,
+    "evm": 0.00022810516630348277,
+    "signal_to_residual_db": 72.83729756744505
+  },
+  "probe": {
+    "exact": 0,
+    "decoded_complete": 0,
+    "raw_wrong_bits": 15,
+    "raw_wrong_bits_counted": true,
+    "amplitude": 0.3,
+    "symbol_rate": 17647.05882,
+    "rolloff": 0.02
+  },
+  "gain_interpretation": "Residual scalar after production RX normalization/equalization, not hardware gain.",
+  "residual_interpretation": "Known-source residual includes noise, distortion, timing, phase and equalizer errors. It is not calibrated AWGN SNR.",
+  "global_fit_caveat": "Complex gain fitting removes common amplitude/phase error and can hide a label rotation; raw known-source EVM remains the primary metric.",
+  "inputs": {
+    "probe": {
+      "path": "/tmp/cable-dsp-floor-wide.json",
+      "sha256": "4a1168b144c7f26411622bdfb1496e0ee775c1c2fd9dd6e8ceef1cfbdea79b2e"
+    },
+    "tx_bits": {
+      "path": "/tmp/cable-dsp-floor-wide.bits",
+      "sha256": "6b49e443a3b9aeda162cd6bec604092603e404cacce9503a729b3936d76d7d7c"
+    },
+    "rx_symbols": {
+      "path": "/tmp/cable-dsp-floor-wide.iq",
+      "sha256": "e3fd3fdc3190adceb414c71d52eab06f16132b055414bad23c4dcf1283dbde9d"
+    }
+  }
+}

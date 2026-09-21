@@ -60,10 +60,32 @@ practical decoding headroom and is not claimed to reach capacity. Narrower
 rolloff, denser QAM, stronger tracking and rate selection can improve that
 fraction, subject to actual radio filtering and fading.
 
-## Sampled tests and limits
+## Cable tests of radio-profile output level
 
-No radio, speaker, microphone or audio device was used for these tests. The
-tests generated and demodulated the production **48,000 samples/s real PCM**
+The production radio waveform was also tested through the user's physical
+headphone-left-to-microphone cable at both 2400 Hz and 240 Hz occupied bandwidth.
+All tested raw decisions were exact at amplitude settings 0.10, 0.20, 0.30 and
+0.40. However, the 2400 Hz waveform at 0.40 generated a peak of **1.030**, above
+the normalized PCM clipping limit of 1.0. The radio defaults therefore retain
+**0.30**. Single-carrier normalization already keeps average PCM power
+approximately constant as symbol rate and bandwidth decrease; no additional
+bandwidth-dependent gain is needed. These are audio-cable results, not tests of
+an IC-7100 or its RF chain.
+[Level measurements and evidence](fast-cable-level-calibration.md)
+
+An actual radio needs its own level calibration. Icom's `USB MOD Level` adjusts
+USB transmit input, while `ACC/USB AF Level` controls received audio output.
+Data mode disables speech compression and fixes transmit audio to 300–2700 Hz.
+The cable measurement procedure can be reused, but the chosen level must also
+be checked for RF linearity and ALC behavior in SSB, or deviation in FM. A clean
+computer loopback does not establish these properties.
+[Icom full manual, sections 17-24 and 18-3](https://www.icomjapan.com/support/manual/2288/)
+
+## Earlier sampled-noise tests and limits
+
+No radio, speaker, microphone or audio device was used for the earlier
+sampled-noise tests in this section. Those tests generated and demodulated the
+production **48,000 samples/s real PCM**
 waveform with a deterministic 751-byte keyed source, including leading and
 trailing zero bytes. To bound test runtime, sampled trials use one LDPC frame
 per cycle instead of the four-frame default: one bootstrap cycle plus one source

@@ -1,0 +1,21 @@
+[
+  "build/fast_cable_probe",
+  "--profile",
+  "ssb",
+  "--capacity",
+  "--stereo",
+  "--tail",
+  "7",
+  "--mode",
+  "raw",
+  "--intervals",
+  "64",
+  "--amplitude",
+  "0.1",
+  "--capture-save",
+  "/tmp/cable-level-20260921/radio-a010.f32",
+  "--tx-bits-save",
+  "/tmp/cable-level-20260921/radio-a010.bits",
+  "--rx-symbols-save",
+  "/tmp/cable-level-20260921/radio-a010.iq"
+]

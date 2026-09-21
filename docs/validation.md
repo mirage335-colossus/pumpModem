@@ -5100,3 +5100,37 @@ the unchanged long ordinary probability calibration were not repeated.
 [reproduction records](validation-data/fast/acoustic-low-snr-recovery-20260921/README.md)
 include before/after data, complete-source fixtures, commands and recording
 hashes. Large PCM recordings remain in `/tmp`; compact evidence is archived.
+
+### Cable transmit-level calibration (2026-09-21)
+
+The user's left headphone-to-microphone cable was tested through the default
+physical devices and production S16 audio API. Twenty-six modem trials plus
+eight tone levels totaled 656.4 seconds of capture. System mixer settings were
+unchanged: output 95%, hardware Capture and Mic Boost both 0 dB. Nominal 18 kHz
+cable trials swept amplitudes 0.10–0.40; raw trials also covered 1.8 kHz, 180 Hz,
+and the radio-profile waveforms at 2.4 kHz and 240 Hz. No actual radio or RF path
+was tested.
+
+The 100,000-byte trials passed at 0.25–0.40 and failed at 0.10–0.20. Three
+1,000,000-byte trials at 0.30, 0.35 and 0.40 all recovered exact SHA-256 values,
+4,572 intervals and 144 LDPC frames each, but the two higher levels exceeded
+digital full scale. The 0.30 fixture peaked at 0.8594. The existing 0.30 default
+is retained. Settled generated RMS remained effectively constant across
+narrowing, so no additional bandwidth scaling was added. The manually selected
+1.8 kHz cable geometry accumulated more than the production FIFO allowance;
+its offline calibration result is not a real-time reception qualification.
+
+The new offline `tools/fast_known_evm.py` compares received symbols with saved
+transmitted bits, retaining interval padding and rejecting missing observations.
+Its seven independent mapping, geometry and misleading-EVM checks pass; the
+existing eleven tone-analysis checks also pass. Independently calculated raw
+bit-error counts agree with every raw probe. Noiseless controls show that the
+narrowest residual plateau is largely modem DSP error. A separate sine-level
+sweep measured only 0.00666 dB gain variation over a 30-fold range.
+
+Only documentation and offline analysis tools/tests changed; no runtime,
+transport or GUI behavior changed, so C++ and native GUI suites were not
+repeated for this study. These are small calibration samples, not statistical
+whole-file reliability measurements. [Findings](fast-cable-level-calibration.md)
+and [reproduction evidence](validation-data/fast/cable-level-calibration-20260921/README.md)
+include exact metrics, limitations and hashes of the retained recordings.

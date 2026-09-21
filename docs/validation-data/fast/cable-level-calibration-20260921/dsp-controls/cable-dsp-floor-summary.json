@@ -1,0 +1,49 @@
+{
+  "conditions": "Direct float32 noiseless TX-to-RX; excludes S16 conversion, hardware filtering, sample-clock mismatch and external noise. Power-share ratios are indicative, not a calibrated decomposition. Wideband uses a shorter, different raw fixture than its live codec run.",
+  "measurements": [
+    {
+      "band": "wide",
+      "baud": 17647.05882,
+      "intervals": 64,
+      "offline_known_residual_db": 72.74691940587834,
+      "live_known_residual_db": 64.5916985283145,
+      "offline_known_evm": 0.0002304910305590238,
+      "offline_raw_bit_errors": 15,
+      "wall_seconds": 2.01165199,
+      "illustrative_offline_to_live_error_power_ratio": 0.15292479685124258,
+      "identical_tx_bits": false
+    },
+    {
+      "band": "mid",
+      "baud": 1764.70588,
+      "intervals": 64,
+      "offline_known_residual_db": 72.54265010005034,
+      "live_known_residual_db": 70.99,
+      "offline_known_evm": 0.00023597581515824272,
+      "offline_raw_bit_errors": 14,
+      "wall_seconds": 24.37920041,
+      "illustrative_offline_to_live_error_power_ratio": 0.6994150770245838,
+      "identical_tx_bits": true,
+      "known_error_squared_coherence": 0.7131487029233862,
+      "known_error_projection_gain_real": 1.0099617986291232,
+      "known_error_projection_gain_imag": 0.02329779103161866,
+      "live_minus_noiseless_error_ratio_db": 76.40268652243446
+    },
+    {
+      "band": "narrow",
+      "baud": 176.470588,
+      "intervals": 16,
+      "offline_known_residual_db": 70.54092229088289,
+      "live_known_residual_db": 70.35,
+      "offline_known_evm": 0.0002971350509080259,
+      "offline_raw_bit_errors": 9,
+      "wall_seconds": 4.12764066,
+      "illustrative_offline_to_live_error_power_ratio": 0.9569908180486547,
+      "identical_tx_bits": true,
+      "known_error_squared_coherence": 0.9712496391144718,
+      "known_error_projection_gain_real": 1.0072595946568477,
+      "known_error_projection_gain_imag": 0.005238878621875858,
+      "live_minus_noiseless_error_ratio_db": 85.75327810725717
+    }
+  ]
+}

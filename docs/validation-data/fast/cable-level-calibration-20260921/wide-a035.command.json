@@ -1,0 +1,21 @@
+[
+  "build/fast_cable_probe",
+  "--profile",
+  "wire",
+  "--capacity",
+  "--stereo",
+  "--tail",
+  "7",
+  "--mode",
+  "codec",
+  "--bytes",
+  "100000",
+  "--amplitude",
+  "0.35",
+  "--capture-save",
+  "/tmp/cable-level-20260921/wide-a035.f32",
+  "--tx-bits-save",
+  "/tmp/cable-level-20260921/wide-a035.bits",
+  "--rx-symbols-save",
+  "/tmp/cable-level-20260921/wide-a035.iq"
+]
