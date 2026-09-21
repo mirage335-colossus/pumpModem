@@ -523,6 +523,167 @@ void capacity_malformed() {
     }
     recovered.finish(true);check(recovered.result() && Bytes(recovered.result()->bytes().begin(),recovered.result()->bytes().end())==source,"capacity LDPC/frame interleaver repairs a timed interval erasure");
 }
+void continue_after_damaged_cycle() {
+    // A timed damaged cycle must occupy its original logical position. The
+    // following groups keep their original integrity ordinals and whitening;
+    // no retransmission, ordinal search, or source interpretation is involved.
+    for(bool capacity:{false,true})for(bool encrypted:{false,true})for(unsigned missing:{1U,2U}) {
+        auto p=capacity?capacity_profile(Channel::acoustic):classic_profile(Channel::wire);
+        p.interleave_depth=1;p.code_rate=CodeRate::three_quarters;
+        const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
+        const auto width=cycle_intervals(p)*physical_interval_bits;
+        const auto area_size=source_bytes_per_group(p,encrypted);
+        const auto payload=capacity?capacity_source_bytes_per_cycle(p,encrypted):area_size*8/9;
+        Bytes source((missing+2)*payload+7);
+        for(std::size_t i=0;i<source.size();++i)source[i]=static_cast<std::uint8_t>(i*73+(i/payload)*19+11);
+        source.back()=0;
+        const auto wire=transmit(p,crypto,source);
+        const auto source_cycles=missing+3U;
+        check(wire.size()==(source_cycles+1)*width,"gap fixture includes bootstrap, good prefix, holes, later good area, and final");
+        const auto boot=systematic(p,std::span(wire).first(width));const auto salt=std::span(boot).first(32);
+        std::vector<Bytes> areas;Bytes damaged=wire;
+        for(unsigned ordinal=0;ordinal<source_cycles;++ordinal) {
+            auto group=systematic(p,std::span(wire).subspan((ordinal+1)*width,width),ordinal+1);
+            areas.push_back(crypto?fast::testing::open_group(p,*crypto,salt,ordinal,group):Bytes(group.begin(),group.end()-32));
+            if(ordinal>=1 && ordinal<=missing) {
+                // Regenerate valid FEC around an invalid full digest/HMAC so
+                // this regression cannot pass merely because FEC repaired it.
+                group.back()^=1;
+                const auto replacement=code_systematic(p,group,ordinal+1);
+                std::copy(replacement.begin(),replacement.end(),damaged.begin()+static_cast<std::ptrdiff_t>((ordinal+1)*width));
+            }
+        }
+        StreamDecoder rx(p,crypto);feed(rx,std::span(damaged).first(2*width));
+        check(!rx.snapshot().failed && rx.snapshot().coding_cycles==2 && rx.snapshot().verified_bytes==area_size,
+            "good source prefix is verified before the disturbance");
+        for(unsigned ordinal=1;ordinal<source_cycles;++ordinal) {
+            feed(rx,std::span(damaged).subspan((ordinal+1)*width,width));
+            const auto snapshot=rx.snapshot();const auto gaps=std::min(ordinal,missing);
+            const auto good=ordinal+1-gaps;
+            check(snapshot.failed && !snapshot.decoding_stopped && snapshot.failed_cycles==gaps && snapshot.coding_cycles==ordinal+2,
+                "integrity gap marks incomplete data while later fixed cycles remain decodable");
+            check(snapshot.spool_bytes==(ordinal+1)*area_size && snapshot.verified_bytes==good*area_size,
+                "verified areas and missing areas retain bounded distinct byte accounting");
+            check((encrypted?snapshot.authenticated_groups:snapshot.checksum_groups)==good &&
+                  (encrypted?snapshot.checksum_groups:snapshot.authenticated_groups)==0,
+                "later groups continue independent keyed or public integrity verification");
+            check(!snapshot.physical_end && !snapshot.complete && !snapshot.authenticated && !snapshot.source_bytes && !rx.result(),
+                "neither verified later cycles nor a protected final flag expose incomplete source");
+            check(!fast::testing::retained_source_area(rx,ordinal),"verified raw areas remain opaque before physical absence");
+            rx.finish(false);
+            check(!rx.snapshot().physical_end && !rx.snapshot().decoding_stopped && !rx.result(),
+                "EOF after a gap cannot stop subsequent decoding or manufacture physical end");
+        }
+        if(capacity)check(rx.snapshot().ldpc_frames==source_cycles+1 && !rx.snapshot().ldpc_failed_frames,
+            "every capacity frame after an integrity failure was decoded with clean FEC");
+        rx.finish(true);
+        check(rx.snapshot().physical_end && rx.snapshot().failed && !rx.snapshot().complete && !rx.snapshot().authenticated &&
+              !rx.snapshot().source_bytes && !rx.result(),"missing source remains incomplete at actual physical end");
+        for(unsigned ordinal=0;ordinal<source_cycles;++ordinal) {
+            const auto retained=fast::testing::retained_source_area(rx,ordinal);
+            if(ordinal>=1 && ordinal<=missing)check(!retained,"damaged logical source area is an explicit hole");
+            else check(retained && *retained==areas[ordinal],"later verified source area remains exact at its original ordinal");
+        }
+        check(!fast::testing::retained_source_area(rx,source_cycles),"retention hook rejects an unreceived logical position");
+    }
+
+    // Classic cycles contain several independently protected groups. A bad
+    // group must not suppress its later intact neighbors within that cycle.
+    for(bool encrypted:{false,true}) {
+        auto p=classic_profile(Channel::wire);p.interleave_depth=4;p.code_rate=CodeRate::three_quarters;
+        const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
+        const auto width=cycle_intervals(p)*physical_interval_bits;
+        const auto area_size=source_bytes_per_group(p,encrypted);
+        Bytes source(area_size*p.interleave_depth*8/9+7);
+        for(std::size_t i=0;i<source.size();++i)source[i]=static_cast<std::uint8_t>(i*37+9);
+        const auto wire=transmit(p,crypto,source);check(wire.size()==3*width,"classic fixture spans two source cycles");
+        const auto boot=systematic(p,std::span(wire).first(width));const auto salt=std::span(boot).first(32);
+        auto first=systematic(p,std::span(wire).subspan(width,width));
+        const auto last=systematic(p,std::span(wire).last(width));
+        const auto k=first.size()/p.interleave_depth;std::vector<Bytes> areas;
+        for(unsigned ordinal=0;ordinal<8;++ordinal) {
+            const auto group=std::span(ordinal<4?first:last).subspan((ordinal%4)*k,k);
+            areas.push_back(crypto?fast::testing::open_group(p,*crypto,salt,ordinal,group):Bytes(group.begin(),group.end()-32));
+        }
+        first[2*k-1]^=1;const auto damaged=code_systematic(p,first);
+        StreamDecoder rx(p,crypto);feed(rx,std::span(wire).first(width));feed(rx,damaged);
+        check(rx.snapshot().failed && !rx.snapshot().decoding_stopped && rx.snapshot().failed_cycles==1 &&
+              rx.snapshot().verified_bytes==3*area_size && rx.snapshot().spool_bytes==4*area_size,
+            "classic integrity failure retains good groups on both sides within the same cycle");
+        feed(rx,std::span(wire).last(width));
+        check(rx.snapshot().coding_cycles==3 && rx.snapshot().failed_cycles==1 &&
+              (encrypted?rx.snapshot().authenticated_groups:rx.snapshot().checksum_groups)==7,
+            "classic group ordinal advances across one hole and into the next coding cycle");
+        rx.finish(true);check(!rx.result() && !rx.snapshot().complete,"classic hole cannot become apparently contiguous source");
+        for(unsigned ordinal=0;ordinal<8;++ordinal) {
+            const auto retained=fast::testing::retained_source_area(rx,ordinal);
+            if(ordinal==1)check(!retained,"classic damaged group is explicitly absent");
+            else check(retained && *retained==areas[ordinal],"classic verified group retains its original bytes and address");
+        }
+    }
+
+    auto p=capacity_profile(Channel::acoustic);p.interleave_depth=1;p.code_rate=CodeRate::three_quarters;
+    const auto width=cycle_intervals(p)*physical_interval_bits;
+    const auto area_size=source_bytes_per_group(p,false),payload=capacity_source_bytes_per_cycle(p,false);
+    const auto wire=transmit(p,std::nullopt,Bytes(payload*3+7,0x5a));
+    const auto push_erased_cycle=[&](StreamDecoder& rx) {
+        const std::array<float,physical_interval_bits> erased{};
+        for(std::size_t i=0;i<cycle_intervals(p);++i)rx.push_interval(erased);
+    };
+    StreamDecoder erased(p,std::nullopt);feed(erased,std::span(wire).first(2*width));push_erased_cycle(erased);
+    check(erased.snapshot().failed && !erased.snapshot().decoding_stopped && erased.snapshot().failed_cycles==1,
+        "a wholly erased timed cycle leaves a recoverable decoder state");
+    feed(erased,std::span(wire).subspan(3*width));
+    check(erased.snapshot().ldpc_frames==5 && erased.snapshot().checksum_groups==3 && erased.snapshot().verified_bytes==3*area_size,
+        "actual missing likelihoods do not suppress decoding and checksums after the disturbance");
+    erased.finish(true);
+    auto final=systematic(p,std::span(wire).last(width),4);final.resize(area_size);
+    check(!erased.result() && !fast::testing::retained_source_area(erased,1) &&
+          fast::testing::retained_source_area(erased,3)==std::optional<Bytes>(final),
+        "erased cycle cannot shift the independently verified final area's logical address");
+
+    // Missing areas consume local logical-space quota just as good areas do;
+    // otherwise an all-bad stream could grow its hole bookkeeping forever.
+    StreamDecoder bounded(p,std::nullopt,2*area_size);feed(bounded,std::span(wire).first(width));
+    push_erased_cycle(bounded);push_erased_cycle(bounded);
+    check(!bounded.snapshot().decoding_stopped && bounded.snapshot().failed_cycles==2 &&
+          bounded.snapshot().spool_bytes==2*area_size && !bounded.snapshot().verified_bytes,
+        "consecutive wholly missing cycles consume the exact configured source quota");
+    push_erased_cycle(bounded);
+    check(bounded.snapshot().failed && bounded.snapshot().decoding_stopped && bounded.snapshot().spool_bytes<=2*area_size,
+        "next missing cycle cannot overrun the bounded logical source quota");
+    const auto stopped=bounded.snapshot();for(unsigned i=0;i<4;++i)push_erased_cycle(bounded);
+    check(bounded.snapshot().coding_cycles==stopped.coding_cycles && bounded.snapshot().ldpc_frames==stopped.ldpc_frames &&
+          bounded.snapshot().intervals==stopped.intervals+4*cycle_intervals(p),
+        "fatal local quota stops decoder work while physical interval accounting continues");
+    bounded.finish(false);check(!bounded.snapshot().physical_end,"quota failure is not physical completion");
+    bounded.finish(true);check(!bounded.result(),"all missing source cannot produce a completed result");
+
+    // Bootstrap damage cannot be treated as a later data hole: no established
+    // salt or key context exists, and later bytes must never trigger re-keying.
+    auto boot=systematic(p,std::span(wire).first(width));boot[32]^=1;
+    const auto invalid_boot=code_systematic(p,boot,0);
+    StreamDecoder bootstrap(p,std::nullopt);feed(bootstrap,invalid_boot);
+    check(bootstrap.snapshot().failed && bootstrap.snapshot().decoding_stopped &&
+          bootstrap.snapshot().failed_cycles==1 && bootstrap.snapshot().coding_cycles==1,
+        "invalid bootstrap remains a fatal integrity-context failure");
+    feed(bootstrap,wire);
+    check(bootstrap.snapshot().coding_cycles==1 && bootstrap.snapshot().ldpc_frames==1 &&
+          !bootstrap.snapshot().checksum_groups && !bootstrap.snapshot().verified_bytes,
+        "later valid bootstrap cannot restart a failed reception under a fresh context");
+    bootstrap.finish(true);check(!bootstrap.result() && !fast::testing::retained_source_area(bootstrap,0),
+        "fatal bootstrap leaves no eligible retained source");
+
+    StreamDecoder nonfinite(p,std::nullopt);feed(nonfinite,std::span(wire).first(2*width));
+    std::array<float,physical_interval_bits> nan{};nan.fill(std::numeric_limits<float>::quiet_NaN());
+    for(std::size_t i=0;i<cycle_intervals(p);++i)nonfinite.push_interval(nan);
+    check(nonfinite.snapshot().failed && nonfinite.snapshot().decoding_stopped && !nonfinite.snapshot().physical_end,
+        "nonfinite data evidence remains a fatal input fault after a valid bootstrap");
+    const auto before=nonfinite.snapshot();feed(nonfinite,std::span(wire).subspan(3*width));
+    check(nonfinite.snapshot().coding_cycles==before.coding_cycles && nonfinite.snapshot().ldpc_frames==before.ldpc_frames,
+        "invalid numeric evidence cannot enable further decoder work");
+    nonfinite.finish(true);check(!nonfinite.result(),"fatal numeric input cannot yield a completed file");
+}
 void capacity_acoustic_contracts() {
     // The codec sees fixed 2048-bit intervals behind either SC or OFDM. Use
     // identical local SC geometry for both channel identities to isolate the
@@ -587,7 +748,7 @@ void capacity_acoustic_contracts() {
         check(bad_integrity.snapshot().failed && !bad_integrity.snapshot().physical_end && !bad_integrity.result(),
             "acoustic LDPC/RS success cannot bypass corrupted full integrity check");
         feed(bad_integrity,std::span(wire).last(width));bad_integrity.finish(true);
-        check(bad_integrity.snapshot().failed && !bad_integrity.result(),"acoustic integrity failure remains terminal");
+        check(bad_integrity.snapshot().failed && !bad_integrity.result(),"acoustic integrity failure keeps whole-file completion unavailable");
         StreamDecoder truncated(p,crypto);feed(truncated,std::span(wire).first(2*width));truncated.finish(true);
         check(truncated.snapshot().failed && !truncated.result(),"acoustic lost final cycle cannot complete a protected prefix");
         auto wrong_channel=p;wrong_channel.channel=Channel::wire;
@@ -748,8 +909,11 @@ void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
 int main(int argc,char** argv) {
     try {
         if(argc>1 && std::string_view(argv[1])=="--parallel") {capacity_parallel_decode();return 0;}
+        if(argc>1 && std::string_view(argv[1])=="--continuation") {
+            continue_after_damaged_cycle();std::cout<<"fast damaged-cycle continuation tests passed\n";return 0;
+        }
         independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
-        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
+        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();continue_after_damaged_cycle();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
         streamed(argc>1?2*1024*1024:100*1024);streamed(argc>1?2*1024*1024:100*1024,false);
         streamed(1024*1024,true,true);streamed(1024*1024,false,true);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";

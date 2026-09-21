@@ -346,6 +346,16 @@ Only then can flags/padding be interpreted and an explicit Save handle appear.
 Incomplete cycles, missing finals, invalid fill, integrity failure and exhausted
 storage leave no completed source.
 
+An uncorrectable source cycle leaves a hole at its fixed position; the decoder
+continues FEC and integrity checks on later cycles. Locally counted cycle and
+group ordinals advance through the hole, preserving whitening and independent
+group verification. Classic cycles also retain intact groups alongside a bad
+group. The GUI reports missing data while its verified-group count can continue
+to increase. This does not reconstruct the missing bytes or enable saving an
+incomplete file. Failed bootstrap context, invalid numeric input, quota and
+internal errors still stop source decoding. See the
+[continuation regression record](fast-cycle-continuation.md).
+
 Failed marker groups retain their timed positions as erasures. Trailing absent
 intervals are held as a bounded count and delivered only if a later marker
 resumes the stream, avoiding fictitious source data during end silence.
@@ -355,7 +365,10 @@ iteration limit requires measured scheduling headroom. There is no automatic
 retransmission, arbitrary mid-file join or recovery across unknown time gaps.
 
 Receive source-area storage is capped at 256 MiB and compacts in place after
-physical completion. Capacity requires source bytes plus one flag per cycle
+physical completion. Missing areas consume their full fixed logical space in
+that quota, preventing corrupt streams from creating unlimited positions or
+integrity attempts. A separately bounded validity map uses one byte per area.
+Capacity requires source bytes plus one flag per cycle
 and final-cycle fill; classic additionally needs its 1.125 source expansion.
 PCM, FEC, diagnostics and shared code tables have separately bounded storage;
 the source quota is not a process RSS limit. Source reads and waveform generation

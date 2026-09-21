@@ -1,0 +1,9 @@
+fast damaged-cycle continuation tests passed
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start 8: fast_codec
+1/1 Test #8: fast_codec .......................   Passed   29.94 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Total Test time (real) =  29.94 sec

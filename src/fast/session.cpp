@@ -92,8 +92,12 @@ struct Session::Impl {
                 out.corrected_bytes=coding.corrected_bytes;out.erased_bytes=coding.erased_bytes;
                 out.ldpc_frames=coding.ldpc_frames;out.ldpc_failed_frames=coding.ldpc_failed_frames;
                 out.ldpc_iterations=coding.ldpc_iterations;out.ldpc_changed_bits=coding.ldpc_changed_bits;
+                out.decoding_stopped=coding.decoding_stopped;out.coding_cycles=coding.coding_cycles;
+                out.failed_cycles=coding.failed_cycles;out.verified_bytes=coding.verified_bytes;
                 out.evm=dsp.evm;out.carrier_error_hz=dsp.carrier_error_hz;out.clock_error_ppm=dsp.clock_error_ppm;
-                out.status=dsp.acquired?"Receiving fast stream; content pending":"Listening for Fast modem training";
+                out.status=coding.decoding_stopped?"File decoding stopped: "+coding.status:
+                    coding.failed_cycles?"Receiving fast stream with missing data; continuing decoding":
+                    dsp.acquired?"Receiving fast stream; content pending":"Listening for Fast modem training";
             });
             if(dsp.physical_complete)break;
         }
@@ -106,6 +110,8 @@ struct Session::Impl {
             out.physical_complete=end;out.complete=result.complete;out.source_bytes=result.source_bytes;
             out.encrypted=result.encrypted;out.authenticated=result.authenticated;
             out.authenticated_groups=result.authenticated_groups;out.checksum_groups=result.checksum_groups;
+            out.decoding_stopped=result.decoding_stopped;out.coding_cycles=result.coding_cycles;
+            out.failed_cycles=result.failed_cycles;out.verified_bytes=result.verified_bytes;
             out.file=decoder.result();out.status=result.status;
             if(end&&!result.complete)out.error=result.status;
         });

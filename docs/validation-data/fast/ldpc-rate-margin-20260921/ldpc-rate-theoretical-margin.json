@@ -1,0 +1,38 @@
+[
+  {
+    "qam": 16,
+    "rate": "3/4",
+    "gaussian_bound_esn0_db": 8.450980400142567,
+    "bicm_ideal_esn0_db": 9.308631426029024
+  },
+  {
+    "qam": 16,
+    "rate": "8/9",
+    "gaussian_bound_esn0_db": 10.317265316112152,
+    "bicm_ideal_esn0_db": 11.8673016786488
+  },
+  {
+    "qam": 16,
+    "rate": "9/10",
+    "gaussian_bound_esn0_db": 10.463286150838119,
+    "bicm_ideal_esn0_db": 12.117654087414849
+  },
+  {
+    "qam": 64,
+    "rate": "3/4",
+    "gaussian_bound_esn0_db": 13.350046539506844,
+    "bicm_ideal_esn0_db": 14.38938575120119
+  },
+  {
+    "qam": 64,
+    "rate": "8/9",
+    "gaussian_bound_esn0_db": 15.945856038119155,
+    "bicm_ideal_esn0_db": 17.442795151509927
+  },
+  {
+    "qam": 64,
+    "rate": "9/10",
+    "gaussian_bound_esn0_db": 16.15152796322389,
+    "bicm_ideal_esn0_db": 17.729444740180043
+  }
+]

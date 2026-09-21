@@ -1,0 +1,2 @@
+captured_s=26.5 acquired=1 intervals=508 evm=0.193005 clock_ppm=0.17475 physical_end=0
+ldpc_frames=16 ldpc_failed=8 verified_cycles=0 decode_failed=1 failed_cycles=1 decoding_stopped=0

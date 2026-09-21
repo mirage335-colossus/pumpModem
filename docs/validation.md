@@ -4,6 +4,36 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast damaged-cycle continuation — 21 September 2026 UTC
+
+The [continuation fix](fast-cycle-continuation.md) separates an incomplete file
+from a stopped decoder. Rejected source cycles retain their fixed positions and
+consume quota; later cycles continue through FEC and independent integrity
+verification. Physical whitening and group ordinals advance across holes.
+Classic cycles can retain good groups alongside a rejected group. Bootstrap,
+quota, nonfinite-input and internal failures remain fatal. The session, CLI and
+shared GUI report missing data while verified-group counts continue to advance.
+Missing data never becomes a completed file or a Save handle.
+
+Replay of the unchanged real 64-QAM/right-only amplitude-0.20 recording now
+attempts **32 LDPC frames instead of 16** and verifies both cycles after the
+failed source cycle. Its whole file remains incomplete. The more impaired
+64-QAM recording attempts all 32 frames but has three bad source cycles; the
+failed-bootstrap control still stops after eight frames. The saved **500,000-byte
+16-QAM** recording still recovers exactly with 96/96 converged frames and the
+original SHA-256. All four input hashes match the preceding live-study manifest.
+These are saved-waveform replays, not new live tests.
+
+The Release build and **20/20** selected CTest suites passed in **143.08 seconds**,
+including new public/keyed cycle-continuation, exact retained-position, erased
+cycle, quota, sampled-audio session, GUI progress and CLI state checks. Existing
+Fast and regular short-text, fixed-stream, physical-end, attachment and shared
+GUI regressions passed. Both Release GUI variants rebuilt and the Rev shared
+GUI self-check passed. Independent wire vectors remain unchanged; no native
+adapter, waveform or encoder changes were made. The
+[evidence archive](validation-data/fast/cycle-continuation-20260921/README.md)
+contains replay outputs, build/test logs and source/binary/input hashes.
+
 ## Fast acoustic 16/64-QAM and output routing — 21 September 2026 UTC
 
 The [routing diagnosis](fast-acoustic-routing-diagnosis.md) reproduces the

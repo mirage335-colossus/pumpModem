@@ -17,11 +17,15 @@
 #include <fstream>
 #include <limits>
 #include <mutex>
+#include <string_view>
 #include <thread>
 #include <utility>
 
 namespace datapump::fast {
 namespace {
+// Only corrupted received data may leave a recoverable hole. Allocation,
+// cryptographic-library and geometry errors remain fatal to this decoder.
+struct CorruptCycle : Error { using Error::Error; };
 struct CloseFile { void operator()(std::FILE* f)const {if(f)std::fclose(f);} };
 using File = std::unique_ptr<std::FILE, CloseFile>;
 void write_file(std::FILE* f,std::span<const std::uint8_t> data) {
@@ -131,10 +135,10 @@ Bytes open(const Profile& p,const Keys& keys,std::span<const std::uint8_t> salt,
     if(systematic.size()!=systematic_bytes(p))throw Error("Invalid fixed fast systematic width");
     const auto body_size=16+ciphertext_bytes(p);
     if(std::any_of(systematic.begin()+static_cast<std::ptrdiff_t>(body_size+32),systematic.end(),[](auto b){return b!=0;}))
-        throw Error("Noncanonical capacity cipher alignment fill");
+        throw CorruptCycle("Noncanonical capacity cipher alignment fill");
     auto body=systematic.first(body_size);
     if(!same(systematic.subspan(body_size,32),hmac(keys.authentication,tag_input(p,salt,ordinal,body))))
-        throw Error("Fast stream integrity failed");
+        throw CorruptCycle("Fast stream integrity failed");
     return crypt(body.subspan(16),keys.encryption,body.first(16),false);
 }
 Bytes public_tag(const Profile& p,std::span<const std::uint8_t> salt,std::uint64_t ordinal,
@@ -151,7 +155,7 @@ Bytes public_open(const Profile& p,std::span<const std::uint8_t> salt,std::uint6
                   std::span<const std::uint8_t> systematic) {
     if(systematic.size()!=systematic_bytes(p))throw Error("Invalid fixed fast public systematic width");
     const auto plain=systematic.first(systematic.size()-32);
-    if(!same(systematic.last(32),public_tag(p,salt,ordinal,plain)))throw Error("Fast public stream checksum failed");
+    if(!same(systematic.last(32),public_tag(p,salt,ordinal,plain)))throw CorruptCycle("Fast public stream checksum failed");
     return Bytes(plain.begin(),plain.end());
 }
 Bytes bootstrap_tag(const Profile& p,const std::optional<Crypto>& crypto,std::span<const std::uint8_t> salt) {
@@ -170,7 +174,8 @@ Bytes rs_interleave(const Profile& p,std::span<const std::uint8_t> systematic) {
     }
     return output;
 }
-Bytes rs_deinterleave(const Profile& p,const coding::Decoded& decoded,DecodeSnapshot& stats) {
+Bytes rs_deinterleave(const Profile& p,const coding::Decoded& decoded,DecodeSnapshot& stats,
+                     std::vector<std::string>* group_errors=nullptr) {
     const std::size_t rows=p.interleave_depth*2U,k=k_bytes(p);Bytes output;output.reserve(rows*k);
     for(std::size_t row=0;row<rows;++row) {
         Bytes word(128);std::vector<std::size_t> erasures;
@@ -180,8 +185,18 @@ Bytes rs_deinterleave(const Profile& p,const coding::Decoded& decoded,DecodeSnap
         }
         // An erasure spread beyond the RS budget is a hard failure, never
         // selectively discard unknown positions to manufacture continuity.
-        stats.corrected_bytes+=fec::rs_correct(word,128-k,erasures);
-        stats.erased_bytes+=erasures.size();append(output,std::span(word).first(k));
+        try {
+            stats.corrected_bytes+=fec::rs_correct(word,128-k,erasures);
+            stats.erased_bytes+=erasures.size();
+        }catch(const Error& error) {
+            const std::string_view why=error.what();
+            if(why!="Uncorrectable Reed-Solomon interval" && why!="Too many Reed-Solomon erasures")throw;
+            if(!group_errors)throw CorruptCycle(error.what());
+            auto& group_error=(*group_errors)[row/2];
+            if(group_error.empty())group_error=error.what();
+            std::fill(word.begin(),word.end(),0);
+        }
+        append(output,std::span(word).first(k));
     }
     return output;
 }
@@ -309,11 +324,17 @@ Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapsho
         }
     }
     if(decoded.size()%2) {
-        if(decoded.back())throw Error("Noncanonical capacity LDPC alignment fill");
+        if(decoded.back())throw CorruptCycle("Noncanonical capacity LDPC alignment fill");
         decoded.pop_back();
     }
     auto before=decoded;
-    (void)outer_rs::correct(decoded,capacity_parity_symbols(p));
+    try {(void)outer_rs::correct(decoded,capacity_parity_symbols(p));}
+    catch(const Error& error) {
+        const std::string_view why=error.what();
+        if(why=="Uncorrectable capacity Reed-Solomon cycle" || why=="Too many capacity Reed-Solomon erasures")
+            throw CorruptCycle(error.what());
+        throw;
+    }
     for(std::size_t i=0;i<decoded.size();++i)if(decoded[i]!=before[i])++stats.corrected_bytes;
     decoded.resize(capacity_data_bytes(p));return decoded;
 }
@@ -562,7 +583,7 @@ std::uint64_t StreamEncoder::source_bytes()const{return impl_->source_count;}
 std::uint64_t StreamEncoder::intervals_emitted()const{return impl_->intervals;}
 
 struct StreamDecoder::Impl {
-    Profile profile;std::optional<Crypto> crypto;std::uint64_t quota;DecodeSnapshot stats;Bytes plain;
+    Profile profile;std::optional<Crypto> crypto;std::uint64_t quota;DecodeSnapshot stats;Bytes plain,valid_areas;
     std::vector<float> soft;Bytes salt;std::unique_ptr<Keys> keys;std::uint64_t ordinal=0,cycles=0;
     bool bootstrap_received=false;
     std::shared_ptr<const ReceivedFile> received;
@@ -572,47 +593,90 @@ struct StreamDecoder::Impl {
         soft.reserve(cycle_intervals(p)*physical_interval_bits);
         stats.encrypted=crypto.has_value();
     }
-    void fail(const std::string& why) {stats.failed=true;stats.status=why;}
+    void fail(const std::string& why) {stats.failed=true;stats.decoding_stopped=true;stats.status=why;}
     void cycle() {
-        Bytes systematic;
-        if(profile.capacity_mode) {
-            whitening_bits(soft.size(),bootstrap_received?cycles+1:0,[&](std::size_t i,unsigned bit){if(bit)soft[i]=-soft[i];});
-            systematic=capacity_decode(profile,soft,stats);
-        } else {
-            const auto actual=inner_size(profile.interleave_depth*256,profile.code_rate);
-            auto decoded=coding::decode(std::span(soft).first(actual),profile.interleave_depth*256,profile.code_rate);
-            systematic=rs_deinterleave(profile,decoded,stats);
+        if(stats.coding_cycles==std::numeric_limits<std::uint64_t>::max())throw Error("Fast cycle counter exhausted");
+        const auto physical_cycle=stats.coding_cycles++;
+        const bool bootstrap=!bootstrap_received;
+        const auto groups=profile.capacity_mode?1U:profile.interleave_depth;
+        const auto width=source_bytes_per_group(profile,crypto.has_value());
+        const auto first_ordinal=ordinal;
+        if(!bootstrap) {
+            if(groups>std::numeric_limits<std::uint64_t>::max()-ordinal)throw Error("Fast group counter exhausted");
+            const auto bytes=static_cast<std::uint64_t>(groups)*width;
+            // Charge every local fixed position, including rejected cycles, so
+            // an indefinitely corrupt stream cannot evade the receive quota.
+            if(bytes>quota-stats.spool_bytes)throw Error("Fast receive memory quota exceeded");
+            const auto required=plain.size()+static_cast<std::size_t>(bytes);
+            if(required>plain.capacity())
+                plain.reserve(static_cast<std::size_t>(std::min<std::uint64_t>(quota,
+                    std::max<std::uint64_t>(required,plain.capacity()*2))));
+            plain.resize(required,0);
+            stats.spool_bytes=plain.size();
+            valid_areas.resize(valid_areas.size()+groups,0);
+            ordinal+=groups;++cycles;
         }
-        if(!bootstrap_received) {
+        bool rejected=false;
+        const auto reject=[&](const std::string& why) {
+            if(!rejected) {++stats.failed_cycles;rejected=true;}
+            if(!stats.failed)stats.status=why;
+            stats.failed=true;
+        };
+        Bytes systematic;
+        std::vector<std::string> group_errors(groups);
+        try {
+            if(profile.capacity_mode) {
+                whitening_bits(soft.size(),physical_cycle,[&](std::size_t i,unsigned bit){if(bit)soft[i]=-soft[i];});
+                systematic=capacity_decode(profile,soft,stats);
+            } else {
+                const auto actual=inner_size(profile.interleave_depth*256,profile.code_rate);
+                auto decoded=coding::decode(std::span(soft).first(actual),profile.interleave_depth*256,profile.code_rate);
+                systematic=rs_deinterleave(profile,decoded,stats,bootstrap?nullptr:&group_errors);
+            }
+            // The inner decoders validate their own evidence in frame order;
+            // validate the remaining physical alignment fill as well.
+            if(std::any_of(soft.begin(),soft.end(),[](float x){return !std::isfinite(x);}))
+                throw Error("Non-finite fast soft evidence");
+        }catch(const CorruptCycle& error) {
+            if(std::any_of(soft.begin(),soft.end(),[](float x){return !std::isfinite(x);}))
+                throw Error("Non-finite fast soft evidence");
+            reject(error.what());
+            if(bootstrap)fail(error.what());
+            soft.clear();return;
+        }
+        if(bootstrap) {
             salt.assign(systematic.begin(),systematic.begin()+32);
             if(!same(std::span(systematic).subspan(32,32),bootstrap_tag(profile,crypto,salt)) ||
-               std::any_of(systematic.begin()+64,systematic.end(),[](auto b){return b!=0;}))
-                throw Error(crypto?"Fast bootstrap integrity failed":"Fast public bootstrap checksum failed");
+               std::any_of(systematic.begin()+64,systematic.end(),[](auto b){return b!=0;})) {
+                const auto why=crypto?"Fast bootstrap integrity failed":"Fast public bootstrap checksum failed";
+                reject(why);fail(why);soft.clear();return;
+            }
             if(crypto)keys=std::make_unique<Keys>(profile,*crypto,salt);
             bootstrap_received=true;
             stats.status=crypto?"Receiving authenticated fast areas":"Receiving checksummed fast areas (not authenticated)";
         }else {
-            const auto groups=profile.capacity_mode?1U:profile.interleave_depth;
             for(unsigned group=0;group<groups;++group) {
-                if(ordinal==std::numeric_limits<std::uint64_t>::max())throw Error("Fast group counter exhausted");
+                if(!group_errors[group].empty()) {reject(group_errors[group]);continue;}
                 const auto k=systematic_bytes(profile);
                 const auto body=std::span(systematic).subspan(group*k,k);
-                auto area=keys?open(profile,*keys,salt,ordinal,body):public_open(profile,salt,ordinal,body);++ordinal;
-                if(area.size()>quota-stats.spool_bytes)throw Error("Fast receive memory quota exceeded");
-                if(plain.size()+area.size()>plain.capacity())
-                    plain.reserve(static_cast<std::size_t>(std::min<std::uint64_t>(quota,std::max<std::uint64_t>(plain.size()+area.size(),plain.capacity()*2))));
-                append(plain,area);stats.spool_bytes+=area.size();
-                if(crypto)++stats.authenticated_groups;else ++stats.checksum_groups;
-                OPENSSL_cleanse(area.data(),area.size());
+                const auto area_ordinal=first_ordinal+group;
+                try {
+                    auto area=keys?open(profile,*keys,salt,area_ordinal,body):public_open(profile,salt,area_ordinal,body);
+                    if(area.size()!=width)throw Error("Invalid fixed fast source width");
+                    std::copy(area.begin(),area.end(),plain.begin()+static_cast<std::ptrdiff_t>(area_ordinal*width));
+                    valid_areas[static_cast<std::size_t>(area_ordinal)]=1;
+                    stats.verified_bytes+=area.size();
+                    if(crypto)++stats.authenticated_groups;else ++stats.checksum_groups;
+                    OPENSSL_cleanse(area.data(),area.size());
+                }catch(const CorruptCycle& error) {reject(error.what());}
             }
-            ++cycles;
         }
         soft.clear();
     }
     std::shared_ptr<ReceivedFile::Impl> interpret_capacity() {
         const auto width=source_bytes_per_group(profile,crypto.has_value());
         if(plain.size()!=cycles*width)throw Error("Invalid capacity source geometry");
-        std::size_t used=0;
+        std::size_t final_end=plain.size();
         for(std::size_t cycle=0;cycle<cycles;++cycle) {
             const auto begin=cycle*width;const bool last=cycle+1==cycles;
             if(plain[begin]!=(last?1:0))throw Error("Missing or noncanonical capacity final flag");
@@ -621,18 +685,24 @@ struct StreamDecoder::Impl {
                 while(end>begin+1 && plain[end-1]==0)--end;
                 if(end==begin+1 || plain[end-1]!=0x80)throw Error("Invalid capacity final padding");
                 --end;
+                final_end=end;
             }
+        }
+        // Validate every area before changing any opaque retained bytes.
+        auto output=std::make_shared<ReceivedFile::Impl>();std::size_t used=0;
+        for(std::size_t cycle=0;cycle<cycles;++cycle) {
+            const auto begin=cycle*width;
+            const auto end=cycle+1==cycles?final_end:begin+width;
             for(std::size_t read=begin+1;read<end;++read)plain[used++]=plain[read];
         }
-        auto output=std::make_shared<ReceivedFile::Impl>();plain.resize(used);output->data=std::move(plain);
+        plain.resize(used);output->data=std::move(plain);
         stats.source_bytes=used;return output;
     }
     std::shared_ptr<ReceivedFile::Impl> interpret() {
         if(!bootstrap_received || !cycles || !soft.empty())throw Error("Fast stream ended within fixed coding geometry");
         if(profile.capacity_mode)return interpret_capacity();
-        auto output=std::make_shared<ReceivedFile::Impl>();
-        // Interpret only after physical end. Compact in place: nine-bit cells
-        // shrink to bytes, so writes cannot overwrite unread source bits.
+        // Interpret only after physical end. First validate the entire source
+        // without modifying opaque retained areas if source syntax is invalid.
         bool ended=false;unsigned cell=0,cell_bits=0;
         std::uint64_t position=0,endpoint=0;std::size_t used=0;
         for(std::size_t b=0;b<plain.size();++b) {
@@ -645,13 +715,24 @@ struct StreamDecoder::Impl {
                 if(!(cell&256)) {
                     if(cell)throw Error("Invalid fast endpoint cell");
                     ended=true;endpoint=position;
-                }else plain[used++]=static_cast<std::uint8_t>(cell);
+                }else ++used;
                 cell=0;cell_bits=0;
             }
         }
         if(!ended)throw Error("Fast mandatory source endpoint missing");
         const auto cycle_bits=static_cast<std::uint64_t>(profile.interleave_depth)*source_bytes_per_group(profile,crypto.has_value())*8;
         if(endpoint<=position-cycle_bits)throw Error("Extra noncanonical fast padding cycle");
+        auto output=std::make_shared<ReceivedFile::Impl>();
+        // Nine-bit cells shrink to bytes, so these writes cannot overwrite
+        // unread source bits. The endpoint cell and fill have already passed.
+        for(std::size_t byte=0;byte<used;++byte) {
+            unsigned value=0;
+            for(unsigned i=0;i<8;++i) {
+                const auto bit=byte*9+1+i;
+                value=(value<<1)|((plain[bit/8]>>(7-bit%8))&1U);
+            }
+            plain[byte]=static_cast<std::uint8_t>(value);
+        }
         plain.resize(used);output->data=std::move(plain);
         stats.source_bytes=used;
         return output;
@@ -664,12 +745,15 @@ StreamDecoder& StreamDecoder::operator=(StreamDecoder&&) noexcept=default;
 void StreamDecoder::push_interval(std::span<const float> soft_bits) {
     if(soft_bits.size()!=physical_interval_bits)throw Error("Fast interval must have exactly 2048 positions");
     if(impl_->stats.physical_end)throw Error("Fast reception already physically ended");
-    if(impl_->stats.intervals==std::numeric_limits<std::uint64_t>::max())throw Error("Fast interval counter exhausted");
-    ++impl_->stats.intervals;if(impl_->stats.failed)return;
-    impl_->soft.insert(impl_->soft.end(),soft_bits.begin(),soft_bits.end());
-    if(impl_->soft.size()==cycle_intervals(impl_->profile)*physical_interval_bits) {
-        try {impl_->cycle();}catch(const std::exception& error) {impl_->soft.clear();impl_->fail(error.what());}
+    if(impl_->stats.intervals==std::numeric_limits<std::uint64_t>::max()) {
+        impl_->soft.clear();impl_->fail("Fast interval counter exhausted");
+        throw Error("Fast interval counter exhausted");
     }
+    ++impl_->stats.intervals;if(impl_->stats.decoding_stopped)return;
+    try {
+        impl_->soft.insert(impl_->soft.end(),soft_bits.begin(),soft_bits.end());
+        if(impl_->soft.size()==cycle_intervals(impl_->profile)*physical_interval_bits)impl_->cycle();
+    }catch(const std::exception& error) {impl_->soft.clear();impl_->fail(error.what());}
 }
 void StreamDecoder::finish(bool physical_end) {
     if(impl_->stats.physical_end)return;
@@ -690,6 +774,16 @@ DecodeSnapshot StreamDecoder::snapshot()const{return impl_->stats;}
 std::shared_ptr<const ReceivedFile> StreamDecoder::result()const{return impl_->received;}
 
 namespace testing {
+std::optional<Bytes> retained_source_area(const StreamDecoder& decoder,std::uint64_t ordinal) {
+    const auto& impl=*decoder.impl_;
+    if(!impl.stats.physical_end || impl.stats.complete || ordinal>=impl.valid_areas.size() ||
+       !impl.valid_areas[static_cast<std::size_t>(ordinal)])return std::nullopt;
+    const auto width=source_bytes_per_group(impl.profile,impl.crypto.has_value());
+    const auto begin=static_cast<std::size_t>(ordinal)*width;
+    if(begin>impl.plain.size() || width>impl.plain.size()-begin)return std::nullopt;
+    return Bytes(impl.plain.begin()+static_cast<std::ptrdiff_t>(begin),
+                 impl.plain.begin()+static_cast<std::ptrdiff_t>(begin+width));
+}
 std::size_t capacity_interleave_rotation(const Profile& p,std::size_t column) {
     if(column>=ldpc::coded_bits)throw Error("Capacity interleave column outside fixed frame");
     return capacity_rotations(p)[column];

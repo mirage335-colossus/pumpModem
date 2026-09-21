@@ -231,7 +231,8 @@ int run(const Options& o) {
             std::cerr<<"captured_s="<<double(processed)/p.sample_rate<<" acquired="<<rx.progress().acquired
                 <<" intervals="<<rx_intervals<<" evm="<<rx.progress().evm
                 <<" clock_ppm="<<rx.progress().clock_error_ppm<<" physical_end="<<rx.progress().physical_complete<<'\n';
-            if(decoder) {const auto c=decoder->snapshot();std::cerr<<"ldpc_frames="<<c.ldpc_frames<<" ldpc_failed="<<c.ldpc_failed_frames<<" verified_cycles="<<c.checksum_groups<<" decode_failed="<<c.failed<<'\n';}
+            if(decoder) {const auto c=decoder->snapshot();std::cerr<<"ldpc_frames="<<c.ldpc_frames<<" ldpc_failed="<<c.ldpc_failed_frames<<" verified_cycles="<<c.checksum_groups<<" decode_failed="<<c.failed
+                <<" failed_cycles="<<c.failed_cycles<<" decoding_stopped="<<c.decoding_stopped<<'\n';}
             last_report=Clock::now();
         }
     };
@@ -355,6 +356,8 @@ int run(const Options& o) {
         <<",\"erased_bytes\":"<<decoded.erased_bytes<<",\"checksum_groups\":"<<decoded.checksum_groups
         <<",\"ldpc_frames\":"<<decoded.ldpc_frames<<",\"ldpc_failed_frames\":"<<decoded.ldpc_failed_frames
         <<",\"ldpc_iterations\":"<<decoded.ldpc_iterations<<",\"ldpc_changed_bits\":"<<decoded.ldpc_changed_bits
+        <<",\"coding_cycles\":"<<decoded.coding_cycles<<",\"failed_cycles\":"<<decoded.failed_cycles
+        <<",\"decoding_stopped\":"<<decoded.decoding_stopped<<",\"verified_bytes\":"<<decoded.verified_bytes<<",\"spool_bytes\":"<<decoded.spool_bytes
         <<",\"decode_status\":"<<quoted(decoded.status)<<",\"source_goodput_bps\":"<<(encoder&&exact?o.bytes*8/(air+o.tail):0)
         <<",\"capture_format\":";format_json(capture_format);std::cout<<",\"playback_format\":";format_json(playback_format);
     std::cout<<",\"before_level\":";before.json();std::cout<<",\"signal_level\":";signal.json();

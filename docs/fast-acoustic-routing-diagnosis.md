@@ -48,6 +48,9 @@ eight LDPC frames converged; all eight frames of the next coding cycle failed.
 The source decoder stopped after that failure, although physical reception
 continued. Exact-bit offline diagnostics therefore cover 32 transmitted frames,
 including the later cycles that the failed source decoder did not attempt.
+This describes the implementation at measurement time. The subsequent
+[coding-cycle continuation fix](fast-cycle-continuation.md) removes that failure
+latch and replays these same recordings to test later-cycle recovery.
 
 Two additional 64-QAM/right-only transfers also failed. Repeating amplitude
 0.40 failed all eight bootstrap frames. Reducing amplitude to 0.20 allowed

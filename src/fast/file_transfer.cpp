@@ -150,6 +150,8 @@ Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave
         result.checksum_groups=c.checksum_groups;
         result.ldpc_frames=c.ldpc_frames;result.ldpc_failed_frames=c.ldpc_failed_frames;
         result.ldpc_iterations=c.ldpc_iterations;result.ldpc_changed_bits=c.ldpc_changed_bits;
+        result.decoding_stopped=c.decoding_stopped;result.coding_cycles=c.coding_cycles;
+        result.failed_cycles=c.failed_cycles;result.verified_bytes=c.verified_bytes;
         result.corrected_bytes=c.corrected_bytes;result.erased_bytes=c.erased_bytes;result.evm=d.evm;result.status=c.status;++result.revision;
         if(progress)progress(result);
         if(d.physical_complete)break;
@@ -157,6 +159,8 @@ Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave
     modem.finish();result.physical_complete=!stop.stop_requested()&&modem.progress().physical_complete;
     codec.finish(result.physical_complete);const auto c=codec.snapshot();result.complete=c.complete;result.file=codec.result();result.source_bytes=c.source_bytes;
     result.encrypted=c.encrypted;result.authenticated=c.authenticated;result.authenticated_groups=c.authenticated_groups;result.checksum_groups=c.checksum_groups;
+    result.decoding_stopped=c.decoding_stopped;result.coding_cycles=c.coding_cycles;
+    result.failed_cycles=c.failed_cycles;result.verified_bytes=c.verified_bytes;
     result.cancelled=stop.stop_requested();result.status=c.status;result.listening=false;
     if(result.cancelled) {
         result.complete=false;result.authenticated=false;result.file.reset();

@@ -299,6 +299,10 @@ class FastCLI(unittest.TestCase):
         self.assertTrue(result["encrypted"])
         self.assertTrue(result["authenticated"])
         self.assertEqual(result["checksum_groups"], 0)
+        self.assertFalse(result["decoding_stopped"])
+        self.assertEqual(result["failed_cycles"], 0)
+        self.assertGreater(result["coding_cycles"], 1)
+        self.assertGreaterEqual(result["verified_bytes"], len(SOURCE_BYTES))
         self.assertNotIn("text_preview", result)
         self.assertGreater(result["intervals"], 0)
 
@@ -315,6 +319,10 @@ class FastCLI(unittest.TestCase):
         self.assertFalse(result["authenticated"])
         self.assertEqual(result["authenticated_groups"], 0)
         self.assertGreater(result["checksum_groups"], 0)
+        self.assertFalse(result["decoding_stopped"])
+        self.assertEqual(result["failed_cycles"], 0)
+        self.assertGreater(result["coding_cycles"], 1)
+        self.assertGreaterEqual(result["verified_bytes"], len(SOURCE_BYTES))
         self.assertEqual(destination.read_bytes(), SOURCE_BYTES)
         human = self.run_pump("fast-rx", "--input", self.plain_wave, *PROFILE).stdout
         human.decode("utf-8")  # Invalid source bytes must not corrupt console text.
@@ -379,6 +387,10 @@ class FastCLI(unittest.TestCase):
             *PROFILE, "--json", ok=False).stdout)
         self.assertFalse(result["complete"])
         self.assertFalse(result["authenticated"])
+        self.assertTrue(result["decoding_stopped"])
+        self.assertEqual(result["failed_cycles"], 1)
+        self.assertEqual(result["coding_cycles"], 1)
+        self.assertEqual(result["verified_bytes"], 0)
         self.assertEqual(result["source_bytes"], 0)
         self.assertFalse(destination.exists())
 

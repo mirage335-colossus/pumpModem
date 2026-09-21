@@ -159,12 +159,16 @@ void report(const Snapshot& s,bool json) {
         <<",\"authenticated_groups\":"<<s.authenticated_groups<<",\"checksum_groups\":"<<s.checksum_groups<<",\"corrected_bytes\":"<<s.corrected_bytes<<",\"erased_bytes\":"<<s.erased_bytes
         <<",\"ldpc_frames\":"<<s.ldpc_frames<<",\"ldpc_failed_frames\":"<<s.ldpc_failed_frames
         <<",\"ldpc_iterations\":"<<s.ldpc_iterations<<",\"ldpc_changed_bits\":"<<s.ldpc_changed_bits
+        <<",\"decoding_stopped\":"<<(s.decoding_stopped?"true":"false")<<",\"coding_cycles\":"<<s.coding_cycles
+        <<",\"failed_cycles\":"<<s.failed_cycles<<",\"verified_bytes\":"<<s.verified_bytes
         <<",\"estimated_seconds\":"<<s.estimated_seconds<<",\"transmit_fraction\":"<<s.transmit_fraction
         <<",\"evm\":"<<s.evm<<",\"goodput_bps\":"<<s.goodput_bps
         <<",\"status\":\""<<json_escape(s.status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n";
     else {
         std::cout<<s.status<<"; "<<s.source_bytes<<" source bytes, "<<s.intervals<<" fixed intervals; encryption "<<(s.encrypted?"on":"off")
-            <<(s.complete?(s.authenticated?"; authenticated":"; checksum checked"):"")<<(s.error.empty()?"":"; "+s.error)<<'\n';
+            <<(s.complete?(s.authenticated?"; authenticated":"; checksum checked"):"")
+            <<(s.failed_cycles?"; "+std::to_string(s.failed_cycles)+" damaged coding cycles":"")
+            <<(s.error.empty()?"":"; "+s.error)<<'\n';
     }
 }
 }

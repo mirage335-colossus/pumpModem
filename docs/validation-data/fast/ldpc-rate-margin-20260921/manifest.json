@@ -1,0 +1,26 @@
+{
+  "ldpc-qam16-awgn-margin-config.json": {
+    "bytes": 1734,
+    "sha256": "c9d6c640f9961f9da8aac3d71cc75ec2bd5a5f64ca893e4a63cad91ba8db1e07"
+  },
+  "ldpc-qam16-awgn-margin.csv": {
+    "bytes": 1687,
+    "sha256": "1db3815597eaac7b1b91100687199c246dab7bc93f2109873c22cb7698d43f86"
+  },
+  "ldpc-rate-theoretical-margin.json": {
+    "bytes": 827,
+    "sha256": "81c9b1e3a626984de9a1f6c1abe5990d158a97197d0a73a0bc7bce44b4a08bd0"
+  },
+  "ldpc-rate-theory.py": {
+    "bytes": 686,
+    "sha256": "d8a71494555b5f3745c0e7ba5f73b1f4a3b5647f334014f9b4aa174c65afccd9"
+  },
+  "ldpc_qam16_margin.cpp": {
+    "bytes": 3428,
+    "sha256": "61ad3897f0a75663d08e64c48c731d4e6752835119c245b2a6bb330786ac4e2c"
+  },
+  "theory-source-sha256.json": {
+    "bytes": 383,
+    "sha256": "d600584c60fe053159dac22b65ac6be4ca855fe87f079db6e07c5bd2409c3b08"
+  }
+}

@@ -14,9 +14,14 @@ namespace datapump::fast {
 
 using SourceReader = std::function<std::size_t(std::span<std::uint8_t>)>;
 class StreamEncoder;
+class StreamDecoder;
 namespace testing {
 // Reproducible regression waveform only. Never selected by production settings.
 StreamEncoder deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t seed);
+// Incomplete receptions retain opaque fixed source areas, including flags and
+// padding. Available only after physical end; null for a hole, an absent area,
+// or a successfully completed stream whose areas were compacted into its file.
+std::optional<Bytes> retained_source_area(const StreamDecoder&,std::uint64_t ordinal);
 }
 // Readers return zero only at EOF. They never receive a remotely chosen size.
 SourceReader file_source(const std::filesystem::path&);
@@ -53,10 +58,16 @@ private:
 
 struct DecodeSnapshot {
     bool physical_end = false, complete = false, failed = false;
+    // A corrupt source area makes the file incomplete, but later fixed areas
+    // are still decoded. Fatal bootstrap, quota or internal failures stop work.
+    bool decoding_stopped = false;
     bool encrypted = false, authenticated = false;
     std::uint64_t intervals = 0, authenticated_groups = 0, source_bytes = 0;
     std::uint64_t checksum_groups = 0;
     std::uint64_t corrected_bytes = 0, erased_bytes = 0, spool_bytes = 0;
+    // Coding cycles include bootstrap. Spool bytes include fixed holes;
+    // verified bytes count only retained integrity-checked opaque source areas.
+    std::uint64_t coding_cycles = 0, failed_cycles = 0, verified_bytes = 0;
     // LDPC changes are diagnostics until whole-cycle integrity succeeds.
     std::uint64_t ldpc_frames = 0, ldpc_failed_frames = 0, ldpc_iterations = 0, ldpc_changed_bits = 0;
     std::string status = "Waiting for fast stream";
@@ -96,6 +107,7 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
+    friend std::optional<Bytes> testing::retained_source_area(const StreamDecoder&,std::uint64_t);
 };
 
 namespace coding {

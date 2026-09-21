@@ -1,5 +1,6 @@
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/modem.hpp"
 #include "datapump/live.hpp"
 #include "datapump/audio.hpp"
 #include <atomic>
@@ -156,5 +157,45 @@ void text_audio_roundtrip() {
         check(rejected&&!rx.active()&&rx.poll().file==received.file,"oversized text disturbed a completed reception");
     }
 }
+void damaged_cycle_continues() {
+    fast::Settings s;s.device="fixture";s.profile=fast::classic_profile(fast::Channel::wire);
+    s.profile.constellation=4;s.profile.code_rate=fast::CodeRate::three_quarters;
+    s.profile.interleave_depth=1;s.profile.symbol_rate=12000;s.profile.carrier_hz=10000;
+    const auto cycle=fast::cycle_intervals(s.profile);
+    Bytes source(500);for(std::size_t i=0;i<source.size();++i)source[i]=static_cast<std::uint8_t>(i*37+11);
+    fast::StreamEncoder encoder(s.profile,std::nullopt,fast::byte_source(std::move(source)));
+    std::size_t intervals=0;
+    fast::Transmitter transmitter(s.profile,[&](std::span<std::uint8_t> bits) {
+        if(!encoder.next_interval(bits))return false;
+        // Damage the second source cycle, retaining all sampled modem markers
+        // and pilots. The final source cycle must still reach its checksum.
+        if(intervals/cycle==2)std::fill(bits.begin(),bits.end(),0);
+        ++intervals;return true;
+    });
+    std::vector<float> wave;std::array<float,4096> block{};
+    while(auto n=transmitter.read(block))wave.insert(wave.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));
+    check(intervals==4*cycle,"Damaged session fixture must contain bootstrap and three source cycles");
+    // Supply enough real tail samples to finish scoring the last interval,
+    // but nowhere near the six seconds required for physical completion.
+    wave.resize(wave.size()+s.profile.sample_rate/10,0);
+    fixture::reset(std::move(wave),true);
+    fast::Session rx;rx.configure(s);rx.listen();
+    await([&]{const auto r=rx.poll();return r.coding_cycles==4||!r.active;},"Later sampled cycle was not decoded after damage");
+    const auto pending=rx.poll();
+    check(pending.active&&!pending.decoding_stopped&&pending.failed_cycles==1&&pending.checksum_groups==2,
+        "Session stopped processing valid cycles after a damaged cycle");
+    check(!pending.physical_complete&&!pending.complete&&!pending.file&&pending.source_bytes==0&&pending.error.empty(),
+        "Damaged pending session exposed source or manufactured physical completion");
+    check(pending.status.find("continuing decoding")!=std::string::npos&&pending.verified_bytes>0,
+        "Session did not report continued decoding with missing data");
+    {std::lock_guard lock(fixture::mutex);fixture::input.resize(fixture::input.size()+fast::end_silence_samples(s.profile),0);}
+    await([&]{return !rx.active();},"Damaged reception did not end after real physical absence");
+    const auto result=rx.poll();
+    check(result.physical_complete&&!result.complete&&!result.file&&!result.error.empty()&&
+        result.failed_cycles==1&&result.checksum_groups==2&&!result.decoding_stopped,
+        "Damaged reception lost later verified cycles or became a complete file");
+    bool refused=false;try{rx.save("/tmp/datapump-must-not-save-damaged-session.bin");}catch(const Error&){refused=true;}
+    check(refused,"Session allowed saving an incomplete file");
 }
-int main(){try{idle_release();pending_preserved();fast_cancel();text_audio_roundtrip();std::cout<<"fast session ownership and text transfer passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}
+}
+int main(){try{idle_release();pending_preserved();fast_cancel();text_audio_roundtrip();damaged_cycle_continues();std::cout<<"fast session ownership, text transfer and damaged-cycle continuation passed\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

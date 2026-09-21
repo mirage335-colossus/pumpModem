@@ -1,0 +1,49 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  12: fast_transfer
+      Start  19: gui_fast_live
+ 1/20 Test  #12: fast_transfer ....................   Passed   32.60 sec
+      Start  16: fast_acoustic
+ 2/20 Test  #16: fast_acoustic ....................   Passed    6.02 sec
+      Start  93: gui_self_check
+ 3/20 Test  #93: gui_self_check ...................   Passed   11.17 sec
+      Start 100: fast_cli
+ 4/20 Test  #19: gui_fast_live ....................   Passed   55.59 sec
+      Start  11: fast_session
+ 5/20 Test #100: fast_cli .........................   Passed   23.31 sec
+      Start  82: gui_controller
+ 6/20 Test  #11: fast_session .....................   Passed   21.33 sec
+      Start   8: fast_codec
+ 7/20 Test   #8: fast_codec .......................   Passed   32.60 sec
+      Start  10: fast_files
+ 8/20 Test  #10: fast_files .......................   Passed    3.45 sec
+      Start  18: gui_fast
+ 9/20 Test  #18: gui_fast .........................   Passed    1.93 sec
+      Start  26: stream_receive
+10/20 Test  #26: stream_receive ...................   Passed    1.80 sec
+      Start  13: fast_telemetry
+11/20 Test  #13: fast_telemetry ...................   Passed    0.65 sec
+      Start  88: gui_application
+12/20 Test  #88: gui_application ..................   Passed    1.66 sec
+      Start  48: transfer
+13/20 Test  #48: transfer .........................   Passed    0.24 sec
+      Start  17: fast_boundary
+14/20 Test  #17: fast_boundary ....................   Passed    0.02 sec
+      Start  75: gui_inspection
+15/20 Test  #75: gui_inspection ...................   Passed    0.12 sec
+      Start  23: stream_codec
+16/20 Test  #23: stream_codec .....................   Passed    0.05 sec
+      Start  28: compression_short
+17/20 Test  #28: compression_short ................   Passed    0.03 sec
+      Start  81: gui_binary_editor
+18/20 Test  #81: gui_binary_editor ................   Passed    0.04 sec
+      Start  25: attachment
+19/20 Test  #25: attachment .......................   Passed    0.01 sec
+20/20 Test  #82: gui_controller ...................   Passed   69.98 sec
+
+100% tests passed, 0 tests failed out of 20
+
+Label Time Summary:
+gui    = 140.48 sec*proc (7 tests)
+
+Total Test time (real) = 143.08 sec

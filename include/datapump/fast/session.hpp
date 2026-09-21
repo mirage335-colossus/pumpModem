@@ -23,10 +23,12 @@ struct Snapshot {
     bool active=false,transmitting=false,listening=false;
     bool physical_complete=false,complete=false,cancelled=false;
     bool encrypted=false,authenticated=false;
+    bool decoding_stopped=false;
     std::uint64_t revision=0,source_bytes=0,intervals=0,authenticated_groups=0;
     std::uint64_t checksum_groups=0;
     std::uint64_t corrected_bytes=0,erased_bytes=0;
     std::uint64_t ldpc_frames=0,ldpc_failed_frames=0,ldpc_iterations=0,ldpc_changed_bits=0;
+    std::uint64_t coding_cycles=0,failed_cycles=0,verified_bytes=0;
     double estimated_seconds=0,transmit_fraction=0;
     double elapsed_seconds=0,goodput_bps=0,evm=0,carrier_error_hz=0,clock_error_ppm=0;
     std::string status="Fast mode ready",error;

@@ -1,0 +1,10 @@
+gmake: jobserver mkfifo: /tmp/GMfifo4: File exists
+[  0%] Checking regular/fast DSP isolation
+[ 60%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 60%] Built target datapump_fast_boundary
+[ 93%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/fast_cable_probe.dir/tools/fast_cable_probe.cpp.o
+[100%] Linking CXX executable fast_cable_probe
+[100%] Built target fast_cable_probe

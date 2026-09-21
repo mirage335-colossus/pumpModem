@@ -153,12 +153,56 @@ must pass its full digest or HMAC before its opaque source area is retained.
 Diagnostics count LDPC frames, nonconverged frames, total iterations, and changes
 to non-erased systematic hard decisions. These changes are not proof of correct
 recovery until integrity succeeds. RS changed bytes are recorded separately.
-A single surviving failed cycle prevents whole-file completion; there is no
-selective retransmission protocol in this format.
+A single unrecoverable cycle prevents whole-file completion, but does not stop
+the decoder from verifying and retaining later cycles after a valid bootstrap.
+The failed cycle occupies an explicit invalid source-area slot; later good
+areas retain their original positions. Physical cycle numbering advances even
+when correction or integrity fails, so later whitening masks and digest/HMAC
+ordinals remain correct. This requires the modem to preserve fixed timed
+positions; it does not recover an unknown cycle index or reacquire a lost
+bootstrap. The classic Fast decoder likewise continues and can retain other
+independently protected groups within a partly damaged coding cycle.
+
+This continuation behavior changes no transmitted bits. There is no selective
+retransmission protocol or parity spanning different coding cycles. Later good
+areas do not repair the missing bytes, and any hole prevents a complete file
+from being offered. Bootstrap corruption remains fatal because later areas
+cannot be checked without a verified transfer context. Local quota exhaustion,
+nonfinite soft evidence, resource failures and internal processing errors also
+stop decoding; these are not treated as recoverable channel corruption.
+
+`DecodeSnapshot.failed` records an incomplete or invalid transfer. It can remain
+true while subsequent coding cycles are processed. `decoding_stopped` records a
+fatal stop. `coding_cycles` counts complete fixed cycles presented for decoding,
+including the bootstrap and a cycle rejected immediately by the local quota;
+`failed_cycles` counts cycles rejected for FEC, alignment-fill or group-integrity
+corruption. It does not count quota/internal failures or post-end source-syntax
+rejections. These states do not substitute for observed physical absence.
 
 The receiver retains at most its configured source-area quota, capped at
-256 MiB, entirely in RAM. It stores fixed source areas until physical completion,
-then compacts them in place. A final area's padding counts against this quota.
+256 MiB, entirely in RAM. Before decoding a source cycle, it checks the complete
+locally fixed area width against the remaining quota and allocates that slot.
+Rejected areas remain zero-filled holes with explicit validity metadata; their
+full width still consumes the quota. Thus a stream of bad cycles cannot obtain
+unbounded decoding or integrity attempts by avoiding successful retention.
+In capacity mode the smallest supported area is 3,984 bytes, so the 256 MiB
+quota admits at most 67,378 source positions plus one bootstrap integrity check.
+The next source cycle stops before decoding or checking its digest. See the
+[conditional integrity bound](fast-capacity-integrity.md) for the arithmetic
+and probability-model limits.
+
+`spool_bytes` counts allocated fixed source positions, including holes and final
+padding; `verified_bytes` sums only integrity-checked opaque source-area widths.
+Both include source flags and fill and differ from the eventual file's
+`source_bytes`. A separate validity byte per source area and bounded vector
+capacity track the holes. Source areas remain opaque until physical completion.
+For a clean reception, the receiver validates source syntax before compacting
+them in place into the completed file, without a duplicate source buffer.
+An incomplete reception retains the good opaque areas and their fixed holes;
+it does not expose them as a complete or silently shortened file. This storage
+belongs to the decoder's lifetime; the live session releases the decoder when
+reception ends, retaining progress counts without a partial-file handle.
+
 Each source-reader request is at most 16 KiB. Coding scratch depends on at most
 16 local frames, not source size or received metadata. At maximum depth, retained
 LLRs use about 4 MiB, while one LDPC decode owns under 3 MiB of additional scratch.
@@ -183,9 +227,15 @@ boundaries, arbitrary bytes and trailing zeros, maximum 16-frame geometry,
 1 MiB streamed sources, memory quotas, and physical-end gating. It also covers
 malformed authenticated/checksummed padding, corrupted digests, wrong keys,
 missing/reordered/spliced cycles, and an erased complete 2,048-bit interval.
+Continuation regressions cover one and consecutive integrity-damaged cycles,
+later exact retained areas, and classic groups after an integrity failure
+within the same cycle in both public and keyed modes. Additional cases cover
+a fully erased cycle, quota exhaustion by holes, fatal bootstrap/nonfinite
+failures, and the absence of a complete result despite continued successful
+decoding.
 Acoustic channel tests cover rates 1/2, 2/3 and 3/4 at depths one and four in both
 integrity modes: independent continuation/final byte layout, mandatory final
-cycles, deferred padding interpretation, terminal integrity failure, and
+cycles, deferred padding interpretation, incomplete-file integrity failure, and
 rejection under an otherwise identical cable channel identity. These tests
 exercise the codec without sound devices or a modulation receiver.
 Additional OFDM context tests bind waveform selection, FFT size, cyclic prefix

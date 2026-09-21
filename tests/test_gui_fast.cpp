@@ -13,6 +13,31 @@ using namespace datapump;
 using namespace datapump::gui;
 namespace {
 void check(bool value,const char* message) {if(!value)throw Error(message);}
+void damaged_reception_presentation() {
+    fast::Snapshot s;s.revision=1;s.active=true;s.listening=true;
+    s.failed_cycles=1;s.checksum_groups=2;s.verified_bytes=4096;
+    check(fast_ui::transfer_stage(s)=="RECEIVING / MISSING DATA",
+        "Recoverable cycle damage was presented as a stopped receiver");
+    auto label=fast_ui::integrity_label(s);
+    check(label.find("2 checksum-verified groups")!=std::string::npos&&
+        label.find("1 damaged cycle")!=std::string::npos&&
+        label.find("decoding continues; awaiting physical end")!=std::string::npos,
+        "Missing-data presentation lost verified progress or physical-end gating");
+    ++s.checksum_groups;
+    check(fast_ui::integrity_label(s).find("3 checksum-verified groups")!=std::string::npos,
+        "Later verified data did not advance damaged-reception presentation");
+    s.decoding_stopped=true;
+    check(fast_ui::transfer_stage(s)=="RECEIVING / DECODING STOPPED"&&
+        fast_ui::integrity_label(s).find("decoding stopped; awaiting physical end")!=std::string::npos,
+        "Fatal stop was confused with recoverable coding damage");
+    s.decoding_stopped=false;s.active=false;s.listening=false;s.physical_complete=true;
+    check(fast_ui::transfer_stage(s)=="INCOMPLETE"&&
+        fast_ui::integrity_label(s).find("received bytes available")==std::string::npos,
+        "A file with missing data was presented as complete");
+    s.cancelled=true;
+    check(fast_ui::transfer_stage(s)=="CANCELLED · no completion implied",
+        "Damaged reception hid the explicit cancellation state");
+}
 const ui::Control& control(ui::Field field) {
     for(const auto& c:ui::console_screen())if(c.field==field)return c;
     throw Error("Missing shared fast field");
@@ -360,6 +385,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {damaged_reception_presentation();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

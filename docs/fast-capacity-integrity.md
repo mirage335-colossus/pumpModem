@@ -30,18 +30,25 @@ candidate event, and it is not an authentication claim for public mode.
    32-byte SHA-256 or keyed tag binding the local profile and salt, and canonical
    zero fill. Every later fixed cycle must pass its own full 32-byte digest or
    HMAC binding the profile, transfer salt, local cycle ordinal and complete
-   protected area. A failed bootstrap, LDPC/outer-code processing exception,
-   integrity failure or quota failure is terminal for that decoder instance.
-   There is no scan through alternate byte offsets or alternate decoded source
-   interpretations after a failure.
+   protected area. After a valid bootstrap, an uncorrectable outer-code result,
+   noncanonical protected alignment fill or failed cycle digest leaves a hole
+   at that fixed source position. The decoder continues checking subsequent
+   cycles, using their original physical whitening index and integrity ordinal.
+   Failed bootstrap, local quota exhaustion, nonfinite evidence and resource or
+   internal processing errors stop decoding. There is no second bootstrap
+   attempt, scan through alternate byte offsets or alternate decoded source
+   interpretation after a failure.
 3. Even integrity-confirmed source areas remain opaque and unavailable as a
    completed file until the DSP observes six seconds of fully scored absence.
    Only then does the codec interpret continuation/final flags and padding.
    Every earlier source cycle must have continuation flag zero; the last must
    have final flag one and a canonical `0x80` delimiter followed by zero fill.
-   Missing, extra, reordered or truncated cycles cannot turn a protected prefix
-   into a completed file. EOF, cancellation and a valid final flag do not
-   generate the physical-absence event.
+   A retained hole prevents whole-file completion; later verified areas never
+   slide into the missing area's position. Missing, extra, reordered or
+   truncated cycles cannot turn a protected prefix into a completed file. EOF,
+   cancellation and a valid final flag do not generate the physical-absence
+   event. The continuation fix changes receiver bookkeeping, not the wire
+   format, and does not supply retransmission or reconstruct missing data.
 
 The implementation's `ModemProgress::acquired` reports the first decision, not
 integrity confirmation. Completed bytes require all three decisions. A checksum
@@ -66,17 +73,23 @@ checks does not establish the bound when its input assumptions fail.
 The actual implementation gives a finite per-decoder budget without adding a
 new search counter:
 
-- There is exactly one bootstrap attempt. A failed decoder stays failed;
+- There is exactly one bootstrap attempt. A failed bootstrap stops decoding;
   subsequent intervals do not initiate another bootstrap or another alignment.
 - The retained source-area quota is capped at 256 MiB (`2^28` bytes).
 - Across all supported rates, depths 1–16 and public/keyed modes, the smallest
   retained source area is 3,984 bytes: keyed 1/2 with one LDPC frame.
-- At most `floor(2^28 / 3984) = 67,378` source areas can be retained. Integrity is
-  checked before the quota test, so conservatively include one additional
-  source check that could trigger the quota failure, plus the bootstrap.
+- Before decoding each source cycle, the receiver checks its fixed area width
+  against the remaining quota, allocates that position and charges its full
+  width. An uncorrectable or integrity-rejected cycle retains a zero-filled
+  hole with explicit invalid status and consumes the same quota as a good
+  cycle. Repeated corruption therefore cannot create unlimited free checks.
+- At most `floor(2^28 / 3984) = 67,378` source positions fit. They consume
+  268,433,952 bytes, leaving 1,504 bytes, which cannot hold another supported
+  area. The next cycle fails its quota check before FEC or source-integrity
+  verification. Include the one bootstrap check, but no extra source check.
 
-There are therefore at most **67,380 integrity checks per decoder**, fewer than
-`2^17`. Under the stated model, accidental acceptance of any incorrect protected
+There are therefore at most **67,379 integrity checks per capacity decoder**,
+fewer than `2^17`. Under the stated model, accidental acceptance of any incorrect protected
 area is bounded by **less than `2^-239` per decoder**. Acceptance of a completed
 wrong file requires such an acceptance and also the final-format checks, so its
 bound is no larger. This is comfortably below the requested `2^-80` target for
@@ -88,13 +101,24 @@ would give `2^-224`. The application does not impose that number as a lifetime
 limit across arbitrarily many newly created receivers; there is no claim of a
 constant probability bound over unlimited listening/restarts.
 
-The budget follows `StreamDecoder::Impl::cycle`, its terminal `fail` state,
-the local `quota`, and `StreamDecoder::finish` in
+The budget follows `StreamDecoder::Impl::cycle`, its per-position quota charge,
+the terminal `decoding_stopped` state, and `StreamDecoder::finish` in
 [`src/fast/codec.cpp`](../src/fast/codec.cpp). DSP EOF only records EOF;
 [`src/fast/session.cpp`](../src/fast/session.cpp) passes a true physical-end flag
 to the codec only when the DSP has observed physical completion and reception
 has not been cancelled. No received length or source flag selects allocation
 or coding boundaries.
+
+The snapshot's `failed` flag means that a complete file can no longer be
+offered; it does not by itself stop later cycle checks. `decoding_stopped`
+identifies a fatal decoder stop. `spool_bytes` counts allocated fixed source
+positions including holes, while `verified_bytes` counts only source areas
+that passed their digest or HMAC, including their still-opaque flag and padding.
+Neither count is a received payload length or permission to interpret source
+before physical completion. `coding_cycles` includes the bootstrap and every
+complete cycle presented for decoding, including a final quota-rejected
+attempt; `failed_cycles` counts cycles rejected for FEC/alignment/integrity
+corruption, rather than local resource failures or post-end source syntax.
 
 ## What is not established by this bound
 
@@ -137,7 +161,9 @@ in another waveform is likewise not an independent random candidate.
 
 The existing regression tests exercise corrupted digests, wrong keys, spliced
 or reordered cycles, malformed protected padding, missing final cycles, memory
-quotas and physical-end gating. Such tests check the acceptance logic. They
+quotas and physical-end gating. Continuation regressions verify later retained
+areas after one or consecutive corrupt/erased cycles, correct physical ordinals,
+and quota exhaustion from holes. Such tests check the acceptance logic. They
 cannot experimentally measure probabilities as small as `2^-80` or `2^-239`,
 and the numerical bound does not establish successful delivery probability on
 a noisy cable or resistance to denial of service through provisional locks.
