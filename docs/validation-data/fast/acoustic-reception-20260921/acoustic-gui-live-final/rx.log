@@ -1,0 +1,110 @@
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+profile=acoustic constellation=64 code=three-quarters depth=8 mono=0
+0.000213201 | Waiting for exclusive audio. Regular reception and transmission continue unchanged. | WAITING FOR AUDIO · 0 source bytes · 0 intervals · 0.0 s | RX tracking · awaiting received intervals | Receive integrity · no received stream yet
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 14400Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 16000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 22050Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 24000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 32000Hz, get 48000Hz)
+ALSA lib pcm.c:8868:(snd_pcm_set_params) Rate doesn't match (requested 44100Hz, get 48000Hz)
+ALSA lib pcm_dsnoop.c:567:(snd_pcm_dsnoop_open) unable to open slave
+1.01259 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 1.0 s | Input RMS -47 dBFS · peak -39 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+2.02371 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 2.0 s | Input RMS -47 dBFS · peak -36 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+3.0377 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 3.0 s | Input RMS -29 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+4.04995 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 4.0 s | Input RMS -29 dBFS · peak -18 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+5.06299 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 5.0 s | Input RMS -29 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+6.0748 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 6.0 s | Input RMS -29 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+7.08698 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 7.0 s | Input RMS -30 dBFS · peak -20 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+8.10048 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 8.0 s | Input RMS -29 dBFS · peak -18 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+9.11389 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 9.1 s | Input RMS -30 dBFS · peak -21 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+10.1263 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 10.1 s | Input RMS -30 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+11.1392 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 11.1 s | Input RMS -30 dBFS · peak -20 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+12.1523 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 12.1 s | Input RMS -30 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+13.1648 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 13.1 s | Input RMS -30 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+14.1774 | Listening for Fast modem training | RECEIVING / PENDING · 0 source bytes · 0 intervals · 14.1 s | Input RMS -30 dBFS · peak -19 dBFS
+No modem lock · check input, level and matching profile | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+15.1891 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 0 intervals · 15.1 s | Input RMS -29 dBFS · peak -17 dBFS
+Modem synchronized · awaiting first interval | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+16.2014 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 65 intervals · 16.2 s | RX EVM 24.92% · carrier 0.00 Hz
+Clock error -0.15 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+17.2136 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 98 intervals · 17.2 s | RX EVM 20.19% · carrier 0.00 Hz
+Clock error -0.14 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+18.2264 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 131 intervals · 18.2 s | RX EVM 16.13% · carrier 0.00 Hz
+Clock error -0.14 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+19.2394 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 196 intervals · 19.2 s | RX EVM 21.27% · carrier 0.00 Hz
+Clock error -0.12 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+20.2552 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 229 intervals · 20.2 s | RX EVM 23.07% · carrier 0.00 Hz
+Clock error -0.12 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+21.266 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 254 intervals · 21.2 s | RX EVM 18.90% · carrier 0.00 Hz
+Clock error -0.11 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+22.2784 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 286 intervals · 22.2 s | RX EVM 22.67% · carrier 0.00 Hz
+Clock error -0.12 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+23.2908 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 319 intervals · 23.2 s | RX EVM 25.73% · carrier 0.00 Hz
+Clock error -0.10 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+24.3036 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 352 intervals · 24.2 s | RX EVM 25.12% · carrier 0.00 Hz
+Clock error -0.10 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+25.316 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 418 intervals · 25.3 s | RX EVM 21.17% · carrier 0.00 Hz
+Clock error -0.09 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+26.329 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 450 intervals · 26.3 s | RX EVM 26.73% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+27.3423 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 483 intervals · 27.3 s | RX EVM 25.16% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 0 checksum-verified groups
+Unauthenticated · awaiting physical end
+28.3545 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 508 intervals · 28.3 s | RX EVM 24.77% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 1 checksum-verified groups
+Unauthenticated · awaiting physical end
+29.368 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 508 intervals · 29.3 s | RX EVM 24.77% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 1 checksum-verified groups
+Unauthenticated · awaiting physical end
+30.3806 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 508 intervals · 30.3 s | RX EVM 24.77% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 1 checksum-verified groups
+Unauthenticated · awaiting physical end
+31.3933 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 508 intervals · 31.3 s | RX EVM 24.77% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 1 checksum-verified groups
+Unauthenticated · awaiting physical end
+32.4076 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 508 intervals · 32.3 s | RX EVM 24.77% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 1 checksum-verified groups
+Unauthenticated · awaiting physical end
+33.4191 | Receiving fast stream; content pending | RECEIVING / PENDING · 0 source bytes · 508 intervals · 33.4 s | RX EVM 24.77% · carrier 0.00 Hz
+Clock error -0.08 ppm | Public data · 1 checksum-verified groups
+Unauthenticated · awaiting physical end
+result=PASS | Saved complete received bytes. | RECEIVED · checksum verified, unauthenticated · 60 source bytes · 508 intervals · 33.7 s

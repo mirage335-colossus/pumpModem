@@ -1,0 +1,33 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start  12: fast_transfer
+      Start  93: gui_self_check
+ 1/12 Test  #93: gui_self_check ...................   Passed   12.62 sec
+      Start  16: fast_acoustic
+ 2/12 Test  #16: fast_acoustic ....................   Passed    6.80 sec
+      Start 100: fast_cli
+ 3/12 Test  #12: fast_transfer ....................   Passed   37.50 sec
+      Start  19: gui_fast_live
+ 4/12 Test #100: fast_cli .........................   Passed   24.84 sec
+      Start  11: fast_session
+ 5/12 Test  #11: fast_session .....................   Passed   14.44 sec
+      Start  82: gui_controller
+ 6/12 Test  #19: gui_fast_live ....................   Passed   48.73 sec
+      Start  10: fast_files
+ 7/12 Test  #10: fast_files .......................   Passed    3.45 sec
+      Start  18: gui_fast
+ 8/12 Test  #18: gui_fast .........................   Passed    1.96 sec
+      Start  13: fast_telemetry
+ 9/12 Test  #13: fast_telemetry ...................   Passed    0.61 sec
+      Start  88: gui_application
+10/12 Test  #88: gui_application ..................   Passed    1.68 sec
+      Start  17: fast_boundary
+11/12 Test  #17: fast_boundary ....................   Passed    0.02 sec
+12/12 Test  #82: gui_controller ...................   Passed   69.08 sec
+
+100% tests passed, 0 tests failed out of 12
+
+Label Time Summary:
+gui    = 134.07 sec*proc (5 tests)
+
+Total Test time (real) = 127.78 sec

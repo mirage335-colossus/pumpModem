@@ -1,0 +1,10 @@
+Reproducer linked against original committed libdatapump_fast.a (before receiver edits):
+gain 1 acquired 1 complete 1 intervals 32 wrong 0
+gain 1.9 acquired 1 complete 1 intervals 32 wrong 0
+gain 2.1 acquired 0 complete 0 intervals 0 wrong 0
+gain 3 acquired 0 complete 0 intervals 0 wrong 0
+cut 0 acquired 1 complete 1 intervals 32
+cut 1000 acquired 1 complete 1 intervals 32
+cut 4096 acquired 0 complete 0 intervals 0
+cut 8192 acquired 0 complete 0 intervals 0
+cut 12288 acquired 0 complete 0 intervals 0

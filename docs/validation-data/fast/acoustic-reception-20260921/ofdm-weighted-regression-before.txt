@@ -1,0 +1,1 @@
+noise 0.006 acquired 1 complete 0 failedframes 4 totalframes 4 iterations 200 bytes 0 exact 0
