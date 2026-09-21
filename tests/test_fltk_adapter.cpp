@@ -365,9 +365,11 @@ void fast_mode_visibility() {
         return nullptr;
     };
     auto* source=field_widget.template operator()<NativeChoice>("Source");
+    auto* expected_snr=field_widget.template operator()<NativeChoice>("Expected SNR");
+    auto* symbol_rate=field_widget.template operator()<NativeChoice>("Symbol rate");
     auto* text=field_widget.template operator()<NativeEditor>("Text");
     auto* file=field_widget.template operator()<NativeInput>("Source file");
-    require(selector&&encryption&&source&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    require(selector&&encryption&&source&&expected_snr&&symbol_rate&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
     require(selector->value()==0&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
         "Modem selector did not default to Robust Modem or retained the obsolete Fast toggle");
     app.application.toggle(ui::Field::fast_mode,true);
@@ -385,6 +387,37 @@ void fast_mode_visibility() {
         require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&!choose->visible_r()&&text->visible_r()&&
             transmit->visible_r()&&listen->visible_r()&&listen->active_r()&&!encryption->value()&&!regular->visible_r(),
             "Fast Modem selection did not show the default plain-text interface");
+        for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
+            app.application.select(ui::Field::fast_profile,channel);refresh();
+            for(const auto item:{std::pair{expected_snr,ui::Field::fast_expected_snr},std::pair{symbol_rate,ui::Field::fast_symbol_rate}}) {
+                auto* widget=item.first;
+                require(widget->visible_r()&&widget->active_r(),"Fast SNR/rate native dropdown is hidden or disabled");
+                fl_font(widget->textfont(),widget->textsize());
+                for(const auto& option:app.application.field(item.second).options) {
+                    int width=0,height=0;fl_measure(option.label.c_str(),width,height,0);
+                    if(width>widget->w()-28||height>widget->h())
+                        throw std::runtime_error("Fast SNR/rate choice clips at the native minimum window size: "+
+                            option.label+" needs "+std::to_string(width)+" x "+std::to_string(height)+
+                            ", available "+std::to_string(widget->w()-28)+" x "+std::to_string(widget->h()));
+                }
+            }
+            const auto nominal=app.application.field(ui::Field::fast_expected_snr).options.at(1).id;
+            const auto low=app.application.field(ui::Field::fast_expected_snr).options.back().id;
+            for(const auto& target:{nominal,low,std::string("manual")}) {
+                app.application.select(ui::Field::fast_expected_snr,target);refresh();
+                const auto& value=app.application.field(ui::Field::fast_detail).text;
+                auto* detail=find_label(*window,value.c_str());
+                require(detail,"Fast detail did not materialize as a native label");
+                fl_font(detail->labelfont(),detail->labelsize());int width=0,height=0;
+                fl_measure(value.c_str(),width,height,0);
+                if(width>detail->w()||height>detail->h())
+                    throw std::runtime_error("Fast profile detail clips at the native minimum window size: "+
+                        std::to_string(width)+" x "+std::to_string(height)+", available "+
+                        std::to_string(detail->w())+" x "+std::to_string(detail->h())+"; "+value);
+            }
+            app.application.select(ui::Field::fast_expected_snr,nominal);refresh();
+        }
+        app.application.select(ui::Field::fast_profile,"wire");refresh();
         app.application.toggle(ui::Field::fast_mode,false);
         require(app.application.field(ui::Field::fast_mode).selected=="fast","Obsolete toggle changed the selected Fast Modem");
         std::vector<NativeBitmap*> plots;

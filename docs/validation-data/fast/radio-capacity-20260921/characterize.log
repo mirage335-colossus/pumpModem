@@ -1,0 +1,4 @@
+ssb input_snr_db=17 complete=0 qam=64 rate=3/4 intervals=64 ldpc_frames=1 erased_intervals=34 ldpc_failed=1 evm=0.137307 status=Uncorrectable capacity Reed-Solomon cycle
+ssb input_snr_db=18 complete=1 qam=64 rate=3/4 intervals=64 ldpc_frames=2 erased_intervals=34 ldpc_failed=0 evm=0.130098 status=Verified and physically complete
+ssb input_snr_db=20 complete=1 qam=64 rate=8/9 intervals=64 ldpc_frames=2 erased_intervals=34 ldpc_failed=0 evm=0.112751 status=Verified and physically complete
+ssb input_snr_db=23 complete=1 qam=256 rate=2/3 intervals=64 ldpc_frames=2 erased_intervals=45 ldpc_failed=0 evm=0.0588755 status=Verified and physically complete

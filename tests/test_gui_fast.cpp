@@ -5,6 +5,8 @@
 #include "fast/screen.hpp"
 #include "datapump/types.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/preset.hpp"
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -45,6 +47,97 @@ const ui::Control& control(ui::Field field) {
 const ui::Control& action(ui::Command command) {
     for(const auto& c:ui::console_screen())if(c.command==command)return c;
     throw Error("Missing shared fast action");
+}
+void snr_and_symbol_rate_controls() {
+    using F=ui::Field;using C=ui::Command;
+    unsigned acquisitions=0;
+    fast_ui::Controller controller([&] {++acquisitions;return false;});
+    check(controller.field(F::fast_expected_snr).selected=="65"&&
+        controller.field(F::fast_symbol_rate).selected=="auto",
+        "Cable GUI did not start at the automatic nominal SNR and timing");
+    for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
+        const auto& c=control(field);
+        check(c.kind==ui::Kind::choice&&c.persistent&&c.scope==ui::ScreenScope::fast&&c.help[0],
+            "SNR/rate dropdown is missing from the shared Fast screen or lacks help");
+    }
+    controller.select(F::fast_profile,"acoustic");
+    check(controller.field(F::fast_expected_snr).selected=="13"&&
+        controller.field(F::fast_symbol_rate).selected=="auto",
+        "Acoustic expected-SNR default is not independent of cable settings");
+    const auto& choices=controller.field(F::fast_expected_snr).options;
+    for(const auto id:{"13","10","6","3","0","-3","-6","-10","-20"})
+        check(std::any_of(choices.begin(),choices.end(),[&](const auto& option){return option.id==id;}),
+            "Acoustic expected-SNR dropdown omitted a notable target or 40 dB span");
+    check(std::any_of(choices.begin(),choices.end(),[](const auto& option){return option.id!="manual"&&std::stod(option.id)<=-27;}),
+        "Acoustic expected-SNR range does not cover 40 dB below its default");
+    controller.select(F::fast_expected_snr,"10");
+    const auto p=fast::resolve_snr_preset(fast::Channel::acoustic,10).profile;
+    check(controller.field(F::fast_expected_snr).selected=="10"&&
+        controller.field(F::fast_symbol_rate).selected=="auto"&&
+        controller.field(F::fast_constellation).selected==std::to_string(p.constellation),
+        "Expected-SNR selection did not apply the resolved modem settings");
+    const auto detail=controller.field(F::fast_detail).text;
+    check(detail.find("reference bandwidth")!=std::string::npos&&detail.find("model-based")!=std::string::npos&&
+        detail.find("does not measure or negotiate")!=std::string::npos,
+        "Automatic preset was presented as measured or negotiated SNR");
+    const auto options=fast::symbol_rate_options(p);
+    const auto current=fast::symbol_rate_option_id(p);
+    const auto rate=std::find_if(options.begin(),options.end(),[&](const auto& option){return option.id!="auto"&&option.id!=current;});
+    check(rate!=options.end(),"Acoustic symbol-rate dropdown has no alternate timing");
+    controller.select(F::fast_symbol_rate,rate->id);
+    check(controller.field(F::fast_symbol_rate).selected==rate->id&&
+        controller.field(F::fast_expected_snr).selected=="manual",
+        "Explicit symbol timing retained a misleading automatic SNR selection");
+    controller.select(F::fast_constellation,"64");controller.toggle(F::fast_mono,false);
+    check(controller.field(F::fast_symbol_rate).selected==rate->id,
+        "Manual constellation edit reset explicit symbol timing");
+    controller.select(F::fast_profile,"wire");
+    check(controller.field(F::fast_expected_snr).selected=="65"&&
+        controller.field(F::fast_symbol_rate).selected=="auto"&&!controller.field(F::fast_mono).checked,
+        "Acoustic overrides leaked into the cable profile");
+    controller.select(F::fast_expected_snr,"40");
+    controller.select(F::fast_profile,"acoustic");
+    check(controller.field(F::fast_expected_snr).selected=="manual"&&
+        controller.field(F::fast_symbol_rate).selected==rate->id&&
+        controller.field(F::fast_constellation).selected=="64"&&!controller.field(F::fast_mono).checked,
+        "Switching channels discarded retained SNR, timing, constellation or routing");
+    controller.select(F::fast_symbol_rate,"auto");
+    check(controller.field(F::fast_constellation).selected=="64"&&
+        controller.field(F::fast_expected_snr).selected=="manual"&&
+        controller.field(F::fast_symbol_rate).selected=="auto",
+        "Automatic timing discarded independent manual constellation settings");
+    controller.select(F::fast_expected_snr,"-10");
+    const auto narrow=fast::resolve_snr_preset(fast::Channel::acoustic,-10).profile;
+    check(controller.field(F::fast_expected_snr).selected=="-10"&&
+        controller.field(F::fast_constellation).selected==std::to_string(narrow.constellation)&&
+        controller.field(F::fast_symbol_rate).selected=="auto",
+        "Lower-SNR preset did not apply its resolved waveform and clear manual rate override");
+    check(!narrow.acoustic_ofdm&&controller.field(F::fast_detail).text.find("symbols/s")!=std::string::npos,
+        "Narrow single-carrier preset retained an inactive OFDM timing label");
+    controller.select(F::fast_expected_snr,"manual");
+    check(controller.field(F::fast_symbol_rate).selected==fast::symbol_rate_option_id(narrow),
+        "Changing narrowed waveform to Manual discarded its actual timing");
+    controller.select(F::fast_symbol_rate,"auto");
+    const auto narrow_auto=fast::apply_symbol_rate_option(narrow,"auto");
+    check(std::any_of(controller.field(F::fast_symbol_rate).options.begin(),controller.field(F::fast_symbol_rate).options.end(),
+        [&](const auto& option){return option.id==fast::symbol_rate_option_id(narrow_auto);}),
+        "Manual narrow SC Auto timing has no matching explicit dropdown option");
+    controller.select(F::fast_profile,"wire");
+    check(controller.field(F::fast_expected_snr).selected=="40",
+        "Cable SNR selection was discarded by profile switching");
+    const auto frozen_alternate=controller.field(F::fast_symbol_rate).options.back().id;
+    controller.activate(C::fast_listen);
+    check(acquisitions==1&&controller.active()&&!controller.field(F::fast_expected_snr).enabled&&
+        !controller.field(F::fast_symbol_rate).enabled,"Pending audio acquisition did not freeze modem geometry");
+    const auto frozen_rate=controller.field(F::fast_symbol_rate).selected;
+    controller.select(F::fast_expected_snr,"65");controller.select(F::fast_symbol_rate,frozen_alternate);
+    check(controller.field(F::fast_expected_snr).selected=="40"&&
+        controller.field(F::fast_symbol_rate).selected==frozen_rate,
+        "An active transfer accepted an SNR or timing change");
+    controller.activate(C::fast_cancel);
+    check(!controller.active()&&controller.field(F::fast_expected_snr).enabled&&controller.field(F::fast_symbol_rate).enabled,
+        "Cancellation did not release the SNR/rate controls");
+    controller.close();
 }
 void presentation_and_retention() {
     using F=ui::Field;using C=ui::Command;
@@ -109,6 +202,20 @@ void presentation_and_retention() {
             if(c.kind==ui::Kind::bitmap)check(geometry.widget.w>=300&&geometry.widget.h>=140&&geometry.has_caption,
                 "Fast live plots lost useful dimensions or their metadata captions");
         }
+        const auto occupied=[&](const ui::Control& c) {
+            const auto geometry=app.control_layout(c,size.w,size.h);auto r=geometry.frame;
+            if(geometry.has_label&&geometry.label.y<r.y) {r.h+=r.y-geometry.label.y;r.y=geometry.label.y;}
+            return r;
+        };
+        for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
+            const auto r=occupied(control(field));
+            check(r.w>=300,"SNR/rate dropdowns lost room for their descriptive choices");
+            for(const auto& c:ui::console_screen())if(c.scope==ui::ScreenScope::fast&&c.field!=field&&app.control(c).visible) {
+                const auto other=occupied(c);
+                check(r.x+r.w<=other.x||other.x+other.w<=r.x||r.y+r.h<=other.y||other.y+other.h<=r.y,
+                    "SNR/rate dropdown overlaps another Fast control or its label");
+            }
+        }
         const auto title=ui::DesktopLayout(size.w,size.h)[ui::Slot::header];
         const auto toggle=app.control_layout(mode,size.w,size.h).frame;
         check(toggle.x>=title.x+title.w&&toggle.x<title.x+title.w+24,"Modem selector is not adjacent to DATA PUMP");
@@ -116,9 +223,13 @@ void presentation_and_retention() {
     app.select(mode,"robust");
     check(app.page()==ui::Page::compression&&app.field(F::binary).text==bits&&app.field(F::fec).selected==fec,
           "Returning to regular mode changed its selected page or exact draft");
+    const auto retained_snr=app.field(F::fast_expected_snr).selected,retained_rate=app.field(F::fast_symbol_rate).selected;
     app.edit(control(F::fast_file),"/tmp/stale.bin");app.select(control(F::fast_profile),"wire");app.activate(action(C::fast_choose_file));
+    app.select(F::fast_expected_snr,"10");app.select(F::fast_symbol_rate,"auto");
     check(app.field(F::fast_file).text=="/tmp/independent-source.bin"&&app.field(F::fast_profile).selected=="ssb"&&app.take_services().empty(),
           "Hidden fast callbacks changed state or opened native services");
+    check(app.field(F::fast_expected_snr).selected==retained_snr&&app.field(F::fast_symbol_rate).selected==retained_rate,
+        "Hidden Fast callbacks changed retained SNR or symbol timing");
     app.select(mode,"fast");check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_text).text==fast_text&&app.field(F::fast_source).selected=="text",
         "Fast settings or source draft were discarded on mode switch");
     check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
@@ -139,8 +250,11 @@ void presentation_and_retention() {
         check(app.field(F::fast_constellation).selected=="64"&&!app.field(F::fast_mono).checked,
             "Explicit acoustic 64-QAM and both-speaker output remain unavailable");
         app.select(F::fast_profile,"acoustic");
-        check(app.field(F::fast_constellation).selected=="16"&&app.field(F::fast_mono).checked,
-            "Reselecting acoustic did not restore its modulation and output defaults");
+        check(app.field(F::fast_constellation).selected=="64"&&!app.field(F::fast_mono).checked,
+            "Reselecting acoustic discarded its retained modulation and output settings");
+        app.select(F::fast_expected_snr,"13");app.toggle(F::fast_mono,true);
+        check(app.field(F::fast_constellation).selected=="16"&&app.field(F::fast_coding).selected=="three-quarters",
+            "Automatic acoustic SNR selection did not restore its modulation and coding defaults");
         app.select(F::fast_coding,"half");
         check(app.field(F::fast_coding).selected=="half","Acoustic LDPC1/2 option missing");
         app.select(F::fast_coding,"two-thirds");
@@ -167,12 +281,12 @@ void presentation_and_retention() {
         app.field(F::fast_fec).selected=="sparse"&&app.field(F::fast_mono).checked,
         "Removed classic cable profile changed the current settings");
     app.select(F::fast_profile,"fm");
-    check(app.field(F::fast_profile).selected=="fm"&&app.field(F::fast_constellation).selected=="4"&&
-        app.field(F::fast_coding).selected=="three-quarters"&&app.field(F::fast_depth).selected=="16"&&
-        app.field(F::fast_fec).selected=="robust"&&app.field(F::fast_mono).checked,
-        "FM radio profile defaults changed");
-    app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast radio depth choice ignored");
-    app.select(F::fast_depth,"62");check(app.field(F::fast_depth).selected=="62","Fast radio depth-62 choice ignored");
+    check(app.field(F::fast_profile).selected=="fm"&&app.field(F::fast_constellation).selected=="64"&&
+        app.field(F::fast_coding).selected=="three-quarters"&&app.field(F::fast_depth).selected=="4"&&
+        app.field(F::fast_fec).selected=="sparse"&&app.field(F::fast_mono).checked,
+        "FM radio capacity defaults differ from modem profile");
+    app.select(F::fast_depth,"16");check(app.field(F::fast_depth).selected=="16","Fast radio LDPC depth choice ignored");
+    app.select(F::fast_depth,"62");check(app.field(F::fast_depth).selected=="16","Removed classic radio depth changed capacity settings");
     app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
 }
 void live_plot_presentation() {
@@ -393,6 +507,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {damaged_reception_presentation();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {damaged_reception_presentation();snr_and_symbol_rate_controls();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

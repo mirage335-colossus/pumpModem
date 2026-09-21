@@ -120,8 +120,42 @@ class FastCLI(unittest.TestCase):
         self.assertEqual(two_thirds["rs_parity_bytes"], 68)
         self.assertEqual(two_thirds["source_bytes_per_cycle"], 21499)
         self.run_pump("fast-info", "--format", "classic", "--code-rate", "2/3", ok=False)
+
+    def test_radio_capacity_defaults(self):
         for profile in ("ssb", "fm"):
-            self.run_pump("fast-info", "--profile", profile, "--format", "capacity", ok=False)
+            info = json.loads(self.run_pump("fast-info", "--profile", profile,
+                                          "--estimate-bytes", "50000000").stdout)
+            self.assertEqual(info["format"], "capacity")
+            self.assertEqual(info["constellation"], 64)
+            self.assertEqual(info["code_rate"], "3/4")
+            self.assertAlmostEqual(info["occupied_bandwidth_hz"], 2400)
+            self.assertAlmostEqual(info["symbol_rate"], 2400 / 1.1)
+            self.assertGreater(info["estimated_source_bps"], 8600)
+            self.assertEqual(info["snr_reference_bandwidth_hz"], 2400)
+            self.assertEqual(info["expected_snr_db"], 20)
+
+    def test_expected_snr_presets_and_overrides(self):
+        for profile, low, reference in (("wire", 25, 18000), ("acoustic", -27, 17500),
+                                         ("ssb", -20, 2400), ("fm", -20, 2400)):
+            with self.subTest(profile=profile):
+                args = ("--profile", profile, "--expected-snr", low)
+                info = json.loads(self.run_pump("fast-info", *args).stdout)
+                self.assertEqual(info["expected_snr_db"], low)
+                self.assertEqual(info["snr_reference_bandwidth_hz"], reference)
+                self.assertTrue(info["snr_preset_unmodified"])
+                self.assertLessEqual(info["occupied_bandwidth_hz"], reference)
+                if profile != "wire":
+                    self.assertLess(info["symbol_rate"], 10)
+                    self.assertEqual(info["waveform"], "single-carrier")
+                    self.assertGreaterEqual(info["selected_band_snr_db_assumed"], 12.99)
+                manual = json.loads(self.run_pump("fast-info", "--qam", "4", *args).stdout)
+                self.assertEqual(manual["constellation"], 4)
+                self.assertEqual(manual["symbol_rate"], info["symbol_rate"])
+        for args in (("--format", "classic", "--expected-snr", "20"),
+                     ("--profile", "acoustic", "--expected-snr", "14"),
+                     ("--profile", "fm", "--expected-snr", "-21"),
+                     ("--expected-snr", "nan")):
+            self.run_pump("fast-info", *args, ok=False)
 
     def test_acoustic_ofdm_geometry_validation(self):
         acoustic = ("--profile", "acoustic", "--format", "capacity")

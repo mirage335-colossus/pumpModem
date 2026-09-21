@@ -2,6 +2,7 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
+#include "datapump/fast/preset.hpp"
 #include "datapump/runtime.hpp"
 #include <algorithm>
 #include <charconv>
@@ -27,14 +28,18 @@ const char* help=R"(Fast QAM/LDPC and APSK text and file transfer (separate from
 
 Matching local settings (no negotiation or received lengths):
   --profile wire|ssb|fm|acoustic      Default wire
-  --format classic|capacity          Default capacity for wire/acoustic; classic for ssb/fm
+  --format classic|capacity          Default capacity for all four channels
                                     Acoustic: OFDM, 16-QAM, LDPC 3/4, depth 8
+  --expected-snr DB                  Select modeled defaults over the ORIGINAL channel bandwidth
+                                    Cable 65..25 dB / 18 kHz; acoustic 13..-27 dB / 17.5 kHz
+                                    SSB/FM 20..-20 dB / 2.4 kHz; weak presets narrow bandwidth
+                                    Assumed, not measured or negotiated. Explicit options override.
   --qam 4|16|64|256|1024|4096|16384|65536|262144|1048576|4194304
                                     Cable default 4194304-QAM, LDPC 8/9
   --apsk 4|16|64|256                 Select classic format; default 256 (classic wire)
   --code-rate 1/2|2/3|3/4|7/8|7/9|8/9|9/10   Capacity supports 1/2, 2/3, 3/4, 7/9, 8/9, 9/10 LDPC
   --rs robust|high-rate|0.3%          Capacity uses approximately 0.3% parity/data
-  --interleave 1..16 (capacity), 1..64 (classic); defaults: cable 4, acoustic 8; classic 62 / 16 / 5
+  --interleave 1..16 (capacity), 1..64 (classic); defaults: cable/radio 4, acoustic 8
   --sample-rate 44100..192000        Default 48000 Hz
   --symbol-rate HZ --carrier HZ --rolloff N --amplitude N
   --marker-spacing 1..16            Single-carrier capacity intervals per full marker (16)
@@ -64,7 +69,7 @@ struct Args {
     std::map<std::string,std::string> values;
     Args(int argc,char** argv) {
         const std::set<std::string> flags{"help","json","stereo","mono","encrypt","no-encryption"};
-        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes","ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots"};
+        const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes","ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots","expected-snr"};
         for(int i=2;i<argc;++i) {
             std::string name=argv[i];if(!name.starts_with("--"))throw Error("Expected a fast --option");name.erase(0,2);
             if(values.contains(name))throw Error("Duplicate fast option: "+name);
@@ -105,12 +110,14 @@ bool encryption_enabled(const Args& a) {
 Settings settings(const Args& a,bool load_key) {
     Settings s;const auto channel=parse_channel(a.get("profile","wire"));
     if(a.has("qam")&&a.has("apsk"))throw Error("--qam and --apsk conflict");
-    const auto format=a.get("format",a.has("apsk")?"classic":a.has("qam")||channel==Channel::wire||channel==Channel::acoustic?"capacity":"classic");
+    const auto format=a.get("format",a.has("apsk")?"classic":"capacity");
     if(format!="classic"&&format!="capacity")throw Error("Fast format must be classic or capacity");
     if((format=="classic"&&a.has("qam"))||(format=="capacity"&&a.has("apsk")))throw Error("Constellation option conflicts with selected format");
-    if(format=="capacity"&&channel!=Channel::wire&&channel!=Channel::acoustic)
-        throw Error("Capacity format requires --profile wire or acoustic");
     s.profile=format=="capacity"?capacity_profile(channel):classic_profile(channel);
+    if(a.has("expected-snr")) {
+        if(format!="capacity")throw Error("Expected-SNR presets require capacity format");
+        s.profile=resolve_snr_preset(channel,a.real("expected-snr",default_expected_snr(channel))).profile;
+    }
     const auto order=a.integer(a.has("qam")?"qam":"apsk",s.profile.constellation),depth=a.integer("interleave",s.profile.interleave_depth),rate=a.integer("sample-rate",48000);
     if(order>4194304||depth>64||rate>192000)throw Error("Fast profile value exceeds local bound");
     s.profile.constellation=static_cast<unsigned>(order);s.profile.interleave_depth=static_cast<unsigned>(depth);s.profile.sample_rate=static_cast<std::uint32_t>(rate);
@@ -208,6 +215,15 @@ int cli_main(int argc,char** argv) {
             if(!p.acoustic_ofdm)std::cout<<",\"marker_spacing_intervals\":"<<p.marker_spacing_intervals<<",\"pilot_spacing_symbols\":"<<p.pilot_spacing_symbols;
         }
         std::cout<<",\"waveform\":\""<<(p.acoustic_ofdm?"ofdm":"single-carrier")<<"\"";
+        if(p.capacity_mode) {
+            const auto preset=resolve_snr_preset(p.channel,a.real("expected-snr",default_expected_snr(p.channel)));
+            const auto reference=preset.reference_bandwidth_hz;
+            const auto selected=preset.expected_snr_db+10*std::log10(reference/occupied_bandwidth_hz(p));
+            std::cout<<",\"expected_snr_db\":"<<preset.expected_snr_db<<",\"snr_reference_bandwidth_hz\":"<<reference
+                <<",\"selected_band_snr_db_assumed\":"<<selected
+                <<",\"snr_preset_unmodified\":"<<(profile_id(p)==profile_id(preset.profile)?"true":"false")
+                <<",\"reference_band_shannon_capacity_bps\":"<<reference*std::log2(1+std::pow(10.,preset.expected_snr_db/10.));
+        }
         if(p.acoustic_ofdm)std::cout<<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples<<",\"ofdm_pilot_stride\":"<<p.ofdm_pilot_stride
             <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
             <<",\"occupied_lower_hz\":"<<occupied_lower_hz(p)<<",\"occupied_upper_hz\":"<<occupied_upper_hz(p);

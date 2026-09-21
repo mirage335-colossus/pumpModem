@@ -18,6 +18,8 @@ const std::vector<Control>& screen() {
     static const std::vector<Control> controls{
         placed(Kind::label,Field::count,Command::none,"FAST TRANSFER\nText and files",Slot::fast_heading),
         placed(Kind::choice,Field::fast_profile,Command::none,"Channel profile",Slot::fast_profile,"Both ends must use identical local profile, constellation and coding selections."),
+        placed(Kind::choice,Field::fast_expected_snr,Command::none,"Expected SNR",Slot::fast_expected_snr,"Auto selects local modulation, coding and symbol timing for an assumed SNR. It does not measure the link or negotiate with the receiver. Both peers must match. SNR refers to the original channel bandwidth; narrower presets assume unchanged total received signal power and flat noise density. Lower-SNR presets are model-based and require link testing. Manual rate or coding changes switch this choice to Manual."),
+        placed(Kind::choice,Field::fast_symbol_rate,Command::none,"Symbol rate",Slot::fast_symbol_rate,"Auto uses the expected-SNR preset's timing, or the channel default when SNR is Manual. OFDM values are symbols per second per tone, including the echo guard; a block carries many tones simultaneously. An explicit rate switches expected SNR to Manual. Both peers must match."),
         placed(Kind::choice,Field::fast_constellation,Command::none,"Constellation",Slot::fast_constellation,"Denser constellations require a cleaner, more linear audio path."),
         placed(Kind::choice,Field::fast_coding,Command::none,"Inner error correction",Slot::fast_coding),
         placed(Kind::choice,Field::fast_depth,Command::none,"Interleave depth",Slot::fast_depth,"More blocks spread brief disturbances; fewer blocks reduce short-message latency. Both peers must match."),
@@ -46,7 +48,7 @@ const std::vector<Control>& screen() {
         placed(Kind::label,Field::fast_tracking,Command::none,"",Slot::fast_tracking),
         placed(Kind::label,Field::fast_correction,Command::none,"",Slot::fast_correction),
         placed(Kind::label,Field::fast_auth,Command::none,"",Slot::fast_auth),
-        placed(Kind::label,Field::fast_detail,Command::none,"",Slot::fast_detail),
+        [] {auto c=placed(Kind::label,Field::fast_detail,Command::none,"",Slot::fast_detail);c.font_size=12;return c;}(),
         placed(Kind::list,Field::fast_history,Command::none,"Transfer history",Slot::fast_history),
         placed(Kind::label,Field::fast_status,Command::none,"",Slot::fast_status)
     };

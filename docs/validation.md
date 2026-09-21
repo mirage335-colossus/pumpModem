@@ -4993,3 +4993,63 @@ implementation changed. `git diff --check` passed.
 No acquisition thresholds, wire framing or regular modem algorithms changed.
 These software checks do not establish why the reported physical
 speaker/microphone link failed to synchronize or qualify an acoustic channel.
+
+### Fast expected-SNR controls and radio capacity profiles (2026-09-21)
+
+Fast now has expected-SNR and symbol-rate selectors shared by both native
+backends. Assumed SNR is referenced to the original channel bandwidth: cable
+65..25 dB over 18 kHz, acoustic 13..−27 dB over 17.5 kHz, and radio
+20..−20 dB over 2.4 kHz. Weak presets narrow bandwidth with unchanged modeled
+total signal power. They do not measure or negotiate a link. Manual overrides,
+per-channel retained choices, mode isolation and active-transfer freezing are
+covered by shared GUI tests. Computed preset frequencies use a binary grid to
+avoid last-bit math-library differences in the exact peer integrity context.
+
+SSB/FM defaults now select capacity 64-QAM, LDPC 3/4, four frames, approximately
+0.3% RS, compact source bytes, 2181.818 baud across 300–2700 Hz and markers every
+four intervals. Estimated 50 MB public-file throughput is 8.70 kbit/s, versus
+3.10/1.63 kbit/s for the previous SSB/FM defaults. Separate exact-default codec
+tests cover public/keyed operation. Sampled 48 kHz radio cases cover 20 dB noise,
+carrier offset and a static echo; these are not live RF measurements. Explicit
+classic profiles and ordinary transport remain unchanged.
+
+Capacity single-carrier rates below 1000 baud may use bounded multirate
+processing. Tests recover clean bits at 5, 15, 100 and 500 baud, including the
+dense cable constellation at 500 baud, and check one-baud memory bounds.
+The actual −10 dB radio preset recovers a complete LDPC frame through sampled
+noise over the original 2.4 kHz reference band. The same noise floor persists
+through real trailing absence. Slow/sparse settings now emit enough silence
+to score their complete marker/pilot observation windows; EOF and partial
+silence still cannot complete reception. Nominal cable/radio and classic
+tail durations remain unchanged.
+
+A 104-frame production LDPC/QAM screen found dense half-rate QAM choices that
+failed despite favorable information estimates. Auto excludes rate 1/2 above
+16-QAM pending calibrated thresholds. The 36 dB cable replacement,
+4096-QAM/LDPC 7/9, passes its four screened frames with 3.46% less estimated
+throughput. All corrected cable menu points passed four frames each; these
+small samples are not whole-file reliability estimates.
+
+Both Release GUI executables and the CLI rebuilt. The final Fast/shared-GUI
+group passed **26/26 in 168.82 seconds**. The final focused helper check also
+passed after preserving explicit classic Auto timing. Independent checks
+covered 1,604 SNR points with monotonic bulk throughput, bounded bandwidth,
+canonical rate round-trips and invalid-input rejection. Rev's final self-check
+passed. Complete native conformance passed on FLTK and Rev using private
+virtual displays; checks include every new dropdown label and all four-line
+detail variants at both minimum and default sizes. Native testing caught and
+fixed overly long OFDM rate labels. Private displays were closed afterward.
+
+[Integration logs](validation-data/fast/snr-presets-20260921/README.md),
+[radio evidence](validation-data/fast/radio-capacity-20260921/README.md),
+[LDPC screening](validation-data/fast/wire-snr-screen-20260921/README.md), and
+[low-rate PCM evidence](validation-data/fast/low-rate-20260921/README.md)
+record sources, noise definitions and limits. No new live audio/RF test or
+physical margin guarantee is claimed.
+
+The complete focused ordinary-modem development-contract group also passed
+**29/29 in 1375.19 seconds**, including independent short/source vectors,
+sampled physical-end and weak-signal tests, pending-reception GUI tests, and
+the full `differential_receiver_probability` calibration. That long calibration
+finished within its unchanged timeout; no assertions were relaxed. Final
+`git diff --check` passed.

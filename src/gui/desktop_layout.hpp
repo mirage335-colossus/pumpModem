@@ -28,7 +28,7 @@ enum class Slot {
     short_use_text, short_send_key, short_transmit, short_transmit_noise, short_cancel, short_airtime,
     compression_signals, copy_raw_signal, paste_raw_signal, raw_recovery_actions, received_raw_bits,
     device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace, diagnostics, status,
-    fast_heading, fast_profile, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
+    fast_heading, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth, fast_device, fast_mono, fast_encryption,
     fast_key, fast_key_path, fast_open_key, fast_generate_key, fast_source, fast_source_detail, fast_text, fast_file, fast_choose_file,
     fast_transmit, fast_listen, fast_cancel, fast_save, fast_progress, fast_rate, fast_tracking,
     fast_correction, fast_auth, fast_detail, fast_history, fast_status,
@@ -81,39 +81,42 @@ struct DesktopLayout {
         // is selected by the shared application; neither adapter knows modes.
         const int fast_gap=18,fast_width=width-2*margin;
         const int fast_column=(fast_width-3*fast_gap)/4;
+        const int fast_wide_column=(fast_width-2*fast_gap)/3;
         out[Slot::fast_heading]={margin,57,fast_width,32};
-        out[Slot::fast_profile]={margin,112,fast_column,field_height};
-        out[Slot::fast_constellation]={margin+fast_column+fast_gap,112,fast_column,field_height};
-        out[Slot::fast_coding]={margin+2*(fast_column+fast_gap),112,fast_column,field_height};
-        out[Slot::fast_fec]={margin+3*(fast_column+fast_gap),112,fast_column,field_height};
-        out[Slot::fast_device]={margin,163,2*fast_column+fast_gap,field_height};
-        out[Slot::fast_mono]={margin+2*(fast_column+fast_gap),162,fast_column,28};
-        out[Slot::fast_encryption]={margin+3*(fast_column+fast_gap),162,fast_column,28};
-        out[Slot::fast_key]={margin,214,2*fast_column+fast_gap,field_height};
-        out[Slot::fast_open_key]={margin+2*(fast_column+fast_gap),213,fast_column,action_height};
-        out[Slot::fast_generate_key]={margin+3*(fast_column+fast_gap),213,fast_column,action_height};
-        out[Slot::fast_key_path]={margin,246,fast_width,20};
-        out[Slot::fast_source]={margin,291,fast_column,field_height};
-        out[Slot::fast_source_detail]={margin+fast_column+fast_gap,290,3*fast_column+2*fast_gap,28};
-        out[Slot::fast_text]={margin,341,fast_width,54};
-        out[Slot::fast_file]={margin,341,fast_width-fast_column-fast_gap,field_height};
-        out[Slot::fast_choose_file]={margin+3*(fast_column+fast_gap),340,fast_column,action_height};
-        out[Slot::fast_transmit]={margin,409,fast_column,action_height};
-        out[Slot::fast_listen]={margin+fast_column+fast_gap,409,fast_column,action_height};
-        out[Slot::fast_cancel]={margin+2*(fast_column+fast_gap),409,fast_column,action_height};
-        out[Slot::fast_save]={margin+3*(fast_column+fast_gap),409,fast_column,action_height};
-        out[Slot::fast_progress]={margin,448,fast_width,26};
+        out[Slot::fast_profile]={margin,112,fast_wide_column,field_height};
+        out[Slot::fast_expected_snr]={margin+fast_wide_column+fast_gap,112,fast_wide_column,field_height};
+        out[Slot::fast_symbol_rate]={margin+2*(fast_wide_column+fast_gap),112,fast_width-2*(fast_wide_column+fast_gap),field_height};
+        out[Slot::fast_constellation]={margin,160,fast_column,field_height};
+        out[Slot::fast_coding]={margin+fast_column+fast_gap,160,fast_column,field_height};
+        out[Slot::fast_depth]={margin+2*(fast_column+fast_gap),160,fast_column,field_height};
+        out[Slot::fast_fec]={margin+3*(fast_column+fast_gap),160,fast_column,field_height};
+        out[Slot::fast_device]={margin,208,2*fast_column+fast_gap,field_height};
+        out[Slot::fast_mono]={margin+2*(fast_column+fast_gap),207,fast_column,28};
+        out[Slot::fast_encryption]={margin+3*(fast_column+fast_gap),207,fast_column,28};
+        out[Slot::fast_key]={margin,256,2*fast_column+fast_gap,field_height};
+        out[Slot::fast_open_key]={margin+2*(fast_column+fast_gap),255,fast_column,action_height};
+        out[Slot::fast_generate_key]={margin+3*(fast_column+fast_gap),255,fast_column,action_height};
+        out[Slot::fast_key_path]={margin,286,fast_width,18};
+        out[Slot::fast_source]={margin,328,fast_column,field_height};
+        out[Slot::fast_source_detail]={margin+fast_column+fast_gap,327,3*fast_column+2*fast_gap,28};
+        out[Slot::fast_text]={margin,377,fast_width,46};
+        out[Slot::fast_file]={margin,377,fast_width-fast_column-fast_gap,field_height};
+        out[Slot::fast_choose_file]={margin+3*(fast_column+fast_gap),376,fast_column,action_height};
+        out[Slot::fast_transmit]={margin,434,fast_column,action_height};
+        out[Slot::fast_listen]={margin+fast_column+fast_gap,434,fast_column,action_height};
+        out[Slot::fast_cancel]={margin+2*(fast_column+fast_gap),434,fast_column,action_height};
+        out[Slot::fast_save]={margin+3*(fast_column+fast_gap),434,fast_column,action_height};
+        out[Slot::fast_progress]={margin,473,fast_width,24};
         const int plot_width=(fast_width-2*fast_gap)/3;
-        out[Slot::fast_waveform]={margin,501,plot_width,177};
-        out[Slot::fast_waterfall]={margin+plot_width+fast_gap,501,plot_width,177};
-        out[Slot::fast_constellation_plot]={margin+2*(plot_width+fast_gap),501,fast_width-2*(plot_width+fast_gap),177};
-        out[Slot::fast_rate]={margin,688,2*fast_column+fast_gap,34};
-        out[Slot::fast_tracking]={margin+2*(fast_column+fast_gap),688,2*fast_column+fast_gap,34};
-        out[Slot::fast_correction]={margin,731,2*fast_column+fast_gap,34};
-        out[Slot::fast_auth]={margin+2*(fast_column+fast_gap),731,2*fast_column+fast_gap,40};
-        out[Slot::fast_depth]={margin,866,210,field_height};
-        out[Slot::fast_detail]={margin,777,fast_width,48};
-        out[Slot::fast_history]={margin+230,866,fast_width-230,std::max(42,height-926)};
+        out[Slot::fast_waveform]={margin,523,plot_width,170};
+        out[Slot::fast_waterfall]={margin+plot_width+fast_gap,523,plot_width,170};
+        out[Slot::fast_constellation_plot]={margin+2*(plot_width+fast_gap),523,fast_width-2*(plot_width+fast_gap),170};
+        out[Slot::fast_rate]={margin,703,2*fast_column+fast_gap,34};
+        out[Slot::fast_tracking]={margin+2*(fast_column+fast_gap),703,2*fast_column+fast_gap,34};
+        out[Slot::fast_correction]={margin,744,2*fast_column+fast_gap,40};
+        out[Slot::fast_auth]={margin+2*(fast_column+fast_gap),744,2*fast_column+fast_gap,40};
+        out[Slot::fast_detail]={margin,791,fast_width,60};
+        out[Slot::fast_history]={margin,878,fast_width,std::max(42,height-926)};
         out[Slot::fast_status]={margin,height-43,fast_width,27};
         // Legacy is a separate text terminal; regular/Fast slots stay unchanged.
         out[Slot::legacy_profile]={margin,76,240,field_height};

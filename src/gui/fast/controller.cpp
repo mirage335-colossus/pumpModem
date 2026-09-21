@@ -5,6 +5,7 @@
 #include "plots.hpp"
 #include "datapump/fast/session.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/preset.hpp"
 #include "datapump/crypto.hpp"
 #include <algorithm>
 #include <array>
@@ -52,6 +53,10 @@ struct Controller::Impl {
     std::array<ui::FieldState,static_cast<std::size_t>(F::count)> fields;
     fast::Session session;
     fast::Settings settings;
+    struct ProfileSelection {fast::Profile profile;std::string snr,rate;bool mono=false;};
+    std::map<fast::Channel,ProfileSelection> profile_selections;
+    std::map<std::pair<fast::Channel,double>,fast::SnrPreset> resolved_presets;
+    std::optional<fast::Channel> selected_channel;
     fast::Snapshot snapshot;
     std::optional<std::uint64_t> file_size;
     FastPlots plots;
@@ -73,11 +78,6 @@ struct Controller::Impl {
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
         f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"}};
-        const auto acoustic=fast::profile(fast::Channel::acoustic);
-        if(acoustic.capacity_mode) {
-            f(F::fast_profile).options.back().label=acoustic.acoustic_ofdm?
-                "Speakers / microphone · OFDM / LDPC":"Speakers / microphone · QAM / LDPC";
-        }
         f(F::fast_profile).selected="wire";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
@@ -92,8 +92,62 @@ struct Controller::Impl {
         set_profile(fast::Channel::wire);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
+    void remember_profile() {
+        if(selected_channel)profile_selections[*selected_channel]={settings.profile,
+            f(F::fast_expected_snr).selected,f(F::fast_symbol_rate).selected,f(F::fast_mono).checked};
+    }
+    void sync_profile_fields() {
+        f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
+        f(F::fast_constellation).selected=std::to_string(settings.profile.constellation);
+        f(F::fast_coding).selected=coding_id(settings.profile.code_rate);
+        f(F::fast_fec).selected=settings.profile.capacity_mode?"sparse":settings.profile.robust?"robust":"high-rate";
+    }
+    const fast::SnrPreset& resolved_preset(fast::Channel channel,double snr) {
+        const auto key=std::pair{channel,snr};const auto found=resolved_presets.find(key);
+        if(found!=resolved_presets.end())return found->second;
+        return resolved_presets.emplace(key,fast::resolve_snr_preset(channel,snr)).first->second;
+    }
+    fast::Profile automatic_profile() {
+        return f(F::fast_expected_snr).selected=="manual"?fast::profile(settings.profile.channel):
+            resolved_preset(settings.profile.channel,std::stod(f(F::fast_expected_snr).selected)).profile;
+    }
+    void sync_rate_options() {
+        auto& rate=f(F::fast_symbol_rate);rate.options.clear();
+        for(const auto& option:fast::symbol_rate_options(settings.profile))
+            rate.options.push_back({option.id,option.label});
+        // The Auto label follows the SNR preset, but Manual uses the selected
+        // waveform's channel-default timing. Explicit IDs retain actual timing.
+        auto timing=automatic_profile();
+        if(f(F::fast_expected_snr).selected=="manual")
+            timing=fast::apply_symbol_rate_option(settings.profile,"auto");
+        for(const auto& option:fast::symbol_rate_options(timing))if(option.id=="auto")
+            for(auto& existing:rate.options)if(existing.id=="auto")existing.label=option.label;
+    }
+    void make_manual() {
+        f(F::fast_expected_snr).selected="manual";
+        f(F::fast_symbol_rate).selected=fast::symbol_rate_option_id(settings.profile);
+    }
     void set_profile(fast::Channel channel) {
-        settings.profile=fast::profile(channel);
+        remember_profile();selected_channel=channel;
+        const auto saved=profile_selections.find(channel);
+        if(saved==profile_selections.end()) {
+            const auto snr=fast::default_expected_snr(channel);
+            settings.profile=resolved_preset(channel,snr).profile;
+            f(F::fast_expected_snr).selected=number(snr,0);
+            f(F::fast_symbol_rate).selected="auto";
+            // One speaker avoids interference between two copies of the waveform.
+            // This routes playback to the right output; capture is unchanged.
+            settings.mono=channel!=fast::Channel::wire;
+        } else {
+            settings.profile=saved->second.profile;settings.mono=saved->second.mono;
+            f(F::fast_expected_snr).selected=saved->second.snr;
+            f(F::fast_symbol_rate).selected=saved->second.rate;
+        }
+        f(F::fast_expected_snr).options={{"manual","Manual"}};
+        for(const auto snr:fast::expected_snr_options(channel)) {
+            const auto id=number(snr,0);
+            f(F::fast_expected_snr).options.push_back({id,"Auto: "+id+" dB SNR"});
+        }
         const bool capacity=settings.profile.capacity_mode;
         if(capacity) {
             f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
@@ -106,14 +160,8 @@ struct Controller::Impl {
             f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long transfers"},{"64","64"}};
             f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         }
-        // One speaker avoids interference between two copies of the waveform.
-        // This routes playback to the right output; capture is unchanged.
-        settings.mono=channel!=fast::Channel::wire;
         f(F::fast_mono).checked=settings.mono;
-        f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
-        f(F::fast_constellation).selected=std::to_string(settings.profile.constellation);
-        f(F::fast_coding).selected=coding_id(settings.profile.code_rate);
-        f(F::fast_fec).selected=capacity?"sparse":settings.profile.robust?"robust":"high-rate";
+        sync_profile_fields();sync_rate_options();
     }
     bool enabled(C command) const {
         if(closing)return false;
@@ -131,7 +179,7 @@ struct Controller::Impl {
     }
     void refresh() {
         const bool edit=!closing&&!session.active()&&pending_start==C::none&&!key_loading;
-        for(const auto field:{F::fast_profile,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_depth,F::fast_device,F::fast_mono,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
+        for(const auto field:{F::fast_profile,F::fast_expected_snr,F::fast_symbol_rate,F::fast_constellation,F::fast_coding,F::fast_fec,F::fast_depth,F::fast_device,F::fast_mono,F::fast_encryption,F::fast_source,F::fast_text,F::fast_file})f(field).enabled=edit;
         f(F::fast_key).enabled=edit&&f(F::fast_encryption).checked;
         f(F::fast_key_path).enabled=f(F::fast_encryption).checked;
         f(F::fast_text).visible=f(F::fast_source).selected=="text";
@@ -145,10 +193,9 @@ struct Controller::Impl {
             "OFDM · "+number(fast::occupied_lower_hz(p),0)+"–"+number(fast::occupied_upper_hz(p),0)+" Hz · "+
                 number(1000.*p.ofdm_prefix_samples/p.sample_rate)+" ms echo guard · "+
                 number(1000.*(p.ofdm_fft_size+p.ofdm_prefix_samples)/p.sample_rate)+" ms blocks":
-            number(p.symbol_rate,0)+" symbols/s · "+number(p.carrier_hz,0)+" Hz carrier";
+            number(p.symbol_rate,p.symbol_rate<10?4:p.symbol_rate<1000?2:0)+" symbols/s · "+number(p.carrier_hz,0)+" Hz carrier";
         f(F::fast_detail).text="Next: "+std::string(fast::channel_name(p.channel))+" · "+waveform+" · "+number(p.sample_rate,0)+" Hz audio · "
-            +(f(F::fast_encryption).checked?"AES-CBC + HMAC":"public checksum")+"\n"
-            "Profile, constellation, coding and encryption must match. 256-byte intervals; no packet lengths.";
+            +(f(F::fast_encryption).checked?"AES-CBC + HMAC":"public checksum");
         f(F::fast_progress).text=pending_start!=C::none?"WAITING FOR AUDIO":transfer_stage(snapshot);
         f(F::fast_progress).text+=" · "+std::to_string(snapshot.source_bytes)+" source bytes · "+std::to_string(snapshot.intervals)+" intervals · "+number(snapshot.elapsed_seconds)+" s";
         f(F::fast_rate).text="Gross: "+number(gross/1000)+" kbit/s\nMeasured source: "+number(snapshot.goodput_bps/1000)+" kbit/s";
@@ -160,7 +207,18 @@ struct Controller::Impl {
         }
         if(snapshot.estimated_seconds>0)f(F::fast_progress).text+=" · "+number(snapshot.transmit_fraction*100,1)+"% · "+number(snapshot.estimated_seconds)+" s estimated total";
         const auto bandwidth=fast::occupied_bandwidth_hz(p);
-        f(F::fast_detail).text+="\nShannon-Hartley: C = B log2(1 + S/N), B = "+number(bandwidth,0)+" Hz; ideal at assumed 40 / 60 dB SNR: "+number(bandwidth*std::log2(10001.)/1000)+" / "+number(bandwidth*std::log2(1000001.)/1000)+" kbit/s. These are capacity examples, not measured SNR.";
+        if(f(F::fast_expected_snr).selected=="manual") {
+            f(F::fast_detail).text+="\nManual settings · occupied bandwidth "+number(bandwidth,1)+" Hz · no expected-SNR target.";
+            f(F::fast_detail).text+="\nBoth peers must match profile, symbol rate, constellation, coding and encryption.";
+            f(F::fast_detail).text+="\nShannon-Hartley: C = B log2(1 + S/N). Manual settings have no measured or guaranteed SNR margin.";
+        } else {
+            const auto& preset=resolved_preset(p.channel,std::stod(f(F::fast_expected_snr).selected));
+            f(F::fast_detail).text+="\nExpected "+number(preset.expected_snr_db,0)+" dB SNR over "+number(preset.reference_bandwidth_hz,0)+
+                " Hz reference bandwidth · occupied "+number(bandwidth,1)+" Hz · model-based target.";
+            f(F::fast_detail).text+="\nBoth peers must match all settings. Auto uses assumed SNR; it does not measure or negotiate the link.";
+            const auto capacity=preset.reference_bandwidth_hz*std::log2(1+std::pow(10.,preset.expected_snr_db/10.));
+            f(F::fast_detail).text+="\nShannon-Hartley ideal in reference band: "+number(capacity/1000,3)+" kbit/s. Actual reliability requires link testing.";
+        }
         f(F::fast_tracking).text=snapshot.intervals&&!snapshot.transmitting?
             "RX EVM "+number(snapshot.evm*100,2)+"% · carrier "+number(snapshot.carrier_error_hz,2)+" Hz\nClock error "+number(snapshot.clock_error_ppm,2)+" ppm":
             "RX tracking · awaiting received intervals";
@@ -268,10 +326,24 @@ void Controller::select(F field,std::string id) {
     if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;}))return;
     try {
         if(field==F::fast_profile)p.set_profile(fast::parse_channel(id));
-        else if(field==F::fast_constellation)p.settings.profile.constellation=static_cast<unsigned>(std::stoul(id));
-        else if(field==F::fast_coding)p.settings.profile.code_rate=coding_rate(id);
-        else if(field==F::fast_depth)p.settings.profile.interleave_depth=static_cast<unsigned>(std::stoul(id));
-        else if(field==F::fast_fec)p.settings.profile.robust=id=="robust";
+        else if(field==F::fast_expected_snr) {
+            if(id=="manual")p.make_manual();
+            else {
+                p.settings.profile=p.resolved_preset(p.settings.profile.channel,std::stod(id)).profile;
+                p.f(F::fast_symbol_rate).selected="auto";
+            }
+            p.f(field).selected=id;p.sync_profile_fields();p.sync_rate_options();
+        }
+        else if(field==F::fast_symbol_rate) {
+            if(id=="auto")p.settings.profile=p.f(F::fast_expected_snr).selected=="manual"?
+                fast::apply_symbol_rate_option(p.settings.profile,"auto"):p.automatic_profile();
+            else {p.settings.profile=fast::apply_symbol_rate_option(p.settings.profile,id);p.make_manual();}
+            p.sync_profile_fields();p.sync_rate_options();
+        }
+        else if(field==F::fast_constellation) {p.settings.profile.constellation=static_cast<unsigned>(std::stoul(id));p.make_manual();p.sync_rate_options();}
+        else if(field==F::fast_coding) {p.settings.profile.code_rate=coding_rate(id);p.make_manual();p.sync_rate_options();}
+        else if(field==F::fast_depth) {p.settings.profile.interleave_depth=static_cast<unsigned>(std::stoul(id));p.make_manual();p.sync_rate_options();}
+        else if(field==F::fast_fec) {p.settings.profile.robust=id=="robust";p.make_manual();p.sync_rate_options();}
         else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;
         else if(field==F::fast_source) {} // Source drafts have independent retained fields.
         else return;

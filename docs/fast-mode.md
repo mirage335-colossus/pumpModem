@@ -3,8 +3,9 @@
 Fast Modem is a separate streaming QAM/LDPC and classic APSK modem. Select **Fast Modem** from the
 dropdown beside **DATA PUMP** to switch the entire desktop interface. The other
 choice, **Robust Modem**, is the existing regular interface and remains the
-default. Select a channel profile,
-constellation and coding. Choose **Text** and enter a message, or choose **File**
+default. Select a channel profile and **Expected SNR** to set its constellation,
+coding and waveform timing together. The **Symbol rate**, constellation and
+coding controls allow manual overrides. Choose **Text** and enter a message, or choose **File**
 and select a source file, then transmit. Select **Listen** on the receiving
 computer. The **Encryption** checkbox is optional and starts off; enabling it
 requires loading a key. Both peers need matching local settings, including
@@ -108,8 +109,8 @@ measured trials, failures and limits.
 | --- | --- | ---: | ---: | --- | --- | ---: |
 | `wire` | Capacity | 17,647.0588 | 9,300 Hz | 300–18,300 Hz | 4,194,304-QAM | 388.24 kbit/s |
 | `wire --format classic` | Classic | 15,000 | 9,300 Hz | 300–18,300 Hz | 256-APSK | 120 kbit/s |
-| `ssb` | Classic | 2,000 | 1,500 Hz | 300–2,700 Hz | 16-APSK | 8 kbit/s |
-| `fm` | Classic | 2,000 | 1,500 Hz | 300–2,700 Hz | QPSK | 4 kbit/s |
+| `ssb` | Capacity | 2,181.8182 | 1,500 Hz | 300–2,700 Hz | 64-QAM | 13.09 kbit/s |
+| `fm` | Capacity | 2,181.8182 | 1,500 Hz | 300–2,700 Hz | 64-QAM | 13.09 kbit/s |
 | `acoustic` | Capacity OFDM | 1.302 blocks/s | Multicarrier | 501–18,000 Hz | 16-QAM | 52.10 kbit/s coded |
 | `acoustic --format classic` | Classic | 500 | 1,800 Hz | 1,500–2,100 Hz | QPSK | 1 kbit/s |
 
@@ -124,9 +125,31 @@ for the default change and the [acoustic live study](fast-acoustic-live-study.md
 for earlier measurements and their limits. Select `--qam 64 --stereo` explicitly
 to reproduce the earlier preset; matching QAM is required at both peers.
 The GUI channel selector offers **Audio cable · QAM / LDPC**, **IC-7100 SSB ·
-2.4 kHz**, **IC-7100 FM · voice band**, and **Speakers / microphone · OFDM /
-LDPC**. Classic cable and acoustic presets are available through the CLI with
+2.4 kHz**, **IC-7100 FM · voice band**, and **Speakers / microphone**.
+All four classic presets remain available through the CLI with
 `--format classic`.
+
+The IC-7100 defaults use LDPC 3/4, four frames per cycle, 10% RRC rolloff,
+amplitude 0.30, a full marker every four intervals, and four pilots per
+64 payload symbols. They share the compact capacity source codec and sparse
+outer RS. Estimated 50 MB public-file throughput is 8.70 kbit/s. The
+[radio study](fast-radio-capacity.md) records sampled tests, comparisons and
+the remaining need for actual radio qualification.
+
+**Expected SNR** uses original-band assumptions: cable 65 dB over 18 kHz,
+acoustic 13 dB over 17.5 kHz, and radio 20 dB over 2.4 kHz. Each menu extends
+40 dB downward, with notable 3/10 dB steps. Weak settings narrow bandwidth
+and reduce rate; the lowest acoustic settings switch from OFDM to a narrow
+single carrier. The menu neither measures nor negotiates SNR. Both ends need
+the same settings. See [SNR presets](fast-snr-presets.md) for the noise model,
+synchronization limits and qualification status.
+
+Manual rate/QAM/LDPC/depth changes mark the SNR selector **Manual**.
+The rate menu shows actual symbols/s; OFDM values are **per tone** and include
+block duration. Rate **Auto** with a manual constellation restores timing while
+retaining that constellation and coding. Selecting an expected-SNR value
+restores its complete modeled preset. Each channel retains its selections
+when switching away and back; controls are frozen during active transfers.
 
 Capacity mode offers square Gray-labelled QAM orders from 4 through 4,194,304
 in powers of four, with LDPC rates 1/2, 2/3, 3/4, 7/9, 8/9 and 9/10. This includes
@@ -138,7 +161,7 @@ automatic fallback, or adaptive bit loading.
 
 The CLI's `--profile wire --format classic` preserves the earlier cable preset: 256-APSK,
 convolutional 7/8, RS(128,120), depth 62, amplitude 0.35, and 20% rolloff.
-SSB/FM retain convolutional 3/4, robust RS, depth 16 and amplitude 0.5;
+Explicit classic SSB/FM retain convolutional 3/4, robust RS, depth 16 and amplitude 0.5;
 classic acoustic retains QPSK, convolutional 3/4, robust RS, depth 5 and amplitude
 0.35. All classic profiles offer QPSK and 16/64/256-APSK. Their pulse span
 remains 16 symbols. The [earlier cable study](fast-cable-live-study.md) and
@@ -182,7 +205,9 @@ transmission. [47 CFR 97.113](https://www.govinfo.gov/content/pkg/CFR-2025-title
 
 The GUI and `fast-info --estimate-bytes N` calculate airtime from fixed local
 geometry, including bootstrap, complete source cycles, QAM label fill, markers,
-pilots, the pulse tail and 6.25 seconds of end silence. Capacity source data is
+pilots, the pulse tail and physical-end silence. The usual 6.25-second silence
+is extended when slow symbols or OFDM blocks require longer complete
+observations. Capacity source data is
 packed as eight-bit bytes; there is no ninth validity bit per byte. Active TX
 percentage counts generated samples and stays below 100% until playback drains.
 Device queues can make audible playback lag the producer. A file changed after
@@ -209,7 +234,11 @@ noise channel this gives approximately 239.18 kbit/s at 40 dB and 358.77 kbit/s
 at 60 dB. These examples assume the stated **in-band signal/noise power ratio**.
 They are not guarantees derived from a full-scale single-tone hardware test.
 `fast-info` reports these 40/60 dB examples alongside the older assumed-30 dB
-example. Uniform QAM, finite coding, training, tracking error, nonlinearities,
+example. With capacity profiles it also reports the selected expected SNR,
+its original reference bandwidth, assumed selected-band SNR, and whether manual
+options changed the preset. Use, for example,
+`pump fast-info --profile acoustic --expected-snr -10 --estimate-bytes 100000`.
+Uniform QAM, finite coding, training, tracking error, nonlinearities,
 and burst disturbances all affect achievable throughput.
 
 The [coding study](fast-coding-study.md) records the earlier design analysis.
@@ -238,10 +267,10 @@ Capacity transmission starts with **2,048 known QPSK training symbols**. A full
 64-symbol public QPSK marker precedes interval zero and every 16th interval
 thereafter by default. Its length is preserved; the frequency of insertion is
 reduced. Four known QPSK pilots follow every group of up to 256 data symbols.
-At the default 20-bit QAM order, each interval has 103 data symbols and one
-four-symbol pilot group; the last mapper symbol has 12 fixed fill bits outside
-the 2,048-bit codec span. An interval therefore uses 107 symbols without a
-marker or 171 with one. The 2% RRC pulse has a 640-symbol finite span to reduce
+At the default 22-bit QAM order, each interval has 94 data symbols and one
+four-symbol pilot group; the last mapper symbol has 20 fixed fill bits outside
+the 2,048-bit codec span. An interval therefore uses 98 symbols without a
+marker or 162 with one. The 2% RRC pulse has a 640-symbol finite span to reduce
 filter truncation error in dense QAM.
 
 Square QAM uses independent Gray-labelled amplitude axes and unit mean symbol

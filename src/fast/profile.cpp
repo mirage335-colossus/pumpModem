@@ -22,11 +22,22 @@ Profile classic_profile(Channel channel) {
     }
     return p;
 }
-Profile profile(Channel channel) {return channel==Channel::wire||channel==Channel::acoustic?capacity_profile(channel):classic_profile(channel);}
+Profile profile(Channel channel) {return capacity_profile(channel);}
 Profile capacity_profile(Channel channel) {
     Profile p;p.channel=channel;
     switch(channel) {
     case Channel::wire: break;
+    case Channel::ssb:
+    case Channel::fm:
+        // IC-7100 audio modem: occupy 300..2700 Hz, independent of its RF/IF
+        // filter bandwidth. Gray QAM, LDPC and the compact source format give
+        // both radio modes the same high-quality-link throughput. The shorter
+        // pilot/marker cadence follows radio phase and gain changes more often
+        // than the direct cable preset. No radio control or PTT is implied.
+        p.constellation=64;p.code_rate=CodeRate::three_quarters;p.interleave_depth=4;
+        p.symbol_rate=2400/1.10;p.carrier_hz=1500;p.rolloff=.10;p.amplitude=.30;
+        p.marker_spacing_intervals=4;p.pilot_spacing_symbols=64;
+        break;
     case Channel::acoustic:
         p.acoustic_ofdm=true;
         p.constellation=16;p.code_rate=CodeRate::three_quarters;p.interleave_depth=8;
@@ -34,7 +45,7 @@ Profile capacity_profile(Channel channel) {
         p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.amplitude=.40;
         p.marker_spacing_intervals=1;p.pilot_spacing_symbols=32;
         break;
-    default: throw Error("Capacity format requires the wire or acoustic profile");
+    default: throw Error("Unknown fast channel profile");
     }
     return p;
 }
@@ -102,8 +113,6 @@ void validate(const Profile& p) {
             throw Error("Acoustic OFDM requires at least 512 active frequency bins");
     }
     if(p.capacity_mode) {
-        if(p.channel!=Channel::wire&&p.channel!=Channel::acoustic)
-            throw Error("Capacity format requires the wire or acoustic profile");
         if(p.constellation<4||p.constellation>4194304||!std::has_single_bit(p.constellation)||std::countr_zero(p.constellation)%2)
             throw Error("Fast QAM order must be a power of four from 4 through 4194304");
         if(p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::two_thirds&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
@@ -123,7 +132,7 @@ void validate(const Profile& p) {
         throw Error("Fast sample rate must be 44100..192000 Hz");
     // The 18 kHz / 1.02 cable waveform has 2.499 samples/symbol at
     // 44.1 kHz. Keep peer baud fixed when only the local device rate changes.
-    if(!std::isfinite(p.symbol_rate)||p.symbol_rate<100||p.symbol_rate>p.sample_rate/(p.capacity_mode?2.49:2.5))
+    if(!std::isfinite(p.symbol_rate)||p.symbol_rate<(p.capacity_mode?1.:100.)||p.symbol_rate>p.sample_rate/(p.capacity_mode?2.49:2.5))
         throw Error("Invalid fast symbol rate");
     if(!std::isfinite(p.rolloff)||p.rolloff<(p.capacity_mode?.02:.1)||p.rolloff>.5)
         throw Error("Fast RRC rolloff is outside the selected format's range");

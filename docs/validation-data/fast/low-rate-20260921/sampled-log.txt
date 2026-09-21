@@ -1,0 +1,7 @@
+baud=5 qam=16 reference_snr=100 narrowed_snr=126.021 intervals=1 errors=0 erasures=0 complete=1 evm=0.000700949 rx_workspace=1378792 waveform_seconds=563 wall_seconds=3.24833
+baud=15 qam=16 reference_snr=100 narrowed_snr=121.249 intervals=1 errors=0 erasures=0 complete=1 evm=0.000731333 rx_workspace=1681192 waveform_seconds=181.267 wall_seconds=1.75608
+baud=100 qam=4 reference_snr=100 narrowed_snr=112.041 intervals=1 errors=0 erasures=0 complete=1 evm=0.000966369 rx_workspace=2126376 waveform_seconds=31.77 wall_seconds=1.25086
+baud=500 qam=4 reference_snr=100 narrowed_snr=105.051 intervals=1 errors=0 erasures=0 complete=1 evm=0.000965976 rx_workspace=1704168 waveform_seconds=6.35402 wall_seconds=1.06461
+baud=10.935 qam=16 reference_snr=-10 narrowed_snr=13 intervals=32 errors=2983 erasures=0 complete=1 evm=0.271284 rx_workspace=1316568 waveform_seconds=1837.68 wall_seconds=15.5002
+negative-reference-SNR LDPC converged=1 iterations=9
+Fast low-rate sampled tests passed

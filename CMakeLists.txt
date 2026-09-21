@@ -67,7 +67,7 @@ else()
 endif()
 add_executable(pump src/main.cpp)
 target_link_libraries(pump PRIVATE datapump)
-add_library(datapump_fast STATIC src/fast/profile.cpp src/fast/codec.cpp
+add_library(datapump_fast STATIC src/fast/profile.cpp src/fast/preset.cpp src/fast/codec.cpp
   src/fast/modem.cpp src/fast/acoustic_ofdm.cpp src/fast/session.cpp src/fast/file_transfer.cpp src/fast/telemetry.cpp src/fast/ldpc.cpp)
 target_include_directories(datapump_fast PUBLIC include)
 # Only unchanged crypto, GF(256) and hardware utilities cross this boundary.
@@ -112,7 +112,7 @@ if(BUILD_TESTING)
   target_link_libraries(test_gui_legacy_live PRIVATE datapump_gui_application datapump_legacy)
   add_test(NAME gui_legacy_live COMMAND test_gui_legacy_live)
   set_tests_properties(gui_legacy_live PROPERTIES LABELS "gui")
-  foreach(component codec modem files session transfer telemetry ldpc qam acoustic)
+  foreach(component codec modem files session transfer telemetry ldpc qam acoustic radio presets low_rate)
     add_executable(test_fast_${component} tests/test_fast_${component}.cpp)
     target_link_libraries(test_fast_${component} PRIVATE datapump_fast datapump)
     add_test(NAME fast_${component} COMMAND test_fast_${component})

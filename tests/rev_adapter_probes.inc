@@ -44,6 +44,28 @@
                     require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&source->params.value=="text"&&
                         !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
                         "Rev Fast did not default to plain text and keyless receive");
+                    for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
+                        application.select(ui::Field::fast_profile,channel);settle();
+                        for(const auto field:{ui::Field::fast_expected_snr,ui::Field::fast_symbol_rate}) {
+                            auto* choice=by_field(field).choice;
+                            require(choice&&allows_input(choice)&&choice->dropdownText,
+                                "Rev Fast SNR/rate dropdown is hidden, disabled or lacks its value");
+                            auto* text=choice->dropdownText;text->layoutText();
+                            require(text->width<=text->rect.w&&text->height<=text->rect.h,
+                                "Rev Fast SNR/rate value clips at the minimum window size");
+                        }
+                        const auto nominal=application.field(ui::Field::fast_expected_snr).options.at(1).id;
+                        const auto low=application.field(ui::Field::fast_expected_snr).options.back().id;
+                        for(const auto& target:{nominal,low,std::string("manual")}) {
+                            application.select(ui::Field::fast_expected_snr,target);settle();
+                            auto* text=by_field(ui::Field::fast_detail).label;
+                            require(text,"Rev Fast detail lacks its native label");text->layoutText();
+                            require(text->width<=text->rect.w&&text->height<=text->rect.h,
+                                "Rev Fast profile detail clips at the minimum window size");
+                        }
+                        application.select(ui::Field::fast_expected_snr,nominal);settle();
+                    }
+                    application.select(ui::Field::fast_profile,"wire");settle();
                     unsigned plot_count=0;
                     for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.control.kind==ui::Kind::bitmap) {
                         ++plot_count;

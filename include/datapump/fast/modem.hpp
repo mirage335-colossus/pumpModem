@@ -53,7 +53,9 @@ std::size_t pulse_tail_symbols(const Profile& profile);
 std::size_t preamble_symbols(const Profile& profile);
 // Exact waveform length before physical-end silence, from local geometry only.
 std::uint64_t transmission_samples(const Profile& profile, std::size_t interval_count);
-// Real transmitted silence sufficient for whole-symbol absence scoring.
+// Real transmitted silence sufficient for whole-symbol absence scoring. Slow
+// single-carrier groups also cover the next complete marker/pilot observation;
+// their required tail can therefore exceed six seconds by many symbol times.
 std::uint64_t end_silence_samples(const Profile& profile);
 
 class Transmitter {
@@ -82,6 +84,9 @@ public:
     // samples per nominal symbol, on a free-running display-only cadence. It
     // has no acquired timing, gain or carrier correction and is not evidence
     // of payload symbols. Its exceptions cannot change receiver decisions.
+    // Capacity SC rates below 1000 baud may decimate internally before the
+    // matched filter; callers still supply PCM and count time at
+    // profile.sample_rate.
     Receiver(Profile profile, IntervalSink sink, SymbolObserver observer={},SymbolObserver input_observer={});
     ~Receiver();
     Receiver(Receiver&&) noexcept;

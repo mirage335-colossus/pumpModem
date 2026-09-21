@@ -1,0 +1,1 @@
+baud=500 qam=4194304 reference_snr=100 narrowed_snr=106.726 intervals=1 errors=0 erasures=0 complete=1 evm=0.000134683 rx_workspace=2411496 waveform_seconds=5.69802 wall_seconds=12.6136

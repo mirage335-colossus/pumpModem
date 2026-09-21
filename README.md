@@ -61,8 +61,13 @@ wire revisions.
 The CLI's **classic APSK** profile (`--format classic`) supports the earlier 256-APSK,
 convolutional 7/8, high-rate RS and depth-62 cable settings. Its roughly
 2h 01m calculated 50 MB airtime and 44.14 kbit/s sampled 2 MiB result are
-historical reference points, not cable capacity limits. SSB and FM retain their
-classic coding and waveforms. Speakers/microphone now defaults to a separate
+historical reference points, not cable capacity limits. The IC-7100 SSB and FM
+defaults now use 64-QAM/LDPC 3/4 across 300–2700 Hz, with approximately
+0.3% RS and compact source bytes. Estimated bulk throughput is 8.70 kbit/s,
+about 2.8× the former SSB and 5.3× the former FM public-file defaults.
+These radio settings passed sampled channel simulations, not live RF tests;
+see the [radio profile study](docs/fast-radio-capacity.md).
+Speakers/microphone defaults to a separate
 16-QAM/LDPC 3/4 OFDM waveform with right-channel-only output, providing
 38.80 kbit/s of steady source capacity. Higher QAM orders remain selectable;
 the classic acoustic profile is available through the CLI. The
@@ -74,6 +79,13 @@ The separate [physical SNR measurement](docs/cable-snr-live-study.md) found abou
 conditions; this is not a direct measurement of dense-QAM decoding margin.
 The [coding study](docs/fast-coding-study.md) records the preceding theoretical
 analysis and remaining work such as probabilistic shaping and adaptive loading.
+
+Fast now has **Expected SNR** and **Symbol rate** dropdowns. Expected SNR sets
+matching local waveform/coding defaults, down to 40 dB below each nominal
+setting. Weak presets narrow their bandwidth; the displayed SNR stays referenced
+to the original channel bandwidth. Manual overrides and settings for each
+channel are retained. These are assumed operating targets, not automatic SNR
+measurements. See [SNR presets and rate selection](docs/fast-snr-presets.md).
 
 The CLI provides `fast-info`, `fast-tx`, `fast-rx` and `fast-listen`. Fast accepts
 `--text` or `--input`; encryption is off by default and enabled by `--keyfile`.

@@ -33,7 +33,8 @@ struct Profile {
 };
 Profile profile(Channel channel);
 Profile classic_profile(Channel channel);
-// Bulk-file capacity presets; acoustic uses its independently tested OFDM path.
+// Bulk-file capacity presets; acoustic uses its independently tested OFDM path,
+// and the IC-7100 profiles use a 300..2700 Hz single-carrier audio waveform.
 Profile capacity_profile(Channel channel=Channel::wire);
 void validate(const Profile& profile);
 std::string_view channel_name(Channel channel);

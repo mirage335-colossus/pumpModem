@@ -22,6 +22,53 @@ unsigned label_bits(unsigned order) {
     throw std::invalid_argument("fast constellation must be a power of four in 4..4194304");
 }
 Profile validated(Profile p) {validate(p);return p;}
+std::size_t low_rate_decimation(const Profile& p) {
+    if(!p.capacity_mode || p.acoustic_ofdm || p.symbol_rate>=1000)return 1;
+    std::size_t factor=1;
+    while(static_cast<double>(p.sample_rate)/(2*factor)>=32*p.symbol_rate)factor*=2;
+    return factor;
+}
+// A bounded anti-alias cascade before the long low-baud RRC. The desired
+// baseband occupies at most 0.024 of the final sample rate, well inside every
+// half-band stage's flat passband. Odd half-band taps are exactly zero except
+// the center, so each decimated output needs only 33 real-weight products.
+struct HalfBandDecimator {
+    static constexpr std::size_t length=63;
+    std::array<Complex,length> history{};
+    std::size_t position=0;
+    bool phase=false;
+    static const std::array<double,length>& coefficients() {
+        static const auto values=[] {
+            std::array<double,length> result{};
+            double total=0;
+            for(std::size_t i=0;i<length;++i) {
+                const auto offset=static_cast<int>(i)-static_cast<int>(length/2);
+                const auto window=.42+.5*std::cos(2*pi*offset/(length-1))+.08*std::cos(4*pi*offset/(length-1));
+                result[i]=offset==0?.5:offset%2?std::sin(pi*.5*offset)/(pi*offset)*window:0;
+                total+=result[i];
+            }
+            for(auto& value:result)value/=total;
+            return result;
+        }();
+        return values;
+    }
+    bool push(Complex input,Complex& output) {
+        const auto latest=position;
+        history[position]=input;
+        if(++position==length)position=0;
+        phase=!phase;
+        if(phase)return false;
+        const auto& taps=coefficients();
+        output=0;
+        for(std::size_t i=0;i<length;i+=2) {
+            const auto index=latest>=i?latest-i:latest+length-i;
+            output+=history[index]*taps[i];
+        }
+        const auto middle=latest>=length/2?latest-length/2:latest+length-length/2;
+        output+=history[middle]*taps[length/2];
+        return true;
+    }
+};
 Complex qam_point(unsigned order,unsigned label) {
     const auto axis_bits=label_bits(order)/2,side=1u<<axis_bits;
     auto i=label>>axis_bits,q=label&(side-1);
@@ -187,6 +234,17 @@ std::uint64_t transmission_samples(const Profile& p,std::size_t count) {
 }
 std::uint64_t end_silence_samples(const Profile& p) {
     validate(p);
+    if(p.capacity_mode&&!p.acoustic_ofdm) {
+        // The next complete marker/pilot group can exceed the usual quarter
+        // second guard, even above 100 baud with sparse pilots. Feed actual
+        // silence through the filters and complete-symbol absence scorer.
+        const auto bps=label_bits(p.constellation);
+        const auto data_symbols=(physical_interval_bits+bps-1)/bps;
+        const auto evidence_symbols=std::max(sync_symbols,std::min(data_symbols,spacing(p))+pilot_symbols);
+        const auto observation_seconds=(evidence_symbols+12)/p.symbol_rate;
+        if(observation_seconds>.25)
+            return static_cast<std::uint64_t>(std::ceil(p.sample_rate*(6.25+observation_seconds)));
+    }
     if(!p.acoustic_ofdm)return static_cast<std::uint64_t>(p.sample_rate)*25/4;
     const auto block=static_cast<double>(p.ofdm_fft_size+p.ofdm_prefix_samples);
     // Cover six seconds of complete blocks at the tracked clock extremes,
@@ -209,12 +267,18 @@ struct Transmitter::Impl {
     unsigned bps;
     double sps,omega;
     double pulse_radius;
+    std::size_t low_rate_factor=1;
+    std::int64_t grid_index=-1;
+    std::array<Complex,4> grid_values{};
+    Complex carrier=1,carrier_step=1;
     bool ended=false,done=false,have_interval=false;
     std::uint64_t last_symbol=0;
     Impl(Profile p,IntervalReader reader,SymbolObserver observe):config(p),source(std::move(reader)),observer(std::move(observe)),points(p.capacity_mode?std::vector<Complex>{}:constellation(p.constellation)),
         pulse(p.rolloff,radius(p)),bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),pulse_radius(radius(p)) {
         validate(p);
         if(!source)throw std::invalid_argument("fast transmitter requires an interval source");
+        low_rate_factor=low_rate_decimation(p);
+        if(low_rate_factor>1)carrier_step=std::polar(1.,omega);
     }
     bool next(Complex& output) {
         if(training<preamble_symbols(config)) {
@@ -251,8 +315,50 @@ struct Transmitter::Impl {
         if(++position==interval_symbols(config,interval_index)) {have_interval=false;++interval_index;}
         return true;
     }
+    Complex grid_baseband(std::int64_t index) {
+        if(index<0)return 0;
+        const auto time=static_cast<double>(index)*low_rate_factor;
+        while(!ended && static_cast<double>(symbol)*sps<=time+1e-9) {
+            Complex point;
+            if(next(point)){history.emplace_back(symbol,point);last_symbol=symbol;++symbol;}
+            else ended=true;
+        }
+        while(!history.empty() && time-static_cast<double>(history.front().first)*sps>2*pulse_radius*sps)
+            history.pop_front();
+        Complex shaped=0;
+        for(const auto& [position,point]:history)
+            shaped+=point*pulse(time/sps-static_cast<double>(position)-pulse_radius);
+        return shaped;
+    }
+    std::size_t read_low_rate(std::span<float> out) {
+        if(grid_index<0) {
+            grid_index=0;
+            for(std::size_t i=0;i<grid_values.size();++i)grid_values[i]=grid_baseband(static_cast<std::int64_t>(i)-1);
+        }
+        std::size_t written=0;
+        for(auto& value:out) {
+            const auto index=static_cast<std::int64_t>(sample/low_rate_factor);
+            while(grid_index<index) {
+                std::move(grid_values.begin()+1,grid_values.end(),grid_values.begin());
+                ++grid_index;grid_values.back()=grid_baseband(grid_index+2);
+            }
+            if(ended && static_cast<double>(sample)>static_cast<double>(last_symbol)*sps+2*pulse_radius*sps){done=true;break;}
+            const auto f=static_cast<double>(sample%low_rate_factor)/low_rate_factor;
+            // Four-point Lagrange interpolation of an oversampled, very narrow
+            // baseband; carrier samples and external sample counts stay at Fs.
+            const auto shaped=grid_values[0]*(-f*(f-1)*(f-2)/6)+
+                grid_values[1]*((f+1)*(f-1)*(f-2)/2)+
+                grid_values[2]*(-(f+1)*f*(f-2)/2)+grid_values[3]*((f+1)*f*(f-1)/6);
+            value=static_cast<float>(config.amplitude*std::real(shaped*carrier));
+            ++sample;++written;
+            if(sample%4096==0)carrier=std::polar(1.,omega*static_cast<double>(sample));
+            else carrier*=carrier_step;
+        }
+        return written;
+    }
     std::size_t read(std::span<float> out) {
-        if(done)return 0;
+        if(done||out.empty())return 0;
+        if(low_rate_factor>1)return read_low_rate(out);
         std::size_t written=0;
         for(auto& value:out) {
             while(!ended && static_cast<double>(symbol)*sps<=static_cast<double>(sample)+1e-9) {
@@ -283,11 +389,14 @@ struct Receiver::Impl {
     std::array<float,physical_interval_bits> soft{};
     std::array<Complex,1024> capacity_group{};
     std::array<Complex,21> equalizer{};
+    std::vector<HalfBandDecimator> decimators;
     std::size_t equalizer_size=5;
     ModemProgress state;
     unsigned bps;
-    double sps,omega;
-    std::uint64_t sample=0;
+    std::size_t low_rate_factor;
+    double processing_rate,sps,omega;
+    std::uint64_t sample=0,input_sample=0;
+    Complex mixer=1,mixer_step=1;
     bool eof=false,locked=false,marker_good=false;
     double next_time=0,clock_period=0,phase=0,frequency=0,gain=1;
     double next_input_time=0;
@@ -301,11 +410,15 @@ struct Receiver::Impl {
     struct Correlation { double quality=0; Complex gain=0; double energy=0; };
     Impl(Profile p,IntervalSink target,SymbolObserver observe,SymbolObserver observe_input):config(p),sink(std::move(target)),observer(std::move(observe)),
         input_observer(std::move(observe_input)),points(p.capacity_mode?std::vector<Complex>{}:constellation(p.constellation)),
-        bps(label_bits(p.constellation)),sps(p.sample_rate/p.symbol_rate),omega(2*pi*p.carrier_hz/p.sample_rate),clock_period(sps) {
+        bps(label_bits(p.constellation)),low_rate_factor(low_rate_decimation(p)),
+        processing_rate(static_cast<double>(p.sample_rate)/low_rate_factor),sps(processing_rate/p.symbol_rate),
+        omega(2*pi*p.carrier_hz/p.sample_rate),clock_period(sps) {
         validate(p);
         equalizer_size=p.capacity_mode||p.channel==Channel::acoustic?21:5;
         equalizer[equalizer_size/2]=1.;
         if(!sink)throw std::invalid_argument("fast receiver requires an interval sink");
+        for(auto factor=low_rate_factor;factor>1;factor/=2)decimators.emplace_back();
+        if(low_rate_factor>1)mixer_step=std::polar(1.,-omega);
         const auto half=static_cast<std::size_t>(std::ceil(radius(p)*sps));
         taps.resize(2*half+1);raw.resize(taps.size());
         for(std::size_t k=0;k<taps.size();++k)
@@ -629,7 +742,7 @@ struct Receiver::Impl {
     void process_symbol() {
         ++state.symbols;
         if(marker_good)absent=0;
-        else absent+=clock_period/config.sample_rate;
+        else absent+=clock_period/processing_rate;
         if(absent>=6) {state.physical_complete=true;return;}
         std::array<Complex,21> input{};
         phase+=frequency;
@@ -707,49 +820,77 @@ struct Receiver::Impl {
             if(marker_size(config,interval_index))next_time+=static_cast<double>(sync_symbols-1)*clock_period;
         }
     }
+    void process_baseband(Complex mixed) {
+        raw[sample%raw.size()]=mixed;
+        Complex filtered_value=0;
+        if(low_rate_factor>1) {
+            // Keep the original summation order while avoiding one integer
+            // division per tap in the longer narrow-band matched filter.
+            const auto latest=static_cast<std::size_t>(sample%raw.size());
+            const auto count=static_cast<std::size_t>(std::min<std::uint64_t>(taps.size(),sample+1));
+            const auto first=std::min(count,latest+1);
+            for(std::size_t i=0;i<first;++i)filtered_value+=raw[latest-i]*taps[i];
+            for(std::size_t i=first;i<count;++i)filtered_value+=raw[latest+raw.size()-i]*taps[i];
+        } else {
+            for(std::size_t i=0;i<taps.size() && i<=sample;++i)
+                filtered_value+=raw[(sample-i)%raw.size()]*taps[i];
+        }
+        filtered[sample%filtered.size()]=filtered_value;
+        if(input_observer && static_cast<double>(sample)>=next_input_time) {
+            // A separate free-running tap remains useful before lock. It
+            // never chooses a symbol boundary or changes DSP state.
+            try{input_observer(static_cast<std::complex<float>>(filtered_value));}catch(...){}
+            next_input_time+=sps*.5;
+        }
+        ++sample;
+        if(state.physical_complete)return;
+        if(!locked) {
+            const auto time=static_cast<double>(sample)-(config.capacity_mode?8:(config.channel==Channel::acoustic?6:2))*sps-(config.capacity_mode?18:3);
+            if(time<static_cast<double>(sync_symbols+2)*sps)return;
+            // The coarse search only proposes a timing hypothesis. The
+            // full-precision fit and exact marker bits still admit it.
+            const auto fit=correlation(time,!config.capacity_mode);
+            if(fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && fit.quality>best_quality) {
+                best_quality=fit.quality;best_time=time;
+                if(candidate_until==0)candidate_until=time+sps;
+            }
+            if(candidate_until && time>=candidate_until) {
+                accept_marker(best_time,true);
+                best_quality=0;candidate_until=0;
+            }
+        }
+        while(locked && !state.physical_complete && static_cast<double>(sample)>next_time+(config.capacity_mode?8:(config.channel==Channel::acoustic?6:2))*sps+(config.capacity_mode?18:4)) {
+            if(position==0 && marker_size(config,interval_index)) {
+                const auto end=next_time;
+                // Absence accounting covers every whole training symbol,
+                // including words that fail the independent coherence test.
+                const auto old_absent=absent;
+                accept_marker(end,false);
+                state.symbols+=sync_symbols;
+                if(!marker_good)absent=old_absent+sync_symbols*clock_period/processing_rate;
+                if(absent>=6)state.physical_complete=true;
+            } else process_symbol();
+        }
+    }
     void push(std::span<const float> samples) {
         if(eof)throw std::logic_error("samples supplied after fast receiver EOF");
         for(const auto f:samples) {
             if(!std::isfinite(f))throw std::invalid_argument("nonfinite fast PCM input");
-            raw[sample%raw.size()]=2.*static_cast<double>(f)*std::polar(1.,-omega*static_cast<double>(sample));
-            Complex filtered_value=0;
-            for(std::size_t i=0;i<taps.size() && i<=sample;++i)
-                filtered_value+=raw[(sample-i)%raw.size()]*taps[i];
-            filtered[sample%filtered.size()]=filtered_value;
-            if(input_observer && static_cast<double>(sample)>=next_input_time) {
-                // A separate free-running tap remains useful before lock. It
-                // never chooses a symbol boundary or changes DSP state.
-                try{input_observer(static_cast<std::complex<float>>(filtered_value));}catch(...){}
-                next_input_time+=sps*.5;
-            }
-            ++sample;
-            if(state.physical_complete)continue;
-            if(!locked) {
-                const auto time=static_cast<double>(sample)-(config.capacity_mode?8:(config.channel==Channel::acoustic?6:2))*sps-(config.capacity_mode?18:3);
-                if(time<static_cast<double>(sync_symbols+2)*sps)continue;
-                // The coarse search only proposes a timing hypothesis. The
-                // full-precision fit and exact marker bits still admit it.
-                const auto fit=correlation(time,!config.capacity_mode);
-                if(fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && fit.quality>best_quality) {
-                    best_quality=fit.quality;best_time=time;
-                    if(candidate_until==0)candidate_until=time+sps;
+            if(low_rate_factor==1) {
+                // Preserve the established full-rate arithmetic and waveform.
+                process_baseband(2.*static_cast<double>(f)*std::polar(1.,-omega*static_cast<double>(sample)));
+            } else {
+                Complex value=2.*static_cast<double>(f)*mixer;
+                bool available=true;
+                for(auto& stage:decimators) {
+                    Complex output;
+                    if(!stage.push(value,output)){available=false;break;}
+                    value=output;
                 }
-                if(candidate_until && time>=candidate_until) {
-                    accept_marker(best_time,true);
-                    best_quality=0;candidate_until=0;
-                }
-            }
-            while(locked && !state.physical_complete && static_cast<double>(sample)>next_time+(config.capacity_mode?8:(config.channel==Channel::acoustic?6:2))*sps+(config.capacity_mode?18:4)) {
-                if(position==0 && marker_size(config,interval_index)) {
-                    const auto end=next_time;
-                    // Absence accounting covers every whole training symbol,
-                    // including words that fail the independent coherence test.
-                    const auto old_absent=absent;
-                    accept_marker(end,false);
-                    state.symbols+=sync_symbols;
-                    if(!marker_good)absent=old_absent+sync_symbols*clock_period/config.sample_rate;
-                    if(absent>=6)state.physical_complete=true;
-                } else process_symbol();
+                if(available)process_baseband(value);
+                ++input_sample;
+                if(input_sample%4096==0)mixer=std::polar(1.,-omega*static_cast<double>(input_sample));
+                else mixer*=mixer_step;
             }
         }
     }
@@ -778,6 +919,6 @@ Receiver& Receiver::operator=(Receiver&&) noexcept=default;
 void Receiver::push(std::span<const float> samples){if(acoustic_)acoustic_->push(samples);else impl_->push(samples);}
 void Receiver::finish(){if(acoustic_)acoustic_->finish();else impl_->eof=true;}
 const ModemProgress& Receiver::progress() const{return acoustic_?acoustic_->progress():impl_->state;}
-std::size_t Receiver::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+(impl_->points.capacity()+impl_->raw.capacity()+impl_->filtered.capacity())*sizeof(Complex)+impl_->taps.capacity()*sizeof(double);}
+std::size_t Receiver::workspace_bytes() const{if(acoustic_)return acoustic_->workspace_bytes();return sizeof(Impl)+(impl_->points.capacity()+impl_->raw.capacity()+impl_->filtered.capacity())*sizeof(Complex)+impl_->taps.capacity()*sizeof(double)+impl_->decimators.capacity()*sizeof(HalfBandDecimator);}
 
 } // namespace datapump::fast
