@@ -1,0 +1,102 @@
+gmake: jobserver mkfifo: /tmp/GMfifo4: File exists
+[  0%] Checking regular/fast DSP isolation
+[ 50%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 50%] Built target datapump_fast_boundary
+[ 81%] Built target datapump
+[ 87%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/codec.cpp.o
+[ 87%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/profile.cpp.o
+[ 87%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/modem.cpp.o
+[ 87%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/acoustic_ofdm.cpp.o
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/fast/acoustic_ofdm.cpp: In member function ‘void datapump::fast::acoustic_ofdm::Receiver::Impl::search()’:
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/fast/acoustic_ofdm.cpp:223:9: warning: this ‘for’ clause does not guard... [-Wmisleading-indentation]
+  223 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |         ^~~
+/home/user/___quick/p/_cur/dataPump/pumpModem/src/fast/acoustic_ofdm.cpp:223:84: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the ‘for’
+  223 |         for(std::size_t i=0;i<work.size();++i)work[i]*=std::conj(reference_fft[i]);fft(work,true);
+      |                                                                                    ^~~
+[ 87%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/session.cpp.o
+[ 93%] Building CXX object CMakeFiles/datapump_fast.dir/src/fast/file_transfer.cpp.o
+[ 93%] Linking CXX static library libdatapump_fast.a
+[ 93%] Built target datapump_fast
+[ 93%] Building CXX object CMakeFiles/pump.dir/src/fast/cli.cpp.o
+[ 93%] Linking CXX executable pump
+[100%] Built target pump
+[  0%] Checking Legacy modem isolation
+[ 16%] Built target liblzma
+[ 16%] Built target datapump_legacy_boundary
+[ 18%] Checking regular/fast DSP isolation
+[ 77%] Built target fltk
+[ 77%] Checking the shared GUI/native adapter boundary
+-- Regular/fast DSP dependency boundary passed
+[ 77%] Built target datapump_fast_boundary
+[ 87%] Built target datapump
+[ 89%] Built target datapump_legacy
+[ 93%] Built target datapump_fast
+[ 93%] Built target datapump_gui_boundary
+[100%] Built target datapump_gui_application
+[100%] Linking CXX executable datapump-gui
+[100%] Built target datapump-gui
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/fast_cable_probe.dir/tools/fast_cable_probe.cpp.o
+[100%] Linking CXX executable fast_cable_probe
+[100%] Built target fast_cable_probe
+[  0%] Checking regular/fast DSP isolation
+[ 50%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 50%] Built target datapump_fast_boundary
+[ 81%] Built target datapump
+[ 93%] Built target datapump_fast
+[ 93%] Building CXX object CMakeFiles/test_fast_modem.dir/tests/test_fast_modem.cpp.o
+[100%] Linking CXX executable test_fast_modem
+[100%] Built target test_fast_modem
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/test_fast_low_rate.dir/tests/test_fast_low_rate.cpp.o
+[100%] Linking CXX executable test_fast_low_rate
+[100%] Built target test_fast_low_rate
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/test_fast_pilot_presence.dir/tests/test_fast_pilot_presence.cpp.o
+[100%] Linking CXX executable test_fast_pilot_presence
+[100%] Built target test_fast_pilot_presence
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/test_fast_presets.dir/tests/test_fast_presets.cpp.o
+[100%] Linking CXX executable test_fast_presets
+[100%] Built target test_fast_presets
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/test_fast_output_power.dir/tests/test_fast_output_power.cpp.o
+[100%] Linking CXX executable test_fast_output_power
+[100%] Built target test_fast_output_power
+[  0%] Checking regular/fast DSP isolation
+[ 53%] Built target liblzma
+-- Regular/fast DSP dependency boundary passed
+[ 53%] Built target datapump_fast_boundary
+[ 86%] Built target datapump
+[100%] Built target datapump_fast
+[100%] Building CXX object CMakeFiles/test_fast_radio.dir/tests/test_fast_radio.cpp.o
+[100%] Linking CXX executable test_fast_radio
+[100%] Built target test_fast_radio

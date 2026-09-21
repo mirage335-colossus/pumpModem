@@ -5053,3 +5053,50 @@ sampled physical-end and weak-signal tests, pending-reception GUI tests, and
 the full `differential_receiver_probability` calibration. That long calibration
 finished within its unchanged timeout; no assertions were relaxed. Final
 `git diff --check` passed.
+
+### Acoustic low-SNR premature-end recovery (2026-09-21)
+
+Reproduced the reported acoustic Auto −10 dB failure on the default real
+speaker/microphone devices: the old receiver ended around 46 seconds while
+the 90.18-second signal continued. One failed pilot cleared a flag required
+by all later pilots, so valid subsequent audio was counted as absent before
+the next full marker, roughly 30.65 seconds away.
+
+Capacity single-carrier reception now separates marker framing, current
+physical presence and demapping quality. Bad groups preserve erasures without
+disabling later pilots; coherent phase jumps recover common phase. A bounded
+presence-only check of already scheduled marker quarters prevents a phase
+change inside a long marker from falsely declaring absence at five baud.
+It cannot acquire framing or weaken the whole-word/exact-sign admission test.
+Slow-rate real silence tails cover the completed observation windows. Missing
+intervals retain positions, and EOF/partial silence still cannot complete.
+
+The acoustic single-carrier fallback also reused OFDM's amplitude despite
+different normalization, causing an unintended 10.055 dB average output-power
+increase. Its amplitude now preserves nominal OFDM PCM power. Measured
+production PCM agrees within 0.007 dB across OFDM and both single-carrier
+processing paths; a negative control restoring the old amplitude fails.
+
+The identical original live recording now yields all eight intervals through
+the corrected receiver and ends after transmission. A lower-level live trial
+has two raw errors across 16,384 bits. A complete 60-byte live transfer then
+passed all 64 intervals, matching the source SHA-256 after 714 LDPC bit
+corrections. Physical completion occurred at 526.869 capture seconds; total
+capture was 531.284 seconds. There was no PCM clipping, overrun or reported
+device error. Final-build replay recovered the same source. System mixer
+settings were not changed. These trials do not establish a whole-file success
+probability or calibrated −10 dB reference-band sensitivity.
+
+New regressions cover brief pilot fades, permanent phase steps, a damaged
+scheduled marker, explicit erasure positions, later exact recovery, genuine
+silence/noise completion, partial absence and EOF. The integrated Fast,
+shared-GUI and selected ordinary compatibility group passed **31/31 in
+343.95 seconds**. After the last runtime refinement, six affected suites
+passed again in **37.16 seconds**. Both GUI backends and the CLI rebuilt.
+No native adapter or regular modem algorithm changed; native rendering and
+the unchanged long ordinary probability calibration were not repeated.
+
+[Diagnosis](fast-acoustic-low-snr-recovery.md) and
+[reproduction records](validation-data/fast/acoustic-low-snr-recovery-20260921/README.md)
+include before/after data, complete-source fixtures, commands and recording
+hashes. Large PCM recordings remain in `/tmp`; compact evidence is archived.

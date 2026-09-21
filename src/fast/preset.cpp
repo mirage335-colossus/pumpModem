@@ -57,6 +57,10 @@ Profile single_carrier_base(Channel c) {
     auto p=profile(c);
     if(c==Channel::acoustic) {
         p.acoustic_ofdm=false;p.carrier_hz=1800;p.rolloff=.20;
+        // OFDM's nominal PCM RMS is amplitude/4.5; the unit-energy
+        // single carrier produces amplitude/sqrt(2). Keep the same average
+        // output power when narrowing, rather than adding about 10 dB.
+        p.amplitude*=std::sqrt(2.)/4.5;
         // Keep a narrow acoustic waveform away from DC and the top of the
         // speaker passband. Its timing is explicit in the local profile ID.
         p.symbol_rate=2400/(1+p.rolloff);

@@ -1,0 +1,5 @@
+pilot recovery baud=73.0898 erased_first=256 exact_later_intervals=3 noisy_tail=1 phase_step=0
+pilot recovery baud=73.0898 erased_first=256 exact_later_intervals=3 noisy_tail=0 phase_step=1
+pilot recovery baud=5 erased_first=256 exact_later_intervals=3 noisy_tail=0 phase_step=0
+premature marker end: baud=5 seconds=884.941
+mid-marker phase step ended a continuing signal

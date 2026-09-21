@@ -54,7 +54,7 @@ std::size_t preamble_symbols(const Profile& profile);
 // Exact waveform length before physical-end silence, from local geometry only.
 std::uint64_t transmission_samples(const Profile& profile, std::size_t interval_count);
 // Real transmitted silence sufficient for whole-symbol absence scoring. Slow
-// single-carrier groups also cover the next complete marker/pilot observation;
+// single-carrier groups also cover the complete marker/pilot recovery windows;
 // their required tail can therefore exceed six seconds by many symbol times.
 std::uint64_t end_silence_samples(const Profile& profile);
 

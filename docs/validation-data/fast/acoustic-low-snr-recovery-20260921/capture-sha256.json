@@ -1,0 +1,6 @@
+{
+  "acoustic-minus10-baseline": "ca4559b1612ea5b5026de0cd85c8933e8f4cf5b37c260a559082c7409515ac50",
+  "acoustic-minus10-before.f32": "c79e2e8fd71ac5e469fda521ecc2eefae4697edeb8560a829ad6405e5c33df6f",
+  "acoustic-minus10-lowamp.f32": "1a2747a3b761aa6c8f58a83640a2a2bb288e30d3151ac30ef8b37fcac9e384a7",
+  "acoustic-minus10-codec-fixed.f32": "be0e7626e05247602e1878d6cf12c900b53203f551628fc08fd9102258402eea"
+}

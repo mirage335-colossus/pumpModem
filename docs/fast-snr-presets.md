@@ -75,7 +75,8 @@ false-match policy have not been weakened to make the menu look faster.
 Acoustic presets first consider narrower OFDM. The current FFT and independent
 marker design require at least 512 active bins and a 1 kHz configured band.
 Below that supported geometry the selector uses a narrow single carrier near
-1.8 kHz. Radio keeps its 1.5 kHz carrier. These restrictions cause a sizable
+1.8 kHz. Its output amplitude is normalized to preserve the nominal OFDM
+average PCM power. Radio keeps its 1.5 kHz carrier. These restrictions cause a sizable
 throughput drop at the OFDM-to-single-carrier transition. Lower-SNR acquisition,
 longer coherent training, and a new multiblock marker design could reduce this
 gap in a future wire revision; stronger LDPC alone would not fix acquisition.
@@ -135,3 +136,9 @@ It tests one corrected frame, not a complete file or a success probability.
 No new live audio or RF qualification is implied by adding these controls.
 The final [integration logs](validation-data/fast/snr-presets-20260921/README.md)
 record the completed Fast/GUI and native checks.
+
+The reported premature completion at acoustic −10 dB was subsequently
+reproduced on a physical speaker/microphone link and corrected. A failed pilot
+no longer prevents later good pilots from restoring reception; the narrow
+acoustic fallback's unintended 10 dB output-power increase was also removed.
+See the [diagnosis and measured comparisons](fast-acoustic-low-snr-recovery.md).

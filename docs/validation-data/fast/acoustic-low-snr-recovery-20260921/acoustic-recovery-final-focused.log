@@ -1,0 +1,18 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start 19: fast_low_rate
+    Start 17: fast_radio
+1/6 Test #17: fast_radio .......................   Passed   13.10 sec
+    Start  9: fast_modem
+2/6 Test #19: fast_low_rate ....................   Passed   22.41 sec
+    Start 20: fast_pilot_presence
+3/6 Test  #9: fast_modem .......................   Passed   18.81 sec
+    Start 21: fast_output_power
+4/6 Test #21: fast_output_power ................   Passed    0.25 sec
+    Start 18: fast_presets
+5/6 Test #18: fast_presets .....................   Passed    0.05 sec
+6/6 Test #20: fast_pilot_presence ..............   Passed   14.75 sec
+
+100% tests passed, 0 tests failed out of 6
+
+Total Test time (real) =  37.16 sec

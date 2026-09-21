@@ -1,0 +1,5 @@
+pilot recovery baud=73.0898 erased_first=256 exact_later_intervals=3 noisy_tail=1 phase_step=0
+pilot recovery baud=73.0898 erased_first=256 exact_later_intervals=3 noisy_tail=0 phase_step=1
+pilot recovery baud=5 erased_first=256 exact_later_intervals=3 noisy_tail=0 phase_step=0
+marker phase recovery baud=5 erased_intervals=4 exact_intervals=8 acquired_silence_noise_controls=2
+Fast pilot presence tests passed

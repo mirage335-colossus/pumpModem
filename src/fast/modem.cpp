@@ -240,7 +240,10 @@ std::uint64_t end_silence_samples(const Profile& p) {
         // silence through the filters and complete-symbol absence scorer.
         const auto bps=label_bits(p.constellation);
         const auto data_symbols=(physical_interval_bits+bps-1)/bps;
-        const auto evidence_symbols=std::max(sync_symbols,std::min(data_symbols,spacing(p))+pilot_symbols);
+        // The first failed pilot cannot classify the preceding payload as
+        // absent: it may be an isolated damaged pilot. Allow one following
+        // complete group before charging its full failed duration.
+        const auto evidence_symbols=std::max(sync_symbols,2*(std::min(data_symbols,spacing(p))+pilot_symbols));
         const auto observation_seconds=(evidence_symbols+12)/p.symbol_rate;
         if(observation_seconds>.25)
             return static_cast<std::uint64_t>(std::ceil(p.sample_rate*(6.25+observation_seconds)));
@@ -397,7 +400,8 @@ struct Receiver::Impl {
     double processing_rate,sps,omega;
     std::uint64_t sample=0,input_sample=0;
     Complex mixer=1,mixer_step=1;
-    bool eof=false,locked=false,marker_good=false;
+    bool eof=false,locked=false,marker_good=false,marker_present=false;
+    bool capacity_pilot_present=true,capacity_interval_present=false;
     double next_time=0,clock_period=0,phase=0,frequency=0,gain=1;
     double next_input_time=0;
     double absent=0,noise_variance=.001;
@@ -604,6 +608,38 @@ struct Receiver::Impl {
         }
         noise_variance=std::clamp(held_out_error/held_out_count,1e-9,.3);
     }
+    void emit_pending_intervals() {
+        // Pending intervals retain their exact positions. Only later observed
+        // signal commits them; trailing silence must not append codec slots.
+        static const std::array<float,physical_interval_bits> erased{};
+        for(std::size_t i=0;i<pending_absent_intervals;++i) {sink(erased);++state.intervals;}
+        pending_absent_intervals=0;
+    }
+    bool capacity_marker_parts_present(double end) const {
+        // Only a previously acquired, locally scheduled marker can use this
+        // physical-presence check. A phase step can cancel the whole-word
+        // sum while its known pieces still carry continuous signal. Fixed
+        // quarters provide independent phase-invariant evidence; they never
+        // authorize framing, refine timing, or search for a new boundary.
+        constexpr std::size_t part_symbols=sync_symbols/4;
+        const auto threshold=config.channel==Channel::acoustic?.55:.72;
+        unsigned present_parts=0;
+        double coherent_energy=0,total_energy=0;
+        for(std::size_t begin=0;begin<sync_symbols;begin+=part_symbols) {
+            Complex sum=0;double energy=0;
+            for(std::size_t k=begin;k<begin+part_symbols;++k) {
+                const auto value=at(end-static_cast<double>(sync_symbols-1-k)*clock_period);
+                sum+=value*std::conj(marker[k]);energy+=std::norm(value);
+            }
+            const auto coherent=std::norm(sum);
+            const auto quality=coherent/(part_symbols*energy+1e-30);
+            if(quality>threshold&&energy/part_symbols>std::max(1e-12,gain*gain*.06))++present_parts;
+            coherent_energy+=coherent;total_energy+=energy;
+        }
+        // One phase discontinuity can spoil at most one quarter. Requiring
+        // three independently coherent pieces also rejects isolated fragments.
+        return present_parts>=3&&coherent_energy/(part_symbols*total_energy+1e-30)>threshold;
+    }
     void accept_marker(double end,bool initial) {
         auto fitted=refine(end,initial?.8:.18*clock_period);
         const auto old_period=clock_period;
@@ -611,7 +647,8 @@ struct Receiver::Impl {
         const bool known_training=config.capacity_mode&&initial&&capacity_training_fit(fitted,clock_period).quality>.85;
         if(known_training)fitted=fit_initial_capacity_clock(fitted);
         const auto fit=correlation(fitted);
-        marker_good=fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && (initial || fit.energy>gain*gain*.06);
+        marker_present=fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && (initial || fit.energy>gain*gain*.06);
+        marker_good=marker_present;
         if(config.capacity_mode && marker_good) {
             // Exact 128-sign agreement strengthens provisional sync. Adaptive
             // waveform/timing/clock searches have no certified raw false-lock
@@ -627,13 +664,15 @@ struct Receiver::Impl {
             }
             marker_good=disagreements==0;
         }
+        if(config.capacity_mode&&!initial&&!marker_present&&capacity_marker_parts_present(end))
+            marker_present=true;
         if(config.capacity_mode && initial && !marker_good) {clock_period=old_period;return;}
+        if(config.capacity_mode) {
+            capacity_interval_present=marker_present;
+            capacity_pilot_present=marker_present;
+        }
         if(marker_good) {
-            if(pending_absent_intervals) {
-                soft.fill(0);
-                for(std::size_t i=0;i<pending_absent_intervals;++i) {sink(soft);++state.intervals;}
-                pending_absent_intervals=0;
-            }
+            emit_pending_intervals();
             if(!initial) {
                 const auto correction=fitted-end;
                 const auto distance=config.capacity_mode?total_interval_symbols(config,config.marker_spacing_intervals):interval_symbols(config);
@@ -741,9 +780,11 @@ struct Receiver::Impl {
     }
     void process_symbol() {
         ++state.symbols;
-        if(marker_good)absent=0;
-        else absent+=clock_period/processing_rate;
-        if(absent>=6) {state.physical_complete=true;return;}
+        if(!config.capacity_mode) {
+            if(marker_good)absent=0;
+            else absent+=clock_period/processing_rate;
+            if(absent>=6) {state.physical_complete=true;return;}
+        }
         std::array<Complex,21> input{};
         phase+=frequency;
         const auto value=equalized(next_time,input);
@@ -786,6 +827,29 @@ struct Receiver::Impl {
             track(value,expected,input,true);
             if(index+1==pilot_symbols) {
                 const bool incoherent=std::norm(pilot_correlation)<.4*pilot_symbols*pilot_energy;
+                bool capacity_group_present=false;
+                if(config.capacity_mode) {
+                    // Physical presence is independent of exact marker signs
+                    // and demapping phase. Evaluate this complete known word,
+                    // rather than latching a past bad pilot for every later
+                    // data symbol. A mere energy or nearest-QAM test would
+                    // let unrelated tones/noise manufacture presence.
+                    const auto prediction_error=(pilot_energy+pilot_symbols-2*std::abs(pilot_correlation))/pilot_symbols;
+                    const bool present=!incoherent&&prediction_error<=.3;
+                    capacity_group_present=present;
+                    if(present) {
+                        absent=0;capacity_interval_present=true;
+                    } else {
+                        // One short pilot fade is not evidence that its whole
+                        // preceding payload was absent. Charge only the known
+                        // word on the first failure; following wholly observed
+                        // failed groups establish consecutive lost cadence.
+                        const auto failed_symbols=capacity_pilot_present?pilot_symbols:available+pilot_symbols;
+                        absent+=failed_symbols*clock_period/processing_rate;
+                    }
+                    capacity_pilot_present=present;
+                    if(absent>=6) {state.physical_complete=true;return;}
+                }
                 if(pilot_error/pilot_symbols>.3 || incoherent) {
                     const auto begin=std::min(start*bps,soft.size()),end=std::min((start+available)*bps,soft.size());
                     // Coherent acoustic pilots can have substantial residual
@@ -794,7 +858,17 @@ struct Receiver::Impl {
                     // Incoherent pilots and absent markers still erase positions.
                     const float weight=config.channel==Channel::acoustic&&!incoherent?.2F:0.F;
                     for(auto bit=begin;bit<end;++bit)soft[bit]*=weight;
-                    if(config.capacity_mode)marker_good=false;
+                    // Capacity cadence remains established by the full marker.
+                    // Only this group is erased; a later good pilot can resume
+                    // demapping and tracking without waiting for a new marker.
+                    if(config.capacity_mode) {
+                        group_phase_anchor=0;
+                        // A coherent phase jump is signal, but its location
+                        // within this payload group is unknown. Erase the
+                        // group and re-anchor only common phase for the next
+                        // one; a phase step is not a frequency observation.
+                        if(marker_good&&capacity_group_present)phase+=std::arg(pilot_correlation);
+                    }
                 } else if(config.capacity_mode&&marker_good) {
                     // Four known pilots carry unambiguous carrier evidence.
                     // Dense decision-directed phase errors fold at each tiny
@@ -810,8 +884,11 @@ struct Receiver::Impl {
         next_time+=clock_period;
         if(++position==interval_symbols(config,interval_index)) {
             if(std::none_of(soft.begin(),soft.end(),[](float f){return f!=0;}))++state.erased_intervals;
-            if(marker_good) {sink(soft);++state.intervals;}
+            if(marker_good&&(!config.capacity_mode||capacity_interval_present)) {
+                emit_pending_intervals();sink(soft);++state.intervals;
+            }
             else ++pending_absent_intervals;
+            capacity_interval_present=false;
             position=0;
             ++interval_index;
             soft.fill(0);
@@ -867,7 +944,10 @@ struct Receiver::Impl {
                 const auto old_absent=absent;
                 accept_marker(end,false);
                 state.symbols+=sync_symbols;
-                if(!marker_good)absent=old_absent+sync_symbols*clock_period/processing_rate;
+                if(config.capacity_mode) {
+                    if(marker_present)absent=0;
+                    else absent=old_absent+sync_symbols*clock_period/processing_rate;
+                } else if(!marker_good)absent=old_absent+sync_symbols*clock_period/processing_rate;
                 if(absent>=6)state.physical_complete=true;
             } else process_symbol();
         }

@@ -195,6 +195,7 @@ int run(const Options& o) {
     std::atomic<bool> playback_done{false};
     audio::StreamFormat capture_format{},playback_format{};
     double maximum_dsp=0,evm_sum=0,maximum_evm=0;
+    double acquired_at=-1,physical_end_at=-1;
     std::uint64_t evm_samples=0;
     auto last_report=Clock::now();
     std::ofstream saved_capture;
@@ -224,6 +225,8 @@ int run(const Options& o) {
         if(decoder&&decoder->snapshot().failed)decode_failed=true;
         maximum_dsp=std::max(maximum_dsp,std::chrono::duration<double>(Clock::now()-begin).count());
         processed+=pcm.size();
+        if(acquired_at<0&&rx.progress().acquired)acquired_at=double(processed)/p.sample_rate;
+        if(physical_end_at<0&&rx.progress().physical_complete)physical_end_at=double(processed)/p.sample_rate;
         if(rx.progress().acquired && rx.progress().evm>0) {
             evm_sum+=rx.progress().evm;++evm_samples;maximum_evm=std::max(maximum_evm,rx.progress().evm);
         }
@@ -338,6 +341,7 @@ int run(const Options& o) {
         <<",\"capture_seconds\":"<<double(processed)/p.sample_rate<<",\"tx_intervals\":"<<tx_intervals
         <<",\"rx_intervals\":"<<rx_intervals<<",\"missing_intervals\":"<<missing
         <<",\"acquired\":"<<rx.progress().acquired<<",\"physical_end\":"<<rx.progress().physical_complete
+        <<",\"acquired_capture_seconds\":"<<acquired_at<<",\"physical_end_capture_seconds\":"<<physical_end_at
         <<",\"exact\":"<<exact<<",\"raw_compared_bits\":"<<compared<<",\"raw_wrong_bits\":"<<wrong
         <<",\"raw_erased_bits\":"<<erasures<<",\"raw_missing_bits\":"<<missing*physical_interval_bits
         <<",\"raw_exact_intervals\":"<<exact_intervals<<",\"aligned_compared_bits\":"<<aligned_compared
