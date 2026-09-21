@@ -7,6 +7,10 @@ source flag per fixed coding cycle, shortened GF(65536) Reed–Solomon, and stan
 retain their existing wire formats. This document specifies coding geometry;
 actual modem throughput and physical-link reliability require separate tests.
 
+Production text and file APIs now place an [XZ stream](fast-xz.md) in these
+source slots and decode it only after physical completion. The raw coding API
+and its independent layout vectors below are unchanged.
+
 All dimensions come from matching local settings. No transmitted length, source
 flag, checksum, or decoded content changes physical framing, allocation, or
 completion. The only completion event remains six seconds of scored physical

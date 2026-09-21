@@ -1399,8 +1399,8 @@ struct Session::Impl {
                     continue;
                 }
                 if (wave) {
-                    bool mono;
-                    { std::lock_guard lock(mutex); mono = settings.mono; }
+                    audio::ChannelMode channels;
+                    { std::lock_guard lock(mutex); channels = audio::output_channels(settings.mono,settings.channel_mode); }
                     discontinuity();
                     audio::playback(transmit_modem.sample_rate, value.device, [&](std::span<float> output) {
                         const auto before=wave->transmitter->samples_emitted();
@@ -1423,7 +1423,7 @@ struct Session::Impl {
                             wave->prepare_hardware(*wave);
                             wave->prepare_hardware={};
                         }
-                    }, mono);
+                    }, channels);
                     discontinuity(); complete_tx(*wave); wave.reset(); plot_window.reset(); continue;
                 }
                 {
@@ -1632,6 +1632,12 @@ void Session::configure(const Settings& settings) { impl_->configure(settings); 
 void Session::set_mono(bool mono) {
     std::lock_guard lock(impl_->mutex);
     impl_->settings.mono = mono;
+    impl_->settings.channel_mode = audio::output_channels(mono);
+}
+void Session::set_channel_mode(audio::ChannelMode channels) {
+    std::lock_guard lock(impl_->mutex);
+    impl_->settings.channel_mode = channels;
+    impl_->settings.mono = channels != audio::ChannelMode::stereo;
 }
 bool Session::try_suspend_capture() {
     std::lock_guard lock(impl_->mutex);

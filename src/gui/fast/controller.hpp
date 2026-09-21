@@ -11,6 +11,8 @@ public:
     explicit Controller(std::function<bool()> acquire_audio);
     ~Controller();
     void poll();
+    // Selected Fast mode keeps receiving until explicitly paused.
+    void set_selected(bool selected);
     void close();
     bool ready_to_close() const;
     bool active() const;

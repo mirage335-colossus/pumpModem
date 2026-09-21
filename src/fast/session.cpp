@@ -1,5 +1,7 @@
 #include "datapump/fast/session.hpp"
+#include "session_state.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
 #include "datapump/audio.hpp"
 #include <algorithm>
@@ -40,7 +42,7 @@ struct Session::Impl {
     }
     void receive(std::stop_token stop,const Settings& s,std::uint64_t stream_id) {
         Telemetry telemetry(s.profile,false,stream_id);
-        StreamDecoder decoder(s.profile,s.key,s.quota_bytes);
+        StreamDecoder decoder(s.profile,s.key,s.quota_bytes,SourceEncoding::xz);
         Receiver receiver(s.profile,[&](std::span<const float> interval) {decoder.push_interval(interval);},
             [&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);},
             [&](std::complex<float> input) noexcept {telemetry.record_input(input);});
@@ -116,23 +118,20 @@ struct Session::Impl {
             if(end&&!result.complete)out.error=result.status;
         });
     }
-    void send(std::stop_token stop,const Settings& s,SourceReader input,bool text,std::uint64_t stream_id,std::uint64_t size) {
-        const auto estimate=estimate_transmission(s.profile,s.key.has_value(),size);
+    void send(std::stop_token stop,const Settings& s,PreparedXzSource input,bool text,std::uint64_t stream_id) {
+        const auto estimate=estimate_transmission(s.profile,s.key.has_value(),input.encoded.size());
+        const auto source_bytes=input.source_bytes;
         std::uint64_t generated=0;
         update([&](auto& out){out.estimated_seconds=estimate.seconds;});
         Telemetry telemetry(s.profile,true,stream_id);
-        std::uint64_t read_bytes=0;
-        StreamEncoder encoder(s.profile,s.key,[&](std::span<std::uint8_t> bytes) {
-            const auto count=input(bytes);
-            if(count>s.quota_bytes-read_bytes)throw Error("Fast source grew beyond local storage quota");
-            read_bytes+=count;return count;
-        });
+        StreamEncoder encoder(s.profile,s.key,byte_source(std::move(input.encoded)),SourceEncoding::xz);
         Transmitter transmitter(s.profile,[&](std::span<std::uint8_t> bits) {
             if(stop.stop_requested())return false;
             return encoder.next_interval(bits);
         },[&](std::complex<float> symbol) noexcept {telemetry.record_symbol(symbol);});
         // The playback producer is bounded; unlike capture it can wait for the
-        // source reader. No full source, waveform or bit-vector is retained.
+        // fixed coding work. XZ bytes are prepared in bounded RAM before audio opens;
+        // no full waveform or bit-vector is retained.
         auto silence=end_silence_samples(s.profile);
         audio::playback(s.profile.sample_rate,s.device,[&](std::span<float> output) {
             if(stop.stop_requested())return std::size_t{0};
@@ -147,11 +146,11 @@ struct Session::Impl {
             update([&](auto& out) {
                 if(diagnostics)out.diagnostics=diagnostics;
                 out.transmit_fraction=std::min(.999,static_cast<double>(generated)/static_cast<double>(estimate.samples));
-                out.source_bytes=encoder.source_bytes();out.intervals=encoder.intervals_emitted();
+                out.source_bytes=source_bytes;out.intervals=encoder.intervals_emitted();
                 out.status=std::string("Transmitting fast ")+(s.key?"encrypted ":"unencrypted ")+(text?"text":"file");
             });
             return count;
-        },stop,[&](const auto& format){check_format(s,format);},s.mono);
+        },stop,[&](const auto& format){check_format(s,format);},audio::output_channels(s.mono,s.channel_mode));
         update([&](auto& out) {
             out.status=stop.stop_requested()?"Transmission cancelled":"Transmission sent; receiver observes physical absence";
             if(!stop.stop_requested())out.transmit_fraction=1;
@@ -181,19 +180,17 @@ struct Session::Impl {
         worker=std::jthread([this,s=std::move(s),tx,path,text=std::move(text),stream_id](std::stop_token stop) {
             try {
                 if(!tx)receive(stop,s,stream_id);
-                else if(text)send(stop,s,byte_source(Bytes(text->begin(),text->end())),true,stream_id,text->size());
+                else if(text)send(stop,s,prepare_xz_source(byte_source(Bytes(text->begin(),text->end())),s.quota_bytes,stop),true,stream_id);
                 else {
                     std::error_code ec;const auto size=std::filesystem::file_size(path,ec);
                     if(ec||!std::filesystem::is_regular_file(path))throw Error("Fast source must be a readable regular file");
                     if(size>s.quota_bytes)throw Error("Fast source exceeds local storage quota");
-                    send(stop,s,file_source(path),false,stream_id,size);
+                    send(stop,s,prepare_xz_source(file_source(path),s.quota_bytes,stop),false,stream_id);
                 }
             }
             catch(const std::exception& e) {update([&](auto& out){if(!stop.stop_requested())out.error=e.what();out.status="Fast transfer incomplete";});}
             update([&](auto& out) {
-                out.cancelled=stop.stop_requested();
-                if(out.cancelled){out.complete=false;out.authenticated=false;out.file.reset();out.status="Cancelled; transfer incomplete";}
-                out.active=false;out.transmitting=false;out.listening=false;
+                detail::finish_worker(out,stop.stop_requested());
             });
         });
     }
@@ -217,6 +214,7 @@ void Session::save(const std::filesystem::path& destination) const {
     auto result=poll();if(!result.complete||!result.file)throw Error("No complete fast file is available");
     result.file->save(destination);
 }
+void Session::clear_received(){std::lock_guard lock(impl_->mutex);impl_->current.file.reset();}
 bool Session::active() const {std::lock_guard lock(impl_->mutex);return impl_->current.active;}
 void Session::close(){std::lock_guard lock(impl_->mutex);impl_->closing=true;impl_->worker.request_stop();}
 bool Session::ready_to_close() const{return !active();}

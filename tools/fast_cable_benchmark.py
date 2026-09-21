@@ -14,7 +14,7 @@ fallback is allowed. Source fixtures are deterministic; production bootstrap
 salts remain random. Device settings, cable, noise and independent errors must
 be established by the operator. A file checksum does not measure raw BER/SNR.
 Output routing follows the selected executable's profile default unless
---stereo (both channels) or --mono (right only) is supplied. Effective routing
+--stereo (both channels), --mono (left only) or --right-mono is supplied. Effective routing
 is recorded separately from an explicit override when fast-info exposes it.
 """
 
@@ -103,15 +103,18 @@ def airtime(info, candidate, source_bytes):
 
 
 def routing_options(args):
-    return ["--stereo"] if args.stereo else ["--mono"] if args.mono else []
+    return ["--stereo"] if args.stereo else ["--right-mono"] if getattr(args, "right_mono", False) else ["--mono"] if args.mono else []
 
 
 def routing_provenance(args, info):
-    requested = "both-channels" if args.stereo else "right-only" if args.mono else "profile-default"
+    requested = "both-channels" if args.stereo else "right-only" if getattr(args, "right_mono", False) else "left-only" if args.mono else "profile-default"
     mono = info.get("mono")
-    if isinstance(mono, bool):
-        effective, evidence = "right-only" if mono else "both-channels", "fast-info"
-    elif args.stereo or args.mono:
+    if info.get("audio_channels") in ("left", "right", "stereo"):
+        effective = {"left": "left-only", "right": "right-only", "stereo": "both-channels"}[info["audio_channels"]]
+        evidence = "fast-info"
+    elif isinstance(mono, bool):
+        effective, evidence = "mono-unspecified" if mono else "both-channels", "fast-info"
+    elif args.stereo or args.mono or getattr(args, "right_mono", False):
         effective, evidence = requested, "explicit-option"
     else:
         # Old binaries did not expose this field. Omission of --stereo alone
@@ -333,7 +336,8 @@ def main(argv=None):
     parser.add_argument("--output-device", default="default")
     routing = parser.add_mutually_exclusive_group()
     routing.add_argument("--stereo", action="store_true", help="explicitly send both output channels; omission uses the executable's profile default")
-    routing.add_argument("--mono", action="store_true", help="explicitly send the right output channel only; omission uses the executable's profile default")
+    routing.add_argument("--mono", action="store_true", help="explicitly send the left output channel only; omission uses the executable's profile default")
+    routing.add_argument("--right-mono", action="store_true", help="explicitly send the right output channel only")
     parser.add_argument("--seed", type=bounded_integer(0, 2**64 - 1), default=417)
     parser.add_argument("--startup-seconds", type=finite_positive, default=1.5)
     parser.add_argument("--timeout-factor", type=finite_positive, default=1.5)
@@ -359,7 +363,7 @@ def main(argv=None):
     metadata = {"mode": "live" if args.live else "plan", "pump": str(args.pump),
                 "pump_sha256": hash_file(args.pump), "input_device": args.input_device,
                 "output_device": args.output_device, "explicit_stereo": args.stereo,
-                "explicit_mono": args.mono, "sample_rate": args.sample_rate,
+                "explicit_mono": args.mono, "explicit_right_mono": getattr(args, "right_mono", False), "sample_rate": args.sample_rate,
                 "output_routing": {name: routing_provenance(args, info) for name, info in information.items()},
                 "seed": args.seed, "candidates": [asdict(c) for c in candidates], "geometry": information,
                 "trials": plan, "minimum_playback_hours": sum(p["seconds"] * p["trials"] for p in plan) / 3600}

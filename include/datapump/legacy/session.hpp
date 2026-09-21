@@ -1,8 +1,9 @@
 #pragma once
+#include "datapump/audio.hpp"
 #include "datapump/legacy/modem.hpp"
 #include <memory>
 namespace datapump::legacy {
-struct Settings {Config config;std::string device="default";bool mono=true;};
+struct Settings {Config config;std::string device="default";bool mono=true;audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;};
 struct TextEvent {std::uint64_t serial=0;bool transmitted=false;std::string text;};
 struct Snapshot {
     bool active=false,listening=false,transmitting=false;

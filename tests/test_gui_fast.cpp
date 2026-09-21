@@ -17,6 +17,32 @@ using namespace datapump;
 using namespace datapump::gui;
 namespace {
 void check(bool value,const char* message) {if(!value)throw Error(message);}
+void rate_and_spectrum_presentation() {
+    auto profile=fast::resolve_snr_preset(fast::Channel::wire,36).profile;
+    const auto payload=fast_ui::expected_modem_bitrate(profile,false);
+    check(payload>0&&payload<fast::gross_bitrate(profile)*fast::code_rate_value(profile.code_rate),
+        "Displayed expected rate omitted outer parity, integrity or modem framing");
+    check(fast_ui::expected_modem_bitrate(profile,true)<payload,
+        "Encryption overhead did not reduce expected payload bitrate");
+    fast::Diagnostics d;d.sample_rate=48000;d.spectrum_valid=true;d.spectrum_db.fill(-60);
+    const double low=fast::occupied_lower_hz(profile),high=fast::occupied_upper_hz(profile);
+    for(std::size_t k=0;k<d.spectrum_db.size();++k)if(k*d.sample_rate/512.>=low&&k*d.sample_rate/512.<=high)
+        d.spectrum_db[k]=static_cast<float>(10*std::log10(11e-6));
+    const auto snr=fast_ui::waterfall_snr(d,profile);
+    check(snr&&std::abs(*snr-10)<1e-4,"Waterfall SNR did not subtract matched in-band noise power");
+    d.transmitting=true;check(!fast_ui::waterfall_snr(d,profile),"TX spectrum was labeled receiver SNR");
+    d.transmitting=false;d.spectrum_db.fill(-120);
+    check(!fast_ui::waterfall_snr(d,profile),"Silent input fabricated a measured SNR");
+    Application app({});
+    check(app.field(ui::Field::fast_mode).selected=="fast","Ordinary launch did not default to Fast Modem");
+    app.close();
+    unsigned attempts=0;
+    fast_ui::Controller invalid([&] {++attempts;return true;});
+    invalid.edit(ui::Field::fast_device,"");invalid.set_selected(true);
+    for(unsigned i=0;i<10;++i)invalid.poll();
+    check(attempts==1&&!invalid.active(),"Invalid audio configuration retried on every continuous-listen poll");
+    invalid.close();
+}
 void damaged_reception_presentation() {
     fast::Snapshot s;s.revision=1;s.active=true;s.listening=true;
     s.failed_cycles=1;s.checksum_groups=2;s.verified_bytes=4096;
@@ -38,6 +64,9 @@ void damaged_reception_presentation() {
     check(fast_ui::transfer_stage(s)=="INCOMPLETE"&&
         fast_ui::integrity_label(s).find("received bytes available")==std::string::npos,
         "A file with missing data was presented as complete");
+    fast::Snapshot finishing;finishing.physical_complete=finishing.complete=finishing.active=true;
+    check(fast_ui::transfer_stage(finishing)=="RECEIVED · checksum verified, unauthenticated",
+        "A physically completed result was still presented as pending during worker cleanup");
     s.cancelled=true;
     check(fast_ui::transfer_stage(s)=="CANCELLED · no completion implied",
         "Damaged reception hid the explicit cancellation state");
@@ -54,16 +83,16 @@ void snr_and_symbol_rate_controls() {
     using F=ui::Field;using C=ui::Command;
     unsigned acquisitions=0;
     fast_ui::Controller controller([&] {++acquisitions;return false;});
-    check(controller.field(F::fast_expected_snr).selected=="65"&&
+    check(controller.field(F::fast_expected_snr).selected=="36"&&
         controller.field(F::fast_symbol_rate).selected=="auto",
         "Cable GUI did not start at the automatic nominal SNR and timing");
     for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
         const auto& c=control(field);
-        check(c.kind==ui::Kind::choice&&c.persistent&&c.scope==ui::ScreenScope::fast&&c.help[0],
+        check(c.kind==ui::Kind::choice&&c.persistent==(field==F::fast_expected_snr)&&c.scope==ui::ScreenScope::fast&&c.help[0],
             "SNR/rate dropdown is missing from the shared Fast screen or lacks help");
     }
     controller.select(F::fast_profile,"acoustic");
-    check(controller.field(F::fast_expected_snr).selected=="13"&&
+    check(controller.field(F::fast_expected_snr).selected=="3"&&
         controller.field(F::fast_symbol_rate).selected=="auto",
         "Acoustic expected-SNR default is not independent of cable settings");
     const auto& choices=controller.field(F::fast_expected_snr).options;
@@ -120,8 +149,8 @@ void snr_and_symbol_rate_controls() {
     check(controller.field(F::fast_symbol_rate).selected==rate->id,
         "Manual constellation edit reset explicit symbol timing");
     controller.select(F::fast_profile,"wire");
-    check(controller.field(F::fast_expected_snr).selected=="65"&&
-        controller.field(F::fast_symbol_rate).selected=="auto"&&!controller.field(F::fast_mono).checked,
+    check(controller.field(F::fast_expected_snr).selected=="36"&&
+        controller.field(F::fast_symbol_rate).selected=="auto"&&controller.field(F::fast_mono).selected=="left",
         "Acoustic overrides leaked into the cable profile");
     controller.select(F::fast_expected_snr,"40");
     controller.select(F::fast_profile,"acoustic");
@@ -153,15 +182,12 @@ void snr_and_symbol_rate_controls() {
     controller.select(F::fast_profile,"wire");
     check(controller.field(F::fast_expected_snr).selected=="40",
         "Cable SNR selection was discarded by profile switching");
-    const auto frozen_alternate=controller.field(F::fast_symbol_rate).options.back().id;
     controller.activate(C::fast_listen);
-    check(acquisitions==1&&controller.active()&&!controller.field(F::fast_expected_snr).enabled&&
-        !controller.field(F::fast_symbol_rate).enabled,"Pending audio acquisition did not freeze modem geometry");
-    const auto frozen_rate=controller.field(F::fast_symbol_rate).selected;
-    controller.select(F::fast_expected_snr,"65");controller.select(F::fast_symbol_rate,frozen_alternate);
-    check(controller.field(F::fast_expected_snr).selected=="40"&&
-        controller.field(F::fast_symbol_rate).selected==frozen_rate,
-        "An active transfer accepted an SNR or timing change");
+    check(acquisitions==1&&controller.active()&&controller.field(F::fast_expected_snr).enabled&&
+        controller.field(F::fast_symbol_rate).enabled,"Pending listening disabled editable modem settings");
+    controller.select(F::fast_expected_snr,"36");controller.edit(F::fast_text,"Draft while waiting for input");
+    check(controller.field(F::fast_expected_snr).selected=="36"&&controller.enabled(C::fast_transmit),
+        "Listening could not accept a new profile or transmit draft");
     controller.activate(C::fast_cancel);
     check(!controller.active()&&controller.field(F::fast_expected_snr).enabled&&controller.field(F::fast_symbol_rate).enabled,
         "Cancellation did not release the SNR/rate controls");
@@ -172,21 +198,27 @@ void presentation_and_retention() {
     Application app({.simulation=true});
     const auto& mode=control(F::fast_mode);
     check(mode.kind==ui::Kind::choice&&mode.persistent&&mode.scope==ui::ScreenScope::shared&&app.field(F::fast_mode).selected=="robust",
-          "Modem choice must default to Robust Modem in the shared header");
-    check(app.field(F::fast_mode).options.size()==3&&app.field(F::fast_mode).options[0].label=="Robust Modem"&&
-        app.field(F::fast_mode).options[1].label=="Fast Modem","Modem selector labels changed");
+          "Simulation launch must retain the Robust Modem facilities");
+    check(app.field(F::fast_mode).options.size()==3&&app.field(F::fast_mode).options[0].label=="Fast Modem"&&
+        app.field(F::fast_mode).options[1].label=="Robust Modem","Modem selector labels changed");
     app.toggle(F::developer_mode,true);app.select_page(ui::Page::compression);
     app.edit(F::binary,"001");const auto bits=app.field(F::binary).text;
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
     app.select(mode,"fast");
     check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
-    check(!app.field(F::fast_mono).checked,"Cable must default to both output channels");
+    check(app.field(F::fast_mono).selected=="left","Cable must default to left mono");
     for(const auto& c:ui::console_screen()) {
         if(c.scope==ui::ScreenScope::regular||c.scope==ui::ScreenScope::legacy)check(!app.control(c).visible,"Other modem controls leaked into the fast interface");
-        else check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
+        else if(c.scope==ui::ScreenScope::fast&&c.page==ui::Page::console)
+            check(app.control(c).visible==(c.field!=F::fast_file),"Fast interface failed to show the selected source controls");
     }
-    for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))check(!tab.visible,"Regular tabs leaked into fast interface");
-    const auto acoustic=fast::profile(fast::Channel::acoustic);
+    for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))
+        check(tab.visible==(tab.page==ui::Page::console||tab.page==ui::Page::fast_modem),"Fast tabs are not scoped to Console and developer Modem details");
+    app.toggle(F::developer_mode,false);
+    for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))
+        check(tab.visible==(tab.page==ui::Page::console),"Normal Fast view must keep only Console visible");
+    app.toggle(F::developer_mode,true);
+    const auto acoustic=fast::resolve_snr_preset(fast::Channel::acoustic,3).profile;
     const auto& profiles=app.field(F::fast_profile).options;
     check(profiles.size()==4&&profiles[0].id=="wire"&&profiles[1].id=="ssb"&&
         profiles[2].id=="fm"&&profiles[3].id=="acoustic"&&app.field(F::fast_constellation).options.size()==11,
@@ -206,10 +238,10 @@ void presentation_and_retention() {
     app.edit(control(F::binary),"111");app.select(control(F::fec),"rs60");
     app.edit(F::message,"stale");app.dispatch(C::use_text);app.navigate(ui::Page::planner);
     check(app.field(F::binary).text==bits&&app.field(F::fec).selected==fec,"Inactive regular callbacks mutated retained settings");
-    app.select(control(F::fast_profile),"ssb");app.select(control(F::fast_constellation),"256");
+    app.select(control(F::fast_profile),"ssb");app.select(F::fast_constellation,"256");
     check(app.field(F::fast_mono).checked,"Radio output routing default changed");
     app.toggle(F::fast_mono,false);check(!app.field(F::fast_mono).checked,"Explicit radio stereo override ignored");
-    app.select(control(F::fast_source),"file");
+    app.select(F::fast_source,"file");
     app.edit(control(F::fast_file),"/tmp/independent-source.bin");
     check(!app.control(control(F::fast_text)).visible&&app.control(action(C::fast_choose_file)).visible&&app.command_label(C::fast_transmit)=="Transmit file",
           "File source did not replace the composer and transmit label");
@@ -227,7 +259,7 @@ void presentation_and_retention() {
         for(const auto& c:ui::console_screen())if(c.scope==ui::ScreenScope::fast) {
             const auto geometry=app.control_layout(c,size.w,size.h);const auto r=geometry.frame;
             check(r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=size.w&&r.y+r.h<=size.h,"Fast layout escaped desktop bounds");
-            if(c.kind==ui::Kind::bitmap)check(geometry.widget.w>=300&&geometry.widget.h>=140&&geometry.has_caption,
+            if(c.kind==ui::Kind::bitmap&&c.bitmap!=ui::Bitmap::fast_qr)check(geometry.widget.w>=300&&geometry.widget.h>=140&&geometry.has_caption,
                 "Fast live plots lost useful dimensions or their metadata captions");
         }
         const auto occupied=[&](const ui::Control& c) {
@@ -237,8 +269,9 @@ void presentation_and_retention() {
         };
         for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
             const auto r=occupied(control(field));
-            check(r.w>=300,"SNR/rate dropdowns lost room for their descriptive choices");
-            for(const auto& c:ui::console_screen())if(c.scope==ui::ScreenScope::fast&&c.field!=field&&app.control(c).visible) {
+            check(r.w>=180,"SNR/rate dropdowns lost room for their descriptive choices");
+            for(const auto& c:ui::console_screen())if(c.scope==ui::ScreenScope::fast&&c.field!=field&&app.control(c).visible&&
+                (c.persistent||control(field).persistent||c.page==control(field).page)) {
                 const auto other=occupied(c);
                 check(r.x+r.w<=other.x||other.x+other.w<=r.x||r.y+r.h<=other.y||other.y+other.h<=r.y,
                     "SNR/rate dropdown overlaps another Fast control or its label");
@@ -260,10 +293,10 @@ void presentation_and_retention() {
         "Hidden Fast callbacks changed retained SNR or symbol timing");
     app.select(mode,"fast");check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_text).text==fast_text&&app.field(F::fast_source).selected=="text",
         "Fast settings or source draft were discarded on mode switch");
-    check(app.field(F::fast_source_detail).text.find("Estimated")!=std::string::npos,"Fast draft has no airtime estimate");
+    check(app.field(F::fast_airtime).text.find("Transmit")!=std::string::npos,"Fast draft has no airtime estimate");
     check(app.field(F::fast_detail).text.find("Shannon-Hartley")!=std::string::npos,"Fast capacity explanation missing");
     app.select(F::fast_profile,"acoustic");
-    check(app.field(F::fast_mono).checked,"Acoustic profile must default to the right speaker only");
+    check(app.field(F::fast_mono).checked,"Acoustic profile must default to left mono");
     check(app.field(F::fast_detail).text.starts_with("Next: acoustic"),"Acoustic GUI selection silently used cable identity");
     if(acoustic.capacity_mode) {
         if(acoustic.acoustic_ofdm)check(app.field(F::fast_detail).text.find("OFDM")!=std::string::npos&&
@@ -271,9 +304,9 @@ void presentation_and_retention() {
             app.field(F::fast_detail).text.find("ms blocks")!=std::string::npos&&
             app.field(F::fast_detail).text.find("symbols/s")==std::string::npos,
             "OFDM detail used inactive single-carrier symbol-rate fields");
-        check(app.field(F::fast_constellation).selected=="16"&&app.field(F::fast_depth).selected=="8"&&
-            app.field(F::fast_coding).selected=="three-quarters"&&app.field(F::fast_fec).selected=="sparse",
-            "Acoustic 16-QAM, LDPC3/4, depth8 defaults were not applied to GUI");
+        check(app.field(F::fast_constellation).selected==std::to_string(acoustic.constellation)&&app.field(F::fast_depth).selected==std::to_string(acoustic.interleave_depth)&&
+            app.field(F::fast_coding).selected=="two-thirds"&&app.field(F::fast_fec).selected=="sparse",
+            "Acoustic 3 dB preset defaults were not applied to GUI");
         app.select(F::fast_constellation,"64");app.toggle(F::fast_mono,false);
         check(app.field(F::fast_constellation).selected=="64"&&!app.field(F::fast_mono).checked,
             "Explicit acoustic 64-QAM and both-speaker output remain unavailable");
@@ -294,11 +327,12 @@ void presentation_and_retention() {
             "Removed classic acoustic profile changed the current settings");
     }
     app.select(F::fast_profile,"wire");
-    check(!app.field(F::fast_mono).checked,"Cable profile did not reset both-channel output routing");
-    app.toggle(F::fast_mono,true);check(app.field(F::fast_mono).checked,"Explicit cable right-only override ignored");
-    check(app.field(F::fast_constellation).selected=="4194304"&&app.field(F::fast_depth).selected=="4"&&
-        app.field(F::fast_coding).selected=="eight-ninths"&&app.field(F::fast_fec).selected=="sparse",
-        "Cable bulk defaults differ from modem profile");
+    check(app.field(F::fast_mono).selected=="left","Cable profile did not retain left mono routing");
+    app.toggle(F::fast_mono,true);check(app.field(F::fast_mono).checked,"Explicit cable left-mono override ignored");
+    const auto wire=fast::resolve_snr_preset(fast::Channel::wire,36).profile;
+    check(app.field(F::fast_constellation).selected==std::to_string(wire.constellation)&&
+        app.field(F::fast_depth).selected==std::to_string(wire.interleave_depth)&&
+        app.field(F::fast_fec).selected=="sparse", "Cable 36 dB defaults differ from the resolved modem preset");
     app.select(F::fast_constellation,"16384");app.select(F::fast_coding,"nine-tenths");app.select(F::fast_depth,"8");
     check(app.field(F::fast_constellation).selected=="16384"&&app.field(F::fast_coding).selected=="nine-tenths"&&
         app.field(F::fast_depth).selected=="8","Capacity QAM/LDPC choices ignored");
@@ -535,6 +569,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {damaged_reception_presentation();snr_and_symbol_rate_controls();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

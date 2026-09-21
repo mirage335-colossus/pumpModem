@@ -89,7 +89,7 @@ struct Session::Impl {
         audio::playback(sample_rate,s.device,[&](std::span<float> out) {
             if(stop.stop_requested())return std::size_t{};
             const auto count=transmitter.read(out);if(count)samples(out.first(count));return count;
-        },stop,[&](const auto& format){check_format(s,format);},s.mono);
+        },stop,[&](const auto& format){check_format(s,format);},audio::output_channels(s.mono,s.channel_mode));
         if(!stop.stop_requested())update([&](auto& out){out.sent_bytes=text.size();});
     }
     void launch(bool tx,std::string text={}) {

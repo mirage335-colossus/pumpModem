@@ -55,7 +55,8 @@ class FastCLI(unittest.TestCase):
             self.assertEqual(info["source_bytes_per_group"], 208 if profile == "wire" else 192)
             self.assertEqual(info["constellation"], {"wire": 256, "ssb": 16, "fm": 4, "acoustic": 4}[profile])
             self.assertEqual(info["amplitude"], 0.35 if profile in ("wire", "acoustic") else 0.5)
-            self.assertEqual(info["mono"], profile != "wire")
+            self.assertTrue(info["mono"])
+            self.assertEqual(info["audio_channels"], "left")
 
     def test_capacity_bulk_default(self):
         info = json.loads(self.run_pump("fast-info", "--estimate-bytes", "50000000").stdout)
@@ -71,10 +72,13 @@ class FastCLI(unittest.TestCase):
 
     def test_local_output_routing(self):
         for profile in ("wire", "ssb", "fm", "acoustic"):
-            for flag, mono in (("--mono", True), ("--stereo", False)):
+            for flag, mono, channels in (("--mono", True, "left"), ("--right-mono", True, "right"), ("--stereo", False, "stereo")):
                 report = json.loads(self.run_pump("fast-info", "--profile", profile, flag).stdout)
                 self.assertEqual(report["mono"], mono)
+                self.assertEqual(report["audio_channels"], channels)
         self.run_pump("fast-info", "--mono", "--stereo", ok=False)
+        self.run_pump("fast-info", "--mono", "--right-mono", ok=False)
+        self.run_pump("fast-info", "--right-mono", "--stereo", ok=False)
 
     def test_explicit_acoustic_capacity_profile(self):
         legacy = json.loads(self.run_pump("fast-info", "--profile", "acoustic", "--format", "classic").stdout)

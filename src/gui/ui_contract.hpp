@@ -6,7 +6,7 @@
 #include <vector>
 
 namespace datapump::gui::ui {
-enum class Page { console, compression, flow, transmission, planner, count };
+enum class Page { console, compression, flow, transmission, planner, fast_modem, count };
 enum class Field {
     callsign, grid, repeatable, simulation, link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
@@ -19,8 +19,8 @@ enum class Field {
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
     developer_mode, fast_mode, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth,
     fast_device, fast_mono, fast_encryption, fast_key, fast_key_path, fast_source, fast_source_detail, fast_text, fast_file, fast_status,
-    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history,
-    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, count
+    fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_files,
+    legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_mono, count
 };
 enum class Command {
     none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
@@ -34,12 +34,12 @@ enum class Command {
     planner_power, planner_loss, planner_noise, planner_apply_short, planner_apply_long,
     planner_power_100w, planner_power_4w, planner_power_1w, planner_power_100mw,
     planner_power_2mw, planner_power_1mw, planner_power_30uw, planner_power_1uw,
-    fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save,
+    fast_open_key, fast_generate_key, fast_choose_file, fast_transmit, fast_listen, fast_cancel, fast_save, fast_use_text, fast_clear_received, fast_copy_signal, fast_paste_signal, fast_toggle_qr_expanded,
     legacy_transmit
 };
 enum class Bitmap {
     none, qr, waveform, waterfall, constellation, pattern_scores, pattern, pattern_distances,
-    pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation,
+    pattern_evidence, payload_alphabet, reference_alphabet, fast_waveform, fast_waterfall, fast_constellation, fast_qr,
     legacy_waterfall
 };
 enum class ScreenScope { regular, fast, legacy, shared };

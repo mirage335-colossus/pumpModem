@@ -72,8 +72,9 @@ struct Application::Impl {
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
     // Smoke runs exercise every page; ordinary launches start with the simpler view.
     impl_->developer_mode.checked=launch.smoke;
-    impl_->fast_mode.options={{"robust","Robust Modem"},{"fast","Fast Modem"},{"legacy","Legacy Modem"}};
-    impl_->fast_mode.selected="robust";
+    impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
+    // Explicit Robust simulation/settings/page launches keep their requested work.
+    impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
     select_page(launch.page);
 }
 Application::~Application()=default;
@@ -83,6 +84,7 @@ void Application::start() {
     impl_->next=impl_->next_presentation=impl_->started=Clock::now();
     if(launch.smoke)impl_->smoke=std::make_unique<Smoke>(launch.smoke_directory,launch.timeout);
     impl_->controller.start();impl_->bitmaps.update(impl_->controller);
+    if(impl_->fast_selected()&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
 }
 bool Application::tick() {
     const auto now=Clock::now();
@@ -140,9 +142,11 @@ void Application::select(ui::Field field,std::string id) {
         dismiss_overlay();++impl_->mode_generation;
         if(impl_->regular_selected())impl_->regular_page=impl_->page;
         if(impl_->legacy_selected())impl_->legacy_controller.selected(false);
+        if(impl_->fast_selected())impl_->fast_controller.set_selected(false);
         impl_->page=ui::Page::console;
         impl_->fast_mode.selected=std::move(id);
         if(impl_->legacy_selected())impl_->legacy_controller.selected(true);
+        if(impl_->fast_selected()&&impl_->started_session&&!launch.simulation&&!launch.smoke)impl_->fast_controller.set_selected(true);
         if(impl_->regular_selected()) {
             select_page(impl_->regular_page);
             if(impl_->audio_suspended&&!impl_->auxiliary_active()) {
@@ -164,13 +168,12 @@ void Application::toggle(ui::Field field,bool value) {
     if(field==ui::Field::fast_mode||legacy_ui::owns(field))return;
     if(fast_ui::owns(field)) {
         if(impl_->fast_selected()&&!impl_->legacy_controller.active())impl_->fast_controller.toggle(field,value);
-    } else if(!impl_->regular_selected()||impl_->auxiliary_active())return;
-    else if(field==ui::Field::developer_mode) {
+    } else if(field==ui::Field::developer_mode) {
         if(impl_->developer_mode.checked==value)return;
         impl_->developer_mode.checked=value;
         if(!page_visible(page()))select_page(ui::Page::console);
         ++impl_->presentation_revision;
-    } else impl_->controller.toggle(field,value);
+    } else if(impl_->regular_selected()&&!impl_->auxiliary_active())impl_->controller.toggle(field,value);
 }
 void Application::toggle(const ui::Control& declaration,bool value) {
     if(declaration.kind==ui::Kind::toggle&&accepts_input(declaration))toggle(declaration.field,value);
@@ -179,6 +182,18 @@ void Application::activate(ui::Command command) {
     if(closing())return;
     if(legacy_ui::owns(command)) {
         if(impl_->legacy_selected())impl_->legacy_controller.activate(command);
+        return;
+    }
+    if(command==ui::Command::dismiss_overlay) {dismiss_overlay();return;}
+    if(command==ui::Command::fast_toggle_qr_expanded) {
+        if(enabled(command)) {
+            if(impl_->overlay)dismiss_overlay();
+            else {
+                auto definition=ui::qr_overlay_definition();
+                for(auto& control:definition.controls) {control.bitmap=ui::Bitmap::fast_qr;control.scope=ui::ScreenScope::fast;}
+                show_overlay(std::move(definition));
+            }
+        }
         return;
     }
     if(fast_ui::owns(command)) {
@@ -203,7 +218,7 @@ void Application::gesture(const ui::Control& declaration,ui::Command command) {
 }
 std::shared_ptr<const ui::OverlayDefinition> Application::overlay() const {return impl_->overlay;}
 void Application::show_overlay(ui::OverlayDefinition definition) {
-    if(closing()||!impl_->regular_selected())return;
+    if(closing()||impl_->legacy_selected())return;
     for(const auto& binding:definition.policy.keys)
         if(binding.stroke.key==ui::Key::other)throw std::invalid_argument("Overlay key bindings require a named key");
     definition.generation=++impl_->overlay_generation;
@@ -239,18 +254,28 @@ ui::ControlLayout Application::control_layout(const ui::Control& declaration,int
                               field(ui::Field::transmit_scope).visible,field(ui::Field::simulation_cpu_time).visible);
 }
 ui::Rect Application::page_bounds(int width,int height) const {
+    if(impl_->fast_selected())return {ui::margin,86,width-2*ui::margin,height-190};
     return ui::page_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
 }
 ui::Rect Application::tabs_bounds(int width,int height) const {
+    if(impl_->fast_selected())return {ui::margin,58,width-2*ui::margin,28};
     return ui::tabs_rect(width,height,field(ui::Field::simulation_cpu_time).visible);
 }
 std::vector<ui::TabLayout> Application::tab_layout(int width,int height) const {
     auto result=ui::tab_layout(width,height,ui::pages(),field(ui::Field::simulation_cpu_time).visible);
-    for(auto& tab:result)tab.visible=page_visible(tab.page);
+    int x=tabs_bounds(width,height).x;
+    for(auto& tab:result) {
+        tab.visible=page_visible(tab.page);
+        if(impl_->fast_selected()) {
+            tab.frame.x=x;tab.frame.y=58;
+            if(tab.visible)x+=tab.frame.w;
+        }
+    }
     return result;
 }
 bool Application::page_visible(ui::Page page) const {
-    if(!impl_->regular_selected())return false;
+    if(impl_->fast_selected())return page==ui::Page::console||(page==ui::Page::fast_modem&&impl_->developer_mode.checked);
+    if(!impl_->regular_selected()||page==ui::Page::fast_modem)return false;
     const auto& definitions=ui::pages();
     const auto found=std::find_if(definitions.begin(),definitions.end(),[&](const auto& item){return item.id==page;});
     return found!=definitions.end()&&(!found->developer_only||impl_->developer_mode.checked);
@@ -265,6 +290,7 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
     if(declaration.developer_only&&!impl_->developer_mode.checked)view.visible=false;
+    if(declaration.field==ui::Field::developer_mode&&impl_->legacy_selected())view.visible=false;
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     // The planner owns its concise LPI reference and single model warning.
     // The current-draft advisory remains unchanged on the other pages.
@@ -318,6 +344,8 @@ const ui::FieldState& Application::field(ui::Field field) const {
     return field==ui::Field::developer_mode?impl_->developer_mode:impl_->controller.field(field);
 }
 bool Application::enabled(ui::Command command) const {
+    if(command==ui::Command::dismiss_overlay)return !closing()&&bool(impl_->overlay);
+    if(command==ui::Command::fast_toggle_qr_expanded)return !closing()&&impl_->fast_selected()&&page()==ui::Page::console;
     if(legacy_ui::owns(command))return impl_->legacy_selected()&&impl_->legacy_controller.enabled(command);
     if(fast_ui::owns(command))return impl_->fast_selected()&&!impl_->legacy_controller.active()&&impl_->fast_controller.enabled(command);
     if(!impl_->regular_selected()||impl_->auxiliary_active())return false;
@@ -390,11 +418,11 @@ bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
 }
 void Application::activate_record(const ui::Control& control,const std::string& id) {
     if(control.activate_record==ui::Command::none||control.field==ui::Field::count||!accepts_input(control))return;
-    const auto& state=impl_->controller.field(control.field);
+    const auto& state=field(control.field);
     const auto found=std::find_if(state.records.begin(),state.records.end(),[&](const auto& record){return record.id==id;});
     if(!state.enabled||!state.visible||found==state.records.end()||!found->enabled||!found->activatable)return;
-    impl_->controller.select(control.field,id);
-    if(impl_->controller.field(control.field).selected==id&&enabled(control.activate_record))activate(control.activate_record);
+    select(control.field,id);
+    if(field(control.field).selected==id&&enabled(control.activate_record))activate(control.activate_record);
 }
 BitmapPresentation Application::bitmap(const ui::Control& control,unsigned width) const {
     if(control.scope==ui::ScreenScope::legacy) {

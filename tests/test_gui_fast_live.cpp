@@ -19,14 +19,14 @@ namespace fixture {
 std::mutex mutex;
 std::vector<float> transmitted,input;
 std::size_t position=0;
-bool last_mono=false;
+audio::ChannelMode last_channels=audio::ChannelMode::stereo;
 }
 // Only hardware is replaced. The real Fast encoder, sampled modem, receiver,
 // telemetry worker and shared GUI controller process all samples and symbols.
 namespace datapump::audio {
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,
-              std::stop_token stop,StreamFormatCallback format,bool mono) {
-    {std::lock_guard lock(fixture::mutex);fixture::last_mono=mono;}
+              std::stop_token stop,StreamFormatCallback format,ChannelMode channels) {
+    {std::lock_guard lock(fixture::mutex);fixture::last_channels=channels;}
     if(format)format({rate,rate,rate*.49,4096});
     std::vector<float> block(rate/20);
     while(!stop.stop_requested()) {
@@ -156,6 +156,8 @@ void run_transfer(fast_ui::Controller& controller,bool receive) {
         std::this_thread::sleep_for(5ms);
     }
     controller.poll();
+    if(!receive)check(!controller.field(ui::Field::fast_airtime).text.starts_with("Transmitting"),
+        "Completed manual transmission retained an active transmitting estimate");
     check(changed[0]&&changed[1]&&changed[2]&&captured,"Actual audio failed to update all three Fast plots");
     if(receive)check(controller.bitmap_title(ui::Bitmap::fast_constellation)=="Retained RX equalized constellation",
                      "Valid received payload never replaced unsynchronized input I/Q with equalized symbols");
@@ -169,9 +171,123 @@ void run_transfer(fast_ui::Controller& controller,bool receive) {
               "Idle polling discarded or advanced the final signal capture");
     }
 }
+void continuous_console() {
+    using F=ui::Field;using C=ui::Command;
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::transmitted.clear();fixture::input.clear();fixture::position=0;
+    }
+    fast_ui::Controller controller([] {return true;});
+    controller.edit(F::fast_device,"fixture");controller.set_selected(true);controller.poll();
+    check(controller.active()&&controller.field(F::fast_text).enabled,"Selected Fast mode did not automatically listen with an editable draft");
+    const auto empty_qr=render(controller.bitmap(ui::Bitmap::fast_qr));
+    const std::string message="Continuous Fast console: café and exact bytes.";
+    controller.edit(F::fast_text,message);
+    check(controller.enabled(C::fast_transmit)&&render(controller.bitmap(ui::Bitmap::fast_qr))!=empty_qr,
+        "Listening blocked composition, transmission or message QR updates");
+    controller.activate(C::fast_transmit);
+    const auto wait=[&](auto condition,const char* error) {
+        const auto end=std::chrono::steady_clock::now()+45s;
+        while(!condition()) {
+            controller.poll();check(std::chrono::steady_clock::now()<end,error);std::this_thread::sleep_for(5ms);
+        }
+    };
+    wait([&] {return controller.active()&&controller.bitmap_title(ui::Bitmap::fast_waveform)=="Live RX waveform"&&
+        !controller.field(F::fast_history).records.empty()&&controller.field(F::fast_history).records.front().cells.front().text.find("TRANSMISSION FINISHED")!=std::string::npos;},
+        "Simplex transmit did not finish and automatically resume reception");
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::input=fixture::transmitted;fixture::position=0;
+    }
+    std::string pending_id;
+    wait([&] {
+        const auto& records=controller.field(F::fast_history).records;
+        for(const auto& row:records)if(row.cells.front().text.find("RECEIVING / PENDING")!=std::string::npos) {
+            if(pending_id.empty())pending_id=row.id;
+            check(row.id==pending_id&&!row.activatable,"A pending Fast reception changed identity or exposed completed content");
+        }
+        return !controller.field(F::fast_files).records.empty();
+    },"Continuous listener did not retain completed received bytes");
+    check(!pending_id.empty()&&controller.field(F::fast_files).records.front().id==pending_id,
+        "Physical completion replaced the pending signal identity");
+    wait([&] {return controller.active()&&controller.bitmap_title(ui::Bitmap::fast_waveform)=="Live RX waveform";},
+        "Completed reception did not restart continuous listening");
+    controller.select(F::fast_history,pending_id);
+    check(controller.enabled(C::fast_copy_signal)&&controller.enabled(C::fast_paste_signal)&&controller.enabled(C::fast_save),
+        "Automatic relistening lost access to completed received content");
+    controller.activate(C::fast_copy_signal);const auto copied=controller.take_services();
+    check(copied.size()==1&&copied.front().kind==ui::ServiceKind::clipboard&&copied.front().value==message,
+        "Copy did not preserve exact completed UTF-8 bytes");
+    controller.edit(F::fast_text,"replace me");controller.activate(C::fast_paste_signal);
+    check(controller.field(F::fast_text).text==message,"Paste did not restore the selected completed message");
+    controller.activate(C::fast_choose_file);const auto attachment=controller.take_services();
+    check(attachment.size()==1,"Attach file was disabled while listening");
+    controller.complete_service({attachment.front().id,false,"/tmp/fast-attachment.bin",{}});
+    check(controller.field(F::fast_source).selected=="file","Attach file did not select the retained file draft");
+    controller.activate(C::fast_use_text);
+    check(controller.field(F::fast_source).selected=="text"&&controller.field(F::fast_text).text==message,
+        "Use text discarded the retained composer");
+    controller.activate(C::fast_clear_received);
+    check(controller.field(F::fast_files).records.empty()&&controller.field(F::fast_history).records.empty()&&!controller.enabled(C::fast_save),
+        "Clear received left retained files or copy/save eligibility");
+    controller.activate(C::fast_cancel);
+    wait([&] {return !controller.active();},"Explicit pause did not stop continuous listening");
+    controller.poll();check(!controller.active(),"Explicit pause immediately restarted the listener");
+    controller.close();
+}
+
+void completion_between_polls() {
+    using F=ui::Field;using C=ui::Command;
+    // Reuse the independent complete waveform produced and received by the
+    // continuous-console fixture. Deliberately stop UI polls before RX ends.
+    {
+        std::lock_guard lock(fixture::mutex);
+        fixture::input=fixture::transmitted;fixture::position=0;
+    }
+    fast_ui::Controller controller([] {return true;});
+    controller.edit(F::fast_device,"fixture");controller.edit(F::fast_text,"Next transmission");
+    controller.activate(C::fast_listen);
+    const auto deadline=std::chrono::steady_clock::now()+45s;
+    while(controller.field(F::fast_history).records.empty()) {
+        controller.poll();check(std::chrono::steady_clock::now()<deadline,"Delayed-poll fixture never acquired a pending reception");
+        std::this_thread::sleep_for(5ms);
+    }
+    const auto pending_id=controller.field(F::fast_history).records.front().id;
+    check(!controller.field(F::fast_history).records.front().activatable,
+        "Delayed-poll fixture did not stop before content completion");
+    // active() only inspects worker state. No final snapshot reaches the UI.
+    while(controller.active()) {
+        check(std::chrono::steady_clock::now()<deadline,"Delayed-poll receiver did not finish");
+        std::this_thread::sleep_for(5ms);
+    }
+    check(controller.field(F::fast_files).records.empty(),"Fixture accidentally polled the terminal receive snapshot");
+    controller.activate(C::fast_transmit);
+    check(controller.active()&&controller.field(F::fast_files).records.size()==1&&
+        controller.field(F::fast_files).records.front().id==pending_id,
+        "Launching between UI polls discarded the completed reception or changed its identity");
+    check(controller.field(F::fast_history).records.front().cells.front().text.find("RECEIVED")!=std::string::npos&&
+        controller.enabled(C::fast_copy_signal)&&controller.enabled(C::fast_save),
+        "Retained completion remained pending after the next launch");
+    controller.activate(C::fast_copy_signal);const auto requests=controller.take_services();
+    check(requests.size()==1&&requests.front().value=="Continuous Fast console: café and exact bytes.",
+        "Draining the terminal snapshot changed the retained received bytes");
+    // Again allow the worker to finish without a UI poll. Clear must consume
+    // this new terminal revision as well as the previously retained reception.
+    while(controller.active()) {
+        check(std::chrono::steady_clock::now()<deadline,"Delayed-poll fixture did not finish its second transmission");
+        std::this_thread::sleep_for(5ms);
+    }
+    controller.activate(C::fast_clear_received);controller.poll();
+    check(controller.field(F::fast_history).records.empty()&&controller.field(F::fast_files).records.empty()&&
+        !controller.enabled(C::fast_copy_signal)&&!controller.enabled(C::fast_save),
+        "The first poll after Clear recreated a terminal update that had not reached the UI");
+    controller.close();
+}
+
 }
 int main() {
     try {
+        continuous_console();completion_between_polls();
         // Exercise the ordinary controller/session path for both shipped
         // capacity defaults. Acoustic OFDM has independent startup, coding
         // cycle and physical-end geometry from the cable waveform.
@@ -188,7 +304,7 @@ int main() {
             unsynchronized_audio(controller);
             run_transfer(controller,false);
             {std::lock_guard lock(fixture::mutex);
-                check(fixture::last_mono==(std::string(profile)=="acoustic"),
+                check(fixture::last_channels==audio::ChannelMode::left_mono,
                       "GUI session did not pass the selected default output routing to playback");
                 fixture::input=std::move(fixture::transmitted);fixture::position=0;}
             check(!fixture::input.empty(),"Live Fast TX produced no PCM");

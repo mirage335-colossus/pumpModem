@@ -16,6 +16,32 @@ const ui::Control& control(ui::Field field) {
     for(const auto& value:ui::console_screen())if(value.field==field)return value;
     throw Error("Missing shared control");
 }
+void fast_default_console() {
+    using F=ui::Field;using C=ui::Command;using P=ui::Page;
+    Application app({});
+    const auto visible=[&](P page) {const auto tabs=app.tab_layout(ui::default_width,ui::default_height);return std::any_of(tabs.begin(),tabs.end(),[&](const auto& tab){return tab.page==page&&tab.visible;});};
+    check(app.field(F::fast_mode).selected=="fast"&&app.field(F::fast_mode).options[0].id=="fast"&&
+          app.field(F::fast_mode).options[1].id=="robust"&&app.field(F::fast_mode).options[2].id=="legacy",
+          "Ordinary launch must default to Fast, then offer Robust and Legacy");
+    check(app.page()==P::console&&visible(P::console)&&!visible(P::fast_modem),
+          "Fast must open Console and hide modem details initially");
+    check(app.control(control(F::developer_mode)).visible&&app.control(control(F::fast_text)).visible&&
+          !app.control(control(F::fast_symbol_rate)).visible&&app.field(F::fast_mono).selected=="left",
+          "Fast default surface or channel routing is incorrect");
+    app.toggle(F::developer_mode,true);app.navigate(P::fast_modem);
+    app.select(control(F::fast_constellation),"16");
+    const auto selected=app.field(F::fast_constellation).selected;
+    check(app.page()==P::fast_modem&&app.control(control(F::fast_symbol_rate)).visible,
+          "Fast developer modem controls are inaccessible");
+    app.toggle(F::developer_mode,false);
+    check(app.page()==P::console&&!visible(P::fast_modem)&&app.field(F::fast_constellation).selected==selected,
+          "Hiding modem details discarded settings or failed to return to Console");
+    app.edit(F::fast_text,"Fast message");app.activate(C::fast_toggle_qr_expanded);
+    check(app.overlay()&&app.overlay()->controls[0].bitmap==ui::Bitmap::fast_qr,
+          "Fast message QR did not expand independently");
+    check(app.overlay_key({ui::Key::escape})&&!app.overlay(),"Escape did not dismiss Fast QR");
+    app.close();
+}
 void developer_mode_presentation() {
     using F=ui::Field;using P=ui::Page;
     Launch launch;
@@ -53,7 +79,7 @@ void developer_mode_presentation() {
                   "Developer mode moved a control instead of hiding it in place");
         const auto shown=app.tab_layout(size.w,size.h);
         for(std::size_t i=0;i<tabs.size();++i)
-            check(shown[i].visible&&shown[i].page==tabs[i].page&&shown[i].frame==tabs[i].frame,
+            check(shown[i].visible==(shown[i].page!=P::fast_modem)&&shown[i].page==tabs[i].page&&shown[i].frame==tabs[i].frame,
                   "Developer mode moved or failed to restore a tab");
         for(const auto field:advanced_fields)
             check(app.control(control(field)).visible,"Developer mode failed to restore an advanced control");
@@ -251,7 +277,7 @@ void transmission_scope_reflow() {
 }
 void simulation_header_reflow() {
     using F=ui::Field;using S=ui::Slot;
-    Application app({});
+    Application app({});app.select(ui::Field::fast_mode,"robust");
     for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},
                          ui::Rect{0,0,ui::default_width,ui::default_height},ui::Rect{0,0,1920,1080}}) {
         std::optional<ui::Rect> compact_page;
@@ -772,30 +798,28 @@ void mono_declaration() {
     Application app({.simulation=true});
     app.toggle(ui::Field::developer_mode,true);
     const auto& mono=control(ui::Field::mono);
-    const std::string_view help=mono.help;
-    check(mono.kind==ui::Kind::toggle&&mono.persistent&&std::string_view(mono.label)=="Mono"&&
-          app.field(mono.field).checked&&help.find("right channel")!=help.npos&&
-          help.find("sole channel")!=help.npos&&help.find("both stereo channels")!=help.npos,
-          "Mono must be a default-on shared toggle explaining stereo and mono-device routing");
+    check(mono.kind==ui::Kind::choice&&mono.persistent&&app.field(mono.field).selected=="left"&&
+          app.field(mono.field).options.size()==3,
+          "Audio routing must offer Left mono by default, Right mono and Stereo");
     for(const auto& page:ui::pages()) {
+        if(page.id==ui::Page::fast_modem)continue;
         app.select_page(page.id);
-        const auto presentation=app.control(mono);
-        check(presentation.visible&&presentation.enabled,"Mono routing disappeared or became unavailable on another page");
-        app.toggle(mono,false);
-        check(!app.field(mono.field).checked,"Declared Mono off callback did not reach the shared controller");
-        app.toggle(mono,true);
-        check(app.field(mono.field).checked,"Declared Mono on callback did not reach the shared controller");
+        check(app.control(mono).visible&&app.control(mono).enabled,"Audio routing disappeared on another page");
+        for(const auto* id:{"stereo","right","left"}) {
+            app.select(mono,id);
+            check(app.field(mono.field).selected==id,"Declared channel choice did not reach the controller");
+        }
         for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
             const auto geometry=ui::control_layout(mono,app.field(mono.field),size.w,size.h);
             const auto diagnostics=ui::control_layout(control(ui::Field::diagnostics),app.field(ui::Field::diagnostics),size.w,size.h);
-            check(!geometry.has_label&&geometry.widget.w>=74&&geometry.widget.h>=22&&
+            check(!geometry.has_label&&geometry.widget.w>=150&&geometry.widget.h>=22&&
                   geometry.frame.x+geometry.frame.w<diagnostics.frame.x,
-                  "Mono's native checkbox label or diagnostic text lost its reserved space");
+                  "Audio channel dropdown overlaps diagnostics");
         }
     }
-    app.close();app.toggle(mono,false);
-    check(!app.control(mono).enabled&&app.field(mono.field).checked,
-          "A stale declared Mono callback reconfigured a closing application");
+    app.close();app.select(mono,"stereo");
+    check(!app.control(mono).enabled&&app.field(mono.field).selected=="left",
+          "A stale audio channel callback reconfigured a closing application");
 }
 void oscillator_declaration() {
     using F=ui::Field;
@@ -1046,7 +1070,7 @@ std::string document_text(const ui::DocumentNode& node) {
 }
 void typed_short_text_inspection() {
     using F=ui::Field;using P=ui::Page;
-    Application app({}); // Production defaults; no audio session is needed to inspect a draft.
+    Application app({});app.select(ui::Field::fast_mode,"robust"); // Production defaults; no audio session is needed to inspect a draft.
     app.toggle(ui::Field::developer_mode,true);
     const auto& message=control(F::message);
     check(app.field(F::bandwidth).text=="3.6 kHz" && app.field(F::carrier).text=="1.5 kHz" &&
@@ -1211,6 +1235,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -34,7 +34,9 @@ std::size_t capacity_source_bytes_per_cycle(const Profile&,bool encrypted);
 // GF(65536) parity symbols (two bytes each), rounded up to even at >=0.3%.
 std::size_t capacity_parity_symbols(const Profile&);
 struct TransmitEstimate { std::uint64_t intervals=0,samples=0; double seconds=0,source_bps=0; };
-TransmitEstimate estimate_transmission(const Profile&,bool encrypted,std::uint64_t source_bytes);
+// Geometry of bytes supplied directly to StreamEncoder; production uses XZ
+// bytes here. Use estimate_xz_transmission for original text or file sources.
+TransmitEstimate estimate_transmission(const Profile&,bool encrypted,std::uint64_t encoded_bytes);
 
 std::size_t ciphertext_bytes(const Profile&);
 // In capacity mode there is one group per coding cycle; the returned area
@@ -73,11 +75,16 @@ struct DecodeSnapshot {
     std::string status = "Waiting for fast stream";
 };
 
+enum class SourceEncoding { raw, xz };
+
 class StreamEncoder {
 public:
     // Encryption is a matching local choice. There is no wire negotiation or
     // fallback between keyed HMAC and unkeyed SHA-256 checksum operation.
-    StreamEncoder(Profile, const std::optional<Crypto>&, SourceReader);
+    // SourceEncoding binds source interpretation into bootstrap integrity;
+    // callers supply already encoded bytes (xz_source performs compression).
+    StreamEncoder(Profile, const std::optional<Crypto>&, SourceReader,
+                  SourceEncoding = SourceEncoding::raw);
     ~StreamEncoder();
     StreamEncoder(StreamEncoder&&) noexcept;
     StreamEncoder& operator=(StreamEncoder&&) noexcept;
@@ -87,13 +94,17 @@ public:
 private:
     struct Impl;
     std::unique_ptr<Impl> impl_;
-    StreamEncoder(Profile,const std::optional<Crypto>&,SourceReader,std::function<Bytes(std::size_t)>);
+    StreamEncoder(Profile,const std::optional<Crypto>&,SourceReader,std::function<Bytes(std::size_t)>,
+                  SourceEncoding = SourceEncoding::raw);
     friend StreamEncoder testing::deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t);
 };
 
 class StreamDecoder {
 public:
-    StreamDecoder(Profile, const std::optional<Crypto>&, std::uint64_t memory_quota = 256ULL*1024*1024);
+    // Raw source mode preserves low-level coding vectors and studies; production
+    // Session/WAV APIs explicitly request XZ without an automatic raw fallback.
+    StreamDecoder(Profile, const std::optional<Crypto>&, std::uint64_t memory_quota = 256ULL*1024*1024,
+                  SourceEncoding = SourceEncoding::raw);
     ~StreamDecoder();
     StreamDecoder(StreamDecoder&&) noexcept;
     StreamDecoder& operator=(StreamDecoder&&) noexcept;
@@ -101,6 +112,7 @@ public:
     void push_interval(std::span<const float> soft_bits);
     // Only the DSP's observed six-second absence event may pass true here.
     // EOF/cancellation pass false and cannot make a source available.
+    // XZ source decoding, when locally requested, also waits for this event.
     void finish(bool physical_end);
     DecodeSnapshot snapshot() const;
     std::shared_ptr<const ReceivedFile> result() const;

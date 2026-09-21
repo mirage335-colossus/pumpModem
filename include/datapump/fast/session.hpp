@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/audio.hpp"
 #include "datapump/fast/profile.hpp"
 #include "datapump/fast/telemetry.hpp"
 #include "datapump/crypto.hpp"
@@ -15,8 +16,9 @@ struct Settings {
     // Peers must select the same mode; receivers never fall back from encryption.
     std::optional<Crypto> key;
     std::string device="default";
-    // The default cable route drives both outputs; this is local device setup.
-    bool mono=false;
+    // Output routing is a local device choice; mono defaults to the left.
+    bool mono=true;
+    audio::ChannelMode channel_mode=audio::ChannelMode::left_mono;
     std::uint64_t quota_bytes=256ULL*1024*1024;
 };
 struct Snapshot {
@@ -50,6 +52,8 @@ public:
     void cancel();
     Snapshot poll() const;
     void save(const std::filesystem::path& destination) const;
+    // Release the session's completed file handle; history may own other copies.
+    void clear_received();
     bool active() const;
     void close();
     bool ready_to_close() const;

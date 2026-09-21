@@ -18,7 +18,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Resume the selected incomplete search for another five-minute budget, or cancel its recovery. Reception continues independently.";
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
-    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Robust Modem, Fast Modem or Legacy Modem. Each mode keeps its own settings.";}
+    if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
+    if(slot==Slot::developer_mode)control.scope=ScreenScope::shared;
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -92,7 +93,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.bitmap_caption=BitmapCaption::overlay_error;control.click=Command::toggle_qr_expanded;
         control.help="Click to expand the QR code to fill the window. Click again or press Escape to restore its original size.";
     }
-    if(slot==Slot::mono)control.help="Transmit through the right channel only on stereo devices, or the sole channel on mono devices. Turn off to transmit through both stereo channels. Enabled by default.";
+    if(slot==Slot::mono)control.help="Choose Left mono (default), Right mono, or Stereo. Mono devices use their sole channel.";
     if(slot==Slot::bandwidth)control.help="Nominal modem rate, 0.01 Hz through 30 MHz; occupied bandwidth depends on the waveform. Decimal Hz values are accepted. Chip rate is half this value; narrower rates make chips and symbols longer and require tighter frequency stability. Defaults to 3.6 kHz with a 1.5 kHz carrier. Changing Rate resets Carrier to the recommended frequency; edit Carrier afterward to choose another frequency.";
     if(slot==Slot::carrier)control.help="Audio carrier frequency. The dropdown offers the current rate's default carrier and center frequency (half the rate): 1.5 kHz and 1.8 kHz at the 3.6 kHz rate. Manual entry accepts Hz, kHz or MHz. Your choice applies to transmit and receive and stays selected until Rate changes. Some pattern or tone modes require a higher carrier.";
     if(slot==Slot::snr)control.help="Design C/N0 in a 1 Hz noise bandwidth for text of 1–16 source bytes inclusive and exact raw bits, default 32 dB-Hz. Counts UTF-8 and any callsign/grid/Repeatable text. Automatic modes use lower targets for longer integration; higher targets select shorter patterns subject to the minimum pattern length. This is not an enforced minimum received signal strength. The link budget sets channel C/N0 independently, and longer symbols remain limited by clock/phase drift. Changing either transmit target to a valid value resets RX targets to both distinct current targets; RX targets can then be edited independently. Automatic modes choose a nearby clock/RAM fit at every target, preferring an equal or weaker target. Typing keeps your text; the label shows any adjustment. Enter or a preset displays the exact selected value.";
@@ -125,7 +126,8 @@ const std::vector<PageDefinition>& pages() {
         {Page::planner,"planner","Link planner",true,128},
         {Page::compression,"compression","Compression / raw bits",false,200,true},
         {Page::flow,"flow","Modem flow",true,114,true},
-        {Page::transmission,"transmission","Transmission layout",true,204,true}
+        {Page::transmission,"transmission","Transmission layout",true,204,true},
+        {Page::fast_modem,"fast-modem","Modem details",false,142,true}
     };
     return definitions;
 }
@@ -200,7 +202,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::action,Field::count,Command::zoom_in,Bitmap::none,Page::console,13,"Zoom in"}, Slot::zoom_in),
         placed({Kind::action,Field::count,Command::zoom_out,Bitmap::none,Page::console,13,"Zoom out"}, Slot::zoom_out),
         placed({Kind::action,Field::count,Command::reset_zoom,Bitmap::none,Page::console,13,"Reset zoom"}, Slot::reset_zoom),
-        placed({Kind::toggle,Field::mono,Command::none,Bitmap::none,Page::console,14,"Mono"}, Slot::mono),
+        placed({Kind::choice,Field::mono,Command::none,Bitmap::none,Page::console,14,""}, Slot::mono),
         placed({Kind::label,Field::diagnostics,Command::none,Bitmap::none,Page::console,14,""}, Slot::diagnostics),
         placed({Kind::label,Field::status,Command::none,Bitmap::none,Page::console,15,""}, Slot::status),
         placed({Kind::label,Field::count,Command::none,Bitmap::none,Page::compression,0,

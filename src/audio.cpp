@@ -43,12 +43,12 @@ std::vector<std::uint32_t> rate_candidates(std::uint32_t logical_rate) {
 void report_format(std::uint32_t logical,std::uint32_t hardware,std::size_t workspace,const StreamFormatCallback& callback) {
     if(callback)callback({logical,hardware,(logical==hardware?.5:.42)*std::min(logical,hardware),workspace});
 }
-void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,bool mono) {
+void playback_pcm(std::span<const float> samples,std::span<std::int16_t> output,unsigned channels,ChannelMode mode) {
     for(std::size_t i=0;i<samples.size();++i) {
         if(!std::isfinite(samples[i]))throw Error("nonfinite transmit sample");
         const auto sample=static_cast<std::int16_t>(std::clamp(samples[i],-1.0f,1.0f)*32767);
-        output[i*channels]=channels==2 && mono?0:sample;
-        if(channels==2)output[i*channels+1]=sample;
+        output[i*channels]=channels==2 && mode==ChannelMode::right_mono?0:sample;
+        if(channels==2)output[i*channels+1]=mode==ChannelMode::left_mono?0:sample;
     }
 }
 class PlaybackSource {
@@ -222,7 +222,7 @@ std::vector<Device> devices() {
     if(hints) api.free_hint(hints);
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     Alsa api; Stream stream(api,device,0,rate);
@@ -237,7 +237,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         const auto count=source.read(samples);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count)break;
-        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,mono);
+        playback_pcm(std::span<const float>(samples.data(),count),block,stream.channels,channels);
         std::size_t offset=0;
         while(offset<count) {
             check_cancelled(stop);
@@ -409,7 +409,7 @@ std::vector<Device> devices() {
         if(waveOutGetDevCapsA(i,&caps,sizeof(caps))==MMSYSERR_NOERROR) result.push_back({std::to_string(i),std::string("Output: ")+caps.szPname});}
     return result;
 }
-void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
     check_cancelled(stop);
     if(!next_samples)throw Error("playback callback is required");
     WaveSession session(false,rate,device);
@@ -427,7 +427,7 @@ void playback(std::uint32_t rate,const std::string& device,const PlaybackCallbac
         check_cancelled(stop);
         if(count>samples.size())throw Error("playback callback returned invalid sample count");
         if(!count){finished=true;return;}
-        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,mono);
+        playback_pcm(std::span<const float>(samples.data(),count),session.pcm[slot],session.channels,channels);
         auto& header=session.headers[slot];
         header.dwBufferLength=static_cast<DWORD>(count*session.channels*sizeof(std::int16_t));
         // The other buffer may finish while the producer computes this block.
@@ -499,7 +499,13 @@ void capture(std::uint32_t rate,const std::string& device,const CaptureCallback&
 }
 
 #endif
+void playback(std::uint32_t rate,const std::string& device,const PlaybackCallback& next_samples,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
+    playback(rate,device,next_samples,stop,std::move(on_format),output_channels(mono));
+}
 void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,bool mono) {
+    play(samples,rate,device,stop,std::move(on_format),output_channels(mono));
+}
+void play(std::span<const float> samples,std::uint32_t rate,const std::string& device,std::stop_token stop,StreamFormatCallback on_format,ChannelMode channels) {
     check_cancelled(stop);
     for(const auto sample:samples)if(!std::isfinite(sample))throw Error("nonfinite transmit sample");
     std::size_t offset=0;
@@ -507,6 +513,6 @@ void play(std::span<const float> samples,std::uint32_t rate,const std::string& d
         const auto count=std::min(chunk.size(),samples.size()-offset);
         std::copy_n(samples.begin()+static_cast<std::ptrdiff_t>(offset),count,chunk.begin());
         offset+=count;return count;
-    },stop,std::move(on_format),mono);
+    },stop,std::move(on_format),channels);
 }
 }

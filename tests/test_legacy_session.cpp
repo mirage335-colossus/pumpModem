@@ -25,7 +25,7 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
     while(!stop.stop_requested()) {if(!consume(silence))break;std::this_thread::sleep_for(1ms);}
     --fixture::inputs;
 }
-void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,bool) {
+void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,std::stop_token stop,StreamFormatCallback format,ChannelMode) {
     ++fixture::outputs;if(fixture::inputs)fixture::overlap=true;
     if(format)format({rate,rate,3900,4096});
     std::vector<float> block(137);

@@ -53,8 +53,9 @@ Matching local settings (no negotiation or received lengths):
   --no-encryption                  Explicit plaintext; ignore keyfile options
   --key-name NAME [--pad PATH]       Existing named symmetric keyfile
   --quota-mb N                      Local storage quota, default 256 MiB
-  --stereo                          Same waveform on both outputs (wire default)
-  --mono                            Right output only; left silent (other profile defaults)
+  --stereo                          Same waveform on both outputs
+  --mono                            Left output only (default for every profile)
+  --right-mono                      Right output only; left silent
   --json                            Machine-readable result
 
 Every physical interval has 2048 inner-coded bits plus fixed sync/pilots.
@@ -63,12 +64,12 @@ Text is at most 32768 UTF-8 bytes and uses the same wire format as file bytes.
 WAV output includes at least 6.25 seconds of silence, extended for complete OFDM blocks.
 EOF/cancellation is not physical end.
 SNR simulation is available only in the fast_regression test executable.
-Output routing is local; peers need not use the same --mono/--stereo setting.
+Output routing is local; peers need not use the same --mono/--right-mono/--stereo setting.
 )";
 struct Args {
     std::map<std::string,std::string> values;
     Args(int argc,char** argv) {
-        const std::set<std::string> flags{"help","json","stereo","mono","encrypt","no-encryption"};
+        const std::set<std::string> flags{"help","json","stereo","mono","right-mono","encrypt","no-encryption"};
         const std::set<std::string> options{"input","text","output","save","keyfile","key-name","pad","profile","format","qam","apsk","code-rate","rs","interleave","sample-rate","device","quota-mb","seconds","symbol-rate","carrier","rolloff","amplitude","marker-spacing","pilot-spacing","estimate-bytes","ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots","expected-snr"};
         for(int i=2;i<argc;++i) {
             std::string name=argv[i];if(!name.starts_with("--"))throw Error("Expected a fast --option");name.erase(0,2);
@@ -143,9 +144,12 @@ Settings settings(const Args& a,bool load_key) {
         s.profile.ofdm_low_hz=a.real("ofdm-low",s.profile.ofdm_low_hz);s.profile.ofdm_high_hz=a.real("ofdm-high",s.profile.ofdm_high_hz);
     } else for(const auto* option:{"ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots"})
         if(a.has(option))throw Error("OFDM options require the acoustic capacity profile");
-    if(a.has("mono")&&a.has("stereo"))throw Error("--mono and --stereo conflict");
+    if(unsigned(a.has("mono"))+unsigned(a.has("right-mono"))+unsigned(a.has("stereo"))>1)
+        throw Error("--mono, --right-mono and --stereo conflict");
     s.device=a.get("device","default");
-    s.mono=a.has("mono") || (!a.has("stereo") && s.profile.channel!=Channel::wire);
+    s.mono=!a.has("stereo");
+    s.channel_mode=a.has("right-mono")?audio::ChannelMode::right_mono:
+        s.mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
     auto quota=a.integer("quota-mb",256);if(!quota||quota>256)throw Error("Fast quota must be 1..256 MiB");s.quota_bytes=quota*1024*1024;
     validate(s.profile);
     if(encryption_enabled(a)&&load_key) {
@@ -200,6 +204,7 @@ int cli_main(int argc,char** argv) {
             <<",\"carrier_hz\":"<<(p.acoustic_ofdm?(occupied_lower_hz(p)+occupied_upper_hz(p))*.5:p.carrier_hz)<<",\"occupied_bandwidth_hz\":"<<occupied_bandwidth_hz(p)<<",\"constellation\":"<<p.constellation
             <<",\"amplitude\":"<<p.amplitude
             <<",\"mono\":"<<(s.mono?"true":"false")
+            <<",\"audio_channels\":\""<<(s.channel_mode==audio::ChannelMode::stereo?"stereo":s.channel_mode==audio::ChannelMode::right_mono?"right":"left")<<"\""
             <<",\"shannon_snr_db_assumed\":30,\"shannon_capacity_bps\":"<<occupied_bandwidth_hz(p)*std::log2(1001.)
             <<",\"shannon_capacity_at_40db_bps\":"<<occupied_bandwidth_hz(p)*std::log2(10001.)
             <<",\"shannon_capacity_at_60db_bps\":"<<occupied_bandwidth_hz(p)*std::log2(1000001.)

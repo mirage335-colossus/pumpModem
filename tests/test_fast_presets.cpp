@@ -19,7 +19,11 @@ template<class F> void rejects(F f) {
 int main() {try {
     for(const auto channel:{Channel::wire,Channel::acoustic,Channel::ssb,Channel::fm}) {
         const auto options=expected_snr_options(channel);
-        const auto top=default_expected_snr(channel);
+        const auto top=channel==Channel::wire?65.:channel==Channel::acoustic?13.:20.;
+        require(default_expected_snr(channel)==(channel==Channel::wire?36.:channel==Channel::acoustic?3.:20.),
+            "Default expected SNR changed");
+        require(std::find(options.begin(),options.end(),default_expected_snr(channel))!=options.end(),
+            "Default expected SNR missing from options");
         require(options.front()==top&&options.back()==top-40,"SNR menu must span exactly40dB");
         require(std::is_sorted(options.begin(),options.end(),std::greater<>()),"SNR menu is not descending");
         require(std::adjacent_find(options.begin(),options.end())==options.end(),"duplicate SNR options");

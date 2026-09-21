@@ -105,7 +105,8 @@ Modem:
 
 Audio/simulation:
   --device ID           OS audio endpoint; listen automatically uses default
-  --no-mono             TX on both stereo channels; default right only (mono devices use their sole channel)
+  --right-mono          TX on right channel; default left (mono devices use their sole channel)
+  --no-mono             TX on both stereo channels
   --device-type audio   Analog audio input only; no network/raw serial input
   --seconds N           RX recording duration(default15); listen limit(default0)
   --tx-delay N          Delay after live TX completes; default6 seconds
@@ -152,7 +153,7 @@ class Args {
 public:
     std::string command;
     Args(int argc,char** argv) {
-        const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","scramble","dsss","progress","help","version"};
+        const std::set<std::string> booleans={"json","repeatable","no-compression","no-mono","right-mono","scramble","dsss","progress","help","version"};
         const std::set<std::string> valued={"text","input","output","save","kind","filename","callsign","grid",
             "bw","sample-rate","carrier","spreading","fec","memory-mb","keyfile","pad","time","search-seconds",
             "device","device-type","seconds","tx-delay","snr","seed","delay-samples","frequency-offset","bits","format",
@@ -176,6 +177,7 @@ public:
                 else {if(++i>=argc || std::string_view(argv[i]).starts_with("--")) throw Error("missing value for --"+name);values_[name]=argv[i];}
             } else throw Error("unknown option: --"+name);
         }
+        if(has("no-mono")&&has("right-mono"))throw Error("--no-mono and --right-mono conflict");
     }
     bool has(const std::string& name)const{return values_.contains(name);}
     std::string get(const std::string& name,std::string fallback="")const {
@@ -319,7 +321,7 @@ void play_transmission(const Args& a, transfer::Options& options, Factory make) 
         },clock);
         source=std::move(scheduled.transmitter);
         detail::wait_for_playback(scheduled.playback_epoch,clock);
-    },!a.has("no-mono"));
+    },a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono);
 }
 std::uint64_t epoch(const Args& a) {
     return a.integer("time",static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::seconds>(
@@ -426,7 +428,7 @@ void output_wave(const Args& a,std::vector<float> samples,const modem::Config& c
     }
     if(a.has("device")) {
         const auto delay=hardware_delay(a,c);
-        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c),!a.has("no-mono"));
+        audio::play(samples,c.sample_rate,a.get("device"),{},audio_passband_guard(c),a.has("no-mono")?audio::ChannelMode::stereo:a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono);
         std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(delay*1000)));
     }
 }
@@ -760,6 +762,7 @@ void listen(const Args& a,const transfer::Options& options) {
     if(!a.has("time")) settings.transfer.timestamp=0;
     settings.device=a.get("device","default");
     settings.mono=!a.has("no-mono");
+    settings.channel_mode=a.has("right-mono")?audio::ChannelMode::right_mono:audio::ChannelMode::left_mono;
     if(a.has("simulation")) {
         const auto preset=tuning::parse_simulation_preset(a.get("simulation"));
         settings.simulation=preset.enabled;

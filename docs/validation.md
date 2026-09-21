@@ -4,6 +4,84 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast console, audio channels and XZ source — 21 September 2026 UTC
+
+Ordinary GUI launches now select Fast Modem and continuously listen. Fast owns
+its Console composer, expandable QR, retained signal/file browsers and developer
+Modem details page. Audio settings sit at the bottom with net modem rate,
+Shannon–Hartley limit and occupied band; a spectrum-derived SNR precedes the
+status line. The cable/acoustic expected-SNR defaults are 36/3 dB. All modem
+GUIs offer left mono (default), right mono and stereo. Output-only routing
+changes preserve ongoing reception.
+
+Production Fast text/files are prepared as bounded XZ bytes before opening audio.
+Raw and XZ sources use distinct bootstrap integrity contexts with unchanged
+wire dimensions, so old literal Fast files cannot be silently reinterpreted as
+XZ. Decompression remains behind fully observed physical completion and local
+source/output/memory quotas. The regular dictionary, exact-bit and fixed-interval
+formats are unchanged. Both production Fast peers must use the new source format.
+
+Release build and `git diff --check` passed. Verification includes:
+
+- All 15 focused shared GUI suites passed: `gui_fast`, `gui_fast_live`,
+  `gui_application`, `gui_controller`, `gui_layout`, `gui_legacy`,
+  `gui_legacy_live`, `gui_overlay`, `gui_inspection`, `gui_binary_editor`,
+  `gui_adapter_boundary`, `gui_contract`, `gui_link_boundary`, `gui_self_check`
+  and `gui_bindings`. The Fast live fixture covers continuous listen, editable
+  drafts, receive/transmit handoff, stable pending identity, retained completed
+  files, copy/paste/save, clear, pause and exact sampled wire/acoustic reception.
+  Final review added a deterministic completion-between-polls regression:
+  starting another transfer must first retain the previous terminal receive
+  snapshot, and a physically complete row must be labeled completed even while
+  its worker is finishing cleanup. Session teardown also preserves an already
+  published complete result if cancellation arrives during cleanup; sampled
+  public/keyed results and pending damaged-source controls cover that boundary.
+  Clear consumes an unpolled terminal revision before removing rows, so the
+  next refresh cannot recreate an already cleared result.
+- `fast_codec`, `fast_compression`, `fast_files`, `fast_session`, `fast_cli`,
+  `fast_presets`, `fast_boundary` and `fast_output_power` passed. XZ tests use an
+  independent container vector, both raw/XZ mismatch directions, incomplete
+  physical-end controls, malformed/truncated data, prepared-source bounds and
+  source/output/decoder-memory quotas. A 32 MiB incompressible fixture checks
+  the streaming encoder's explicit chunk-overhead bound rather than relying
+  on liblzma's single-call-only bound. Raw coding vectors remain frozen.
+- `compression_short`, `transfer`, `stream_codec`, `stream_receive`, `attachment`
+  and `recovery` passed. ALSA and WinMM stub suites verified left/right/stereo
+  PCM, mono-only fallback, partial writes and resampling. Fast CLI routing and
+  benchmark argument/evidence tests passed.
+- FLTK native adapter and document conformance passed on an isolated Xvfb
+  2400×1800×24 display. The Fast declarations were rendered at default/minimum
+  sizes, including Console/details visibility and retained source controls.
+  An actual Fast startup capture confirmed continuous listening and the bottom
+  diagnostics. Final visual review widened the Pause listening button.
+  Shared layout/application tests passed again after that final geometry change.
+- Rev native adapter conformance passed at 1× scale; platform conformance and
+  both 1×/2× coordinate checks also passed on the isolated Xvfb display. An
+  additional full adapter run at 2× reached its unchanged 330-second limit,
+  without a reported assertion failure; that extra run is not a conformance
+  pass. Both GUI variants rebuilt after all final changes; their shared
+  layout, application and contract suites passed again.
+- All 19 regular receiver/CLI suites passed: `live_profiles`,
+  `live_receptions`, `live`, `live_resources`, `pattern_correlator`,
+  `pattern_receiver`, `pattern_drift`, `pattern_differential`,
+  `receiver_differential`, `pattern_fft_batch`, `pattern_correlator_batch`,
+  `pattern_search`, `tuning`, `simulation_estimate`, `receiver_probability`,
+  `differential_probability`, `differential_receiver_probability`, `weak_signal`
+  and `cli`. These include the fully scored four-hour-symbol and immediate
+  pending-prefix regressions. The separate sampled receiver-probability
+  calibration completed successfully in 1,464.74 seconds.
+- The full FLTK `gui_workflow` reached its unchanged 300-second limit in phase
+  15 (sampled-audio transmission). Earlier validation entries reproduce this
+  same phase-15 limit on an unchanged baseline; this run does not establish a
+  complete workflow pass. No smoke assertion or timeout was weakened.
+
+Initial keyfile tests exhausted the pre-existing nearly full `/tmp`; reruns used
+workspace build directories for `TMPDIR` and passed. An unrelated FLTK native
+pointer-tooltip probe failed under Xwayland; the unchanged probe passed under
+Xvfb. Xvfb was extracted locally under the ignored build directory, without
+installing a system package. Linux native and mocked WinMM checks do not establish
+Windows native-window behavior or physical-link BER/throughput qualification.
+
 ## Fast channel-profile menu — 21 September 2026 UTC
 
 The shared Fast Modem channel selector now offers cable QAM/LDPC, SSB, FM and

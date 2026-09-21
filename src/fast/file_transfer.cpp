@@ -1,5 +1,6 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
 #include <algorithm>
 #include <array>
@@ -92,13 +93,14 @@ struct Reader {
         }
         throw Error("WAV has no bounded PCM data region");
     }
-    std::size_t read(std::span<float> output,bool mono) {
+    std::size_t read(std::span<float> output,audio::ChannelMode mode) {
         const auto frames=static_cast<std::size_t>(std::min<std::uint64_t>({remaining/(channels*2),output.size(),4096}));
         std::array<std::uint8_t,16384> bytes{};exact(std::span(bytes).first(frames*channels*2));remaining-=frames*channels*2;
         for(std::size_t i=0;i<frames;++i) {
             const auto left=static_cast<std::int16_t>(get16(std::span(bytes).subspan(i*channels*2)));
             const auto right=channels==2?static_cast<std::int16_t>(get16(std::span(bytes).subspan(i*4+2))):left;
-            output[i]=mono?right/32768.f:(left/65536.f+right/65536.f);
+            output[i]=mode==audio::ChannelMode::left_mono?left/32768.f:
+                mode==audio::ChannelMode::right_mono?right/32768.f:(left/65536.f+right/65536.f);
         }
         return frames;
     }
@@ -108,18 +110,18 @@ void check_settings(const Settings& s) {
     if(s.quota_bytes<65536||s.quota_bytes>256ULL*1024*1024)
         throw Error("Fast storage quota must be 64 KiB..256 MiB");
 }
-Snapshot transmit_source_wave(const Settings& s,SourceReader reader,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop,std::uint64_t size) {
-    const auto estimate=estimate_transmission(s.profile,s.key.has_value(),size);
+Snapshot transmit_source_wave(const Settings& s,PreparedXzSource input,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
+    const auto estimate=estimate_transmission(s.profile,s.key.has_value(),input.encoded.size());
     std::uint64_t generated=0;
-    std::uint64_t source_bytes=0;
-    StreamEncoder codec(s.profile,s.key,[&](auto bytes){auto n=reader(bytes);if(n>s.quota_bytes-source_bytes)throw Error("Fast source exceeds local quota");source_bytes+=n;return n;});
+    const auto source_bytes=input.source_bytes;
+    StreamEncoder codec(s.profile,s.key,byte_source(std::move(input.encoded)),SourceEncoding::xz);
     Transmitter modem(s.profile,[&](auto bits){return codec.next_interval(bits);});
     Writer writer(wave,s.profile.sample_rate);std::array<float,4096> block{};Snapshot result;result.transmitting=true;result.encrypted=s.key.has_value();result.estimated_seconds=estimate.seconds;
     const auto start=std::chrono::steady_clock::now();
     while(!stop.stop_requested()) {
         const auto n=modem.read(block);if(!n)break;writer.write(std::span(block).first(n));
         generated+=n;result.transmit_fraction=std::min(.999,static_cast<double>(generated)/static_cast<double>(estimate.samples));
-        result.source_bytes=codec.source_bytes();result.intervals=codec.intervals_emitted();++result.revision;
+        result.source_bytes=source_bytes;result.intervals=codec.intervals_emitted();++result.revision;
         if(progress)progress(result);
     }
     if(stop.stop_requested())throw Error("Fast WAV transmission cancelled");
@@ -133,19 +135,19 @@ Snapshot transmit_wave(const Settings& s,const std::filesystem::path& source,con
     check_settings(s);
     if(!std::filesystem::is_regular_file(source))throw Error("Fast source must be a readable regular file");
     if(std::filesystem::file_size(source)>s.quota_bytes)throw Error("Fast source exceeds local quota");
-    return transmit_source_wave(s,file_source(source),wave,std::move(progress),stop,std::filesystem::file_size(source));
+    return transmit_source_wave(s,prepare_xz_source(file_source(source),s.quota_bytes,stop),wave,std::move(progress),stop);
 }
 Snapshot transmit_text_wave(const Settings& s,const std::string& text,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
     check_settings(s);
     if(text.size()>text_byte_limit||text.size()>s.quota_bytes)throw Error("Fast text exceeds the local 32768-byte limit");
-    return transmit_source_wave(s,byte_source(Bytes(text.begin(),text.end())),wave,std::move(progress),stop,text.size());
+    return transmit_source_wave(s,prepare_xz_source(byte_source(Bytes(text.begin(),text.end())),s.quota_bytes,stop),wave,std::move(progress),stop);
 }
 Snapshot receive_wave(const Settings& settings,const std::filesystem::path& wave,ProgressCallback progress,std::stop_token stop) {
     Reader input(wave);auto s=settings;s.profile.sample_rate=input.rate;check_settings(s);
-    StreamDecoder codec(s.profile,s.key,s.quota_bytes);Receiver modem(s.profile,[&](auto bits){codec.push_interval(bits);});
+    StreamDecoder codec(s.profile,s.key,s.quota_bytes,SourceEncoding::xz);Receiver modem(s.profile,[&](auto bits){codec.push_interval(bits);});
     Snapshot result;result.listening=true;result.encrypted=s.key.has_value();std::array<float,4096> block{};std::uint64_t samples=0;
     while(!stop.stop_requested()) {
-        const auto n=input.read(block,s.mono);if(!n)break;modem.push(std::span(block).first(n));samples+=n;
+        const auto n=input.read(block,audio::output_channels(s.mono,s.channel_mode));if(!n)break;modem.push(std::span(block).first(n));samples+=n;
         auto c=codec.snapshot();const auto& d=modem.progress();result.intervals=c.intervals;result.authenticated_groups=c.authenticated_groups;
         result.checksum_groups=c.checksum_groups;
         result.ldpc_frames=c.ldpc_frames;result.ldpc_failed_frames=c.ldpc_failed_frames;

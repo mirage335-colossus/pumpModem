@@ -58,7 +58,7 @@ struct FastPlots::Frame {
     bool active=false,stale=false;
     double extent=1.5;
 };
-bool owns(B id) {return id==B::fast_waveform||id==B::fast_waterfall||id==B::fast_constellation;}
+bool owns(B id) {return id==B::fast_waveform||id==B::fast_waterfall||id==B::fast_constellation||id==B::fast_qr;}
 FastPlots::FastPlots():frame_(std::make_shared<Frame>()) {}
 void FastPlots::reset() {
     if(frame_->diagnostics)ignored_stream_=frame_->diagnostics->stream_id;
@@ -127,7 +127,7 @@ std::string FastPlots::caption(B id,unsigned width) const {
     return {};
 }
 BitmapSource FastPlots::source(B id) const {
-    if(!owns(id))return {};
+    if(!owns(id)||id==B::fast_qr)return {};
     return BitmapSource([frame=frame_,id](const BitmapRequest& request,const BitmapSink& sink,bool preference) {
         if(!request.width||!request.height||!request.damage.width||!request.damage.height)return;
         if(request.width>16384||request.height>16384)throw std::invalid_argument("Fast plot dimensions exceed the display bound");

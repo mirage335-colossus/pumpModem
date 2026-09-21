@@ -19,7 +19,7 @@ void channel_routing() {
         check(f::state.channels==2 && f::state.configured_channels==std::vector<unsigned>{2},"stereo playback must prefer two channels, including a stereo-only card");
         check(f::state.played.size()==pcm.size()*2,"default mono routing changed stereo frame count");
         for(std::size_t i=0;i<pcm.size();++i)
-            check(f::state.played[2*i]==0 && f::state.played[2*i+1]==pcm[i],"default mono must silence left and preserve right PCM");
+            check(f::state.played[2*i]==pcm[i] && f::state.played[2*i+1]==0,"default mono must preserve left and silence right PCM");
         check(f::state.live==0 && f::state.opens==f::state.closes,"stereo playback leaked its device");
         f::reset();f::state.available={"stereo-card"};f::state.supported_channels=supported;
         a::play(samples,48000,"stereo-card",{},{},false);
@@ -28,9 +28,10 @@ void channel_routing() {
             check(f::state.played[2*i]==pcm[i] && f::state.played[2*i+1]==pcm[i],"disabled mono must send the same PCM through both channels");
         check(f::state.live==0,"dual-channel playback leaked its device");
     }
-    for(const bool mono:{true,false}) {
+    for(const auto mode:{a::ChannelMode::left_mono,a::ChannelMode::right_mono,a::ChannelMode::stereo}) {
+        const bool left=mode!=a::ChannelMode::right_mono,right=mode!=a::ChannelMode::left_mono;
         f::reset();f::state.available={"mono-card"};
-        a::play(samples,48000,"mono-card",{},{},mono);
+        a::play(samples,48000,"mono-card",{},{},mode);
         check(f::state.channels==1 && f::state.configured_channels==std::vector<unsigned>{2,1},"mono-only card did not fall back at its original rate");
         check(f::state.played==pcm,"mono-only device lost or changed transmit PCM");
         check(f::state.live==0 && f::state.opens==f::state.closes,"mono fallback leaked a rejected stereo device");
@@ -41,24 +42,25 @@ void channel_routing() {
             const auto count=std::min<std::size_t>(chunk.size(),10003-generated);
             for(std::size_t i=0;i<count;++i)chunk[i]=samples[(generated+i)%samples.size()];
             generated+=count;return count;
-        },{},{},mono);
+        },{},{},mode);
         check(f::state.played.size()==20006 && f::state.configured_streams==1,"streamed stereo changed duration or reopened a configured stream");
         check(std::all_of(f::state.write_frames.begin(),f::state.write_frames.end(),[](auto count){return count<=2400;}),"stereo driver writes count samples instead of frames");
         for(std::size_t i=0;i<10003;++i)
-            check(f::state.played[2*i]==(mono?0:pcm[i%pcm.size()]) && f::state.played[2*i+1]==pcm[i%pcm.size()],"partial stereo writes shifted channel or source frame alignment");
+            check(f::state.played[2*i]==(left?pcm[i%pcm.size()]:0) && f::state.played[2*i+1]==(right?pcm[i%pcm.size()]:0),"partial stereo writes shifted channel or source frame alignment");
         check(f::state.live==0,"streamed stereo playback leaked its device");
         f::reset();f::state.available={"default"};f::state.supported_rates={44100};f::state.supported_channels={2};f::state.write_limit=31;
         std::vector<float> tone(9600+17);
         for(std::size_t i=0;i<tone.size();++i)tone[i]=static_cast<float>(.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/96000));
-        a::play(tone,96000,"default",{},{},mono);
+        a::play(tone,96000,"default",{},{},mode);
         const auto frames=(tone.size()*44100+95999)/96000;
         check(f::state.rate==44100 && f::state.channels==2 && f::state.played.size()==frames*2,"stereo rate fallback changed transmit duration");
         for(std::size_t i=0;i<frames;++i)
-            check(f::state.played[2*i]==(mono?0:f::state.played[2*i+1]),"resampling changed left-channel routing");
+            check((left || f::state.played[2*i]==0) && (right || f::state.played[2*i+1]==0) &&
+                  (!(left&&right) || f::state.played[2*i]==f::state.played[2*i+1]),"resampling changed channel routing");
         double error=0;
         for(std::size_t i=100;i+100<frames;++i)
-            error=std::max(error,std::abs(f::state.played[2*i+1]/32767.-.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/44100)));
-        check(error<.00015,"resampling and partial stereo writes changed right-channel phase/amplitude");
+            error=std::max(error,std::abs(f::state.played[2*i+(left?0:1)]/32767.-.5*std::sin(2*std::numbers::pi*1500*static_cast<double>(i)/44100)));
+        check(error<.00015,"resampling and partial stereo writes changed active-channel phase/amplitude");
         check(f::state.live==0 && f::state.opens==f::state.closes,"stereo rate negotiation leaked a device");
     }
 }

@@ -35,22 +35,26 @@ Fast. See [Legacy Modem](docs/legacy-modem.md).
 **Fast Modem** is an independent QAM/LDPC and classic APSK text/file-transfer
 interface, selected from the **Modem** dropdown beside **DATA PUMP**. It includes
 live waveform, waterfall and constellation plots, fixed 2,048-bit coded intervals,
-optional AES-256-CBC/HMAC, and bounded streaming source storage. Regular waveform,
+optional AES-256-CBC/HMAC, [XZ source compression](docs/fast-xz.md), and bounded
+source preparation. XZ decompression waits for physical completion; both
+peers must use the matching Fast source format. Regular waveform,
 encryption and short/pending-message behavior remain unchanged.
 
-The default audio-cable profile now uses **4,194,304-QAM, LDPC 8/9, four LDPC
+The qualified high-SNR audio-cable profile uses **4,194,304-QAM, LDPC 8/9, four LDPC
 frames per cycle, approximately 0.3% RS parity/data, and a full marker every
 16 intervals**. It uses 17,647.0588 symbols/s, 2% rolloff and an 18 kHz shaped
-band, with output amplitude 0.30 on both channels. Compact eight-bit source
+band, with output amplitude 0.30. Mono now defaults to the left channel; right
+mono and stereo remain selectable. Compact eight-bit source
 bytes, one integrity-protected continuation/final flag per cycle, and unambiguous
 final padding replace the classic nine-bit source cells. A 2,048-symbol preamble
 supports dense-QAM acquisition.
 
-An exact live **50 MB transfer succeeded in 21m 30.664s** on the connected
+In earlier raw-source trials, an exact live **50 MB transfer succeeded in
+21m 30.664s** on the connected
 headphone-to-microphone cable, including startup and an eight-second silence
 tail. All 6,980 LDPC frames converged, the complete source SHA-256 matched,
-and no clipping or capture overrun occurred. Calculated public-source 50 MB
-airtime is **21m 27.337s**, including the current preamble and 6.25 seconds of
+and no clipping or capture overrun occurred. Calculated airtime for 50 MB
+of encoded source at that high-SNR setting is **21m 27.337s**, including the current preamble and 6.25 seconds of
 end silence. This single whole-file success does not establish an 80% success
 probability. Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferred
 5 MB exactly. See [Fast operation and settings](docs/fast-mode.md), the
@@ -67,8 +71,8 @@ defaults now use 64-QAM/LDPC 3/4 across 300–2700 Hz, with approximately
 about 2.8× the former SSB and 5.3× the former FM public-file defaults.
 These radio settings passed sampled channel simulations, not live RF tests;
 see the [radio profile study](docs/fast-radio-capacity.md).
-Speakers/microphone defaults to a separate
-16-QAM/LDPC 3/4 OFDM waveform with right-channel-only output, providing
+The highest speakers/microphone preset uses a separate
+16-QAM/LDPC 3/4 OFDM waveform, providing
 38.80 kbit/s of steady source capacity. Higher QAM orders remain selectable;
 the classic acoustic profile is available through the CLI. The
 [acoustic routing diagnosis](docs/fast-acoustic-routing-diagnosis.md) explains
@@ -81,8 +85,9 @@ The [coding study](docs/fast-coding-study.md) records the preceding theoretical
 analysis and remaining work such as probabilistic shaping and adaptive loading.
 
 Fast now has **Expected SNR** and **Symbol rate** dropdowns. Expected SNR sets
-matching local waveform/coding defaults, down to 40 dB below each nominal
-setting. Weak presets narrow their bandwidth; the displayed SNR stays referenced
+matching local waveform/coding defaults, starting at **36 dB for audio cable**
+and **3 dB for speakers/microphone**. The menu retains higher qualified settings
+and reaches down to 40 dB below each highest setting. Weak presets narrow their bandwidth; the displayed SNR stays referenced
 to the original channel bandwidth. Manual overrides and settings for each
 channel are retained. These are assumed operating targets, not automatic SNR
 measurements. See [SNR presets and rate selection](docs/fast-snr-presets.md).
@@ -342,11 +347,17 @@ transmitted by the automated tests. Physical audio transfer and Windows hardware
 operation still require device testing. Use a capture long enough to contain the
 complete rounded two-second hardware-settling prefix and payload.
 
-Transmit audio defaults to the right channel on stereo outputs and the sole
-channel on mono outputs. Use `--no-mono` to send the same audio to both stereo
-channels. The GUI's **Mono** toggle, below **Audio device**, controls the same
-routing and starts enabled. Mono-only devices remain usable with either setting;
-WAV output and simulation keep their existing single-channel waveform.
+Transmit audio defaults to the left channel on stereo outputs and the sole
+channel on mono outputs. Use `--right-mono` for the right output or `--no-mono`
+for both stereo outputs. All three GUIs offer **Left mono**, **Right mono**, and
+**Stereo**, with Left mono selected by default. Mono-only devices use their sole
+channel with every selection; WAV output and simulation keep their existing
+single-channel waveform.
+
+Ordinary desktop launches now open **Fast Modem** and listen continuously. Its
+Console provides text/file composition, QR, received signals and files in memory;
+Developer mode reveals a separate Modem details tab. Fast compresses text and
+files with XZ. The dropdown order is Fast Modem, Robust Modem, Legacy Modem.
 
 ## Desktop console
 

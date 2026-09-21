@@ -239,10 +239,10 @@ void supported_sizes() {
               "A modem control is too narrow for its full native label");
         const auto mono=layout[Slot::mono],diagnostics=layout[Slot::diagnostics],device=layout[Slot::device];
         check(persistent_slot(Slot::mono)&&mono.x==device.x&&mono.y>device.y+device.h&&
-              mono.w>=74&&mono.h>=22&&mono.x+mono.w<diagnostics.x&&mono.y==diagnostics.y&&
-              diagnostics.w>=916&&diagnostics.x+diagnostics.w==size.w-margin&&
+              mono.w>=150&&mono.h>=22&&mono.x+mono.w<diagnostics.x&&mono.y==diagnostics.y&&
+              diagnostics.w>=824&&diagnostics.x+diagnostics.w==size.w-margin&&
               mono.y+mono.h<layout[Slot::status].y,
-              "Mono routing must fit below its device without overlapping diagnostics or status");
+              "Audio-channel choice must fit below its device without overlapping diagnostics or status");
     }
 }
 void hidden_scope_reclaims_space() {

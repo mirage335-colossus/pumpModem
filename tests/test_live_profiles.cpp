@@ -546,11 +546,11 @@ void capture(std::uint32_t rate, const std::string& device, const CaptureCallbac
     }
 }
 void play(std::span<const float>, std::uint32_t, const std::string&, std::stop_token,
-          StreamFormatCallback, bool) { throw Error("profile fixture unexpectedly played audio"); }
+          StreamFormatCallback, ChannelMode) { throw Error("profile fixture unexpectedly played audio"); }
 std::vector<float> record(double, std::uint32_t, const std::string&, std::size_t,
                           std::stop_token, StreamFormatCallback) { throw Error("profile fixture unexpectedly recorded audio"); }
 void playback(std::uint32_t, const std::string&, const PlaybackCallback&, std::stop_token,
-              StreamFormatCallback, bool) { throw Error("profile fixture unexpectedly played audio"); }
+              StreamFormatCallback, ChannelMode) { throw Error("profile fixture unexpectedly played audio"); }
 }
 
 int main(int argc, char** argv) {

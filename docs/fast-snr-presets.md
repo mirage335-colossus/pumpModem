@@ -9,17 +9,18 @@ selector **Manual**; each channel retains its selections when switching views.
 
 ## Reference bandwidth
 
-| Channel | Nominal assumption | Menu endpoint | Original reference bandwidth |
+| Channel | Default assumption | Menu range | Original reference bandwidth |
 | --- | ---: | ---: | ---: |
-| Audio cable | 65 dB | 25 dB | 18,000 Hz |
-| Speakers/microphone | 13 dB | −27 dB | 17,500 Hz |
-| IC-7100 SSB | 20 dB | −20 dB | 2,400 Hz |
-| IC-7100 FM | 20 dB | −20 dB | 2,400 Hz |
+| Audio cable | 36 dB | 65 to 25 dB | 18,000 Hz |
+| Speakers/microphone | 3 dB | 13 to −27 dB | 17,500 Hz |
+| IC-7100 SSB | 20 dB | 20 to −20 dB | 2,400 Hz |
+| IC-7100 FM | 20 dB | 20 to −20 dB | 2,400 Hz |
 
 Menus include the endpoints and notable 3/10 dB values. For example, acoustic
 offers 13, 10, 6, 3, 0, −3, −6, −10, −13, −16, −20, −23, −26 and −27 dB.
-13 dB is an operating assumption motivated by earlier decoder analysis, not a
-measurement of ambient room noise. The original information-equivalent metric
+The default assumptions are 36 dB for an audio cable and 3 dB for
+speakers/microphone. The earlier 65/13 dB settings remain available; these
+values are operating assumptions, not measurements of ambient room noise. The original information-equivalent metric
 must not be mistaken for independently measured band-integrated SNR.
 
 The user-authorized weak presets may narrow bandwidth. SNR remains referenced
@@ -38,8 +39,9 @@ can invalidate this white-noise model. The UI displays both bandwidths.
 
 ## Selection and limits
 
-Nominal presets preserve the qualified cable/acoustic settings and the new
-sampled radio default. Lower settings compare implemented square-QAM/LDPC
+The highest menu presets preserve the qualified cable/acoustic settings and
+the sampled radio default. The new 36/3 dB defaults resolve the existing
+presets at those actual assumptions. Lower settings compare implemented square-QAM/LDPC
 combinations using estimated 50 MB source throughput, including actual cycle,
 marker, pilot and padding overhead. They do not optimize a received channel
 response or promise globally optimal coding.

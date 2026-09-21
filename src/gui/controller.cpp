@@ -232,6 +232,8 @@ struct Controller::Impl {
         f(UiField::transmit_scope_format).selected="hex-auto-hide";
         f(UiField::device).text="default"; f(UiField::device).options={{"default","default"}};
         f(UiField::mono).checked=true;
+        f(UiField::mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
+        f(UiField::mono).selected="left";
         f(UiField::bandwidth).text="3.6 kHz";
         for(const auto* s:{"0.01 Hz","0.1 Hz","1 Hz","100 Hz","1.2 kHz","2.4 kHz","3.6 kHz","12 kHz","18 kHz","24 kHz","1 MHz","30 MHz"}) f(UiField::bandwidth).options.push_back({s,s});
         reset_carrier(3600);
@@ -481,7 +483,9 @@ struct Controller::Impl {
             if(next_encrypted) { const auto* key=selected_key(); if(!key) throw Error("Select a valid encryption key entry"); next.transfer.key=key->key; }
             if(!next_tone)for(const auto& key:keys) next.receive_keys.push_back(key.key);
             next.device=f(UiField::device).text.empty()?"default":f(UiField::device).text;
-            next.mono=f(UiField::mono).checked;
+            next.mono=f(UiField::mono).selected!="stereo";
+            next.channel_mode=f(UiField::mono).selected=="right"?audio::ChannelMode::right_mono:
+                next.mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
             next.simulation=!(load&&simulation_off)&&f(UiField::simulation).selected=="yes";
             const auto oscillator_id=load&&load->oscillator?*load->oscillator:f(UiField::simulation_oscillator).selected;
             const auto oscillator=tuning::parse_oscillator_preset(oscillator_id);
@@ -1434,7 +1438,14 @@ void Controller::select(UiField field,std::string id) {
             std::any_of(state.options.begin(),state.options.end(),[&](const auto& option){return option.id==id&&option.enabled;});
         if(!available)throw Error("Select an available item");
         state.selected=std::move(id);
-        if(field==UiField::key||field==UiField::pattern) {
+        if(field==UiField::mono) {
+            state.checked=state.selected!="stereo";
+            p.settings.mono=state.checked;
+            p.settings.channel_mode=state.selected=="right"?audio::ChannelMode::right_mono:
+                state.checked?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
+            if(p.started)p.session.set_channel_mode(p.settings.channel_mode);
+        }
+        else if(field==UiField::key||field==UiField::pattern) {
             p.encryption_changed(); p.configure();
             if(field==UiField::pattern && p.tone())p.notice("Tone modes are unencrypted and do not provide Low-Probability-of-Intercept protection.");
         }
@@ -1450,6 +1461,8 @@ void Controller::toggle(UiField field,bool value) {
         if(field==UiField::repeatable)p.set_repeatable(value);
         else if(field==UiField::mono) {
             p.f(field).checked=value;
+            p.f(field).selected=value?"left":"stereo";
+            p.settings.channel_mode=audio::output_channels(value);
             p.settings.mono=value;
             if(p.started)p.session.set_mono(value);
         }

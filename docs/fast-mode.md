@@ -1,26 +1,33 @@
 # Fast text and file transfer
 
-Fast Modem is a separate streaming QAM/LDPC and classic APSK modem. Select **Fast Modem** from the
-dropdown beside **DATA PUMP** to switch the entire desktop interface. The other
-choice, **Robust Modem**, is the existing regular interface and remains the
-default. Select a channel profile and **Expected SNR** to set its constellation,
-coding and waveform timing together. The **Symbol rate**, constellation and
-coding controls allow manual overrides. Choose **Text** and enter a message, or choose **File**
-and select a source file, then transmit. Select **Listen** on the receiving
-computer. The **Encryption** checkbox is optional and starts off; enabling it
-requires loading a key. Both peers need matching local settings, including
-encryption on/off and, when enabled, the same key material (entry names are only
-local labels). Save becomes available only after
-physical completion and integrity checks. Encrypted transfers authenticate;
-unencrypted transfers only check public checksums. Existing destinations are
+Fast Modem is a separate streaming QAM/LDPC and classic APSK modem. Ordinary
+desktop launches select it by default and listen continuously. The modem dropdown
+lists Fast Modem, Robust Modem and Legacy Modem. Explicit Robust simulation or
+settings launches retain their workflow. Console opens first; Developer mode
+reveals Modem details with manual symbol rate, constellation and coding controls.
+Channel profile and Expected SNR sit below the diagnostic plots. Cable defaults
+to an expected 36 dB SNR; speakers/microphone defaults to 3 dB.
+
+Enter a Message or Attach file, then transmit. Use text restores the retained
+text draft. Sending pauses listening and resumes it afterward, including after
+cancelling transmission. Pause listening stops automatic listening until Listen
+is selected. Encryption is optional and initially off;
+enabling it requires a key. Both peers need matching local settings and source
+format, including encryption and the same key material when enabled. Save becomes
+available only after physical completion and integrity checks. Encrypted transfers
+authenticate; public transfers only check checksums. Existing destinations are
 never overwritten.
 
 Text is limited to 32,768 source bytes, including UTF-8 bytes. The GUI accepts
 valid UTF-8 without NUL; files preserve arbitrary binary data. Text and files use
-exactly the same source format: no message type, text encoding tag or source
-length is sent. UTF-8, newlines and all file bytes keep their exact values.
-Received content is never rendered as text or binary in the GUI or CLI. Save
-preserves all original bytes; reception status shows counts and integrity only.
+the same XZ source format. No application-level message type, text encoding tag,
+filename or modem-length header is sent. XZ metadata, including decoded block
+sizes, is interpreted only after physical completion; it never chooses modem
+framing, allocation or completion. UTF-8, newlines and file bytes keep their exact
+values after compression and bounded post-completion decompression.
+The GUI Signals browser previews completed valid UTF-8 and supports copy/paste.
+Files in memory retains completed exact bytes for saving; pending rows remain
+unavailable for copy/save. The CLI reports counts and integrity.
 Switching Text/File retains both drafts. Loading a key does not enable
 encryption; switching encryption off retains the key for later use.
 
@@ -33,14 +40,16 @@ hardware waits for the regular audio device to close and refuses to interrupt
 an admitted pending reception or transmission. A regular simulation can continue
 while its interface is hidden.
 
-An active Fast transfer also continues when switching back. Regular controls
-remain disabled until Fast releases the audio device; idle regular capture
-resumes when Fast is inactive and the regular view is selected. Starting Fast
-allows up to two seconds for asynchronous device release, then reports that
-the operator must retry when regular work is idle.
+An active Fast transmission continues when switching back; Fast listening stops.
+Regular controls remain disabled until Fast releases the audio device; idle
+regular capture resumes when Fast is inactive and the regular view is selected.
+Starting Fast allows up to two seconds for asynchronous device release, then
+reports if audio remains unavailable. Automatic listening retries after a short
+delay; a blocked transmission can be retried when regular work is idle.
 
 Fast offers optional encryption and authentication, but no LPI claim, spreading, pattern
-codewords, time/key search, single-bit recovery or source compression. Its known
+codewords, time/key search or single-bit recovery. Text and files use
+[streaming XZ source compression](fast-xz.md). Its known
 training, markers, pilots, occupied spectrum and transmission duration are public.
 
 ## Live signal plots
@@ -84,12 +93,18 @@ completion. Both native backends render the same immutable plot snapshots.
 
 ## Channel profiles
 
-The default **Audio cable · QAM / LDPC** profile uses **4,194,304-QAM,
+The raw API/CLI reference profiles below describe the established high-SNR
+operating points. The GUI resolves its Expected SNR (36 dB cable, 3 dB acoustic)
+into the corresponding lower-order settings; the CLI does likewise when passed
+`--expected-snr`. See [SNR presets](fast-snr-presets.md).
+
+The high-SNR **Audio cable · QAM / LDPC** reference uses **4,194,304-QAM,
 LDPC 8/9, four LDPC frames per coding cycle, approximately 0.3% outer RS,
 and one full marker every 16 intervals**. It sends 17,647.0588 symbols/s with
 2% root-raised-cosine rolloff, occupying an ideal 18 kHz band from 300 to
 18,300 Hz around a 9,300 Hz carrier. The default sample rate is 48 kHz and
-output amplitude is 0.30. Both headphone outputs carry the same signal.
+output amplitude is 0.30. The historical trial below used both headphone
+outputs; current routing defaults to left mono.
 
 This clean-cable operating point completed an exact live **50,000,000-byte
 transfer in 1,290.664 seconds (21m 30.664s)**, including device startup and an
@@ -114,9 +129,9 @@ measured trials, failures and limits.
 | `acoustic` | Capacity OFDM | 1.302 blocks/s | Multicarrier | 501–18,000 Hz | 16-QAM | 52.10 kbit/s coded |
 | `acoustic --format classic` | Classic | 500 | 1,800 Hz | 1,500–2,100 Hz | QPSK | 1 kbit/s |
 
-The acoustic default uses a 32,768-point FFT, an 85.33 ms cyclic prefix,
+The acoustic raw API/CLI reference uses a 32,768-point FFT, an 85.33 ms cyclic prefix,
 pilot stride 16, LDPC 3/4, depth 8, nominal waveform amplitude 0.40, and
-right-channel-only output (**Mono**). Its steady source rate is 38.80 kbit/s; the table's OFDM coded
+single-channel output (the historical measurement used the right channel). Its steady source rate is 38.80 kbit/s; the table's OFDM coded
 rate already includes the guard, pilots, refresh blocks, and mapper rounding.
 A real 5,000,000-byte transfer with the earlier 64-QAM/stereo preset completed
 exactly in 746.47 seconds, but later tests reproduced 64-QAM decoding failures
@@ -177,9 +192,9 @@ decision-directed tracking information; it must not be relabelled as an
 independent SNR measurement.
 
 Avoid software and ADC clipping. The tested cable used zero microphone boost;
-actual gain settings depend on the connected hardware. Cable output drives
-both channels by default; the other presets use right-only output. `--mono`
-selects right-only output and `--stereo` selects both. Routing and playback
+actual gain settings depend on the connected hardware. Output defaults to left
+mono for every profile. `--mono` selects left-only output, `--right-mono` selects
+right-only output, and `--stereo` selects both. Routing and playback
 level are local choices and need not match between peers.
 
 The CLI accepts 44.1–192 kHz sample rates. Audio negotiation and the bounded
@@ -400,11 +415,14 @@ Receive source-area storage is capped at 256 MiB and compacts in place after
 physical completion. Missing areas consume their full fixed logical space in
 that quota, preventing corrupt streams from creating unlimited positions or
 integrity attempts. A separately bounded validity map uses one byte per area.
-Capacity requires source bytes plus one flag per cycle
-and final-cycle fill; classic additionally needs its 1.125 source expansion.
+Capacity requires the encoded XZ bytes plus one flag per cycle
+and final-cycle fill; classic additionally needs its 1.125 encoded-source expansion.
 PCM, FEC, diagnostics and shared code tables have separately bounded storage;
 the source quota is not a process RSS limit. Source reads and waveform generation
-stream. Text retains its separate 32,768-byte local limit.
+use bounded chunks. Production TX first prepares its XZ source in bounded RAM
+so compression cannot stall playback; post-end RX decompression uses a separate
+source-output quota and 64 MiB codec memory cap. See [Fast XZ](fast-xz.md).
+Text retains its separate 32,768-byte local limit.
 
 Reception creates no temporary receive files, disk caches or autosaves. Only
 explicit Save, requested CLI destinations and keyfile creation write output.

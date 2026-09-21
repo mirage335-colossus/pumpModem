@@ -12,6 +12,14 @@
 
 namespace datapump::fast {
 namespace {
+double maximum_expected_snr(Channel c) {
+    switch(c) {
+    case Channel::wire:return 65;
+    case Channel::acoustic:return 13;
+    case Channel::ssb:case Channel::fm:return 20;
+    }
+    throw Error("Unknown Fast SNR channel");
+}
 double reference_bandwidth(Channel c) {
     switch(c) {
     case Channel::wire:return 18000;
@@ -91,15 +99,15 @@ double parse_rate(std::string_view text) {
 }
 double default_expected_snr(Channel c) {
     switch(c) {
-    case Channel::wire:return 65;
-    case Channel::acoustic:return 13;
+    case Channel::wire:return 36;
+    case Channel::acoustic:return 3;
     case Channel::ssb:case Channel::fm:return 20;
     }
     throw Error("Unknown Fast SNR channel");
 }
 std::vector<double> expected_snr_options(Channel c) {
-    const auto top=default_expected_snr(c),bottom=top-40;
-    std::vector<double> values{top,bottom};
+    const auto top=maximum_expected_snr(c),bottom=top-40;
+    std::vector<double> values{top,bottom,default_expected_snr(c)};
     for(int n=static_cast<int>(std::ceil(bottom));n<=static_cast<int>(top);++n) {
         const auto digit=std::abs(n)%10;
         if(digit==0||digit==3||digit==6)values.push_back(n);
@@ -108,9 +116,9 @@ std::vector<double> expected_snr_options(Channel c) {
     values.erase(std::unique(values.begin(),values.end()),values.end());return values;
 }
 SnrPreset resolve_snr_preset(Channel c,double expected) {
-    const auto nominal=default_expected_snr(c),band=reference_bandwidth(c);
+    const auto nominal=maximum_expected_snr(c),band=reference_bandwidth(c);
     if(!std::isfinite(expected)||expected>nominal||expected<nominal-40)
-        throw Error("Expected Fast SNR must be within the channel's default to default-minus-40 dB range");
+        throw Error("Expected Fast SNR must be within the channel's supported 40 dB range");
     SnrPreset result{profile(c),expected,band,
         "Assumed SNR in the original channel bandwidth; local settings must match at both ends. "
         "Narrowing assumes unchanged total received signal power and flat noise density. "

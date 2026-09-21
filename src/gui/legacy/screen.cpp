@@ -7,7 +7,7 @@ Control placed(Kind kind,Field field,const char* label,Slot slot) {
     c.slot=slot;c.persistent=true;c.scope=ScreenScope::legacy;return c;
 }
 }
-bool owns(Field field) {return field>=Field::legacy_profile&&field<=Field::legacy_status;}
+bool owns(Field field) {return field>=Field::legacy_profile&&field<=Field::legacy_mono;}
 bool owns(Command command) {return command==Command::legacy_transmit;}
 const std::vector<Control>& screen() {
     static const std::vector<Control> controls{
@@ -23,6 +23,8 @@ const std::vector<Control>& screen() {
         [] {auto c=placed(Kind::bitmap,Field::count,"Waterfall",Slot::legacy_waterfall);c.bitmap=Bitmap::legacy_waterfall;
             c.help="Live audio from 0 to 4 kHz; newest row at the top. Reception pauses during transmission.";return c;}(),
         placed(Kind::choice,Field::legacy_squelch,"Squelch",Slot::legacy_squelch),
+        [] {auto c=placed(Kind::choice,Field::legacy_mono,"Audio channels",Slot::legacy_mono);
+            c.help="Transmit on the left, right, or both stereo channels. Mono devices use their sole channel.";return c;}(),
         placed(Kind::label,Field::legacy_status,"",Slot::legacy_status)
     };
     return controls;

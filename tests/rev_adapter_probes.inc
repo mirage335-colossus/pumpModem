@@ -9,11 +9,11 @@
         };
         auto* selector=by_field(ui::Field::fast_mode).choice;
         auto* encryption=by_field(ui::Field::fast_encryption).toggle;
-        auto* source=by_field(ui::Field::fast_source).choice;
-        require(selector&&encryption&&source&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
-        require(selector->params.options.size()==3&&selector->params.options[0].name=="Robust Modem"&&
-            selector->params.options[0].value=="robust"&&selector->params.options[1].name=="Fast Modem"&&
-            selector->params.options[1].value=="fast"&&selector->params.value=="robust"&&
+
+        require(selector&&encryption&&by_field(ui::Field::fast_text).editor,"Rev Fast native controls missing");
+        require(selector->params.options.size()==3&&selector->params.options[0].name=="Fast Modem"&&
+            selector->params.options[0].value=="fast"&&selector->params.options[1].name=="Robust Modem"&&
+            selector->params.options[1].value=="robust"&&selector->params.value=="robust"&&
             application.field(ui::Field::fast_mode).selected=="robust","Rev modem selector did not default to the declared Robust Modem choice");
         application.toggle(ui::Field::fast_mode,true);
         application.select(ui::Field::fast_mode,"invalid-mode");
@@ -41,18 +41,20 @@
                 application.toggle(ui::Field::fast_mode,!fast);
                 require(application.field(ui::Field::fast_mode).selected==(fast?"fast":"robust"),"Rev obsolete toggle changed the selected modem");
                 if(fast) {
-                    require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&source->params.value=="text"&&
+                    require(!encryption->value&&application.enabled(ui::Command::fast_listen)&&application.field(ui::Field::fast_source).selected=="text"&&
                         !by_field(ui::Field::fast_text).element->resolved.hidden&&by_field(ui::Field::fast_file).element->resolved.hidden,
                         "Rev Fast did not default to plain text and keyless receive");
+                    require(!tabs.at(ui::Page::console)->resolved.hidden&&tabs.at(ui::Page::fast_modem)->resolved.hidden,"Rev Fast default tabs are incorrect");
+                    application.toggle(ui::Field::developer_mode,true);application.select_page(ui::Page::fast_modem);settle();
                     for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
                         application.select(ui::Field::fast_profile,channel);settle();
-                        for(const auto field:{ui::Field::fast_expected_snr,ui::Field::fast_symbol_rate}) {
+                        for(const auto field:{ui::Field::fast_expected_snr,ui::Field::fast_symbol_rate,ui::Field::fast_mono}) {
                             auto* choice=by_field(field).choice;
                             require(choice&&allows_input(choice)&&choice->dropdownText,
-                                "Rev Fast SNR/rate dropdown is hidden, disabled or lacks its value");
+                                "Rev Fast SNR/rate/channel dropdown is hidden, disabled or lacks its value");
                             auto* text=choice->dropdownText;text->layoutText();
                             require(text->width<=text->rect.w&&text->height<=text->rect.h,
-                                "Rev Fast SNR/rate value clips at the minimum window size");
+                                "Rev Fast SNR/rate/channel value clips at the minimum window size");
                         }
                         const auto nominal=application.field(ui::Field::fast_expected_snr).options.at(1).id;
                         const auto low=application.field(ui::Field::fast_expected_snr).options.back().id;
@@ -65,9 +67,10 @@
                         }
                         application.select(ui::Field::fast_expected_snr,nominal);settle();
                     }
-                    application.select(ui::Field::fast_profile,"wire");settle();
+                    application.select(ui::Field::fast_profile,"wire");application.toggle(ui::Field::developer_mode,false);settle();
+                    require(application.page()==ui::Page::console,"Rev hiding details did not return to Console");
                     unsigned plot_count=0;
-                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.control.kind==ui::Kind::bitmap) {
+                    for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.control.kind==ui::Kind::bitmap&&binding.control.bitmap!=ui::Bitmap::fast_qr) {
                         ++plot_count;
                         require(binding.bitmap&&!binding.element->resolved.hidden&&binding.bitmap->width&&binding.bitmap->height&&
                             binding.bitmap->video->texture,"Rev Fast signal plot did not materialize and upload pixels");
@@ -88,13 +91,13 @@
                     require(!application.enabled(ui::Command::fast_listen)&&!application.enabled(ui::Command::fast_transmit),
                         "Rev encrypted actions accepted a missing key");
                     encryption->checkbox->click(click);settle();
-                    source->params.value="file";source->onChange(click);settle();
+                    application.select(ui::Field::fast_source,"file");settle();
                     require(by_field(ui::Field::fast_text).element->resolved.hidden&&!by_field(ui::Field::fast_file).element->resolved.hidden&&
                         application.command_label(ui::Command::fast_transmit)=="Transmit file","Rev file choice did not replace text controls");
                     for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast&&binding.bitmap)
                         require(!binding.element->resolved.hidden,"Rev File view hid a Fast signal plot");
                     application.edit(ui::Field::fast_file,"/tmp/rev-fast-source.bin");
-                    source->params.value="text";source->onChange(click);settle();
+                    application.activate(ui::Command::fast_use_text);settle();
                     require(application.field(ui::Field::fast_text).text=="Rev fast café\nSecond line"&&
                         application.field(ui::Field::fast_file).text=="/tmp/rev-fast-source.bin"&&application.command_label(ui::Command::fast_transmit)=="Transmit text",
                         "Rev source switching discarded independent drafts");
@@ -109,7 +112,7 @@
                     } else if(fast&&b.control.scope==ui::ScreenScope::regular)
                         require(b.element->resolved.hidden,"Rev Fast retained a regular native control");
                 }
-                if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden,"Rev Fast retained regular tabs");
+                if(fast)for(const auto& [id,button]:tabs)require(button->resolved.hidden==(id!=ui::Page::console),"Rev Fast tab visibility is inconsistent");
                 require(application.field(ui::Field::binary).text=="001"&&application.take_services().empty(),
                     "Rev mode switching or stale callbacks changed the regular source or opened a service");
             }
@@ -180,7 +183,7 @@
                     "Rev developer mode did not hide/show an entire advanced control in place");
             for(const auto& definition:ui::pages()) {
                 auto* button=tabs.at(definition.id);
-                require(button->resolved.hidden==(!checked&&definition.developer_only),
+                require(button->resolved.hidden==(definition.id==ui::Page::fast_modem||(!checked&&definition.developer_only)),
                     "Rev developer mode did not refresh native tab visibility without resizing");
                 if(button->resolved.hidden) {
                     require(!allows_input(button),"Rev hidden advanced tab retained keyboard input eligibility");
@@ -194,7 +197,7 @@
             for(const auto& [element,bounds]:visible_bounds)if(!element->resolved.hidden)require(frame(element)==bounds,
                 "Rev developer mode changed the rendered position of a visible control or tab");
         }
-        for(const auto& definition:ui::pages())if(definition.developer_only) {
+        for(const auto& definition:ui::pages())if(definition.developer_only&&definition.id!=ui::Page::fast_modem) {
             set_mode(true);re::Event click;tabs.at(definition.id)->click(click);settle();
             require(application.page()==definition.id&&displayed_page==definition.id,
                 "Rev enabled advanced tab could not be selected");
@@ -1182,6 +1185,11 @@
     }
     void verify_overlay_composition() {
         const auto page=application.page();const auto windows=group->size();auto* native_window=window;
+        const auto target=std::find_if(ui::pages().rbegin(),ui::pages().rend(),[&](const auto& definition) {
+            return definition.id!=page&&!tabs.at(definition.id)->resolved.hidden;
+        });
+        if(target==ui::pages().rend())throw std::runtime_error("Rev overlay fixture lacks another visible navigation tab");
+        const auto background_page=target->id;
         const auto callsign=application.field(ui::Field::callsign).text;
         const auto brightness=application.field(ui::Field::qr_brightness).selected;
         const bool repeatable=application.field(ui::Field::repeatable).checked;
@@ -1247,7 +1255,7 @@
         re::Event remapped;remapped.keyboard.escape.id=1;keyDown(remapped);
         if(!application.overlay())throw std::runtime_error("Rev hard-coded Escape instead of using the shared overlay key map");
         dispatch(ui::Command::dismiss_overlay);
-        re::Event tab_click;tabs.at(ui::pages().back().id)->click(tab_click);
+        re::Event tab_click;tabs.at(background_page)->click(tab_click);
         if(!application.overlay()||application.page()!=page)throw std::runtime_error("Rev blocked overlay leaked desktop document or tab actions");
         service_probe=true;services.enqueue({{710,ui::ServiceKind::prompt,"Deferred shared overlay prompt",""}});process_services();
         if(dialog||services.current())throw std::runtime_error("Rev overlay ignored shared service deferral");
@@ -1271,7 +1279,7 @@
         auto unblocked=fixture();unblocked.policy.hide_background=false;unblocked.policy.block_background=false;
         unblocked.policy.restore_focus=false;unblocked.policy.dismiss_on_page_change=false;
         application.show_overlay(std::move(unblocked));apply();native_overlay_frame();
-        const auto next=ui::pages().back().id;re::Event navigate;tabs.at(next)->click(navigate);apply();native_overlay_frame();
+        const auto next=background_page;re::Event navigate;tabs.at(next)->click(navigate);apply();native_overlay_frame();
         if(application.page()!=next||!application.overlay()||surface->targetFlags.disabled||overlay_view->element->interceptHits)
             throw std::runtime_error("Rev overlay ignored shared background eligibility or page persistence");
         focus_control(overlay_binding(703).editor);dispatch(ui::Command::dismiss_overlay);apply();native_frame();
@@ -1478,8 +1486,14 @@
                 " actual logical="+std::to_string(details.size.width)+","+std::to_string(details.size.height)+" native="+std::to_string(window->size.w)+","+std::to_string(window->size.h)+
                 " scale="+std::to_string(details.scale)+" nativeScale="+std::to_string(window->scale));
             apply();scroll_page(1);native_frame();verify_layout();
+            for(const auto& binding:bindings)if(binding.control.field==ui::Field::mono&&!binding.element->resolved.hidden) {
+                if(!binding.choice||!binding.choice->dropdownText)throw std::runtime_error("Rev audio channels did not materialize as a native choice");
+                auto* text=binding.choice->dropdownText;text->layoutText();
+                if(text->width>text->rect.w||text->height>text->rect.h)
+                    throw std::runtime_error("Rev audio channel choice clips at the resized viewport");
+            }
         };
-        for(const auto& page:ui::pages()) {
+        for(const auto& page:ui::pages())if(!tabs.at(page.id)->resolved.hidden) {
             select_page(page.id);resize(ui::min_width,ui::min_height);resize(ui::default_width,ui::default_height);
         }
         select_page(initial_page);apply();native_frame();verify_layout();verify_expanded_bitmap();

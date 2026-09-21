@@ -24,7 +24,7 @@ std::atomic<bool> playback_ready=false,capture_ready=false;
 // independent audio source/sink starts producing/consuming PCM.
 namespace datapump::audio {
 void playback(std::uint32_t rate,const std::string&,const PlaybackCallback& source,
-              std::stop_token stop,StreamFormatCallback format,bool) {
+              std::stop_token stop,StreamFormatCallback format,ChannelMode) {
     if(format)format({rate,rate,rate*.49,2048});
     std::array<float,2048> samples{};
     while(!stop.stop_requested()) {

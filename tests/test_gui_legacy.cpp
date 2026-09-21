@@ -46,6 +46,12 @@ void presentation_and_isolation() {
     check(app.field(F::legacy_carrier).text=="1500"&&app.field(F::legacy_profile).options.size()==3,"Legacy frequency or modes are incorrect");
     check(!app.enabled(C::legacy_transmit),"Empty Legacy draft enabled TX");
     check(app.field(F::legacy_squelch).selected=="normal","Legacy squelch default changed");
+    check(control(F::legacy_mono).kind==ui::Kind::choice&&app.field(F::legacy_mono).selected=="left"&&
+          app.field(F::legacy_mono).options.size()==3,"Legacy channel dropdown lost its left default or alternatives");
+    for(const auto mode:{"right","stereo","left"}) {
+        app.select(F::legacy_mono,mode);
+        check(app.field(F::legacy_mono).selected==mode,"Legacy channel selection was routed to another modem");
+    }
     app.select(F::legacy_squelch,"high");
     check(app.field(F::legacy_squelch).selected=="high","Legacy squelch selection ignored");
     app.select(F::legacy_squelch,"normal");

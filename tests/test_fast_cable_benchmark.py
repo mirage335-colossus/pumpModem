@@ -25,14 +25,16 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(BENCH.routing_provenance(args, {}),
                          {"requested": "profile-default", "effective": None, "evidence": "unreported"})
         self.assertEqual(BENCH.routing_provenance(args, {"mono": False})["effective"], "both-channels")
-        self.assertEqual(BENCH.routing_provenance(args, {"mono": True})["effective"], "right-only")
+        self.assertEqual(BENCH.routing_provenance(args, {"mono": True})["effective"], "mono-unspecified")
+        for channel, expected in (("left", "left-only"), ("right", "right-only"), ("stereo", "both-channels")):
+            self.assertEqual(BENCH.routing_provenance(args, {"audio_channels": channel})["effective"], expected)
         args.stereo = True
         self.assertEqual(BENCH.routing_options(args), ["--stereo"])
         self.assertEqual(BENCH.routing_provenance(args, {}),
                          {"requested": "both-channels", "effective": "both-channels", "evidence": "explicit-option"})
         args.stereo, args.mono = False, True
         self.assertEqual(BENCH.routing_options(args), ["--mono"])
-        self.assertEqual(BENCH.routing_provenance(args, {})["effective"], "right-only")
+        self.assertEqual(BENCH.routing_provenance(args, {})["effective"], "left-only")
 
     def test_exact_probability_bounds(self):
         self.assertEqual(BENCH.exact_bounds(0, 0), (None, None))
@@ -133,9 +135,10 @@ class GeometryTests(unittest.TestCase):
         base = [sys.executable, str(ROOT / "tools/fast_cable_benchmark.py"),
                 "--pump", str(PUMP), "--sizes", "4096", "--candidate", "256:7/8:high-rate:62"]
         for flags, expected_request, expected_effective in (
-                ([], "profile-default", "both-channels"),
+                ([], "profile-default", "left-only"),
                 (["--stereo"], "both-channels", "both-channels"),
-                (["--mono"], "right-only", "right-only")):
+                (["--mono"], "left-only", "left-only"),
+                (["--right-mono"], "right-only", "right-only")):
             result = subprocess.run([*base, *flags], check=True, capture_output=True, text=True, timeout=15)
             plan = json.loads(result.stdout)
             self.assertEqual(plan["mode"], "plan")

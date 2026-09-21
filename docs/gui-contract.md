@@ -25,42 +25,51 @@ screen fitting and host file-chooser internals remain toolkit mechanisms.
 
 ## Controls and state
 
-The **Robust Modem / Fast Modem** dropdown beside **DATA PUMP** at the upper
-left switches the full interface between the regular controller and the
-separate `src/gui/fast` controller. **Robust Modem** is selected by default.
-Shared declarations carry regular/Fast/shared scope; native adapters contain
-no mode-specific behavior. The Robust Modem draft, selected page,
-keys, settings and received rows survive a round trip through Fast, and admitted
-pending reception continues to be polled while hidden. Hidden controls cannot
-dispatch edits/actions; asynchronous native service replies retain their owner
-and mode generation and are cancelled if stale.
+The modem dropdown beside **DATA PUMP** lists **Fast Modem**, **Robust Modem**,
+and **Legacy Modem**, in that order. Ordinary launches default to Fast. Explicit
+Robust simulation, settings and inspection-page launches keep their requested
+workflow. Each modem owns its controller and declarations; native adapters have
+no mode-specific behavior. Robust drafts, selected page, keys, settings and
+received rows survive mode changes, and admitted pending reception keeps being
+polled. Hidden controls cannot dispatch edits or actions. Native service replies
+retain their owner and mode generation and are cancelled if stale.
 
-Fast exposes a Text/File source choice, multiline text draft, file selection,
-optional Encryption toggle, key, channel, constellation, convolutional and RS
-settings, audio routing, transmit/listen/cancel/save and transfer metrics/history.
-Text and encryption-off are the Fast defaults. Both source drafts and the loaded
-key survive switching those choices. Encryption-on requires a key and never
-falls back to public mode. Text uses the same source stream as files, without
-a transmitted type. Completed integrity checks and physical end are required
-before saving; only keyed transfers claim authentication. Received bytes stay
-in bounded memory and are not previewed. Explicit Save retains the exact
-original bytes. Fast shows estimated airtime, active transmit percentage, and
-an explicitly assumed-SNR Shannon-Hartley capacity example. Completed results retain their original protection status
-when the settings for the next transfer change. Its
-regression simulator has no GUI control. Starting Fast obtains idle audio
-ownership without cancelling a pending regular reception. Active Fast work
-continues if the view changes back, with regular controls disabled until it
-finishes. See [Fast operation and audio ownership](fast-mode.md).
+Fast opens **Console**. **Developer mode** and **Clear received** sit at the top
+right; the transmit airtime estimate sits beside the modem dropdown. Developer
+mode reveals **Modem details**, which holds symbol rate, constellation, inner
+error correction, interleave depth, Reed–Solomon, gross/measured rates, tracking,
+integrity, settings details and the matching-peer/capacity explanations. Hiding
+that tab returns to Console without changing settings.
 
-Fast also declares three independent bitmap sources: live waveform, waterfall
-and constellation. Its controller consumes immutable, bounded diagnostic frames
-from the Fast session; native adapters only paint generic bitmap sources. RX
-constellation points precede slicing, TX points come from the mapper, and neither
-feeds reception decisions. Titles distinguish direction, active, stalled and
-retained captures. New transfers reset history; changing views does not reset
-ongoing work. The waterfall retains at most 96 rows and display publication is
-limited to ten frames per second. PCM/FFT and symbol histories stay separate from
-the regular controller and its plots.
+The independent Fast composer provides **Message**, **Attach file**, **Use text**,
+transmit/cancel, an expandable message QR code, optional encryption and retained
+key selection. Text and file drafts survive source changes. Both are XZ-compressed;
+there is no transmitted content-type marker. **Signals** shows pending and
+completed transfers in stable rows. Completed valid UTF-8 can be copied or pasted
+as a new message. **Files in memory** retains completed exact bytes for explicit
+saving; neither pending data nor cancellation grants copy/save eligibility.
+History is bounded to 64 entries and the local source-memory quota. Existing save
+destinations are never overwritten. Only keyed transfers claim authentication.
+
+Fast listens continuously when selected on a normal live launch. Sending pauses
+reception and resumes listening afterward, including after cancelling a
+transmission. A received stream is retained before the next listener starts.
+Pause listening stops automatic listening until Listen is selected. Changing
+modes stops Fast listening; transmitting work continues to be polled. Starting
+Fast obtains idle audio ownership without cancelling a pending
+Robust reception. Fast's regression simulator has no GUI control.
+
+Three independent diagnostic plots show waveform, waterfall and constellation.
+The waterfall compares occupied receive bins with surrounding unoccupied bins to
+show a concise SNR estimate, followed by one status line. This estimate never
+feeds receiver decisions. RX constellation points precede slicing; TX points come
+from the mapper. Titles distinguish active, stalled and retained captures. The
+waterfall retains at most 96 rows, with display publication limited to ten frames
+per second. **Audio device**, **Channel profile** and **Expected SNR** sit at the
+bottom. Defaults are 36 dB for cable and 3 dB for speakers/microphone. The final
+row contains channel routing, expected steady modem bitrate after coding and
+recurring overhead, the assumed-SNR Shannon–Hartley limit, and occupied frequency
+range/bandwidth. Gross and measured source rates stay on Modem details.
 
 The controls and message presentation described below belong to regular mode.
 
@@ -234,13 +243,13 @@ states declares a received message complete. **RX estimate** is
 conditional on completed receiver computation, not a measured success rate or
 the probability of finishing within a deadline.
 
-The persistent **Mono** toggle below **Audio device** starts enabled. Transmit
-audio uses the right channel of a stereo output, with silence on the left;
-mono-only outputs use their sole channel. Turning Mono off sends the same audio
-to both stereo channels. It follows the audio device control's availability
-during transmission. Changing it preserves the running receiver, pending bits,
-plots and airtime estimate; the selected routing applies to the next playback.
-Simulated samples and exported WAV framing are independent of this choice.
+The persistent audio-channel dropdown below **Audio device** starts at **Left
+mono**. **Right mono** and **Stereo** are alternatives; a mono-only output always
+uses its sole channel. Stereo duplicates the waveform on both outputs. The same
+three choices are present in the independent Fast and Legacy interfaces. Routing
+follows audio-device availability during transmission. Robust routing changes
+preserve the running receiver, pending bits, plots and airtime estimate and apply
+to the next playback. Simulated samples and exported WAV framing remain unchanged.
 
 The persistent **Oscillator model** dropdown below the Simulation estimates
 offers **Free-running crystal** (the unchanged default), **GPSDO: hobbyist XO

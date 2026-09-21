@@ -807,7 +807,9 @@ void profile_reference_display() {
 void mono_controls() {
     using F=ui::Field;using C=ui::Command;
     Controller controller({true,true});
-    check(controller.field(F::mono).checked&&controller.field(F::mono).enabled&&controller.settings().mono,
+    check(controller.field(F::mono).checked&&controller.field(F::mono).enabled&&controller.settings().mono&&
+          controller.field(F::mono).selected=="left"&&controller.field(F::mono).options.size()==3&&
+          controller.settings().channel_mode==audio::ChannelMode::left_mono,
           "Mono audio routing must be enabled by default in the shared GUI and live settings");
     controller.edit(F::binary,"001");prepare(controller);
     const auto prepared_revision=controller.revision();
@@ -838,11 +840,15 @@ void mono_controls() {
     const auto live_inspection=controller.inspection();
     const auto estimated_airtime=controller.estimate()->total_seconds;
     controller.plot_update();
-    for(const bool mono:{false,true}) {
+    for(const auto mode:{"stereo","right","left"}) {
+        const bool mono=std::string_view(mode)!="stereo";
+        const auto channels=std::string_view(mode)=="right"?audio::ChannelMode::right_mono:
+            mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
         const auto samples=controller.snapshot().samples_received;
         const auto seconds=controller.snapshot().virtual_seconds;
-        controller.toggle(F::mono,mono);controller.poll();
+        controller.select(F::mono,mode);controller.poll();
         check(controller.field(F::mono).checked==mono&&controller.settings().mono==mono&&
+              controller.field(F::mono).selected==mode&&controller.settings().channel_mode==channels&&
               controller.snapshot().running&&controller.snapshot().samples_received>=samples&&
               controller.snapshot().virtual_seconds>=seconds,
               "Changing audio output routing reset or interrupted the running receiver clock");
@@ -858,7 +864,9 @@ void mono_controls() {
     controller.toggle(F::mono,false);
     check(controller.field(F::mono).checked&&controller.settings().mono,
           "A disabled Mono callback changed the active transmission routing");
-    controller.close();controller.toggle(F::mono,false);
+    controller.select(F::mono,"right");
+    check(controller.field(F::mono).selected=="left","Disabled channel choice changed active transmission routing");
+    controller.close();controller.toggle(F::mono,false);controller.select(F::mono,"right");
     check(!controller.field(F::mono).enabled&&controller.field(F::mono).checked&&controller.settings().mono,
           "A stale Mono callback changed a closing session");
 }

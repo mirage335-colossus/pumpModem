@@ -25,11 +25,13 @@ struct Controller::Impl {
         f(F::legacy_profile).selected="bpsk31";f(F::legacy_carrier).text="1500";
         f(F::legacy_squelch).options={{"low","Low · weak signals"},{"normal","Normal"},{"high","High · cleaner text"}};
         f(F::legacy_squelch).selected="normal";
+        f(F::legacy_mono).options={{"left","Left mono"},{"right","Right mono"},{"stereo","Stereo"}};
+        f(F::legacy_mono).selected="left";
         f(F::legacy_status).text="Select Legacy Modem to receive.";
     }
     void refresh() {
         const bool edit=!closing&&!snapshot.transmitting&&!pending_tx&&!cancelling;
-        f(F::legacy_profile).enabled=edit;f(F::legacy_carrier).enabled=edit;f(F::legacy_squelch).enabled=edit;
+        f(F::legacy_profile).enabled=edit;f(F::legacy_carrier).enabled=edit;f(F::legacy_squelch).enabled=edit;f(F::legacy_mono).enabled=edit;
         f(F::legacy_text).enabled=!closing;
     }
     void changed_settings() {
@@ -108,7 +110,14 @@ void Controller::edit(F field,std::string value) {
     }
 }
 void Controller::select(F field,std::string value) {
-    auto& p=*impl_;if((field!=F::legacy_profile&&field!=F::legacy_squelch)||p.closing||!p.f(field).enabled||value==p.f(field).selected)return;
+    auto& p=*impl_;if((field!=F::legacy_profile&&field!=F::legacy_squelch&&field!=F::legacy_mono)||p.closing||!p.f(field).enabled||value==p.f(field).selected)return;
+    if(field==F::legacy_mono) {
+        if(value!="left"&&value!="right"&&value!="stereo")return;
+        p.settings.mono=value!="stereo";
+        p.settings.channel_mode=value=="right"?audio::ChannelMode::right_mono:
+            p.settings.mono?audio::ChannelMode::left_mono:audio::ChannelMode::stereo;
+        p.f(field).selected=std::move(value);++p.revision;return;
+    }
     auto config=p.settings.config;
     if(field==F::legacy_squelch) {
         if(value!="low"&&value!="normal"&&value!="high")return;

@@ -1,5 +1,6 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/fast/compression.hpp"
 #include "datapump/fast/modem.hpp"
 #include <array>
 #include <chrono>
@@ -153,7 +154,7 @@ void acoustic_wave_tail() {
         settings.profile.ofdm_fft_size=fft;settings.profile.ofdm_prefix_samples=prefix;
         settings.profile.constellation=64;settings.profile.interleave_depth=1;
         const auto wave=directory.path/(std::to_string(fft)+".wav");
-        const auto estimate=estimate_transmission(settings.profile,false,content.size());
+        const auto estimate=estimate_xz_transmission(settings.profile,false,byte_source(content));
         transmit_wave(settings,source,wave);
         check(std::filesystem::file_size(wave)==44+2*estimate.samples,"OFDM WAV duration differs from exact estimate");
         const auto received=receive_wave(settings,wave);

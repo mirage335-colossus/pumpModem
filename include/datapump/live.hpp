@@ -1,4 +1,5 @@
 #pragma once
+#include "datapump/audio.hpp"
 #include "datapump/transfer.hpp"
 #include <chrono>
 #include <complex>
@@ -17,9 +18,9 @@ struct Settings {
     // a message path never replaces the independently running receiver bank.
     std::optional<modem::Config> long_message_modem;
     std::string device = "default";
-    // Right channel on stereo output, sole channel on mono output. When off,
-    // send the same signal to both stereo channels.
+    // Mono defaults to the left output. The boolean remains for existing callers.
     bool mono = true;
+    audio::ChannelMode channel_mode = audio::ChannelMode::left_mono;
     bool simulation = false;
     double simulation_snr_db = 18;
     double simulation_clock_error_ppm = 100;
@@ -171,6 +172,7 @@ public:
     // Apply output routing to the next playback without interrupting reception
     // or changing audio already being transmitted.
     void set_mono(bool mono);
+    void set_channel_mode(audio::ChannelMode channels);
     // Release only idle hardware capture for another local engine. Refuses
     // pending RX/TX; repeated polls acknowledge actual device closure. Does
     // not cancel recovery, complete a reception, or change saved settings.

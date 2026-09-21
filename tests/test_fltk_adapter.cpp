@@ -349,7 +349,7 @@ void fast_mode_visibility() {
         for(int i=0;i<group.children();++i) {
             auto* child=group.child(i);
             if(auto* choice=dynamic_cast<NativeChoice*>(child);choice&&choice->size()==4&&
-                literal_menu_text(choice->text(0))=="Robust Modem"&&literal_menu_text(choice->text(1))=="Fast Modem")return choice;
+                literal_menu_text(choice->text(0))=="Fast Modem"&&literal_menu_text(choice->text(1))=="Robust Modem")return choice;
             if(auto* nested=dynamic_cast<Fl_Group*>(child))if(auto* choice=mode_choice(*nested))return choice;
         }
         return nullptr;
@@ -357,20 +357,38 @@ void fast_mode_visibility() {
     require(!(Fl_Preferences::file_access()&Fl_Preferences::ALL_WRITE_OK),"File chooser preferences may write implicitly");
     auto* selector=mode_choice(*window);
     auto* encryption=dynamic_cast<NativeCheckbox*>(find_button(*window,"Encryption"));
-    auto* choose=find_button(*window,"Choose file…");auto* transmit=find_button(*window,"Transmit text");
+    auto* choose=find_button(*window,"Attach file");auto* transmit=find_button(*window,"Transmit text");
     auto* listen=find_button(*window,"Listen");auto* regular=find_button(*window,"Transmit");
     const auto field_widget=[&]<class Widget>(const char* label) -> Widget* {
         auto* heading=find_label(*window,label);if(!heading)return nullptr;
         for(int i=0;i<heading->parent()->children();++i)if(auto* widget=dynamic_cast<Widget*>(heading->parent()->child(i)))return widget;
         return nullptr;
     };
-    auto* source=field_widget.template operator()<NativeChoice>("Source");
+    Fl_Button* fast_attach=nullptr;
+    const std::function<void(Fl_Group&)> find_attach=[&](Fl_Group& group) {
+        const auto expected=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_choose_file];
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* button=dynamic_cast<Fl_Button*>(child);button&&button->x()==expected.x&&button->y()==expected.y)fast_attach=button;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find_attach(*nested);
+        }
+    };
+    find_attach(*window);choose=fast_attach;
     auto* expected_snr=field_widget.template operator()<NativeChoice>("Expected SNR");
     auto* symbol_rate=field_widget.template operator()<NativeChoice>("Symbol rate");
-    auto* text=field_widget.template operator()<NativeEditor>("Text");
+    auto* text=field_widget.template operator()<NativeEditor>("Message");
+    const std::function<void(Fl_Group&)> find_fast_editor=[&](Fl_Group& group) {
+        const auto expected=ui::DesktopLayout(window->w(),window->h())[ui::Slot::fast_text];
+        for(int i=0;i<group.children();++i) {
+            auto* child=group.child(i);
+            if(auto* editor=dynamic_cast<NativeEditor*>(child);editor&&editor->x()==expected.x&&editor->y()==expected.y)text=editor;
+            if(auto* nested=dynamic_cast<Fl_Group*>(child))find_fast_editor(*nested);
+        }
+    };
+    find_fast_editor(*window);
     auto* file=field_widget.template operator()<NativeInput>("Source file");
-    require(selector&&encryption&&source&&expected_snr&&symbol_rate&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
-    require(selector->value()==0&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
+    require(selector&&encryption&&expected_snr&&symbol_rate&&text&&file&&choose&&transmit&&listen&&regular,"Fast fixture lacks native controls");
+    require(selector->value()==1&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
         "Modem selector did not default to Robust Modem or retained the obsolete Fast toggle");
     app.application.toggle(ui::Field::fast_mode,true);
     app.application.select(ui::Field::fast_mode,"invalid-mode");
@@ -383,10 +401,13 @@ void fast_mode_visibility() {
     app.application.edit(ui::Field::binary,"001");
     for(const auto size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);refresh();
-        selector->picked(selector->menu()+1);refresh();
-        require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&!choose->visible_r()&&text->visible_r()&&
+        selector->picked(selector->menu());refresh();
+        require(app.application.field(ui::Field::fast_mode).selected=="fast"&&selector->visible_r()&&selector->active_r()&&choose->visible_r()&&text->visible_r()&&
             transmit->visible_r()&&listen->visible_r()&&listen->active_r()&&!encryption->value()&&!regular->visible_r(),
             "Fast Modem selection did not show the default plain-text interface");
+        require(find_button(*window,"Console")->visible_r()&&!find_button(*window,"Modem details")->visible_r(),"Fast console did not hide developer tab by default");
+        app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::fast_modem);refresh();
+        require(symbol_rate->visible_r()&&!text->visible_r(),"Fast modem page did not separate details from message controls");
         for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
             app.application.select(ui::Field::fast_profile,channel);refresh();
             for(const auto item:{std::pair{expected_snr,ui::Field::fast_expected_snr},std::pair{symbol_rate,ui::Field::fast_symbol_rate}}) {
@@ -417,11 +438,13 @@ void fast_mode_visibility() {
             }
             app.application.select(ui::Field::fast_expected_snr,nominal);refresh();
         }
-        app.application.select(ui::Field::fast_profile,"wire");refresh();
+        app.application.select(ui::Field::fast_profile,"wire");
+        app.application.toggle(ui::Field::developer_mode,false);refresh();
+        require(app.application.page()==ui::Page::console&&!symbol_rate->visible_r()&&text->visible_r(),"Hiding developer mode did not restore Fast Console");
         app.application.toggle(ui::Field::fast_mode,false);
         require(app.application.field(ui::Field::fast_mode).selected=="fast","Obsolete toggle changed the selected Fast Modem");
         std::vector<NativeBitmap*> plots;
-        for(const auto& declaration:ui::console_screen())if(declaration.scope==ui::ScreenScope::fast&&declaration.kind==ui::Kind::bitmap) {
+        for(const auto& declaration:ui::console_screen())if(declaration.scope==ui::ScreenScope::fast&&declaration.kind==ui::Kind::bitmap&&declaration.bitmap!=ui::Bitmap::fast_qr) {
             const auto geometry=app.application.control_layout(declaration,window->w(),window->h());
             const auto expected=geometry.widget;
             NativeBitmap* plot=nullptr;
@@ -452,16 +475,16 @@ void fast_mode_visibility() {
         encryption->value(1);encryption->do_callback();refresh();
         require(!listen->active_r()&&!transmit->active_r(),"Fast encrypted native actions accepted a missing key");
         encryption->value(0);encryption->do_callback();refresh();
-        source->picked(source->menu()+1);refresh();
+        app.application.select(ui::Field::fast_source,"file");refresh();
         require(!text->visible_r()&&choose->visible_r()&&file->visible_r()&&std::string(transmit->label())=="Transmit file",
             "Fast native source choice did not replace the text composer");
         for(const auto* plot:plots)require(plot->visible_r(),"Fast File view hid a live signal plot");
         file->value("/tmp/native-fast-source.bin");file->do_callback();refresh();
-        source->picked(source->menu());refresh();
-        require(text->visible_r()&&!choose->visible_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line"&&
+        app.application.activate(ui::Command::fast_use_text);refresh();
+        require(text->visible_r()&&choose->visible_r()&&buffer_text(*text->buffer())=="Native fast café\nSecond line"&&
             app.application.field(ui::Field::fast_file).text=="/tmp/native-fast-source.bin"&&std::string(transmit->label())=="Transmit text",
             "Fast native source switching changed independent drafts");
-        for(const auto& page:ui::pages())require(!find_button(*window,page.title)->visible_r(),"Fast view retained a regular native tab");
+        for(const auto& page:ui::pages())require(find_button(*window,page.title)->visible_r()==(page.id==ui::Page::console),"Fast tab visibility is inconsistent");
         require(text->x()+text->w()<=window->w()&&text->y()+text->h()<=window->h(),"Fast native composer escaped the viewport");
         const auto draft=app.application.field(ui::Field::binary).text;
         regular->do_callback();refresh();
@@ -469,7 +492,7 @@ void fast_mode_visibility() {
         Fl_Image_Surface surface(window->w(),window->h());Fl_Surface_Device::push_current(&surface);
         surface.draw(window);Fl_Surface_Device::pop_current();std::unique_ptr<Fl_RGB_Image> image(surface.image());
         require(image&&image->w()==window->w()&&image->h()==window->h(),"Fast native surface failed to render");
-        selector->picked(selector->menu());refresh();
+        selector->picked(selector->menu()+1);refresh();
         require(app.application.field(ui::Field::fast_mode).selected=="robust"&&selector->visible_r()&&selector->active_r()&&
             !choose->visible_r()&&!text->visible_r()&&regular->visible_r()&&app.application.field(ui::Field::binary).text=="001",
             "Returning from Fast did not restore the native regular interface and source");
@@ -538,7 +561,7 @@ void developer_mode_visibility() {
                 "Developer mode did not hide/show an entire advanced control in place");
             for(const auto& definition:ui::pages()) {
                 auto* button=find_button(*window,definition.title);
-                require(static_cast<bool>(button->visible_r())==(checked||!definition.developer_only),
+                require(static_cast<bool>(button->visible_r())==((checked||!definition.developer_only)&&definition.id!=ui::Page::fast_modem),
                     "Developer mode did not update native tab visibility without resizing");
                 if(!button->visible_r()) {
                     require(!button->take_focus(),"Hidden advanced tab retained keyboard focus eligibility");
@@ -549,7 +572,7 @@ void developer_mode_visibility() {
             for(const auto& [widget,bounds]:preserved)require(frame(widget)==bounds,
                 "Toggling developer mode moved an existing native control or tab");
         }
-        for(const auto& definition:ui::pages())if(definition.developer_only) {
+        for(const auto& definition:ui::pages())if(definition.developer_only&&definition.id!=ui::Page::fast_modem) {
             set_mode(true);auto* button=find_button(*window,definition.title);button->do_callback();refresh();
             require(app.application.page()==definition.id,"An enabled advanced native tab could not be selected");
             set_mode(false);
@@ -582,6 +605,7 @@ void tab_clicks() {
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);
         for(const auto& initial:ui::pages())for(const auto& target:ui::pages()) {
+            if(initial.id==ui::Page::fast_modem||target.id==ui::Page::fast_modem)continue;
             app.application.select_page(initial.id);refresh();selected(initial.id);
             auto* button=find_button(*window,target.title);
             const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
@@ -597,6 +621,7 @@ void tab_clicks() {
         }
     }
     for(const auto& target:ui::pages()) {
+        if(target.id==ui::Page::fast_modem)continue;
         auto* button=find_button(*window,target.title);
         const int px=button->x()+button->w()/2,py=button->y()+button->h()/2;
         for(bool return_inside:{false,true}) {
