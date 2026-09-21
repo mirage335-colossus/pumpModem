@@ -123,7 +123,10 @@ on a stationary path. See the [routing diagnosis](fast-acoustic-routing-diagnosi
 for the default change and the [acoustic live study](fast-acoustic-live-study.md)
 for earlier measurements and their limits. Select `--qam 64 --stereo` explicitly
 to reproduce the earlier preset; matching QAM is required at both peers.
-The GUI keeps **Speakers / microphone · classic APSK** as a separate fallback.
+The GUI channel selector offers **Audio cable · QAM / LDPC**, **IC-7100 SSB ·
+2.4 kHz**, **IC-7100 FM · voice band**, and **Speakers / microphone · OFDM /
+LDPC**. Classic cable and acoustic presets are available through the CLI with
+`--format classic`.
 
 Capacity mode offers square Gray-labelled QAM orders from 4 through 4,194,304
 in powers of four, with LDPC rates 1/2, 2/3, 3/4, 7/9, 8/9 and 9/10. This includes
@@ -133,7 +136,7 @@ number of LDPC frames in one locally fixed cycle. Marker spacing and pilot
 spacing are additional matching CLI settings. There is no over-air negotiation,
 automatic fallback, or adaptive bit loading.
 
-**Audio cable · classic APSK** preserves the earlier cable preset: 256-APSK,
+The CLI's `--profile wire --format classic` preserves the earlier cable preset: 256-APSK,
 convolutional 7/8, RS(128,120), depth 62, amplitude 0.35, and 20% rolloff.
 SSB/FM retain convolutional 3/4, robust RS, depth 16 and amplitude 0.5;
 classic acoustic retains QPSK, convolutional 3/4, robust RS, depth 5 and amplitude

@@ -72,12 +72,11 @@ struct Controller::Impl {
     ui::FieldState& f(F field) {return fields.at(static_cast<std::size_t>(field));}
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
-        f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"wire-classic","Audio cable · classic APSK"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"}};
+        f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"}};
         const auto acoustic=fast::profile(fast::Channel::acoustic);
         if(acoustic.capacity_mode) {
             f(F::fast_profile).options.back().label=acoustic.acoustic_ofdm?
                 "Speakers / microphone · OFDM / LDPC":"Speakers / microphone · QAM / LDPC";
-            f(F::fast_profile).options.push_back({"acoustic-classic","Speakers / microphone · classic APSK"});
         }
         f(F::fast_profile).selected="wire";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
@@ -90,11 +89,12 @@ struct Controller::Impl {
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
         f(F::fast_status).text="Choose matching settings at both ends.";
-        set_profile(fast::Channel::wire,true);refresh();
+        set_profile(fast::Channel::wire);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
-    void set_profile(fast::Channel channel,bool capacity=false) {
-        settings.profile=capacity?fast::capacity_profile(channel):fast::classic_profile(channel);
+    void set_profile(fast::Channel channel) {
+        settings.profile=fast::profile(channel);
+        const bool capacity=settings.profile.capacity_mode;
         if(capacity) {
             f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
             f(F::fast_coding).options={{"half","LDPC 1/2"},{"two-thirds","LDPC 2/3"},{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
@@ -267,12 +267,7 @@ void Controller::select(F field,std::string id) {
     const auto& options=p.f(field).options;
     if(std::none_of(options.begin(),options.end(),[&](const auto& option){return option.id==id&&option.enabled;}))return;
     try {
-        if(field==F::fast_profile) {
-            const bool classic=id=="wire-classic"||id=="acoustic-classic";
-            const auto channel=id=="wire-classic"?fast::Channel::wire:
-                id=="acoustic-classic"?fast::Channel::acoustic:fast::parse_channel(id);
-            p.set_profile(channel,!classic&&fast::profile(channel).capacity_mode);
-        }
+        if(field==F::fast_profile)p.set_profile(fast::parse_channel(id));
         else if(field==F::fast_constellation)p.settings.profile.constellation=static_cast<unsigned>(std::stoul(id));
         else if(field==F::fast_coding)p.settings.profile.code_rate=coding_rate(id);
         else if(field==F::fast_depth)p.settings.profile.interleave_depth=static_cast<unsigned>(std::stoul(id));

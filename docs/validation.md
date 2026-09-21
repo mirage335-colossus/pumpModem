@@ -4,6 +4,24 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Fast channel-profile menu — 21 September 2026 UTC
+
+The shared Fast Modem channel selector now offers cable QAM/LDPC, SSB, FM and
+acoustic OFDM/LDPC. The cable and acoustic classic APSK entries were removed.
+The existing GUI regression checks the four remaining options, rejects callbacks
+using removed profile IDs without changing current settings, and retains checks
+for capacity defaults, radio controls and output routing. Classic CLI/codec
+support and regular transport behavior are unchanged.
+
+Release configuration and the full build passed. Of 36 selected CTest suites,
+35 passed: the [development contract](development.md)'s headless selection except
+`differential_receiver_probability`, plus `gui_fast`, `gui_fast_live`,
+`gui_self_check`, `gui_bindings`, `gui_contract`, `fast_boundary` and `fast_cli`.
+The remaining `differential_receiver_probability` calibration was interrupted
+after an extended run and has no result for this change; no completed test
+failed. `git diff --check` passed. No native adapter code changed; native window
+conformance and physical audio tests were not rerun.
+
 ## Fast damaged-cycle continuation — 21 September 2026 UTC
 
 The [continuation fix](fast-cycle-continuation.md) separates an incomplete file

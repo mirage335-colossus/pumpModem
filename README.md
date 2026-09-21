@@ -58,14 +58,14 @@ probability. Earlier 1,048,576-QAM / LDPC 9/10 development trials also transferr
 [live capacity study](docs/fast-capacity-live-study.md) for measured limits and
 wire revisions.
 
-The preserved **classic APSK** profile supports the earlier 256-APSK,
+The CLI's **classic APSK** profile (`--format classic`) supports the earlier 256-APSK,
 convolutional 7/8, high-rate RS and depth-62 cable settings. Its roughly
 2h 01m calculated 50 MB airtime and 44.14 kbit/s sampled 2 MiB result are
 historical reference points, not cable capacity limits. SSB and FM retain their
 classic coding and waveforms. Speakers/microphone now defaults to a separate
 16-QAM/LDPC 3/4 OFDM waveform with right-channel-only output, providing
-38.80 kbit/s of steady source capacity. Higher QAM orders and the classic
-acoustic profile remain selectable. The
+38.80 kbit/s of steady source capacity. Higher QAM orders remain selectable;
+the classic acoustic profile is available through the CLI. The
 [acoustic routing diagnosis](docs/fast-acoustic-routing-diagnosis.md) explains
 the current default and measured decoding limits. The
 [earlier cable study](docs/fast-cable-live-study.md) documents those settings.

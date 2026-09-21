@@ -66,7 +66,9 @@ void presentation_and_retention() {
     }
     for(const auto& tab:app.tab_layout(ui::default_width,ui::default_height))check(!tab.visible,"Regular tabs leaked into fast interface");
     const auto acoustic=fast::profile(fast::Channel::acoustic);
-    check(app.field(F::fast_profile).options.size()==5+static_cast<unsigned>(acoustic.capacity_mode)&&app.field(F::fast_constellation).options.size()==11,
+    const auto& profiles=app.field(F::fast_profile).options;
+    check(profiles.size()==4&&profiles[0].id=="wire"&&profiles[1].id=="ssb"&&
+        profiles[2].id=="fm"&&profiles[3].id=="acoustic"&&app.field(F::fast_constellation).options.size()==11,
           "Fast channel/constellation selections are incomplete");
     check(!app.field(F::fast_encryption).checked&&app.enabled(C::fast_listen)&&!app.enabled(C::fast_transmit),"Fast defaults must allow plain reception and require nonempty transmit text");
     check(!app.field(F::fast_key).enabled&&!app.enabled(C::fast_open_key)&&!app.enabled(C::fast_generate_key),"Plain mode retained active key controls");
@@ -144,12 +146,11 @@ void presentation_and_retention() {
         app.select(F::fast_coding,"two-thirds");
         check(app.field(F::fast_coding).selected=="two-thirds","Acoustic LDPC2/3 option missing");
         app.select(F::fast_profile,"acoustic-classic");
-        check(app.field(F::fast_profile).selected=="acoustic-classic"&&app.field(F::fast_constellation).selected=="4",
-            "Classic acoustic fallback is not selectable");
-        check(app.field(F::fast_mono).checked,"Classic acoustic fallback did not restore right-only routing");
+        check(app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_constellation).selected=="16"&&
+            app.field(F::fast_depth).selected=="8"&&app.field(F::fast_coding).selected=="two-thirds"&&
+            app.field(F::fast_fec).selected=="sparse"&&app.field(F::fast_mono).checked,
+            "Removed classic acoustic profile changed the current settings");
     }
-    check(app.field(F::fast_depth).selected=="5"&&app.field(F::fast_coding).selected=="three-quarters"&&
-        app.field(F::fast_fec).selected=="robust","Acoustic bulk defaults differ from modem profile");
     app.select(F::fast_profile,"wire");
     check(!app.field(F::fast_mono).checked,"Cable profile did not reset both-channel output routing");
     app.toggle(F::fast_mono,true);check(app.field(F::fast_mono).checked,"Explicit cable right-only override ignored");
@@ -161,10 +162,17 @@ void presentation_and_retention() {
         app.field(F::fast_depth).selected=="8","Capacity QAM/LDPC choices ignored");
     app.select(F::fast_coding,"half");check(app.field(F::fast_coding).selected=="half","Capacity LDPC1/2 choice ignored");
     app.select(F::fast_profile,"wire-classic");
-    check(app.field(F::fast_constellation).selected=="256"&&app.field(F::fast_coding).selected=="seven-eighths",
-        "Classic cable profile did not restore its original format");
-    app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast cable depth choice ignored");
-    app.select(F::fast_depth,"62");check(app.field(F::fast_depth).selected=="62","Fast optimized cable depth choice ignored");
+    check(app.field(F::fast_profile).selected=="wire"&&app.field(F::fast_constellation).selected=="16384"&&
+        app.field(F::fast_coding).selected=="half"&&app.field(F::fast_depth).selected=="8"&&
+        app.field(F::fast_fec).selected=="sparse"&&app.field(F::fast_mono).checked,
+        "Removed classic cable profile changed the current settings");
+    app.select(F::fast_profile,"fm");
+    check(app.field(F::fast_profile).selected=="fm"&&app.field(F::fast_constellation).selected=="4"&&
+        app.field(F::fast_coding).selected=="three-quarters"&&app.field(F::fast_depth).selected=="16"&&
+        app.field(F::fast_fec).selected=="robust"&&app.field(F::fast_mono).checked,
+        "FM radio profile defaults changed");
+    app.select(F::fast_depth,"64");check(app.field(F::fast_depth).selected=="64","Fast radio depth choice ignored");
+    app.select(F::fast_depth,"62");check(app.field(F::fast_depth).selected=="62","Fast radio depth-62 choice ignored");
     app.close();app.select(mode,"robust");check(app.field(F::fast_mode).selected=="fast","Closed application accepted mode callback");
 }
 void live_plot_presentation() {
