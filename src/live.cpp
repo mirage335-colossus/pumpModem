@@ -52,6 +52,7 @@ constexpr std::size_t replay_text_limit = 4096;
 constexpr std::size_t reception_alias_bytes = detail::ReceptionHistory::capacity * sizeof(std::uint64_t);
 struct ReplayFrame {
     std::vector<float> waveform, spectrum;
+    std::optional<double> simulation_spectrum_gain_db;
     std::vector<std::complex<float>> constellation, pattern_scores;
     std::vector<PatternScoreObservation> pattern_score_observations;
     std::uint64_t pattern_score_observation_id = 0;
@@ -159,6 +160,8 @@ Settings normalized(Settings value) {
     (void)bank_capacity(value);
     if (!std::isfinite(value.simulation_snr_db) || std::abs(value.simulation_snr_db) > 200)
         throw Error("simulation sample SNR must be finite and between -200 and 200 dB");
+    if (value.simulation_spectrum_gain_db && !std::isfinite(*value.simulation_spectrum_gain_db))
+        throw Error("simulation spectrum display gain must be finite");
     modem::validate_channel(value.transfer.modem, channel_config(value));
     if (value.receive_keys.size() > 128) throw Error("continuous receiver supports at most 128 loaded keys");
     if (value.transfer.search_seconds > 60) throw Error("continuous timing search exceeds 60 seconds");
@@ -482,6 +485,7 @@ struct Session::Impl {
         result.simulation_replay = true; result.replay_frame_index = index; result.replay_frame_count = replay.size();
         result.simulation_sample_fraction = frame.fraction;
         result.waveform = frame.waveform; result.spectrum_db.assign(frame.spectrum.begin(), frame.spectrum.end());
+        result.simulation_spectrum_gain_db = frame.simulation_spectrum_gain_db;
         result.spectrum_bin_hz = replay_bin_hz; result.constellation_source = frame.source;
         modem::ConstellationBatch visible;
         // Delayed UI polls consume intervening points together, not a long
@@ -570,6 +574,8 @@ struct Session::Impl {
         if (transmitter && tx_serial != serial) return;
         if (pattern_scores && tx_serial != serial) return;
         current.waveform = std::move(measured.waveform); current.spectrum_db = std::move(measured.spectrum);
+        current.simulation_spectrum_gain_db = settings.simulation ?
+            detail::spectrum_display_gain(settings.simulation_spectrum_gain_db, current.waveform.size()) : std::nullopt;
         if (pattern_scores) {
             current.pattern_scores = *pattern_scores;
             current.pattern_score_observations = *pattern_observations;
@@ -597,9 +603,11 @@ struct Session::Impl {
         const auto divisor = wave.replay_count - 1, index = wave.replay.size();
         return (samples / divisor) * index + (samples % divisor * index + divisor - 1) / divisor;
     }
-    void collect_replay(Prepared& wave, const modem::Config& config, const detail::SignalWindow& window) {
+    void collect_replay(Prepared& wave, const modem::Config& config, const detail::SignalWindow& window,
+                        std::optional<double> simulation_spectrum_gain_db) {
         auto measured = window.frame(config);
         ReplayFrame frame;
+        frame.simulation_spectrum_gain_db = detail::spectrum_display_gain(simulation_spectrum_gain_db, measured.waveform.size());
         const auto keep = std::min(replay_wave_samples, measured.waveform.size());
         frame.waveform.assign(measured.waveform.end() - static_cast<std::ptrdiff_t>(keep), measured.waveform.end());
         frame.spectrum.resize(replay_bins);
@@ -1364,7 +1372,7 @@ struct Session::Impl {
                         // receiver before any newly transmitted samples arrive.
                         if (wave->replay.empty()) {
                             wave->pattern_score_observation_id = pattern_score_observation_id.load(std::memory_order_relaxed);
-                            collect_replay(*wave, transmit_modem, plot_window);
+                            collect_replay(*wave, transmit_modem, plot_window, value.simulation_spectrum_gain_db);
                         }
                         std::size_t count = 0;
                         if (!wave->tail_started) {
@@ -1394,13 +1402,13 @@ struct Session::Impl {
                         if (!wave->tail_started && wave->replay.size() < wave->replay_count &&
                             wave->replay.size()+1 < wave->replay_count &&
                             wave->transmitted_samples >= replay_target(*wave))
-                            collect_replay(*wave, transmit_modem, plot_window);
+                            collect_replay(*wave, transmit_modem, plot_window, value.simulation_spectrum_gain_db);
                         if (wave->tail_started && !wave->tail_remaining) {
                             // Short pattern bursts can be scored only after
                             // trailing samples complete a receiver window.
                             // Reserve their final replay frame for that evidence.
                             if (wave->replay.size() < wave->replay_count)
-                                collect_replay(*wave, transmit_modem, plot_window);
+                                collect_replay(*wave, transmit_modem, plot_window, value.simulation_spectrum_gain_db);
                             complete_tx(*wave); wave.reset();
                         }
                         std::this_thread::yield();

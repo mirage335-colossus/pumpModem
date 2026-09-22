@@ -409,7 +409,10 @@ std::string PlotSnapshot::caption(unsigned width) const {
                 out << "; diagonal = equal scores";
             }
         } else if constexpr (std::is_same_v<Type, Waterfall>) {
-            out << "0.." << data.history.max_hz() << " Hz / " << data.history.lower_db() << ".." << data.history.upper_db() << " dBFS peak";
+            out << "0.." << data.history.max_hz() << " Hz / ";
+            if (data.history.simulation_reference()) out << std::fixed << std::setprecision(1);
+            out << data.history.lower_db() << ".." << data.history.upper_db()
+                << (data.history.simulation_reference() ? " dB sim. ref." : " dBFS peak");
         } else if constexpr (std::is_same_v<Type, Qr>) {
             if (data.brightness == QrBrightness::off) return "QR preview off";
             return data.code ? "QR preview" : "No QR message";

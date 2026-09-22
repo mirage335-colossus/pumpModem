@@ -385,6 +385,10 @@ struct Controller::Impl {
     }
     static double link_channel(live::Settings& value,const planner::Inputs& input) {
         const auto cn0=input.tx_dbm-input.path_loss_db-input.noise_density_dbm_hz;
+        // The channel fixes source amplitude and varies noise to model SNR.
+        // Undo that normalization for the waterfall, using the default received
+        // power (-117 dBm) as a fixed display reference. Never scale RX samples.
+        value.simulation_spectrum_gain_db=input.tx_dbm-input.path_loss_db+117;
         // ChannelConfig's sampled-noise model accepts only this finite range.
         // Retain the exact budget above for the planner's power and margin.
         value.simulation_snr_db=std::clamp(cn0-10*std::log10(value.transfer.modem.sample_rate/2.),-300.,300.);

@@ -23,6 +23,9 @@ struct Settings {
     audio::ChannelMode channel_mode = audio::ChannelMode::left_mono;
     bool simulation = false;
     double simulation_snr_db = 18;
+    // Display-only offset for simulated spectra. The raw PCM, FFT values and
+    // receiver remain unchanged; an absent value retains the raw dBFS view.
+    std::optional<double> simulation_spectrum_gain_db;
     double simulation_clock_error_ppm = 100;
     double simulation_phase_noise_degrees_per_sqrt_second = .5;
     // Received content and pending event storage are independent of DSP work.
@@ -94,6 +97,9 @@ struct Snapshot {
     std::vector<float> waveform;
     std::vector<double> spectrum_db;
     double spectrum_bin_hz = 0;
+    // Captured with spectrum_db, including startup noise-bandwidth correction
+    // and replay. Always absent for hardware.
+    std::optional<double> simulation_spectrum_gain_db;
     std::vector<std::complex<double>> constellation;
     // Retained receiver hypotheses, not probabilities: real = pattern 0
     // evidence, imaginary = pattern 1 evidence, both against noise.

@@ -5843,3 +5843,135 @@ The timing assertion is unchanged and was not relaxed for this feature.
 Reproduction logs are retained in the ignored `build/received-text-*.log` files.
 These are generated-audio and Linux GUI checks, not Windows rendering or
 physical speaker/microphone qualification.
+
+## Stable simulation waterfall reference — 22 September 2026
+
+The sampled simulation keeps nominal signal amplitude fixed and represents link
+loss through noise amplitude. Its raw dBFS spectrum therefore changed the
+waterfall background when only path loss or transmit power changed. The GUI now
+uses a fixed display reference at the default −117 dBm received power and a
+−100..0 dB color range. Signal peaks above that range saturate without rescaling
+the background or retained history. Noise-density edits still change displayed
+noise by the entered dB difference. Hardware retains its existing dBFS behavior.
+
+The display offset travels with live and replay spectra. Receiver PCM, raw FFT
+values, physical completion and message processing are unchanged. The caption,
+tooltip and README distinguish the simulation display reference from hardware
+full scale.
+
+The new `gui_bitmaps` regression runs seeded channel PCM through the FFT and
+color/grayscale renderers across 60–270 dB path loss, power edits and a 10 dB
+noise-density edit. It checks signal attenuation, strong-signal saturation,
+retained history, hardware switching and the real snapshot-to-bitmap path.
+`live_resources` adds reference propagation through idle, transmission,
+reconfiguration and replay, rejects nonfinite offsets, and independently
+recomputes the unchanged raw FFT from retained waveform samples.
+
+Both FLTK/GCC and Rev/Clang 19 passed all 33 headless GUI tests. A mutation that
+removed the correction failed the new regression with “Simulation power/path
+loss changed the receiver noise floor”; the correction was then restored.
+The restored regression passes. The complete preservation contract passes
+**30/30**, including the unchanged sampled differential calibration in
+1,093.42 seconds (1,206.32 seconds for the complete group).
+
+The initial FLTK production smoke exposed an older newline expectation: it
+compared a space-flattened label against signal records that already preserve
+LF. Its exact-content assertion now compares the permitted received text
+without flattening newlines, consistent with the existing `gui_native_policy`
+LF regression. No receive presentation behavior or timing assertion changed.
+The initial adapter and document conformance cases both passed.
+The corrected FLTK native group passes **3/3**: production workflow in
+208.61 seconds, adapter conformance in 67.92 seconds, and document conformance
+in 0.06 seconds on a private 2400×1800, 96 DPI Xvfb display.
+Rev adapter/platform/1×/2× conformance passes **4/4** (87.21, 6.20, 5.18 and
+5.17 seconds). Its initial workflow fails the previously documented replay
+timing assertion, this time in phase 13: 2.867505 seconds, eight frames, seven
+waveform changes and final fraction 0.864408. The assertion is unchanged.
+An isolated retry of that same executable passes the full workflow in
+296.91 seconds within the original time limit. Rev therefore passes all five
+native cases across the group and retry, with the initial timing failure
+retained as evidence of an intermittent issue.
+
+Reproduction logs are retained under the ignored `build/waterfall-reference/`
+directory. These are generated-audio and Linux GUI checks, not physical-link
+or Windows qualification.
+
+## Simulation waterfall noise and weak-signal contrast — 22 September 2026
+
+The fixed reference above stopped path loss from recoloring noise, but its
+100 dB range put default receiver noise near the middle of the palette. At
+6 kHz sampling, seeded noise had a median palette index of 143; larger sample
+rates raised it further because each FFT bin contained more noise power.
+That bright background also reduced visible contrast for attenuated peaks.
+The original color comparison accidentally requested a grayscale bitmap, so
+it verified intensity invariance without exercising RGB output.
+
+Simulation now uses a 40 dB display range: −50..−10 dB relative to the same
+−117 dBm signal reference at 6 kHz sampling. The limits shift by
+`10 log10(sample_rate / 6000)` at other sample rates. The default −164 dBm/Hz
+receiver noise maps to dark blue, while noise-density edits still move the
+background. Strong signals saturate without rescaling history. The full
+frequency extent determines this adjustment so replay's four-bin peak
+pooling does not change the reference. Hardware retains its original range.
+Receiver samples, raw spectra and modem processing are unchanged.
+
+The strengthened `gui_bitmaps` regression explicitly requests RGB and checks
+that it differs from grayscale. It requires a dark-blue majority, stable
+noise color across power/path-loss edits, retained-row pixel equality after
+a strong signal, and identical noise pixels at 6 kHz, 14.4 kHz, 96 kHz,
+4 MHz and 120 MHz sampling. It also checks matching live/replay limits.
+Real seeded noise plus a narrow tone at 150 and 155 dB path loss is rendered
+over 32 frames. Median carrier/background contrast is 66 and 34 grayscale
+levels, respectively; the assertions require at least 45 and 25 levels plus
+RGB blue-channel contrast. The default noise median is now palette index 41.
+
+The initial calibration passes **33/33** headless GUI cases with both FLTK/GCC
+and Rev/Clang 19 (110.63 and 123.34 seconds). Its FLTK native group passes
+**3/3**, including the workflow in 232.23 seconds. A before/after comparison
+from the production renderer,
+using the same sampled noise and tones, is retained with its source in the
+ignored `build/waterfall-calibration/` directory. It shows the previous
+100 dB mapping beside the calibrated mapping; the false-color palette itself
+is unchanged.
+
+Review then identified an additional calibration case. Partial startup FFTs
+have greater equivalent noise bandwidth than a complete Hann window, especially
+at low explicit carrier/sample rates. The captured display gain now corrects
+that bandwidth using the actual window length, including replay; raw FFT bins
+are unchanged. Full windows retain exactly the original reference gain.
+RGB regressions include the first 50 ms windows at 64 Hz, 400 Hz, 6 kHz and
+14.4 kHz sampling. Noise-invariance coverage extends through 325 dB loss at
+default power/noise, approaching the live session's supported sample-SNR limit.
+The existing rejection of settings outside that limit is preserved, including
+the unchanged atomic launch-settings regression.
+
+All 33 shared GUI cases are verified on both backends across the final group
+and focused runs. The bitmap fixture was adjusted from 330 to 325 dB so its
+14.4 kHz sample rate stays within the existing live SNR limit; its intensity
+and RGB assertions remain unchanged. `signal_view` passes, and all seven
+`live_resources` cases pass, including the new startup/replay case and the
+existing workspace, cancellation and reconfiguration checks. The low-rate
+startup fixture uses a four-chip tone to keep frequency hypotheses inside
+its narrow passband; no receiver validation was relaxed.
+
+The final FLTK native group passes **3/3**: workflow in 275.72 seconds,
+adapter conformance in 69.04 seconds and document conformance in 0.12 seconds,
+on a private 2400×1800, 96 DPI Xvfb display.
+
+The final Rev conformance cases pass **4/4**: adapter in 87.74 seconds,
+platform in 6.20 seconds, and 1×/2× coordinates in 5.27 seconds each. Its
+first workflow attempt hits the previously recorded phase-13 replay timing
+failure: 2.848819 seconds, seven measured frames, six changes and final
+fraction 0.898306. The timing assertion and application executable are
+unchanged for the isolated retry.
+
+That retry also fails phase 13 after 138.56 seconds: 2.959657 seconds of
+replay, eight measured frames, seven changes and fraction 0.898306. No complete
+Rev workflow pass is claimed for the final calibration; the existing timing
+assertion remains intact. The color calibration, startup/reference propagation,
+raw-spectrum checks, FLTK native workflow and Rev conformance checks pass.
+Final logs and the renderer comparison are retained under the ignored
+`build/waterfall-calibration/` directory. The complete 30-case preservation
+contract recorded above was run for the initial reference change; this
+display-only calibration follow-up uses the focused GUI, signal and live
+resource checks without repeating the unchanged detector calibration.

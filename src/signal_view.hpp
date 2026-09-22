@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/modem.hpp"
+#include <optional>
 
 namespace datapump::live::detail {
 inline constexpr std::size_t signal_window_size=2048;
@@ -10,6 +11,10 @@ struct SignalPlots {
 };
 SignalPlots signal_plots(std::span<const float> samples,const modem::Config& config,
                          std::uint64_t first_sample=0);
+// Match partial startup FFT noise bandwidth to a complete Hann window, using
+// display metadata only. Full windows and unreferenced hardware stay unchanged.
+std::optional<double> spectrum_display_gain(std::optional<double> reference_gain_db,
+                                             std::size_t waveform_samples);
 // Input callback sizes and UI polling cadence cannot change the signal clock.
 // Retain at least one nominal 60 Hz frame for the constellation. Waveform and
 // spectrum still use their fixed 2,048-sample tail. No display clock is needed.

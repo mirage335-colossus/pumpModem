@@ -440,6 +440,16 @@ Existing files are never overwritten. The waveform defaults to four carrier
 cycles; use the mouse wheel to zoom and double-click to reset. The waterfall
 retains every FFT bin through peak pooling and uses one labeled intensity scale for
 its entire history. Click it to clear the history and reset that scale.
+In simulation, the waterfall uses a 40 dB display range referenced to the
+default −117 dBm received signal, with the default −164 dBm/Hz receiver noise
+in dark blue and more contrast for faint peaks. The range is −50..−10 dB at
+6 kHz sampling and shifts with noise bandwidth per FFT bin at other sample
+rates. Short startup FFT windows receive a matching noise-bandwidth correction.
+Path loss and transmit power change the signal brightness; receiver
+noise density changes the background. Strong signals saturate at the top of
+this display scale without recoloring the noise.
+The caption identifies this simulation reference; hardware retains dBFS units.
+This display correction does not change the samples processed by the receiver.
 
 Color is enabled by default when supported: muted cyan data field values, waveform
 traces, and constellation points, softer gray text, and a subdued multihue waterfall
@@ -448,7 +458,7 @@ red to soft off-white. Every constellation point uses the same hue. Reference
 marks, status labels, and signed pattern diagrams stay grayscale. Run
 `datapump-gui --monochrome` for grayscale; `--color` re-enables color, and the last
 of these switches wins. Color changes presentation only. Grayscale uses the
-original measured waterfall intensities and original text contrast, not
+same measured waterfall intensity scale and original text contrast, not
 desaturated false color. If FLTK cannot select an RGB visual, it uses grayscale.
 
 The dropdown above the QR preview offers **Normal**, **Dim red**, **Dark red**,

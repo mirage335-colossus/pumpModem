@@ -1,5 +1,8 @@
 #include "../src/gui/plot_render.hpp"
 #include "../src/gui/theme.hpp"
+#include "../src/gui/bitmap_sources.hpp"
+#include "../src/signal_view.hpp"
+#include "datapump/channel.hpp"
 #include "datapump/pattern_code.hpp"
 #include "datapump/pattern_correlator.hpp"
 #include "datapump/pattern_pulse.hpp"
@@ -9,6 +12,7 @@
 #include <memory>
 #include <random>
 #include <set>
+#include <thread>
 
 using namespace datapump;
 using namespace datapump::gui;
@@ -196,6 +200,243 @@ void measured_plots() {
     check(disabled.pixels() == scalar.pixels(), "color override must use original scalar values");
     const auto compressed = render(retained, full_bitmap_request(1, 1));
     check(red(compressed, 0, 0) == 255, "narrow waterfall lost a peak between output columns");
+}
+void simulation_waterfall_reference() {
+    Controller controller({true, false});
+    const auto noise_history = [&] {
+        const auto& settings = controller.settings();
+        modem::ChannelConfig impairment;
+        impairment.snr_db = settings.simulation_snr_db;
+        impairment.seed = 73;
+        modem::SampledSimulationChannel channel(settings.transfer.modem, impairment);
+        std::array<float, 2048> samples{};
+        channel.read_noise(samples);
+        const auto measured = live::detail::signal_plots(samples, settings.transfer.modem);
+        plots::SpectrumHistory history;
+        history.push(measured.spectrum, settings.transfer.modem.sample_rate / 2048.,
+                     settings.simulation_spectrum_gain_db);
+        return history;
+    };
+    const auto baseline = noise_history();
+    const auto request = full_bitmap_request(256, 1, false, true);
+    const auto baseline_gray = render(PlotSnapshot::waterfall(baseline), request, false);
+    const auto baseline_color = render(PlotSnapshot::waterfall(baseline), request);
+    std::vector<unsigned char> noise_levels;
+    std::size_t dark_blue = 0;
+    for (unsigned x = 0; x < request.width; ++x) {
+        noise_levels.push_back(red(baseline_gray, x, 0));
+        const auto pixel = 3 * x;
+        if (red(baseline_gray, x, 0) <= 64 && baseline_color.pixels()[pixel + 2] > baseline_color.pixels()[pixel + 1] &&
+            baseline_color.pixels()[pixel + 1] > baseline_color.pixels()[pixel]) ++dark_blue;
+    }
+    std::sort(noise_levels.begin(), noise_levels.end());
+    check(noise_levels[noise_levels.size() / 2] >= 32 && noise_levels[noise_levels.size() / 2] <= 55 &&
+          dark_blue >= 3 * request.width / 4,
+          "Default simulation noise must start in dark blue, leaving contrast for faint spectral peaks");
+    check(baseline_color.pixels() != baseline_gray.pixels(), "Simulation reference regression did not exercise RGB false color");
+    const auto same_noise = [&] {
+        const auto changed = noise_history();
+        for (std::size_t i = 0; i < baseline.rows().back().size(); ++i)
+            check(std::abs(changed.rows().back()[i] - baseline.rows().back()[i]) < .0002,
+                  "Simulation power/path loss changed the receiver noise floor");
+        check(render(PlotSnapshot::waterfall(changed), request, false).pixels() == baseline_gray.pixels() &&
+              render(PlotSnapshot::waterfall(changed), request).pixels() == baseline_color.pixels(),
+              "Simulation power/path loss recolored the waterfall background");
+    };
+    // Cross the old 20 dB autoscale thresholds in both directions. These use
+    // real seeded channel PCM, the FFT and both actual bitmap palettes.
+    for (const auto loss : {60, 90, 120, 121, 140, 170, 220, 270, 325, 170, 120}) {
+        controller.edit(ui::Field::link_loss, std::to_string(loss));
+        check(std::abs(controller.settings().simulation_snr_db) <= 200,
+              "Link settings exceeded the live simulation's supported SNR range");
+        same_noise();
+    }
+    controller.edit(ui::Field::link_power, "23 dBm");
+    same_noise();
+    controller.edit(ui::Field::link_noise, "-154 dBm/Hz");
+    const auto noisier = noise_history();
+    const auto noisier_gray = render(PlotSnapshot::waterfall(noisier), request, false);
+    std::size_t unclipped = 0;
+    for (std::size_t i = 0; i < baseline.rows().back().size(); ++i) {
+        check(std::abs(noisier.rows().back()[i] - baseline.rows().back()[i] - 10) < .0002,
+              "A 10 dB noise-density edit did not raise displayed noise by 10 dB");
+        const auto difference = int(red(noisier_gray, i, 0)) - int(red(baseline_gray, i, 0));
+        if (baseline.rows().back()[i] >= baseline.lower_db()) {
+            ++unclipped;
+            check(difference == 63 || difference == 64, "Noise-density edit lost the fixed waterfall intensity scale");
+        } else {
+            check(red(baseline_gray, i, 0) == 0 && difference > 0 && difference <= 64,
+                  "A noise-density edit did not lift a clipped background bin from black");
+        }
+    }
+    check(unclipped >= 9 * baseline.rows().back().size() / 10, "Too much default noise is clipped to verify the noise-density scale");
+    controller.edit(ui::Field::link_power, "3 dBm");
+    controller.edit(ui::Field::link_noise, "-164 dBm/Hz");
+    std::array<float, 2048> tone{};
+    for (std::size_t i = 0; i < tone.size(); ++i)
+        tone[i] = static_cast<float>(.7 * std::cos(2 * std::numbers::pi * 384 * i / tone.size()));
+    const auto spectrum = live::detail::signal_plots(tone, controller.settings().transfer.modem).spectrum;
+    plots::SpectrumHistory signals = baseline;
+    signals.push(spectrum, controller.settings().transfer.modem.sample_rate / 2048.,
+                 controller.settings().simulation_spectrum_gain_db);
+    const auto peak = *std::max_element(signals.rows().back().begin(), signals.rows().back().end());
+    controller.edit(ui::Field::link_loss, "140");
+    signals.push(spectrum, controller.settings().transfer.modem.sample_rate / 2048.,
+                 controller.settings().simulation_spectrum_gain_db);
+    check(std::abs(*std::max_element(signals.rows().back().begin(), signals.rows().back().end()) - peak + 20) < 1e-9,
+          "Added path loss did not dim the signal by the same number of dB");
+    controller.edit(ui::Field::link_loss, "60");
+    signals.push(spectrum, controller.settings().transfer.modem.sample_rate / 2048.,
+                 controller.settings().simulation_spectrum_gain_db);
+    check(signals.upper_db() == baseline.upper_db() && signals.lower_db() == baseline.lower_db() &&
+          signals.upper_db() - signals.lower_db() == 40 && signals.rows().front() == baseline.rows().front(),
+          "A strong simulated signal rescaled the noise or rewrote retained history");
+    const auto retained_color = render(PlotSnapshot::waterfall(signals, true), full_bitmap_request(256, 4, false, true));
+    const auto retained_gray = render(PlotSnapshot::waterfall(signals, true), full_bitmap_request(256, 4, false, true), false);
+    check(std::equal(baseline_color.pixels().begin(), baseline_color.pixels().end(), retained_color.pixels().begin()) &&
+          std::equal(baseline_gray.pixels().begin(), baseline_gray.pixels().end(), retained_gray.pixels().begin()),
+          "A strong simulated signal recolored retained noise pixels");
+    check(PlotSnapshot::waterfall(signals).caption().find("sim. ref.") != std::string::npos,
+          "Simulation spectrum claimed raw hardware dBFS units");
+    signals.push(spectrum, controller.settings().transfer.modem.sample_rate / 2048.);
+    check(signals.rows().size() == 1 && !signals.simulation_reference() &&
+          PlotSnapshot::waterfall(signals).caption().find("dBFS") != std::string::npos,
+          "Switching to hardware retained a simulation reference or incompatible history");
+
+    // Exercise the real snapshot-to-named-bitmap wiring too; a helper-only
+    // regression could pass while the GUI silently drops the captured gain.
+    controller.edit(ui::Field::link_loss, "170");
+    controller.start();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (controller.snapshot().waveform.size() < 2048 && std::chrono::steady_clock::now() < deadline) {
+        controller.poll();
+        check(controller.snapshot().error.empty(), "Waterfall simulation failed");
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    const auto& captured = controller.snapshot();
+    check(captured.waveform.size() == 2048 && captured.simulation_spectrum_gain_db == -50,
+          "Live spectrum did not retain the link reference used for its samples");
+    plots::SpectrumHistory expected;
+    expected.push(captured.spectrum_db, captured.spectrum_bin_hz, -50);
+    BitmapSources sources;
+    sources.update(controller);
+    check(render(sources.get(ui::Bitmap::waterfall), request).pixels() ==
+          render(PlotSnapshot::waterfall(expected), request).pixels(),
+          "GUI bitmap mapping dropped the captured simulation spectrum reference");
+    controller.close();
+}
+void simulation_waterfall_calibration() {
+    const auto request = full_bitmap_request(256, 1, false, true);
+    BitmapImage baseline_gray, baseline_color;
+    for (const std::uint32_t sample_rate : {6000U, 14400U, 96000U, 4000000U, 120000000U}) {
+        modem::Config config;
+        config.sample_rate = sample_rate;
+        config.carrier_hz = config.bandwidth_hz = sample_rate / 4.;
+        modem::ChannelConfig impairment;
+        impairment.snr_db = 47 - 10 * std::log10(sample_rate / 2.);
+        impairment.seed = 73;
+        modem::SampledSimulationChannel channel(config, impairment);
+        std::array<float, 2048> samples{};
+        channel.read_noise(samples);
+        const auto measured = live::detail::signal_plots(samples, config);
+        plots::SpectrumHistory history;
+        history.push(measured.spectrum, sample_rate / 2048., 0);
+        const auto gray = render(PlotSnapshot::waterfall(history), request, false);
+        const auto color = render(PlotSnapshot::waterfall(history), request);
+        if (sample_rate == 6000) {
+            baseline_gray = gray;
+            baseline_color = color;
+        } else {
+            check(gray.pixels() == baseline_gray.pixels() && color.pixels() == baseline_color.pixels(),
+                  "Changing the simulation sample rate recolored fixed receiver noise density");
+        }
+        // Replay stores four-bin peaks with four times the original bin spacing.
+        // That changes frequency sampling, not the FFT's noise bandwidth.
+        std::vector<double> replay_bins(257);
+        for (std::size_t i = 0; i < replay_bins.size(); ++i) {
+            const auto first = measured.spectrum.begin() + static_cast<std::ptrdiff_t>(4 * i);
+            const auto last = measured.spectrum.begin() + static_cast<std::ptrdiff_t>(std::min(4 * (i + 1), measured.spectrum.size()));
+            replay_bins[i] = *std::max_element(first, last);
+        }
+        plots::SpectrumHistory replay;
+        replay.push(replay_bins, sample_rate / 512., 0);
+        check(replay.lower_db() == history.lower_db() && replay.upper_db() == history.upper_db(),
+              "Replay frequency pooling changed the simulation noise reference");
+    }
+
+    // Startup frames have fewer samples and a wider effective noise bandwidth.
+    // Include very low explicit carrier/sample rates where this phase lasts
+    // seconds, as well as the first 50 ms frames of ordinary GUI settings.
+    for (const std::uint32_t sample_rate : {64U, 400U, 6000U, 14400U}) {
+        modem::Config config;
+        config.sample_rate = sample_rate;
+        config.carrier_hz = config.bandwidth_hz = sample_rate / 4.;
+        modem::ChannelConfig impairment;
+        impairment.snr_db = 47 - 10 * std::log10(sample_rate / 2.);
+        impairment.seed = 73;
+        modem::SampledSimulationChannel channel(config, impairment);
+        plots::SpectrumHistory history;
+        std::vector<float> samples(sample_rate / 20);
+        for (unsigned frame = 0; frame < 32; ++frame) {
+            channel.read_noise(samples);
+            const auto measured = live::detail::signal_plots(samples, config);
+            history.push(measured.spectrum, sample_rate / 2048.,
+                         live::detail::spectrum_display_gain(0, measured.waveform.size()));
+        }
+        const auto gray = render(PlotSnapshot::waterfall(history), full_bitmap_request(256, 32, false, true), false);
+        const auto color = render(PlotSnapshot::waterfall(history), full_bitmap_request(256, 32, false, true));
+        std::vector<unsigned char> levels;
+        std::size_t dark = 0;
+        for (std::size_t pixel = 0; pixel < 256 * 32; ++pixel) {
+            const auto level = gray.pixels()[pixel * 3];
+            levels.push_back(level);
+            if (level <= 90 && (level == 0 || (color.pixels()[pixel * 3 + 2] > color.pixels()[pixel * 3 + 1] &&
+                color.pixels()[pixel * 3 + 1] > color.pixels()[pixel * 3]))) ++dark;
+        }
+        std::sort(levels.begin(), levels.end());
+        check(levels[levels.size() / 2] <= 55 && dark >= 9 * levels.size() / 10,
+              "A partial startup FFT brightened simulation noise out of the dark-blue palette");
+    }
+
+    // Use real noisy PCM, not isolated synthetic dB bins: a narrow carrier with
+    // 30--35 dB of additional path loss must retain visible contrast over noise.
+    // Median scores across 32 frames avoid depending on one fortunate FFT peak.
+    const auto median = [](std::vector<unsigned char> values) {
+        std::sort(values.begin(), values.end());
+        return values[values.size() / 2];
+    };
+    for (const auto path_loss : {150, 155}) {
+        modem::Config config;
+        modem::ChannelConfig impairment;
+        impairment.snr_db = 3 - path_loss + 164 - 10 * std::log10(config.sample_rate / 2.);
+        impairment.seed = 73;
+        modem::SampledSimulationChannel channel(config, impairment);
+        plots::SpectrumHistory history;
+        for (unsigned frame = 0; frame < 32; ++frame) {
+            std::array<float, 2048> samples{};
+            channel.read_noise(samples);
+            for (std::size_t i = 0; i < samples.size(); ++i)
+                samples[i] += static_cast<float>(.7 * std::cos(2 * std::numbers::pi * 384 * i / samples.size()));
+            const auto measured = live::detail::signal_plots(samples, config);
+            history.push(measured.spectrum, config.sample_rate / 2048., 120 - path_loss);
+        }
+        const auto gray = render(PlotSnapshot::waterfall(history), full_bitmap_request(256, 32, false, true), false);
+        const auto color = render(PlotSnapshot::waterfall(history), full_bitmap_request(256, 32, false, true));
+        std::vector<unsigned char> carrier_levels, noise_levels, carrier_blue, noise_blue;
+        for (unsigned y = 0; y < 32; ++y) {
+            carrier_levels.push_back(red(gray, 96, y));
+            carrier_blue.push_back(color.pixels()[(y * 256 + 96) * 3 + 2]);
+            for (unsigned x = 64; x < 128; ++x) if (x < 94 || x > 98) {
+                noise_levels.push_back(red(gray, x, y));
+                noise_blue.push_back(color.pixels()[(y * 256 + x) * 3 + 2]);
+            }
+        }
+        check(median(noise_levels) >= 32 && median(noise_levels) <= 55,
+              "Attenuated-signal capture lost the calibrated dark background");
+        check(int(median(carrier_levels)) - int(median(noise_levels)) >= (path_loss == 150 ? 45 : 25) &&
+              int(median(carrier_blue)) - int(median(noise_blue)) >= 35,
+              "An attenuated carrier lost visible contrast in the calibrated grayscale or color spectrum");
+    }
 }
 void waterfall_resize() {
     plots::SpectrumHistory history;
@@ -499,7 +740,7 @@ void sampled_pattern_score_clouds() {
 }
 int main() {
     try {
-        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); waterfall_resize(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
+        transfer_contract(); producer_lifetime(); tiled_replay(); measured_plots(); simulation_waterfall_reference(); simulation_waterfall_calibration(); waterfall_resize(); qr_and_patterns(); pattern_scores(); sampled_pattern_score_clouds();
         std::cout << "GUI bitmap contract and shared producer tests passed\n";
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

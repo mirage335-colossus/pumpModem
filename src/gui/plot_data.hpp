@@ -5,6 +5,7 @@
 #include <cmath>
 #include <deque>
 #include <numbers>
+#include <optional>
 #include <span>
 #include <vector>
 
@@ -92,31 +93,48 @@ inline std::vector<Column> waveform_columns(std::span<const float> samples, std:
 class SpectrumHistory {
 public:
     static constexpr std::size_t capacity = 160;
-    void clear() { rows_.clear(); upper_db_ = max_hz_ = 0; }
-    void push(std::span<const double> bins, double bin_hz) {
+    void clear() { rows_.clear(); upper_db_ = max_hz_ = 0; simulation_reference_ = false; }
+    void push(std::span<const double> bins, double bin_hz,
+              std::optional<double> simulation_gain_db = {}) {
         if (bins.empty()) return;
         if (!(bin_hz > 0) || !std::isfinite(bin_hz)) throw Error("invalid spectrum frequency scale");
+        if (simulation_gain_db && !std::isfinite(*simulation_gain_db)) throw Error("invalid simulation spectrum reference");
         const auto edge = bin_hz * static_cast<double>(bins.size() - 1);
-        if (!rows_.empty() && std::abs(edge - max_hz_) > 1e-9 * std::max(1., edge)) clear();
+        if (!rows_.empty() && (std::abs(edge - max_hz_) > 1e-9 * std::max(1., edge) ||
+            simulation_reference_ != simulation_gain_db.has_value())) clear();
+        simulation_reference_ = simulation_gain_db.has_value();
         max_hz_ = edge;
+        // At the fixed -164 dBm/Hz reference noise, a complete 2,048-sample
+        // Hann FFT at 6 kHz has mean noise near -45.7 dB sim. ref.; pooling
+        // four bins puts typical columns near -43.5 dB. Start at -50 dB so
+        // that floor is dark blue, with 40 dB of contrast for weak peaks.
+        // Noise power per FFT bin grows with sample rate. Use the full
+        // frequency extent: replay has already pooled bins and wider spacing.
+        // Cache this once per row rather than calculating logarithms per pixel.
+        if (simulation_reference_) simulation_lower_db_ = -50 + (max_hz_ > 0 ? 10 * std::log10(max_hz_ / 3000) : 0);
         const auto columns = std::min<std::size_t>(256, bins.size());
         std::vector<double> row(columns, -240.);
         for (std::size_t i = 0; i < columns; ++i) {
             const auto first = i * bins.size() / columns, last = (i + 1) * bins.size() / columns;
             for (auto bin = first; bin < last; ++bin)
-                if (std::isfinite(bins[bin])) row[i] = std::max(row[i], bins[bin]);
-            if (row[i] > upper_db_) upper_db_ = std::ceil(row[i] / 20) * 20;
+                if (std::isfinite(bins[bin])) row[i] = std::max(row[i], bins[bin] + simulation_gain_db.value_or(0));
+            // A stronger simulated carrier may saturate its own color, but
+            // must not recolor the independent receiver noise or older rows.
+            if (!simulation_reference_ && row[i] > upper_db_) upper_db_ = std::ceil(row[i] / 20) * 20;
         }
         if (rows_.size() == capacity) rows_.pop_front();
         rows_.push_back(std::move(row));
     }
-    double intensity(double db) const { return std::clamp((db - lower_db()) / 100., 0., 1.); }
-    double lower_db() const { return upper_db_ - 100; }
-    double upper_db() const { return upper_db_; }
+    double intensity(double db) const { return std::clamp((db - lower_db()) / (simulation_reference_ ? 40. : 100.), 0., 1.); }
+    double lower_db() const { return simulation_reference_ ? simulation_lower_db_ : upper_db_ - 100; }
+    double upper_db() const { return simulation_reference_ ? simulation_lower_db_ + 40 : upper_db_; }
     double max_hz() const { return max_hz_; }
+    bool simulation_reference() const { return simulation_reference_; }
     const std::deque<std::vector<double>>& rows() const { return rows_; }
 private:
     std::deque<std::vector<double>> rows_;
     double upper_db_ = 0, max_hz_ = 0;
+    double simulation_lower_db_ = -50;
+    bool simulation_reference_ = false;
 };
 }

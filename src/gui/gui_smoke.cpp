@@ -225,8 +225,10 @@ struct Smoke::Impl {
             const auto row=std::find_if(records.begin(),records.end(),[&](const auto& value){return value.id==std::to_string(signal.id);});
             require(row!=records.end(),"Signal collection lost its stable reception identity");
             const auto has=[&](const std::string& text){return std::any_of(row->cells.begin(),row->cells.end(),[&](const auto& cell){return cell.text==text;});};
+            // Received rows preserve permitted LF bytes; compare the complete
+            // text without the filename/label helper's whitespace flattening.
             require(has(std::to_string(static_cast<long long>(std::llround(signal.frequency_hz)))+" Hz")&&
-                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(display_label(signal_display_text(signal))),
+                    has(signal_status_label(signal))&&has(signal_preamble_label(signal))&&has(signal_data_label(signal))&&has(signal_display_text(signal)),
                     "Signal record omitted frequency, status, preamble, data accuracy or complete received text");
             require(row->activatable==(signal.binary?signal.complete:(signal.validated||signal.complete&&signal.pattern_score)&&signal.text_message),
                     "Signal record activation disagreed with verified-text or completed-raw clipboard eligibility");
