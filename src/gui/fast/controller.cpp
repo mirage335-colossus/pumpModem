@@ -92,7 +92,7 @@ struct Controller::Impl {
     const ui::FieldState& f(F field) const {return fields.at(static_cast<std::size_t>(field));}
     explicit Impl(std::function<bool()> acquire):acquire_audio(std::move(acquire)) {
         f(F::fast_profile).options={{"wire","Audio cable · QAM / LDPC"},{"ssb","IC-7100 SSB · 2.4 kHz"},{"fm","IC-7100 FM · voice band"},{"acoustic","Speakers / microphone"},{"acoustic-short","Speakers / mic · short"}};
-        f(F::fast_profile).selected="acoustic";
+        f(F::fast_profile).selected="acoustic-short";
         f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
         f(F::fast_coding).options={{"half","Rate 1/2 · strongest"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8 · highest rate"}};
         f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long cable transfers"},{"64","64"}};
@@ -107,7 +107,7 @@ struct Controller::Impl {
         f(F::fast_key).options={{"none","Choose an encryption key"}};f(F::fast_key).selected="none";
         f(F::fast_key_path).text="No fast key loaded";
         f(F::fast_status).text="Choose matching settings at both ends.";
-        set_profile(fast::Channel::acoustic);refresh();
+        set_profile(fast::Channel::acoustic_short);refresh();
     }
     ~Impl() {session.close();if(worker.joinable())worker.join();}
     void remember_routing() {

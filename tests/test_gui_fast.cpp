@@ -83,9 +83,9 @@ void snr_and_symbol_rate_controls() {
     using F=ui::Field;using C=ui::Command;
     unsigned acquisitions=0;
     fast_ui::Controller controller([&] {++acquisitions;return false;});
-    check(controller.field(F::fast_profile).selected=="acoustic"&&controller.field(F::fast_expected_snr).selected=="3"&&
+    check(controller.field(F::fast_profile).selected=="acoustic-short"&&controller.field(F::fast_expected_snr).selected=="-6"&&
         controller.field(F::fast_symbol_rate).selected=="auto",
-        "Fast GUI did not default to speakers/microphone at 3 dB");
+        "Fast GUI did not default to short speakers/microphone at -6 dB");
     for(const auto field:{F::fast_expected_snr,F::fast_symbol_rate}) {
         const auto& c=control(field);
         check(c.kind==ui::Kind::choice&&c.persistent==(field==F::fast_expected_snr)&&c.scope==ui::ScreenScope::fast&&c.help[0],
@@ -182,15 +182,15 @@ void snr_and_symbol_rate_controls() {
         [&](const auto& option){return option.id==fast::symbol_rate_option_id(narrow_auto);}),
         "Manual narrow SC Auto timing has no matching explicit dropdown option");
     controller.select(F::fast_profile,"acoustic-short");
-    const auto short_acoustic=fast::resolve_snr_preset(fast::Channel::acoustic_short,3).profile;
+    const auto short_acoustic=fast::resolve_snr_preset(fast::Channel::acoustic_short,-6).profile;
     check(controller.field(F::fast_profile).selected=="acoustic-short"&&
-        controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_expected_snr).selected=="-6"&&
         controller.field(F::fast_symbol_rate).selected=="auto"&&
         controller.field(F::fast_constellation).selected==std::to_string(short_acoustic.constellation)&&
         controller.field(F::fast_depth).selected==std::to_string(short_acoustic.interleave_depth)&&
         controller.field(F::fast_mono).selected=="left"&&
         controller.field(F::fast_detail).text.find("acoustic-short")!=std::string::npos,
-        "Short-transfer acoustic profile did not select its independent 3 dB preset");
+        "Short-transfer acoustic profile did not select its independent -6 dB preset");
     check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
         controller.field(F::fast_coding).options[0].id=="half"&&
         controller.field(F::fast_coding).options.back().id=="three-quarters",
@@ -223,7 +223,7 @@ void snr_and_symbol_rate_controls() {
         controller.field(F::fast_mono).selected=="stereo",
         "Short-transfer acoustic settings changed the existing acoustic profile");
     controller.select(F::fast_profile,"acoustic-short");
-    check(controller.field(F::fast_expected_snr).selected=="3"&&
+    check(controller.field(F::fast_expected_snr).selected=="-6"&&
         controller.field(F::fast_depth).selected==std::to_string(short_acoustic.interleave_depth)&&
         controller.field(F::fast_mono).selected=="right",
         "Returning to short-transfer acoustic did not reset SNR while retaining its output routing");
@@ -256,8 +256,8 @@ void presentation_and_retention() {
     app.select(F::fec,"off");const auto fec=app.field(F::fec).selected;
     app.select(mode,"fast");
     check(app.field(F::fast_mode).selected=="fast","Fast Modem choice was not accepted");
-    check(app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_expected_snr).selected=="3"&&
-        app.field(F::fast_mono).selected=="left","Fast must default to speakers/microphone with left mono");
+    check(app.field(F::fast_profile).selected=="acoustic-short"&&app.field(F::fast_expected_snr).selected=="-6"&&
+        app.field(F::fast_mono).selected=="left","Fast must default to short speakers/microphone at -6 dB with left mono");
     check(app.field(F::fast_qr_brightness).selected=="dark"&&app.field(F::fast_qr_brightness).options.size()==4,
         "Fast QR brightness choices/default differ from the shared convention");
     for(const auto& c:ui::console_screen()) {
@@ -275,7 +275,7 @@ void presentation_and_retention() {
     const auto& profiles=app.field(F::fast_profile).options;
     check(profiles.size()==5&&profiles[0].id=="wire"&&profiles[1].id=="ssb"&&
         profiles[2].id=="fm"&&profiles[3].id=="acoustic"&&profiles[4].id=="acoustic-short"&&
-        profiles[4].label=="Speakers / mic · short"&&app.field(F::fast_constellation).options.size()==11,
+        profiles[4].label=="Speakers / mic · short"&&app.field(F::fast_constellation).options.size()==1,
           "Fast channel/constellation selections are incomplete");
     check(!app.field(F::fast_encryption).checked&&app.enabled(C::fast_listen)&&!app.enabled(C::fast_transmit),"Fast defaults must allow plain reception and require nonempty transmit text");
     check(!app.field(F::fast_key).enabled&&!app.enabled(C::fast_open_key)&&!app.enabled(C::fast_generate_key),"Plain mode retained active key controls");

@@ -170,7 +170,8 @@ Profile short_acoustic_preset(double expected) {
 double default_expected_snr(Channel c) {
     switch(c) {
     case Channel::wire:return 36;
-    case Channel::acoustic:case Channel::acoustic_short:return 3;
+    case Channel::acoustic:return 3;
+    case Channel::acoustic_short:return -6;
     case Channel::ssb:case Channel::fm:return 20;
     }
     throw Error("Unknown Fast SNR channel");

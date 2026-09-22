@@ -2,9 +2,9 @@
 
 Select **Speakers / mic · short** for speaker/microphone transfers with smaller
 coding blocks and less startup training. In the CLI, use
-`--profile acoustic-short --expected-snr -6`. The default expected SNR remains
-3 dB. Other channel profiles and the initial **Speakers / microphone** selection
-are unchanged.
+`--profile acoustic-short --expected-snr -6`. This is the initial GUI channel
+profile, with a default expected SNR of −6 dB. Other channel profiles are
+unchanged.
 
 ## Airtime and throughput across SNR settings
 
@@ -21,10 +21,10 @@ public or encrypted text, including bootstrap and one source cycle.
 | ---: | --- | ---: | ---: |
 | 13 dB | OFDM / 16,200-bit LDPC | 9.610 s | 32,681 |
 | 6 dB | OFDM / 16,200-bit LDPC | 9.610 s | 16,244 |
-| 3 dB (default) | OFDM / 16,200-bit LDPC | 10.343 s | 7,956 |
+| 3 dB | OFDM / 16,200-bit LDPC | 10.343 s | 7,956 |
 | 0 dB | OFDM / 1,944-bit LDPC | 12.328 s | 3,141 |
 | −3 dB | Single carrier / 1,944-bit LDPC | 9.557 s | 863 |
-| −6 dB | Single carrier / 1,944-bit LDPC | 9.844 s | 794 |
+| −6 dB (default) | Single carrier / 1,944-bit LDPC | 9.844 s | 794 |
 | −10 dB | Single carrier / 1,944-bit LDPC | 15.278 s | 316 |
 
 Times include training, bootstrap, complete coding cycles, tracking, pulse tails
@@ -41,8 +41,8 @@ attachment drops from 76.986 to 39.057 seconds. Selecting interleave depth 2
 in Modem details increases the minimum to 12.765 seconds and steady throughput
 to 895 / 830 bit/s; its tested keyed file takes 36.136 seconds. That smaller
 additional gain does not justify changing the automatic minimum at −6 dB.
-Both peers must use the same depth. At unchanged 3 dB, the tested 2.5 KiB
-attachment still takes 11.794 seconds.
+Both peers must use the same depth. At an explicitly selected 3 dB, the tested
+2.5 KiB attachment still takes 11.794 seconds.
 
 SNR uses the original 17.5 kHz reference band. Narrowing assumes unchanged total
 received power and flat noise density. At −6 dB, the occupied band is about

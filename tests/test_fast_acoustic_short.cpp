@@ -34,8 +34,8 @@ Profile short_profile() {
     const auto preset=resolve_snr_preset(Channel::acoustic_short,reference_snr_db);
     const auto& p=preset.profile;
     require(preset.reference_bandwidth_hz==reference_bandwidth_hz&&
-        default_expected_snr(Channel::acoustic_short)==3&&preset.expected_snr_db==reference_snr_db,
-        "short acoustic default lost its original-band 3 dB reference");
+        default_expected_snr(Channel::acoustic_short)==-6&&preset.expected_snr_db==reference_snr_db,
+        "short acoustic default or explicit original-band SNR selection changed");
     require(p.channel==Channel::acoustic_short&&p.capacity_mode&&
         (p.compact_convolutional||p.ldpc_frame_bits==16200||small_ldpc_frame(p.ldpc_frame_bits))&&
         (!p.acoustic_ofdm||p.ofdm_training_blocks<16)&&p.interleave_depth>=1&&p.interleave_depth<=16,

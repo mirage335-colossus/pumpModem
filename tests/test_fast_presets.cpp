@@ -80,7 +80,7 @@ int main() {try {
     }
     require(parse_channel("acoustic-short")==Channel::acoustic_short&&
         channel_name(Channel::acoustic_short)=="acoustic-short", "short profile name is not canonical");
-    require(default_expected_snr(Channel::acoustic_short)==3,"short profile default SNR changed");
+    require(default_expected_snr(Channel::acoustic_short)==-6,"short profile must default to -6 dB");
     const auto short_options=expected_snr_options(Channel::acoustic_short);
     require(short_options==expected_snr_options(Channel::acoustic),"short acoustic SNR choices differ");
     for(const auto snr:short_options) {

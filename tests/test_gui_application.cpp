@@ -27,7 +27,7 @@ void fast_default_console() {
           "Fast must open Console and hide modem details initially");
     check(app.control(control(F::developer_mode)).visible&&app.control(control(F::fast_text)).visible&&
           !app.control(control(F::fast_symbol_rate)).visible&&app.field(F::fast_mono).selected=="left"&&
-          app.field(F::fast_profile).selected=="acoustic"&&app.field(F::fast_expected_snr).selected=="3",
+          app.field(F::fast_profile).selected=="acoustic-short"&&app.field(F::fast_expected_snr).selected=="-6",
           "Fast default surface or channel routing is incorrect");
     check(control(F::fast_history).activate_on_select&&control(F::fast_history).activate_record==C::fast_copy_signal,
           "A single signal selection must copy completed text");

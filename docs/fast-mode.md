@@ -1,12 +1,13 @@
 # Fast text and file transfer
 
 Fast Modem is a separate streaming QAM/LDPC and classic APSK modem. Ordinary
-desktop launches select it with Speakers / microphone and listen continuously. The modem dropdown
+desktop launches select it with Speakers / mic · short and listen continuously. The modem dropdown
 lists Fast Modem, Robust Modem and Legacy Modem. Explicit Robust simulation or
 settings launches retain their workflow. Console opens first; Developer mode
 reveals Modem details with manual symbol rate, constellation and coding controls.
 Channel profile and Expected SNR sit below the diagnostic plots. Cable defaults
-to an expected 36 dB SNR; speakers/microphone defaults to 3 dB. Switching channel
+to an expected 36 dB SNR; speakers/microphone defaults to 3 dB and its short
+profile to −6 dB. Switching channel
 profiles reapplies that profile's default SNR and waveform settings.
 
 Enter a Message or Attach file, then transmit. Use text restores the retained
@@ -101,8 +102,8 @@ completion. Both native backends render the same immutable plot snapshots.
 ## Channel profiles
 
 The raw API/CLI reference profiles below describe the established high-SNR
-operating points. The GUI resolves its Expected SNR (36 dB cable, 3 dB acoustic)
-into the corresponding lower-order settings; the CLI does likewise when passed
+operating points. The GUI resolves its Expected SNR (36 dB cable, 3 dB acoustic,
+−6 dB acoustic short) into the corresponding lower-order settings; the CLI does likewise when passed
 `--expected-snr`. See [SNR presets](fast-snr-presets.md).
 
 The high-SNR **Audio cable · QAM / LDPC** reference uses **4,194,304-QAM,
@@ -150,11 +151,11 @@ The GUI channel selector offers **Audio cable · QAM / LDPC**, **IC-7100 SSB ·
 2.4 kHz**, **IC-7100 FM · voice band**, **Speakers / microphone**, and
 **Speakers / mic · short**. The separate [short acoustic profile](fast-acoustic-short.md)
 uses smaller coding blocks and less training, taking about 11.8 seconds for the
-tested 2.5 KiB attachment at its default 3 dB expected SNR. Its general preset
-search targets approximately ten-second minimum transfers, allowing 12.5 seconds
+tested 2.5 KiB attachment at an explicitly selected 3 dB expected SNR. Its general
+preset search targets approximately ten-second minimum transfers, allowing 12.5 seconds
 for a substantial throughput gain. Small LDPC gives about 9.8 seconds at −6 dB
-and 12.3 seconds at 0 dB; larger messages take longer. Existing profiles
-and the initial speakers/microphone selection are unchanged.
+and 12.3 seconds at 0 dB; larger messages take longer. The short profile is the
+initial GUI selection at −6 dB expected SNR. Other profiles are unchanged.
 All four classic presets remain available through the CLI with
 `--format classic`.
 
