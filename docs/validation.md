@@ -5381,3 +5381,35 @@ qualification or statistical file-success measurements. No audio hardware or
 running user GUI was changed. [Profile behavior](fast-acoustic-short.md) and
 [commands, sampled results and integration logs](validation-data/fast/acoustic-short-20260922/README.md)
 record the limits and reproduction details.
+
+### Developer mode layout after modem switching (2026-09-22)
+
+FLTK and Rev now invalidate desktop layout when the page viewport, tab container
+or tab presentation changes, independently of individual control rectangles.
+Returning from Fast to Robust therefore restores the Robust tab row before
+developer mode exposes additional tabs. Previously, retained Fast tab positions
+could overlap one another and the Callsign, Grid and Repeatable row until a
+window resize. Modem behavior, settings and message contents are unchanged.
+
+The extended FLTK native regression fails against the original adapter and
+passes with the fix. It establishes Fast geometry, returns to Robust, then
+toggles developer mode repeatedly without resizing; default/minimum sizes,
+both prior developer states, persistent controls and their children, tabs and
+the page viewport are checked. Rev checks expected native placement in both
+switching directions and after developer toggles. Shared binding tests cover
+independent desktop geometry invalidation.
+
+Both Release GUI executables rebuilt. The nine selected shared checks pass:
+`gui_adapter_boundary`, `gui_boundary_regression`, `gui_layout`, `gui_bindings`,
+`gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` and
+`gui_overlay` (71.48 seconds together). FLTK adapter/document conformance passes
+on a private 2400×1800 Xvfb display at 96 DPI (66.17 seconds); Rev adapter
+conformance passes on a separate display with the same geometry (102.13 seconds).
+The production FLTK simulation workflow also passes (260.50 seconds).
+Rev platform and 1×/2× coordinate checks also pass. Its production workflow
+still fails the previously recorded phase 11 three-second replay assertion
+(12 frames, 11 changes, elapsed 3.096 seconds, fraction 0.898305); no assertion
+was relaxed and no complete Rev workflow pass is claimed.
+Temporary test files use repository-local build directories because host `/tmp`
+is nearly full. These are Linux GUI checks; Windows rendering and physical
+audio links are not qualified by this change.

@@ -58,8 +58,33 @@ void retained_layout_and_bitmap() {
           retained.update_bitmap(ui::Bitmap::pattern_scores,0),
         "Initial or wrapped bitmap revisions were confused with an uninitialized native cache");
 }
+void retained_desktop_layout() {
+    DesktopLayoutState retained;
+    const ui::Rect page{16,86,1148,858},navigation{16,58,1148,28};
+    const std::vector<ui::TabLayout> tabs{{ui::Page::console,{16,58,120,28},true},
+        {ui::Page::fast_modem,{136,58,140,28},false}};
+    check(retained.needs_layout(page,navigation,tabs),"Initial desktop geometry was treated as already applied");
+    retained.applied_layout(page,navigation,tabs);
+    check(!retained.needs_layout(page,navigation,tabs),"Unchanged desktop geometry caused a repeated native layout");
+    auto moved_page=page;moved_page.y+=128;moved_page.h-=128;
+    check(retained.needs_layout(moved_page,navigation,tabs),"A moved page viewport retained stale native child origins");
+    auto moved_navigation=navigation;moved_navigation.y+=128;
+    check(retained.needs_layout(page,moved_navigation,tabs),"A moved tab container retained its native origin");
+    auto changed=tabs;changed[1].frame.x+=100;
+    check(retained.needs_layout(page,navigation,changed),"A moved tab retained stale native geometry");
+    changed=tabs;changed[1].visible=true;
+    check(retained.needs_layout(page,navigation,changed),"A newly visible tab did not refresh native geometry");
+    changed=tabs;changed[1].page=ui::Page::compression;
+    check(retained.needs_layout(page,navigation,changed),"A replacement tab retained stale native identity");
+    changed=tabs;std::reverse(changed.begin(),changed.end());
+    check(retained.needs_layout(page,navigation,changed),"Reordered tabs retained stale native placement");
+    changed=tabs;changed.pop_back();
+    check(retained.needs_layout(page,navigation,changed),"A removed tab retained stale native layout");
+    retained.applied_layout(moved_page,moved_navigation,changed);
+    check(!retained.needs_layout(moved_page,moved_navigation,changed),"Applied desktop geometry was not retained");
+}
 }
 int main() {
-    try {deferred_options();resolved_roles();retained_layout_and_bitmap();std::cout<<"Shared native binding presentation and retention passed\n";}
+    try {deferred_options();resolved_roles();retained_layout_and_bitmap();retained_desktop_layout();std::cout<<"Shared native binding presentation and retention passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }
