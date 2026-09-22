@@ -163,11 +163,12 @@ and decoder could otherwise change the codebook together without a test failing.
 From the repository root, build and run the focused headless coverage:
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel 2
-ctest --test-dir build --output-on-failure -j 2 \
-  -R '^(live_profiles|live_receptions|live|live_resources|compression_short|transfer|stream_codec|stream_receive|recovery|attachment|pattern_correlator|pattern_receiver|pattern_drift|pattern_differential|receiver_differential|pattern_fft_batch|pattern_correlator_batch|pattern_search|tuning|simulation_estimate|receiver_probability|differential_probability|differential_receiver_probability|weak_signal|gui_application|gui_controller|gui_inspection|gui_binary_editor|cli)$'
+./build.sh test contract --jobs 2
 ```
+
+The `contract` CTest label and `datapump-tests-contract` build target select
+these same 29 suites (the CLI suite is included when Python is available).
+See [the build guide](building.md) for direct CMake commands and other groups.
 
 The long-symbol regression generates sampled PCM with four-hour coordinates; it
 does not wait four wall-clock hours. Shared GUI suites require no display and

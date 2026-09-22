@@ -1,4 +1,7 @@
-build*/
+/build/
+/build-*/
+/third_party/build-support/cache/
+/CMakeUserPresets.json
 __pycache__/
 *.pyc
 *.wav

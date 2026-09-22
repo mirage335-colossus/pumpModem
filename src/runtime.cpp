@@ -197,7 +197,7 @@ void write_new_file(const std::string& path,std::span<const std::uint8_t> bytes)
     auto closer=[](FILE* file){std::fclose(file);};
     std::unique_ptr<FILE,decltype(closer)> f(std::fopen(path.c_str(),"wbx"),closer);
     if(!f) throw Error("cannot create output (it may already exist): "+path);
-    if(std::fwrite(bytes.data(),1,bytes.size(),f.get())!=bytes.size() || std::fflush(f.get())!=0)
+    if((!bytes.empty() && std::fwrite(bytes.data(),1,bytes.size(),f.get())!=bytes.size()) || std::fflush(f.get())!=0)
         throw Error("output write failed: "+path);
 }
 }

@@ -1,5 +1,9 @@
 # Data Pump
 
+**Build:** `./build.sh` · **Test:** `./build.sh test contract` ·
+**Package:** `./build.sh package`. See the [build and maintenance guide](docs/building.md)
+for dependencies, stable profiles, focused tests and portable release limits.
+
 A C++20 audio modem for moving clipboard text, screenshots, and files between
 computers. It includes a compiled CLI, a native C++/FLTK desktop console, real
 waveform and sampled channel simulation, and a documented fixed-interval byte stream. Received source data uses bounded
@@ -288,14 +292,13 @@ the software. If Python is available, CTest can also run optional CLI integratio
 tests.
 
 ```sh
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
+./build.sh
+./build.sh test contract
 
-./build/datapump-gui
-./build/pump simulate --text 'CQ hello from Data Pump' --snr 12 --json
-./build/pump tx --input circuit.kicad_pcb --output transfer.wav
-./build/pump rx --input transfer.wav --save received.kicad_pcb
+./build/dev/datapump-gui
+./build/dev/pump simulate --text 'CQ hello from Data Pump' --snr 12 --json
+./build/dev/pump tx --input circuit.kicad_pcb --output transfer.wav
+./build/dev/pump rx --input transfer.wav --save received.kicad_pcb
 ```
 
 The last command refuses to overwrite an existing file. `rx --json` returns
@@ -331,11 +334,11 @@ for another configured budget or cancels its current run. Clearing received
 content discards these jobs; stopping or reconfiguring the session does too.
 
 ```sh
-printf 'clipboard text' | ./build/pump tx --input - --output message.wav
-./build/pump rx --input message.wav
-./build/pump tx --text 'hello' --device default
-./build/pump listen --json
-./build/pump listen --simulation '3dBm -120dB' --text 'hello' --json
+printf 'clipboard text' | ./build/dev/pump tx --input - --output message.wav
+./build/dev/pump rx --input message.wav
+./build/dev/pump tx --text 'hello' --device default
+./build/dev/pump listen --json
+./build/dev/pump listen --simulation '3dBm -120dB' --text 'hello' --json
 ```
 
 `listen` continuously receives from the operating system's default audio device;
@@ -392,14 +395,15 @@ producers. Build it separately with `-DDATAPUMP_GUI_BACKEND=rev`; see the
 software-OpenGL requirements and current release boundaries.
 
 The desktop application is a compiled executable linked to the same C++ transfer
-service as the CLI. FLTK and OpenSSL are linked statically by default. For a
+service as the CLI. FLTK is linked statically; portable release builds also
+request static OpenSSL. For a
 copyable installation, install or package a release build:
 
 ```sh
-cmake --install build --prefix "$PWD/build/DataPump-portable"
+./build.sh package
+cmake --install build/release --prefix "$PWD/build/DataPump-portable"
 ./build/DataPump-portable/bin/datapump-gui --self-check
 ./build/DataPump-portable/bin/datapump-gui
-cmake --build build --target package
 ```
 
 Copy that **entire directory** to another compatible computer and use its
@@ -542,11 +546,11 @@ local action. Filenames are bounded UTF-8 basenames, with no path separators.
 ## Shared keys and encrypted transfers
 
 ```sh
-./build/pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
-./build/pump keys --keyfile shared.key
-./build/pump tx --text 'private clipboard' --keyfile shared.key \
+./build/dev/pump keygen --output shared.key --key-names 'Home,Portable,Emergency'
+./build/dev/pump keys --keyfile shared.key
+./build/dev/pump tx --text 'private clipboard' --keyfile shared.key \
   --time 1800000000 --output encrypted.wav
-./build/pump rx --input encrypted.wav --keyfile shared.key \
+./build/dev/pump rx --input encrypted.wav --keyfile shared.key \
   --time 1800000002 --search-seconds 2 --json
 ```
 
@@ -580,18 +584,18 @@ from someone holding the complete keyfile and required pad. See
 
 ```sh
 # Automatic tuning and exact airtime, without allocating audio.
-./build/pump estimate --text 'CQ hello' --bw 1200 --target-snr 40 --pattern auto-pattern
+./build/dev/pump estimate --text 'CQ hello' --bw 1200 --target-snr 40 --pattern auto-pattern
 
 # Optical transfer, UTF-8, up to500 Unicode characters.
-./build/pump qr --text 'clipboard text' --output clipboard.svg
-./build/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
+./build/dev/pump qr --text 'clipboard text' --output clipboard.svg
+./build/dev/pump qr --text 'clipboard text' --format pbm --output clipboard.pbm
 
 # Three payload symbols plus the hardware-settling prefix; no padding, MAC or FEC.
-./build/pump status-tx --bits 010 --output status.wav
-./build/pump status-rx --bits 010 --input status.wav
+./build/dev/pump status-tx --bits 010 --output status.wav
+./build/dev/pump status-rx --bits 010 --input status.wav
 
 # Search these receive targets only, with the selected bandwidth and pattern.
-./build/pump listen --receive-targets "40, 6, -6" --bw 1200 --pattern auto-pattern --json
+./build/dev/pump listen --receive-targets "40, 6, -6" --bw 1200 --pattern auto-pattern --json
 ```
 
 With automatic pattern settings, `status-rx` discovers the raw bit string from
@@ -682,9 +686,7 @@ It records the required short-text/binary paths, physical-end boundary and
 pending GUI behavior, with focused regression commands.
 
 ```sh
-cmake -S . -B build-sanitize -DCMAKE_BUILD_TYPE=Debug -DDATAPUMP_SANITIZERS=ON
-cmake --build build-sanitize --parallel
-ASAN_OPTIONS=detect_leaks=0 ctest --test-dir build-sanitize --output-on-failure
+ASAN_OPTIONS=detect_leaks=0 ./build.sh sanitize contract
 ```
 
 Leak detection is disabled above for environments where ptrace prevents
@@ -710,7 +712,10 @@ For Windows, use a C++20 Visual Studio toolchain and OpenSSL 3 (for example the
 Windows code is maintained alongside Linux code but cannot be hardware-verified
 by the Linux test environment. MSVC builds embed a UTF-8 process manifest for
 Windows10 version1903 or newer; non-ASCII paths on older Windows are unsupported.
-`DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON`. CMake installation
+`DATAPUMP_BUILD_GUI` and `DATAPUMP_PORTABLE` default to `ON` for direct CMake
+configuration. The explicit `dev` preset disables portable collection; the
+`release` preset enables it. Application builds omit test executables; use
+`./build.sh test GROUP` or build `datapump-tests` before running CTest. CMake installation
 and CPack TGZ/ZIP archives include both native executables and collected runtime
 libraries. `-DDATAPUMP_GUI_BACKEND=fltk` selects the single compiled GUI backend;
 FLTK is the default, and `rev` selects the optional Rev profile described above.

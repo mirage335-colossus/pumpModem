@@ -4,6 +4,74 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Build and dependency simplification — 22 September 2026 UTC
+
+This change alters build orchestration, dependency preparation, packaging and
+documentation. Sanitizer validation also found an existing zero-length
+`fwrite` call with a null data pointer; empty-file writes now skip that call
+while retaining exclusive creation and flushing, with a regression for empty
+files, binary contents and rejection of an existing destination. No wire format
+or message behavior was changed. The POSIX
+`build.sh` entry point selects explicit incremental, sanitizer, release and
+optional Rev profiles. Application builds exclude test executables; named test
+groups build their prerequisites before running the existing individual tests.
+The complete 29-case preservation-contract selection remains intact.
+
+A fresh GCC/Ninja FLTK application build with three jobs took 72.16 seconds;
+compiling the full test prerequisites afterward took another 87.00 seconds.
+These are local elapsed measurements without ccache, not a controlled
+before/after speedup benchmark. The application graph has 308 compilation
+commands and no test/probe sources; the contract graph has 147 compilation
+commands, including 28 C++ test sources, and needs no FLTK compilation. Python
+provides the additional CLI contract case. Optional ccache was unavailable on
+this host; no cache-hit performance claim is made.
+
+The pinned Debian development archives were verified and prepared under
+`third_party/build-support/cache`, using matching installed runtime libraries.
+Fresh builds no longer depend on the former `/tmp/datapump-native-headers`
+symlink. Five previously ignored FLTK libdecor build-support files were checked
+byte-for-byte against the recorded upstream commit; upstream content is
+unchanged. Build information and dependency notices are included in packages;
+historical validation captures remain available in the source checkout and as
+an explicit packaging option.
+
+Validation results:
+
+- Fresh GCC/Ninja FLTK and Clang 19/Ninja Rev application builds pass. A separate
+  Unix Makefiles CLI build passes with GUI and Python discovery disabled.
+- All 123 headless cases pass across the full run and focused reruns, including
+  all 29 preservation-contract cases. The full run took 1,501.55 seconds. Its
+  only failure was an older planner fixture assuming Robust was the default;
+  three fixtures now select Robust explicitly, preserving every assertion and
+  the application's Fast default. The corrected planner case passes.
+- All 24 wrapper and seven dependency-helper checks pass; CI now explicitly
+  runs the build-tool group. SDK checks include offline repair, corruption,
+  version mismatches, directory ownership and cross-compilation selection.
+- Nine focused ASan/UBSan cases pass across the initial run and reruns: runtime,
+  short compression, transfer, stream codec/reception, GUI application,
+  controller, inspection and binary editor. The initial controller run exposed
+  the empty-file issue and missed a pending-progress deadline under concurrent
+  load. Its sequential rerun passes with UBSan configured to halt on error;
+  the original pending-progress assertions and deadlines are unchanged.
+  LeakSanitizer was disabled for the restricted process environment.
+- Packaging fixtures pass, covering inventory, relocation, checksums and
+  deliberate corruption. Both local TGZ/ZIP archives pass dependency-closure,
+  isolated-command and ELF ABI checks. Their observed glibc floor is **2.38**;
+  these host-built artifacts do not claim the CI release floor of 2.35.
+
+All three FLTK native cases pass on an isolated Xvfb display, including its
+182.93-second end-to-end workflow. All five Rev native cases pass across the
+conformance run and isolated workflow rerun (260.70 seconds for the latter).
+Initial concurrent Rev workflow attempts missed replay frame/time bounds;
+the fresh isolated run preserves the original assertions and 300-second budget.
+Do not overlap these wall-clock-sensitive GUI simulations with other heavy
+test/build processes. Xvfb required permission to create local display sockets
+outside the execution sandbox; it did not use the user's desktop.
+
+Windows, the Ubuntu 22.04 release builder, copied binaries on other
+distributions and physical audio hardware were not exercised locally; their
+existing CI and qualification gates remain in place.
+
 ## Short acoustic LDPC alternatives — 22 September 2026 UTC
 
 Implemented 648-, 1,296- and 1,944-bit QC LDPC at rates 1/2, 2/3 and 3/4,

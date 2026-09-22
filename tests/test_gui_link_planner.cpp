@@ -891,6 +891,7 @@ void shared_link_budget_without_simulation() {
 void shared_link_controls_visibility() {
     using F=ui::Field;
     Application app(Launch{});
+    app.select(F::fast_mode,"robust");
     app.toggle(F::developer_mode,true);
     const auto& screen=ui::console_screen();
     const auto declaration=[&](F field)->const ui::Control& {
@@ -1005,6 +1006,7 @@ void link_budget_edit_buffers() {
 void link_budget_preset_and_dialog_sync() {
     using F=ui::Field;using C=ui::Command;
     Application app(Launch{});
+    app.select(F::fast_mode,"robust");
     const auto declaration=[&](F field)->const ui::Control& {
         const auto& screen=ui::console_screen();
         const auto found=std::find_if(screen.begin(),screen.end(),[&](const auto& control){return control.field==field;});
@@ -1094,6 +1096,8 @@ void all_target_dropdowns_and_native_planner_editor() {
     controller.close();
 
     Application app({});
+    // Planner controls belong to Robust; ordinary launches now default to Fast.
+    app.select(F::fast_mode,"robust");
     app.toggle(F::developer_mode,true);
     const auto& screen=ui::console_screen();
     const auto editor=std::find_if(screen.begin(),screen.end(),[](const auto& c){return c.field==F::planner_target;});

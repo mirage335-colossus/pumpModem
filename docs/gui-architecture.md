@@ -259,6 +259,7 @@ display. Register display-dependent tests explicitly with
 `-DDATAPUMP_TEST_NATIVE_GUI=ON`, then run:
 
 ```sh
+cmake --build build-gui --target datapump-tests-gui --parallel 2
 LIBGL_ALWAYS_SOFTWARE=1 LP_NUM_THREADS=2 xvfb-run -a -s '-screen 0 2400x1800x24 -dpi 96' \
   ctest --test-dir build-gui --output-on-failure -L gui
 ```
@@ -268,6 +269,11 @@ without a display. Native tests include clipboard, editor focus/selection,
 record history, document resizing and Rev coordinates at 1x and 2x. Windows
 runtime testing remains a separate platform requirement; Linux success does
 not establish Windows validation.
+
+For the canonical wrapper profiles, use `./build.sh test gui` for headless GUI
+coverage and `./build.sh test native` inside a private display for the native
+checks. Add `--backend rev` for Rev. Both commands build their prerequisites;
+ordinary application builds omit the native test executables.
 Successful smoke runs remove their automatically created temporary fixtures;
 failed-run evidence and explicitly selected `--smoke-dir` output are retained.
 

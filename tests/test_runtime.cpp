@@ -1,4 +1,6 @@
 #include "datapump/runtime.hpp"
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <limits>
@@ -53,5 +55,21 @@ int main() { try {
     check(terminal_text(Bytes{'c','a','f',0xc3,0xa9})=="caf\xc3\xa9");
     check(terminal_text(Bytes{0xc2,0x9b})=="\\xc2\\x9b");
     std::istringstream input("12345"); rejects([&]{read_bounded(input,4);});
+    struct TemporaryDirectory {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-runtime-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        TemporaryDirectory() {check(std::filesystem::create_directory(path));}
+        ~TemporaryDirectory() {std::error_code ignored;std::filesystem::remove_all(path,ignored);}
+    } files;
+    const auto empty=files.path/"empty.bin";
+    write_new_file(empty.string(),{});
+    check(std::filesystem::file_size(empty)==0);
+    rejects([&]{write_new_file(empty.string(),Bytes{1});});
+    check(std::filesystem::file_size(empty)==0);
+    const auto binary=files.path/"binary.bin";
+    const Bytes expected{0,255,0};
+    write_new_file(binary.string(),expected);
+    std::ifstream saved(binary,std::ios::binary);
+    check(read_bounded(saved,expected.size())==expected);
     std::cout<<"runtime tests passed\n";
   } catch(const std::exception& e) {std::cerr<<e.what()<<'\n'; return 1;} }

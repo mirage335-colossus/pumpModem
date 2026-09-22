@@ -6,7 +6,7 @@ if(NOT TARGET datapump_gui_application)
     COMMAND "${CMAKE_COMMAND}" "-DROOT=${CMAKE_CURRENT_SOURCE_DIR}"
       -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/gui_adapter_boundary.cmake"
     COMMENT "Checking the shared GUI/native adapter boundary" VERBATIM)
-  add_library(datapump_gui_application STATIC
+  add_library(datapump_gui_application STATIC EXCLUDE_FROM_ALL
     src/gui/application.cpp src/gui/controller.cpp src/gui/gui_smoke.cpp src/gui/launch_command.cpp
     src/gui/screen_console.cpp src/gui/plot_render.cpp src/gui/state.cpp
     src/gui/fast/controller.cpp src/gui/fast/screen.cpp src/gui/fast/plots.cpp

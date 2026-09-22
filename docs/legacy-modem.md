@@ -88,7 +88,7 @@ read-only text presentation are shared by the native adapters.
 Run the focused tests with:
 
 ```sh
-ctest --test-dir build --output-on-failure -R '^(legacy_.*|gui_legacy.*)$'
+./build.sh test legacy
 ```
 
 Independent wire vectors and FLDigi-generated waveform fixtures accompany the
