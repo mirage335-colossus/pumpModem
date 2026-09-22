@@ -116,6 +116,120 @@ void receiver_cpu_budget() {
           std::isfinite(base.receiver_cpu_seconds/base.simulated_seconds),
           "CPU pace must include observed-absence audio and have a finite workload ratio");
 }
+void received_processing_budget() {
+    transfer::Options options;const auto channel=clean_channel();
+    const auto check_components=[](const simulation::Estimate& value) {
+        check(std::isfinite(value.payload_processing_seconds)&&value.payload_processing_seconds>=0&&
+              std::isfinite(value.mitigation_seconds)&&value.mitigation_seconds>=0&&
+              value.mitigation_seconds<=value.payload_processing_seconds,
+              "mitigation work must be a finite nonnegative subset of received payload processing");
+        check(value.cpu_seconds>=value.payload_processing_seconds&&
+              value.receiver_cpu_seconds>=value.payload_processing_seconds&&
+              value.gpu_seconds>=value.payload_processing_seconds,
+              "all execution projections must retain the CPU payload-processing allowance");
+    };
+    const auto draft=wire(3,options.modem);
+    const auto base=simulation::estimate(draft,options,true,channel,{},1,false);
+    check_components(base);
+    check(base.payload_processing_seconds>0&&base.mitigation_seconds>0,
+          "eligible raw reception must include bounded interpretation and its mitigation work");
+    auto same_bits=draft;same_bits.content_bytes=transfer::short_message_bytes;
+    const auto different_source=simulation::estimate(same_bits,options,true,channel,{},1,false);
+    near(different_source.payload_processing_seconds,base.payload_processing_seconds,
+         "raw interpretation must depend on received bits, not transmitter source-byte count");
+    near(different_source.mitigation_seconds,base.mitigation_seconds,
+         "identical raw and dictionary wire bits must receive the same mitigation allowance");
+    const auto empty=simulation::estimate(wire(0,options.modem),options,true,channel,{},1,false);
+    near(empty.payload_processing_seconds,0,"empty reception must not invent payload processing");
+    near(empty.mitigation_seconds,0,"empty reception must not invent payload mitigations");
+    auto other=options.modem;other.spreading_factor*=2;
+    const auto unmatched=simulation::estimate(draft,options,true,channel,std::span(&other,1),1,false);
+    near(unmatched.payload_processing_seconds,0,"unmatched receiver must not decode a desired payload");
+    near(unmatched.mitigation_seconds,0,"unmatched receiver must not invent desired payload mitigations");
+    const std::array profiles{options.modem,other};
+    const auto bank=simulation::estimate(draft,options,true,channel,profiles,1,false);
+    const auto keys=simulation::estimate(draft,options,true,channel,{},3,false);
+    for(const auto* value:{&bank,&keys}) {
+        check_components(*value);
+        near(value->payload_processing_seconds,base.payload_processing_seconds,
+             "unrelated search banks must not duplicate received payload processing");
+        near(value->mitigation_seconds,base.mitigation_seconds,
+             "unrelated search banks must not duplicate received payload mitigations");
+    }
+    // Explicit bits and dictionary text share receiver interpretation. Saved
+    // interval settings do not add interval work to either raw representation.
+    for(const auto count:{std::size_t{1},transfer::short_message_bits,transfer::short_message_bits+1,std::size_t{8192}}) {
+        const auto raw=wire(count,options.modem);
+        const auto reference=simulation::estimate(raw,options,true,channel,{},1,false);
+        check_components(reference);
+        check(reference.mitigation_seconds>0,
+              "raw views retain a validation boundary even beyond short dictionary eligibility");
+        for(const auto fec:{FecMode::off,FecMode::rs20,FecMode::rs60})for(const bool compression:{false,true}) {
+            auto saved=options;saved.fec=fec;saved.compression=compression;saved.key.emplace(Bytes(32,0x37));
+            const auto changed=simulation::estimate(raw,saved,true,channel,{},1,false);
+            near(changed.payload_processing_seconds,reference.payload_processing_seconds,
+                 "saved interval FEC, compression and authentication must not add work to raw bits");
+            near(changed.mitigation_seconds,reference.mitigation_seconds,
+                 "saved interval settings must not add mitigation overhead to raw bits");
+        }
+    }
+
+    auto interval=wire(boundary_sync::marker_bits+boundary_sync::interval_bits,options.modem);
+    interval.coded_bytes=stream_interval_bytes;interval.content_bytes=32;
+    options.compression=false;options.fec=FecMode::off;
+    const auto plain=simulation::estimate(interval,options,false,channel,{},1,false);
+    options.fec=FecMode::rs20;
+    const auto light=simulation::estimate(interval,options,false,channel,{},1,false);
+    options.fec=FecMode::rs60;
+    const auto corrected=simulation::estimate(interval,options,false,channel,{},1,false);
+    check(plain.payload_processing_seconds<light.payload_processing_seconds&&
+          light.payload_processing_seconds<corrected.payload_processing_seconds,
+          "interval processing must account for the configured parity workload");
+    auto multiple=wire(4*(boundary_sync::marker_bits+boundary_sync::interval_bits),options.modem);
+    multiple.coded_bytes=4*stream_interval_bytes;multiple.content_bytes=interval.content_bytes;
+    const auto more_intervals=simulation::estimate(multiple,options,false,channel,{},1,false);
+    check(more_intervals.payload_processing_seconds>corrected.payload_processing_seconds&&
+          more_intervals.mitigation_seconds>corrected.mitigation_seconds,
+          "more fixed intervals must increase processing and mitigation allowances");
+    options.key.emplace(Bytes(32,0x37));
+    const auto authenticated=simulation::estimate(interval,options,false,channel,{},1,false);
+    check(authenticated.payload_processing_seconds>corrected.payload_processing_seconds,
+          "keyed intervals must account for authentication work");
+    options.key.reset();
+    interval.content_bytes=4096;
+    const auto uncompressed=simulation::estimate(interval,options,false,channel);
+    options.compression=true;
+    const auto compressed=simulation::estimate(interval,options,false,channel);
+    auto expanded=interval;expanded.content_bytes*=2;
+    const auto more_source=simulation::estimate(expanded,options,false,channel,{},1,false);
+    auto literal_options=options;literal_options.compression=false;
+    const auto more_literal=simulation::estimate(expanded,literal_options,false,channel,{},1,false);
+    check(more_source.payload_processing_seconds>compressed.payload_processing_seconds,
+          "decompression processing must scale with the estimated original source size");
+    check(more_source.payload_processing_seconds-more_literal.payload_processing_seconds>
+          compressed.payload_processing_seconds-uncompressed.payload_processing_seconds&&
+          more_source.mitigation_seconds>compressed.mitigation_seconds,
+          "decoder and mitigation work must scale with expanded source independently of the shared copy cost");
+    for(const auto* value:{&plain,&light,&corrected,&more_intervals,&authenticated,&uncompressed,&compressed,&more_source})
+        check_components(*value);
+    const auto processing_delta=compressed.payload_processing_seconds-uncompressed.payload_processing_seconds;
+    check(processing_delta>0,"compressed source interpretation must add decoder work");
+    near(compressed.cpu_seconds-uncompressed.cpu_seconds,processing_delta,
+         "CPU projection must charge source processing exactly once");
+    near(compressed.receiver_cpu_seconds-uncompressed.receiver_cpu_seconds,processing_delta,
+         "receiver headroom must include the same source processing allowance");
+    near(compressed.gpu_seconds-uncompressed.gpu_seconds,processing_delta,
+         "hypothetical GPU projection must retain CPU source processing without acceleration");
+    near(compressed.cpu_seconds-compressed.receiver_cpu_seconds,
+         uncompressed.cpu_seconds-uncompressed.receiver_cpu_seconds,
+         "payload processing must not be charged to synthetic channel generation");
+    near(compressed.tracking_seconds,uncompressed.tracking_seconds,
+         "payload mitigation allowance must not rescale unchanged modem tracking");
+    near(compressed.simulated_seconds,uncompressed.simulated_seconds,
+         "CPU mitigation allowance must not alter represented audio duration");
+    near(compressed.success_probability,uncompressed.success_probability,
+         "CPU mitigation allowance must not alter the conditional receive probability");
+}
 void whole_symbol_phase_coherence() {
     transfer::Options options;
     options.modem=tuning::resolve(1,0,tuning::PatternMode::auto_pattern,false,1500).config;
@@ -664,7 +778,7 @@ void target_and_channel_are_independent() {
 }
 }
 int main() {
-    try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();whole_symbol_phase_coherence();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
+    try {probability_and_framing();workload_and_impairments();receiver_cpu_budget();received_processing_budget();whole_symbol_phase_coherence();differential_model_limits();drift_receiver_estimate();receiver_statistic_controls();raw_sample_probability_geometry();established_tracking_workload();complete_symbol_absence();narrow_band_carrier_coverage();
         coupled_and_independent_clock_estimates();streamed_template_workload();target_and_channel_are_independent();
         std::cout<<"simulation estimate tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"simulation estimate tests failed: "<<error.what()<<'\n';return 1;}

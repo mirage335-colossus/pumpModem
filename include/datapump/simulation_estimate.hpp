@@ -29,10 +29,18 @@ struct Estimate {
     std::size_t probability_carrier_candidates = 0;
     std::string probability_model_limit;
     double cpu_seconds = 0;
-    // Receive projection, search and tracking only; excludes synthetic channel
-    // generation. Divide by simulated_seconds for a rough real-time workload,
+    // Receive projection, search, tracking and nominal payload processing;
+    // excludes synthetic channel generation and exceptional recovery searches.
+    // Divide by simulated_seconds for a rough real-time workload,
     // not a measured CPU utilization or a guarantee about per-bit latency.
     double receiver_cpu_seconds = 0;
+    // Ordinary receive bookkeeping, payload codecs and permitted text view.
+    // Included once in CPU, receiver-only and hypothetical GPU totals. This
+    // rounded reference allowance includes the mitigation subset below.
+    double payload_processing_seconds = 0;
+    // Estimated incremental CPU-mitigation cost within payload processing,
+    // not an additional charge or a multiplier on unchanged modem DSP.
+    double mitigation_seconds = 0;
     double gpu_seconds = 0;
     // Included in both totals: serial whole-symbol continuation for one
     // established signal stream per matching FFT profile, through observed

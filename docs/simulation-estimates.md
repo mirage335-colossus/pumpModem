@@ -394,10 +394,21 @@ prediction, never a guarantee or authentication claim.
 
 Link planner's **CPU estimate** compares estimated processing for a one-bit receive
 preview with its incoming audio duration. It uses `receiver_cpu_seconds`: carrier
-projection, acquisition and tracking, plus the fixed startup allowance, without generating
-or resampling a synthetic channel. The simulation's existing `cpu_seconds`
+projection, acquisition and tracking, plus fixed startup and ordinary payload
+processing allowances, without generating or resampling a synthetic channel. The simulation's `cpu_seconds`
 includes that channel work. Both use the named reference laptop; neither
 measures the current computer or reports CPU utilization.
+
+Ordinary payload work includes a separate allowance for the receive CPU
+mitigations. `payload_processing_seconds` is included once in both totals and
+in the CPU portion of the hypothetical GPU total; `mitigation_seconds` identifies
+its incremental mitigation subset, not another charge. Short dictionary and
+explicit binary reception share the same bounded interpretation allowance.
+Framed messages add fixed-interval correction/authentication and source decoding
+work. The planner still uses one raw bit, so saved interval FEC/compression
+settings do not introduce interval work into its CPU graph. The Console uses
+the actual draft. See the [paired measurements and extrapolation](robust-cpu-costs.md)
+for coefficients, results and limits. DSP operation budgets are unchanged.
 
 The workload ratio is `receiver_cpu_seconds / simulated_seconds`. The audio
 span includes the fully observed absent symbols needed to finish reception.
@@ -561,7 +572,8 @@ reference products; **they do not establish the assumed throughput rates**.
 Laptop power limits, sustained thermals, compiler choices, caching and eventual
 GPU implementation can change runtime substantially. Treat the displayed times
 as order-of-magnitude estimates; even a factor of four is not a validated error
-bound. Content compression, exceptional recovery searches and concurrent
+bound. Ordinary source decompression is covered by the payload allowance;
+transmit-side compression, exceptional recovery searches and concurrent
 background tasks are excluded. A total shorter than simulated airtime does not
 guarantee real-time operation: FFT block scheduling can delay acquisition and
 accepted bits, and bursts of work can exceed the live capture queue's capacity.

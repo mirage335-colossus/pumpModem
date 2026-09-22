@@ -62,6 +62,10 @@ void verify_cpu_point(const gui::planner::Inputs& input,const gui::planner::CpuP
         10*std::log10(options.modem.sample_rate/2.);
     constexpr std::array<std::uint8_t,1> bit{0};
     const auto estimate=simulation::estimate(transfer::estimate_binary(bit,options),options,true,channel,{},1,false);
+    check(std::isfinite(estimate.payload_processing_seconds)&&estimate.payload_processing_seconds>0&&
+          std::isfinite(estimate.mitigation_seconds)&&estimate.mitigation_seconds>0&&
+          estimate.mitigation_seconds<=estimate.payload_processing_seconds,
+          "one-bit CPU curve must retain the shared bounded receive-processing mitigation allowance");
     check(point.available==(estimate.carrier_in_search&&estimate.receiver_workspace_supported),
           "CPU graph must preserve independently checked Clock/RAM limits at its exact target");
     near(point.realtime_ratio,estimate.receiver_cpu_seconds/estimate.simulated_seconds,
@@ -144,6 +148,38 @@ void transition_and_cpu() {
     check(low&&high&&middle,"a larger workspace must still sample both ends and the steep probability transition");
     same_curve(larger,gui::planner::build(input));
 }
+void raw_cpu_processing_scope() {
+    auto input=example();
+    const auto model=gui::planner::build(input);
+    check(model.available&&model.one_bit_cpu_available,"raw CPU allowance fixture must be available");
+    auto options=input.options;
+    const std::array targets{input.target_db_hz};
+    options.modem=tuning::receive_profiles(options.modem,targets,input.mode,options.key.has_value()).front();
+    auto channel=input.channel;
+    channel.snr_db=input.tx_dbm-input.path_loss_db-input.noise_density_dbm_hz-
+        10*std::log10(options.modem.sample_rate/2.);
+    constexpr std::array<std::uint8_t,1> bit{0};
+    const auto estimate=simulation::estimate(transfer::estimate_binary(bit,options),options,true,channel,{},1,false);
+    check(estimate.payload_processing_seconds>0&&estimate.mitigation_seconds>0,
+          "selected planner preview must include bounded one-bit interpretation overhead");
+    near(model.one_bit_cpu_seconds,estimate.cpu_seconds,
+         "selected planner total must inherit the shared CPU processing allowance");
+    near(model.receiver_cpu_seconds,estimate.receiver_cpu_seconds,
+         "selected planner receiver time must inherit the shared CPU processing allowance");
+    near(model.cpu_realtime_ratio,estimate.receiver_cpu_seconds/estimate.simulated_seconds,
+         "selected planner headroom must include receive processing over complete one-bit audio");
+    // The planner compares one raw bit even when the composer holds a framed
+    // draft. Saved interval-only options cannot inflate that bit's CPU curve.
+    input.options.fec=FecMode::off;input.options.compression=false;input.wire_bits=1216;
+    const auto interval_settings_off=gui::planner::build(input);
+    same_curve(model,interval_settings_off);
+    near(interval_settings_off.one_bit_cpu_seconds,model.one_bit_cpu_seconds,
+         "saved interval settings must not add FEC or decompression to one-bit total CPU time");
+    near(interval_settings_off.receiver_cpu_seconds,model.receiver_cpu_seconds,
+         "saved interval settings must not add FEC or decompression to one-bit receiver time");
+    near(interval_settings_off.cpu_realtime_ratio,model.cpu_realtime_ratio,
+         "framed draft settings must preserve one-bit CPU headroom");
+}
 void cache_invalidation() {
     auto input=example();
     input.mode=tuning::PatternMode::auto_keystream;
@@ -189,6 +225,6 @@ void cache_invalidation() {
 }
 }
 int main() {
-    try {transition_and_cpu();cache_invalidation();std::cout<<"link planner curve tests passed\n";return 0;}
+    try {transition_and_cpu();raw_cpu_processing_scope();cache_invalidation();std::cout<<"link planner curve tests passed\n";return 0;}
     catch(const std::exception& error){std::cerr<<"link planner curve tests failed: "<<error.what()<<'\n';return 1;}
 }

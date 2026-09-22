@@ -33,6 +33,46 @@ constexpr long double tracking_evidence_operations_per_fit = 64;
 constexpr long double differential_operations_per_window = 128;
 constexpr long double model_implementation_loss_db = 3;
 
+struct PayloadWork { long double baseline=0,mitigation=0; };
+PayloadWork payload_work(const transfer::Estimate& transmission,const transfer::Options& options,bool raw) {
+    // Rounded extrapolation from paired pre/post-hardening Robust workloads;
+    // see docs/robust-cpu-costs.md. These are allowances for the fixed reference
+    // model, not a benchmark of the user's computer or an upper runtime bound.
+    // Search/DSP coefficients stay unchanged. Exceptional alignment/assignment
+    // recovery depends on actual missing data and remains a separate job.
+    constexpr long double us=1e-6L,ns=1e-9L;
+    PayloadWork work;
+    if(!transmission.wire_bits)return work;
+    work.baseline=2*us;
+    if(raw) {
+        // The receiver attempts the same short interpretation for explicit
+        // binary and dictionary transmissions, including incomplete one-bit
+        // tokens. Their transmitter content_bytes need not be the same.
+        work.baseline+=2*ns*std::min<std::size_t>(transmission.wire_bits,4096);
+        work.mitigation=.05L*us; // Final permitted-view validation boundary.
+        if(transmission.wire_bits<=transfer::short_message_bits)
+            work.mitigation+=.4L*us+3*ns*transmission.wire_bits;
+        return work;
+    }
+    const auto intervals=std::ceil(static_cast<long double>(transmission.coded_bytes)/stream_interval_bytes);
+    const auto parity=interval_parity_bytes(options.fec);
+    // Budget a repair-capable interval rather than only a clean syndrome pass.
+    // The smaller parity tier is an extrapolation, not a separate calibration.
+    const auto repair=(parity==48?60.L:parity?20.L:0.L)*us;
+    // Keyed stream work includes Data unmasking/setup and bookkeeping as well
+    // as interval authentication; 100 us is not an isolated HMAC measurement.
+    work.baseline+=intervals*(25*us+repair+(options.key?100*us:0));
+    work.mitigation+=intervals*(.05L*us+.05L*repair+(options.key?.02L*us:0));
+    const auto source=static_cast<long double>(transmission.content_bytes);
+    work.baseline+=5*ns*source; // Copying/permitted text view; conservative for attachments.
+    if(options.compression) {
+        const auto decoder=25*us+2*ns*source;
+        work.baseline+=decoder;
+        work.mitigation+=.05L*decoder;
+    }
+    return work;
+}
+
 double finite_seconds(long double value) {
     return static_cast<double>(std::min(value,static_cast<long double>(std::numeric_limits<double>::max())));
 }
@@ -448,16 +488,20 @@ Estimate estimate(const transfer::Estimate& transmission,const transfer::Options
     }
     result.tracking_seconds=finite_seconds(tracking_serial/serial_operations_per_second);
     result.tracking_symbol_windows=finite_seconds(tracking_windows);
+    const auto payload=result.profile_matches?payload_work(transmission,options,raw_bits):PayloadWork{};
+    const auto processing=payload.baseline+payload.mitigation;
+    result.payload_processing_seconds=finite_seconds(processing);
+    result.mitigation_seconds=finite_seconds(payload.mitigation);
     // Budget track refinement at the serial rate even when long-symbol carrier
     // fits can share CPU workers. The hypothetical GPU
     // model offloads FFT scoring only, so this term remains in both totals.
     const auto serial_seconds=(serial+tracking_serial)/serial_operations_per_second;
-    result.cpu_seconds=finite_seconds(.03L+serial_seconds+parallel/cpu_scoring_operations_per_second);
+    result.cpu_seconds=finite_seconds(.03L+serial_seconds+parallel/cpu_scoring_operations_per_second+processing);
     result.receiver_cpu_seconds=finite_seconds(.03L+
         (serial-samples*channel_operations_per_sample+tracking_serial)/serial_operations_per_second+
-        parallel/cpu_scoring_operations_per_second);
+        parallel/cpu_scoring_operations_per_second+processing);
     result.gpu_seconds=finite_seconds(.11L+serial_seconds+parallel/gpu_scoring_operations_per_second+
-        samples*sizeof(float)/gpu_transfer_bytes_per_second);
+        samples*sizeof(float)/gpu_transfer_bytes_per_second+processing);
     if(!transmission.wire_bits)return result;
 
     // The simulator's SNR is per Fs/2 noise bandwidth, so Es/N0=snr*Fs*T/2.

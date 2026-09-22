@@ -4,6 +4,72 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Robust CPU mitigation measurements and estimates — 22 September 2026 UTC
+
+The [Robust CPU cost study](robust-cpu-costs.md) compares the same 17 workloads
+against pre-mitigation `f715839` and hardened `a062386` GCC Release libraries on
+one AMD Ryzen 5 PRO 5650U Linux host. Each version has two seven-sample runs in
+baseline/current/current/baseline order, with at least 250 ms per sample and no
+competing project build/test workload. All 476 samples preserve fixture metadata
+and exact results. The [retained samples and analysis](validation-data/robust-mitigations-2026-09-22/README.md)
+document artifact hashes, commands and limitations. Short timings are calculated
+from sample totals divided by iterations, avoiding nanosecond-rounded quotient
+error.
+
+Complete 8,192-assignment searches take 0.42% longer with one worker and 1.26%
+longer with four. Equivalent five-minute candidate coverage decreases by 0.42%
+and 1.25%; these are fixture-rate extrapolations, not additional observed trials.
+The 32,769-position all-missing planning case takes 3.54% longer, an additional
+2.48 ms. Authenticated RS60 correction changes by 1.14–2.51% across clean,
+damaged and correction-limit inputs. Full sampled FFT reception changes by
+0.32%, within the observed pair variation; small negative stream/sample changes
+are not treated as speedups. Every recovery fixture retains the same search
+coverage, authentication and missing-bit accounting, and sampled reception must
+reach physical completion before EOF.
+
+Console and Link Planner now share an ordinary receive-processing allowance
+with a separately identified mitigation subset. The one-bit Planner receives
+2.455 µs, including 0.453 µs for mitigations. Framed Console drafts additionally
+budget interval repair, keyed-stream work and source decompression. Both remain
+fixed-reference engineering estimates; the AMD measurements do not establish
+absolute i9-13900H, MSVC or ARM performance. DSP operation budgets, probabilities,
+wire behavior and search limits are unchanged. Exceptional recovery remains
+outside nominal headroom and is quantified separately in the study.
+
+The shared GUI group passes **33/33** with GCC/FLTK (130.11 seconds) and
+Clang/Rev (148.87 seconds). The final simulation estimate suite passes with
+both compilers (55.43 seconds for Clang); its source-size checks distinguish
+decompression scaling from the shared copy allowance. CMake-built benchmarks
+pass all 17 fixture correctness checks
+with each compiler. Those smoke runs overlapped other tests and supply
+correctness evidence only, not additional timing samples.
+
+All **30/30** preservation-contract suites pass, including the unchanged
+receiver-probability calibration in **1,265.04 seconds**, within its original
+1,500-second timeout. Exact wire vectors, physical completion, next-poll pending
+progress, correction/recovery behavior and CLI presentation checks are intact.
+
+On an isolated 2400×1800 Xvfb display at 96 DPI, all **3/3** FLTK native cases
+pass: the production workflow (217.60 seconds), adapter conformance
+(68.03 seconds) and document conformance (0.03 seconds). They ran after heavy
+tests/builds finished. Initial sandboxed display attempts could not bind or
+connect to the local X socket and ran no GUI assertions; the host-level
+private-display invocation disables TCP and does not use the user's desktop.
+
+Rev's production workflow reproduces the previously documented phase 11
+replay-frame timing failure (3.211450 seconds, eight frames, seven changes,
+fraction 0.932204). It stops after 91.41 seconds, so a complete Rev workflow pass
+is not claimed. The existing timing assertion is unchanged; this estimate update
+does not modify the replay/refresh implementation.
+All four other Rev native checks pass: adapter conformance (95.97 seconds),
+platform conformance (6.16 seconds), and 1×/2× coordinate checks (5.12 seconds
+each). No timeout, replay assertion or modem regression was weakened.
+
+Build/test logs and the private-display helper are retained under the ignored
+`build/robust-cpu-estimates/` directory. These are Linux generated-audio and
+GUI checks, not Windows rendering, physical-link qualification or CPU-attack
+immunity tests.
+
 ## Targeted receive-processing hardening — 22 September 2026 UTC
 
 The [receive-processing review](receive-processing-hardening.md) adds selected

@@ -184,3 +184,8 @@ Reed–Solomon workloads. Short decoding rose from about 0.068 to 0.273 µs for 
 noise, not universal performance guarantees. The validation record includes the
 full table, per-run results and workload definitions; MSVC's fencing fallback has
 not been benchmarked here.
+
+The subsequent [Robust reception and recovery study](robust-cpu-costs.md) adds
+sampled Robust reception, near-limit RS correction, exhaustive assignment and
+alignment-planning measurements. It documents the resulting ordinary
+receive-processing allowance shared by Console and Link Planner CPU estimates.

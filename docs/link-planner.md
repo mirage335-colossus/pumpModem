@@ -82,6 +82,10 @@ time** retains its separate logarithmic ratio scale and existing LPI model.
 The headline's **CPU estimate** is available in either simulation mode. It
 compares receiver processing with incoming audio for a one-bit preview,
 including the final silence check, on the reference Intel Core i9-13900H.
+It includes the [ordinary receive-processing and CPU-mitigation allowance](robust-cpu-costs.md).
+The preview remains one raw bit regardless of the draft or saved interval FEC
+and compression settings. Additional recovery searches are excluded because
+their work depends on the actual missing bits and candidate alignments.
 Green means less than 0.5 seconds of modeled work per audio second; yellow
 means 0.5–1, and red means 1 or more. These are planning indicators, not measured
 CPU utilization or a guarantee of timely reception. Search bursts and other
