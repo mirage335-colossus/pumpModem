@@ -4,6 +4,51 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Unencrypted transmit wait and one-shot override — 22 September 2026 UTC
+
+The shared Robust Console now offers **Force next transmission** beside
+**Previous message - click to paste** during either a key-reuse lock or the
+ordinary receiver-separation wait. **TX wait** also explains that it is waiting
+for the receiver silence check. The ordinary hardware deadline remains
+`ceil(6 / symbol_seconds) * symbol_seconds + 1` seconds after completion, so
+long symbols can require minutes of silence even without encryption. No
+receiver-completion rule, waveform or backend deadline changes.
+
+The live transmit-lock regression passes with both GCC and Clang. It adds
+unencrypted output with a 1,600-second symbol, consumed by deterministic audio
+fixtures without waiting 1,600 seconds. Both key-reuse counters remain zero;
+ordinary separation lasts about 1,601 seconds. A forced request starts promptly,
+retains the prior deadline after cancellation, and does not allow the following
+ordinary request through. Another case selects no transmit key while retaining
+receive keys, verifies zero key lock, then restores the old transmit key and
+verifies that its usage history remains protected.
+
+All **33/33** shared GUI tests pass with GCC/FLTK (124.54 seconds) and Clang/Rev
+(165.78 seconds). Updated controller coverage exercises an unencrypted
+601-second wait, force visibility and readiness, empty/invalid draft rejection,
+and restoration of ordinary controls when the wait expires. Existing one-shot,
+busy-state and minimum/default-size placement checks remain intact. The force
+tooltip explains that skipping silence can merge unencrypted messages.
+
+All **30/30** preservation-contract suites pass, including the unchanged
+receiver-probability calibration in **1,264.31 seconds**, within its original
+1,500-second timeout. Exact wire bits, whole-symbol completion, next-poll
+pending progress and recovery checks remain intact.
+
+After the heavy tests and builds finish, isolated 2400×1800, 96 DPI Xvfb checks
+pass for both native backends: **2/2** FLTK conformance cases (adapter 67.94
+seconds, document 0.03 seconds), and **4/4** Rev conformance cases (adapter
+95.15 seconds, platform 6.19 seconds, and 1×/2× coordinates 5.13 seconds each).
+These are the native control/layout checks affected by this shared command and
+help change. The production replay workflow is not rerun here; its most recent
+result remains recorded in the CPU-estimate validation below. No replay
+assertion or timeout is changed.
+
+Both application profiles are rebuilt. Logs are retained under the ignored
+`build/transmit-wait-override/` directory. The existing private-display helper
+disables TCP and does not use the user's desktop. Tests use generated audio
+and Linux GUI fixtures; they are not physical-link or Windows qualification.
+
 ## Robust CPU mitigation measurements and estimates — 22 September 2026 UTC
 
 The [Robust CPU cost study](robust-cpu-costs.md) compares the same 17 workloads

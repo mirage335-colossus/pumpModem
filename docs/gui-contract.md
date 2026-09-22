@@ -289,12 +289,26 @@ countdown such as **TX lock 10m01s** and the airtime/one-bit-preview line says
 **Earlier output used this key for a future symbol.** The current draft's short
 or long transmit profile determines the countdown. A backward clock adjustment
 can extend it; cancellation and profile changes do not clear the record.
-The normal airtime line returns when the key lock clears.
+With no transmit key, this key-reuse lock is zero; receive-only keys do not
+change that. Selecting the same transmit key again restores its retained usage.
+
+**TX wait** identifies a separate silence interval after completed hardware
+output, including unencrypted output. A receiver must score whole absent symbols
+covering at least six seconds before separating messages. The sender therefore
+waits `ceil(6 / symbol_seconds) * symbol_seconds + 1` seconds. A ten-minute symbol
+requires a ten-minute-and-one-second wait. The airtime line explains
+**Waiting for receiver silence check.** The ordinary airtime returns after both
+the key lock and this separation wait clear. The same **TX wait** label also
+covers the existing six-second GUI guard after cancellation.
 
 **Force next transmission** appears next to **Previous message - click to paste**
-while the key lock applies. It sends the current valid draft once despite the
-key lock and transmit-separation wait, without a confirmation dialog. It retains
-the key's usage record and restores ordinary protection for subsequent requests.
+while either wait applies, including unencrypted separation. It sends the current
+valid draft once despite the key lock and transmit-separation wait, without a
+confirmation dialog. It retains the key's usage record and existing wait
+deadlines, and restores ordinary
+protection for subsequent requests. Skipping the silence check can merge
+consecutive messages even without encryption. The button stays visible but
+disabled while the draft is empty, invalid or still being prepared.
 It does not change encryption, waveform generation or receiver completion.
 All draft, key-loading, device-ownership and memory checks still apply. The lock
 also applies to keyboard and raw-bit submission. There is no persistent override,

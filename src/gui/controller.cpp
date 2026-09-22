@@ -934,7 +934,7 @@ struct Controller::Impl {
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
         case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;
-        case Command::force_transmit: return transmit_ready()&&key_lock_seconds()>0;
+        case Command::force_transmit: return transmit_ready()&&(key_lock_seconds()>0||separation_seconds()>0);
         case Command::transmit_noise: return !busy && !key_loading && settings_valid;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
@@ -982,8 +982,10 @@ struct Controller::Impl {
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
         const bool key_locked=!busy&&key_lock_seconds()>0;
-        f(UiField::force_transmit).visible=key_locked;
-        f(UiField::airtime).text=key_locked?"Earlier output used this key\nfor a future symbol.":ordinary_airtime;
+        const bool separating=!busy&&separation_seconds()>0;
+        f(UiField::force_transmit).visible=key_locked||separating;
+        f(UiField::airtime).text=key_locked?"Earlier output used this key\nfor a future symbol.":
+            separating?"Waiting for receiver\nsilence check.":ordinary_airtime;
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();

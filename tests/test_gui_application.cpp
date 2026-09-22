@@ -1224,6 +1224,7 @@ void force_transmit_declaration() {
           std::string_view(force.label)=="Force next transmission"&&
           std::string_view(force.help).find("once")!=std::string_view::npos&&
           std::string_view(force.help).find("expose message content")!=std::string_view::npos&&
+          std::string_view(force.help).find("merge consecutive messages, even without encryption")!=std::string_view::npos&&
           !app.control(force).visible&&!app.control(force).enabled,
           "Force action must use ordinary shared visibility and explicit one-shot risk wording");
     const auto original=app.field(F::message).text;

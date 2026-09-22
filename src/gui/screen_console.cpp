@@ -49,7 +49,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
     if(slot==Slot::force_transmit) {
         control.font_size=11;
-        control.help="Transmit this draft once despite the key-reuse lock and transmit separation wait. Repeated encryption and spreading sequences can expose message content and make signals easier to recognize. Earlier key use remains recorded until the program closes.";
+        control.help="Transmit this draft once despite the current wait. Skipping the receiver silence check can merge consecutive messages, even without encryption. Bypassing a key-reuse lock can expose message content and make signals easier to recognize. Earlier key use and ordinary wait deadlines remain recorded.";
     }
     if(slot==Slot::transmit||slot==Slot::short_transmit||slot==Slot::airtime||slot==Slot::short_airtime)
         control.font_size=11;

@@ -120,6 +120,21 @@ void shaped_future_exposure() {
     check(std::abs(session.snapshot().transmit_key_lock_seconds-before-2)<.001,
           "clock rollback did not extend key lock");
 
+    // Receive-only keys do not select an encryption key for an unencrypted
+    // transmission. Turning encryption off must hide, not erase, prior usage.
+    auto unkeyed=fast;
+    unkeyed.receive_keys.push_back(*unkeyed.transfer.key);
+    unkeyed.transfer.key.reset();
+    unkeyed.transfer.modem.scramble=unkeyed.transfer.modem.dsss=false;
+    unkeyed.transfer.modem.data_key.reset();
+    session.configure(unkeyed);
+    const auto public_state=session.snapshot();
+    check(public_state.transmit_key_lock_seconds==0 && public_state.long_transmit_key_lock_seconds==0,
+          "unencrypted transmission inherited a receive-only key's usage lock");
+    session.configure(fast);
+    check(session.snapshot().transmit_key_lock_seconds>590,
+          "turning encryption off erased the selected key's earlier exposure");
+
     // A different key needs no multi-key receiver search and has its own
     // transmit history; reloading identical material restores its old lock.
     auto other=fast;other.transfer.key.emplace(Bytes(32,0x77));
@@ -227,6 +242,59 @@ void normal_quiet_override() {
     rejected([&]{session.transmit_bits(Bytes{0});},"quiet override became a persistent key bypass");
     session.stop();script=nullptr;
 }
+void unkeyed_slow_quiet_override() {
+    Playback playback;script=&playback;
+    auto settings=slow_settings();
+    settings.transfer.key.reset();
+    settings.transfer.modem.scramble=false;
+    const auto& config=settings.transfer.modem;
+    check(modem::symbol_sample_count(config)==102400 && config.sample_rate==64,
+          "unencrypted quiet fixture lost its 1600-second symbol");
+    const auto total=transfer::binary_transmitter(Bytes{0},settings.transfer)->total_samples();
+    live::Session session([]{return static_cast<double>(epoch);});
+    session.start(settings);
+    playback.released=total;
+    session.transmit_bits(Bytes{0});
+    await([&]{return playback.delivered==total;},"unencrypted slow waveform did not finish");
+    playback.finish=true;
+    await([&]{return session.snapshot().transmission_finished && playback.closed==1;},
+          "unencrypted completion did not settle");
+    const auto completed=session.snapshot();
+    const auto completed_at=std::chrono::steady_clock::now();
+    check(completed.transmit_key_lock_seconds==0 && completed.long_transmit_key_lock_seconds==0,
+          "unencrypted output acquired a keystream-reuse lock");
+    check(completed.transmit_separation_seconds>1595 && completed.transmit_separation_seconds<=1601,
+          "unencrypted completion did not preserve a full absent-symbol separation");
+
+    // The deterministic device consumes 1600 seconds of sampled media without
+    // sleeping. A force request must likewise bypass the real quiet deadline.
+    playback.finish=false;playback.released=total+1;
+    session.transmit_bits(Bytes{0},true);
+    await([&]{return playback.started==2 && playback.delivered==total+1;},
+          "one-shot override did not bypass unencrypted multi-minute separation",3s);
+    session.cancel_transmit();
+    await([&]{return playback.closed==2;},"forced unencrypted playback did not close");
+    const auto cancelled=session.snapshot();
+    const auto elapsed=std::chrono::duration<double>(std::chrono::steady_clock::now()-completed_at).count();
+    check(cancelled.transmit_key_lock_seconds==0 && cancelled.long_transmit_key_lock_seconds==0 &&
+          cancelled.transmit_separation_seconds>=completed.transmit_separation_seconds-elapsed-1 &&
+          cancelled.transmit_separation_seconds<=completed.transmit_separation_seconds,
+          "forcing unencrypted output changed its key state or erased the separation deadline");
+
+    // Ordinary submission is accepted into the queue but must wait before
+    // opening the device. The prior force applies to exactly one request.
+    session.transmit_bits(Bytes{0});
+    await([&]{return session.snapshot().status=="Preparing raw binary signal";},
+          "ordinary unencrypted request did not reach its separation wait");
+    const auto observation_end=std::chrono::steady_clock::now()+100ms;
+    while(std::chrono::steady_clock::now()<observation_end) {
+        check(playback.opened==2 && playback.started==2 && playback.delivered==total+1,
+              "unencrypted override leaked into the next ordinary request");
+        std::this_thread::sleep_for(1ms);
+    }
+    session.cancel_transmit();
+    session.stop();script=nullptr;
+}
 }
 namespace datapump::audio {
 std::vector<Device> devices() { return {{"epoch guard test","deterministic output"}}; }
@@ -264,6 +332,7 @@ std::vector<float> record(double,std::uint32_t,const std::string&,std::size_t,st
 int main() {
     try {
         boundary_accounting();shaped_future_exposure();queued_request_rechecks();normal_quiet_override();
+        unkeyed_slow_quiet_override();
         std::cout<<"live transmit epoch lock passed\n";
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

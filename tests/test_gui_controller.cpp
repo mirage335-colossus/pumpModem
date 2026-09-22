@@ -1193,10 +1193,24 @@ void transmit_key_lock_controls() {
           "Unlocking must restore the existing estimate without recomputing the draft");
     timing.transmit_separation_seconds=5.1;controller.poll();
     check(!controller.enabled(C::transmit)&&!controller.enabled(C::transmit_short_bits)&&
-          controller.command_label(C::transmit)=="TX wait 6s"&&!controller.field(F::force_transmit).visible&&
-          controller.field(F::airtime).text==airtime,
-          "Ordinary receiver separation must remain distinct from the key-reuse lock");
+          controller.command_label(C::transmit)=="TX wait 6s"&&controller.field(F::force_transmit).visible&&
+          controller.enabled(C::force_transmit)&&controller.field(F::airtime).text=="Waiting for receiver\nsilence check.",
+          "Ordinary receiver separation must explain its distinct cause and expose the one-shot override");
+    timing.transmit_separation_seconds=601;controller.poll();
+    check(!controller.settings().transfer.key&&controller.command_label(C::transmit)=="TX wait 10m01s"&&
+          controller.enabled(C::force_transmit)&&controller.field(F::force_transmit).visible,
+          "Unencrypted long-symbol separation must offer the same validated force action");
+    controller.edit(F::message,"");prepare(controller);
+    check(controller.field(F::force_transmit).visible&&!controller.enabled(C::force_transmit),
+          "Separation override must remain visible but cannot transmit an empty draft");
+    controller.edit(F::short_bits,"001x");controller.poll();
+    check(!controller.enabled(C::force_transmit),"Separation override bypassed invalid raw input");
+    controller.edit(F::message,"e");prepare(controller);
     timing.transmit_separation_seconds=0;
+    controller.poll();
+    check(!controller.field(F::force_transmit).visible&&!controller.enabled(C::force_transmit)&&
+          controller.field(F::airtime).text==airtime,
+          "Ending receiver separation must hide the override and restore the ordinary airtime");
     timing.transmit_key_lock_seconds=601;
     controller.edit(F::message,std::string(16,'e'));prepare(controller);
     check(!controller.enabled(C::transmit)&&controller.enabled(C::force_transmit),
