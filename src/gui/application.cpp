@@ -411,7 +411,8 @@ bool Application::submit(const ui::Control& control,bool ctrl,bool shift) {
         if(accepts_input(control)&&impl_->legacy_selected())impl_->legacy_controller.transmit();
         return true;
     }
-    const bool wants_ctrl=control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter";
+    const bool wants_ctrl=(control.field==ui::Field::fast_text&&control.submit==ui::Command::fast_transmit)||
+        (control.submit_mode!=ui::Field::count&&impl_->controller.field(control.submit_mode).selected=="ctrl-enter");
     if(ctrl!=wants_ctrl)return false;
     if(accepts_input(control)&&enabled(control.submit))activate(control.submit);
     return true; // Consume the declared submit gesture even when unavailable.

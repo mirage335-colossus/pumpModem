@@ -79,6 +79,37 @@ const ui::Control& action(ui::Command command) {
     for(const auto& c:ui::console_screen())if(c.command==command)return c;
     throw Error("Missing shared fast action");
 }
+void message_submit_shortcut() {
+    using F=ui::Field;using C=ui::Command;
+    Application app({.simulation=true});
+    const auto& editor=control(F::fast_text);
+    check(editor.submit==C::fast_transmit&&editor.submit_mode==F::count,
+        "Fast message submit is not independent of the regular send-key preference");
+    app.select(F::send_key,"enter");app.select(F::fast_mode,"fast");
+    const auto idle=app.field(F::fast_status).text;
+    check(!app.enabled(C::fast_transmit)&&app.submit(editor,true,false)&&
+        app.field(F::fast_status).text==idle,"Empty Fast draft was transmitted by Ctrl+Enter");
+    app.edit(F::fast_device,""); // Exercise dispatch without opening an audio device.
+    app.edit(F::fast_text,"Shortcut message");
+    check(!app.submit(editor,false,false)&&!app.submit(editor,false,true)&&!app.submit(editor,true,true)&&
+        app.field(F::fast_status).text==idle,"Plain/Shift+Enter triggered Fast transmission");
+    check(app.enabled(C::fast_transmit)&&app.submit(editor,true,false)&&
+        app.field(F::fast_status).text=="Select a fast audio device",
+        "Ctrl+Enter did not dispatch the Fast transmit action");
+    app.report_error("Keep disabled draft");app.toggle(F::fast_encryption,true);
+    check(!app.enabled(C::fast_transmit)&&app.submit(editor,true,false)&&
+        app.field(F::fast_status).text=="Keep disabled draft","Ctrl+Enter bypassed missing-key protection");
+    app.toggle(F::fast_encryption,false);app.select(F::fast_source,"file");
+    app.edit(F::fast_file,"unopened-shortcut-fixture.bin");
+    const auto hidden=app.field(F::fast_status).text;
+    check(app.submit(editor,true,false)&&app.field(F::fast_status).text==hidden,
+        "Hidden message editor submitted a file transfer");
+    app.select(F::fast_mode,"robust");
+    const auto inactive=app.field(F::fast_status).text;
+    check(app.submit(editor,true,false)&&app.field(F::fast_status).text==inactive,
+        "Inactive Fast editor submitted from another modem");
+    app.close();
+}
 void snr_and_symbol_rate_controls() {
     using F=ui::Field;using C=ui::Command;
     unsigned acquisitions=0;
@@ -623,6 +654,6 @@ void regular_work_keeps_polling() {
 }
 }
 int main() {
-    try {rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
+    try {rate_and_spectrum_presentation();damaged_reception_presentation();snr_and_symbol_rate_controls();message_submit_shortcut();presentation_and_retention();service_generations();retained_key_and_result_presentation();live_plot_presentation();unsynchronized_plot_presentation();regular_work_keeps_polling();std::cout<<"Fast GUI isolation tests passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

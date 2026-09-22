@@ -55,6 +55,9 @@ copy/save eligibility.
 History is bounded to 64 entries and the local source-memory quota. Existing save
 destinations are never overwritten. Only keyed transfers claim authentication.
 
+In the Fast Message editor, Ctrl+Enter transmits; Enter and Shift+Enter insert
+a newline. The shortcut uses the same availability checks as Transmit.
+
 Fast listens continuously when selected on a normal live launch. Sending pauses
 reception and resumes listening afterward, including after cancelling a
 transmission. A received stream is retained before the next listener starts.
