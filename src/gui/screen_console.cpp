@@ -46,6 +46,12 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.help="Relative observer bit durations per one receiver bit, at 90% detection and 1% false alarm per known window. Both listeners have equal received C/N0, normalized so one receiver symbol reaches the 18 dB Es/N0 pattern design reference. This is not a measurement or calibrated reception threshold, and does not mean one accepted bit out of N transmitted bits. The unkeyed energy detector knows the occupied band, on-air window and stationary Gaussian noise power. Simulation on/off, power and oscillator presets do not affect this estimate. A TX target can affect the ratio only by changing symbol geometry. With encryption off, a warning identifies a hypothetical encrypted private pattern at the current sample, chip and symbol timing. This includes tone experiments; actual public patterns and tones can be easier to detect and are not described by these figures. No key or waveform setting is changed. Numerical times apply only at or below -10 dB normalized in-band SNR; the hypothetical warning remains when a number is unavailable. Repeated traffic accumulates. Encryption does not reduce power or interference. No guaranteed hidden traffic or safe quota. Transmission details show additional bit durations beyond the receiver's first bit, supplemental reference time, and current draft exposure including settling and suppression at the same normalized power, without re-encoding for encryption.";
     }
     if(slot==Slot::paste_previous) {control.font_size=11;control.help="Paste the previous transmitted message back into Message for editing or retransmission.";}
+    if(slot==Slot::force_transmit) {
+        control.font_size=11;
+        control.help="Transmit this draft once despite the key-reuse lock and transmit separation wait. Repeated encryption and spreading sequences can expose message content and make signals easier to recognize. Earlier key use remains recorded until the program closes.";
+    }
+    if(slot==Slot::transmit||slot==Slot::short_transmit||slot==Slot::airtime||slot==Slot::short_airtime)
+        control.font_size=11;
     if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
     if(control.multiline) {
         control.submit=Command::transmit;control.submit_mode=Field::send_key;
@@ -171,6 +177,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::text,Field::receive_snr,Command::none,Bitmap::none,Page::console,5,"RX targets (dB-Hz)",1,false,512}, Slot::receive_snr),
         placed({Kind::label,Field::message_label,Command::none,Bitmap::none,Page::console,6,"Message"}, Slot::message_label),
         placed({Kind::action,Field::count,Command::paste_previous,Bitmap::none,Page::console,6,"Previous message - click to paste"}, Slot::paste_previous),
+        placed({Kind::action,Field::force_transmit,Command::force_transmit,Bitmap::none,Page::console,6,"Force next transmission"}, Slot::force_transmit),
         placed({Kind::label,Field::binary_label,Command::none,Bitmap::none,Page::console,6,"Binary"}, Slot::binary_label),
         placed({Kind::text,Field::message,Command::none,Bitmap::none,Page::console,7,"",2,true,4*1024*1024}, Slot::message),
         placed({Kind::text,Field::binary,Command::none,Bitmap::none,Page::console,7,"",1,true}, Slot::binary),

@@ -251,7 +251,8 @@ void Application::navigate(ui::Page page) {if(accepts_surface(0))select_page(pag
 ui::ControlLayout Application::control_layout(const ui::Control& declaration,int width,int height,
         std::span<const ui::Control> declarations) const {
     return ui::control_layout(declaration,control(declaration).state,width,height,declarations,
-                              field(ui::Field::transmit_scope).visible,field(ui::Field::simulation_cpu_time).visible);
+                              field(ui::Field::transmit_scope).visible,field(ui::Field::simulation_cpu_time).visible,
+                              field(ui::Field::force_transmit).visible);
 }
 ui::Rect Application::page_bounds(int width,int height) const {
     if(impl_->fast_selected())return {ui::margin,86,width-2*ui::margin,height-190};

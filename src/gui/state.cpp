@@ -81,8 +81,8 @@ std::vector<const StreamContent*> Inbox::file_items() const {
     return files;
 }
 
-void TransmissionPolicy::started(bool simulation, bool encrypted, Clock::time_point now) {
-    if (remaining(simulation, encrypted, now).count() > 0)
+void TransmissionPolicy::started(bool simulation, bool encrypted, Clock::time_point now, bool force) {
+    if (active_ || (!force && remaining(simulation, encrypted, now).count() > 0))
         throw Error(active_ ? "A transmission is already active" : "The six-second transmit separation is still active");
     active_ = true;
     active_hardware_output_ = !simulation;

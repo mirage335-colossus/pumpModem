@@ -46,7 +46,7 @@ private:
 class TransmissionPolicy {
 public:
     using Clock = std::chrono::steady_clock;
-    void started(bool simulation, bool encrypted, Clock::time_point now = Clock::now());
+    void started(bool simulation, bool encrypted, Clock::time_point now = Clock::now(), bool force = false);
     void finished(Clock::time_point now = Clock::now()) noexcept;
     void abort_start() noexcept;
     std::chrono::milliseconds remaining(bool simulation, bool encrypted,

@@ -492,6 +492,16 @@ identifier. Editing the recalled message generates a fresh identifier.
 The new draft remains available while transmission runs. Convenience fields and
 reception identities are local application state, not modem fields.
 
+If earlier hardware output used the selected key for a future symbol, the send
+button shows **TX lock 10m01s** (with the remaining time) and the airtime line
+explains the lock. **Force next transmission**, beside the previous-message
+button, sends the current valid draft once despite that lock and the separation
+wait. This deliberate override can repeat encryption and spreading sequences;
+use it for isolated tests or when you accept that risk. It does not erase the
+usage record or disable protection for later sends. Records remain in memory
+through cancellation and profile changes, and disappear when the program closes.
+No keyfile options or additional receiver searches are involved.
+
 Enter transmits audio; the send preference changes this to Ctrl+Enter. Normal
 transmission is the default. Selecting a simulation preset switches the same
 receiver and Transmit control to a continuous noisy channel: the plots keep

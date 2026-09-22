@@ -18,7 +18,7 @@ enum class Slot {
     link_power, link_loss, link_noise,
     simulation_confidence, simulation_cpu_time, simulation_gpu_time,
     simulation_oscillator, simulation_oscillator_detail, lpi_estimate, key_actions,
-    key_path, key, tabs, page, message_label, paste_previous, binary_label, message,
+    key_path, key, tabs, page, message_label, paste_previous, force_transmit, binary_label, message,
     binary, qr_brightness, qr, attach_file, use_text, send_key, transmit, transmit_noise,
     cancel, airtime, transmit_scope_caption, transmit_scope_format, transmit_scope, profile_reference, signal_label, signals, copy_signal, paste_signal, recovery_actions, file_label, files,
     save_file, waterfall_label, waterfall, clear_waterfall, waveform_label,
@@ -67,7 +67,8 @@ struct DesktopLayout {
     static constexpr int default_width = ui::default_width, default_height = ui::default_height;
     static constexpr int min_width = ui::min_width, min_height = ui::min_height;
     explicit DesktopLayout(int width = default_width, int height = default_height,
-                           bool transmit_scope_visible = true, bool simulation_estimates_visible = true) {
+                           bool transmit_scope_visible = true, bool simulation_estimates_visible = true,
+                           bool force_transmit_visible = false) {
         auto& out = *this;
         const int header_rows = oscillator_row_height + lpi_row_height +
             (simulation_estimates_visible ? simulation_estimate_row_height : 0);
@@ -184,8 +185,11 @@ struct DesktopLayout {
         const int editor_width = width - 2 * margin - qr_size - binary_width - 28;
         const int binary_x = margin + editor_width + 14;
         constexpr int previous_width = 240;
-        out[Slot::message_label] = {margin, 173, editor_width - previous_width - 8, 20};
-        out[Slot::paste_previous] = {margin + editor_width - previous_width, 173, previous_width, 20};
+        constexpr int force_width = 166;
+        const int force_space = force_transmit_visible ? force_width + 8 : 0;
+        out[Slot::message_label] = {margin, 173, editor_width - previous_width - force_space - 8, 20};
+        out[Slot::paste_previous] = {margin + editor_width - previous_width - force_space, 173, previous_width, 20};
+        out[Slot::force_transmit] = {margin + editor_width - force_width, 173, force_width, 20};
         const int qr_choice_width=std::max(78,qr_size);
         out[Slot::binary_label] = {binary_x, 173, binary_width-(qr_choice_width-qr_size), 20};
         out[Slot::message] = {margin, compose_y, editor_width, compose_height};

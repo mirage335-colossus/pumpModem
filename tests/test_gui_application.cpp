@@ -1194,6 +1194,35 @@ void compression_declarations() {
     check(std::string_view(control(ui::Field::binary).help).find("Incomplete bytes pause")==std::string_view::npos,
           "Binary help still rejects supported short raw patterns");
 }
+void force_transmit_declaration() {
+    using C=ui::Command;using F=ui::Field;
+    Application app({.simulation=true});
+    const auto& force=control(F::force_transmit);
+    check(force.kind==ui::Kind::action&&force.command==C::force_transmit&&force.page==ui::Page::console&&
+          force.slot==ui::Slot::force_transmit&&!force.persistent&&force.font_size==11&&
+          std::string_view(force.label)=="Force next transmission"&&
+          std::string_view(force.help).find("once")!=std::string_view::npos&&
+          std::string_view(force.help).find("expose message content")!=std::string_view::npos&&
+          !app.control(force).visible&&!app.control(force).enabled,
+          "Force action must use ordinary shared visibility and explicit one-shot risk wording");
+    const auto original=app.field(F::message).text;
+    app.activate(force);app.dispatch(C::force_transmit);
+    check(app.field(F::message).text==original&&app.take_services().empty(),
+          "Hidden override callback dispatched a transmission or introduced a confirmation service");
+    // Exercise the existing field-driven visibility/layout route, with no new
+    // backend command decisions or specialized native widgets.
+    auto& state=const_cast<ui::FieldState&>(app.field(F::force_transmit));
+    state.visible=true;
+    check(app.control(force).visible&&!app.control(force).enabled,
+          "Override visibility bypassed the controller's independent eligibility guard");
+    for(const auto size:{ui::Rect{0,0,ui::min_width,ui::min_height},ui::Rect{0,0,ui::default_width,ui::default_height}}) {
+        const auto visible=app.control_layout(force,size.w,size.h).frame;
+        const ui::DesktopLayout expected(size.w,size.h,app.field(F::transmit_scope).visible,
+            app.field(F::simulation_cpu_time).visible,true);
+        check(visible==expected[ui::Slot::force_transmit],"Shared facade dropped override layout visibility");
+    }
+    state.visible=false;app.close();
+}
 void noise_declarations_and_dispatch() {
     using C=ui::Command;using F=ui::Field;using P=ui::Page;
     const auto declaration=[](C command,P page)->const ui::Control& {
@@ -1251,6 +1280,6 @@ void noise_declarations_and_dispatch() {
 }
 }
 int main() {
-    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
+    try {fast_default_console();developer_mode_presentation();transmission_scope_records();transmission_scope_reflow();simulation_header_reflow();records();progressive_pending_records();revised_reception_records();recovery_reception_records();presentation();control_bindings();expanded_preview();menu_bindings();declared_edits();rate_carrier_declarations();target_snr_declarations();fitted_target_editing();mono_declaration();oscillator_declaration();lpi_declaration();declared_submission();declared_native_input();stale_page_input();menu_groups();declarations();typed_short_text_inspection();compression_declarations();force_transmit_declaration();noise_declarations_and_dispatch();std::cout<<"Shared GUI application/records/declarations passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

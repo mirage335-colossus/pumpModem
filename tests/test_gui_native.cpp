@@ -282,6 +282,22 @@ int main() {
         policy.started(false,true,time+std::chrono::seconds(14));
         policy.abort_start();
         check(policy.remaining(false,true,time+std::chrono::seconds(14)).count()==0);
+        policy.started(false,true,time+std::chrono::seconds(14));
+        policy.finished(time+std::chrono::seconds(15));
+        bool separation_rejected=false;
+        try { policy.started(false,true,time+std::chrono::seconds(16)); }
+        catch(const Error&) { separation_rejected=true; }
+        check(separation_rejected);
+        policy.started(false,true,time+std::chrono::seconds(16),true);
+        bool forced_concurrent_rejected=false;
+        try { policy.started(false,true,time+std::chrono::seconds(16),true); }
+        catch(const Error&) { forced_concurrent_rejected=true; }
+        check(forced_concurrent_rejected);
+        policy.finished(time+std::chrono::seconds(17));
+        check(policy.remaining(false,true,time+std::chrono::seconds(17))==std::chrono::seconds(6));
+        policy.started(false,true,time+std::chrono::seconds(18),true);
+        policy.abort_start();
+        check(policy.remaining(false,true,time+std::chrono::seconds(18))==std::chrono::seconds(5));
         check(gui::format_bit_rate(1200)=="1.2 kbit/s");
         check(gui::format_bit_rate(.025)=="0.025 bit/s");
         check(gui::format_bit_rate(6.34e-9)=="6.34e-09 bit/s");

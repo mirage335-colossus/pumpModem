@@ -306,16 +306,36 @@ can remain undetected for an uncompressed source or independently valid suffix.
 Reusing the same key, timestamp, purpose, domain and stream positions repeats
 CTR output. It can expose plaintext XORs and allow correlation between repeated
 private waveforms; the new mapping cannot repair stream reuse. Independent
-MAC keys remain separate. Automatically timed live keyed bursts wait for a
-fresh whole-second epoch. Hardware output also waits through the symbol-duration
-aware receive-separation period, whether encryption is enabled or not.
-The live hardware guard tracks the greatest symbol epoch whose samples have
-been generated for output, including later symbols in a long message. A
-subsequent automatic burst must start beyond that epoch even after a backward
-clock correction. Backward clock jumps during preparation or its playback
-wait abort that attempt. This local guard is not persistent cross-process state.
-Explicit timestamps are caller-controlled, and separate devices sharing a key
-still require coordination. A surviving reception uses its acquired epoch,
+MAC keys remain separate. The live hardware sender keeps an in-memory maximum
+used epoch for each key, identified by a dedicated local MAC label. It includes
+the first epoch used by surrounding noise and every payload symbol whose shaped
+pulse can contribute to generated output, even before that symbol's nominal
+start. Reservations are retained before audio delivery and survive cancellation,
+profile changes and reloading the same key within the session.
+
+An ordinary subsequent payload must start beyond that maximum. The selected
+new profile's settling/pulse prefix determines the corresponding playback wait.
+For maximum used whole-second epoch `H` and prefix duration `P` seconds, the
+conservative automatic-playback deadline is `H + 1 - P`; the countdown is
+`max(0, H + 1 - P - current_time)`. It is recomputed from the clock, rather than
+decremented independently of clock adjustments. A fixed caller-supplied epoch
+at or below `H` stays locked until changed or explicitly forced.
+The shared GUI shows **TX lock** with a countdown and enforces the same condition
+for ordinary button, keyboard and raw-bit sends. A backward clock correction
+can extend the wait. Backward jumps during preparation or playback waiting,
+and forward jumps that miss the scheduled start, abort that attempt. Normal
+hardware completion retains its separate symbol-duration-aware receive-separation
+wait; cancellation retains its existing separation behavior.
+
+The explicit **Force next transmission** action bypasses these transmit waits
+for one valid request. It can repeat CTR masks and private waveforms, but does
+not erase the maximum used epoch or leave protection disabled for later requests.
+It does not alter the receiver's physical-absence completion rule. No keyfile
+flags, transmitted fields or extra receive hypotheses implement this override.
+All history is memory-only and closing the program forgets it. Simulation stays
+separate from hardware history. Standalone CLI/file transmitter timestamps remain
+caller-controlled, and separate devices sharing a key still require coordination.
+A surviving reception uses its acquired epoch,
 subsecond phase and stream-symbol index to recover the matching Data positions.
 Recovering later bits does not reconstruct wholly missing intervals or prove
 that reception includes the complete original source.

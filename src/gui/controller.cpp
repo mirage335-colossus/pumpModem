@@ -135,6 +135,17 @@ std::string elapsed_text(double seconds) {
         <<':'<<std::setw(2)<<elapsed%60;
     return text.str();
 }
+std::string lock_time_text(double seconds) {
+    if(!std::isfinite(seconds)||seconds>=static_cast<double>(std::numeric_limits<std::uint64_t>::max()))
+        return "clock";
+    const auto remaining=static_cast<std::uint64_t>(std::ceil(std::max(0.,seconds)));
+    std::ostringstream text;
+    if(remaining>=86400)text<<remaining/86400<<'d'<<std::setfill('0')<<std::setw(2)<<(remaining/3600)%24<<'h';
+    else if(remaining>=3600)text<<remaining/3600<<'h'<<std::setfill('0')<<std::setw(2)<<(remaining/60)%60<<'m';
+    else if(remaining>=60)text<<remaining/60<<'m'<<std::setfill('0')<<std::setw(2)<<remaining%60<<'s';
+    else text<<remaining<<'s';
+    return text.str();
+}
 std::string workspace_text(unsigned percent,std::size_t bytes) {
     constexpr std::size_t gib=1024*1024*1024,mib=1024*1024;
     std::ostringstream text;
@@ -181,7 +192,7 @@ struct Controller::Impl {
     bool planner_input_notice=false;
     bool target_input_notice=false;
     std::optional<bool> displayed_short_target;
-    std::string draft_error,tuning_explanation,estimate_error;
+    std::string draft_error,tuning_explanation,estimate_error,ordinary_airtime;
     std::vector<KeyEntry> keys;
     std::shared_ptr<const Bytes> attachment;
     std::filesystem::path attachment_path,key_path;
@@ -294,6 +305,17 @@ struct Controller::Impl {
         return !attachment && (composer.raw_bits().has_value() || composer.bytes().size()<=transfer::short_message_bytes);
     }
     bool empty_draft() const {return !attachment&&(composer.raw_bits()?composer.raw_bits()->empty():composer.bytes().empty());}
+    double key_lock_seconds() const {
+        return short_draft()?snapshot.transmit_key_lock_seconds:snapshot.long_transmit_key_lock_seconds;
+    }
+    double separation_seconds() const {
+        return std::max(snapshot.transmit_separation_seconds,
+            gate.remaining(settings.simulation,encrypted()).count()/1000.);
+    }
+    bool transmit_ready() const {
+        return !empty_draft()&&!transmit_requested&&!snapshot.transmitting&&!key_loading&&!key_failed&&
+            !file_loading&&settings_valid&&(attachment||draft_error.empty())&&estimate&&estimated_revision==revision&&estimate->memory_supported;
+    }
     const modem::Config& transmit_config() const {
         return !short_draft() && settings.long_message_modem ? *settings.long_message_modem : settings.transfer.modem;
     }
@@ -324,10 +346,10 @@ struct Controller::Impl {
         planner_model.reset();
         simulation_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
         lpi_estimate_status(!settings_valid?"Invalid settings":!attachment&&!draft_error.empty()?"Unavailable":"Calculating...");
-        f(UiField::airtime).text="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
+        ordinary_airtime="Calculating airtime..."; f(UiField::inspection).text="Calculating current transmission...";
         f(UiField::flow_detail).text.clear(); f(UiField::transmission_detail).text.clear();
         f(UiField::payload_alphabet).visible=false; f(UiField::reference_alphabet).visible=false;
-        if(!attachment && !draft_error.empty()) { estimated_revision=revision; f(UiField::airtime).text=draft_error; f(UiField::inspection).text=draft_error; }
+        if(!attachment && !draft_error.empty()) { estimated_revision=revision; ordinary_airtime=draft_error; f(UiField::inspection).text=draft_error; }
     }
     void simulation_estimate_text(std::string confidence,std::string cpu,std::string gpu,bool coherent_reference=false,
                                   ui::TextTone tone=ui::TextTone::normal) {
@@ -612,7 +634,7 @@ struct Controller::Impl {
             plot_policy.reset(); plot_update.clear_waterfall=true;
             if(started) session.configure(settings);
         } catch(...) {
-            if(!load) {settings_valid=false;target_labels();simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); f(UiField::airtime).text="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings";}
+            if(!load) {settings_valid=false;target_labels();simulation_estimate_status("Invalid settings"); lpi_estimate_status("Invalid settings"); ordinary_airtime="Invalid modem settings"; f(UiField::inspection).text="Invalid modem settings";}
             throw;
         }
     }
@@ -893,7 +915,8 @@ struct Controller::Impl {
         case Command::planner_weaker: return link_plan()->available&&link_plan()->weaker_fit_target.has_value();
         case Command::transmit_short_bits: return !attachment&&!file_loading&&draft_error.empty()&&
             !f(UiField::short_bits).text.empty()&&enabled(Command::transmit);
-        case Command::transmit: return !empty_draft() && !busy && !key_loading && !key_failed && !file_loading && settings_valid && estimate && estimated_revision==revision && estimate->memory_supported && gate.remaining(settings.simulation,encrypted()).count()==0;
+        case Command::transmit: return transmit_ready()&&key_lock_seconds()<=0&&separation_seconds()<=0;
+        case Command::force_transmit: return transmit_ready()&&key_lock_seconds()>0;
         case Command::transmit_noise: return !busy && !key_loading && settings_valid;
         case Command::cancel: return busy||snapshot.simulation_replay;
         case Command::open_keyfile: case Command::generate_keyfile: return !busy&&!key_loading;
@@ -940,6 +963,9 @@ struct Controller::Impl {
         if((f(UiField::repeatable).checked||has_repeatable_prefix())&&!pending_repeatable_removal&&
            (attachment||file_loading||composer.bytes().size()>repeatable_limit))set_repeatable(false);
         const bool busy=transmit_requested||snapshot.transmitting||closing;
+        const bool key_locked=!busy&&key_lock_seconds()>0;
+        f(UiField::force_transmit).visible=key_locked;
+        f(UiField::airtime).text=key_locked?"Earlier output used this key\nfor a future symbol.":ordinary_airtime;
         f(UiField::planner_target).enabled=!closing;
         f(UiField::planner_command).enabled=!closing;
         sync_launch_command();
@@ -1042,7 +1068,7 @@ struct Controller::Impl {
         if(result.kind==PrepKind::file&&result.revision!=attachment_revision) return;
         if(!result.error.empty()) {
             if(result.kind==PrepKind::keys) { key_failed=true; f(UiField::key_path).text=result.created?"Keyfile saved; load failed":"Keyfile operation failed"; }
-            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; estimate_error=result.error; if(planner_draft)planner_model.reset(); simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); f(UiField::airtime).text=result.error; f(UiField::inspection).text=result.error; } }
+            if(result.kind==PrepKind::estimate) { if(result.revision==revision) { estimated_revision=revision; estimate_error=result.error; if(planner_draft)planner_model.reset(); simulation_estimate_status("Unavailable"); lpi_estimate_status("Unavailable"); ordinary_airtime=result.error; f(UiField::inspection).text=result.error; } }
             else if(result.kind!=PrepKind::devices) notice(result.error,10);
             return;
         }
@@ -1112,7 +1138,7 @@ struct Controller::Impl {
             auto text="TX "+seconds_text(estimate->total_seconds)+" / content "+seconds_text(estimate->content_seconds);
             if(!estimate->memory_supported) text="Content / DSP budget exceeded: "+seconds_text(estimate->total_seconds);
             if(inspection->preview_only)text="1-bit preview · "+text;
-            f(UiField::airtime).text=std::move(text);
+            ordinary_airtime=std::move(text);
         }
     }
     void accept_snapshot(live::Snapshot next) {
@@ -1208,15 +1234,17 @@ struct Controller::Impl {
             f(command==Command::planner_apply_short?UiField::snr:UiField::long_snr).text=planner_number(planner_inputs.target_db_hz);
             configure(true);notice(command==Command::planner_apply_short?"Planner target applied to short messages.":"Planner target applied to long messages and files.");break;
         case Command::transmit_short_bits:
+        case Command::force_transmit:
         case Command::transmit: {
             // Keep the accepted bytes available for retry, including arbitrary
             // binary edits. Clearing here frees the next draft while TX runs.
             std::optional<BinaryEditor> sent;
             if(!attachment)sent=composer;
-            gate.started(settings.simulation,encrypted()); transmit_requested=true;
+            const bool force=command==Command::force_transmit;
+            gate.started(settings.simulation,encrypted(),Clock::now(),force); transmit_requested=true;
             try {
-                if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits());
-                else session.transmit(message());
+                if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits(),force);
+                else session.transmit(message(),force);
             } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
             if(sent) { previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
@@ -1478,9 +1506,10 @@ bool Controller::enabled(Command command) const { return impl_->enabled(command)
 std::string Controller::command_label(Command command) const {
     if(command==Command::cancel)return impl_->noise_requested||impl_->snapshot.transmitting_noise?
         "Stop noise":impl_->snapshot.simulation_replay?"Stop replay":"Cancel TX";
-    if(command==Command::transmit) {
-        const auto remaining=impl_->gate.remaining(impl_->settings.simulation,impl_->encrypted()).count();
-        if(remaining>0&&!impl_->snapshot.transmitting)return "TX wait "+std::to_string((remaining+999)/1000)+"s";
+    if((command==Command::transmit||command==Command::transmit_short_bits)&&
+       !impl_->transmit_requested&&!impl_->snapshot.transmitting) {
+        if(const auto remaining=impl_->key_lock_seconds();remaining>0)return "TX lock "+lock_time_text(remaining);
+        if(const auto remaining=impl_->separation_seconds();remaining>0)return "TX wait "+lock_time_text(remaining);
     }
     return {};
 }

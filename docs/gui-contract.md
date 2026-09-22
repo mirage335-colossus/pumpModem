@@ -243,6 +243,26 @@ and saved keys remain intact. Simulation runs continuously without a completion
 replay. Automatic transmission capture stays hidden during noise; manual Hex/Bits
 show an explanatory caption and no retained temporary keystream diagnostics.
 
+Regular hardware transmission keeps an in-memory usage record for each selected
+key. When prior output has already used a future symbol epoch, including its
+leading shaped pulse, normal transmission is locked. The button shows a compact
+countdown such as **TX lock 10m01s** and the airtime/one-bit-preview line says
+**Earlier output used this key for a future symbol.** The current draft's short
+or long transmit profile determines the countdown. A backward clock adjustment
+can extend it; cancellation and profile changes do not clear the record.
+The normal airtime line returns when the key lock clears.
+
+**Force next transmission** appears next to **Previous message - click to paste**
+while the key lock applies. It sends the current valid draft once despite the
+key lock and transmit-separation wait, without a confirmation dialog. It retains
+the key's usage record and restores ordinary protection for subsequent requests.
+It does not change encryption, waveform generation or receiver completion.
+All draft, key-loading, device-ownership and memory checks still apply. The lock
+also applies to keyboard and raw-bit submission. There is no persistent override,
+keyfile flag, additional receive-key search or disk-written usage record. Closing
+the program forgets this local history; separate transmitters require operator
+coordination. Simulation does not consume the hardware usage record.
+
 Finite simulation reports generated **audio** percentage separately from elapsed
 wall time. Elapsed time continues updating on UI polls while receiver scoring
 holds the audio percentage unchanged. Once TX audio ends, the mode line says

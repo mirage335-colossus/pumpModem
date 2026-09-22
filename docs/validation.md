@@ -4,6 +4,59 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## In-memory Robust transmit epoch lock — 22 September 2026 UTC
+
+The live hardware sender now records the greatest exposed symbol epoch per
+selected key, including the leading pulse of a future symbol. Accounting occurs
+before PCM leaves the playback callback and survives cancellation, profile
+changes, key reloads and stop/start within the same session. The next profile's
+prefix determines its lock deadline. Clock rollback extends the countdown;
+simulation and a new session have separate history. Normal completion and
+cancellation retain their existing receive-separation behavior.
+
+The shared GUI displays a compact `TX lock` countdown and replaces the airtime
+line with the explanation. Its adjacent `Force next transmission` action sends
+one valid draft through the normal path while bypassing that request's key and
+separation waits. Earlier history remains recorded. No native adapter code,
+confirmation dialog, keyfile option, persistent state, receiver hypothesis or
+wire format was added or changed.
+
+The new `live_transmit_lock` suite independently compares two rendered slow
+waveforms to establish an early contribution from the next symbol. It then
+exercises cancellation, six seconds of clock advance and a faster profile;
+ordinary sends remain locked. Other cases cover phase and subsecond boundaries,
+tail clamping, short/long prefix deadlines, forward/backward clock corrections,
+same/different keys, reload and session lifetime, invalid forcing, explicit
+epochs, queued-request rechecks, one-shot quiet-period bypass and retained
+history. Release coverage passes in 7.12 seconds; its ASan/UBSan run passes in
+7.81 seconds with UBSan halting on error and LeakSanitizer disabled for the
+restricted process environment.
+
+All 30 preservation-contract suites pass across the full run and corrected
+controller rerun, including the 1,013.48-second differential receiver
+calibration. The new controller fixture initially inspected the default
+pre-poll snapshot; it now observes a real transmission and finishes its normal
+replay before asserting exact `001` output. The existing assertions remain
+unchanged. The full controller suite passes in 76.82 seconds. All 33 headless
+GUI checks pass across these runs and the additional 29-case GUI selection
+(101.81 seconds), including the shared/native boundary, compact minimum-size
+layout, validation guards and restoration of the airtime estimate.
+
+The FLTK production workflow, adapter conformance and document conformance
+pass on a private 2400×1800 Xvfb display at 96 DPI (292.59 seconds together;
+226.71 seconds for the complete workflow). Rev adapter/platform conformance
+and both 1×/2× coordinate checks also pass (118.87 seconds together). Its
+production workflow reaches the unchanged 300-second smoke limit in phase 17
+both in the native group and on an isolated rerun (300.46/300.42 seconds).
+The reported states were replacement-transmission generation and receiver
+search limited by its configured DSP workspace. No complete Rev workflow pass
+is claimed, and neither its timeout nor its assertions were relaxed.
+
+Both Release GUI executables rebuilt. `git diff --check` passes. These are
+generated-audio, hardware-callback-stub and Linux GUI checks; physical radio/audio
+links and native Windows rendering were not exercised. The private display was
+closed after testing, and no running user GUI or audio device was changed.
+
 ## Build and dependency simplification — 22 September 2026 UTC
 
 This change alters build orchestration, dependency preparation, packaging and

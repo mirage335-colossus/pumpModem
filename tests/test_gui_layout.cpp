@@ -299,6 +299,27 @@ void hidden_scope_reclaims_space() {
         }
     }
 }
+void force_transmit_reflows_heading() {
+    for(const auto size:{Rect{0,0,min_width,min_height},Rect{0,0,default_width,default_height},Rect{0,0,1920,1080}})
+        for(const bool scope:{false,true})for(const bool simulation:{false,true}) {
+            const DesktopLayout ordinary(size.w,size.h,scope,simulation);
+            const DesktopLayout locked(size.w,size.h,scope,simulation,true);
+            const auto heading=locked[Slot::message_label],previous=locked[Slot::paste_previous],force=locked[Slot::force_transmit];
+            const auto editor=locked[Slot::message];
+            check(heading.w>=200&&heading.x+heading.w+8==previous.x&&
+                  previous.x+previous.w+8==force.x&&force.x+force.w==editor.x+editor.w&&
+                  heading.y==previous.y&&previous.y==force.y&&force.y+force.h<=editor.y&&force.w>=166,
+                  "Force action must fit beside previous-message paste without covering the heading or editor");
+            for(std::size_t index=1;index<static_cast<std::size_t>(Slot::count);++index) {
+                const auto slot=static_cast<Slot>(index);
+                if(slot!=Slot::message_label&&slot!=Slot::paste_previous)
+                    check(locked[slot]==ordinary[slot],"Showing the override shifted unrelated GUI controls");
+            }
+            Control declaration{Kind::action};declaration.slot=Slot::force_transmit;
+            check(control_layout(declaration,{},size.w,size.h,{},scope,simulation,true).frame==force,
+                  "Force visibility did not reach the shared control geometry");
+        }
+}
 void hidden_simulation_estimates_reclaim_space() {
     for(const auto size:{Rect{0,0,min_width,min_height},Rect{0,0,default_width,default_height},
                          Rect{0,0,1387,1001},Rect{0,0,1920,1080}})for(const bool scope:{false,true}) {
@@ -451,6 +472,7 @@ int main() {
         document_widths();
         supported_sizes();
         hidden_scope_reclaims_space();
+        force_transmit_reflows_heading();
         hidden_simulation_estimates_reclaim_space();
         adapter_helpers();
         relative_controls();

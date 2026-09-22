@@ -13,7 +13,7 @@ enum class Field {
     simulation_oscillator, simulation_oscillator_detail, lpi_estimate, planner_target, planner_command,
     key, message, binary,
     qr_brightness, send_key, device, mono, bandwidth, carrier, snr, long_snr, receive_snr, pattern, fec, dsp_workspace,
-    files, signals, mode, status, airtime, key_path, message_label, binary_label,
+    files, signals, mode, status, airtime, force_transmit, key_path, message_label, binary_label,
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
@@ -23,7 +23,7 @@ enum class Field {
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_mono, count
 };
 enum class Command {
-    none, transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
+    none, transmit, force_transmit, transmit_noise, cancel, clear_received, attach_file, use_text, paste_previous, open_keyfile,
     generate_keyfile, show_key_folder, acknowledge_key_failure, save_file,
     copy_signal, paste_signal, zoom_in, zoom_out, reset_zoom, clear_waterfall,
     pattern_first, pattern_previous, pattern_next, pattern_last, toggle_qr_expanded, dismiss_overlay,

@@ -10,6 +10,7 @@
 #include "live_pattern_scores.hpp"
 #include "live_receptions.hpp"
 #include "transmit_timing.hpp"
+#include "transmit_epoch_guard.hpp"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -193,6 +194,8 @@ struct Session::Impl {
         std::unique_ptr<modem::StreamingTransmitter> transmitter;
         std::function<void(Prepared&)> prepare_hardware;
         std::optional<std::uint64_t> protected_epoch;
+        Bytes protected_key;
+        bool hardware = false;
         bool binary = false;
         bool noise = false;
         std::uint64_t generation = 0, serial = 0;
@@ -272,7 +275,10 @@ struct Session::Impl {
     Settings settings;
     Snapshot current;
     std::uint64_t generation = 0, decoder_generation = 0, tx_serial = 0, receive_revision = 0, next_signal = 1, next_event = 1;
-    std::uint64_t last_pattern_transmit_epoch = 0;
+    // Material identity, independent of a keyfile name or selected profile.
+    // Deliberately lives only as long as this Session; never written to disk.
+    std::map<Bytes,std::uint64_t> transmit_epochs;
+    Bytes selected_transmit_key;
     std::uint64_t recovery_clear_generation = 0;
     std::array<std::uint8_t,16> reception_namespace{};
     std::atomic<std::uint64_t> pattern_score_observation_id{0};
@@ -281,7 +287,8 @@ struct Session::Impl {
     std::optional<Clock::time_point> simulation_compute_started;
     Clock::time_point next_hardware_send{};
     using Transmission = std::variant<Message, Bytes, modem::Noise>;
-    std::deque<Transmission> queued;
+    struct TransmitRequest { Transmission content; bool force = false; };
+    std::deque<TransmitRequest> queued;
     std::shared_ptr<Prepared> ready;
     std::deque<AudioBlock> input;
     std::size_t input_bytes = 0, decoding_bytes = 0, received_bytes = 0, receiver_bytes = 0;
@@ -368,14 +375,32 @@ struct Session::Impl {
     }
     // Called with mutex held, after validation. Invalid input must leave a
     // currently presented simulation and its pending result untouched.
-    void enqueue(Transmission transmission) {
+    double key_lock_seconds(const Settings& value, const modem::Config& config,
+                            const Bytes& key) const {
+        if(value.simulation || key.empty())return 0;
+        const auto used=transmit_epochs.find(key);
+        if(used==transmit_epochs.end())return 0;
+        if(value.transfer.timestamp) {
+            if(value.transfer.timestamp>used->second)return 0;
+            // An explicit timestamp must be changed or deliberately forced;
+            // passage of time alone cannot make that fixed address unused.
+            return std::max(1.,datapump::detail::transmit_epoch_lock_seconds(config,used->second,current_epoch()));
+        }
+        return datapump::detail::transmit_epoch_lock_seconds(config,used->second,current_epoch());
+    }
+    void enqueue(Transmission transmission, bool force = false) {
         if(capture_suspended)throw Error("Audio is reserved by the other mode");
         if (current.transmitting_noise) throw Error("stop noise before transmitting a message");
         const bool noise = std::holds_alternative<modem::Noise>(transmission);
+        const auto* message=std::get_if<Message>(&transmission);
+        const auto& config=message && settings.long_message_modem && !transfer::uses_raw_message(*message)?
+            *settings.long_message_modem:settings.transfer.modem;
+        if(!noise && !force && key_lock_seconds(settings,config,selected_transmit_key)>0)
+            throw Error("Transmit locked: earlier output used this key for a future symbol");
         if (noise && (tx_busy || !queued.empty())) throw Error("wait for transmission to finish before starting noise");
         if (queued.size() >= 8) throw Error("transmit queue contains eight pending messages");
         advance_replay(replay_clock());
-        queued.push_back(std::move(transmission)); current.transmitting = true;
+        queued.push_back({std::move(transmission),force}); current.transmitting = true;
         current.transmission_finished = current.transmission_cancelled = false;
         if (!tx_busy) {
             current.transmitting_noise = noise;
@@ -490,10 +515,12 @@ struct Session::Impl {
     }
     void configure(const Settings& requested) {
         auto value = normalized(requested);
+        const auto key=value.transfer.key?value.transfer.key->mac(Bytes{'D','P','-','T','X','-','E','P','O','C','H','-','G','U','A','R','D'}):Bytes{};
         std::lock_guard lock(mutex);
         capture_stop.request_stop(); tx_stop.request_stop(); decode_stop.request_stop();
         decode_stop = std::stop_source{};
         settings = std::move(value); ++generation; ++tx_serial; ++receive_revision;
+        selected_transmit_key=key;
         receive_pending=false;
         queued.clear(); ready.reset(); tx_busy = false; input.clear();
         input_bytes = receiver_bytes = received_bytes = audio_bytes = 0;
@@ -1205,10 +1232,14 @@ struct Session::Impl {
     void complete_tx(Prepared& wave, const std::string& error = {}) {
         std::lock_guard lock(mutex);
         if (wave.generation != generation || wave.serial != tx_serial) return;
+        // Keep the existing normal-completion quiet interval. Cancellation
+        // retains key exposure independently, without adding a full-symbol
+        // backend delay to the GUI's existing cancellation separation.
+        if(wave.hardware && !wave.noise && wave.transmitter && wave.transmitter->samples_emitted())
+            next_hardware_send=std::max(next_hardware_send,Clock::now()+std::chrono::duration_cast<Clock::duration>(
+                std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.)));
         finish_simulation_elapsed();
         if (wave.transmitter) current.transmit_trace = wave.transmitter->transmit_trace();
-        if(!settings.simulation && !wave.noise)next_hardware_send=Clock::now()+std::chrono::duration_cast<Clock::duration>(
-            std::chrono::duration<double>(static_cast<double>(modem::pattern_absence_samples(wave.modem))/wave.modem.sample_rate+1.));
         tx_busy = false; current.transmitting = settings.simulation ? false : !queued.empty();
         current.transmitting_noise = false;
         current.transmission_finished = settings.simulation || queued.empty(); current.transmission_cancelled = wave.stop.stop_requested();
@@ -1246,17 +1277,12 @@ struct Session::Impl {
         current.simulation_receiving_tail=value.simulation && !wave.noise && wave.tail_started;
     }
     void retain_emitted_epoch(const Prepared& wave) {
-        if(!wave.protected_epoch)return;
-        const auto& config=wave.modem;
-        const auto prefix=modem::training_sample_count(config)+modem::pattern_pulse_padding_samples(config);
-        const auto end=wave.transmitter->total_samples()-modem::pattern_pulse_padding_samples(config)-modem::suppression_sample_count(config);
-        const auto emitted=std::min(end,wave.transmitter->samples_emitted());
-        if(emitted<=prefix)return;
-        const auto symbol=(emitted-prefix-1)/modem::symbol_sample_count(config);
-        const auto address=modem::symbol_stream_address(*wave.protected_epoch,0,symbol,
-            modem::symbol_sample_count(config),config.sample_rate);
+        if(!wave.protected_epoch || !wave.transmitter->samples_emitted())return;
+        const auto epoch=datapump::detail::exposed_transmit_epoch(wave.modem,*wave.protected_epoch,
+            wave.transmitter->total_samples(),wave.transmitter->samples_emitted());
         std::lock_guard lock(mutex);
-        last_pattern_transmit_epoch=std::max(last_pattern_transmit_epoch,address.epoch);
+        auto& retained=transmit_epochs[wave.protected_key];
+        retained=std::max(retained,epoch);
     }
     void source_loop(std::stop_token stop) {
         std::uint64_t local_generation = 0;
@@ -1454,12 +1480,14 @@ struct Session::Impl {
     }
     void encode_loop(std::stop_token stop) {
         while (!stop.stop_requested()) {
-            Transmission transmission; Settings value; std::uint64_t version, serial; std::stop_token token;
+            Transmission transmission; Settings value; Bytes key; bool force=false;
+            std::uint64_t version, serial; std::stop_token token;
             {
                 std::unique_lock lock(mutex);
                 changed.wait(lock, stop, [this] { return current.running && !tx_busy && replay.empty() && !queued.empty(); });
                 if (stop.stop_requested()) break;
-                transmission = std::move(queued.front()); queued.pop_front(); value = settings;
+                transmission = std::move(queued.front().content); force=queued.front().force;
+                queued.pop_front(); value = settings; key=selected_transmit_key;
                 version = generation; serial = ++tx_serial; tx_stop = std::stop_source{}; token = tx_stop.get_token();
                 current.transmission_id = serial;
                 current.transmit_trace = {};
@@ -1496,62 +1524,74 @@ struct Session::Impl {
                     changed.notify_all();
                     continue;
                 }
-                // Only the transmitter reads its send epoch here. The
-                // running receiver admits its own candidates independently.
-                if(!value.simulation) {
-                    // Both explicit epochs and automatically scheduled sends
-                    // leave an observed absence interval after the last send.
+                // Simulation has its own deterministic sample timeline and
+                // never consumes the hardware key-use history.
+                if(value.simulation && !value.transfer.timestamp)
+                    value.transfer.timestamp=static_cast<std::uint64_t>(current_epoch());
+                if(!value.simulation && !force) {
+                    // Keep capture available during potentially hours-long
+                    // absence waits. The source thread rechecks, rather than
+                    // waiting with the output device open, if a later
+                    // deadline is established after this point.
                     std::unique_lock lock(mutex);
                     changed.wait_until(lock,token,next_hardware_send,[&]{return token.stop_requested();});
                     if(token.stop_requested() || stop.stop_requested())continue;
-                }
-                const bool scheduled_hardware=!value.simulation && !value.transfer.timestamp;
-                if (!value.transfer.timestamp && !scheduled_hardware) {
-                    value.transfer.timestamp=static_cast<std::uint64_t>(current_epoch());
-                    if(value.transfer.key) {
-                        // No transmitted nonce: wait for a fresh local time
-                        // coordinate instead of repeating this device's CTR
-                        // positions in two bursts in the same whole second.
-                        std::uint64_t previous;
-                        {std::lock_guard lock(mutex);previous=last_pattern_transmit_epoch;}
-                        while(value.transfer.timestamp<=previous && !token.stop_requested() && !stop.stop_requested()) {
-                            std::unique_lock lock(mutex);
-                            changed.wait_for(lock,stop,std::chrono::milliseconds(50),[&]{return token.stop_requested();});
-                            value.transfer.timestamp=static_cast<std::uint64_t>(current_epoch());
-                        }
-                        if(token.stop_requested() || stop.stop_requested())continue;
-                        {std::lock_guard lock(mutex);last_pattern_transmit_epoch=std::max(last_pattern_transmit_epoch,value.transfer.timestamp);}
-                    }
                 }
                 auto prepared = std::make_shared<Prepared>();
                 prepared->modem = value.transfer.modem;
                 prepared->generation = version; prepared->serial = serial; prepared->stop = token;
                 prepared->binary = std::holds_alternative<Bytes>(transmission);
-                if (scheduled_hardware) {
-                    prepared->prepare_hardware=[this,transmission=std::move(transmission),options=value.transfer](Prepared& wave) mutable {
-                        options.modem.stream_phase_samples=0;
-                        std::uint64_t minimum=0;
-                        if(options.key) {
+                prepared->hardware = !value.simulation;
+                if (!value.simulation) {
+                    prepared->prepare_hardware=[this,transmission=std::move(transmission),
+                            value,key,force](Prepared& wave) mutable {
+                        // This runs on the single audio source thread, after
+                        // any cancelled preceding playback has fully returned.
+                        // A queued request must recheck history here: the
+                        // preceding waveform can advance it after enqueue.
+                        if(!force) {
                             std::lock_guard lock(mutex);
-                            if(last_pattern_transmit_epoch==std::numeric_limits<std::uint64_t>::max())
-                                throw Error("transmit epoch exhausted");
-                            minimum=last_pattern_transmit_epoch+1;
+                            if(wave.stop.stop_requested())throw Error("transmission cancelled");
+                            if(Clock::now()<next_hardware_send)
+                                throw Error("Transmit locked: waiting for reception separation");
+                            if(key_lock_seconds(value,value.transfer.modem,key)>0)
+                                throw Error("Transmit locked: earlier output used this key for a future symbol");
                         }
-                        auto scheduled=datapump::detail::schedule_transmission(options.modem,[&](std::uint64_t epoch) {
+                        auto options=value.transfer;
+                        const auto make=[&](std::uint64_t epoch) {
                             options.timestamp=epoch;
                             return wave.binary?transfer::binary_transmitter(std::get<Bytes>(transmission),options):
                                 transfer::message_transmitter(std::get<Message>(transmission),options);
-                        },[this]{return current_epoch();},wave.stop,minimum);
-                        if(options.key) {
-                            std::lock_guard lock(mutex);last_pattern_transmit_epoch=std::max(last_pattern_transmit_epoch,scheduled.epoch);
-                            wave.protected_epoch=scheduled.epoch;
+                        };
+                        if(!options.timestamp) {
+                            options.modem.stream_phase_samples=0;
+                            wave.modem.stream_phase_samples=0;
+                            std::uint64_t minimum=0;
+                            if(!key.empty() && !force) {
+                                std::lock_guard lock(mutex);
+                                const auto previous=transmit_epochs.find(key);
+                                if(previous!=transmit_epochs.end()) {
+                                    if(previous->second==std::numeric_limits<std::uint64_t>::max())
+                                        throw Error("transmit epoch exhausted");
+                                    minimum=previous->second+1;
+                                }
+                            }
+                            auto scheduled=datapump::detail::schedule_transmission(options.modem,make,
+                                [this]{return current_epoch();},wave.stop,minimum);
+                            wave.transmitter=std::move(scheduled.transmitter);
+                            if(!key.empty())wave.protected_epoch=scheduled.epoch;
+                            datapump::detail::wait_for_playback(scheduled.playback_epoch,
+                                [this]{return current_epoch();},wave.stop);
+                        } else {
+                            wave.transmitter=make(options.timestamp);
+                            if(!key.empty())wave.protected_epoch=options.timestamp;
                         }
-                        wave.transmitter=std::move(scheduled.transmitter);
-                        datapump::detail::wait_for_playback(scheduled.playback_epoch,[this]{return current_epoch();},wave.stop);
+                        wave.protected_key=key;
+                        // Reservation itself happens after each successful read
+                        // and before its PCM is handed back to the device.
                     };
                 } else if (prepared->binary) {
-                    const auto& bits = std::get<Bytes>(transmission);
-                    prepared->transmitter = transfer::binary_transmitter(bits, value.transfer);
+                    prepared->transmitter = transfer::binary_transmitter(std::get<Bytes>(transmission),value.transfer);
                 } else {
                     if (token.stop_requested()) continue;
                     prepared->transmitter = transfer::message_transmitter(std::get<Message>(transmission), value.transfer);
@@ -1708,20 +1748,20 @@ void Session::clear_recoveries() {
         std::erase_if(impl_->current.signals,[&](const auto& event){return event.id==task->event.id;});
     impl_->invalidate_recoveries();
 }
-void Session::transmit(const Message& message) {
+void Session::transmit(const Message& message, bool force) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
     if (message.data.size() > impl_->settings.content_limit) throw Error("message exceeds content capacity");
-    impl_->enqueue(message);
+    impl_->enqueue(message,force);
 }
-void Session::transmit_bits(std::span<const std::uint8_t> bits) {
+void Session::transmit_bits(std::span<const std::uint8_t> bits, bool force) {
     std::lock_guard lock(impl_->mutex);
     if (!impl_->current.running) throw Error("continuous receiver is not running");
     if (bits.empty()) throw Error("enter at least one binary bit");
     if (bits.size() > impl_->settings.content_limit) throw Error("binary input exceeds content capacity");
     if (std::any_of(bits.begin(), bits.end(), [](auto bit) { return bit > 1; }))
         throw Error("binary input must contain only 0 and 1 bits");
-    impl_->enqueue(Bytes(bits.begin(), bits.end()));
+    impl_->enqueue(Bytes(bits.begin(), bits.end()),force);
 }
 void Session::transmit_noise() {
     std::lock_guard lock(impl_->mutex);
@@ -1747,6 +1787,12 @@ Snapshot Session::snapshot() {
     impl_->advance_replay(now);
     impl_->publish_recovery_progress();
     impl_->current.recovery_working_bytes=impl_->recovery_bytes();
+    impl_->current.transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
+        impl_->settings.transfer.modem,impl_->selected_transmit_key);
+    impl_->current.long_transmit_key_lock_seconds=impl_->key_lock_seconds(impl_->settings,
+        impl_->settings.long_message_modem.value_or(impl_->settings.transfer.modem),impl_->selected_transmit_key);
+    impl_->current.transmit_separation_seconds=impl_->settings.simulation?0:
+        std::max(0.,std::chrono::duration<double>(impl_->next_hardware_send-Clock::now()).count());
     auto signals = std::move(impl_->current.signals); auto received = std::move(impl_->current.received);
     impl_->current.signals.clear(); impl_->current.received.clear(); impl_->received_bytes = 0;
     if (!impl_->pending_points.points.empty() || impl_->pending_points.dropped) {

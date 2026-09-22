@@ -1156,6 +1156,125 @@ void repeatable_message_identity() {
           !controller.enabled(ui::Command::transmit),
           "Clearing a repeatable message must leave an empty, unsendable preview");
 }
+void transmit_key_lock_controls() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});
+    controller.edit(F::message,"e");prepare(controller);
+    const auto airtime=controller.field(F::airtime).text;
+    const auto revision=controller.revision();
+    // Feed timing reports into an unstarted shared controller. The live-session
+    // regressions independently exercise the clock and actual waveform exposure.
+    auto& timing=const_cast<live::Snapshot&>(controller.snapshot());
+    timing.transmit_key_lock_seconds=600.01;
+    timing.long_transmit_key_lock_seconds=0;
+    controller.poll();
+    check(controller.command_label(C::transmit)=="TX lock 10m01s"&&
+          controller.command_label(C::transmit_short_bits)=="TX lock 10m01s"&&
+          !controller.enabled(C::transmit)&&!controller.enabled(C::transmit_short_bits)&&
+          controller.enabled(C::force_transmit)&&controller.field(F::force_transmit).visible,
+          "Key lock must disable both ordinary submits and expose one validated force action");
+    auto warning=controller.field(F::airtime).text;std::replace(warning.begin(),warning.end(),'\n',' ');
+    check(warning=="Earlier output used this key for a future symbol.",
+          "Key lock did not replace the estimate with its compact explanation");
+    const auto draft=controller.message_bytes();
+    controller.activate(C::transmit);controller.activate(C::transmit_short_bits);
+    check(controller.message_bytes()==draft&&!controller.enabled(C::paste_previous),
+          "Locked ordinary submissions changed the draft");
+    for(const auto& [seconds,label]:std::vector<std::pair<double,std::string>>{
+            {.01,"TX lock 1s"},{61,"TX lock 1m01s"},{7380,"TX lock 2h03m"},{180000,"TX lock 2d02h"}}) {
+        timing.transmit_key_lock_seconds=seconds;controller.poll();
+        check(controller.command_label(C::transmit)==label,"Long key-lock countdown is not compact");
+    }
+    timing.transmit_key_lock_seconds=0;controller.poll();
+    check(controller.enabled(C::transmit)&&!controller.enabled(C::force_transmit)&&
+          !controller.field(F::force_transmit).visible&&controller.field(F::airtime).text==airtime&&
+          controller.revision()==revision,
+          "Unlocking must restore the existing estimate without recomputing the draft");
+    timing.transmit_separation_seconds=5.1;controller.poll();
+    check(!controller.enabled(C::transmit)&&!controller.enabled(C::transmit_short_bits)&&
+          controller.command_label(C::transmit)=="TX wait 6s"&&!controller.field(F::force_transmit).visible&&
+          controller.field(F::airtime).text==airtime,
+          "Ordinary receiver separation must remain distinct from the key-reuse lock");
+    timing.transmit_separation_seconds=0;
+    timing.transmit_key_lock_seconds=601;
+    controller.edit(F::message,std::string(16,'e'));prepare(controller);
+    check(!controller.enabled(C::transmit)&&controller.enabled(C::force_transmit),
+          "Sixteen-byte text selected the long-profile lock");
+    controller.edit(F::message,std::string(17,'e'));prepare(controller);
+    check(controller.enabled(C::transmit)&&!controller.field(F::force_transmit).visible,
+          "Seventeen-byte text retained the short-profile lock");
+    timing.long_transmit_key_lock_seconds=7200;controller.poll();
+    check(controller.command_label(C::transmit)=="TX lock 2h00m"&&controller.enabled(C::force_transmit),
+          "Long text failed to use its own waveform-prefix lock");
+    controller.edit(F::short_bits,std::string(150,'0'));prepare(controller);
+    check(controller.command_label(C::transmit)=="TX lock 10m01s"&&controller.enabled(C::force_transmit),
+          "Explicit raw bits incorrectly selected the long-source lock");
+    controller.edit(F::message,"");prepare(controller);
+    check(controller.command_label(C::transmit)=="TX lock 10m01s"&&!controller.enabled(C::force_transmit),
+          "Empty one-bit preview selected the wrong lock or became transmittable");
+    timing.transmit_key_lock_seconds=0;controller.poll();
+    check(controller.field(F::airtime).text.starts_with("1-bit preview"),
+          "Unlocking did not restore the prepared one-bit estimate");
+    timing.transmit_key_lock_seconds=601;
+    controller.edit(F::short_bits,"001x");controller.poll();
+    check(!controller.enabled(C::force_transmit),"Force action bypassed invalid raw input");
+    controller.edit(F::message,"e");prepare(controller);
+    struct TemporaryAttachment {
+        std::filesystem::path path=std::filesystem::temp_directory_path()/
+            ("datapump-lock-attachment-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        ~TemporaryAttachment(){std::error_code ignored;std::filesystem::remove(path,ignored);}
+    } fixture;
+    write_new_file(fixture.path.string(),Bytes{'e'});
+    controller.activate(C::attach_file);const auto requests=controller.take_services();
+    check(requests.size()==1,"Lock fixture did not request its attachment chooser");
+    controller.complete_service({requests.front().id,false,fixture.path.string(),{}});
+    check(!controller.enabled(C::force_transmit),"Force action bypassed pending attachment loading");
+    prepare(controller);
+    check(controller.command_label(C::transmit)=="TX lock 2h00m"&&controller.enabled(C::force_transmit),
+          "Even a one-byte attachment must use the long-profile lock");
+    controller.activate(C::use_text);controller.edit(F::short_bits,"001");prepare(controller);
+    controller.activate(C::force_transmit);
+    check(!controller.enabled(C::paste_previous)&&controller.message_bytes()==Bytes{'e'}&&
+          controller.enabled(C::force_transmit),
+          "A rejected forced start changed the draft or left transmission armed");
+    const auto forced_draft=controller.field(F::short_bits).text;
+    const bool forced_binary=controller.inspection()->binary;
+    controller.start();controller.activate(C::force_transmit);
+    check(controller.enabled(C::paste_previous)&&!controller.enabled(C::force_transmit)&&
+          !controller.field(F::force_transmit).visible,
+          "Forced start did not dispatch once through normal draft capture and busy validation");
+    // Computation completion starts the ordinary three-second replay at its
+    // first (pre-transmission) trace. Wait for its final frame before checking
+    // the complete wire bits, just as the other shared reception fixtures do.
+    // Always poll once: the retained unstarted snapshot initially says finished.
+    const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(15);
+    do {
+        controller.poll();std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    } while((!controller.snapshot().transmission_finished||controller.snapshot().simulation_replay)&&
+            std::chrono::steady_clock::now()<deadline);
+    const auto& completed=controller.snapshot();
+    if(!completed.transmission_finished||completed.simulation_replay)
+        throw Error("Forced raw transmission did not finish its simulation and replay; status="+completed.status+
+            ", error="+completed.error+", generated="+std::to_string(completed.transmit_trace.wire_bits.size()));
+    check(completed.running&&completed.transmission_id>0,
+          "Forced transmission never reached the live session");
+    if(completed.transmit_trace.wire_bits!=Bytes({0,0,1})) {
+        std::string bits;for(const auto bit:completed.transmit_trace.wire_bits)bits+=std::to_string(bit);
+        throw Error("Completed forced raw transmission changed its exact leading-zero bits; bits="+bits+
+            ", trace_active="+std::to_string(completed.transmit_trace.active)+
+            ", raw="+std::to_string(completed.transmit_trace.raw)+
+            ", generated="+std::to_string(completed.transmit_trace.generated_bits)+
+            ", draft="+forced_draft+", binary="+std::to_string(forced_binary)+
+            ", status="+completed.status+", error="+completed.error);
+    }
+    controller.edit(F::short_bits,"001");prepare(controller);
+    timing.transmit_key_lock_seconds=601;
+    check(!controller.enabled(C::transmit)&&controller.enabled(C::force_transmit),
+          "A forced transmission left a sticky bypass for the next draft");
+    controller.close();
+    check(!controller.enabled(C::force_transmit)&&!controller.field(F::force_transmit).visible,
+          "Closing left the override actionable");
+}
 void previous_message_controls() {
     using F=ui::Field; using C=ui::Command;
     Controller controller({true,true});
@@ -2056,6 +2175,7 @@ int main(int argc,char** argv) {
         composer_conveniences();
         repeatable_message_identity();
         previous_message_controls();
+        transmit_key_lock_controls();
         repeatable_pending_drafts();
         binary_editor_controls();
         three_bit_dispatch();

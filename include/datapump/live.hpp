@@ -115,6 +115,11 @@ struct Snapshot {
     bool running = false;
     bool transmitting = false;
     bool transmitting_noise = false; // Continuous tuning noise; fraction has no endpoint.
+    // Local, in-memory hardware safeguards for the currently selected key.
+    // Short/raw and long-message profiles have different prefix durations.
+    double transmit_key_lock_seconds = 0;
+    double long_transmit_key_lock_seconds = 0;
+    double transmit_separation_seconds = 0;
     bool simulation = false;
     std::uint64_t sequence = 0;
     std::uint64_t samples_received = 0;
@@ -178,12 +183,14 @@ public:
     // not cancel recovery, complete a reception, or change saved settings.
     bool try_suspend_capture();
     void resume_capture();
-    void transmit(const Message& message);
+    // Force applies only to this request, bypassing local key/quiet waits.
+    // It never clears previously recorded key use or changes the waveform.
+    void transmit(const Message& message, bool force = false);
     // One 0/1 per element, including leading zeros. Uses streaming APSK and
     // the selected data key, with no interval coding, preamble or FEC. Raw
     // simulations pass sampled audio to ordinary blind acquisition. Without
     // raw discovery framing, no timing/length-assisted raw result is emitted.
-    void transmit_bits(std::span<const std::uint8_t> bits);
+    void transmit_bits(std::span<const std::uint8_t> bits, bool force = false);
     // Continuous noise at the selected carrier/bandwidth and normal signal
     // level, with fresh temporary private streams. Does not encode a message
     // or use/register saved keys. Stop with cancel_transmit().
