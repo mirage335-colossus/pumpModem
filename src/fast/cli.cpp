@@ -217,10 +217,13 @@ int cli_main(int argc,char** argv) {
             <<",\"encrypted\":"<<(encrypted?"true":"false")<<",\"source_bytes_per_group\":"<<source_bytes_per_group(p,encrypted);
         if(p.capacity_mode) {
             const auto parity=capacity_parity_symbols(p)*2;
-            const auto info=ldpc::data_bits(p.code_rate,p.ldpc_frame_bits)/8*p.interleave_depth;
-            std::cout<<",\"source_bytes_per_cycle\":"<<capacity_source_bytes_per_cycle(p,encrypted)
-                <<",\"ldpc_blocks_per_cycle\":"<<p.interleave_depth
-                <<",\"rs_parity_bytes\":"<<parity<<",\"rs_parity_data_ratio\":"<<static_cast<double>(parity)/((info&~std::size_t{1})-parity);
+            const auto info=capacity_information_bytes(p);
+            std::cout<<",\"source_bytes_per_cycle\":"<<capacity_source_bytes_per_cycle(p,encrypted);
+            if(p.compact_convolutional)
+                std::cout<<",\"inner_code\":\"convolutional\",\"inner_information_bytes\":"<<info
+                    <<",\"inner_coded_bits\":"<<capacity_coded_bits(p);
+            else std::cout<<",\"ldpc_blocks_per_cycle\":"<<p.interleave_depth;
+            std::cout<<",\"rs_parity_bytes\":"<<parity<<",\"rs_parity_data_ratio\":"<<static_cast<double>(parity)/((info&~std::size_t{1})-parity);
             if(!p.acoustic_ofdm)std::cout<<",\"marker_spacing_intervals\":"<<p.marker_spacing_intervals<<",\"pilot_spacing_symbols\":"<<p.pilot_spacing_symbols;
         }
         std::cout<<",\"waveform\":\""<<(p.acoustic_ofdm?"ofdm":"single-carrier")<<"\"";
@@ -236,7 +239,7 @@ int cli_main(int argc,char** argv) {
         if(p.acoustic_ofdm)std::cout<<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples<<",\"ofdm_pilot_stride\":"<<p.ofdm_pilot_stride
             <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
             <<",\"occupied_lower_hz\":"<<occupied_lower_hz(p)<<",\"occupied_upper_hz\":"<<occupied_upper_hz(p);
-        if(p.channel==Channel::acoustic_short&&p.capacity_mode)
+        if(p.channel==Channel::acoustic_short&&p.capacity_mode&&!p.compact_convolutional)
             std::cout<<",\"ldpc_frame_bits\":"<<p.ldpc_frame_bits<<",\"ofdm_training_blocks\":"<<p.ofdm_training_blocks;
         if(a.has("estimate-bytes")) {
             const auto estimate=estimate_transmission(p,encrypted,a.integer("estimate-bytes",0));

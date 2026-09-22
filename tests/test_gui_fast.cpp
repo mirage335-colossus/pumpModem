@@ -191,15 +191,30 @@ void snr_and_symbol_rate_controls() {
         controller.field(F::fast_mono).selected=="left"&&
         controller.field(F::fast_detail).text.find("acoustic-short")!=std::string::npos,
         "Short-transfer acoustic profile did not select its independent 3 dB preset");
-    check(controller.field(F::fast_coding).options.size()==3&&
+    check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
         controller.field(F::fast_coding).options[0].id=="half"&&
-        controller.field(F::fast_coding).options[1].id=="two-thirds"&&
-        controller.field(F::fast_coding).options[2].id=="three-quarters",
-        "Short-transfer acoustic offered unsupported LDPC rates");
+        controller.field(F::fast_coding).options.back().id=="three-quarters",
+        "Short-transfer acoustic offered unsupported coding rates");
     const auto short_coding=controller.field(F::fast_coding).selected;
     controller.select(F::fast_coding,"nine-tenths");
     check(controller.field(F::fast_coding).selected==short_coding,
         "Unsupported normal-frame LDPC rate was accepted for short-transfer acoustic");
+    controller.select(F::fast_expected_snr,"-6");
+    check(controller.field(F::fast_coding).selected=="half"&&
+        controller.field(F::fast_coding).options.size()==2&&
+        controller.field(F::fast_coding).options[0].label=="Convolutional 1/2"&&
+        controller.field(F::fast_depth).options.size()==16&&
+        controller.field(F::fast_constellation).options.size()==1,
+        "Weak short profile did not expose its compact coding geometry");
+    controller.select(F::fast_coding,"two-thirds");
+    check(controller.field(F::fast_coding).selected=="half"&&
+        controller.field(F::fast_expected_snr).selected=="-6",
+        "Weak short profile accepted an unsupported LDPC selection");
+    controller.select(F::fast_expected_snr,"3");
+    check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
+        controller.field(F::fast_constellation).options.size()==11&&
+        controller.field(F::fast_depth).options.size()==16,
+        "Returning to 3 dB did not restore short OFDM controls");
     controller.select(F::fast_mono,"right");controller.select(F::fast_expected_snr,"0");
     controller.select(F::fast_profile,"acoustic");
     check(controller.field(F::fast_expected_snr).selected=="3"&&

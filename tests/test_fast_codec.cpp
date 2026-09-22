@@ -47,9 +47,16 @@ void feed(StreamDecoder& rx,std::span<const std::uint8_t> wire) {
         rx.push_interval(soft);
     }
 }
-std::size_t coded_size(const Profile& p) {return p.capacity_mode?p.interleave_depth*p.ldpc_frame_bits:coding::encode(Bytes(p.interleave_depth*256),p.code_rate).size();}
+std::size_t coded_size(const Profile& p) {return p.capacity_mode?capacity_coded_bits(p):coding::encode(Bytes(p.interleave_depth*256),p.code_rate).size();}
 Bytes systematic(const Profile& p,std::span<const std::uint8_t> cycle,std::uint64_t cycle_ordinal=0) {
     if(p.capacity_mode) {
+        if(p.compact_convolutional) {
+            const auto mask=fast::testing::capacity_whitening_mask(cycle.size(),cycle_ordinal);
+            std::vector<float> soft(capacity_coded_bits(p));
+            for(std::size_t i=0;i<soft.size();++i)soft[i]=(cycle[i]^mask[i])?12.F:-12.F;
+            auto out=coding::decode(soft,capacity_information_bytes(p),p.code_rate).bytes;
+            out.resize(out.size()-2*capacity_parity_symbols(p));return out;
+        }
         Bytes out;std::vector<float> soft(p.ldpc_frame_bits);
         const auto mask=fast::testing::capacity_whitening_mask(cycle.size(),cycle_ordinal);
         for(std::size_t block=0;block<p.interleave_depth;++block) {
@@ -71,6 +78,11 @@ Bytes systematic(const Profile& p,std::span<const std::uint8_t> cycle,std::uint6
 Bytes code_systematic(const Profile& p,std::span<const std::uint8_t> systematic,std::uint64_t cycle_ordinal=1) {
     if(p.capacity_mode) {
         auto rs=outer_rs::encode(systematic,capacity_parity_symbols(p));
+        if(p.compact_convolutional) {
+            auto wire=coding::encode(rs,p.code_rate);wire.resize(cycle_intervals(p)*physical_interval_bits);
+            const auto mask=fast::testing::capacity_whitening_mask(wire.size(),cycle_ordinal);
+            for(std::size_t i=0;i<wire.size();++i)wire[i]^=mask[i];return wire;
+        }
         const auto k=ldpc::data_bits(p.code_rate,p.ldpc_frame_bits)/8;rs.resize(k*p.interleave_depth);Bytes wire(cycle_intervals(p)*physical_interval_bits);
         for(std::size_t block=0;block<p.interleave_depth;++block) {
             const auto bits=ldpc::interleave(ldpc::encode(std::span(rs).subspan(block*k,k),p.code_rate,p.ldpc_frame_bits),p.ldpc_frame_bits);
@@ -435,7 +447,7 @@ void capacity_roundtrips() {
     for(unsigned depth:{1U,4U})for(bool encrypted:{false,true}) {
         if(channel==Channel::wire&&depth!=1)continue;
         if(channel==Channel::acoustic_short&&rate!=CodeRate::half&&rate!=CodeRate::two_thirds&&rate!=CodeRate::three_quarters)continue;
-        auto p=capacity_profile(channel);p.code_rate=rate;p.interleave_depth=depth;
+        auto p=capacity_profile(channel);p.compact_convolutional=false;p.code_rate=rate;p.interleave_depth=depth;
         const auto c=capacity_source_bytes_per_cycle(p,encrypted);const auto width=cycle_intervals(p)*physical_interval_bits;
         for(auto size:{std::size_t{0},std::size_t{1},c-1,c,c+1}) {
             Bytes source(size);for(std::size_t i=0;i<size;++i)source[i]=static_cast<std::uint8_t>(i*17);
@@ -474,8 +486,10 @@ void capacity_roundtrips() {
     check(quota.snapshot().failed && !quota.result(),"capacity complete corrected source area obeys local memory quota");
     StreamDecoder wrong(p,key(1));feed(wrong,wire);wrong.finish(true);check(!wrong.result(),"capacity public and keyed bootstrap never autodetect");
 }
-void capacity_malformed(Channel channel=Channel::wire) {
-    auto p=capacity_profile(channel);p.interleave_depth=1;const auto width=cycle_intervals(p)*physical_interval_bits;
+void capacity_malformed(Channel channel=Channel::wire,bool compact=false) {
+    auto p=capacity_profile(channel);p.interleave_depth=1;p.compact_convolutional=compact;
+    if(compact) {p.acoustic_ofdm=false;p.ofdm_training_blocks=16;p.constellation=4;}
+    const auto width=cycle_intervals(p)*physical_interval_bits;
     const auto pristine=transmit(p,std::nullopt,{});const auto boot=systematic(p,std::span(pristine).first(width));
     const auto salt=std::span(boot).first(32);const auto size=source_bytes_per_group(p,false);
     const auto invalid=[&](const Bytes& wire,const char* why) {
@@ -532,10 +546,12 @@ void continue_after_damaged_cycle() {
     // following groups keep their original integrity ordinals and whitening;
     // no retransmission, ordinal search, or source interpretation is involved.
     for(auto channel:{Channel::wire,Channel::acoustic,Channel::acoustic_short})
+    for(bool compact:{false,true})
     for(bool encrypted:{false,true})for(unsigned missing:{1U,2U}) {
+        if(compact&&channel!=Channel::acoustic_short)continue;
         const bool capacity=channel!=Channel::wire;
         auto p=capacity?capacity_profile(channel):classic_profile(Channel::wire);
-        p.interleave_depth=1;p.code_rate=CodeRate::three_quarters;
+        p.compact_convolutional=compact;p.interleave_depth=1;p.code_rate=CodeRate::three_quarters;
         const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
         const auto width=cycle_intervals(p)*physical_interval_bits;
         const auto area_size=source_bytes_per_group(p,encrypted);
@@ -580,8 +596,9 @@ void continue_after_damaged_cycle() {
             check(!rx.snapshot().physical_end && !rx.snapshot().decoding_stopped && !rx.result(),
                 "EOF after a gap cannot stop subsequent decoding or manufacture physical end");
         }
-        if(capacity)check(rx.snapshot().ldpc_frames==source_cycles+1 && !rx.snapshot().ldpc_failed_frames,
+        if(capacity&&!compact)check(rx.snapshot().ldpc_frames==source_cycles+1 && !rx.snapshot().ldpc_failed_frames,
             "every capacity frame after an integrity failure was decoded with clean FEC");
+        if(compact)check(!rx.snapshot().ldpc_frames,"compact continuation does not claim LDPC frames");
         rx.finish(true);
         check(rx.snapshot().physical_end && rx.snapshot().failed && !rx.snapshot().complete && !rx.snapshot().authenticated &&
               !rx.snapshot().source_bytes && !rx.result(),"missing source remains incomplete at actual physical end");
@@ -887,6 +904,83 @@ void capacity_parallel_decode() {
             <<" iterations="<<expected.ldpc_iterations<<" failed_frames="<<expected.ldpc_failed_frames<<'\n';
     }
 }
+void compact_capacity_contracts() {
+    for(auto rate:{CodeRate::half,CodeRate::three_quarters}) {
+        auto p=capacity_profile(Channel::acoustic_short);p.compact_convolutional=true;p.code_rate=rate;
+        p.acoustic_ofdm=false;p.ofdm_training_blocks=16;p.constellation=4;p.interleave_depth=1;
+        p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.marker_spacing_intervals=1;p.pilot_spacing_symbols=32;
+        p.ldpc_frame_bits=16200;
+        check(capacity_information_bytes(p)==(rate==CodeRate::half?126U:190U),"compact fixed information byte geometry");
+        check(capacity_coded_bits(p)==(rate==CodeRate::half?2028U:2035U),"compact terminated punctured trellis bit endpoint");
+        check(cycle_intervals(p)==1 && capacity_parity_symbols(p)==2,"compact cycle occupies one fixed interval with two outer RS symbols");
+        // Independent Python GF(65536), K=7/puncture, SplitMix64 and hashlib
+        // construction, including local profile domain and full physical fill.
+        const auto expected=rate==CodeRate::half?
+            "a0825e08d739449dea3b1d27a5c4b8a391ebb1b8f25f08371a8a2f20f97c1614":
+            "36fda4c62bc75bb013a44e8de5bca8c9f8ebd1e7072f67183792d154e0a4c820";
+        auto vector_encoder=fast::testing::deterministic_encoder(p,std::nullopt,byte_source(Bytes{0,0x80,0xff,0}),
+            0x636f6d7061637421ULL,SourceEncoding::raw);
+        Bytes vector_wire;std::array<std::uint8_t,physical_interval_bits> interval{};
+        while(vector_encoder.next_interval(interval))vector_wire.insert(vector_wire.end(),interval.begin(),interval.end());
+        check(sha256(vector_wire)==unhex(expected),"independent compact fixed-cycle wire fingerprint");
+        for(bool encrypted:{false,true}) {
+            const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
+            const auto capacity=capacity_source_bytes_per_cycle(p,encrypted);
+            for(auto size:{std::size_t{0},std::size_t{1},capacity-1,capacity,capacity+1,capacity*3+7}) {
+                Bytes source(size);for(std::size_t i=0;i<size;++i)source[i]=static_cast<std::uint8_t>(71*i+3);
+                if(!source.empty())source.back()=0;
+                const auto wire=transmit(p,crypto,source);
+                check(wire.size()==(2+size/capacity)*physical_interval_bits,"compact source boundary retains mandatory final cycle");
+                check(estimate_transmission(p,encrypted,size).intervals==wire.size()/physical_interval_bits,"compact estimator counts actual intervals");
+                StreamDecoder rx(p,crypto);feed(rx,wire);
+                check(!rx.result()&&!rx.snapshot().physical_end&&!rx.snapshot().source_bytes,"compact correction does not expose source before physical end");
+                rx.finish(false);check(!rx.result()&&!rx.snapshot().physical_end,"compact EOF is not physical completion");
+                rx.finish(true);
+                check(rx.result()&&Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,"compact keyed/public exact source and trailing zero recovery");
+                const auto stats=rx.snapshot();
+                check(stats.coding_cycles==wire.size()/physical_interval_bits&&!stats.ldpc_frames&&!stats.ldpc_iterations&&!stats.ldpc_changed_bits,
+                    "compact convolutional cycles never claim LDPC diagnostics");
+                check(stats.authenticated==encrypted,"compact public checksum is not authentication");
+            }
+            const Bytes source(capacity*3+7,0x5a);const auto wire=transmit(p,crypto,source);
+            StreamDecoder erased(p,crypto);std::array<float,physical_interval_bits> soft{};
+            for(std::size_t at=0;at<wire.size();at+=physical_interval_bits) {
+                for(std::size_t i=0;i<soft.size();++i)soft[i]=at==physical_interval_bits?0.F:(wire[at+i]?12.F:-12.F);
+                erased.push_interval(soft);
+            }
+            erased.finish(true);
+            check(!erased.result()&&erased.snapshot().failed&&erased.snapshot().failed_cycles==1,
+                "compact missing cycle remains an integrity hole while later cycles retain position");
+            StreamDecoder wrong(p,encrypted?std::optional<Crypto>(key(1)):std::optional<Crypto>(key()));feed(wrong,wire);wrong.finish(true);
+            check(!wrong.result()&&wrong.snapshot().failed,"compact wrong key or public/keyed mismatch fails closed");
+            StreamDecoder repaired(p,crypto);
+            for(std::size_t at=0;at<wire.size();at+=physical_interval_bits) {
+                for(std::size_t i=0;i<soft.size();++i)soft[i]=wire[at+i]?12.F:-12.F;
+                if(at==physical_interval_bits)soft[30]=soft[31]=0;
+                repaired.push_interval(soft);
+            }
+            repaired.finish(true);
+            check(repaired.result()&&Bytes(repaired.result()->bytes().begin(),repaired.result()->bytes().end())==source&&
+                repaired.snapshot().erased_bytes>0,"compact trellis restores isolated timed neutral evidence without discarding positions");
+        }
+        for(unsigned depth:{2U,8U,16U})for(bool ofdm:{false,true}) {
+            auto multi=p;multi.interleave_depth=depth;multi.acoustic_ofdm=ofdm;
+            if(ofdm) {multi.ofdm_training_blocks=6;multi.ofdm_fft_size=8192;multi.ofdm_prefix_samples=512;}
+            const auto information=depth*(rate==CodeRate::half?126U:190U);
+            check(capacity_information_bytes(multi)==information,"compact depth scales fixed information geometry");
+            check(capacity_coded_bits(multi)==coding::encode(Bytes(information),rate).size(),
+                "compact depth uses a single terminated trellis without internal tails");
+            const auto size=capacity_source_bytes_per_cycle(multi,true)+1;
+            const Bytes source(size,0x93);const auto wire=transmit(multi,key(),source);
+            StreamDecoder rx(multi,key());feed(rx,wire);rx.finish(true);
+            check(rx.result()&&Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,
+                "compact multidepth SC/OFDM source cycles preserve every keyed byte");
+            check(estimate_transmission(multi,true,size).intervals==wire.size()/physical_interval_bits,
+                "compact multidepth estimator includes actual coding tail and physical fill");
+        }
+    }
+    capacity_malformed(Channel::acoustic_short,true);
+}
 void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
     auto p=capacity?capacity_profile():classic_profile(Channel::wire);p.interleave_depth=4;const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;std::size_t generated=0,max_request=0;
     StreamEncoder tx(p,crypto,[&](std::span<std::uint8_t> output) {
@@ -914,12 +1008,13 @@ void streamed(std::size_t total,bool encrypted=true,bool capacity=false) {
 }
 int main(int argc,char** argv) {
     try {
+        if(argc>1 && std::string_view(argv[1])=="--compact") {compact_capacity_contracts();std::cout<<"compact acoustic capacity contracts passed\n";return 0;}
         if(argc>1 && std::string_view(argv[1])=="--parallel") {capacity_parallel_decode();return 0;}
         if(argc>1 && std::string_view(argv[1])=="--continuation") {
             continue_after_damaged_cycle();std::cout<<"fast damaged-cycle continuation tests passed\n";return 0;
         }
         independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
-        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();capacity_malformed(Channel::acoustic_short);continue_after_damaged_cycle();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
+        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();capacity_malformed(Channel::acoustic_short);compact_capacity_contracts();continue_after_damaged_cycle();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
         streamed(argc>1?2*1024*1024:100*1024);streamed(argc>1?2*1024*1024:100*1024,false);
         streamed(1024*1024,true,true);streamed(1024*1024,false,true);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";

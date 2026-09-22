@@ -5304,3 +5304,56 @@ temporary directory avoided the full host `/tmp` filesystem during tests.
 [Diagnosis and tradeoffs](fast-acoustic-ofdm-recovery.md) and
 [reproduction records](validation-data/fast/acoustic-ofdm-recovery-20260921/README.md)
 preserve exact commands, captures' hashes, counterfactual prototypes and logs.
+
+### Short acoustic minimum transfer time across Expected SNR (2026-09-22)
+
+The separate `acoustic-short` channel now uses one minimum-airtime search across
+its Expected SNR range. It selects the greatest modeled throughput within a
+10.5-second minimum-transfer budget, or the shortest minimum when that budget
+cannot be met. Sixty encoded bytes represent a minimal XZ source in both public
+and keyed operation. Smaller convolutional coding cycles cover weak settings;
+16,200-bit LDPC remains where it meets the target with better throughput. Other
+channel profiles and the default 3 dB short selection retain their geometry.
+
+At −6 dB over the original 17.5 kHz band, compact QPSK occupies about 1,104 Hz
+and the generated minimum waveform takes 9.796 seconds, including the physical
+end silence. The final −3 dB choice caps single carrier at 1,000 symbols/s to
+keep a 5 ms echo inside its equalizer span and takes 9.513 seconds at minimum.
+The 0/3/6/13 dB minima are 9.981/10.343/9.610/9.610 seconds. Larger messages need
+more coding cycles; the existing 3 dB 2.5 KiB attachment still takes 11.794
+seconds. Settings below −6 dB can exceed ten seconds even at minimum size.
+
+Compact coding reuses the terminated K=7 trellis with outer GF(65536) correction
+and whole-cycle SHA/HMAC verification. Its distinct profile context and bounded
+geometry are limited to `acoustic_short`. A 256-symbol preamble, a marker with
+64 fitting and 128 held-out verification symbols, and sixteen-symbol tracking
+pilots reduce startup while retaining independent admission evidence. Only six
+seconds of fully scored absence finish reception. EOF, cancellation, correction
+and integrity success cannot expose source data; missing cycles keep their
+positions. GUI coding/depth/parity fields report the actual selected code.
+
+The ten-case −6 dB sampled suite and −3 dB public/keyed fixtures pass exact
+recovery under fixed original-band noise density, a 0.30 echo at 5 ms and up to
+±100 ppm drift. Controls cover EOF, partial absence, incomplete training,
+corrupted marker verification and noise-only input. The 3 dB suite and 0/6/13 dB
+transition fixtures also pass. Independent compact wire hashes and existing
+LDPC/classic vectors remain. All 172 baseline reports for the four other
+channel profiles are identical.
+
+Both Release GUI backends and the CLI rebuilt. The selected Fast/shared-GUI
+group passes all 40 checks across its initial run and a 92-case SNR rerun. The
+initial SNR run timed out under overlapping calibration/UI load; the rerun kept
+the same limits. Native adapter/document checks pass in FLTK, and adapter,
+platform and both coordinate scales pass in Rev. The FLTK complete workflow passes on rerun in 268.93 seconds. Rev still misses
+its existing three-second replay frame assertion when isolated; no complete Rev
+workflow pass is claimed. Ordinary compatibility passes 28/29: the unchanged
+differential receiver probability calibration reaches its 1,500-second CTest
+timeout, including a brief pause used to isolate GUI timing. Its completed
+portions are retained, but full calibration coverage remains unverified. No
+assertions or unrelated runtime code were changed to accommodate these limits.
+
+These are generated-audio and Linux GUI checks, not physical speaker/microphone
+qualification or statistical file-success measurements. No audio hardware or
+running user GUI was changed. [Profile behavior](fast-acoustic-short.md) and
+[commands, sampled results and integration logs](validation-data/fast/acoustic-short-20260922/README.md)
+record the limits and reproduction details.

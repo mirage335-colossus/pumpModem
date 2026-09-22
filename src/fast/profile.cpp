@@ -101,6 +101,11 @@ CodeRate parse_code_rate(std::string_view name) {
 }
 void validate(const Profile& p) {
     (void)channel_name(p.channel);(void)code_rate_value(p.code_rate);
+    if(p.compact_convolutional&&(p.channel!=Channel::acoustic_short||
+       !p.capacity_mode||p.interleave_depth<1||p.interleave_depth>16||
+       (!p.acoustic_ofdm&&(p.constellation!=4||p.marker_spacing_intervals!=1))||
+       (p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::three_quarters)))
+        throw Error("Compact Fast coding requires the acoustic-short profile, depth 1..16, and rate 1/2 or 3/4");
     if(p.acoustic_ofdm) {
         if(!p.capacity_mode||(p.channel!=Channel::acoustic&&p.channel!=Channel::acoustic_short))
             throw Error("Acoustic OFDM requires the acoustic capacity profile");
@@ -162,6 +167,8 @@ Bytes profile_id(const Profile& p) {
     Bytes out{'d','a','t','a','p','u','m','p','/','f','a','s','t','/','v','1'};
     if(p.capacity_mode)out.back()='2';
     const auto append=[&](std::uint64_t n) {for(int i=7;i>=0;--i)out.push_back(static_cast<std::uint8_t>(n>>(i*8)));};
+    if(p.compact_convolutional)
+        out.insert(out.end(),{'/','c','o','m','p','a','c','t','/','v','1'});
     append(static_cast<unsigned>(p.channel));append(p.constellation);
     append(static_cast<unsigned>(p.code_rate));append(p.robust);append(p.interleave_depth);
     if(p.ldpc_frame_bits!=64800||p.ofdm_training_blocks!=16) {

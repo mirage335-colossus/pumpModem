@@ -49,10 +49,15 @@ combinations using estimated 50 MB source throughput, including actual cycle,
 marker, pilot and padding overhead. They do not optimize a received channel
 response or promise globally optimal coding.
 
-The separate [short acoustic profile](fast-acoustic-short.md) instead minimizes
-complete airtime for 2,800 encoded bytes, including startup and physical-end
-silence. It uses 16,200-bit LDPC frames and six OFDM training blocks, with a
-short-profile-only 2 dB decoder allowance and the same 6 dB acquisition floor.
+The separate [short acoustic profile](fast-acoustic-short.md) applies a minimum
+transfer target across all its SNR settings. It selects the best modeled
+throughput among candidates taking at most 10.5 seconds for 60 encoded bytes,
+including keyed bootstrap, startup and physical-end silence. If none fits,
+it minimizes that transfer time. Candidates include 16,200-bit LDPC and compact
+convolutional coding, six-block OFDM training and a compact single-carrier path.
+LDPC retains the short-profile-only 2 dB decoder allowance and 6 dB acquisition
+floor; compact QPSK at rate 1/2 targets 6 dB selected-band SNR. The minimum is
+about 9.8 seconds at −6 dB; still weaker settings can exceed ten seconds.
 The other profiles retain their existing settings and selection rules.
 
 Low-order decoder thresholds use the archived

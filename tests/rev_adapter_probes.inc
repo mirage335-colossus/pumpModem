@@ -67,7 +67,7 @@
                         }
                         const auto nominal=application.field(ui::Field::fast_expected_snr).options.at(1).id;
                         const auto low=application.field(ui::Field::fast_expected_snr).options.back().id;
-                        for(const auto& target:{nominal,low,std::string("manual")}) {
+                        for(const auto& target:{nominal,low,std::string(channel==std::string_view("acoustic-short")?"-6":"manual"),std::string("manual")}) {
                             application.select(ui::Field::fast_expected_snr,target);settle();
                             auto* text=by_field(ui::Field::fast_detail).label;
                             require(text,"Rev Fast detail lacks its native label");text->layoutText();

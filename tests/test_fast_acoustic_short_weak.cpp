@@ -20,9 +20,10 @@
 using namespace datapump;
 using namespace datapump::fast;
 namespace {
-double reference_snr_db=3;
+constexpr double reference_snr_db=-6;
 constexpr double reference_bandwidth_hz=17500;
 constexpr std::size_t target_source_bytes=2560;
+constexpr std::size_t minimum_attachment_bytes=32;
 constexpr std::size_t echo_delay_samples=240;
 constexpr std::uint64_t memory_quota=1024*1024;
 
@@ -34,16 +35,13 @@ Profile short_profile() {
     const auto preset=resolve_snr_preset(Channel::acoustic_short,reference_snr_db);
     const auto& p=preset.profile;
     require(preset.reference_bandwidth_hz==reference_bandwidth_hz&&
-        default_expected_snr(Channel::acoustic_short)==3&&preset.expected_snr_db==reference_snr_db,
-        "short acoustic default lost its original-band 3 dB reference");
+        preset.expected_snr_db==reference_snr_db,
+        "weak short acoustic preset lost its original-band -6 dB reference");
     require(p.channel==Channel::acoustic_short&&p.capacity_mode&&
-        (p.compact_convolutional||p.ldpc_frame_bits==16200)&&
-        (!p.acoustic_ofdm||p.ofdm_training_blocks<16)&&p.interleave_depth>=1&&p.interleave_depth<=16,
-        "short acoustic regression no longer uses the separate short-frame profile");
+        p.compact_convolutional&&p.interleave_depth==1,
+        "weak short acoustic regression no longer uses the separate short profile");
     require(p.sample_rate==48000&&(!p.acoustic_ofdm||p.ofdm_prefix_samples>echo_delay_samples),
         "short acoustic echo must remain inside the cyclic prefix");
-    if(reference_snr_db>=-6)require(estimate_transmission(p,true,60).seconds<=10.5,
-        "short acoustic preset lost the roughly 10-second minimum across supported SNR choices");
     return p;
 }
 
@@ -56,8 +54,8 @@ double noise_sigma(const Profile& p) {
         (2*reference_bandwidth_hz*std::pow(10.,reference_snr_db/10)));
 }
 
-Bytes random_content() {
-    Bytes bytes(target_source_bytes);std::mt19937 random(0x61327368);
+Bytes random_content(bool short_message) {
+    Bytes bytes(short_message?minimum_attachment_bytes:target_source_bytes);std::mt19937 random(0x61327368);
     for(auto& byte:bytes)byte=static_cast<std::uint8_t>(random());
     bytes.front()=bytes.back()=0;
     return bytes;
@@ -65,7 +63,7 @@ Bytes random_content() {
 
 Bytes text_content(bool short_message) {
     if(short_message) {
-        const std::string text="Short acoustic text: café, こんにちは.\n";
+        const std::string text="é";
         return Bytes(text.begin(),text.end());
     }
     Bytes text(target_source_bytes);std::mt19937 random(0x74657874);
@@ -106,19 +104,22 @@ struct Fixture {
     std::vector<float> waveform;
     Bytes expected_bits;
     Fixture(bool encrypted,bool attachment,bool short_text=false):
-        source(attachment?random_content():text_content(short_text)),
-        filename(attachment?"café-2.5KiB.bin":""),
+        source(attachment?random_content(short_text):text_content(short_text)),
+        filename(attachment?"café.bin":""),
         key(encrypted?std::optional<Crypto>(Crypto(Bytes(32,0x69))):std::nullopt) {
         const auto prepared=attachment?
             prepare_xz_attachment(byte_source(source),filename,memory_quota):
             prepare_xz_source(byte_source(source),memory_quota);
         require(prepared.source_bytes==source.size(),"XZ source accounting included its attachment envelope");
-        if(attachment)require(prepared.encoded.size()>target_source_bytes,
+        if(attachment&&!short_text)require(prepared.encoded.size()>target_source_bytes,
             "short acoustic target fixture stopped exercising an incompressible 2.5 KiB file");
         estimate=estimate_transmission(profile,encrypted,prepared.encoded.size());
-        if(reference_snr_db==3&&source.size()==target_source_bytes)
-            require(estimate.seconds<=12.,
-                "short acoustic 2.5 KiB transfer exceeded its qualified 12-second total airtime");
+        if(short_text&&!attachment) {
+            require(prepared.encoded.size()<=capacity_source_bytes_per_cycle(profile,encrypted),
+                "weak short acoustic minimum fixture no longer fits one source cycle");
+            require(estimate.seconds<=10.5,
+                "weak short acoustic minimum transfer exceeded its roughly 10-second total airtime");
+        }
         auto encoder=fast::testing::deterministic_encoder(profile,key,byte_source(prepared.encoded),
             0x73686f7274617564ULL,SourceEncoding::xz);
         Transmitter tx(profile,[&](std::span<std::uint8_t> bits) {
@@ -199,10 +200,11 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
     feed_noise(end_silence_samples(f.profile)-partial);
     receiver.finish();decoder.finish(receiver.progress().physical_complete);
     const auto state=decoder.snapshot();const auto result=decoder.result();
-    std::cout<<label<<" snr_db="<<reference_snr_db<<" source_bytes="<<f.source.size()<<" air_seconds="<<f.estimate.seconds
+    std::cout<<label<<" source_bytes="<<f.source.size()<<" air_seconds="<<f.estimate.seconds
         <<" echo="<<echo<<" ppm="<<ppm<<" acquired="<<receiver.progress().acquired
         <<" complete="<<state.complete<<" intervals="<<intervals
-        <<" hard_errors="<<hard_errors<<" unknown_bits="<<unknown_bits<<" changed_bits="<<state.ldpc_changed_bits<<" failed_frames="<<state.ldpc_failed_frames
+        <<" hard_errors="<<hard_errors<<" unknown_bits="<<unknown_bits
+        <<" changed_bits="<<state.ldpc_changed_bits<<" failed_frames="<<state.ldpc_failed_frames
         <<" status="<<state.status<<'\n';
     require(receiver.progress().physical_complete&&state.physical_end&&state.complete&&result,
         std::string(label)+": noisy short acoustic source did not complete exactly");
@@ -214,20 +216,17 @@ void sampled_completion(const char* label,bool encrypted,bool attachment,bool sh
     require(state.encrypted==encrypted&&state.authenticated==encrypted,
         "short acoustic keyed/public integrity state changed");
     require(intervals==f.estimate.intervals&&state.intervals==f.estimate.intervals&&
-        !state.failed_cycles&&!state.ldpc_failed_frames&&hard_errors>0&&
+        !state.failed_cycles&&!state.ldpc_failed_frames&&
         state.coding_cycles==f.estimate.intervals/cycle_intervals(f.profile),
-        "short acoustic noisy coding fixture lost fixed positions or did not exercise error correction");
-    if(f.profile.compact_convolutional)
-        require(!state.ldpc_frames&&!state.ldpc_iterations&&!state.ldpc_changed_bits,
-            "compact convolutional correction was mislabeled as LDPC evidence");
-    else require(state.ldpc_changed_bits>0&&
-        state.ldpc_frames==state.coding_cycles*f.profile.interleave_depth,
-        "short acoustic LDPC correction lost its frame or changed-bit evidence");
+        "weak short acoustic noisy coding fixture lost fixed cycle positions");
+    require(hard_errors>0,"weak short acoustic noisy case did not exercise error correction");
+    require(!state.ldpc_frames&&!state.ldpc_iterations&&!state.ldpc_changed_bits,
+        "compact convolutional correction was mislabeled as LDPC evidence");
     require(receiver.workspace_bytes()<8*1024*1024,"short acoustic receiver retained unbounded PCM");
 }
 
 void incomplete_controls() {
-    const Fixture f(true,true);
+    const Fixture f(true,true,true);
     StreamDecoder decoder(f.profile,f.key,memory_quota,SourceEncoding::xz);
     Receiver receiver(f.profile,[&](std::span<const float> soft){decoder.push_interval(soft);});
     receiver.push(f.waveform);receiver.finish();decoder.finish(receiver.progress().physical_complete);
@@ -244,8 +243,44 @@ void incomplete_controls() {
     truncated.push(std::span<const float>(f.waveform).first(prefix));
     truncated.push(std::vector<float>(f.profile.sample_rate*8));truncated.finish();
     require(!truncated.progress().acquired&&!truncated.progress().physical_complete&&!intervals,
-        "short acoustic incomplete training was accepted without its complete initial marker");
+        "weak short acoustic incomplete training was accepted without its complete initial marker");
     std::cout<<"incomplete_controls EOF and incomplete training remain pending\n";
+}
+
+void marker_holdout_control() {
+    const auto p=short_profile();
+    require(!p.acoustic_ofdm,"compact marker control requires the -6 dB single-carrier profile");
+    // One interval supplies one marker only; a later valid marker must not
+    // rescue the deliberately damaged initial acquisition evidence.
+    bool sent=false;
+    Transmitter tx(p,[&](std::span<std::uint8_t> bits) {
+        if(sent)return false;
+        std::mt19937 random(0x686f6c64);
+        for(auto& bit:bits)bit=static_cast<std::uint8_t>(random()&1U);
+        sent=true;return true;
+    });
+    std::vector<float> waveform;std::array<float,977> chunk{};
+    while(!tx.finished()) {
+        const auto count=tx.read(chunk);
+        waveform.insert(waveform.end(),chunk.begin(),chunk.begin()+static_cast<std::ptrdiff_t>(count));
+    }
+    const auto sps=static_cast<double>(p.sample_rate)/p.symbol_rate;
+    const auto pulse_radius=std::ceil(6.4/p.rolloff);
+    // Leave the complete preamble and 64 fitting symbols intact. Invert the
+    // middle 80 of the separate 128 QPSK verification symbols, well beyond
+    // their fixed sign-error allowance. These signs must not fit the channel.
+    const auto begin=static_cast<std::size_t>(std::ceil((preamble_symbols(p)+64+24+pulse_radius)*sps));
+    const auto end=static_cast<std::size_t>(std::floor((preamble_symbols(p)+64+104+pulse_radius)*sps));
+    require(end<waveform.size(),"compact held-out marker corruption exceeded the waveform");
+    for(auto i=begin;i<end;++i)waveform[i]=-waveform[i];
+    std::uint64_t intervals=0;
+    Receiver receiver(p,[&](std::span<const float>){++intervals;});
+    receiver.push(waveform);
+    receiver.push(std::vector<float>(end_silence_samples(p)));
+    receiver.finish();
+    require(!receiver.progress().acquired&&!receiver.progress().physical_complete&&!intervals,
+        "compact marker admitted corrupted independent verification signs");
+    std::cout<<"marker_holdout_control acquired=0 intervals=0 complete=0\n";
 }
 
 void noise_only() {
@@ -271,33 +306,23 @@ void noise_only() {
 }
 
 int main(int argc,char** argv) {try {
-    std::string_view selected_case;
-    for(int i=1;i<argc;++i) {
-        const std::string_view arg=argv[i];
-        if(arg.starts_with("--snr=")) {
-            std::size_t consumed=0;
-            const auto value=std::string(arg.substr(6));
-            reference_snr_db=std::stod(value,&consumed);
-            require(consumed==value.size()&&std::isfinite(reference_snr_db),"invalid test SNR");
-        } else {
-            require(selected_case.empty(),"only one short acoustic test case may be selected");
-            selected_case=arg;
-        }
-    }
     unsigned executed=0,failed=0;
     const auto run=[&](const char* name,const std::function<void()>& test) {
-        if(!selected_case.empty()&&selected_case!=name)return;
+        if(argc>1&&std::string_view(argv[1])!=name)return;
         ++executed;
         try{test();}catch(const std::exception& error){++failed;std::cerr<<name<<": "<<error.what()<<'\n';}
     };
-    run("flat_text",[]{sampled_completion("flat_text",false,false,true,0,100,7101);});
-    run("public_text",[]{sampled_completion("public_text",false,false,true,.30,100,7101);});
-    run("keyed_text",[]{sampled_completion("keyed_text",true,false,false,.30,-100,7102);});
-    run("public_attachment",[]{sampled_completion("public_attachment",false,true,false,.30,0,7103);});
-    run("keyed_attachment",[]{sampled_completion("keyed_attachment",true,true,false,.30,100,7104);});
+    run("flat_text",[]{sampled_completion("flat_text",false,false,true,0,0,7607);});
+    run("public_text",[]{sampled_completion("public_text",false,false,true,.30,100,7601);});
+    run("keyed_text",[]{sampled_completion("keyed_text",true,false,true,.30,-100,7602);});
+    run("public_attachment",[]{sampled_completion("public_attachment",false,true,true,.30,0,7603);});
+    run("keyed_attachment",[]{sampled_completion("keyed_attachment",true,true,true,.30,100,7604);});
+    run("long_text",[]{sampled_completion("long_text",false,false,false,.30,0,7605);});
+    run("long_attachment",[]{sampled_completion("long_attachment",true,true,false,.30,-100,7606);});
     run("incomplete_controls",incomplete_controls);
+    run("marker_holdout_control",marker_holdout_control);
     run("noise_only",noise_only);
     require(executed>0,"unknown short acoustic case");
-    if(failed){std::cerr<<failed<<" of "<<executed<<" short acoustic cases failed\n";return 1;}
-    std::cout<<"Fast short acoustic sampled tests passed ("<<executed<<" cases)\n";return 0;
+    if(failed){std::cerr<<failed<<" of "<<executed<<" weak short acoustic cases failed\n";return 1;}
+    std::cout<<"Fast weak short acoustic sampled tests passed ("<<executed<<" cases)\n";return 0;
 }catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}}

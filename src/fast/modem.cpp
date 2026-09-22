@@ -15,7 +15,9 @@ constexpr double pi = std::numbers::pi;
 constexpr double legacy_pulse_radius = 8;
 double radius(const Profile& p) { return p.capacity_mode ? std::ceil(6.4/p.rolloff) : legacy_pulse_radius; }
 std::size_t spacing(const Profile& p) { return p.capacity_mode ? p.pilot_spacing_symbols : pilot_spacing; }
-std::size_t marker_size(const Profile& p,std::size_t index) { return !p.capacity_mode || index%p.marker_spacing_intervals==0 ? sync_symbols : 0; }
+std::size_t pilot_length(const Profile& p) { return p.compact_convolutional ? 16 : pilot_symbols; }
+std::size_t marker_length(const Profile& p) { return p.compact_convolutional ? 192 : sync_symbols; }
+std::size_t marker_size(const Profile& p,std::size_t index) { return !p.capacity_mode || index%p.marker_spacing_intervals==0 ? marker_length(p) : 0; }
 constexpr unsigned table_resolution = 2048;
 unsigned label_bits(unsigned order) {
     for(unsigned bits=2;bits<=22;bits+=2)if(order==(1u<<bits))return bits;
@@ -76,9 +78,9 @@ Complex qam_point(unsigned order,unsigned label) {
     const auto scale=std::sqrt(2.*(order-1)/3.);
     return {(2.*i+1-side)/scale,(2.*q+1-side)/scale};
 }
-Complex pilot(std::size_t index) { return sync_symbol(11 + (index % 4)*13); }
-std::array<Complex,sync_symbols> sync_table() {
-    std::array<Complex,sync_symbols> result{};
+Complex pilot(std::size_t index,const Profile& p) { return sync_symbol(11 + (p.compact_convolutional?index:index%4)*13); }
+std::array<Complex,192> sync_table() {
+    std::array<Complex,192> result{};
     std::uint32_t state=0x65a39c17u;
     constexpr double v=.7071067811865475244;
     for(auto& point:result) {
@@ -208,21 +210,22 @@ std::size_t interval_symbols(const Profile& p,std::size_t index) {
     if(p.acoustic_ofdm)return acoustic_ofdm::interval_symbols(p,index);
     const auto count=(physical_interval_bits+label_bits(p.constellation)-1)/label_bits(p.constellation);
     const auto stride=spacing(p);
-    return marker_size(p,index)+count+((count+stride-1)/stride)*pilot_symbols;
+    return marker_size(p,index)+count+((count+stride-1)/stride)*pilot_length(p);
 }
 std::size_t total_interval_symbols(const Profile& p,std::size_t count) {
     validate(p);
     if(p.acoustic_ofdm)return count?acoustic_ofdm::transmission_samples(p,count)/(p.ofdm_fft_size+p.ofdm_prefix_samples)-acoustic_ofdm::preamble_symbols(p):0;
     if(!count)return 0;
     const auto markers=p.capacity_mode?(count-1)/p.marker_spacing_intervals+1:count;
-    const auto payload=interval_symbols(p,0)-sync_symbols;
-    if(markers>std::numeric_limits<std::size_t>::max()/sync_symbols ||
-       count>(std::numeric_limits<std::size_t>::max()-markers*sync_symbols)/payload)
+    const auto marker_count=marker_length(p);
+    const auto payload=interval_symbols(p,0)-marker_count;
+    if(markers>std::numeric_limits<std::size_t>::max()/marker_count ||
+       count>(std::numeric_limits<std::size_t>::max()-markers*marker_count)/payload)
         throw std::overflow_error("fast interval symbol count overflow");
-    return count*payload+markers*sync_symbols;
+    return count*payload+markers*marker_count;
 }
 std::size_t pulse_tail_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::pulse_tail_symbols(p):static_cast<std::size_t>(2*radius(p));}
-std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):p.capacity_mode?2048:training_symbols;}
+std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):p.capacity_mode?(p.compact_convolutional?256:2048):training_symbols;}
 std::uint64_t transmission_samples(const Profile& p,std::size_t count) {
     validate(p);
     if(p.acoustic_ofdm)return acoustic_ofdm::transmission_samples(p,count);
@@ -243,7 +246,7 @@ std::uint64_t end_silence_samples(const Profile& p) {
         // The first failed pilot cannot classify the preceding payload as
         // absent: it may be an isolated damaged pilot. Allow one following
         // complete group before charging its full failed duration.
-        const auto evidence_symbols=std::max(sync_symbols,2*(std::min(data_symbols,spacing(p))+pilot_symbols));
+        const auto evidence_symbols=std::max(marker_length(p),2*(std::min(data_symbols,spacing(p))+pilot_length(p)));
         const auto observation_seconds=(evidence_symbols+12)/p.symbol_rate;
         if(observation_seconds>.25)
             return static_cast<std::uint64_t>(std::ceil(p.sample_rate*(6.25+observation_seconds)));
@@ -302,11 +305,11 @@ struct Transmitter::Impl {
         else {
             const auto data_count=(physical_interval_bits+bps-1)/bps;
             const auto local=position-marker_count;
-            const auto group=local/(stride+pilot_symbols);
-            const auto within=local%(stride+pilot_symbols);
+            const auto group=local/(stride+pilot_length(config));
+            const auto within=local%(stride+pilot_length(config));
             const auto start=group*stride;
             const auto available=std::min(stride,data_count-start);
-            if(within>=available)output=pilot(within-available);
+            if(within>=available)output=pilot(within-available,config);
             else {
                 const auto start_bit=(start+within)*bps;
                 unsigned label=0;
@@ -411,6 +414,7 @@ struct Receiver::Impl {
     std::size_t pending_absent_intervals=0;
     Complex pilot_correlation=0;
     double pilot_energy=0,pilot_error=0,group_phase_anchor=0;
+    unsigned pilot_disagreements=0;
     struct Correlation { double quality=0; Complex gain=0; double energy=0; };
     Impl(Profile p,IntervalSink target,SymbolObserver observe,SymbolObserver observe_input):config(p),sink(std::move(target)),observer(std::move(observe)),
         input_observer(std::move(observe_input)),points(p.capacity_mode?std::vector<Complex>{}:constellation(p.constellation)),
@@ -427,7 +431,7 @@ struct Receiver::Impl {
         taps.resize(2*half+1);raw.resize(taps.size());
         for(std::size_t k=0;k<taps.size();++k)
             taps[k]=root_raised_cosine((static_cast<double>(k)-static_cast<double>(half))/sps,p.rolloff)/sps;
-        filtered.resize(static_cast<std::size_t>(std::ceil((sync_symbols+32+(p.capacity_mode?preamble_symbols(p):0))*sps))+64);
+        filtered.resize(static_cast<std::size_t>(std::ceil((marker_length(p)+32+(p.capacity_mode?preamble_symbols(p):0))*sps))+64);
     }
     Complex at(double time) const {
         if(config.capacity_mode) {
@@ -461,7 +465,7 @@ struct Receiver::Impl {
     Correlation correlation(double end,bool precise=true) const {
         Complex sum=0;double energy=0;
         for(std::size_t k=0;k<sync_symbols;++k) {
-            const auto time=end-static_cast<double>(sync_symbols-1-k)*clock_period;
+            const auto time=end-static_cast<double>(marker_length(config)-1-k)*clock_period;
             const auto point=precise?at(time):at_cubic(time);
             sum+=point*std::conj(marker[k]);energy+=std::norm(point);
         }
@@ -491,7 +495,7 @@ struct Receiver::Impl {
         for(std::size_t j=0;j<count;++j) {
             const auto k=j+8;
             const auto expected=k<training_count?marker[(k*17+9)%sync_symbols]*Complex(0,1):marker[k-training_count];
-            const auto age=static_cast<double>(training_count+sync_symbols-1-k);
+            const auto age=static_cast<double>(training_count+marker_length(config)-1-k);
             const auto value=at(end-age*period);
             despread[j]=value*std::conj(expected);energy+=std::norm(value);
             if(j<count/4)first+=despread[j];
@@ -510,7 +514,7 @@ struct Receiver::Impl {
         slope+=(count*sxy-sx*sy)/(count*sxx-sx*sx);
         sum=0;
         for(std::size_t j=0;j<count;++j)sum+=despread[j]*std::polar(1.,-slope*static_cast<double>(j));
-        return {std::norm(sum)/(count*energy+1e-30),std::arg(sum)+slope*(count+7),slope};
+        return {std::norm(sum)/(count*energy+1e-30),std::arg(sum)+slope*(count+7+marker_length(config)-sync_symbols),slope};
     }
     double fit_initial_capacity_clock(double end) {
         auto period=clock_period;
@@ -522,7 +526,7 @@ struct Receiver::Impl {
                 auto best=center;
                 auto quality=capacity_training_fit(end,period).quality;
                 const auto score=[&](double candidate) {
-                    const double center_age=(preamble_symbols(config)+sync_symbols-1)*.5;
+                    const double center_age=(preamble_symbols(config)+sync_symbols-1)*.5+marker_length(config)-sync_symbols;
                     return dimension?capacity_training_fit(end+center_age*(candidate-period),candidate).quality:capacity_training_fit(candidate,period).quality;
                 };
                 for(int k=-4;k<=4;++k) {
@@ -536,7 +540,7 @@ struct Receiver::Impl {
                 if(curvature< -1e-14)best+=std::clamp(.5*(left-right)/curvature,-1.,1.)*step;
                 if(dimension) {
                     best=std::clamp(best,sps*.999,sps*1.001);
-                    end+=(preamble_symbols(config)+sync_symbols-1)*.5*(best-period);
+                    end+=((preamble_symbols(config)+sync_symbols-1)*.5+marker_length(config)-sync_symbols)*(best-period);
                     period=best;
                 }
                 else end=best;
@@ -546,24 +550,29 @@ struct Receiver::Impl {
         clock_period=period;
         return end;
     }
-    void fit_capacity_equalizer(double end) {
+    void fit_capacity_equalizer(double end,bool initial=false) {
         // Solve a bounded regularized least-squares fractional-spaced filter
         // from the known marker. Decision-directed payload adaptation cannot
         // reliably bootstrap a 128x128 constellation through channel tilt.
         constexpr std::size_t n=21;
+        constexpr std::size_t guard=8;
+        const auto training=config.compact_convolutional&&initial?preamble_symbols(config):0;
+        const auto fitting_count=training+sync_symbols;
+        const auto expected=[&](std::size_t k) {return k<training?
+            marker[(k*17+9)%sync_symbols]*Complex(0,1):marker[k-training];};
         for(unsigned pass=0;pass<3;++pass) {
             std::array<std::array<Complex,n+1>,n> equations{};
-            for(std::size_t k=8;k<sync_symbols-8;++k) {
-                const auto time=end-static_cast<double>(sync_symbols-1-k)*clock_period;
+            for(std::size_t k=guard;k<fitting_count-guard;++k) {
+                const auto time=end-static_cast<double>(training+marker_length(config)-1-k)*clock_period;
                 std::array<Complex,n> x{};
-                for(std::size_t j=0;j<n;++j)x[j]=at(time+(static_cast<double>(j)-10)*clock_period*.5)/gain;
-                const auto target=marker[k]*std::polar(1.,phase-frequency*static_cast<double>(sync_symbols-1-k));
+                for(std::size_t j=0;j<n;++j)x[j]=at(time+(static_cast<double>(j)-n/2)*clock_period*.5)/gain;
+                const auto target=expected(k)*std::polar(1.,phase-frequency*static_cast<double>(training+marker_length(config)-1-k));
                 for(std::size_t i=0;i<n;++i) {
                     for(std::size_t j=0;j<n;++j)equations[i][j]+=std::conj(x[i])*x[j];
                     equations[i][n]+=std::conj(x[i])*target;
                 }
             }
-            constexpr double ridge=1e-4;
+            const double ridge=config.compact_convolutional?8.:1e-4;
             for(std::size_t i=0;i<n;++i)equations[i][i]+=ridge;
             equations[n/2][n]+=ridge;
             for(std::size_t i=0;i<n;++i) {
@@ -580,31 +589,32 @@ struct Receiver::Impl {
             }
             for(std::size_t j=0;j<n;++j)equalizer[j]=equations[j][n];
             double sw=0,sy=0,residual=0;
-            for(std::size_t k=8;k<sync_symbols-8;++k) {
-                const auto age=static_cast<double>(sync_symbols-1-k);
+            for(std::size_t k=guard;k<fitting_count-guard;++k) {
+                const auto age=static_cast<double>(training+marker_length(config)-1-k);
                 const auto time=end-age*clock_period;
                 Complex actual=0;
-                for(std::size_t j=0;j<n;++j)actual+=equalizer[j]*at(time+(static_cast<double>(j)-10)*clock_period*.5)/gain;
+                for(std::size_t j=0;j<n;++j)actual+=equalizer[j]*at(time+(static_cast<double>(j)-n/2)*clock_period*.5)/gain;
                 actual*=std::polar(1.,-phase+frequency*age);
-                const auto error=std::arg(actual*std::conj(marker[k]));
+                const auto error=std::arg(actual*std::conj(expected(k)));
                 sw+=1;sy+=error;
-                residual+=std::norm(actual-marker[k]);
+                residual+=std::norm(actual-expected(k));
             }
             phase+=sy/sw;
             noise_variance=std::clamp(residual/sw,1e-9,.3);
         }
-        // The fitting residual understates noise because the same 48 samples
-        // selected 21 equalizer coefficients. Estimate prediction error on 12
-        // known marker symbols excluded from that fit, not on sliced payload.
+        // Fitting residual understates prediction noise. The legacy solve
+        // uses 48 samples for 21 coefficients; compact startup also uses its
+        // known preamble. Estimate error on excluded known symbols, never
+        // on sliced payload or marker-verification decisions.
         double held_out_error=0;unsigned held_out_count=0;
-        for(std::size_t k=2;k<sync_symbols-2;++k) {
-            if(k>=8&&k<sync_symbols-8)continue;
-            const auto age=static_cast<double>(sync_symbols-1-k);
+        for(std::size_t k=2;k<fitting_count-2;++k) {
+            if(k>=guard&&k<fitting_count-guard)continue;
+            const auto age=static_cast<double>(training+marker_length(config)-1-k);
             const auto time=end-age*clock_period;
             Complex actual=0;
-            for(std::size_t j=0;j<n;++j)actual+=equalizer[j]*at(time+(static_cast<double>(j)-10)*clock_period*.5)/gain;
+            for(std::size_t j=0;j<n;++j)actual+=equalizer[j]*at(time+(static_cast<double>(j)-n/2)*clock_period*.5)/gain;
             actual*=std::polar(1.,-phase+frequency*age);
-            held_out_error+=std::norm(actual-marker[k]);++held_out_count;
+            held_out_error+=std::norm(actual-expected(k));++held_out_count;
         }
         noise_variance=std::clamp(held_out_error/held_out_count,1e-9,.3);
     }
@@ -628,7 +638,7 @@ struct Receiver::Impl {
         for(std::size_t begin=0;begin<sync_symbols;begin+=part_symbols) {
             Complex sum=0;double energy=0;
             for(std::size_t k=begin;k<begin+part_symbols;++k) {
-                const auto value=at(end-static_cast<double>(sync_symbols-1-k)*clock_period);
+                const auto value=at(end-static_cast<double>(marker_length(config)-1-k)*clock_period);
                 sum+=value*std::conj(marker[k]);energy+=std::norm(value);
             }
             const auto coherent=std::norm(sum);
@@ -640,7 +650,71 @@ struct Receiver::Impl {
         // three independently coherent pieces also rejects isolated fragments.
         return present_parts>=3&&coherent_energy/(part_symbols*total_energy+1e-30)>threshold;
     }
+    void accept_compact_marker(double end,bool initial) {
+        // This profile spends 64 known symbols fitting the channel and 128
+        // separate QPSK symbols verifying it. None of the 256 checked signs
+        // select timing, phase, frequency or equalizer coefficients.
+        const auto old_period=clock_period,old_gain=gain,old_phase=phase;
+        const auto old_frequency=frequency,old_noise=noise_variance;
+        const auto old_equalizer=equalizer;
+        auto fitted=refine(end,initial?.8:.18*clock_period);
+        const auto trained=initial&&capacity_training_fit(fitted,clock_period).quality>.55;
+        if(trained) {
+            fitted=fit_initial_capacity_clock(fitted);
+            // A brief noisy preamble cannot estimate clock skew as precisely
+            // as the bulk profile's long training. Shrink that estimate toward
+            // the local clock; independently checked markers track it onward.
+            const auto regularized=sps+.25*(clock_period-sps);
+            fitted+=((preamble_symbols(config)+sync_symbols-1)*.5+
+                marker_length(config)-sync_symbols)*(regularized-clock_period);
+            clock_period=regularized;
+        }
+        const auto fit=correlation(fitted);
+        bool present=fit.quality>.55&&fit.energy>1e-12&&(initial||fit.energy>gain*gain*.06);
+        if(present) {
+            gain=std::abs(fit.gain);
+            if(trained) {
+                const auto training=capacity_training_fit(fitted,clock_period);
+                phase=training.phase;frequency=training.frequency;
+            } else {
+                frequency=initial?0:old_frequency;
+                phase=std::arg(fit.gain)+frequency*(marker_length(config)-(sync_symbols+1)*.5);
+            }
+            fit_capacity_equalizer(fitted,initial);
+            unsigned errors=0;double residual=0;
+            for(std::size_t k=sync_symbols;k<marker_length(config);++k) {
+                const auto age=static_cast<double>(marker_length(config)-1-k);
+                const auto time=fitted-age*clock_period;
+                Complex value=0;
+                for(std::size_t j=0;j<equalizer_size;++j)
+                    value+=equalizer[j]*at(time+(static_cast<double>(j)-equalizer_size/2)*clock_period*.5)/gain;
+                value*=std::polar(1.,-phase+frequency*age);
+                errors+=(value.real()>0)!=(marker[k].real()>0);
+                errors+=(value.imag()>0)!=(marker[k].imag()>0);
+                residual+=std::norm(value-marker[k]);
+            }
+            present=errors<=16&&residual<128;
+        }
+        marker_good=marker_present=present;
+        if(!present) {
+            clock_period=old_period;gain=old_gain;phase=old_phase;
+            frequency=old_frequency;noise_variance=old_noise;equalizer=old_equalizer;
+            if(initial)return;
+        } else {
+            emit_pending_intervals();
+            if(!initial)clock_period=std::clamp(clock_period+.08*(fitted-end)/
+                static_cast<double>(total_interval_symbols(config,config.marker_spacing_intervals)),sps*.999,sps*1.001);
+            marker_end=fitted;group_phase_anchor=0;absent=0;
+        }
+        capacity_interval_present=capacity_pilot_present=present;
+        next_time=(present?fitted:end)+clock_period;
+        state.acquired=true;locked=true;position=marker_length(config);
+        state.clock_error_ppm=(clock_period/sps-1)*1e6;
+        state.carrier_error_hz=frequency*config.symbol_rate/(2*pi);
+        soft.fill(0);
+    }
     void accept_marker(double end,bool initial) {
+        if(config.compact_convolutional){accept_compact_marker(end,initial);return;}
         auto fitted=refine(end,initial?.8:.18*clock_period);
         const auto old_period=clock_period;
         const auto old_frequency=frequency;
@@ -658,7 +732,7 @@ struct Receiver::Impl {
             unsigned disagreements=0;
             const auto rotation=std::polar(1.,-std::arg(fit.gain));
             for(std::size_t k=0;k<sync_symbols;++k) {
-                const auto point=at(fitted-static_cast<double>(sync_symbols-1-k)*clock_period)*rotation;
+                const auto point=at(fitted-static_cast<double>(marker_length(config)-1-k)*clock_period)*rotation;
                 disagreements+=(point.real()>0)!=(marker[k].real()>0);
                 disagreements+=(point.imag()>0)!=(marker[k].imag()>0);
             }
@@ -682,7 +756,7 @@ struct Receiver::Impl {
             // Fit phase slope from the two independent halves of training.
             Complex first=0,last=0;
             for(std::size_t k=0;k<sync_symbols;++k) {
-                const auto p=at(fitted-static_cast<double>(sync_symbols-1-k)*clock_period)*std::conj(marker[k]);
+                const auto p=at(fitted-static_cast<double>(marker_length(config)-1-k)*clock_period)*std::conj(marker[k]);
                 (k<sync_symbols/2?first:last)+=p;
             }
             frequency=std::clamp(std::arg(last*std::conj(first))/(sync_symbols/2),-.06,.06);
@@ -705,13 +779,13 @@ struct Receiver::Impl {
                 // payload decisions or source interpretation select a lock.
                 equalizer.fill(0);equalizer[equalizer_size/2]=1.;
                 for(unsigned pass=0;pass<24;++pass)for(std::size_t k=6;k<sync_symbols-6;++k) {
-                    const auto time=fitted-static_cast<double>(sync_symbols-1-k)*clock_period;
+                    const auto time=fitted-static_cast<double>(marker_length(config)-1-k)*clock_period;
                     std::array<Complex,21> input{};Complex actual=0;double power=.01;
                     for(std::size_t j=0;j<equalizer_size;++j) {
                         input[j]=at(time+(static_cast<double>(j)-10)*clock_period*.5)/gain;
                         actual+=equalizer[j]*input[j];power+=std::norm(input[j]);
                     }
-                    const auto target=marker[k]*std::polar(1.,phase-frequency*static_cast<double>(sync_symbols-1-k));
+                    const auto target=marker[k]*std::polar(1.,phase-frequency*static_cast<double>(marker_length(config)-1-k));
                     for(std::size_t j=0;j<equalizer_size;++j)
                         equalizer[j]+=.35*(target-actual)*std::conj(input[j])/power;
                 }
@@ -720,7 +794,7 @@ struct Receiver::Impl {
             if(config.capacity_mode)fit_capacity_equalizer(fitted);
             absent=0;
         } else next_time=end+clock_period;
-        state.acquired=true;locked=true;position=sync_symbols;
+        state.acquired=true;locked=true;position=marker_length(config);
         state.clock_error_ppm=(clock_period/sps-1)*1e6;
         state.carrier_error_hz=frequency*config.symbol_rate/(2*pi);
         soft.fill(0);
@@ -763,7 +837,7 @@ struct Receiver::Impl {
         std::array<double,22> metrics{};
         auto evm=state.evm;
         for(std::size_t symbol_index=0;symbol_index<available;++symbol_index) {
-            const auto fraction=(static_cast<double>(symbol_index)+pilot_symbols*.5+1)/(available+pilot_symbols);
+            const auto fraction=(static_cast<double>(symbol_index)+pilot_length(config)*.5+1)/(available+pilot_length(config));
             const auto residual=group_phase_anchor*(1-fraction)+correction*fraction;
             const auto value=capacity_group[symbol_index]*std::polar(1.,-residual);
             const auto closest=square_qam_soft_demodulate(config.constellation,value,std::span<double>(metrics).first(bps));
@@ -774,8 +848,8 @@ struct Receiver::Impl {
             const auto error=std::norm(value-qam_point(config.constellation,closest));
             evm=std::sqrt(.99*evm*evm+.01*error);
         }
-        const auto pilot_residual=std::max(0.,pilot_energy+pilot_symbols-2*std::abs(pilot_correlation))/pilot_symbols;
-        for(std::size_t k=0;k<pilot_symbols;++k)evm=std::sqrt(.99*evm*evm+.01*pilot_residual);
+        const auto pilot_residual=std::max(0.,pilot_energy+pilot_length(config)-2*std::abs(pilot_correlation))/pilot_length(config);
+        for(std::size_t k=0;k<pilot_length(config);++k)evm=std::sqrt(.99*evm*evm+.01*pilot_residual);
         state.evm=evm;
     }
     void process_symbol() {
@@ -792,8 +866,8 @@ struct Receiver::Impl {
         const auto marker_count=marker_size(config,interval_index);
         const auto stride=spacing(config);
         const auto local=position-marker_count;
-        const auto group=local/(stride+pilot_symbols);
-        const auto within=local%(stride+pilot_symbols);
+        const auto group=local/(stride+pilot_length(config));
+        const auto within=local%(stride+pilot_length(config));
         const auto start=group*stride;
         const auto available=std::min(stride,data_count-start);
         if(within<available) {
@@ -820,13 +894,15 @@ struct Receiver::Impl {
             track(value,config.capacity_mode?qam_point(config.constellation,closest):points[closest],input,false);
         } else {
             const auto index=within-available;
-            if(index==0) {pilot_correlation=0;pilot_energy=0;pilot_error=0;}
-            const auto expected=pilot(index);
+            if(index==0) {pilot_correlation=0;pilot_energy=0;pilot_error=0;pilot_disagreements=0;}
+            const auto expected=pilot(index,config);
             pilot_correlation+=value*std::conj(expected);pilot_energy+=std::norm(value);
             pilot_error+=std::norm(value-expected);
+            pilot_disagreements+=(value.real()>0)!=(expected.real()>0);
+            pilot_disagreements+=(value.imag()>0)!=(expected.imag()>0);
             track(value,expected,input,true);
-            if(index+1==pilot_symbols) {
-                const bool incoherent=std::norm(pilot_correlation)<.4*pilot_symbols*pilot_energy;
+            if(index+1==pilot_length(config)) {
+                const bool incoherent=std::norm(pilot_correlation)<.4*pilot_length(config)*pilot_energy;
                 bool capacity_group_present=false;
                 if(config.capacity_mode) {
                     // Physical presence is independent of exact marker signs
@@ -834,8 +910,9 @@ struct Receiver::Impl {
                     // rather than latching a past bad pilot for every later
                     // data symbol. A mere energy or nearest-QAM test would
                     // let unrelated tones/noise manufacture presence.
-                    const auto prediction_error=(pilot_energy+pilot_symbols-2*std::abs(pilot_correlation))/pilot_symbols;
-                    const bool present=!incoherent&&prediction_error<=.3;
+                    const auto prediction_error=(pilot_energy+pilot_length(config)-2*std::abs(pilot_correlation))/pilot_length(config);
+                    const bool present=!incoherent&&prediction_error<=(config.compact_convolutional?.8:.3)&&
+                        (!config.compact_convolutional||pilot_disagreements<=2);
                     capacity_group_present=present;
                     if(present) {
                         absent=0;capacity_interval_present=true;
@@ -844,13 +921,13 @@ struct Receiver::Impl {
                         // preceding payload was absent. Charge only the known
                         // word on the first failure; following wholly observed
                         // failed groups establish consecutive lost cadence.
-                        const auto failed_symbols=capacity_pilot_present?pilot_symbols:available+pilot_symbols;
+                        const auto failed_symbols=capacity_pilot_present?pilot_length(config):available+pilot_length(config);
                         absent+=failed_symbols*clock_period/processing_rate;
                     }
                     capacity_pilot_present=present;
                     if(absent>=6) {state.physical_complete=true;return;}
                 }
-                if(pilot_error/pilot_symbols>.3 || incoherent) {
+                if(pilot_error/pilot_length(config)>(config.compact_convolutional?.8:.3) || incoherent) {
                     const auto begin=std::min(start*bps,soft.size()),end=std::min((start+available)*bps,soft.size());
                     // Coherent acoustic pilots can have substantial residual
                     // amplitude/ISI error. Preserve and downweight their observed
@@ -876,7 +953,7 @@ struct Receiver::Impl {
                     const auto correction=std::arg(pilot_correlation);
                     complete_capacity_group(start,available,correction);
                     phase+=.8*correction;
-                    frequency=std::clamp(frequency+.15*correction/static_cast<double>(available+pilot_symbols),-.06,.06);
+                    frequency=std::clamp(frequency+(config.compact_convolutional?.03:.15)*correction/static_cast<double>(available+pilot_length(config)),-.06,.06);
                     group_phase_anchor=.2*correction;
                 }
             }
@@ -894,7 +971,7 @@ struct Receiver::Impl {
             soft.fill(0);
             // Leave the whole known word in the matched-filter ring, then make
             // an independent coherence/presence and timing decision on it.
-            if(marker_size(config,interval_index))next_time+=static_cast<double>(sync_symbols-1)*clock_period;
+            if(marker_size(config,interval_index))next_time+=static_cast<double>(marker_length(config)-1)*clock_period;
         }
     }
     void process_baseband(Complex mixed) {
@@ -923,7 +1000,7 @@ struct Receiver::Impl {
         if(state.physical_complete)return;
         if(!locked) {
             const auto time=static_cast<double>(sample)-(config.capacity_mode?8:((config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)?6:2))*sps-(config.capacity_mode?18:3);
-            if(time<static_cast<double>(sync_symbols+2)*sps)return;
+            if(time<static_cast<double>(marker_length(config)+2)*sps)return;
             // The coarse search only proposes a timing hypothesis. The
             // full-precision fit and exact marker bits still admit it.
             const auto fit=correlation(time,!config.capacity_mode);
@@ -943,11 +1020,11 @@ struct Receiver::Impl {
                 // including words that fail the independent coherence test.
                 const auto old_absent=absent;
                 accept_marker(end,false);
-                state.symbols+=sync_symbols;
+                state.symbols+=marker_length(config);
                 if(config.capacity_mode) {
                     if(marker_present)absent=0;
-                    else absent=old_absent+sync_symbols*clock_period/processing_rate;
-                } else if(!marker_good)absent=old_absent+sync_symbols*clock_period/processing_rate;
+                    else absent=old_absent+marker_length(config)*clock_period/processing_rate;
+                } else if(!marker_good)absent=old_absent+marker_length(config)*clock_period/processing_rate;
                 if(absent>=6)state.physical_complete=true;
             } else process_symbol();
         }

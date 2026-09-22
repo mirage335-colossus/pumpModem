@@ -113,7 +113,38 @@ struct Controller::Impl {
     void remember_routing() {
         if(selected_channel)profile_routing[*selected_channel]=settings.channel_mode;
     }
+    void sync_coding_options() {
+        const bool capacity=settings.profile.capacity_mode;
+        if(settings.profile.compact_convolutional) {
+            f(F::fast_constellation).options={{"4","QPSK (4 points)"}};
+            if(settings.profile.acoustic_ofdm)
+                for(const auto order:{16U,64U,256U,1024U,4096U,16384U,65536U,262144U,1048576U,4194304U})
+                    f(F::fast_constellation).options.push_back({std::to_string(order),std::to_string(order)+"-QAM"});
+            f(F::fast_coding).options={{"half","Convolutional 1/2"},{"three-quarters","Convolutional 3/4"}};
+            f(F::fast_depth).options.clear();
+            for(unsigned depth=1;depth<=16;++depth)
+                f(F::fast_depth).options.push_back({std::to_string(depth),std::to_string(depth)+" × compact block"});
+            f(F::fast_fec).options={{"sparse","RS · "+std::to_string(2*fast::capacity_parity_symbols(settings.profile))+" parity bytes"}};
+        } else if(capacity) {
+            f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
+            f(F::fast_coding).options={{"half","LDPC 1/2"},{"two-thirds","LDPC 2/3"},{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
+            if(settings.profile.ldpc_frame_bits==16200)f(F::fast_coding).options.resize(3);
+            f(F::fast_depth).options={{"1","1 LDPC block"},{"2","2 LDPC blocks"},{"4","4 LDPC blocks"},{"8","8 LDPC blocks"},{"16","16 LDPC blocks"}};
+            if(settings.profile.channel==fast::Channel::acoustic_short) {
+                f(F::fast_depth).options.clear();
+                for(unsigned depth=1;depth<=16;++depth)
+                    f(F::fast_depth).options.push_back({std::to_string(depth),std::to_string(depth)+" LDPC block"+(depth==1?"":"s")});
+            }
+            f(F::fast_fec).options={{"sparse","RS · approximately 0.3%"}};
+        } else {
+            f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
+            f(F::fast_coding).options={{"half","Rate 1/2"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8"}};
+            f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long transfers"},{"64","64"}};
+            f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
+        }
+    }
     void sync_profile_fields() {
+        sync_coding_options();
         f(F::fast_depth).selected=std::to_string(settings.profile.interleave_depth);
         f(F::fast_constellation).selected=std::to_string(settings.profile.constellation);
         f(F::fast_coding).selected=coding_id(settings.profile.code_rate);
@@ -157,19 +188,6 @@ struct Controller::Impl {
         for(const auto snr:fast::expected_snr_options(channel)) {
             const auto id=number(snr,0);
             f(F::fast_expected_snr).options.push_back({id,"Auto: "+id+" dB SNR"});
-        }
-        const bool capacity=settings.profile.capacity_mode;
-        if(capacity) {
-            f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
-            f(F::fast_coding).options={{"half","LDPC 1/2"},{"two-thirds","LDPC 2/3"},{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
-            if(settings.profile.ldpc_frame_bits==16200)f(F::fast_coding).options.resize(3);
-            f(F::fast_depth).options={{"1","1 LDPC block"},{"2","2 LDPC blocks"},{"4","4 LDPC blocks"},{"8","8 LDPC blocks"},{"16","16 LDPC blocks"}};
-            f(F::fast_fec).options={{"sparse","RS · approximately 0.3%"}};
-        } else {
-            f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
-            f(F::fast_coding).options={{"half","Rate 1/2"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8"}};
-            f(F::fast_depth).options={{"1","1 · short messages"},{"4","4"},{"5","5 · acoustic"},{"16","16 · radio"},{"62","62 · long transfers"},{"64","64"}};
-            f(F::fast_fec).options={{"robust","RS(128,112) · robust"},{"high-rate","RS(128,120) · high rate"}};
         }
         f(F::fast_mono).checked=settings.mono;
         f(F::fast_mono).selected=settings.channel_mode==audio::ChannelMode::left_mono?"left":
@@ -365,8 +383,9 @@ struct Controller::Impl {
                 (d->waveform_peak>=.999?" · CLIPPING":"")+"\n"+
                 (d->acquired?"Modem synchronized · awaiting first interval":"No modem lock · check input, level and matching profile");
         }
-        f(F::fast_correction).text="RS: "+std::to_string(snapshot.corrected_bytes)+" corrected bytes · "+std::to_string(snapshot.erased_bytes)+" erasures";
-        if(p.capacity_mode)f(F::fast_correction).text+="\nLDPC: "+std::to_string(snapshot.ldpc_frames)+" blocks · "+std::to_string(snapshot.ldpc_failed_frames)+" unconverged · "+std::to_string(snapshot.ldpc_changed_bits)+" changed bits";
+        f(F::fast_correction).text="RS: "+std::to_string(snapshot.corrected_bytes)+" corrected bytes · "+std::to_string(snapshot.erased_bytes)+(p.compact_convolutional?" uncertain bytes":" erasures");
+        if(p.compact_convolutional)f(F::fast_correction).text+="\nConvolutional error correction";
+        else if(p.capacity_mode)f(F::fast_correction).text+="\nLDPC: "+std::to_string(snapshot.ldpc_frames)+" blocks · "+std::to_string(snapshot.ldpc_failed_frames)+" unconverged · "+std::to_string(snapshot.ldpc_changed_bits)+" changed bits";
         else f(F::fast_correction).text+="\nInterleave depth "+std::to_string(p.interleave_depth);
         f(F::fast_auth).text=integrity_label(snapshot);
         f(F::fast_progress).text_tone=snapshot.complete?ui::TextTone::data:ui::TextTone::normal;
@@ -501,7 +520,7 @@ void Controller::select(F field,std::string id) {
         else if(field==F::fast_key)p.settings.key=p.keys.at(std::stoul(id)).key;
         else if(field==F::fast_source||field==F::fast_qr_brightness) {} // Independent local presentation fields.
         else return;
-        p.f(field).selected=std::move(id);p.estimate_key.clear();if(field!=F::fast_source&&field!=F::fast_mono&&field!=F::fast_qr_brightness)p.settings_changed();++p.revision;p.refresh();
+        p.f(field).selected=std::move(id);p.sync_profile_fields();p.estimate_key.clear();if(field!=F::fast_source&&field!=F::fast_mono&&field!=F::fast_qr_brightness)p.settings_changed();++p.revision;p.refresh();
     }catch(const std::exception& e) {report_error(e.what());}
 }
 void Controller::toggle(F field,bool value) {

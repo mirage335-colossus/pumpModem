@@ -30,8 +30,13 @@ SourceReader file_source(const std::filesystem::path&);
 // Owns the caller's local bytes (for text); each read stays within its span.
 SourceReader byte_source(Bytes);
 std::size_t cycle_intervals(const Profile&);
-// Capacity mode uses interleave_depth LDPC frames per coding cycle. One source
-// flag is subtracted here; a final cycle additionally needs one padding byte.
+// Inner-code geometry for one locally configured capacity coding cycle.
+// Compact convolutional cycles do not contain LDPC frames.
+std::size_t capacity_information_bytes(const Profile&);
+std::size_t capacity_coded_bits(const Profile&);
+// One source flag is subtracted here; a final cycle additionally needs one
+// padding byte. LDPC cycles use interleave_depth frames; compact cycles use a
+// single terminated code across interleave_depth fixed information areas.
 std::size_t capacity_source_bytes_per_cycle(const Profile&,bool encrypted);
 // GF(65536) parity symbols (two bytes each), rounded up to even at >=0.3%.
 std::size_t capacity_parity_symbols(const Profile&);

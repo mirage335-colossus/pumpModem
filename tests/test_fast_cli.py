@@ -107,6 +107,26 @@ class FastCLI(unittest.TestCase):
         self.assertEqual(classic["format"], "classic")
         self.assertEqual(classic["symbol_rate"], 500)
 
+    def test_weak_short_acoustic_minimum(self):
+        args = ("--profile", "acoustic-short", "--expected-snr", "-6")
+        info = json.loads(self.run_pump("fast-info", *args, "--estimate-bytes", "60").stdout)
+        self.assertEqual(info["waveform"], "single-carrier")
+        self.assertEqual(info["inner_code"], "convolutional")
+        self.assertEqual(info["code_rate"], "1/2")
+        self.assertEqual(info["inner_information_bytes"], 126)
+        self.assertEqual(info["inner_coded_bits"], 2028)
+        self.assertEqual(info["cycle_intervals"], 1)
+        self.assertEqual(info["estimated_intervals"], 2)
+        self.assertLessEqual(info["estimated_seconds"], 10.5)
+        self.assertGreater(info["estimated_seconds"], 6)
+        self.assertNotIn("ldpc_blocks_per_cycle", info)
+        self.assertNotIn("ldpc_frame_bits", info)
+        self.assertTrue(info["snr_preset_unmodified"])
+        for rate in ("2/3", "7/9", "8/9", "9/10"):
+            self.run_pump("fast-info", *args, "--code-rate", rate, ok=False)
+        self.run_pump("fast-info", *args, "--interleave", "17", ok=False)
+        self.run_pump("fast-info", *args, "--qam", "16", ok=False)
+
     def test_explicit_acoustic_capacity_profile(self):
         legacy = json.loads(self.run_pump("fast-info", "--profile", "acoustic", "--format", "classic").stdout)
         self.assertEqual(legacy["format"], "classic")

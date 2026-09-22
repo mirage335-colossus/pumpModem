@@ -1,0 +1,122 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+      Start 119: fast_snr
+      Start  24: fast_low_rate
+ 1/40 Test  #24: fast_low_rate .................................   Passed   40.35 sec
+      Start  14: fast_transfer
+ 2/40 Test  #14: fast_transfer .................................   Passed   70.03 sec
+      Start  37: gui_fast_live
+ 3/40 Test  #37: gui_fast_live .................................   Passed  105.75 sec
+      Start  17: fast_qam
+ 4/40 Test  #17: fast_qam ......................................   Passed   45.91 sec
+      Start   8: fast_codec
+ 5/40 Test   #8: fast_codec ....................................   Passed   69.05 sec
+      Start  22: fast_radio
+ 6/40 Test  #22: fast_radio ....................................   Passed   18.17 sec
+      Start  13: fast_session
+ 7/40 Test  #13: fast_session ..................................   Passed   35.99 sec
+      Start 109: gui_boundary_regression
+ 8/40 Test #109: gui_boundary_regression .......................   Passed   21.93 sec
+      Start  11: fast_modem
+ 9/40 Test #119: fast_snr ......................................***Failed  423.42 sec
+wire: all 23 SNR levels checked
+ssb: all 23 SNR levels checked
+fm: all 23 SNR levels checked
+Traceback (most recent call last):
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_snr.py", line 77, in <module>
+    main(sys.argv[1])
+    ~~~~^^^^^^^^^^^^^
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_snr.py", line 22, in main
+    rows = run(tool, "--profile", profile, *former_wire, "--bytes", "1024", "--seed", "417")
+  File "/home/user/___quick/p/_cur/dataPump/pumpModem/tests/test_fast_snr.py", line 11, in run
+    completed = subprocess.run(
+        [tool, *arguments], check=True, capture_output=True, text=True, timeout=300
+    )
+  File "/usr/lib/python3.13/subprocess.py", line 556, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 1222, in communicate
+    stdout, stderr = self._communicate(input, endtime, timeout)
+                     ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 2129, in _communicate
+    self._check_timeout(endtime, orig_timeout, stdout, stderr)
+    ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/lib/python3.13/subprocess.py", line 1269, in _check_timeout
+    raise TimeoutExpired(
+    ...<2 lines>...
+            stderr=b''.join(stderr_seq) if stderr_seq else None)
+subprocess.TimeoutExpired: Command '['/home/user/___quick/p/_cur/dataPump/pumpModem/build/fast_regression', '--profile', 'acoustic', '--bytes', '1024', '--seed', '417']' timed out after 300 seconds
+
+      Start  25: fast_pilot_presence
+10/40 Test  #11: fast_modem ....................................   Passed   29.09 sec
+      Start  18: fast_acoustic
+11/40 Test  #25: fast_pilot_presence ...........................   Passed   27.60 sec
+      Start 118: fast_cli
+12/40 Test  #18: fast_acoustic .................................   Passed   15.03 sec
+      Start  21: fast_ofdm_presence
+13/40 Test  #21: fast_ofdm_presence ............................   Passed   10.73 sec
+      Start   9: fast_compression
+14/40 Test   #9: fast_compression ..............................   Passed   17.79 sec
+      Start  12: fast_files
+15/40 Test  #12: fast_files ....................................   Passed    7.32 sec
+      Start  19: fast_acoustic_short
+16/40 Test #118: fast_cli ......................................   Passed   40.44 sec
+      Start  16: fast_ldpc
+17/40 Test  #19: fast_acoustic_short ...........................   Passed    4.51 sec
+      Start 117: fast_cable_benchmark
+18/40 Test #117: fast_cable_benchmark ..........................   Passed    1.33 sec
+      Start  36: gui_fast
+19/40 Test  #16: fast_ldpc .....................................   Passed    2.96 sec
+      Start  15: fast_telemetry
+20/40 Test  #15: fast_telemetry ................................   Passed    1.22 sec
+      Start  26: fast_output_power
+21/40 Test  #36: gui_fast ......................................   Passed    2.77 sec
+      Start 108: gui_adapter_boundary
+22/40 Test  #26: fast_output_power .............................   Passed    0.37 sec
+      Start  10: fast_attachment
+23/40 Test  #10: fast_attachment ...............................   Passed    0.15 sec
+      Start  23: fast_presets
+24/40 Test  #23: fast_presets ..................................   Passed    0.27 sec
+      Start  35: fast_boundary
+25/40 Test #108: gui_adapter_boundary ..........................   Passed    0.71 sec
+      Start 110: gui_native_policy
+26/40 Test  #35: fast_boundary .................................   Passed    0.05 sec
+      Start  86: gui_document_layout
+27/40 Test  #86: gui_document_layout ...........................   Passed    0.01 sec
+      Start  87: gui_interactions
+28/40 Test  #87: gui_interactions ..............................   Passed    0.01 sec
+      Start  92: gui_chrome
+29/40 Test  #92: gui_chrome ....................................   Passed    0.00 sec
+      Start  91: gui_document_presentation
+30/40 Test  #91: gui_document_presentation .....................   Passed    0.00 sec
+      Start  89: gui_bindings
+31/40 Test #110: gui_native_policy .............................   Passed    0.04 sec
+      Start  84: gui_contract
+32/40 Test  #89: gui_bindings ..................................   Passed    0.01 sec
+      Start  83: gui_layout
+33/40 Test  #84: gui_contract ..................................   Passed    0.01 sec
+      Start  29: fast_acoustic_short_snr_0_public_text
+34/40 Test  #83: gui_layout ....................................   Passed    0.01 sec
+      Start  30: fast_acoustic_short_snr_0_keyed_attachment
+35/40 Test  #29: fast_acoustic_short_snr_0_public_text .........   Passed    0.77 sec
+      Start  31: fast_acoustic_short_snr_6_public_text
+36/40 Test  #31: fast_acoustic_short_snr_6_public_text .........   Passed    0.78 sec
+      Start  32: fast_acoustic_short_snr_6_keyed_attachment
+37/40 Test  #32: fast_acoustic_short_snr_6_keyed_attachment ....   Passed    0.74 sec
+      Start  33: fast_acoustic_short_snr_13_public_text
+38/40 Test  #30: fast_acoustic_short_snr_0_keyed_attachment ....   Passed    3.12 sec
+      Start  34: fast_acoustic_short_snr_13_keyed_attachment
+39/40 Test  #33: fast_acoustic_short_snr_13_public_text ........   Passed    0.86 sec
+40/40 Test  #34: fast_acoustic_short_snr_13_keyed_attachment ...   Passed    0.80 sec
+
+98% tests passed, 1 tests failed out of 40
+
+Label Time Summary:
+fast_regression    = 423.42 sec*proc (1 test)
+gui                = 131.23 sec*proc (12 tests)
+
+Total Test time (real) = 500.44 sec
+
+The following tests FAILED:
+	119 - fast_snr (Failed)                                 fast_regression
+Errors while running CTest

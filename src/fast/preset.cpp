@@ -96,6 +96,56 @@ double parse_rate(std::string_view text) {
         throw Error("Invalid Fast symbol-rate selection");
     return result;
 }
+Profile short_acoustic_preset(double expected) {
+    constexpr double minimum_target_seconds=10.5;
+    Profile best;double best_minimum=std::numeric_limits<double>::infinity(),best_rate=-1;
+    bool within_target=false;
+    for(const bool compact:{false,true})for(const bool ofdm:{true,false})for(const unsigned order:{4U,16U})
+    for(const auto rate:{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters}) {
+        // Compact SC is the weak QPSK path; higher-rate acoustic choices keep
+        // OFDM's independently fitted frequency-selective channel response.
+        if(compact&&rate==CodeRate::two_thirds)continue;
+        if(!ofdm&&(!compact||order!=4||rate!=CodeRate::half))continue;
+        const auto selected_snr=compact?(order==4?(rate==CodeRate::half?6.:8.):
+            (rate==CodeRate::half?10.:14.)):
+            std::max(6.,decoder_snr(order,rate,Channel::acoustic_short)+2.);
+        const auto band=17500*std::min(1.,std::pow(10.,(expected-selected_snr)/10.));
+        auto base=ofdm?profile(Channel::acoustic_short):single_carrier_base(Channel::acoustic_short);
+        base.compact_convolutional=compact;base.constellation=order;base.code_rate=rate;
+        base.marker_spacing_intervals=1;
+        if(ofdm) {
+            if(band<1000)continue;
+            base.ofdm_low_hz=500;base.ofdm_high_hz=canonical_frequency(500+band);
+        } else {
+            // Keep a 5 ms acoustic echo inside the compact equalizer's span.
+            // Faster choices use OFDM's cyclic prefix and channel fitting.
+            base.symbol_rate=canonical_frequency(std::min({1000.,maximum_baud(base),band/(1+base.rolloff)}));
+        }
+        for(const unsigned fft:{2048U,4096U,8192U,16384U,32768U}) {
+            if(!ofdm&&fft!=2048)continue;
+            for(unsigned depth=1;depth<=16;++depth) {
+                auto candidate=base;candidate.interleave_depth=depth;
+                if(ofdm)candidate.ofdm_fft_size=fft;
+                if(!valid(candidate))continue;
+                // Sixty encoded bytes fit a minimal XZ UTF-8 source in both
+                // public and keyed modes. Framing always comes from this local
+                // profile, never from a transmitted or decoded source length.
+                const auto minimum=estimate_transmission(candidate,true,60).seconds;
+                const auto throughput=estimate_transmission(candidate,false,50000000).source_bps;
+                const bool meets_target=minimum<=minimum_target_seconds;
+                if((meets_target&&!within_target)||
+                   (meets_target==within_target&&(meets_target?
+                    (throughput>best_rate||(throughput==best_rate&&minimum<best_minimum)):
+                    (minimum<best_minimum||(minimum==best_minimum&&throughput>best_rate))))) {
+                    best=candidate;best_minimum=minimum;best_rate=throughput;within_target=meets_target;
+                }
+            }
+        }
+    }
+    if(best_rate<0)throw Error("No short acoustic waveform fits the requested SNR");
+    return best;
+}
+
 }
 double default_expected_snr(Channel c) {
     switch(c) {
@@ -123,6 +173,11 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
         "Assumed SNR in the original channel bandwidth; local settings must match at both ends. "
         "Narrowing assumes unchanged total received signal power and flat noise density. "
         "Modeled presets require link testing; they are not measured margins."};
+    if(c==Channel::acoustic_short) {
+        result.profile=short_acoustic_preset(expected);
+        result.note+=" Coding-block selection limits minimum transfer overhead; weaker presets may still exceed ten seconds.";
+        return result;
+    }
     // Preserve the previously qualified nominal cable/acoustic waveforms and
     // the sampled radio default exactly, including sparse framing and depth.
     if(expected==nominal)return result;
@@ -149,8 +204,7 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
             // marker, OFDM has 256 held-out signs with an error allowance.
             // Do not advertise low-SNR LDPC operating points while ignoring
             // the stronger SNR needed to acquire/retain physical framing.
-            const auto allowance=c==Channel::acoustic_short?2.:3.;
-            const auto target=std::max(ofdm?6.:13.,decoder_snr(order,rate,c)+allowance);
+            const auto target=std::max(ofdm?6.:13.,decoder_snr(order,rate,c)+3.);
             const auto usable_band=band*std::min(1.,std::pow(10.,(expected-target)/10.));
             if(ofdm) {
                 if(usable_band<1000)continue;
@@ -160,21 +214,7 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
                 p.symbol_rate=canonical_frequency(std::min(maximum_baud(p),usable_band/(1+p.rolloff)));
                 if(p.symbol_rate<100)p.interleave_depth=1;
             }
-            if(c!=Channel::acoustic_short&&!valid(p))continue;
-            if(c==Channel::acoustic_short) {
-                // Minimize complete airtime for a 2.5 KiB message, allowing for
-                // XZ overhead and a bounded filename. This is a local preset
-                // choice, never a length selected from a received header.
-                for(const unsigned fft:{2048U,4096U,8192U,16384U,32768U}) {
-                    auto candidate=p;
-                    if(ofdm)candidate.ofdm_fft_size=fft;
-                    else if(fft!=2048)continue;
-                    if(!valid(candidate))continue;
-                    const auto score=-estimate_transmission(candidate,false,2800).seconds;
-                    if(score>best || best==-1) {best=score;result.profile=candidate;}
-                }
-                continue;
-            }
+            if(!valid(p))continue;
             if(ofdm) {
                 // Narrowing reduces data tones, so retaining eight LDPC frames
                 // made channel refreshes drift from about 10 to 37/74 seconds
@@ -237,9 +277,14 @@ std::vector<SymbolRateOption> symbol_rate_options(const Profile& p) {
 Profile apply_symbol_rate_option(Profile p,std::string_view id) {
     validate(p);
     if(id=="auto") {
-        const auto base=!p.capacity_mode?classic_profile(p.channel):
+        const auto base=p.compact_convolutional&&!p.acoustic_ofdm?resolve_snr_preset(p.channel,-6).profile:
+            !p.capacity_mode?classic_profile(p.channel):
             p.acoustic_ofdm?profile(p.channel):single_carrier_base(p.channel);
-        if(p.acoustic_ofdm){p.ofdm_fft_size=base.ofdm_fft_size;p.ofdm_prefix_samples=base.ofdm_prefix_samples;}
+        if(p.acoustic_ofdm) {
+            p.ofdm_fft_size=base.ofdm_fft_size;p.ofdm_prefix_samples=base.ofdm_prefix_samples;
+            if(p.channel==Channel::acoustic_short)
+                while(p.ofdm_fft_size<32768&&!valid(p))p.ofdm_fft_size*=2;
+        }
         else p.symbol_rate=std::min(base.symbol_rate,maximum_baud(p));
     } else if(p.acoustic_ofdm&&id.starts_with("ofdm:")) {
         const auto n=parse_rate(id.substr(5));

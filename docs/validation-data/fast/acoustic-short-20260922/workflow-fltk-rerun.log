@@ -1,0 +1,12 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start 112: gui_workflow
+1/1 Test #112: gui_workflow .....................   Passed  268.93 sec
+
+100% tests passed, 0 tests failed out of 1
+
+Label Time Summary:
+gui           = 268.93 sec*proc (1 test)
+native_gui    = 268.93 sec*proc (1 test)
+
+Total Test time (real) = 268.94 sec

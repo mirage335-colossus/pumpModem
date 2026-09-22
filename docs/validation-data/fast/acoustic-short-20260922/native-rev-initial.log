@@ -1,0 +1,26 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build-rev
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build-rev
+    Start 112: gui_workflow
+1/5 Test #112: gui_workflow .....................***Failed  289.46 sec
+Data Pump rev: Shared GUI smoke phase 11: Replay did not show changing measured frames and pending reception over about three seconds: elapsed=2.977751 frames=4 changes=3 fraction=0.644068 symbols=0 dropped=5357 pending=575
+
+    Start 113: gui_adapter_conformance
+2/5 Test #113: gui_adapter_conformance ..........   Passed  170.34 sec
+    Start 114: gui_platform_conformance
+3/5 Test #114: gui_platform_conformance .........   Passed    6.17 sec
+    Start 115: gui_coordinates_1x
+4/5 Test #115: gui_coordinates_1x ...............   Passed    5.24 sec
+    Start 116: gui_coordinates_2x
+5/5 Test #116: gui_coordinates_2x ...............   Passed    5.22 sec
+
+80% tests passed, 1 tests failed out of 5
+
+Label Time Summary:
+gui           = 476.43 sec*proc (5 tests)
+native_gui    = 476.43 sec*proc (5 tests)
+
+Total Test time (real) = 476.44 sec
+
+The following tests FAILED:
+	112 - gui_workflow (Failed)                             gui native_gui
+Errors while running CTest

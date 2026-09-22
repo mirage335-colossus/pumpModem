@@ -17,6 +17,9 @@ struct Profile {
     unsigned ofdm_pilot_stride=8;
     unsigned ofdm_training_blocks=16;
     unsigned ldpc_frame_bits=64800;
+    // The short-acoustic preset can use one compact terminated K=7 code
+    // instead of LDPC, retaining the capacity source and integrity format.
+    bool compact_convolutional=false;
     double ofdm_low_hz=500;
     double ofdm_high_hz=18000;
     unsigned marker_spacing_intervals=16;

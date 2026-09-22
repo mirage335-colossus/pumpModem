@@ -434,7 +434,7 @@ void fast_mode_visibility() {
             }
             const auto nominal=app.application.field(ui::Field::fast_expected_snr).options.at(1).id;
             const auto low=app.application.field(ui::Field::fast_expected_snr).options.back().id;
-            for(const auto& target:{nominal,low,std::string("manual")}) {
+            for(const auto& target:{nominal,low,std::string(channel==std::string_view("acoustic-short")?"-6":"manual"),std::string("manual")}) {
                 app.application.select(ui::Field::fast_expected_snr,target);refresh();
                 const auto& value=app.application.field(ui::Field::fast_detail).text;
                 auto* detail=find_label(*window,value.c_str());

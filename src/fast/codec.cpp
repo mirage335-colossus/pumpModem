@@ -62,6 +62,7 @@ Bytes random_bytes(std::size_t size) {
     return value;
 }
 void validate_codec_profile(const Profile& p) {
+    if(p.compact_convolutional) {validate(p);return;}
     if(p.capacity_mode) {
         if(p.interleave_depth<1 || p.interleave_depth>16)throw Error("Capacity interleave depth must be 1 through 16 LDPC frames");
         (void)ldpc::data_bits(p.code_rate,p.ldpc_frame_bits);return;
@@ -90,7 +91,10 @@ std::size_t inner_size(std::size_t source_bytes,CodeRate rate) {
     return whole+static_cast<std::size_t>(std::count(mask.begin(),mask.begin()+static_cast<std::ptrdiff_t>(raw%mask.size()),1));
 }
 std::size_t k_bytes(const Profile& p) { return p.robust?112:120; }
-std::size_t capacity_info_bytes(const Profile& p) {return p.interleave_depth*(ldpc::data_bits(p.code_rate,p.ldpc_frame_bits)/8);}
+std::size_t capacity_info_bytes(const Profile& p) {
+    if(p.compact_convolutional)return p.interleave_depth*(p.code_rate==CodeRate::half?126:190);
+    return p.interleave_depth*(ldpc::data_bits(p.code_rate,p.ldpc_frame_bits)/8);
+}
 std::size_t capacity_data_bytes(const Profile& p) {return (capacity_info_bytes(p)&~std::size_t{1})-2*capacity_parity_symbols(p);}
 std::size_t systematic_bytes(const Profile& p) {return p.capacity_mode?capacity_data_bytes(p):k_bytes(p)*2;}
 const char* domain(const Profile& p,const char* legacy,const char* capacity) {return p.capacity_mode?capacity:legacy;}
@@ -221,7 +225,7 @@ template<class Visitor>void whitening_bits(std::size_t count,std::uint64_t cycle
 }
 const Bytes& capacity_rotations(const Profile& p) {
     validate(p);
-    if(!p.capacity_mode)throw Error("Capacity interleave requires capacity profile");
+    if(!p.capacity_mode||p.compact_convolutional)throw Error("Capacity LDPC interleave requires an LDPC capacity profile");
     const auto depth=p.interleave_depth,bps=static_cast<unsigned>(std::countr_zero(p.constellation));
     struct Cached {std::once_flag once;Bytes rotations;};
     // The finite profile grid bounds storage to 16*11*(64800+16200) bytes.
@@ -254,6 +258,7 @@ const Bytes& capacity_rotations(const Profile& p) {
 }
 Bytes capacity_encode(const Profile& p,std::span<const std::uint8_t> systematic) {
     auto rs=outer_rs::encode(systematic,capacity_parity_symbols(p));
+    if(p.compact_convolutional)return coding::encode(rs,p.code_rate);
     // Odd numbers of DVB-S2 3/4 frames have one unpaired information byte.
     // Its fixed zero fill is LDPC-protected and checked independently of RS.
     rs.resize(capacity_info_bytes(p));
@@ -268,6 +273,15 @@ Bytes capacity_encode(const Profile& p,std::span<const std::uint8_t> systematic)
 }
 Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapshot& stats) {
     Bytes decoded;decoded.reserve(capacity_info_bytes(p));
+    if(p.compact_convolutional) {
+        auto result=coding::decode(wire.first(capacity_coded_bits(p)),capacity_info_bytes(p),p.code_rate);
+        // The trellis can reconstruct neutral evidence at its original timed
+        // positions. Its conservative uncertainty window is diagnostic, not
+        // an instruction to discard those corrected bytes. As with LDPC,
+        // outer RS plus mandatory whole-cycle SHA/HMAC verify the result.
+        stats.erased_bytes+=std::count(result.unreliable.begin(),result.unreliable.end(),1);
+        decoded=std::move(result.bytes);
+    } else {
     const auto& rotations=capacity_rotations(p);
     const auto workers=p.acoustic_ofdm?
         std::min({4U,p.interleave_depth,std::max(1U,std::thread::hardware_concurrency())}):1U;
@@ -328,6 +342,7 @@ Bytes capacity_decode(const Profile& p,std::span<const float> wire,DecodeSnapsho
             append(decoded,frame.result.bytes);
         }
     }
+    }
     if(decoded.size()%2) {
         if(decoded.back())throw CorruptCycle("Noncanonical capacity LDPC alignment fill");
         decoded.pop_back();
@@ -359,9 +374,19 @@ std::size_t capacity_source_bytes_per_cycle(const Profile& p,bool encrypted) {
     if(!p.capacity_mode)throw Error("Capacity geometry requires capacity profile");
     return source_bytes_per_group(p,encrypted)-1;
 }
+std::size_t capacity_information_bytes(const Profile& p) {
+    validate_codec_profile(p);
+    if(!p.capacity_mode)throw Error("Capacity geometry requires capacity profile");
+    return capacity_info_bytes(p);
+}
+std::size_t capacity_coded_bits(const Profile& p) {
+    validate_codec_profile(p);
+    if(!p.capacity_mode)throw Error("Capacity geometry requires capacity profile");
+    return p.compact_convolutional?inner_size(capacity_info_bytes(p),p.code_rate):p.interleave_depth*p.ldpc_frame_bits;
+}
 std::size_t cycle_intervals(const Profile& p) {
     validate_codec_profile(p);
-    if(p.capacity_mode)return (p.interleave_depth*p.ldpc_frame_bits+physical_interval_bits-1)/physical_interval_bits;
+    if(p.capacity_mode)return (capacity_coded_bits(p)+physical_interval_bits-1)/physical_interval_bits;
     return (inner_size(p.interleave_depth*256,p.code_rate)+physical_interval_bits-1)/physical_interval_bits;
 }
 SourceReader file_source(const std::filesystem::path& path) {
@@ -496,7 +521,7 @@ struct StreamEncoder::Impl {
     Impl(Profile p,const std::optional<Crypto>& c,SourceReader r,std::function<Bytes(std::size_t)> entropy,SourceEncoding encoding):
         profile(p),crypto(c),reader(std::move(r)),random(std::move(entropy)),salt(random(32)),source_encoding(encoding) {
         validate_codec_profile(p);if(!reader)throw Error("Missing fast source reader");
-        if(p.capacity_mode)(void)capacity_rotations(p);
+        if(p.capacity_mode&&!p.compact_convolutional)(void)capacity_rotations(p);
         if(crypto)keys=std::make_unique<Keys>(p,*crypto,salt);
     }
     bool next_source_byte(std::uint8_t& byte) {
@@ -596,7 +621,7 @@ struct StreamDecoder::Impl {
     std::shared_ptr<const ReceivedFile> received;
     Impl(Profile p,const std::optional<Crypto>& c,std::uint64_t q,SourceEncoding encoding):profile(p),crypto(c),quota(std::min<std::uint64_t>(q,256ULL*1024*1024)),source_encoding(encoding) {
         validate_codec_profile(p);
-        if(p.capacity_mode)(void)capacity_rotations(p);
+        if(p.capacity_mode&&!p.compact_convolutional)(void)capacity_rotations(p);
         soft.reserve(cycle_intervals(p)*physical_interval_bits);
         stats.encrypted=crypto.has_value();
     }
