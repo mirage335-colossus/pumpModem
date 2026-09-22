@@ -61,7 +61,7 @@ std::vector<std::uint64_t> drift_candidates(std::uint64_t center, unsigned windo
 std::uint64_t sample_nanoseconds(std::uint64_t sample, std::uint32_t sample_rate);
 std::string json_escape(std::string_view text);
 std::string base64_encode(std::span<const std::uint8_t> bytes);
-// Escape terminal controls while leaving ordinary UTF-8 and pipe bytes alone.
+// Restricted received ASCII with one underscore for every rejected byte.
 std::string terminal_text(std::span<const std::uint8_t> bytes);
 Bytes read_bounded(std::istream& input, std::size_t limit);
 void write_new_file(const std::string& path, std::span<const std::uint8_t> bytes);

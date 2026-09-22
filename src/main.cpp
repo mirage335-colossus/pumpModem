@@ -11,6 +11,7 @@
 #include "datapump/stream_codec.hpp"
 #include "datapump/qr.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/received_text.hpp"
 #include "datapump/transfer.hpp"
 #include "datapump/tuning.hpp"
 #include "datapump/live.hpp"
@@ -71,8 +72,11 @@ Input/output:
   --filename NAME       Display filename for file/screenshot (basename only)
   --output PATH         Explicit WAV/keyfile output; never overwrite
   --save PATH           Explicit save of received content or raw 0/1 text; never overwrite
-  --json                Received content as JSON with base64 payload and diagnostics
+  --json                Received content as JSON with restricted ASCII text and diagnostics
   --callsign TEXT --grid TEXT --repeatable
+
+Received text and filenames use letters, digits, comma, period, @, space, -, _, /, =.
+Every other received byte is displayed as _. Use --save for original source bytes.
 
 Modem:
   --bw HZ               Nominal bandwidth, 0.01..30000000 Hz; default1200
@@ -240,13 +244,6 @@ tuning::OscillatorPreset oscillator_config(const Args& a) {
     result.clock_error_ppm=a.number("clock-error-ppm",result.clock_error_ppm);
     result.phase_noise_degrees_per_sqrt_second=a.number("phase-noise",result.phase_noise_degrees_per_sqrt_second);
     return result;
-}
-bool stdout_terminal() {
-#ifdef _WIN32
-    return _isatty(_fileno(stdout))!=0;
-#else
-    return isatty(fileno(stdout))!=0;
-#endif
 }
 std::size_t budget(const Args& a) {
     auto mb=a.integer("memory-mb",256);
@@ -486,9 +483,9 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
           <<",\"short_text_decoded\":"<<(short_text_decoded?"true":"false")
           <<",\"authenticated\":"<<(content_validated&&stream.authenticated?"true":"false")
           <<",\"id\":\""<<id_string(m)<<"\",\"kind\":\""<<(m.kind==MessageKind::text?"text":m.kind==MessageKind::file?"file":"screenshot")
-          <<"\",\"filename\":\""<<json_escape(m.filename)<<"\",\"callsign\":\""<<json_escape(m.callsign)
-          <<"\",\"grid\":\""<<json_escape(m.grid)<<"\",\"repeatable\":"<<(m.repeatable?"true":"false")
-          <<",\"data_base64\":\""<<base64_encode(m.data)<<"\",\"corrected_bytes\":"<<stream.corrected_bytes
+          <<"\",\"filename\":\""<<received_text(m.filename)<<"\",\"callsign\":\""<<received_text(m.callsign)
+          <<"\",\"grid\":\""<<received_text(m.grid)<<"\",\"repeatable\":"<<(m.repeatable?"true":"false")
+          <<",\"data_text\":\""<<received_text(m.data)<<"\",\"corrected_bytes\":"<<stream.corrected_bytes
           <<",\"fec_repairs\":{\"data\":";
         report_fec_region(stream.fec_stats.data);std::cout<<",\"integrity\":";report_fec_region(stream.fec_stats.integrity);
         std::cout<<",\"parity\":";report_fec_region(stream.fec_stats.parity);std::cout<<"},\"pre_fec_accuracy\":";
@@ -517,9 +514,8 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
             for(auto bit:raw_bits)std::cout<<(bit?'1':'0');
             std::cout<<'\n';
         } else if(m.kind!=MessageKind::text) {
-            std::cerr<<"Validated file: "<<m.filename<<" ("<<m.data.size()<<" bytes). Use --save PATH or --json to retrieve.\n";
-        } else if(stdout_terminal()) std::cout<<terminal_text(m.data);
-        else std::cout.write(reinterpret_cast<const char*>(m.data.data()),static_cast<std::streamsize>(m.data.size()));
+            std::cerr<<"Validated file: "<<received_text(m.filename)<<" ("<<m.data.size()<<" bytes). Use --save PATH to retrieve exact bytes.\n";
+        } else std::cout<<received_text(m.data);
     }
     if(!a.has("json") && !content_validated) {
         if(!stream_complete)std::cerr<<"Incomplete capture: physical symbol absence has not completed the stream.\n";
@@ -805,9 +801,8 @@ void listen(const Args& a,const transfer::Options& options) {
                 <<",\"simulation\":"<<(snapshot.simulation?"true":"false")
                 <<",\"transmitting\":"<<(snapshot.transmitting?"true":"false")<<"}\n";
             for(const auto& signal:snapshot.signals) if(!signal.binary && !signal.validated && !signal.complete) {
-                const Bytes text(signal.text.begin(),signal.text.end());
                 std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
-                    <<",\"data_base64\":\""<<base64_encode(text)<<'"';
+                    <<",\"data_text\":\""<<received_text(signal.text)<<'"';
                 report_signal_identity(signal);std::cout<<"}\n";
             }
         }
@@ -815,8 +810,9 @@ void listen(const Args& a,const transfer::Options& options) {
             if(signal.binary) {
                 std::cout<<"{\"event\":\"raw_bits\",\"content_validated\":false,\"authenticated\":false";
                 report_signal_identity(signal);
-                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\""
-                    <<json_escape(signal.text)<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
+                std::cout<<",\"complete\":"<<(signal.complete?"true":"false")<<",\"raw_bits\":\"";
+                for(const auto bit:signal.text)std::cout<<(bit=='1'?'1':'0');
+                std::cout<<"\",\"raw_bit_count\":"<<signal.received_bits<<",\"pattern_score\":";
                 if(signal.pattern_score && std::isfinite(*signal.pattern_score))std::cout<<*signal.pattern_score;else std::cout<<"null";
                 std::cout<<",\"pattern_score_units\":\"model log evidence\"";
                 report_recovery_json(signal.recovery_progress);std::cout<<"}\n";

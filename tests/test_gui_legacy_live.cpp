@@ -52,12 +52,17 @@ int main() {
     try {
         using namespace datapump;using namespace gui;using F=ui::Field;using C=ui::Command;
         const std::string received="RX: CQ TEST\n",sent="TX: café 123\n",later="next draft";
+        const std::string displayed_received="RX_ CQ TEST_";
         legacy::Transmitter transmitter({legacy::Mode::bpsk125,1500},received);std::vector<float> block(400);
         for(auto n=transmitter.read(block);n;n=transmitter.read(block))fixture::input.insert(fixture::input.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));
         bool acquired=false;
         legacy_ui::Controller controller([&]{return acquired;});controller.select(F::legacy_profile,"bpsk125");controller.selected(true);controller.poll();
         check(!controller.active()&&!fixture::inputs,"Legacy ignored denied audio ownership");acquired=true;
-        until(controller,[&]{return controller.field(F::legacy_transcript).text==received;});
+        until(controller,[&]{return controller.field(F::legacy_transcript).text==displayed_received;});
+        controller.set_shellcode_mode(true);
+        check(controller.field(F::legacy_transcript).text=="RX: CQ TEST_","Legacy shellcode mode lost printable ASCII or admitted a control");
+        controller.set_shellcode_mode(false);
+        check(controller.field(F::legacy_transcript).text==displayed_received,"Legacy controller retained shellcode after disabling it");
         check(controller.bitmap_revision()>1,"Sampled RX did not update waterfall");
         controller.edit(F::legacy_text,sent);controller.activate(C::legacy_transmit);
         check(controller.command_label()=="Cancel"&&controller.enabled(C::legacy_transmit),"Queued TX cannot be cancelled");
@@ -71,7 +76,7 @@ int main() {
             return appended&&controller.field(F::legacy_text).text==later&&fixture::outputs==0&&fixture::inputs==1;
         });
         check(partial,"Legacy did not expose TX characters during playback");
-        check(controller.field(F::legacy_transcript).text==received+"\n\n\n"+sent+"\n","Live RX/TX transcript lost text or transmission separators");
+        check(controller.field(F::legacy_transcript).text==displayed_received+"\n\n\n"+sent+"\n","Live RX/TX transcript lost safe received text or local transmission separators");
         check(controller.command_label()=="Transmit","Completed TX retained Cancel button");
         check(!fixture::overlap,"Legacy GUI overlapped TX and RX");
         check(!fixture::output.empty(),"Legacy GUI transmitted no sampled audio");

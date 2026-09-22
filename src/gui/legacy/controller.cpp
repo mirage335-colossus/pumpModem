@@ -62,6 +62,10 @@ void Controller::selected(bool value) {
     else {p.failed=false;p.f(F::legacy_status).text="Waiting for audio…";}
     p.refresh();
 }
+void Controller::set_shellcode_mode(bool enabled) {
+    auto& p=*impl_;
+    if(p.text.set_shellcode_mode(enabled,p.f(F::legacy_transcript)))++p.revision;
+}
 void Controller::poll() {
     auto& p=*impl_;
     // Retain the final acknowledgment once, then leave dormant Legacy history

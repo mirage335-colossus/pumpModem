@@ -4,6 +4,7 @@
 #include "../src/gui/transmit_scope.hpp"
 #include "datapump/compression.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/received_text.hpp"
 #include "datapump/simulation_estimate.hpp"
 #include <filesystem>
 #include <iostream>
@@ -1517,10 +1518,19 @@ void fixed_text_reception() {
     check(index.has_value(),"completed source has a validated display row");
     controller.select(F::signals,std::to_string(controller.signals().lines()[*index].id));
     controller.activate(C::copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1 && requests.front().value==expected,"copy uses exact decoded source bytes");
+    check(requests.size()==1 && requests.front().value=="A fixed interval_","copy must restrict decoded source bytes");
     controller.complete_service({requests.front().id,false,{},{}});
     controller.activate(C::paste_signal);
-    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"paste uses source bytes rather than coded data");
+    check(controller.field(F::message).text=="A fixed interval_","paste must restrict decoded source text");
+    controller.set_shellcode_mode(true);
+    controller.activate(C::paste_signal);
+    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Shellcode permits printable ASCII source text");
+    controller.activate(C::copy_signal);
+    controller.set_shellcode_mode(false);
+    const auto withdrawn=controller.take_services();
+    check(withdrawn.size()==1&&withdrawn.front().value=="A fixed interval_"&&
+          controller.field(F::message).text=="A fixed interval_",
+          "Revoking Shellcode must scrub the received draft and queued clipboard");
     prepare(controller);noise_start_stop(controller);
     controller.activate(C::paste_previous);
     check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Noise replaced the previous transmitted message");
@@ -1783,15 +1793,15 @@ void escaped_signal_message_paste() {
     Controller controller({true,true});
     check(!controller.enabled(C::paste_signal),"Paste as message was enabled without a received selection");
     controller.edit(F::binary,original.binary());prepare(controller);
-    receive_pattern_text(controller,original.text());
+    receive_pattern_text(controller,"___x41");
     check(controller.signals().lines().size()==1 && controller.field(F::signals).records.size()==1 &&
           signal_status_label(controller.signals().lines().front())=="text received",
           "Byte-aligned arbitrary bytes did not produce exactly one escaped text row");
     controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
     check(controller.enabled(C::paste_signal),"Received arbitrary bytes could not be pasted as a message");
     controller.activate(C::copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value==original.text(),
-          "Copying arbitrary received bytes did not use their escaped text representation");
+    check(requests.size()==1 && requests.front().kind==ui::ServiceKind::clipboard && requests.front().value=="___x41",
+          "Copying arbitrary received bytes exposed an escape or raw byte");
     controller.complete_service({requests.front().id,false,{},{}});
     controller.edit(F::message,"A plain message with an unfinished binary prefix");
     controller.toggle(F::repeatable,true);
@@ -1800,12 +1810,56 @@ void escaped_signal_message_paste() {
           controller.field(F::binary_label).text.find("incomplete")!=std::string::npos,
           "Paste fixture did not retain a repeatable plain-text draft with an incomplete binary prefix");
     controller.activate(C::paste_signal);
-    check(controller.message_bytes()==expected && controller.field(F::message).text==original.text() &&
-          controller.field(F::binary).text==original.binary() && !controller.field(F::repeatable).checked &&
-          controller.field(F::message_label).text.find("escaped")!=std::string::npos,
-          "Paste as message reinterpreted arbitrary bytes, retained repeatable text or lost the binary view");
+    const BinaryEditor safe(Bytes{'_','_','_','x','4','1'});
+    check(controller.message_bytes()==safe.bytes() && controller.field(F::message).text==safe.text() &&
+          controller.field(F::binary).text==safe.binary() && !controller.field(F::repeatable).checked &&
+          controller.field(F::message_label).text.find("escaped")==std::string::npos,
+          "Paste as message must restrict arbitrary bytes before composer or QR processing");
+    controller.set_shellcode_mode(true);controller.activate(C::paste_signal);
+    check(controller.field(F::message).text=="__\\x41","Shellcode must allow backslash while excluding binary bytes");
+    controller.activate(C::attach_file);
+    const auto attachment_request=controller.take_services();
+    check(attachment_request.size()==1,"Receive draft fixture could not choose an attachment");
+    controller.complete_service({attachment_request.front().id,false,std::filesystem::absolute(__FILE__).string(),{}});
+    prepare(controller);
+    const auto attachment_marker=controller.field(F::message).text;
+    controller.set_shellcode_mode(false);
+    check(controller.field(F::message).text==attachment_marker&&controller.field(F::message_label).text.starts_with("Attached:"),
+          "Revoking Shellcode replaced the local attachment preview with its retained receive draft");
+    controller.activate(C::use_text);
+    check(controller.field(F::message).text=="___x41","Leaving Shellcode must scrub the retained received-derived draft");
+    controller.edit(F::message,"__\\x41");
+    check(controller.field(F::message).text=="___x41","Stale native edits must not restore received shell punctuation");
+    const auto text_history=controller.field(F::message).text_history_revision;
+    const auto binary_history=controller.field(F::binary).text_history_revision;
+    const auto short_history=controller.field(F::short_bits).text_history_revision;
+    controller.edit(F::message,"");
+    check(controller.field(F::message).text_history_revision>text_history&&
+          controller.field(F::binary).text_history_revision>binary_history&&
+          controller.field(F::short_bits).text_history_revision>short_history,
+          "Clearing received provenance must invalidate undo in every linked editor");
+    controller.edit(F::message,"echo hi; (test) &");
+    check(controller.field(F::message).text=="echo hi; (test) &","Fresh locally typed TX text must stay unrestricted");
     prepare(controller);
     check(controller.enabled(C::transmit),"Paste as message retained the discarded draft's incomplete binary error");
+    controller.close();
+}
+void received_raw_text_boundary() {
+    using F=ui::Field;using C=ui::Command;
+    Controller controller({true,true});controller.edit(F::message,";()\\&");prepare(controller);
+    receive_pattern_text(controller,"_____");
+    controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
+    const auto bits=*controller.signals().copy_raw_bits(0);
+    controller.activate(C::paste_raw_signal);prepare(controller);
+    check(controller.field(F::message).text=="_____"&&controller.field(F::short_bits).text==bits&&
+          controller.field(F::short_bits_detail).text.find("Expected text: '_____'")!=std::string::npos,
+          "Received raw bits leaked their decoded text into the composer or expected-text preview");
+    controller.set_shellcode_mode(true);controller.activate(C::paste_raw_signal);
+    check(controller.field(F::message).text==";()\\&","Shellcode must allow printable ASCII raw-bit interpretations");
+    controller.set_shellcode_mode(false);prepare(controller);
+    check(controller.field(F::message).text=="_____"&&controller.field(F::short_bits).text==bits&&
+          controller.inspection()->binary&&controller.estimate()->wire_bits==bits.size(),
+          "Revoking Shellcode must scrub text without changing original raw-bit transmission");
     controller.close();
 }
 void binary_source_representation() {
@@ -1818,14 +1872,14 @@ void binary_source_representation() {
               !controller.inspection()->binary && controller.estimate()->wire_bits==compression::encode_short_bits(expected).size(),
               "short dictionary must preserve exact source bytes and trailing zeros");
         if(expected.front()==0) {
-            receive_pattern_text(controller,editor.text());
+            receive_pattern_text(controller,received_text(expected));
             check(controller.inbox().items().empty(),"Short raw binary source became an attachment or validated source");
             const auto& lines=controller.signals().lines();
             check(lines.size()==1 && lines.front().complete && !lines.front().validated,
                   "Short binary source had no completed raw message row");
             controller.select(F::signals,std::to_string(lines.front().id));controller.activate(ui::Command::copy_signal);
             const auto copied=controller.take_services();
-            check(copied.size()==1 && copied.front().value==editor.text(),"Binary source copy lost its escaped representation");
+            check(copied.size()==1 && copied.front().value==received_text(expected),"Binary source copy escaped the restricted presentation");
             controller.complete_service({copied.front().id,false,{},{}});
         }
         controller.close();
@@ -2181,7 +2235,7 @@ int main(int argc,char** argv) {
         three_bit_dispatch();
         short_raw_editor();short_raw_reception();
         receive_target_controls();message_target_selection();short_text_reception();three_bit_text_reception();fixed_text_reception();byte_aligned_pattern_reception();
-        escaped_signal_message_paste();binary_source_representation();workspace_controls();
+        escaped_signal_message_paste();received_raw_text_boundary();binary_source_representation();workspace_controls();
         bitmap_source_checks();
         if(argc>1&&std::string_view(argv[1])=="--smoke") {
             datapump::gui::Controller controller({true,true});

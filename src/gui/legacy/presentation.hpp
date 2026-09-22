@@ -2,6 +2,7 @@
 #include "../ui_contract.hpp"
 #include "../text_policy.hpp"
 #include "datapump/legacy/session.hpp"
+#include "datapump/received_text.hpp"
 #include <algorithm>
 #include <string>
 namespace datapump::gui::legacy_ui {
@@ -16,12 +17,29 @@ public:
     void edited(std::string_view draft) {
         if(!draft.starts_with(std::string_view(submitted_).substr(sent_)))clear_prefix_=false;
     }
+    bool set_shellcode_mode(bool enabled,ui::FieldState& transcript) {
+        if(shellcode_mode_==enabled)return false;
+        shellcode_mode_=enabled;
+        transcript.text=enabled?shellcode_transcript_:restricted_transcript_;
+        ++transcript.text_cursor_end_revision;
+        return true;
+    }
     bool update(const legacy::Snapshot& snapshot,ui::FieldState& transcript,ui::FieldState& draft) {
         bool changed=false;
         for(const auto& event:snapshot.events)if(event.serial>event_) {
-            // Text may arrive one UTF-8 byte at a time. Keep incomplete sequences
-            // until the next event so every native presentation stays valid.
-            pending_+=event.text;event_=event.serial;
+            event_=event.serial;
+            if(!event.transmitted) {
+                // Received bytes never enter the UTF-8 decoder or a native
+                // editor. Keep only the two bounded ASCII presentations.
+                if(!pending_.empty()) {append_transmitted("\xEF\xBF\xBD");pending_.clear();}
+                restricted_transcript_+=received_text(event.text);
+                shellcode_transcript_+=received_text(event.text,true);
+                changed=true;
+                continue;
+            }
+            // Locally typed TX text may arrive one UTF-8 byte at a time. Keep
+            // incomplete sequences only for that trusted echo path.
+            pending_+=event.text;
             std::size_t consumed=0;
             while(consumed<pending_.size()) {
                 const auto first=static_cast<unsigned char>(pending_[consumed]);
@@ -32,21 +50,24 @@ public:
                     if((byte&0xc0)!=0x80||(n==1&&((first==0xe0&&byte<0xa0)||(first==0xed&&byte>=0xa0)||
                         (first==0xf0&&byte<0x90)||(first==0xf4&&byte>=0x90))))malformed=true;
                 }
-                if(malformed) {transcript.text+="\xEF\xBF\xBD";++consumed;changed=true;continue;}
+                if(malformed) {append_transmitted("\xEF\xBF\xBD");++consumed;changed=true;continue;}
                 if(pending_.size()-consumed<length)break;
                 const auto piece=std::string_view(pending_).substr(consumed,length);
-                if(ui::edit_error(piece,true,4).empty())transcript.text+=piece;
-                else if(first)transcript.text+="\xEF\xBF\xBD";
+                if(ui::edit_error(piece,true,4).empty())append_transmitted(piece);
+                else if(first)append_transmitted("\xEF\xBF\xBD");
                 consumed+=length;changed=true;
             }
             pending_.erase(0,consumed);
         }
-        if(transcript.text.size()>transcript_limit) {
-            auto remove=transcript.text.size()-transcript_limit;
-            while(remove<transcript.text.size()&&(static_cast<unsigned char>(transcript.text[remove])&0xc0)==0x80)++remove;
-            transcript.text.erase(0,remove);
+        if(restricted_transcript_.size()>transcript_limit) {
+            auto remove=restricted_transcript_.size()-transcript_limit;
+            while(remove<restricted_transcript_.size()&&(static_cast<unsigned char>(restricted_transcript_[remove])&0xc0)==0x80)++remove;
+            restricted_transcript_.erase(0,remove);shellcode_transcript_.erase(0,remove);
         }
-        if(changed)++transcript.text_cursor_end_revision;
+        if(changed) {
+            transcript.text=shellcode_mode_?shellcode_transcript_:restricted_transcript_;
+            ++transcript.text_cursor_end_revision;
+        }
         if(snapshot.transmission==transmission_) {
             auto next=std::min(snapshot.sent_bytes,submitted_.size());
             // A progress callback can split a UTF-8 sequence; never install an
@@ -65,6 +86,11 @@ private:
     std::uint64_t event_=0,transmission_=0;
     std::size_t sent_=0;
     bool clear_prefix_=true;
+    bool shellcode_mode_=false;
     std::string submitted_,pending_;
+    std::string restricted_transcript_,shellcode_transcript_;
+    void append_transmitted(std::string_view text) {
+        restricted_transcript_+=text;shellcode_transcript_+=text;
+    }
 };
 }

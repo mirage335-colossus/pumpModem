@@ -11,6 +11,7 @@
 #include "datapump/fast/attachment.hpp"
 #include "datapump/fast/preset.hpp"
 #include "datapump/crypto.hpp"
+#include "datapump/received_text.hpp"
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -71,6 +72,7 @@ struct Controller::Impl {
     std::vector<HistoryEntry> history;
     std::string current_history;
     bool selected=false,current_transmitting=false;
+    bool shellcode_mode=false,received_draft=false;
     std::chrono::steady_clock::time_point retry_after{};
     std::string estimate_key;
     std::optional<fast::TransmitEstimate> source_estimate;
@@ -222,7 +224,7 @@ struct Controller::Impl {
         case C::fast_save:return bool(selected_file())&&!key_loading;
         case C::fast_copy_signal:case C::fast_paste_signal: {
             const auto file=selected_signal();return file&&!file->is_attachment()&&file->size()<=fast::text_byte_limit&&
-                valid_clipboard_text(file->bytes())&&(command!=C::fast_paste_signal||edit);
+                (command!=C::fast_paste_signal||edit);
         }
         case C::fast_clear_received:case C::fast_toggle_qr_expanded:return true;
         case C::fast_use_text:case C::fast_choose_file:return edit;
@@ -251,20 +253,21 @@ struct Controller::Impl {
             if(capture.active&&!capture.transmitting)label+=" · "+std::to_string(capture.intervals)+" intervals";
             if(capture.file) {
                 const auto bytes=capture.file->bytes();
-                if(!capture.file->is_attachment()&&bytes.size()<=fast::text_byte_limit&&valid_clipboard_text(bytes)) {
-                    std::string preview(bytes.begin(),bytes.end());
-                    std::replace(preview.begin(),preview.end(),'\n',' ');std::replace(preview.begin(),preview.end(),'\r',' ');
-                    // Bound the visible preview on a UTF-8 boundary.
-                    if(preview.size()>160) {preview.resize(160);while(!preview.empty()&&!valid_clipboard_text(std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(preview.data()),preview.size())))preview.pop_back();preview+="…";}
+                if(!capture.file->is_attachment()&&bytes.size()<=fast::text_byte_limit) {
+                    // Filter before any native text processing. Every source
+                    // byte maps independently to one printable ASCII byte.
+                    auto preview=received_text(bytes.first(std::min<std::size_t>(bytes.size(),160)),shellcode_mode);
+                    if(bytes.size()>160)preview+="…";
                     label+=" · "+preview;
                 }
                 if(capture.file->is_attachment()) {
-                    label+=" · "+capture.file->filename();
-                    files.records.push_back({entry.id,{{capture.file->filename()+" · "+std::to_string(capture.file->size())+" bytes",5,1,-8,26,12}},true,true});
+                    const auto filename=received_text(capture.file->filename());
+                    label+=" · "+filename;
+                    files.records.push_back({entry.id,{{filename+" · "+std::to_string(capture.file->size())+" bytes",5,1,-8,26,12}},true,true});
                 }
             }
             signals.records.push_back({entry.id,{{std::move(label),5,1,-8,26,12}},true,
-                capture.file&&!capture.file->is_attachment()&&capture.file->size()<=fast::text_byte_limit&&valid_clipboard_text(capture.file->bytes())});
+                capture.file&&!capture.file->is_attachment()&&capture.file->size()<=fast::text_byte_limit});
         }
     }
     void record_snapshot() {
@@ -473,12 +476,33 @@ void Controller::set_selected(bool selected) {
 
     ++p.revision;p.refresh();
 }
+void Controller::set_shellcode_mode(bool enabled) {
+    auto& p=*impl_;if(p.shellcode_mode==enabled)return;
+    p.shellcode_mode=enabled;
+    if(!enabled) {
+        if(p.received_draft) {
+            ++p.f(F::fast_text).text_history_revision;
+            p.f(F::fast_text).text=received_text(p.f(F::fast_text).text);
+            ++p.f(F::fast_text).text_cursor_end_revision;p.estimate_key.clear();
+        }
+        for(auto& request:p.services)if(request.kind==ui::ServiceKind::clipboard)
+            request.value=received_text(request.value);
+    }
+    p.refresh_history();++p.revision;p.refresh();
+}
 void Controller::close() {auto& p=*impl_;if(p.closing)return;p.closing=true;p.pending_start=C::none;p.session.close();p.pending.clear();p.services.clear();p.refresh();}
 bool Controller::ready_to_close() const {return impl_->closing&&!impl_->key_loading&&impl_->session.ready_to_close();}
 bool Controller::active() const {return impl_->session.active()||impl_->pending_start!=C::none;}
 void Controller::edit(F field,std::string text) {
     auto& p=*impl_;if(!owns(field)||!p.f(field).enabled||!p.f(field).visible)return;
     if(field==F::fast_text) {
+        if(text.empty()&&p.received_draft) {
+            ++p.f(F::fast_text).text_history_revision;p.received_draft=false;
+        }
+        // Native undo and delayed editor callbacks can restore an older RX
+        // draft after the exception is disabled. Keep its provenance until a
+        // deliberate clear starts a fresh, locally entered message.
+        if(p.received_draft)text=received_text(text,p.shellcode_mode);
         const auto bytes=std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(text.data()),text.size());
         if(text.size()>fast::text_byte_limit||!valid_clipboard_text(bytes)) {report_error("Fast text requires valid UTF-8 without NUL, up to 32,768 bytes.");return;}
     }
@@ -544,11 +568,12 @@ void Controller::activate(C command) {
         case C::fast_use_text:p.f(F::fast_source).selected="text";p.estimate_key.clear();break;
         case C::fast_copy_signal: {
             const auto bytes=p.selected_signal()->bytes();
-            p.request(command,ui::ServiceKind::clipboard,"Copy received Fast text",std::string(bytes.begin(),bytes.end()));break;
+            p.request(command,ui::ServiceKind::clipboard,"Copy received Fast text",received_text(bytes,p.shellcode_mode));break;
         }
         case C::fast_paste_signal: {
             const auto bytes=p.selected_signal()->bytes();p.f(F::fast_source).selected="text";
-            p.f(F::fast_text).text=std::string(bytes.begin(),bytes.end());++p.f(F::fast_text).text_cursor_end_revision;p.estimate_key.clear();break;
+            p.f(F::fast_text).text=received_text(bytes,p.shellcode_mode);p.received_draft=true;
+            ++p.f(F::fast_text).text_cursor_end_revision;p.estimate_key.clear();break;
         }
         case C::fast_clear_received:
             // Consume a terminal update that arrived between UI polls before
@@ -556,7 +581,7 @@ void Controller::activate(C command) {
             p.observe_snapshot(p.session.poll());
             p.session.clear_received();p.snapshot.file.reset();p.history.clear();p.current_history.clear();p.f(F::fast_history).selected.clear();p.f(F::fast_files).selected.clear();
             p.refresh_history();p.f(F::fast_status).text="Received content cleared from memory.";break;
-        case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save received attachment",p.selected_file()->filename());break;
+        case C::fast_save:p.request(command,ui::ServiceKind::save_file,"Save received attachment",received_text(p.selected_file()->filename()));break;
         case C::fast_cancel:
             if(p.pending_start!=C::none)p.f(F::fast_status).text="Cancelled before audio was acquired.";
             p.pending_start=C::none;p.session.cancel();break;

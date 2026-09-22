@@ -5534,3 +5534,63 @@ was relaxed and no complete Rev workflow pass is claimed.
 Temporary test files use repository-local build directories because host `/tmp`
 is nearly full. These are Linux GUI checks; Windows rendering and physical
 audio links are not qualified by this change.
+
+### Restricted received text across all modems (2026-09-22)
+
+Robust, Fast and Legacy now share a bytewise received-text boundary. Only ASCII
+letters, digits and `,.@ -_/=` survive default presentation; each other byte
+becomes one underscore without Unicode decoding or escape expansion. This
+boundary covers native text, clipboard requests, received filenames, CLI
+terminals/pipes/JSON and received-to-transmit pastes. CLI JSON deliberately
+replaces `data_base64` with restricted `data_text`; explicit `rx --save PATH`
+continues to save the original bytes. Local transmit input and its QR code keep
+their existing character rules.
+
+Shellcode mode starts false and is visible only with Developer mode enabled in
+all three modems. Both permissions are required for printable ASCII
+`0x20`–`0x7e`; control and non-ASCII bytes remain placeholders. Withdrawing either
+permission filters received views, retained drafts and previous messages, clears
+their native undo/redo histories, and invalidates pending clipboard requests
+already handed to an adapter. Raw-bit pastes retain exact bits while their
+decoded previews obey the active policy. A deliberate clear permits a fresh
+local draft after discarding linked received editor histories.
+
+Tests cover every byte value, default and Shellcode presentation, filenames,
+copy/paste, raw-bit dictionary previews, revocation, stale editor callbacks,
+previous messages, retained drafts behind attachments, exact saves, and native
+Undo/Redo before the next application poll. Existing wire vectors, physical
+absence completion assertions, source-decoding quotas and pending-bit progress
+checks are unchanged.
+
+Both Release GUI applications and the CLI rebuilt through `build.sh`. The
+shared GUI group passes **33/33** with GCC/FLTK (125.24 seconds) and with
+Clang/Rev (154.09 seconds). A final attachment-draft adjustment was followed by
+fresh controller passes in both builds (83.85 and 94.38 seconds). Runtime tests
+pass, as do the regular CLI's **29 cases** (58.27 seconds) and Fast CLI's
+**24 cases** (31.26 seconds). The initial CLI test helper incorrectly requested
+`--save` on `simulate`; it now performs an explicit `rx --save` of the generated
+WAV and retains exact-byte assertions. An old Fast Unicode-filename expectation
+was updated to the new per-byte placeholder policy.
+
+The full compatibility group passes **30/30 across the main run and the CLI
+rerun**. Its unchanged `differential_receiver_probability` calibration completes
+in 1,187.36 seconds within the original 1,500-second timeout. No calibration,
+physical-end or independent wire assertion was weakened.
+
+On a private 2400×1800 Xvfb display at 96 DPI, final FLTK adapter/document tests
+pass **2/2** (68.86 seconds). Rev platform and both coordinate-scale checks pass.
+Its first adapter run fails the unchanged synthetic label-only document
+clipping/focus assertion; an unchanged-binary rerun passes in 95.34 seconds.
+No source or assertion was modified to make that rerun pass. The fixture can
+receive delayed layout events, but this run does not establish the failure's
+cause.
+
+The final production workflows run separately after the heavy builds and
+calibration finish. FLTK passes in **207.68 seconds**. Rev fails its previously
+documented phase 11 three-second replay-frame assertion (elapsed 2.952 seconds,
+9 frames, 8 changes, fraction 0.847458); no complete Rev workflow pass is claimed.
+The timing assertion is unchanged and was not relaxed for this feature.
+
+Reproduction logs are retained in the ignored `build/received-text-*.log` files.
+These are generated-audio and Linux GUI checks, not Windows rendering or
+physical speaker/microphone qualification.

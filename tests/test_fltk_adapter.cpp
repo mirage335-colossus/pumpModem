@@ -138,6 +138,61 @@ void editor_cursor_requests() {
     require(input->insert_position()==static_cast<int>(greeting.size()+1)&&input->mark()==input->insert_position()&&Fl::focus()==editor,
         "New single-line cursor request ignored unchanged text or changed focus");
 }
+void editor_history_requests() {
+    Fl_Double_Window window(600,200,"FLTK text history invalidation");
+    auto* editor=new NativeEditor;editor->resize(10,10,560,100);
+    auto* input=new NativeInput;input->resize(10,130,560,27);
+    window.end();window.show();Fl::check();editor->take_focus();
+    unsigned changes=0;editor->changed=[&](std::string){++changes;};
+    editor->apply("received (;\\&)");editor->buffer()->remove(0,editor->buffer()->length());
+    require(editor->buffer()->can_undo()&&buffer_text(*editor->buffer()).empty(),
+        "Multiline history fixture did not retain its native clear for Undo");
+    const auto before=changes;
+    editor->apply({},0,1);
+    require(!editor->buffer()->can_undo()&&!editor->buffer()->can_redo()&&!editor->buffer()->undo()&&
+        buffer_text(*editor->buffer()).empty()&&changes==before&&Fl::focus()==editor,
+        "Equal-value history invalidation retained multiline Undo or emitted an edit");
+    require(editor->paste("new local text"),"Multiline history fixture could not resume typing");
+    editor->apply("new local text",0,1);
+    require(editor->buffer()->can_undo()&&editor->buffer()->undo()&&editor->buffer()->can_redo(),
+        "Consumed history revision disabled future multiline Undo");
+    editor->apply({},0,2);
+    require(!editor->buffer()->can_redo()&&!editor->buffer()->redo()&&buffer_text(*editor->buffer()).empty(),
+        "Equal-value history invalidation retained multiline Redo");
+    editor->apply("local text");editor->insert_position(4);editor->buffer()->select(1,4);editor->apply("local text",0,3);
+    int start=0,end=0;editor->buffer()->selection_position(&start,&end);
+    require(editor->insert_position()==4&&start==1&&end==4&&Fl::focus()==editor,
+        "History invalidation changed multiline selection or focus");
+
+    input->apply("received (;\\&)");input->replace(0,input->size(),"");
+    require(input->can_undo()&&std::string(input->value()).empty(),"Single-line fixture did not retain its clear for Undo");
+    input->apply({},0,1);
+    require(!input->can_undo()&&!input->can_redo()&&!input->undo()&&std::string(input->value()).empty(),
+        "Equal-value history invalidation retained single-line Undo");
+    require(input->paste("new local text"),"Single-line history fixture could not resume typing");
+    input->apply("new local text",0,1);
+    require(input->can_undo()&&input->undo()&&input->can_redo(),"Consumed history revision disabled future single-line Undo");
+    input->apply({},0,2);
+    require(!input->can_redo()&&!input->redo()&&std::string(input->value()).empty(),
+        "Equal-value history invalidation retained single-line Redo");
+    input->apply("local text");input->insert_position(4,1);input->apply("local text",0,3);
+    require(input->insert_position()==4&&input->mark()==1&&Fl::focus()==editor,
+        "History invalidation changed single-line selection or focus");
+
+    // The next native input event must consume an invalidation even before a
+    // normal presentation poll. Do not mutate FLTK's undo stack reentrantly
+    // from a buffer modify callback while FLTK is still updating that stack.
+    editor->apply("old received command");editor->buffer()->remove(0,editor->buffer()->length());
+    editor->synchronize=[&] {editor->apply({},0,4);};
+    input->apply("old received command");input->replace(0,input->size(),"");
+    input->synchronize=[&] {input->apply({},0,4);};
+    const auto key=Fl::e_keysym,state=Fl::e_state,length=Fl::e_length;auto* text=Fl::e_text;
+    char undo_text[]{'z'&31,0};Fl::e_keysym='z';Fl::e_state=FL_CTRL;Fl::e_length=1;Fl::e_text=undo_text;
+    editor->handle(FL_KEYDOWN);input->handle(FL_KEYDOWN);
+    Fl::e_keysym=key;Fl::e_state=state;Fl::e_length=length;Fl::e_text=text;
+    require(buffer_text(*editor->buffer()).empty()&&std::string(input->value()).empty()&&
+        !editor->buffer()->can_undo()&&!input->can_undo(),"Immediate native Undo bypassed an unpolled history invalidation");
+}
 void editors_and_records() {
     Fl_Double_Window window(600,450,"FLTK generic adapter regression");
     auto* editor=new NativeEditor;editor->resize(10,10,560,100);
@@ -530,8 +585,12 @@ void developer_mode_visibility() {
     Launch launch;launch.simulation=true;NativeApp app(launch);Fl::check();
     auto* window=Fl::first_window();require(window,"Developer mode fixture has no native window");
     auto* toggle=dynamic_cast<NativeCheckbox*>(find_button(*window,"Developer mode"));
+    auto* shellcode=dynamic_cast<NativeCheckbox*>(find_button(*window,"Shellcode mode"));
     auto* clear=find_button(*window,"Clear received");
     require(toggle&&clear&&toggle->visible_r()&&!toggle->value(),"Developer mode did not start as an unchecked native toggle");
+    require(shellcode&&!shellcode->visible_r()&&!shellcode->value()&&
+        !app.application.field(ui::Field::shellcode_mode).checked,
+        "Shellcode mode did not start hidden and unchecked");
     const auto refresh=[] {
         const auto until=Clock::now()+std::chrono::milliseconds(130);
         while(Clock::now()<until)Fl::wait(.005);
@@ -540,8 +599,9 @@ void developer_mode_visibility() {
     const auto set_mode=[&](bool checked) {toggle->value(checked);toggle->do_callback();refresh();};
     for(const auto& size:{std::pair{ui::default_width,ui::default_height},std::pair{ui::min_width,ui::min_height}}) {
         window->size(size.first,size.second);refresh();
-        require(toggle->x()+toggle->w()<clear->x()&&toggle->y()==clear->y(),
-            "Developer mode is not immediately left of Clear received");
+        require(toggle->x()+toggle->w()<=shellcode->x()&&shellcode->x()+shellcode->w()<clear->x()&&
+            toggle->y()==shellcode->y()&&shellcode->y()==clear->y(),
+            "Developer and Shellcode modes are not adjacent before Clear received");
         std::vector<std::pair<Fl_Widget*,ui::Rect>> preserved;
         std::vector<NativeControlGroup*> advanced;
         const std::function<void(Fl_Group&)> collect=[&](Fl_Group& group) {
@@ -577,6 +637,14 @@ void developer_mode_visibility() {
                 set_mode(checked);
                 require(app.application.field(ui::Field::developer_mode).checked==checked&&toggle->visible_r(),
                     "Native developer mode callback failed or hid its own toggle");
+                require(static_cast<bool>(shellcode->visible_r())==checked&&
+                    (checked||(!shellcode->value()&&!app.application.field(ui::Field::shellcode_mode).checked)),
+                    "Developer mode did not show Shellcode or reset and hide its exception");
+                if(checked) {
+                    shellcode->value(true);shellcode->do_callback();refresh();
+                    require(shellcode->value()&&app.application.field(ui::Field::shellcode_mode).checked,
+                        "Native Shellcode callback did not enable printable ASCII mode");
+                }
                 for(auto* control:advanced)require(static_cast<bool>(control->visible_r())==checked,
                     "Developer mode did not hide/show an entire advanced control in place");
                 for(const auto& definition:ui::pages()) {
@@ -609,6 +677,19 @@ void developer_mode_visibility() {
             require(app.application.page()==ui::Page::console&&find_button(*window,"Console")->value()&&
                 !button->value()&&!button->visible_r(),"Hiding the selected advanced tab did not display Console");
         }
+        app.application.select(ui::Field::fast_mode,"legacy");refresh();
+        require(toggle->visible_r()&&!toggle->value()&&!shellcode->visible_r()&&!shellcode->value(),
+            "Legacy did not expose Developer mode with Shellcode hidden and unchecked");
+        set_mode(true);
+        require(toggle->visible_r()&&shellcode->visible_r(),"Legacy hid the enabled Developer or Shellcode toggle");
+        shellcode->value(true);shellcode->do_callback();refresh();
+        require(app.application.field(ui::Field::shellcode_mode).checked&&shellcode->value(),
+            "Legacy native Shellcode callback did not enable the exception");
+        set_mode(false);
+        require(toggle->visible_r()&&!shellcode->visible_r()&&!shellcode->value()&&
+            !app.application.field(ui::Field::shellcode_mode).checked,
+            "Legacy Developer callback failed to hide and reset Shellcode");
+        app.application.select(ui::Field::fast_mode,"robust");refresh();
     }
     app.application.close();while(!app.application.finished())Fl::wait(.005);
 }
@@ -1462,6 +1543,6 @@ void clipboard() {
 }
 }
 int main() {
-    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
+    try {theme::apply_palette();palette_roles();estimate_warning_colors();menus();generic_gestures_and_bitmaps();editor_cursor_requests();editor_history_requests();editors_and_records();clipboard();clipboard_shortcuts();prompts();fast_mode_visibility();developer_mode_visibility();tab_clicks();repeatable_clicks();expanded_bitmap_clicks();expanded_bitmap_hover_repaint();shared_overlay_controls();extension_controls();inline_document_editor();layout_lifecycle();policy_lifecycle();popup_polling_and_document_layout();compression_page_labels();std::cout<<"FLTK generic adapter checks passed: menus, tab clicks, repeatable clicks, expanded bitmaps, atomic UTF-8 edits, records, native clipboard, modal prompts, popup polling, document margins, compression labels and shared extensions.\n";return 0;}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

@@ -174,7 +174,14 @@ changed immutable document; neither independently derives document structure or
 geometry. Native ownership, focus calls and measurements remain adapter code.
 
 The application polls reception and captures plot history at 25 Hz while native
-state/plot presentation runs at 10 Hz. Native input can repaint immediately.
+state/plot presentation runs at 10 Hz. Native input can repaint immediately. Received-text policy is applied in the shared
+controllers before field, record and service presentation. A shared
+`text_history_revision` invalidates native undo/redo when received draft
+provenance is cleared or its printable-ASCII exception is withdrawn. FLTK also
+consumes pending editor state before input events, so Undo cannot race the next
+presentation poll; Rev currently has no undo history. Clipboard requests carry a
+revocable lifetime token which the shared service queue checks before native
+dispatch.
 Pointer double-click timing, wheel command repetition and record keyboard
 selection/activation use shared policy. Adapters translate keys and pointer
 coordinates, then focus the returned native row and apply the shared reveal

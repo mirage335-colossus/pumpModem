@@ -163,6 +163,7 @@ struct Editor : theme::RevText {
     int displayed_cursor=-1;
     float viewport_width=-1,viewport_height=-1;
     std::uint64_t cursor_end_revision=0;
+    std::uint64_t history_revision=0;
     RevPlatform& platform;
     std::function<void(std::string)> changed;
     std::function<void()> submit;
@@ -226,7 +227,10 @@ struct Editor : theme::RevText {
         const auto& value=content.get();cursor=boundary(value,cursor);
         selectAnchor=boundary(value,selectAnchor);selectEnd=boundary(value,selectEnd);
     }
-    void apply(const std::string& value,std::uint64_t revision=0) {
+    void apply(const std::string& value,std::uint64_t revision=0,std::uint64_t reset_history_revision=0) {
+        // This editor keeps no undo/redo history. Consume the shared request
+        // explicitly so future history support has the same invalidation point.
+        if(reset_history_revision&&reset_history_revision!=history_revision)history_revision=reset_history_revision;
         if(content.get()!=value){content=value;clamp_positions();reveal_caret=true;}
         if(revision&&revision!=cursor_end_revision) {
             cursor_end_revision=revision;resetVerticalCursor();
@@ -1227,7 +1231,7 @@ public:
             }
             if(b.editor){b.editor->limit=b.control.byte_limit;b.editor->read_only=b.control.read_only;
                 b.editor->scroll_content=b.control.multiline&&(b.control.document_only||b.control.read_only||b.control.follow_tail);
-                b.editor->apply(value.text,value.text_cursor_end_revision);b.editor->editable=view.enabled&&!b.control.read_only;b.editor->setDisabled(!view.enabled);}
+                b.editor->apply(value.text,value.text_cursor_end_revision,value.text_history_revision);b.editor->editable=view.enabled&&!b.control.read_only;b.editor->setDisabled(!view.enabled);}
             if(b.presentation.update_options(view.options)) {
                 for(auto* menu:{b.choice,b.suggestions,b.menu})if(menu) {
                     menu->params.options.clear();

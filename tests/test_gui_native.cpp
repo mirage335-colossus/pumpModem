@@ -1,4 +1,6 @@
 #include "../src/gui/state.hpp"
+#include "../src/gui/record_presentations.hpp"
+#include "datapump/live.hpp"
 #include <iostream>
 #include <limits>
 #include <source_location>
@@ -62,9 +64,77 @@ void retained_raw_bits() {
     binary.text=std::string(4097,'0');binary.received_bits=4097;unavailable(binary);
     check(signals.lines()[0].text.size()==4096);
 }
+void received_text_boundary() {
+    const std::string allowed="aZ09,.@ -_/=";
+    const std::string punctuation="();\\&";
+    const std::string forbidden="\n\t\r\x1b\x7f\xc3\xa9";
+    const std::string original=allowed+punctuation+forbidden;
+    const std::string restricted=allowed+std::string(12,'_');
+    const std::string shellcode=allowed+punctuation+std::string(7,'_');
+    gui::SignalLine line;
+    line.text=original;line.complete=true;line.pattern_score=25.;
+    gui::Signals signals;
+    signals.update(line);
+    check(gui::signal_display_text(signals.lines()[0])==restricted);
+    check(signals.copy_text(0)==restricted);
+    check(gui::signal_records(signals)[0].cells.back().text==restricted);
+    check(gui::signal_display_text(signals.lines()[0],true)==shellcode);
+    check(signals.copy_text(0,true)==shellcode);
+    check(gui::signal_records(signals,true)[0].cells.back().text==shellcode);
+    // Changing the presentation never transforms the saveable original bytes.
+    check(signals.copy_bytes(0)==Bytes(original.begin(),original.end()));
+    check(gui::signal_display_text(signals.lines()[0],false)==restricted);
+
+    // Byte-aligned raw input follows exactly the same presentation boundary;
+    // the diagnostic/raw-bit operation remains lossless.
+    std::string bits;
+    for(const unsigned char byte:original)
+        for(unsigned bit=8;bit;--bit)bits+=(byte>>(bit-1))&1?'1':'0';
+    line.binary=true;line.text=bits;line.received_bits=bits.size();
+    signals.clear();signals.update(line);
+    check(gui::signal_display_text(signals.lines()[0])==restricted);
+    check(signals.copy_text(0)==restricted && signals.copy_text(0,true)==shellcode);
+    check(signals.copy_raw_bits(0)==bits);
+    check(signals.copy_bytes(0)==Bytes(original.begin(),original.end()));
+
+    // Validated interval text has the same boundary as dictionary/raw text.
+    line.binary=false;line.validated=true;line.text=original;line.reception_id="verified-id";
+    signals.clear();signals.update(line);
+    check(gui::signal_display_text(signals.lines()[0])==restricted);
+    check(gui::signal_display_text(signals.lines()[0],true)==shellcode);
+    check(gui::signal_records(signals)[0].cells.back().text==restricted);
+
+    // A transport diagnostic may already contain a restricted preview. The
+    // shared receiver cache must preserve the original printable ASCII for
+    // an explicitly enabled Shellcode view without recovering escaped text.
+    auto decoded=content(2,original.size());
+    decoded.message.data.assign(original.begin(),original.end());
+    live::Snapshot snapshot;
+    live::SignalUpdate update;
+    update.id=42;update.text=restricted;update.validated=true;update.complete=true;
+    update.reception_id=gui::id_label(decoded.message);
+    snapshot.signals.push_back(update);
+    transfer::Received result;
+    result.content=decoded;result.stream_complete=true;result.content_validated=true;
+    snapshot.received.push_back(std::move(result));
+    gui::Inbox text_inbox;
+    signals.clear();gui::apply_receptions(text_inbox,signals,snapshot);
+    check(gui::signal_display_text(signals.lines()[0])==restricted);
+    check(gui::signal_display_text(signals.lines()[0],true)==shellcode);
+    check(text_inbox.items()[0].message.data==decoded.message.data);
+
+    gui::Inbox inbox;
+    auto file=content(1,3);
+    file.message.kind=MessageKind::file;file.message.filename="name();&\xc3\xa9.bin";
+    inbox.put(file);
+    check(gui::file_records(inbox)[0].cells[0].text=="name______.bin (3 B)");
+    check(inbox.items()[0].message.filename==file.message.filename);
+    check(inbox.items()[0].message.data==file.message.data);
+}
 int main() {
     try {
         retained_raw_bits();
+        received_text_boundary();
         check(gui::parse_binary_bits("0")==Bytes({0}));
         check(gui::parse_binary_bits("000101")==Bytes({0,0,0,1,0,1}));
         check(gui::parse_binary_bits("\t00 01\r\n0\f1\v")==Bytes({0,0,0,1,0,1}));
@@ -204,9 +274,7 @@ int main() {
         check(signals.lines()[2].complete && signals.lines()[2].text.size()==4096 && !signals.copy_bits(2));
         check(gui::signal_data_label(signals.lines()[2])=="Raw observations / prefix");
         check(gui::signal_byte_aligned(signals.lines()[2]) && gui::signal_status_label(signals.lines()[2])=="text received");
-        std::string escaped_prefix;
-        for(std::size_t index=0;index<512;++index)escaped_prefix+="\\x00";
-        check(gui::signal_display_text(signals.lines()[2])==escaped_prefix);
+        check(gui::signal_display_text(signals.lines()[2])==std::string(512,'_'));
         check(!signals.copy_text(2) && !signals.copy_bytes(2));
         check(!signals.copy_bits(3) && !signals.copy_text(3) && !signals.copy_bytes(3));
 
@@ -229,12 +297,14 @@ int main() {
         byte_line.id=101; byte_line.text="1100001110101001"; byte_line.received_bits=16; byte_line.expected_bits=0;
         byte_line.pattern_score=25.;
         byte_signals.update(byte_line);
-        check(gui::signal_display_text(byte_signals.lines()[1])=="\xc3\xa9" && byte_signals.copy_text(1)=="\xc3\xa9");
+        check(gui::signal_display_text(byte_signals.lines()[1])=="__" && byte_signals.copy_text(1)=="__");
+        check(gui::signal_display_text(byte_signals.lines()[1],true)=="__" && byte_signals.copy_text(1,true)=="__");
         check(byte_signals.copy_bytes(1)==Bytes({0xc3,0xa9}) && !byte_signals.copy_bits(1));
 
         byte_line.id=102; byte_line.text="000000001111111101011100"; byte_line.received_bits=byte_line.expected_bits=24;
         byte_signals.update(byte_line);
-        check(gui::signal_display_text(byte_signals.lines()[2])=="\\x00\\xFF\\\\" && byte_signals.copy_text(2)=="\\x00\\xFF\\\\");
+        check(gui::signal_display_text(byte_signals.lines()[2])=="___" && byte_signals.copy_text(2)=="___");
+        check(gui::signal_display_text(byte_signals.lines()[2],true)=="__\\" && byte_signals.copy_text(2,true)=="__\\");
         check(byte_signals.copy_bytes(2)==Bytes({0,0xff,'\\'}) && !byte_signals.copy_bits(2));
 
         byte_line.id=103; byte_line.text="01001000"; byte_line.received_bits=8; byte_line.expected_bits=16;
@@ -258,7 +328,7 @@ int main() {
         mixed.put(screenshot);
         const auto files=mixed.file_items();
         check(files.size()==2 && files[0]->message.local_id[0]==2 && files[1]->message.local_id[0]==4);
-        check(mixed.items().size()==4); // Verified text remains available for exact clipboard copy.
+        check(mixed.items().size()==4); // Originals remain in bounded memory independently of safe text presentation.
         gui::TransmissionPolicy policy;
         const auto time=gui::TransmissionPolicy::Clock::time_point{};
         policy.started(false,false,time);

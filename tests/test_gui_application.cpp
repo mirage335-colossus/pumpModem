@@ -67,6 +67,25 @@ void developer_mode_presentation() {
     check(toggle.kind==ui::Kind::toggle&&toggle.persistent&&app.control(toggle).visible&&
           app.control(toggle).enabled&&!app.field(F::developer_mode).checked,
           "Developer mode must start unchecked and remain available in the persistent header");
+    const auto& shell=control(F::shellcode_mode);
+    check(!app.field(F::shellcode_mode).checked&&!app.control(shell).visible,
+          "Shellcode exception must start false and hidden");
+    app.toggle(F::shellcode_mode,true);
+    check(!app.field(F::shellcode_mode).checked,"Hidden Shellcode field accepted a stale direct callback");
+    for(const auto* modem:{"legacy","fast","robust"}) {
+        app.select(F::fast_mode,modem);
+        check(app.control(toggle).visible,"Every modem needs the developer toggle");
+        app.toggle(toggle,true);
+        check(app.control(shell).visible&&!app.field(F::shellcode_mode).checked,
+              "Developer mode silently enabled Shellcode mode");
+        app.toggle(shell,true);
+        check(app.field(F::shellcode_mode).checked,"Visible Shellcode mode could not be enabled");
+        app.toggle(toggle,false);
+        check(!app.control(shell).visible&&!app.field(F::shellcode_mode).checked,
+              "Leaving Developer mode failed to revoke Shellcode mode");
+        app.toggle(shell,true);
+        check(!app.field(F::shellcode_mode).checked,"Stale Shellcode declaration bypassed visibility");
+    }
     constexpr std::array advanced_fields{F::pattern,F::fec,F::dsp_workspace,F::receive_snr,
         F::profile_reference,F::callsign,F::grid,F::repeatable};
     for(const auto field:advanced_fields)
@@ -87,8 +106,10 @@ void developer_mode_presentation() {
                   "Default navigation must show only Console and Link planner");
         const auto checkbox=app.control_layout(toggle,size.w,size.h).frame;
         const auto clear=ui::DesktopLayout(size.w,size.h)[ui::Slot::clear];
-        check(checkbox.x+checkbox.w<clear.x&&checkbox.y==clear.y&&checkbox.h==clear.h,
-              "Developer mode is not immediately beside the left of Clear received");
+        const auto shellbox=app.control_layout(shell,size.w,size.h).frame;
+        check(checkbox.x+checkbox.w<=shellbox.x&&shellbox.x+shellbox.w<clear.x&&
+              checkbox.y==clear.y&&shellbox.y==clear.y&&checkbox.h==clear.h,
+              "Developer and Shellcode mode must fit beside Clear received");
         app.toggle(toggle,true);
         for(std::size_t i=0;i<ui::console_screen().size();++i)
             check(app.control_layout(ui::console_screen()[i],size.w,size.h)==hidden[i],
@@ -332,7 +353,7 @@ void records() {
     signals.update(pending);
     auto rows=signal_records(signals);
     check(rows.size()==1&&rows[0].id=="81"&&rows[0].cells.size()==5,"Structured signal row lost identity or a field");
-    check(rows[0].cells[0].text=="1500 Hz"&&rows[0].cells[4].text==pending.text,"Frequency or literal UTF-8 message was lost");
+    check(rows[0].cells[0].text=="1500 Hz"&&rows[0].cells[4].text=="pending __","Frequency or restricted received preview was lost");
     check(!rows[0].activatable&&rows[0].cells[4].tone==ui::TextTone::muted,"Pending prefix became copyable or appeared complete");
     pending.validated=true;pending.reception_id="verified";pending.preamble_received_percent=97.5;
     pending.pre_fec_accuracy=StreamBitAccuracy{100,98};signals.update(pending);
@@ -393,19 +414,19 @@ void records() {
           "Received text did not retain exact bytes for pasting into the message editor");
     bytes.id=85;bytes.text="1100001110101001";bytes.received_bits=16;bytes.expected_bits=0;bytes.pattern_score=24.5;
     signals.update(bytes);rows=signal_records(signals);
-    check(rows.back().activatable&&rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="\xc3\xa9",
-          "Byte-aligned UTF-8 was left as raw bits");
+    check(rows.back().activatable&&rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="__",
+          "Byte-aligned UTF-8 was not replaced per byte");
     bytes.id=86;bytes.text="000000001111111101011100";bytes.received_bits=bytes.expected_bits=24;
     signals.update(bytes);rows=signal_records(signals);
-    check(rows.back().activatable&&rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="\\x00\\xFF\\\\",
-          "Nontext bytes and backslashes did not use the message editor's lossless escaped representation");
+    check(rows.back().activatable&&rows.back().cells[1].text=="text received"&&rows.back().cells[4].text=="___",
+          "Nontext bytes and backslashes escaped the receive character policy");
     bytes.id=87;bytes.text="01001000";bytes.received_bits=8;bytes.expected_bits=16;
     signals.update(bytes);
     check(!signal_records(signals).back().activatable,"Mismatched binary length became selectable as a complete message");
     bytes.id=88;bytes.text=std::string(5000,'0');bytes.received_bits=bytes.expected_bits=5000;bytes.pattern_score.reset();
     signals.update(bytes);rows=signal_records(signals);
     check(!rows.back().activatable&&rows.back().cells[1].text=="text received"&&
-          rows.back().cells[3].text=="Raw observations / prefix"&&rows.back().cells[4].text.starts_with("\\x00\\x00"),
+          rows.back().cells[3].text=="Raw observations / prefix"&&rows.back().cells[4].text.starts_with("__"),
           "A truncated aligned result must show a text prefix without offering incomplete clipboard data");
     check(control(ui::Field::signals).follow_tail&&control(ui::Field::signals).activate_on_select,"Signal interaction policy is missing from the declaration");
 }

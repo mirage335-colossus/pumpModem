@@ -143,8 +143,23 @@ void bounded_dictionary_selection() {
     rejects_unchanged(editor,[&]{editor.edit_binary(std::string(129,'0'));},"Console prefix editing exceeded its own 128-bit bound");
 }
 
+void received_binary_edits() {
+    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=";
+    for(bool shellcode:{false,true})for(unsigned first=0;first<256;first+=16) {
+        std::string bits,expected;
+        Bytes raw;
+        for(unsigned value=first;value<first+16;++value) {
+            expected+=((shellcode?value>=32&&value<=126:allowed.find(static_cast<char>(value))!=allowed.npos)?static_cast<char>(value):'_');
+            for(unsigned n=8;n;--n) {bits+=(value>>(n-1))&1?'1':'0';raw.push_back((value>>(n-1))&1);}
+        }
+        BinaryEditor editor;editor.edit_binary(bits,shellcode);
+        check(editor.text()==expected&&editor.bytes()==bytes(expected)&&!editor.escaped()&&editor.raw_bits()==raw,
+              "Received binary editing must preserve exact bits with only a filtered ASCII text view");
+    }
+}
 int main() {
     try {
+        received_binary_edits();
         synchronized_prefix();
         preserved_suffix();
         escaped_roundtrip();

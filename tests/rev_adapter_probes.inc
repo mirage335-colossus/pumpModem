@@ -156,15 +156,21 @@
         auto toggle_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
             return binding.control.field==ui::Field::developer_mode;
         });
+        auto shellcode_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
+            return binding.control.field==ui::Field::shellcode_mode;
+        });
         auto clear_binding=std::find_if(bindings.begin(),bindings.end(),[](const auto& binding) {
             return binding.control.command==ui::Command::clear_received;
         });
-        require(toggle_binding!=bindings.end()&&toggle_binding->toggle&&clear_binding!=bindings.end(),
-            "Rev developer mode fixture lacks its toggle or Clear received button");
+        require(toggle_binding!=bindings.end()&&toggle_binding->toggle&&shellcode_binding!=bindings.end()&&
+            shellcode_binding->toggle&&clear_binding!=bindings.end(),
+            "Rev developer mode fixture lacks its toggles or Clear received button");
         auto* toggle=toggle_binding->toggle;
+        auto* shellcode=shellcode_binding->toggle;
         require(!toggle->value&&allows_input(toggle),"Rev developer mode did not start unchecked and available");
-        require(toggle->rect.x+toggle->rect.w<clear_binding->element->rect.x&&toggle->rect.y==clear_binding->element->rect.y,
-            "Rev developer mode is not immediately left of Clear received");
+        require(!shellcode->value&&shellcode_binding->element->resolved.hidden&&!allows_input(shellcode)&&
+            !application.field(ui::Field::shellcode_mode).checked,
+            "Rev Shellcode mode did not start hidden and unchecked");
         const auto frame=[](const re::Element* element) {
             return std::array<float,4>{element->rect.x,element->rect.y,element->rect.w,element->rect.h};
         };
@@ -221,6 +227,18 @@
             set_mode(checked);shared_geometry();
             require(application.field(ui::Field::developer_mode).checked==checked&&allows_input(toggle),
                 "Rev developer mode callback failed or hid its own toggle");
+            require(shellcode_binding->element->resolved.hidden==!checked&&
+                (checked||(!shellcode->value&&!application.field(ui::Field::shellcode_mode).checked)),
+                "Rev Developer mode did not show Shellcode or reset and hide its exception");
+            if(checked) {
+                require(allows_input(shellcode)&&toggle->rect.x+toggle->rect.w<=shellcode->rect.x&&
+                    shellcode->rect.x+shellcode->rect.w<clear_binding->element->rect.x&&
+                    toggle->rect.y==shellcode->rect.y&&shellcode->rect.y==clear_binding->element->rect.y,
+                    "Rev Developer and Shellcode toggles are not available next to each other");
+                if(!shellcode->value) {re::Event click;shellcode->checkbox->click(click);settle();}
+                require(shellcode->value&&application.field(ui::Field::shellcode_mode).checked,
+                    "Rev native Shellcode callback did not enable printable ASCII mode");
+            }
             for(const auto& binding:bindings)if(binding.control.developer_only&&binding.control.persistent)
                 require(binding.element->resolved.hidden==!checked,
                     "Rev developer mode did not hide/show an entire advanced control in place");
@@ -250,6 +268,19 @@
                 !tabs.at(definition.id)->targetFlags.focus,
                 "Rev hiding the selected advanced tab did not display Console and clear hidden focus");
         }
+        re::Event mode_change;selector->params.value="legacy";selector->onChange(mode_change);settle();
+        require(allows_input(toggle)&&!toggle->value&&shellcode_binding->element->resolved.hidden&&!shellcode->value,
+            "Rev Legacy did not expose Developer with Shellcode hidden and unchecked");
+        set_mode(true);
+        require(allows_input(toggle)&&allows_input(shellcode),"Rev Legacy hid an enabled Developer or Shellcode toggle");
+        re::Event shellcode_click;shellcode->checkbox->click(shellcode_click);settle();
+        require(shellcode->value&&application.field(ui::Field::shellcode_mode).checked,
+            "Rev Legacy Shellcode callback did not enable the exception");
+        set_mode(false);
+        require(allows_input(toggle)&&shellcode_binding->element->resolved.hidden&&!shellcode->value&&
+            !application.field(ui::Field::shellcode_mode).checked,
+            "Rev Legacy Developer callback failed to hide and reset Shellcode");
+        selector->params.value="robust";selector->onChange(mode_change);settle();
         select_page(ui::Page::compression);settle();
         require(application.page()==ui::Page::console&&displayed_page==ui::Page::console,
             "Rev displayed a requested page rejected by the shared application");

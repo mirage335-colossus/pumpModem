@@ -14,7 +14,8 @@ const std::vector<Control>& screen() {
         placed(Kind::choice,Field::legacy_profile,"Modulation",Slot::legacy_profile),
         [] {auto c=placed(Kind::text,Field::legacy_carrier,"Carrier (Hz)",Slot::legacy_carrier);c.byte_limit=32;return c;}(),
         [] {auto c=placed(Kind::text,Field::legacy_transcript,"Received and transmitted text",Slot::legacy_transcript);
-            c.multiline=true;c.read_only=true;c.font_size=16;c.byte_limit=65536;return c;}(),
+            c.multiline=true;c.read_only=true;c.font_size=16;c.byte_limit=65536;
+            c.help="Received bytes outside the restricted ASCII set appear as underscores. Developer Shellcode mode permits printable ASCII only. Locally transmitted text is unchanged.";return c;}(),
         [] {auto c=placed(Kind::text,Field::legacy_text,"Text to transmit",Slot::legacy_text);
             c.multiline=true;c.tab_navigation=true;c.follow_tail=true;c.font_size=16;c.byte_limit=32768;
             c.submit=Command::legacy_transmit;

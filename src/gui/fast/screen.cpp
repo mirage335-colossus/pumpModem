@@ -58,7 +58,9 @@ const std::vector<Control>& screen() {
         placed(Kind::label,Field::fast_correction,Command::none,"",Slot::fast_correction),
         placed(Kind::label,Field::fast_auth,Command::none,"",Slot::fast_auth),
         [] {auto c=placed(Kind::label,Field::fast_detail,Command::none,"",Slot::fast_detail);c.font_size=12;return c;}(),
-        [] {auto c=placed(Kind::list,Field::fast_history,Command::none,"Signals",Slot::fast_history);c.list_row_height=54;c.follow_tail=true;c.activate_record=Command::fast_copy_signal;c.activate_on_select=true;c.empty_text="Listening for signals…";return c;}(),
+        [] {auto c=placed(Kind::list,Field::fast_history,Command::none,"Signals",Slot::fast_history);
+            c.help="Received bytes outside the restricted ASCII set appear as underscores, including Copy and Paste as message. Developer Shellcode mode permits printable ASCII text only.";
+            c.list_row_height=54;c.follow_tail=true;c.activate_record=Command::fast_copy_signal;c.activate_on_select=true;c.empty_text="Listening for signals…";return c;}(),
         [] {auto c=placed(Kind::list,Field::fast_files,Command::none,"Files in memory",Slot::fast_files);c.list_row_height=36;c.activate_record=Command::fast_save;c.empty_text="No received files";return c;}(),
         placed(Kind::action,Field::count,Command::fast_copy_signal,"Copy selected",Slot::fast_copy_signal),
         placed(Kind::action,Field::count,Command::fast_paste_signal,"Paste as message",Slot::fast_paste_signal),

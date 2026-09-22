@@ -2,6 +2,7 @@
 #include "desktop_layout.hpp"
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -17,7 +18,7 @@ enum class Field {
     diagnostics, inspection, flow_detail, transmission_detail, payload_alphabet,
     reference_alphabet, waveform_zoom, short_bits, short_bits_detail, received_raw_bits,
     compression_codes, transmit_scope, transmit_scope_caption, transmit_scope_format, profile_reference,
-    developer_mode, fast_mode, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth,
+    developer_mode, shellcode_mode, fast_mode, fast_profile, fast_expected_snr, fast_symbol_rate, fast_constellation, fast_coding, fast_fec, fast_depth,
     fast_device, fast_mono, fast_encryption, fast_key, fast_key_path, fast_source, fast_text, fast_file, fast_status,
     fast_progress, fast_rate, fast_tracking, fast_correction, fast_auth, fast_detail, fast_history, fast_airtime, fast_diagnostics, fast_snr, fast_qr_brightness, fast_files,
     legacy_profile, legacy_carrier, legacy_squelch, legacy_transcript, legacy_text, legacy_status, legacy_mono, count
@@ -142,6 +143,9 @@ struct FieldState {
     // Increment for an explicit request to collapse selection at the text end.
     // Zero requests nothing; each native editor consumes a revision only once.
     std::uint64_t text_cursor_end_revision = 0;
+    // Increment to discard native undo/redo history, even when text is equal.
+    // Zero requests nothing; consuming a revision preserves caret and selection.
+    std::uint64_t text_history_revision = 0;
     TextTone text_tone = TextTone::normal;
 };
 enum class ServiceKind { open_file, save_file, prompt, clipboard, open_folder };
@@ -154,6 +158,9 @@ struct ServiceRequest {
     // Native file selectors can return OS paths containing line breaks; text
     // prompts are single-line editors. Both return bounded UTF-8 without NUL.
     std::size_t byte_limit = 32768;
+    // Shared lifetime token for revocable output requests. The native queue
+    // checks it immediately before dispatch; it contains no source bytes.
+    std::shared_ptr<const bool> valid;
 };
 struct ServiceResult {
     std::uint64_t id = 0;

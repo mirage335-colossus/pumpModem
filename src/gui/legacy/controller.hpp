@@ -9,6 +9,7 @@ public:
     explicit Controller(std::function<bool()> acquire_audio);
     ~Controller();
     void selected(bool);
+    void set_shellcode_mode(bool enabled);
     void poll();
     void close();
     bool ready_to_close() const;

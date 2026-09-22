@@ -94,8 +94,42 @@ void progress_and_bounded_text() {
     presentation.submitted("abc",9);snapshot.transmission=9;draft.text="replacement";presentation.edited(draft.text);snapshot.sent_bytes=3;
     presentation.update(snapshot,transcript,draft);check(draft.text=="replacement","TX completion erased a replacement draft");
     snapshot.events={{8,false,std::string("\xe2",1)}};presentation.update(snapshot,transcript,draft);
+    check(transcript.text.ends_with('_'),"A received non-ASCII byte was withheld for UTF-8 decoding");
     snapshot.events={{9,true,"CQ"}};presentation.update(snapshot,transcript,draft);
-    check(transcript.text.ends_with("\xEF\xBF\xBD" "CQ"),"Malformed received UTF-8 swallowed later valid transmitted text");
+    check(transcript.text.ends_with("_CQ"),"Received bytes entered TX UTF-8 processing");
+}
+void received_character_boundary() {
+    legacy_ui::TextPresentation presentation;ui::FieldState transcript,draft;legacy::Snapshot snapshot;
+    const std::string allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=";
+    std::string restricted,shellcode;
+    for(unsigned byte=0;byte<256;++byte) {
+        const auto character=static_cast<char>(byte);
+        restricted+=allowed.find(character)!=std::string::npos?character:'_';
+        shellcode+=byte>=0x20&&byte<=0x7e?character:'_';
+        snapshot.events={{byte+1,false,std::string(1,character)}};
+        check(presentation.update(snapshot,transcript,draft)&&transcript.text==restricted,
+            "Legacy received byte escaped the restricted ASCII set or waited for another byte");
+    }
+    check(presentation.set_shellcode_mode(true,transcript)&&transcript.text==shellcode,
+        "Legacy shellcode view did not restrict retained bytes to printable ASCII");
+    const std::string transmitted="local (;\\&) café\n";
+    snapshot.events={{257,true,transmitted}};presentation.update(snapshot,transcript,draft);
+    check(transcript.text==shellcode+transmitted,"RX restriction changed local transmitted echo");
+    check(presentation.set_shellcode_mode(false,transcript)&&transcript.text==restricted+transmitted,
+        "Disabling Legacy shellcode failed to withdraw received punctuation or changed TX echo");
+    presentation.set_shellcode_mode(true,transcript);
+    snapshot.events={{258,false,std::string(";\n\xc3\xa9",4)}};presentation.update(snapshot,transcript,draft);
+    check(transcript.text==shellcode+transmitted+";___","Shellcode admitted a received control or Unicode byte");
+    presentation.set_shellcode_mode(false,transcript);
+    check(transcript.text==restricted+transmitted+"____","New shellcode reception survived disabling the exception");
+    // Both retained views obey the same bound, including a UTF-8 TX boundary.
+    snapshot.events={{259,true,std::string("\xc3\xa9")+std::string(legacy_ui::TextPresentation::transcript_limit-1,'x')}};
+    presentation.update(snapshot,transcript,draft);
+    check(transcript.text==std::string(legacy_ui::TextPresentation::transcript_limit-1,'x'),
+        "Legacy retention split a trusted TX UTF-8 character");
+    presentation.set_shellcode_mode(true,transcript);
+    check(transcript.text==std::string(legacy_ui::TextPresentation::transcript_limit-1,'x'),
+        "Shellcode toggle resurrected expired received text");
 }
 void send_shortcut_and_cancel() {
     using F=ui::Field;using C=ui::Command;
@@ -160,6 +194,6 @@ void waterfall() {
 }
 }
 int main() {
-    try {presentation_and_isolation();progress_and_bounded_text();send_shortcut_and_cancel();deferred_ownership();waterfall();std::cout<<"Legacy GUI checks passed\n";}
+    try {presentation_and_isolation();progress_and_bounded_text();received_character_boundary();send_shortcut_and_cancel();deferred_ownership();waterfall();std::cout<<"Legacy GUI checks passed\n";}
     catch(const std::exception& e) {std::cerr<<e.what()<<'\n';return 1;}
 }

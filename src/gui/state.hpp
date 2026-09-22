@@ -111,7 +111,7 @@ struct SignalLine {
     transfer::RecoveryProgress recovery_progress;
 };
 bool signal_byte_aligned(const SignalLine& line);
-std::string signal_display_text(const SignalLine& line);
+std::string signal_display_text(const SignalLine& line, bool shellcode = false);
 std::string signal_status_label(const SignalLine& line);
 std::string signal_gap_label(const SignalLine& line);
 std::string signal_repair_label(const SignalLine& line);
@@ -132,7 +132,7 @@ public:
     std::optional<std::string> copy_id(std::size_t index) const;
     std::optional<std::string> copy_bits(std::size_t index) const;
     std::optional<std::string> copy_raw_bits(std::size_t index) const;
-    std::optional<std::string> copy_text(std::size_t index) const;
+    std::optional<std::string> copy_text(std::size_t index, bool shellcode = false) const;
     std::optional<Bytes> copy_bytes(std::size_t index) const;
 private:
     std::deque<SignalLine> lines_;

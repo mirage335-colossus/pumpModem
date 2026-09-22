@@ -13,6 +13,7 @@ public:
     void poll();
     // Selected Fast mode keeps receiving until explicitly paused.
     void set_selected(bool selected);
+    void set_shellcode_mode(bool enabled);
     void close();
     bool ready_to_close() const;
     bool active() const;

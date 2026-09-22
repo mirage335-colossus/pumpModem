@@ -1,6 +1,7 @@
 #pragma once
 
 #include "datapump/types.hpp"
+#include "datapump/received_text.hpp"
 #include "utf8_policy.hpp"
 #include <algorithm>
 #include <optional>
@@ -91,7 +92,9 @@ public:
         raw_bits_=Bytes(bits.begin(),bits.end());
     }
 
-    void edit_binary(std::string_view text) {
+    // Received-derived edits keep exact bits separately and filter decoded
+    // bytes before any UTF-8/escape rendering. Local drafts retain their editor.
+    void edit_binary(std::string_view text, std::optional<bool> received_policy = {}) {
         Bytes prefix;
         prefix.reserve(prefix_limit);
         Bytes exact_bits;
@@ -112,15 +115,15 @@ public:
             }
         }
         if (bytes_.size() <= prefix_limit || raw_bits_) {
-            if (exact_bits.empty()) { commit({}); return; }
-            if (bits % 8 == 0) commit(std::move(prefix));
+            if (exact_bits.empty()) { commit({},received_policy); return; }
+            if (bits % 8 == 0) commit(std::move(prefix),received_policy);
             raw_bits_ = std::move(exact_bits);
             return;
         }
         if (bits % 8) throw Error("Complete each binary byte with 8 bits");
         const auto suffix = std::min(prefix_limit, bytes_.size());
         prefix.insert(prefix.end(), bytes_.begin() + static_cast<std::ptrdiff_t>(suffix), bytes_.end());
-        commit(std::move(prefix));
+        commit(std::move(prefix),received_policy);
     }
 
 private:
@@ -146,8 +149,13 @@ private:
         return count;
     }
 
-    void commit(Bytes bytes) {
+    void commit(Bytes bytes, std::optional<bool> received_policy = {}) {
         if (bytes.size() > payload_limit) throw Error("Message exceeds the 1 MiB byte limit");
+        if(received_policy) {
+            text_=received_text(bytes,*received_policy);
+            bytes_.assign(text_.begin(),text_.end());
+            escaped_=false;raw_bits_.reset();return;
+        }
         bool escaped = false;
         for (std::size_t index = 0; index < bytes.size();) {
             const auto count = displayable_length(bytes, index);

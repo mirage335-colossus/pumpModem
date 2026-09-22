@@ -33,10 +33,13 @@ public:
     }
     const ServiceRequest* current() const {return current_?&*current_:nullptr;}
     const ServiceRequest* next() {
-        if(!current_&&!pending_.empty()) {
-            current_=std::move(pending_.front());pending_.pop_front();
+        for(;;) {
+            if(!current_&&!pending_.empty()) {
+                current_=std::move(pending_.front());pending_.pop_front();
+            }
+            if(!current_||!current_->valid||*current_->valid)return current();
+            current_.reset();
         }
-        return current();
     }
     bool complete(ServiceResult& result) {
         if(!current_||current_->id!=result.id)return false;

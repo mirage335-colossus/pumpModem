@@ -1,4 +1,5 @@
 #include "datapump/runtime.hpp"
+#include "datapump/received_text.hpp"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -51,9 +52,24 @@ int main() { try {
     check(bands.at(59).name=="20m" && bands.at(60).name=="40m" && bands.at(120).name=="20m");
     check(json_escape("a\n\"\\")=="a\\n\\\"\\\\");
     check(base64_encode(Bytes{'f','o','o'})=="Zm9v");
-    check(terminal_text(Bytes{27,']','5','2',';',7})=="\\x1b]52;\\x07");
-    check(terminal_text(Bytes{'c','a','f',0xc3,0xa9})=="caf\xc3\xa9");
-    check(terminal_text(Bytes{0xc2,0x9b})=="\\xc2\\x9b");
+    check(terminal_text(Bytes{27,']','5','2',';',7})=="__52__");
+    check(terminal_text(Bytes{'c','a','f',0xc3,0xa9})=="caf__");
+    check(terminal_text(Bytes{0xc2,0x9b})=="__");
+    // Exhaustive independent allowlist: controls and every non-ASCII byte
+    // remain placeholders, including in the developer-only ASCII view.
+    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=";
+    Bytes every_byte;for(unsigned value=0;value<256;++value)every_byte.push_back(static_cast<std::uint8_t>(value));
+    const auto restricted=received_text(every_byte);
+    const auto shellcode=received_text(every_byte,true);
+    check(restricted.size()==every_byte.size() && shellcode.size()==every_byte.size());
+    for(unsigned value=0;value<256;++value) {
+        const auto byte=static_cast<char>(value);
+        check(restricted[value]==(allowed.find(byte)!=std::string_view::npos?byte:'_'));
+        check(shellcode[value]==(value>=32 && value<=126?byte:'_'));
+    }
+    check(received_text(allowed)==allowed);
+    check(received_text(std::string_view("A\0;\\&\n\xc3\xa9",8))=="A_______");
+    check(received_text(std::string_view("A\0;\\&\n\xc3\xa9",8),true)=="A_;\\&___");
     std::istringstream input("12345"); rejects([&]{read_bounded(input,4);});
     struct TemporaryDirectory {
         std::filesystem::path path=std::filesystem::temp_directory_path()/

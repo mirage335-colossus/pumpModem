@@ -54,6 +54,9 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
 }
 }
 namespace {
+const std::string console_message="Continuous Fast console: café and exact bytes.;()\\&\n";
+const std::string restricted_message="Continuous Fast console_ caf__ and exact bytes.______";
+const std::string shellcode_message="Continuous Fast console: caf__ and exact bytes.;()\\&_";
 void check(bool condition,const char* why) {if(!condition)throw Error(why);}
 Bytes render(const BitmapSource& source) {
     BitmapImage image(128,80);
@@ -189,7 +192,7 @@ void continuous_console() {
     controller.edit(F::fast_device,"fixture");controller.set_selected(true);controller.poll();
     check(controller.active()&&controller.field(F::fast_text).enabled,"Selected Fast mode did not automatically listen with an editable draft");
     const auto empty_qr=render(controller.bitmap(ui::Bitmap::fast_qr));
-    const std::string message="Continuous Fast console: café and exact bytes.";
+    const auto& message=console_message;
     controller.edit(F::fast_text,message);
     check(controller.enabled(C::fast_transmit)&&render(controller.bitmap(ui::Bitmap::fast_qr))!=empty_qr,
         "Listening blocked composition, transmission or message QR updates");
@@ -235,16 +238,46 @@ void continuous_console() {
     check(controller.enabled(C::fast_copy_signal)&&controller.enabled(C::fast_paste_signal)&&!controller.enabled(C::fast_save),
         "Automatic relistening lost access to completed received content");
     controller.activate(C::fast_copy_signal);const auto copied=controller.take_services();
-    check(copied.size()==1&&copied.front().kind==ui::ServiceKind::clipboard&&copied.front().value==message,
-        "Copy did not preserve exact completed UTF-8 bytes");
+    check(copied.size()==1&&copied.front().kind==ui::ServiceKind::clipboard&&copied.front().value==restricted_message&&
+        controller.field(F::fast_history).records.front().cells.front().text.ends_with(restricted_message),
+        "Fast received punctuation or UTF-8 escaped into a native row or clipboard");
+    controller.set_shellcode_mode(true);
+    check(controller.field(F::fast_history).records.front().cells.front().text.ends_with(shellcode_message),
+        "Shellcode history did not show printable ASCII only");
+    controller.activate(C::fast_copy_signal);controller.set_shellcode_mode(false);
+    const auto withdrawn=controller.take_services();
+    check(withdrawn.size()==1&&withdrawn.front().value==restricted_message,
+        "Queued Fast clipboard text retained shellcode after disabling the exception");
+    controller.set_shellcode_mode(true);controller.activate(C::fast_paste_signal);
+    check(controller.field(F::fast_text).text==shellcode_message,"Shellcode paste did not use the printable ASCII boundary");
+    controller.edit(F::fast_text,controller.field(F::fast_text).text+"; locally typed");
+    const auto shellcode_qr=render(controller.bitmap(ui::Bitmap::fast_qr));
+    controller.set_shellcode_mode(false);
+    check(controller.field(F::fast_text).text==restricted_message+"_ locally typed"&&
+        render(controller.bitmap(ui::Bitmap::fast_qr))!=shellcode_qr,
+        "Disabling Shellcode mode left received punctuation in the composer or its QR");
+    controller.edit(F::fast_text,message);
+    check(controller.field(F::fast_text).text==restricted_message,
+        "A stale native edit or Undo restored unsafe received text after Shellcode mode was disabled");
+    const auto received_history=controller.field(F::fast_text).text_history_revision;
+    controller.edit(F::fast_text,"");
+    check(controller.field(F::fast_text).text_history_revision>received_history,
+        "Clearing a received draft did not invalidate native Undo history");
+    controller.edit(F::fast_text,message);
+    const auto local_qr=render(controller.bitmap(ui::Bitmap::fast_qr));
+    const auto local_history=controller.field(F::fast_text).text_history_revision;
+    controller.set_shellcode_mode(true);controller.set_shellcode_mode(false);
+    check(controller.field(F::fast_text).text==message&&render(controller.bitmap(ui::Bitmap::fast_qr))==local_qr&&
+        controller.field(F::fast_text).text_history_revision==local_history,
+        "Receive policy altered an independently entered message, its Undo history or its QR");
     controller.edit(F::fast_text,"replace me");controller.activate(C::fast_paste_signal);
-    check(controller.field(F::fast_text).text==message,"Paste did not restore the selected completed message");
+    check(controller.field(F::fast_text).text==restricted_message,"Paste bypassed the received ASCII restriction");
     controller.activate(C::fast_choose_file);const auto attachment=controller.take_services();
     check(attachment.size()==1,"Attach file was disabled while listening");
     controller.complete_service({attachment.front().id,false,"/tmp/fast-attachment.bin",{}});
     check(controller.field(F::fast_source).selected=="file","Attach file did not select the retained file draft");
     controller.activate(C::fast_use_text);
-    check(controller.field(F::fast_source).selected=="text"&&controller.field(F::fast_text).text==message,
+    check(controller.field(F::fast_source).selected=="text"&&controller.field(F::fast_text).text==restricted_message,
         "Use text discarded the retained composer");
     controller.activate(C::fast_clear_received);
     check(controller.field(F::fast_files).records.empty()&&controller.field(F::fast_history).records.empty()&&!controller.enabled(C::fast_save),
@@ -290,8 +323,8 @@ void completion_between_polls() {
         controller.enabled(C::fast_copy_signal)&&!controller.enabled(C::fast_save),
         "Retained completion remained pending after the next launch");
     controller.activate(C::fast_copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1&&requests.front().value=="Continuous Fast console: café and exact bytes.",
-        "Draining the terminal snapshot changed the retained received bytes");
+    check(requests.size()==1&&requests.front().value==restricted_message,
+        "Draining the terminal snapshot bypassed restricted received presentation");
     // Again allow the worker to finish without a UI poll. Clear must consume
     // this new terminal revision as well as the previously retained reception.
     while(controller.active()) {
@@ -334,10 +367,12 @@ int main() {
             }
             fast_ui::Controller controller([] {return true;});
             controller.select(ui::Field::fast_profile,profile);
-            const std::string message="Live Fast plot check: café\nExact received text.";
+            std::string message="Live Fast plot check: café\nExact received bytes.";
+            for(unsigned byte=0;byte<256;++byte)message+=static_cast<char>(byte);
             controller.edit(ui::Field::fast_device,"fixture");
-            const auto filename=std::string("Fast ")+profile+" café-"+
-                std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".txt";
+            const auto suffix=std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".txt";
+            const auto filename=std::string("Fast ")+profile+" café;()-"+suffix;
+            const auto displayed_filename=std::string("Fast ")+profile+" caf_____-"+suffix;
             const auto input_path=std::filesystem::temp_directory_path()/filename;
             struct RemoveSource {std::filesystem::path path;~RemoveSource(){std::error_code ec;std::filesystem::remove(path,ec);}} remove_source{input_path};
             {std::ofstream input(input_path,std::ios::binary);input<<message;}
@@ -356,14 +391,16 @@ int main() {
                 throw Error(std::string("Fast GUI ")+profile+" did not complete reception: "+
                     controller.field(ui::Field::fast_status).text);
             check(controller.field(ui::Field::fast_files).records.size()==1&&
-                controller.field(ui::Field::fast_files).records.front().cells.front().text.find(filename)!=std::string::npos&&
+                controller.field(ui::Field::fast_files).records.front().cells.front().text.find(displayed_filename)!=std::string::npos&&
                 !controller.enabled(ui::Command::fast_copy_signal)&&!controller.enabled(ui::Command::fast_paste_signal),
-                "Received attachment lost its filename or gained text-only actions");
+                "Received attachment filename bypassed the ASCII restriction or gained text-only actions");
+            controller.set_shellcode_mode(true);
             const auto path=std::filesystem::temp_directory_path()/("datapump-fast-save-"+
                 std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".bin");
             struct Cleanup {std::filesystem::path path;~Cleanup(){std::error_code ec;std::filesystem::remove(path,ec);}} cleanup{path};
             controller.activate(ui::Command::fast_save);
-            const auto requests=controller.take_services();check(requests.size()==1&&requests.front().value==filename,"Explicit Save did not preserve the received attachment filename");
+            const auto requests=controller.take_services();check(requests.size()==1&&requests.front().value==displayed_filename,
+                "Save dialog received an unsafe filename, including in Shellcode mode");
             check(!std::filesystem::exists(path),"Receive wrote content before Save destination was chosen");
             controller.complete_service({requests.front().id,false,path.string(),{}});
             const auto deadline=std::chrono::steady_clock::now()+5s;

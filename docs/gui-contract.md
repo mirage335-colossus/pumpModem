@@ -34,8 +34,9 @@ received rows survive mode changes, and admitted pending reception keeps being
 polled. Hidden controls cannot dispatch edits or actions. Native service replies
 retain their owner and mode generation and are cancelled if stale.
 
-Fast opens **Console**. **Developer mode** and **Clear received** sit at the top
-right; the transmit airtime estimate sits beside the modem dropdown. Developer
+Fast opens **Console**. **Developer mode**, its conditional **Shellcode mode**
+checkbox and **Clear received** sit at the top right; the transmit airtime
+estimate sits beside the modem dropdown. Developer
 mode reveals **Modem details**, which holds symbol rate, constellation, inner
 error correction, interleave depth, Reed–Solomon, gross/measured rates, tracking,
 integrity, settings details and the matching-peer/capacity explanations. Hiding
@@ -47,9 +48,10 @@ optional encryption and retained key selection. Text and file drafts survive
 source changes. Both are XZ-compressed; attachments have a bounded filename
 prefix at source byte zero, interpreted only after physical completion.
 **Signals** shows received pending and completed signals in stable rows;
-transmissions do not create rows. A single click copies completed valid UTF-8
-text, which can also be pasted as a new message. **Files in memory** lists only
-completed attachments with their suggested filenames and exact payload bytes.
+transmissions do not create rows. A single click copies completed text through
+the receive character policy below, which also applies to Paste as message.
+**Files in memory** lists only completed attachments with restricted suggested
+filenames; exact payload bytes remain in memory for an explicit save.
 Text messages do not appear there. Neither pending data nor cancellation grants
 copy/save eligibility.
 History is bounded to 64 entries and the local source-memory quota. Existing save
@@ -81,14 +83,51 @@ row contains channel routing, expected steady modem bitrate after coding and
 recurring overhead, the assumed-SNR Shannon–Hartley limit, and occupied frequency
 range/bandwidth. Gross and measured source rates stay on Modem details.
 
-The controls and message presentation described below belong to regular mode.
+### Receive character policy for every modem
 
-**Developer mode** is a persistent checkbox immediately left of **Clear received**
-and starts unchecked. It hides Pattern / tone, Error correction, DSP workspace,
+Robust, Fast and Legacy share one receive-text boundary. By default, received
+text contains only English ASCII `a-z`, `A-Z`, `0-9`, comma (`,`), period (`.`),
+at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`) and equals (`=`).
+Each other source byte becomes one ASCII underscore before native widgets,
+clipboard requests, or transmit-draft processing receive it. This includes
+control bytes, forbidden punctuation and all non-ASCII bytes. The text boundary
+does not decode UTF-8 sequences or expose rejected bytes as hexadecimal escapes.
+Received filenames always follow this default policy.
+
+**Developer mode** is available in all three modems. **Shellcode mode** sits
+beside it, starts unchecked, and is hidden and false unless Developer mode is
+checked. Enabling both permits printable English ASCII `0x20` through `0x7e`
+in received message text; controls and non-ASCII bytes still become underscores.
+Turning Developer mode off resets and hides Shellcode mode. Disabling either
+permission restores restricted received displays, drafts and retained previous
+messages, refreshes their QR previews, and revokes pending copies made under
+the old permission. Neither toggle changes modem framing or completion.
+
+**Paste as message** installs the permitted text presentation in the transmit
+draft. Subsequent edits and previous-message actions retain the receive policy
+until that draft is cleared. A received raw-bit paste preserves the exact bits,
+while any decoded Message or expected-text preview obeys the character policy.
+Original payload bytes stay in the bounded receive cache for direct saving;
+the native save dialog receives only a restricted suggested filename, and the
+controller writes the original bytes to the explicitly selected destination.
+Exact diagnostic-bit displays and copy actions use only `0` and `1`, preserving
+leading zeros and partial bytes within their existing retention bound.
+
+Locally entered transmit text keeps its existing editor rules. QR generators
+consume the transmit draft and support locally typed or pasted command
+punctuation without either toggle. They never receive the original buffers
+behind received rows. Legacy's local transmit echo likewise retains its local
+text handling; incoming Legacy text passes through the receive boundary.
+
+The remaining controls and message presentation below belong to regular mode.
+
+**Developer mode** is a persistent checkbox beside **Shellcode mode** and
+**Clear received**, and starts unchecked. It hides Pattern / tone, Error correction, DSP workspace,
 RX targets, Pattern steps, Callsign, Grid and Repeatable in place, together with
 the Compression / raw bits, Modem flow and Transmission layout tabs. Showing or
 hiding these controls preserves their geometry and values, including launch
-overrides, and does not reconfigure the modem or edit the draft. Turning it off
+overrides, and does not reconfigure the modem. Disabling its Shellcode exception
+does restrict received-derived drafts as described above. Turning it off
 on a hidden tab returns to Console; Link planner remains available. Visibility
 is shared presentation policy, and native adapters consume the tab visibility
 alongside its unchanged rectangle. Smoke workflows enable the advanced view
@@ -474,13 +513,16 @@ copied without interval validation; provisional prefixes and file rows cannot.
 Each newly accepted raw symbol updates the pending row without waiting for a
 complete byte or coding interval. Eligible completed short streams show their
 dictionary interpretation while retaining the exact raw bits. Whole raw
-bytes use the editor's lossless escaped-byte representation, and a partial
-final byte uses an exact-bit record. **Paste as message** loads text/byte records
-into the composer without interpreting their display escapes as literal
-characters. Binary shows the first 16 message bytes.
+bytes use the receive character policy, and a partial final byte uses an exact-bit
+record. **Paste as message** loads the permitted text presentation into the
+composer, with underscores replacing rejected bytes. Binary shows the first
+16 bytes of that resulting draft; exact received raw bits remain available
+through their separate copy/paste actions.
 
 The Compression page mirrors the entire dictionary encoding of a 1–16-byte
-Message draft and previews its expected text. Its separate exact-bit editor
+Message draft and previews its expected text. Previews derived from received
+raw bits use the receive character policy even when pasted into this page.
+Its separate exact-bit editor
 accepts 1–208 bits, including leading zeros and incomplete codes; it preserves
 the dictionary preview independently of byte packing. Editing that field
 selects raw transmission. Console Binary retains its separate 128-bit edit
@@ -776,6 +818,11 @@ using a unique request ID and opaque strings. Native adapters return cancellatio
 a value or an error. Dialogs must allow the shared polling loop to continue.
 The controller retains data behind pending saves and performs exclusive writes;
 platform dialogs never authorize silent overwrites.
+Received clipboard values are filtered before they become service requests.
+Requests made with the Shellcode exception retain revocable authorization across
+the controller and native queues; withdrawing that exception prevents a delayed
+request from copying its formerly permitted text. Saving remains a direct write
+from retained original bytes, independent of the displayed character policy.
 `service_queue.hpp` provides the request queue and completion-ID checks used by
 both adapters. `ServiceRequest::byte_limit` declares the input limit (32768 bytes
 by default). Prompts use the same atomic UTF-8 editor validation as controls;

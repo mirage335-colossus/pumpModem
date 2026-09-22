@@ -19,7 +19,8 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
     if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
-    if(slot==Slot::developer_mode)control.scope=ScreenScope::shared;
+    if(slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
+    if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -52,7 +53,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     }
     if(slot==Slot::transmit||slot==Slot::short_transmit||slot==Slot::airtime||slot==Slot::short_airtime)
         control.font_size=11;
-    if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message, preserving escaped byte values exactly. Binary shows its first 16 bytes.";}
+    if(slot==Slot::paste_signal) {control.font_size=11;control.help="Load the selected received text into Message using the receive character policy. Disallowed bytes become underscores. Copy raw bits preserves the original bits.";}
     if(control.multiline) {
         control.submit=Command::transmit;control.submit_mode=Field::send_key;
         control.help="Enter transmits by default. Shift+Enter inserts a newline. The send-key choice can require Ctrl+Enter.";
@@ -73,7 +74,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
         control.empty_text="Listening for signals...";
-        control.help="Decoded messages appear as one text row. Other receptions show a byte view for whole bytes or exact bits for a partial final byte. Click to copy, or use Paste as message to inspect the bytes in Binary, including escaped byte values.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. Data shows measured pre-FEC accuracy after interval correction. Files use the file list.";
+        control.help="Received text uses only letters, digits, comma, period, @, space, hyphen, underscore, slash and equals. Each other byte becomes an underscore. Developer Shellcode mode allows printable ASCII. Complete bytes use this same policy; partial bytes show exact bits. Copy and Paste as message use the displayed character policy.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. Data shows measured pre-FEC accuracy after interval correction. Files use the file list.";
     }
     if(slot==Slot::compression_signals) {
         control.list_row_height=54;control.follow_tail=true;control.activate_record=Command::copy_raw_signal;
@@ -144,6 +145,7 @@ const std::vector<Control>& console_screen() {
         placed({Kind::choice,Field::fast_mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::fast_mode),
         placed({Kind::label,Field::mode,Command::none,Bitmap::none,Page::console,0,""}, Slot::mode),
         placed({Kind::toggle,Field::developer_mode,Command::none,Bitmap::none,Page::console,0,"Developer mode"}, Slot::developer_mode),
+        placed({Kind::toggle,Field::shellcode_mode,Command::none,Bitmap::none,Page::console,0,"Shellcode mode"}, Slot::shellcode_mode),
         placed({Kind::action,Field::count,Command::clear_received,Bitmap::none,Page::console,0,"Clear received"}, Slot::clear),
         placed({Kind::text,Field::callsign,Command::none,Bitmap::none,Page::console,1,"Callsign",1,false,128}, Slot::callsign),
         placed({Kind::text,Field::grid,Command::none,Bitmap::none,Page::console,1,"Grid",1,false,128}, Slot::grid),

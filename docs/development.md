@@ -42,10 +42,46 @@ adds no bits. Existing settling/filter/suppression waveforms are separate from
 payload bits. The saved FEC choice still applies when a draft becomes longer.
 
 Keep estimates, actual transmission, receive interpretation, GUI inspection and
-copy/paste consistent. At physical completion, eligible raw bits may also spell
-dictionary text (`001` can be shown as `e`); preserve the exact bits alongside
-that interpretation. This is not authentication. Do not add a mode flag to
-resolve the existing ambiguity or pad incomplete dictionary tokens into text.
+copy/paste consistent with the received-text boundary below. At physical
+completion, eligible raw bits may also spell dictionary text (`001` can be shown
+as `e`); preserve the exact bits alongside that interpretation. This is not
+authentication. Do not add a mode flag to resolve the existing ambiguity or pad
+incomplete dictionary tokens into text.
+
+## Restrict received text before presentation
+
+Robust, Fast and Legacy Modem must restrict received content before native GUI
+text, clipboard requests, CLI text output or transmit-draft processing. The
+default allowed bytes are exactly English ASCII `a-z`, `A-Z`, `0-9`, comma (`,`),
+period (`.`), at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`) and
+equals (`=`). Replace every other source byte with one ASCII underscore. Text
+presentation must not decode received UTF-8 or expose rejected bytes through lossless text escapes,
+Base64 output or an exact-byte stdout/pipe bypass. Received filenames follow
+the same default policy.
+
+The GUI may permit printable English ASCII `0x20` through `0x7e` only while both
+**Developer mode** and **Shellcode mode** are checked. Shellcode mode starts
+false, stays hidden unless Developer mode is checked, and is reset when
+Developer mode is turned off. Controls and non-ASCII bytes remain placeholders
+in either mode. Withdrawing the exception also restricts received-derived
+drafts, retained previous-message text and their QR previews, and revokes pending
+copies authorized by the old setting. Stale edits must not restore forbidden
+received characters after that change.
+
+Received **Paste as message** installs this permitted presentation, not the
+original rejected bytes. Raw-bit paste preserves exact bits, but its dictionary
+interpretation and expected-text preview obey the same text policy. Keep original
+completed payloads in bounded receive memory for direct saving to an explicitly
+chosen file. Preserve exact diagnostic `0`/`1` paths, including single bits,
+leading zeros and partial bytes. Locally entered transmit text and its QR code
+retain their existing input behavior without either toggle; QR generators must
+not consume original received buffers.
+
+This presentation boundary changes neither wire bits nor transport/codec
+algorithms. Retain every framing, physical-completion and next-poll progress
+requirement below, including the independent regression vectors. See
+[security](security.md#received-text-boundary) and the
+[GUI contract](gui-contract.md#receive-character-policy-for-every-modem).
 
 ## Fixed framing and physical completion
 
@@ -159,7 +195,7 @@ and decoder could otherwise change the codebook together without a test failing.
 | Modeled reception versus independent sampled captures, phase/frequency/timing impairments, raw-bit draft success and physical completion | `receiver_probability`, `differential_probability`, `differential_receiver_probability`, `simulation_estimate` |
 | Competing RX target orders and geometries, immediate revisions, obsolete-content withdrawal, independent later receptions and bounded arbitration | `live_profiles`, `live_receptions`, `live`, `live_resources`, `cli` |
 | In-memory per-key TX lock, pulse lookahead, cancellation/profile changes, clock corrections and one-transmission override | `live_transmit_lock` |
-| Pending prefixes and row identity, completed copy behavior, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
+| Pending prefixes and row identity, restricted completed copy/paste, short/raw compose edits and transmission inspection | `gui_application`, `gui_controller`, `gui_inspection`, `gui_binary_editor` |
 
 From the repository root, build and run the focused headless coverage:
 

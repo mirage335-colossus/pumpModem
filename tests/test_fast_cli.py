@@ -423,6 +423,18 @@ class FastCLI(unittest.TestCase):
         self.assertNotIn(b"\xff", human)
         self.assertNotIn(b"\\x1b", human)
 
+    def test_received_attachment_name_uses_restricted_ascii(self):
+        source = self.directory / "payload;(x)&caf\u00e9.bin"
+        source.write_bytes(SOURCE_BYTES)
+        wave = self.directory / "restricted-name.wav"
+        destination = self.directory / "restricted-name-saved.bin"
+        self.run_pump("fast-tx", "--input", source, "--output", wave, *PROFILE)
+        result = json.loads(self.run_pump("fast-rx", "--input", wave, "--save", destination,
+                                        *PROFILE, "--json").stdout)
+        self.assertTrue(result["complete"])
+        self.assertEqual(result["filename"], "payload__x__caf__.bin")
+        self.assertEqual(destination.read_bytes(), SOURCE_BYTES)
+
     def test_text_utf8_newlines_and_empty_text_in_both_modes(self):
         for encrypted in (False, True):
             options = (*self.key_options, "--encrypt") if encrypted else ()
@@ -461,7 +473,7 @@ class FastCLI(unittest.TestCase):
             result = json.loads(self.run_pump("fast-rx", "--input", wave, "--save", destination,
                                              *PROFILE, "--json").stdout)
             self.assertEqual(result["is_attachment"], index == 0)
-            self.assertEqual(result["filename"], "café.bin" if index == 0 else "")
+            self.assertEqual(result["filename"], "caf__.bin" if index == 0 else "")
             self.assertEqual(destination.read_bytes(), b"payload" if index == 0 else text.encode("utf-8"))
         source = self.directory / "empty-attachment.bin"
         source.write_bytes(b"")

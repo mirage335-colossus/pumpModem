@@ -43,14 +43,32 @@ struct Application::Impl {
     std::shared_ptr<const ui::OverlayDefinition> overlay;
     std::uint64_t overlay_generation=0;
     bool service_active=false;
-    ui::FieldState developer_mode,fast_mode;
+    ui::FieldState developer_mode,shellcode_mode,fast_mode;
+    void set_shellcode(bool value) {
+        if(shellcode_mode.checked==value)return;
+        shellcode_mode.checked=value;
+        if(!value)for(auto it=service_routes.begin();it!=service_routes.end();) {
+            const auto& route=it->second;
+            if(!route.valid) {++it;continue;}
+            *route.valid=false;
+            ui::ServiceResult cancelled{route.original,true,{},{}};
+            if(route.fast)fast_controller.complete_service(std::move(cancelled));
+            else controller.complete_service(std::move(cancelled));
+            it=service_routes.erase(it);
+        }
+        controller.set_shellcode_mode(value);
+        fast_controller.set_shellcode_mode(value);
+        legacy_controller.set_shellcode_mode(value);
+        bitmaps.update(controller);
+        ++presentation_revision;
+    }
     bool fast_selected() const {return fast_mode.selected=="fast";}
     bool legacy_selected() const {return fast_mode.selected=="legacy";}
     bool regular_selected() const {return fast_mode.selected=="robust";}
     bool auxiliary_active() const {return fast_controller.active()||legacy_controller.active();}
     ui::Page regular_page=ui::Page::console;
     std::uint64_t mode_generation=0,next_service=0;
-    struct ServiceRoute {std::uint64_t original,generation;bool fast;};
+    struct ServiceRoute {std::uint64_t original,generation;bool fast;std::shared_ptr<bool> valid;};
     std::map<std::uint64_t,ServiceRoute> service_routes;
     ui::Page page=ui::Page::console;
     struct Document {
@@ -72,6 +90,7 @@ struct Application::Impl {
 Application::Application(Launch options):launch(std::move(options)),impl_(std::make_unique<Impl>(launch)) {
     // Smoke runs exercise every page; ordinary launches start with the simpler view.
     impl_->developer_mode.checked=launch.smoke;
+    impl_->shellcode_mode.visible=launch.smoke;
     impl_->fast_mode.options={{"fast","Fast Modem"},{"robust","Robust Modem"},{"legacy","Legacy Modem"}};
     // Explicit Robust simulation/settings/page launches keep their requested work.
     impl_->fast_mode.selected=launch.simulation||launch.smoke||launch.settings||launch.page!=ui::Page::console?"robust":"fast";
@@ -171,8 +190,12 @@ void Application::toggle(ui::Field field,bool value) {
     } else if(field==ui::Field::developer_mode) {
         if(impl_->developer_mode.checked==value)return;
         impl_->developer_mode.checked=value;
+        impl_->shellcode_mode.visible=value;
+        if(!value)impl_->set_shellcode(false);
         if(!page_visible(page()))select_page(ui::Page::console);
         ++impl_->presentation_revision;
+    } else if(field==ui::Field::shellcode_mode) {
+        if(impl_->developer_mode.checked)impl_->set_shellcode(value);
     } else if(impl_->regular_selected()&&!impl_->auxiliary_active())impl_->controller.toggle(field,value);
 }
 void Application::toggle(const ui::Control& declaration,bool value) {
@@ -291,7 +314,6 @@ ControlPresentation Application::control(const ui::Control& declaration) const {
     const auto& state=declaration.field==ui::Field::count?empty:field(declaration.field);
     ControlPresentation view{state,declaration.label,state.enabled,state.visible};
     if(declaration.developer_only&&!impl_->developer_mode.checked)view.visible=false;
-    if(declaration.field==ui::Field::developer_mode&&impl_->legacy_selected())view.visible=false;
     if(!declaration.surface&&!declaration.persistent&&!page_visible(declaration.page))view.visible=false;
     // The planner owns its concise LPI reference and single model warning.
     // The current-draft advisory remains unchanged on the other pages.
@@ -340,6 +362,7 @@ void Application::select_menu(std::span<const ui::Control* const> items,const st
 }
 const ui::FieldState& Application::field(ui::Field field) const {
     if(field==ui::Field::fast_mode)return impl_->fast_mode;
+    if(field==ui::Field::shellcode_mode)return impl_->shellcode_mode;
     if(legacy_ui::owns(field))return impl_->legacy_controller.field(field);
     if(fast_ui::owns(field))return impl_->fast_controller.field(field);
     return field==ui::Field::developer_mode?impl_->developer_mode:impl_->controller.field(field);
@@ -377,7 +400,9 @@ std::vector<ui::ServiceRequest> Application::take_services() {
                 continue;
             }
             const auto id=++impl_->next_service;
-            impl_->service_routes.emplace(id,Impl::ServiceRoute{request.id,impl_->mode_generation,fast});
+            auto valid=request.kind==ui::ServiceKind::clipboard?std::make_shared<bool>(true):nullptr;
+            request.valid=valid;
+            impl_->service_routes.emplace(id,Impl::ServiceRoute{request.id,impl_->mode_generation,fast,std::move(valid)});
             request.id=id;result.push_back(std::move(request));
         }
     };

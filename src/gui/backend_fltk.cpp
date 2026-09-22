@@ -237,6 +237,7 @@ public:
     }
     ~NativeEditor() override {buffer(nullptr);}
     std::function<void(std::string)> changed;
+    std::function<void()> synchronize;
     std::function<bool(bool,bool)> submit;
     std::size_t byte_limit=1024*1024;
     bool read_only=false;
@@ -248,10 +249,15 @@ public:
         const std::string inserted(text);buffer_.replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));
         buffer_.unselect();insert_position(edit.cursor);show_insert_position();return true;
     }
-    void apply(const std::string& text,std::uint64_t cursor_end_revision=0) {
-        if(buffer_text(buffer_)!=text) {
+    void apply(const std::string& text,std::uint64_t cursor_end_revision=0,std::uint64_t history_revision=0) {
+        const bool clear_history=history_revision&&history_revision!=history_revision_;
+        if(clear_history)history_revision_=history_revision;
+        if(clear_history||buffer_text(buffer_)!=text) {
             const auto cursor=insert_position(),top=mTopLineNum,horizontal=mHorizOffset;
             int start=0,end=0;const bool selected=buffer_.selection_position(&start,&end)!=0;
+            // Fl_Text_Buffer::text also clears its undo and redo stacks. An
+            // explicit history request must run even after a native clear has
+            // already installed the same empty string locally.
             applying_=true;buffer_.text(text.c_str());
             const auto clamp=[&](int position){return ui::text_boundary(text,position);};
             insert_position(clamp(cursor));if(selected)buffer_.select(clamp(start),clamp(end));
@@ -263,6 +269,7 @@ public:
         }
     }
     int handle(int event) override {
+        if(synchronize&&(event==FL_KEYDOWN||event==FL_PASTE||event==FL_SHORTCUT||event==FL_PUSH))synchronize();
         if(read_only) {
             if(event==FL_PASTE)return 1;
             if(event==FL_KEYDOWN&&(Fl::event_state()&(FL_CTRL|FL_COMMAND))) {
@@ -292,6 +299,7 @@ private:
     Fl_Text_Buffer buffer_;
     bool applying_=false;
     std::uint64_t cursor_end_revision_=0;
+    std::uint64_t history_revision_=0;
     ui::TextEdit propose(std::string_view inserted,int start,int end) {
         auto edit=ui::text_edit(buffer_text(buffer_),{insert_position(),start,end},inserted,true,byte_limit);
         if(!edit.error.empty()&&error)error(edit.error);
@@ -302,12 +310,16 @@ private:
 class NativeInput : public Fl_Input {
 public:
     NativeInput():Fl_Input(0,0,1,1) {}
+    std::function<void()> synchronize;
     std::function<bool(bool,bool)> submit;
     std::size_t byte_limit=1024*1024;
     std::function<void(std::string)> error;
-    void apply(const std::string& text,std::uint64_t cursor_end_revision=0) {
-        if(text!=value()) {
+    void apply(const std::string& text,std::uint64_t cursor_end_revision=0,std::uint64_t history_revision=0) {
+        const bool clear_history=history_revision&&history_revision!=history_revision_;
+        if(clear_history)history_revision_=history_revision;
+        if(clear_history||text!=value()) {
             const auto selection=ui::TextSelection{insert_position(),mark(),insert_position()}.clamped(text);
+            // Fl_Input::value clears undo/redo even for an unchanged value.
             value(text.c_str());insert_position(selection.cursor,selection.anchor);
         }
         if(cursor_end_revision&&cursor_end_revision!=cursor_end_revision_) {
@@ -321,6 +333,7 @@ public:
         const std::string inserted(text);replace(edit.start,edit.end,inserted.c_str(),static_cast<int>(inserted.size()));return true;
     }
     int handle(int event) override {
+        if(synchronize&&(event==FL_KEYDOWN||event==FL_PASTE||event==FL_SHORTCUT||event==FL_PUSH))synchronize();
         if(event==FL_PASTE) {
             if(!Fl::event_text()) {if(error)error("Clipboard text is unavailable");return 1;}
             paste({Fl::event_text(),static_cast<std::size_t>(Fl::event_length())});return 1;
@@ -333,6 +346,7 @@ public:
     }
 private:
     std::uint64_t cursor_end_revision_=0;
+    std::uint64_t history_revision_=0;
     void draw() override {theme::DrawStyle style(*this);Fl_Input::draw();}
     ui::TextEdit propose(std::string_view inserted) {
         auto edit=ui::text_edit(value(),{insert_position(),mark(),insert_position()},inserted,false,byte_limit);
@@ -766,11 +780,19 @@ private:
                 if(control.multiline) {
                     b.editor=new NativeEditor;b.editor->textsize(control.font_size);b.editor->tab_nav(control.tab_navigation);
                     b.editor->changed=[this,c=&control,widget=b.editor](std::string text){if(widget->visible_r()&&widget->active_r())application.edit(*c,std::move(text));};
+                    b.editor->synchronize=[this,c=&control,widget=b.editor] {
+                        const auto state=application.control(*c).state;
+                        widget->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);
+                    };
                     b.editor->submit=[this,c=&control,widget=b.editor](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.editor->byte_limit=control.byte_limit;
                     b.editor->error=[this](std::string error){application.report_error(std::move(error));};
                 } else {
                     b.input=new NativeInput;b.input->textsize(control.font_size);b.input->when(FL_WHEN_CHANGED);
+                    b.input->synchronize=[this,c=&control,widget=b.input] {
+                        const auto state=application.control(*c).state;
+                        widget->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);
+                    };
                     b.input->submit=[this,c=&control,widget=b.input](bool ctrl,bool shift){return widget->visible_r()&&widget->active_r()&&application.submit(*c,ctrl,shift);};
                     b.input->byte_limit=control.byte_limit;
                     b.input->error=[this](std::string error){application.report_error(std::move(error));};
@@ -893,8 +915,8 @@ private:
             label(b.label,view.control.label);
             if(c.kind==ui::Kind::label)b.label->labelcolor(text_color(state.text_tone,view.enabled));
         }
-        if(b.input){b.input->byte_limit=c.byte_limit;b.input->readonly(c.read_only);b.input->apply(state.text,state.text_cursor_end_revision);}
-        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->read_only=c.read_only;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision);}
+        if(b.input){b.input->byte_limit=c.byte_limit;b.input->readonly(c.read_only);b.input->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);}
+        if(b.editor){b.editor->byte_limit=c.byte_limit;b.editor->read_only=c.read_only;if(b.editor->tab_nav()!=c.tab_navigation)b.editor->tab_nav(c.tab_navigation);b.editor->apply(state.text,state.text_cursor_end_revision,state.text_history_revision);}
         if(b.presentation.update_options(view.options,Fl::grab()!=nullptr)) {
             for(auto* menu:std::initializer_list<Fl_Menu_*>{b.choice,b.suggestions,b.menu})
                 if(menu)populate(*menu,b.presentation.options());

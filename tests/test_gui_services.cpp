@@ -54,6 +54,17 @@ void input_policy() {
     for(auto kind:{ServiceKind::clipboard,ServiceKind::open_folder})
         check(service_input_error({1,kind,"","",0},"not a text reply").empty(),"Output-only platform service acquired text-input policy");
 }
+void revoked_output() {
+    ServiceQueue queue;
+    auto valid=std::make_shared<bool>(true);
+    ServiceRequest request{1,ServiceKind::clipboard,"Copy","previously allowed"};request.valid=valid;
+    queue.enqueue({request,{2,ServiceKind::clipboard,"Copy","safe"}});
+    *valid=false;
+    check(queue.next()&&queue.current()->id==2,"Revoked queued output reached native dispatch");
+    check(complete(queue,2)&&!queue.next(),"Revoked output disturbed later requests");
+    *valid=true;queue.enqueue({request});queue.next();*valid=false;
+    check(!queue.next(),"Revoked current output was still dispatchable");
+}
 void shutdown() {
     for(bool open_dialog:{false,true}) {
         ServiceQueue queue;
@@ -71,6 +82,6 @@ void shutdown() {
 }
 }
 int main() {
-    try {serial_requests();input_policy();shutdown();std::cout<<"Shared GUI service ordering, input policy and shutdown passed\n";}
+    try {serial_requests();input_policy();revoked_output();shutdown();std::cout<<"Shared GUI service ordering, input policy and shutdown passed\n";}
     catch(const std::exception& error){std::cerr<<error.what()<<'\n';return 1;}
 }

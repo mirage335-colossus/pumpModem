@@ -301,11 +301,15 @@ tests.
 ./build/dev/pump rx --input transfer.wav --save received.kicad_pcb
 ```
 
-The last command refuses to overwrite an existing file. `rx --json` returns
-content as base64, exact recovered bits, validation flags and DSP diagnostics; without `--save`
-or `--json`, binary file content remains unsaved. Text defaults to stdout, so
-normal pipelines work. Public Reed–Solomon correction does not authenticate the
-sender.
+The last command refuses to overwrite an existing file. Received text and
+filenames allow only ASCII letters, digits, comma, period, `@`, space, `-`, `_`,
+`/`, and `=`. Every other byte becomes `_`, including controls and each byte of
+Unicode text. This restriction applies to stdout, pipelines and JSON. `rx --json`
+returns the restricted `data_text` field, exact recovered `raw_bits` as `0`/`1`,
+validation flags and DSP diagnostics. The former `data_base64` field is removed.
+Use explicit `--save PATH` to retrieve original source bytes; received content
+is otherwise never written to a file. Public Reed–Solomon correction does not
+authenticate the sender.
 
 After observed symbol absence completes a reception, unresolved interval data
 can use a separate hard-bit recovery search. Its default wall-clock budget is

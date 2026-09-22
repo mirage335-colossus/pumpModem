@@ -1,6 +1,7 @@
 #include "datapump/attachment.hpp"
 #include "datapump/compression.hpp"
 #include "controller.hpp"
+#include "datapump/received_text.hpp"
 #include "record_presentations.hpp"
 #include "transmit_scope.hpp"
 #include "profile_reference.hpp"
@@ -169,6 +170,7 @@ struct Controller::Impl {
     bool started=false,closing=false,preparing=false,key_loading=false,key_failed=false,file_loading=false;
     bool need_devices=true,settings_valid=true,transmit_requested=false,noise_requested=false,was_encrypted=false;
     bool attachment_image=false,target_supported=true;
+    bool shellcode_mode=false,composer_received=false,previous_received=false;
     BinaryEditor composer;
     std::optional<BinaryEditor> previous_message;
     std::string seeded_message,repeatable_prefix,previous_repeatable_prefix,last_repeatable_prefix;
@@ -710,8 +712,17 @@ struct Controller::Impl {
     void binary_label() {
         f(UiField::binary_label).text=composer.raw_bits()?"Raw bits / "+std::to_string(composer.raw_bits()->size())+" bits":"Binary / first 16 bytes";
     }
+    void reset_received_edit_history() {
+        for(auto field:{UiField::message,UiField::binary,UiField::short_bits})++f(field).text_history_revision;
+    }
+    void filter_received_editor(BinaryEditor& editor) const {
+        const auto bits=editor.raw_bits();
+        const auto text=received_text(editor.bytes(),shellcode_mode);
+        editor=BinaryEditor(Bytes(text.begin(),text.end()));
+        if(bits)editor.select_raw_bits(*bits,BinaryEditor::payload_limit);
+    }
     void sync_composer() {
-        f(UiField::message).text=composer.text();
+        if(!attachment)f(UiField::message).text=composer.text();
         f(UiField::binary).text=composer.binary();
         draft_error.clear(); binary_label();
         message_label();
@@ -735,6 +746,10 @@ struct Controller::Impl {
             Bytes decoded;
             try { decoded=compression::decode_short_bits(bits,transfer::short_message_bytes); }
             catch(const Error&) {} // An incomplete dictionary code remains a valid raw draft.
+            if(composer_received) {
+                const auto safe=received_text(decoded,shellcode_mode);
+                decoded.assign(safe.begin(),safe.end());
+            }
             BinaryEditor next(std::move(decoded));next.select_raw_bits(bits,transfer::short_message_bits);
             composer=std::move(next);
             repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
@@ -756,7 +771,7 @@ struct Controller::Impl {
                 const auto decoded=compression::decode_short_bits(bits,transfer::short_message_bits/3);
                 if(decoded.size()>transfer::short_message_bytes)
                     detail+="Complete codes exceed the "+std::to_string(transfer::short_message_bytes)+"-byte short-text limit; received as raw bits.";
-                else detail+="Expected text: "+(decoded==Bytes{' '}?std::string("space"):"'"+BinaryEditor(decoded).text()+"'");
+                else detail+="Expected text: "+(decoded==Bytes{' '}?std::string("space"):"'"+(composer_received?received_text(decoded,shellcode_mode):BinaryEditor(decoded).text())+"'");
             } catch(const Error&) { detail+="Incomplete dictionary code; received as raw bits."; }
         }
         auto& received=f(UiField::received_raw_bits).text;
@@ -827,6 +842,8 @@ struct Controller::Impl {
         dirty();
     }
     void seed_composer() {
+        if(composer_received)reset_received_edit_history();
+        composer_received=false;
         std::string greeting;
         const auto& callsign=f(UiField::callsign).text;
         const auto& grid=f(UiField::grid).text;
@@ -847,11 +864,12 @@ struct Controller::Impl {
     }
     void message_changed(std::string_view text) {
         if(text.empty()) {
-            composer=BinaryEditor{};repeatable_prefix.clear();seeded_message.clear();
+            if(composer_received)reset_received_edit_history();
+            composer_received=false;composer=BinaryEditor{};repeatable_prefix.clear();seeded_message.clear();
             pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
             sync_composer();dirty();return;
         }
-        const auto edited=repeatable_message_edit(text);
+        const auto edited=repeatable_message_edit(composer_received?received_text(text,shellcode_mode):std::string(text));
         try { composer.edit_text(edited); }
         catch(const std::exception& e) {
             if(!composer.escaped())throw;
@@ -865,7 +883,7 @@ struct Controller::Impl {
     }
     void binary_changed() {
         try {
-            composer.edit_binary(f(UiField::binary).text);
+            composer.edit_binary(f(UiField::binary).text,composer_received?std::optional<bool>(shellcode_mode):std::nullopt);
             if(!composer.raw_bits()&&composer.bytes().empty()) { message_changed("");return; }
             if(composer.raw_bits()) {
                 repeatable_prefix.clear(); pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
@@ -994,7 +1012,7 @@ struct Controller::Impl {
     }
     void refresh_signals() {
         auto& state=f(UiField::signals);
-        state.records=signal_records(signals);
+        state.records=signal_records(signals,shellcode_mode);
         if(std::none_of(state.records.begin(),state.records.end(),[&](const auto& row){return row.id==state.selected;}))state.selected.clear();
     }
     void start_worker(std::function<void(Prepared&,std::stop_token)> work,Prepared result) {
@@ -1246,7 +1264,7 @@ struct Controller::Impl {
                 if(!attachment&&composer.raw_bits())session.transmit_bits(*composer.raw_bits(),force);
                 else session.transmit(message(),force);
             } catch(...) { transmit_requested=false; gate.abort_start(); throw; }
-            if(sent) { previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
+            if(sent) { previous_received=composer_received; previous_message=std::move(sent); previous_repeatable_prefix=has_repeatable_prefix()?repeatable_prefix:std::string{}; seed_composer(); }
             notice(settings.simulation?"Calculating the simulated transmission...":"Transmitting audio..."); break;
         }
         case Command::transmit_noise:
@@ -1256,7 +1274,8 @@ struct Controller::Impl {
             notice(settings.simulation?"Simulating noise with temporary keys. Stop noise to finish.":
                 "Transmitting noise with temporary keys. Stop noise to finish."); break;
         case Command::paste_previous:
-            composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
+            if(composer_received&&!previous_received)reset_received_edit_history();
+            composer_received=previous_received;composer=*previous_message; repeatable_prefix=previous_repeatable_prefix; pending_repeatable_removal=false; f(UiField::repeatable).checked=false;
             seeded_message.clear(); sync_composer(); ++f(UiField::message).text_cursor_end_revision; dirty(); break;
         case Command::cancel: session.cancel_transmit(); notice(noise_requested||snapshot.transmitting_noise?
             "Stopping noise...":snapshot.simulation_replay?"Stopping simulation replay...":"Cancelling transmission..."); break;
@@ -1273,16 +1292,16 @@ struct Controller::Impl {
         case Command::generate_keyfile: request(Purpose::generate_names,ui::ServiceKind::prompt,"Key entry names, separated by commas","Default"); break;
         case Command::show_key_folder: { const auto folder=std::filesystem::absolute(key_path).parent_path(); if(!std::filesystem::is_directory(folder)) throw Error("The keyfile folder is no longer available"); request(Purpose::folder,ui::ServiceKind::open_folder,"Show keyfile folder",folder_uri(folder)); break; }
         case Command::acknowledge_key_failure: key_failed=false; f(UiField::key_path).text=key_path.empty()?"None":path_text(key_path.filename()); notice("Current key selection retained."); break;
-        case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save decoded source",file->message.filename.empty()?"received.bin":file->message.filename,std::make_shared<const Bytes>(file->message.data)); break; }
+        case Command::save_file: { const auto* file=selected_file(); request(Purpose::save,ui::ServiceKind::save_file,"Save decoded source",file->message.filename.empty()?"received.bin":received_text(file->message.filename),std::make_shared<const Bytes>(file->message.data)); break; }
         case Command::copy_signal: {
             const auto index=*selected_signal(); if(const auto raw=signals.copy_bits(index)) request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received binary bits",*raw);
-            else if(const auto text=signals.copy_text(index))request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received text",*text);
+            else if(const auto text=signals.copy_text(index,shellcode_mode))request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy received text",*text);
             else if(const auto id=signals.copy_id(index)) {
                 const auto found=std::find_if(inbox.items().begin(),inbox.items().end(),[&](const auto& p) { return id_label(p.message)==*id; });
                 if(found==inbox.items().end()) throw Error("That received message has left the memory cache");
                 const auto& bytes=found->message.data;
                 if(found->message.kind!=MessageKind::text)throw Error("This message is an attachment; use Save selected");
-                const auto text=valid_clipboard_text(bytes)?std::string(bytes.begin(),bytes.end()):BinaryEditor(bytes).text();
+                const auto text=received_text(bytes,shellcode_mode);
                 request(Purpose::clipboard,ui::ServiceKind::clipboard,"Copy decoded text",text);
             } break;
         }
@@ -1297,6 +1316,7 @@ struct Controller::Impl {
             session.cancel_recovery(signals.lines()[*selected_signal()].id);
             notice("Cancelling recovery; reception continues.");break;
         case Command::paste_raw_signal:
+            composer_received=true;
             f(UiField::short_bits).text=*signals.copy_raw_bits(*selected_signal());short_bits_changed();
             ++f(UiField::short_bits).text_cursor_end_revision;break;
         case Command::paste_signal: {
@@ -1310,7 +1330,8 @@ struct Controller::Impl {
                 if(found==inbox.items().end())throw Error("That received message has left the memory cache");
                 bytes=found->message.data;
             }
-            composer=BinaryEditor(std::move(*bytes));
+            const auto safe=received_text(*bytes,shellcode_mode);
+            composer=BinaryEditor(Bytes(safe.begin(),safe.end()));composer_received=true;
             repeatable_prefix.clear();pending_repeatable_removal=false;f(UiField::repeatable).checked=false;
             seeded_message.clear();sync_composer();++f(UiField::message).text_cursor_end_revision;dirty();break;
         }
@@ -1351,6 +1372,25 @@ struct Controller::Impl {
 Controller::Controller():Controller(Options{}) {}
 Controller::Controller(Options options):impl_(std::make_unique<Impl>(options)) {}
 Controller::~Controller()=default;
+void Controller::set_shellcode_mode(bool value) {
+    auto& p=*impl_;
+    if(p.shellcode_mode==value)return;
+    p.shellcode_mode=value;
+    if(!value) {
+        if(p.composer_received) {
+            p.reset_received_edit_history();
+            p.filter_received_editor(p.composer);
+            if(p.attached_message_draft)p.attached_message_draft=received_text(*p.attached_message_draft);
+            p.sync_composer();p.dirty();
+        }
+        if(p.previous_received&&p.previous_message)p.filter_received_editor(*p.previous_message);
+        // Undelivered platform requests must not retain the withdrawn exception.
+        for(auto& request:p.services)
+            if(request.kind==ui::ServiceKind::clipboard)request.value=received_text(request.value);
+    }
+    p.refresh_signals();p.short_bits_status();
+}
+
 void Controller::start() { auto& p=*impl_; if(!p.started&&!p.closing) { p.session.start(p.settings); p.started=true; } }
 void Controller::poll() {
     auto& p=*impl_; std::optional<Impl::Prepared> prepared;

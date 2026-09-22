@@ -9,6 +9,50 @@ packet ID, repeat flag, bootstrap CRC, or automatic legacy parser fallback.
 Existing keyfiles remain usable, but peers must use the same fixed-interval wire
 format and local profile. See [protocol](protocol.md).
 
+## Received-text boundary
+
+Robust, Fast and Legacy Modem apply the same restricted receive character policy
+before received content reaches native GUI text, clipboard requests or a
+transmit draft. The CLI applies it to received content on terminals, in pipes
+and in JSON text fields. The default allowed bytes are exactly English ASCII
+`a-z`, `A-Z`, `0-9`, comma (`,`), period (`.`), at sign (`@`), space, hyphen (`-`),
+underscore (`_`), slash (`/`) and equals (`=`).
+
+Every other source byte becomes one ASCII underscore. This includes parentheses,
+semicolon, backslash, ampersand, all control bytes and every byte outside ASCII.
+UTF-8 is not decoded: a two-byte UTF-8 character becomes two underscores.
+`received_text.hpp` implements this boundary with byte comparisons and a
+same-size output buffer, without locale handling, Unicode parsing or escape
+expansion. Received filenames use the default policy even in Shellcode mode.
+Application-owned labels and diagnostics are distinct from received content.
+
+**Shellcode mode** is a GUI exception for copying bootstrap commands. It starts
+unchecked, is hidden unless **Developer mode** is checked, and permits only
+printable English ASCII bytes `0x20` through `0x7e`. Controls and non-ASCII bytes
+still become underscores. Turning Developer mode off also unchecks and hides
+Shellcode mode. Turning either permission off reapplies the default policy to
+received views and received-derived drafts/history, refreshes their QR previews,
+and revokes pending copies made under the withdrawn exception. It cannot revoke
+content already copied to an external program or clipboard manager.
+
+**Paste as message** copies the permitted presentation, not the original rejected
+bytes. Received raw-bit pastes preserve exact `0`/`1` bits, but any accompanying
+decoded text or expected-text preview obeys the same character policy. Edits and
+previous-message actions cannot restore forbidden received bytes after the
+exception is disabled. Fresh locally entered transmit text retains its existing
+input rules; its QR generator may encode locally typed or pasted punctuation
+without either mode being enabled. QR generators consume the transmit draft,
+never original received buffers.
+
+Received-content presentation and export have three forms: retained diagnostic
+bits are rendered as `0` and `1`, rejected byte values have the fixed placeholder,
+and completed original payloads stay in bounded receive memory for direct saving
+to a user-chosen file. Attachment saves and explicit CLI `--save PATH` preserve
+the original bytes and never open or execute them. Ordinary CLI output does not
+provide an exact-byte pipe bypass or a Base64 payload field. The policy changes
+presentation and export behavior, not modem framing, source decoding quotas,
+physical completion, authentication or pending bit progress.
+
 ## Signal evidence, error correction and authentication
 
 Pattern evidence alone establishes symbol timing and keystream coordinates.
@@ -129,9 +173,10 @@ not locked or scrubbed. See [cryptography](crypto.md).
 The receiver drains decisions and fixed intervals; retained waveform/candidate
 state, marker overlap, RS scratch and diagnostic prefixes are bounded. A continuous
 confident signal is limited by local content, spool and output quotas, not by a
-silence timeout. Received compressed bytes may occupy a capped temporary-file
-spool until completion. Application caches, caller buffers, spool storage and
-codec scratch are separately charged; a content quota is not a process RSS limit.
+silence timeout. Received compressed areas remain in bounded RAM until physical
+completion; they are not written to temporary files. Application caches, caller
+buffers, spool storage and codec scratch are separately charged; a content quota
+is not a process RSS limit.
 Current fixed LZMA2 scratch caps are 64 MiB for encoding and 8 MiB for decoding.
 Additional recovery defaults to five wall-clock minutes per run and at most the
 available CPU cores. It separately retains up to 65,536 hard-bit slots; the
@@ -146,10 +191,11 @@ jobs using their parallel workers, independently of the capture/DSP budget.
 Batch PCM APIs still require a full-waveform budget; simulation work grows with
 sample count. Finite key/timing/frequency banks can be refused when unaffordable.
 
-Temporary files, OS swap/hibernation/core dumps, terminal scrollback, redirection
-and clipboard managers can persist data outside the application. Terminal display
-escapes control bytes; pipes preserve exact bytes. Clipboard text requires valid
-UTF-8. No source bytes supply a destination path or executable file type.
+OS swap/hibernation/core dumps, explicit saved files, terminal scrollback,
+redirection and clipboard managers can persist data outside the application.
+The receive character policy applies before text display, pipe output and
+clipboard export; exact saved payloads remain opaque. No source bytes supply a
+destination path or executable file type.
 
 The system still trusts audio hardware, firmware, OS drivers and its runtime.
 Analog modulation does not establish protection against hostile peripherals,

@@ -1,6 +1,7 @@
 #include "gui_smoke.hpp"
 #include "bitmap_sources.hpp"
 #include "datapump/runtime.hpp"
+#include "datapump/received_text.hpp"
 #include <cmath>
 #include <fstream>
 #include <set>
@@ -103,7 +104,7 @@ struct Smoke::Impl {
     ui::ServiceRequest copy(Controller& controller,std::string_view expected) {
         require(controller.enabled(C::copy_signal),"Completed signal did not enable its clipboard action");
         controller.activate(C::copy_signal);const auto request=take(controller,ui::ServiceKind::clipboard);
-        require(request.value==expected,"Shared GUI clipboard request changed the received payload");
+        require(request.value==received_text(expected),"Shared GUI clipboard did not restrict received text");
         return request;
     }
     void check_fec(Controller& controller,FecMode mode) {
@@ -396,7 +397,7 @@ struct Smoke::Impl {
             require(controller.inbox().items().empty()&&controller.signals().lines().empty()&&controller.field(F::files).records.empty()&&
                     controller.field(F::signals).records.empty()&&!controller.enabled(C::save_file)&&!controller.enabled(C::copy_signal),
                     "Clearing received content left stale collection records or actions");
-            require(retained_copy.value==message,"Clearing reception invalidated a queued clipboard payload");
+            require(retained_copy.value==received_text(message),"Clearing reception invalidated a safe queued clipboard payload");
             controller.complete_service({retained_copy.id,false,{},{}});
             controller.complete_service({save.id,false,path_text(save_path),{}});
             {std::ifstream input(save_path,std::ios::binary);require(input&&read_bounded(input,1024)==file_bytes,"Clearing the inbox invalidated a pending save payload");}

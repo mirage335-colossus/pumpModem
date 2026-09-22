@@ -1,5 +1,5 @@
 #include "state.hpp"
-#include "binary_editor.hpp"
+#include "datapump/received_text.hpp"
 #include "datapump/live.hpp"
 #include <algorithm>
 #include <cmath>
@@ -192,11 +192,9 @@ bool complete_bits(const SignalLine& line) {return !recovery_pending(line) && ph
 bool signal_byte_aligned(const SignalLine& line) {
     return !recovery_pending(line) && line.binary && line.complete && line.received_bits && line.received_bits%8==0;
 }
-std::string signal_display_text(const SignalLine& line) {
-    if(const auto bytes=signal_byte_prefix(line)) return BinaryEditor(*bytes).text();
-    if(!line.binary && line.complete && !line.validated && line.text_message && line.pattern_score)
-        return BinaryEditor(Bytes(line.text.begin(),line.text.end())).text();
-    return line.text;
+std::string signal_display_text(const SignalLine& line, bool shellcode) {
+    if(const auto bytes=signal_byte_prefix(line)) return received_text(*bytes,shellcode);
+    return received_text(line.text,shellcode && line.text_message && !line.binary);
 }
 std::string signal_status_label(const SignalLine& line) {
     using transfer::RecoveryState;
@@ -374,6 +372,14 @@ void apply_receptions(Inbox& inbox, Signals& signals, live::Snapshot& snapshot) 
         });
         auto line=*current;
         line.text_message=line.text_message||(stream!=inbox.items().end()&&stream->message.kind==MessageKind::text);
+        // Keep the bounded source preview in receive memory. Presentation applies
+        // the current ASCII policy before any native text or clipboard sees it.
+        if(stream!=inbox.items().end() && line.validated) {
+            const auto& message=stream->message;
+            if(line.text_message)line.text.assign(message.data.begin(),message.data.begin()+
+                static_cast<std::ptrdiff_t>(std::min<std::size_t>(message.data.size(),4096)));
+            else line.text=received_text(message.filename)+" ("+std::to_string(message.data.size())+" bytes)";
+        }
         staged.update(std::move(line));
     }
     signals=std::move(staged);
@@ -399,10 +405,10 @@ std::optional<std::string> Signals::copy_raw_bits(std::size_t index) const {
         !line.pattern_score || !std::isfinite(*line.pattern_score) || line.raw_bits.empty()) return {};
     return line.raw_bits;
 }
-std::optional<std::string> Signals::copy_text(std::size_t index) const {
+std::optional<std::string> Signals::copy_text(std::size_t index, bool shellcode) const {
     const auto bytes=copy_bytes(index);
     if(!bytes)return {};
-    return BinaryEditor(*bytes).text();
+    return received_text(*bytes,shellcode);
 }
 std::optional<Bytes> Signals::copy_bytes(std::size_t index) const {
     if(index>=lines_.size())return {};
