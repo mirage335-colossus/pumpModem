@@ -1,5 +1,6 @@
-# Pinned, offline source build. No find_package(liblzma), download, DLL or
-# dependency on the destination computer's compression libraries is involved.
+# Pinned, offline source build with a verified receive-hardening overlay. No
+# download, DLL or destination-system compression library is involved.
+include("${CMAKE_CURRENT_LIST_DIR}/XzReceiveHardening.cmake")
 function(datapump_add_lzma)
   set(BUILD_SHARED_LIBS OFF)
   foreach(option XZ_NLS XZ_DOC XZ_DOXYGEN XZ_TOOL_XZ XZ_TOOL_XZDEC
@@ -13,7 +14,10 @@ function(datapump_add_lzma)
   set(XZ_DECODERS "lzma1;lzma2" CACHE STRING "Private codec filters" FORCE)
   set(XZ_MATCH_FINDERS bt4 CACHE STRING "Preset 9 extreme match finder" FORCE)
   set(XZ_CHECKS crc32 CACHE STRING "CRC32 for Fast XZ; regular raw streams use no container check" FORCE)
-  add_subdirectory(third_party/xz EXCLUDE_FROM_ALL)
+  set(xz_source "${CMAKE_BINARY_DIR}/generated/xz-receiver")
+  datapump_prepare_xz("${CMAKE_SOURCE_DIR}/third_party/xz" "${xz_source}")
+  add_subdirectory("${xz_source}" "${CMAKE_BINARY_DIR}/third_party/xz" EXCLUDE_FROM_ALL)
+  target_include_directories(liblzma PRIVATE "${CMAKE_SOURCE_DIR}/include")
   get_target_property(lzma_type liblzma TYPE)
   if(NOT lzma_type STREQUAL "STATIC_LIBRARY")
     message(FATAL_ERROR "DataPump requires its vendored static liblzma")

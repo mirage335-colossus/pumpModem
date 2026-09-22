@@ -494,6 +494,7 @@ void ReceivedFile::save(const std::filesystem::path& path)const {
     if(!raw)throw Error("Cannot exclusively create fast destination");
     File output(raw);
     try {
+        datapump_speculation_barrier();
         write_file(output.get(),bytes());
         if(std::fflush(output.get())!=0)throw Error("Fast destination write failed");
         auto* closed=output.release();if(std::fclose(closed)!=0)throw Error("Fast destination close failed");

@@ -1,4 +1,5 @@
 #include "datapump/compression.hpp"
+#include "datapump/speculation.h"
 #include <lzma.h>
 #include <algorithm>
 #include <array>
@@ -92,6 +93,7 @@ Lzma2Decoded process(std::span<const std::uint8_t> input,std::size_t output_limi
     output_limit=std::min(output_limit,Bytes{}.max_size());
     const auto scratch=std::min(workspace_limit,encoding?long_encoder_limit:long_decoder_limit);
     check_workspace(scratch,encoding);
+    datapump_speculation_barrier();
     Profile profile;Stream stream(scratch);
     const auto initialized=encoding?lzma_raw_encoder(&stream.value,profile.filters):
                                     lzma_raw_decoder(&stream.value,profile.filters);
@@ -107,6 +109,7 @@ Lzma2Decoded process(std::span<const std::uint8_t> input,std::size_t output_limi
         const auto status=lzma_code(&stream.value,LZMA_FINISH);
         const auto produced=capacity-stream.value.avail_out;
         if(produced>remaining)throw Error("LZMA2 output limit exceeded");
+        datapump_speculation_barrier();
         result.data.insert(result.data.end(),chunk.begin(),chunk.begin()+static_cast<std::ptrdiff_t>(produced));
         if(status==LZMA_STREAM_END) {
             if(encoding && stream.value.avail_in)throw Error("LZMA2 encoder did not consume its input");

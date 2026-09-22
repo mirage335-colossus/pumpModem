@@ -1,5 +1,6 @@
 #include "acoustic_ofdm.hpp"
 #include "datapump/fast/codec.hpp"
+#include "datapump/speculation.h"
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -197,6 +198,14 @@ struct Receiver::Impl {
         fft(reference_fft);next_search=2*g.n;
     }
     double sample_at(double time) const {
+        // Keep a legal fallback element even for empty storage. Selecting the
+        // pointer through the dependency helper avoids relying on a predicted
+        // empty-buffer branch; each tap still uses the actual PCM extent.
+        static constexpr float silence=0;
+        const std::array<const float*,2> sources{&silence,pcm.data()};
+        const auto count=pcm.size();
+        const auto samples=sources[datapump_index_nospec(count!=0,sources.size())];
+        const auto extent=count+static_cast<std::size_t>(count==0);
         const auto center=static_cast<std::int64_t>(std::floor(time));
         double value=0,total=0;
         for(int j=-15;j<=16;++j) {
@@ -204,7 +213,8 @@ struct Receiver::Impl {
             if(index<static_cast<std::int64_t>(first)||index>=static_cast<std::int64_t>(received))continue;
             const auto t=static_cast<double>(index)-time;
             const auto weight=interpolation_weight(t);
-            value+=weight*pcm[static_cast<std::size_t>(index-static_cast<std::int64_t>(first))];total+=weight;
+            const auto offset=static_cast<std::uint64_t>(index)-first;
+            value+=weight*samples[datapump_index_nospec(static_cast<std::size_t>(offset),extent)];total+=weight;
         }
         return total?value/total:0;
     }
@@ -463,7 +473,9 @@ struct Receiver::Impl {
     }
     void push(std::span<const float> values) {
         if(eof)throw Error("Acoustic samples supplied after EOF");
-        const auto limit=std::numeric_limits<std::uint64_t>::max()-8*g.length;
+        // Interpolation uses signed sample coordinates; preserve room for its
+        // tap offsets and floating-point coordinate rounding near the limit.
+        const auto limit=static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())-8*g.length;
         if(values.size()>limit||received>limit-values.size())throw Error("Acoustic OFDM sample coordinate overflow");
         for(auto v:values)if(!std::isfinite(v))throw Error("Nonfinite acoustic PCM");
         for(std::size_t offset=0;offset<values.size()&&!state.physical_complete;offset+=g.n/2)

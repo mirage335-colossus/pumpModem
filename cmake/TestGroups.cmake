@@ -35,6 +35,7 @@ set(_aliases
   "gui_coordinates_1x=test_rev_coordinates"
   "gui_coordinates_2x=test_rev_coordinates"
   "cli=pump" "fast_cli=pump" "fast_cable_benchmark=pump"
+  "build_speculation_codegen=test_speculation"
   "boundary_marker_storage=pump" "fast_snr=fast_regression")
 foreach(_alias IN LISTS _aliases)
   string(REPLACE "=" ";" _pair "${_alias}")

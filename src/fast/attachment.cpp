@@ -1,16 +1,19 @@
 #include "datapump/fast/attachment.hpp"
+#include "datapump/speculation.h"
 #include <algorithm>
 #include <limits>
 
 namespace datapump::fast::attachment {
 namespace {
 bool valid_name(std::string_view name) {
-    if(name.empty()||name.size()>filename_limit||name=="."||name==".."||
+    if(name.empty()||name.size()>filename_limit)return false;
+    datapump_speculation_barrier();
+    if(name=="."||name==".."||
        name.back()=='.'||name.back()==' ')return false;
     // The appended separator must not complete an earlier closing marker.
     if((std::string(name)+std::string(closing)).find(closing)!=name.size())return false;
     for(std::size_t i=0;i<name.size();) {
-        const auto first=static_cast<unsigned char>(name[i++]);
+        const auto first=static_cast<unsigned char>(name[datapump_index_nospec(i++,name.size())]);
         if(first<0x20||first==0x7f||std::string_view("/\\:<>\"|?*").find(first)!=std::string_view::npos)return false;
         if(first<0x80)continue;
         unsigned continuation=0;std::uint32_t codepoint=0,minimum=0;
@@ -20,7 +23,7 @@ bool valid_name(std::string_view name) {
         else return false;
         if(continuation>name.size()-i)return false;
         while(continuation--) {
-            const auto next=static_cast<unsigned char>(name[i++]);
+            const auto next=static_cast<unsigned char>(name[datapump_index_nospec(i++,name.size())]);
             if((next&0xc0)!=0x80)return false;
             codepoint=(codepoint<<6)|(next&63);
         }
@@ -60,11 +63,14 @@ SourceReader source(SourceReader reader,std::string_view filename,std::uint64_t 
     };
 }
 Description inspect(std::span<const std::uint8_t> bytes) {
-    if(bytes.size()<opening.size()+closing.size()||!std::equal(opening.begin(),opening.end(),bytes.begin()))return {};
+    if(bytes.size()<opening.size()+closing.size())return {};
+    datapump_speculation_barrier();
+    if(!std::equal(opening.begin(),opening.end(),bytes.begin()))return {};
     const auto width=std::min(bytes.size()-opening.size(),filename_limit+closing.size());
     const std::string_view window(reinterpret_cast<const char*>(bytes.data()+opening.size()),width);
     const auto end=window.find(closing);
     if(end==window.npos||!valid_name(window.substr(0,end)))return {};
+    datapump_speculation_barrier();
     return {std::string(window.substr(0,end)),opening.size()+end+closing.size()};
 }
 }

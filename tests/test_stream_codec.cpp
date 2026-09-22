@@ -3,6 +3,7 @@
 #include <openssl/hmac.h>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <numeric>
 #include <random>
 #include <stdexcept>
@@ -51,11 +52,25 @@ void generic_rs() {
         check(unchanged==pristine,"invalid erasures leave codeword unchanged");
         erased={0,0};rejects([&]{fec::rs_correct(unchanged,parity,erased);},"duplicate erasures rejected");
         erased={pristine.size()};rejects([&]{fec::rs_correct(unchanged,parity,erased);},"out-of-range erasure rejected");
+        for(const auto position:{std::size_t{255},std::size_t{256},std::numeric_limits<std::size_t>::max()}) {
+            erased={position};
+            rejects([&]{fec::rs_correct(unchanged,parity,erased);},"large erasure index must not be clamped into acceptance");
+            check(unchanged==pristine,"rejected large erasure index leaves codeword unchanged");
+        }
     }
     // A known erasure may already contain its true zero value. It still uses
     // one erasure equation, and cannot be silently removed from the budget.
     auto zero=fec::rs_encode(Bytes(106),22);std::vector<std::size_t> erased(22);std::iota(erased.begin(),erased.end(),0);
     check(fec::rs_correct(zero,22,erased)==0,"valid zero-valued erasures need no changed values");
+    for(const auto length:{std::size_t{0},std::size_t{1},std::size_t{256}}) {
+        Bytes invalid(length);
+        rejects([&]{fec::rs_correct(invalid,1);},"invalid RS word width rejected before scratch access");
+    }
+    for(const auto parity:{std::size_t{0},std::size_t{128},std::numeric_limits<std::size_t>::max()}) {
+        auto invalid=zero;
+        rejects([&]{fec::rs_correct(invalid,parity);},"invalid RS parity width rejected before scratch access");
+        check(invalid==zero,"invalid RS dimensions do not mutate source");
+    }
 }
 void intervals() {
     std::mt19937 random(9041);
@@ -92,6 +107,10 @@ void intervals() {
             rejects([&]{decode_interval(wire,options,erased);},"no-FEC unknown occupancy cannot become a source byte");
         }
         rejects([&]{decode_interval(std::span(wire).first(127),options);},"short codewords must be explicitly completed with erased slots");
+        for(const auto position:{std::size_t{128},std::size_t{255},std::numeric_limits<std::size_t>::max()}) {
+            const std::array<std::size_t,1> bad_erasure{position};
+            rejects([&]{decode_interval(wire,options,bad_erasure);},"interval erasure must be rejected before bounded fallback indexing");
+        }
         rejects([&]{encode_interval(std::span(input).first(input.size()-1),options);},"variable source area rejected");
     }
     auto options=keyed(FecMode::off,3,4);options.verifier={};

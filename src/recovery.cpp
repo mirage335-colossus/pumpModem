@@ -1,5 +1,6 @@
 #include "datapump/recovery.hpp"
 #include "datapump/boundary_sync.hpp"
+#include "datapump/speculation.h"
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -27,13 +28,16 @@ struct Packed {
     unsigned missing=0;
 };
 Packed pack(const Bytes& bits,std::size_t start) {
+    if(start>=bits.size())throw Error("Invalid recovery coding start");
+    datapump_speculation_barrier();
     Packed out;
     for(std::size_t bit=0;bit<coded_bits;++bit) {
         const auto mask=static_cast<std::uint8_t>(1U<<(7-bit%8));
-        if(bit>=bits.size()-start || bits[start+bit]==2) {
+        const auto position=datapump_index_nospec(start+bit,bits.size());
+        if(bit>=bits.size()-start || bits[position]==2) {
             if(!out.masks[bit/8])out.erased.push_back(bit/8);
             out.masks[bit/8]|=mask;++out.missing;
-        } else if(bits[start+bit])out.bytes[bit/8]|=mask;
+        } else if(bits[position])out.bytes[bit/8]|=mask;
     }
     return out;
 }
@@ -109,6 +113,7 @@ struct RecoveryJob::Impl {
         if(!worker_limit || input.bits.empty() || input.bits.size()>options.retained_bits || !input.interval_options ||
            options.budget.count()<0 || input.first_symbol>std::numeric_limits<std::uint64_t>::max()-input.bits.size() ||
            std::any_of(input.bits.begin(),input.bits.end(),[](auto b){return b>2;}))return false;
+        datapump_speculation_barrier();
         parity=interval_parity_bytes(input.fec);
         if(!parity)return false;
         if(input.bits.size()>std::numeric_limits<std::uint64_t>::max()/(boundary_sync::marker_bits+1))return false;

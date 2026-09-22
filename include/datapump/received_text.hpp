@@ -4,6 +4,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include "datapump/speculation.h"
 
 namespace datapump {
 
@@ -22,6 +23,9 @@ inline std::string received_text(std::span<const std::uint8_t> bytes,bool shellc
             byte==' ' || byte=='-' || byte=='_' || byte=='/' || byte=='=';
         if(allowed)text[i]=static_cast<char>(byte);
     }
+    // Resolve the validation/filtering path before a more complex native text
+    // consumer sees the result. No per-byte serialization is needed here.
+    datapump_speculation_barrier();
     return text;
 }
 

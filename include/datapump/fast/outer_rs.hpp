@@ -1,5 +1,6 @@
 #pragma once
 #include "datapump/types.hpp"
+#include "datapump/speculation.h"
 #include <algorithm>
 #include <array>
 #include <span>
@@ -50,15 +51,18 @@ inline std::size_t locator(const Polynomial& syndrome,std::size_t count,Polynomi
     std::size_t degree=0,shift=1;std::uint16_t previous_discrepancy=1;
     for(std::size_t step=0;step<count;++step) {
         auto discrepancy=syndrome[step];
-        for(std::size_t i=1;i<=degree;++i)discrepancy^=gf.mul(output[i],syndrome[step-i]);
+        for(std::size_t i=1;i<=degree;++i)
+            discrepancy^=gf.mul(output[datapump_index_nospec(i,output.size())],
+                syndrome[datapump_index_nospec(step-i,syndrome.size())]);
         if(!discrepancy){++shift;continue;}
         const auto saved=output;const auto factor=gf.div(discrepancy,previous_discrepancy);
-        for(std::size_t i=0;i+shift<output.size();++i)output[i+shift]^=gf.mul(factor,previous[i]);
+        for(std::size_t i=0;i+shift<output.size();++i)
+            output[datapump_index_nospec(i+shift,output.size())]^=gf.mul(factor,previous[i]);
         if(2*degree<=step){degree=step+1-degree;previous=saved;previous_discrepancy=discrepancy;shift=1;}
         else ++shift;
     }
     if(2*degree>count)throw Error("Uncorrectable capacity Reed-Solomon cycle");
-    return degree;
+    return datapump_index_nospec(degree,output.size());
 }
 }
 inline Bytes encode(std::span<const std::uint8_t> bytes,std::size_t parity) {
@@ -86,11 +90,14 @@ inline std::size_t correct(Bytes& bytes,std::size_t parity,std::span<const std::
     if(bytes.size()%2||!parity||parity>=256||parity>=bytes.size()/2||bytes.size()/2>65535)
         throw Error("Invalid capacity RS dimensions");
     if(erasures.size()>parity)throw Error("Too many capacity Reed-Solomon erasures");
+    datapump_speculation_barrier();
     auto word=detail::unpack(bytes);const auto& gf=detail::field();
     std::vector<bool> erased(word.size());std::array<std::size_t,256> positions{};detail::Polynomial locations{};std::size_t count=0;
     for(auto position:erasures) {
-        if(position>=word.size()||erased[position])throw Error("Invalid capacity RS erasure position");
-        erased[position]=true;positions[count]=position;locations[count++]=gf.exp[word.size()-1-position];
+        const auto bounded=datapump_index_nospec(position,word.size());
+        if(position>=word.size()||erased[bounded])throw Error("Invalid capacity RS erasure position");
+        const auto slot=datapump_index_nospec(count,positions.size());
+        erased[bounded]=true;positions[slot]=bounded;locations[slot]=gf.exp[word.size()-1-bounded];++count;
     }
     const auto syndrome=detail::syndromes(word,parity);
     if(std::all_of(syndrome.begin(),syndrome.begin()+static_cast<std::ptrdiff_t>(parity),[](auto x){return x==0;}))return 0;
@@ -105,10 +112,14 @@ inline std::size_t correct(Bytes& bytes,std::size_t parity,std::span<const std::
         for(std::size_t i=errors;i>0;--i)value=gf.mul(value,inverse)^locator[i-1];
         if(!value) {
             if(erased[position]||count>=parity)throw Error("Uncorrectable capacity Reed-Solomon cycle");
-            positions[count]=position;locations[count++]=gf.exp[word.size()-1-position];
+            const auto slot=datapump_index_nospec(count,positions.size());
+            positions[slot]=position;locations[slot]=gf.exp[word.size()-1-position];++count;
         }
     }
-    if(count!=erasures.size()+errors||!count)throw Error("Uncorrectable capacity Reed-Solomon cycle");
+    if(count!=erasures.size()+errors||!count||count>parity)throw Error("Uncorrectable capacity Reed-Solomon cycle");
+    // Decoded root counts size the matrix; validate before allocating it. The
+    // full-domain GF tables above need no fences in their arithmetic hot path.
+    datapump_speculation_barrier();
     // Scratch is bounded by the locally chosen parity (at most 255 symbols).
     std::vector<std::vector<std::uint16_t>> matrix(count,std::vector<std::uint16_t>(count+1));
     for(std::size_t column=0;column<count;++column) {
@@ -117,9 +128,9 @@ inline std::size_t correct(Bytes& bytes,std::size_t parity,std::span<const std::
     }
     for(std::size_t row=0;row<count;++row)matrix[row][count]=syndrome[row];
     for(std::size_t column=0;column<count;++column) {
-        auto pivot=column;while(pivot<count&&!matrix[pivot][column])++pivot;
+        auto pivot=column;while(pivot<count&&!matrix[datapump_index_nospec(pivot,count)][column])++pivot;
         if(pivot==count)throw Error("Uncorrectable capacity Reed-Solomon cycle");
-        std::swap(matrix[column],matrix[pivot]);const auto scale=matrix[column][column];
+        std::swap(matrix[column],matrix[datapump_index_nospec(pivot,count)]);const auto scale=matrix[column][column];
         for(std::size_t i=column;i<=count;++i)matrix[column][i]=gf.div(matrix[column][i],scale);
         for(std::size_t row=0;row<count;++row)if(row!=column) {
             const auto factor=matrix[row][column];
@@ -127,7 +138,10 @@ inline std::size_t correct(Bytes& bytes,std::size_t parity,std::span<const std::
         }
     }
     std::size_t changed=0;
-    for(std::size_t i=0;i<count;++i)if(matrix[i][count]){word[positions[i]]^=matrix[i][count];++changed;}
+    for(std::size_t i=0;i<count;++i)if(matrix[i][count]) {
+        const auto position=datapump_index_nospec(positions[i],word.size());
+        word[position]^=matrix[i][count];++changed;
+    }
     const auto checked=detail::syndromes(word,parity);
     if(std::any_of(checked.begin(),checked.begin()+static_cast<std::ptrdiff_t>(parity),[](auto x){return x!=0;}))throw Error("Uncorrectable capacity Reed-Solomon cycle");
     bytes=detail::pack(word);return changed;

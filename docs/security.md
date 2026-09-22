@@ -53,6 +53,32 @@ provide an exact-byte pipe bypass or a Base64 payload field. The policy changes
 presentation and export behavior, not modem framing, source decoding quotas,
 physical completion, authentication or pending bit progress.
 
+## Speculative execution: current coverage and limits
+
+Selected receive indices now retain a bounds dependency through their memory
+access, and selected validation transitions have a target-specific speculation
+barrier. Coverage includes short-dictionary reads, portions of Regular/Fast
+Reed–Solomon correction, retained-bit recovery, acoustic interpolation, selected
+LZMA dictionary/property operations, the ASCII output boundary and explicit
+payload writes. The LZMA changes are applied to a verified generated copy of the
+pristine pinned source. Full-domain field tables and reviewed Legacy/LDPC tables
+and arithmetic remain unchanged; no global DSP serialization is enabled.
+
+These are targeted bounds-check-bypass mitigations, not protection against all
+Spectre variants, Meltdown or other CPU weaknesses. Ordinary C++, printable ASCII,
+authentication and an explicit file save are not security proofs. Compiler-target
+support is recorded in `build-info.txt`; unsupported targets retain architectural
+checks without a claim of speculative protection. Generated-code witnesses check
+specific instruction dependencies, not the behavior of every caller or CPU.
+
+The application-controlled receive paths contain no JavaScript engine, embedded
+browser, received-content JIT/interpreter or automatic execution of received
+files. No process or VM isolation is added or credited. CPU, firmware, operating
+system and library behavior still require separate deployment assessment; this
+change neither configures nor verifies host mitigations. See the
+[technical design and audit scope](receive-processing-hardening.md) for precise
+coverage, architecture limits, direct-save handling and performance validation.
+
 ## Signal evidence, error correction and authentication
 
 Pattern evidence alone establishes symbol timing and keystream coordinates.

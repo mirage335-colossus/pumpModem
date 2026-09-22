@@ -155,9 +155,38 @@ void planning_workspace_reservation() {
               "unrepresentable deadline must reject without overflowing clock arithmetic");
     }
 }
+void guarded_capture_boundaries() {
+    RecoveryOptions options;options.workers=1;options.extra_errors=0;
+    for(const auto missing:{1U,7U,8U,9U}) {
+        auto input=fixture(true);input.bits.resize(input.bits.size()-missing);
+        RecoveryJob job(std::move(input),options);job.run();
+        const auto result=job.result();
+        check(job.progress().state==RecoveryState::recovered && result.size()==1 &&
+              result[0].data==area(48),"bounded tail loads must retain exact partial-byte recovery");
+        const auto& stats=result[0].fec_stats;
+        check(stats.data.missing_bits+stats.integrity.missing_bits+stats.parity.missing_bits==missing,
+              "guarded fallback loads must not turn absent tail bits into observed input");
+    }
+    for(const auto invalid:{std::uint8_t{3},std::uint8_t{255}}) {
+        for(const auto position:{std::size_t{0},std::size_t{192},std::size_t{1215}}) {
+            auto input=fixture();input.bits[position]=invalid;
+            RecoveryJob job(std::move(input),options);job.run();
+            check(job.progress().state==RecoveryState::unavailable && !job.progress().attempts && job.result().empty(),
+                  "out-of-domain recovery bits reject before bounded fallback loads");
+        }
+    }
+    auto input=fixture();input.bits.clear();
+    RecoveryJob empty(std::move(input),options);empty.run();
+    check(empty.progress().state==RecoveryState::unavailable && !empty.progress().attempts && empty.result().empty(),
+          "empty recovery capture rejects without a fallback element");
+    input=fixture();input.established_starts.clear();input.bits.resize(1);
+    RecoveryJob single(std::move(input),options);single.run();
+    check(single.progress().state==RecoveryState::exhausted && !single.progress().attempts && single.result().empty(),
+          "single observed bit cannot manufacture a recoverable interval from bounded tail loads");
+}
 }
 int main() {
-    try {sparse_unknowns_and_threads();resume_and_cancel();substantial_exhaustive_search();alignment_and_authentication();chain_and_observation_constraints();planning_workspace_reservation();
+    try {sparse_unknowns_and_threads();resume_and_cancel();substantial_exhaustive_search();alignment_and_authentication();chain_and_observation_constraints();planning_workspace_reservation();guarded_capture_boundaries();
         std::cout<<"post-end hard-bit recovery passed\n";return 0;
     } catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
 }

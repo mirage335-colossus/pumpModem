@@ -1,4 +1,5 @@
 #include "datapump/fast/compression.hpp"
+#include "datapump/speculation.h"
 #include "datapump/fast/attachment.hpp"
 #include <lzma.h>
 #include <algorithm>
@@ -90,6 +91,7 @@ PreparedXzSource prepare_xz_attachment(SourceReader source,std::string_view file
 }
 Bytes decode_xz(std::span<const std::uint8_t> source,std::uint64_t quota) {
     const auto limit=std::min<std::uint64_t>(quota,maximum_source);
+    datapump_speculation_barrier();
     Stream stream;auto& state=stream.value;
     const auto initialized=lzma_stream_decoder(&state,decoder_memory,LZMA_TELL_UNSUPPORTED_CHECK);
     if(initialized!=LZMA_OK)fail(initialized);
@@ -103,6 +105,7 @@ Bytes decode_xz(std::span<const std::uint8_t> source,std::uint64_t quota) {
         const auto status=lzma_code(&state,LZMA_FINISH);
         const auto produced=capacity-state.avail_out;
         if(produced>remaining)throw Error("Fast XZ output exceeds local source quota");
+        datapump_speculation_barrier();
         if(result.size()+produced>result.capacity())
             result.reserve(static_cast<std::size_t>(std::min<std::uint64_t>(limit,
                 std::max<std::uint64_t>(result.size()+produced,result.capacity()*2))));

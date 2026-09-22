@@ -1,4 +1,5 @@
 #include "datapump/compression.hpp"
+#include "datapump/speculation.h"
 #include <algorithm>
 #include <array>
 #include <optional>
@@ -11,6 +12,10 @@ constexpr std::string_view three_bit=" etao";
 constexpr std::string_view four_bit="in";
 constexpr std::string_view six_bit="shrdlucmfwypbg";
 static_assert(six_bit.size()==14);
+// Full-domain decoder tables keep transiently misselected prefix branches
+// within an allocated table too. Canonical endpoints still use the checks below.
+constexpr std::array<std::uint8_t,8> three_bit_decode{' ','e','t','a','o',0,0,0};
+constexpr std::array<std::uint8_t,16> six_bit_decode{'s','h','r','d','l','u','c','m','f','w','y','p','b','g',0,0};
 constexpr auto codes=[] {
     std::array<Code,256> result{};
     for(unsigned byte=0;byte<result.size();++byte)result[byte]={(31U<<8)|byte,13};
@@ -24,31 +29,37 @@ class Reader {
     std::span<const std::uint8_t> input_;
     std::size_t position_=0;
     unsigned read(unsigned count) {
+        if(input_.empty() || count>remaining())throw Error("truncated short prefix bit token");
+        datapump_speculation_barrier();
+        // The index helper preserves an address dependency through the load;
+        // the bit mask also bounds dictionary selectors independently of the
+        // earlier whole-input validation.
         unsigned value=0;
         for(unsigned bit=0;bit<count;++bit,++position_)
-            value=(value<<1)|input_[position_];
+            value=(value<<1)|(input_[datapump_index_nospec(position_,input_.size())]&1U);
         return value;
     }
 public:
     explicit Reader(std::span<const std::uint8_t> input):input_(input) {
         if(std::any_of(input.begin(),input.end(),[](auto bit){return bit>1;}))
             throw Error("short prefix input elements must be zero or one");
+        datapump_speculation_barrier();
     }
     std::size_t remaining()const{return input_.size()-position_;}
     std::optional<std::uint8_t> next() {
         const auto start=position_;
         if(remaining()<3)return {};
         const auto first=read(3);
-        if(first<5)return static_cast<std::uint8_t>(three_bit[first]);
+        if(first<5)return three_bit_decode[first&7U];
         if(first==5) {
             if(!remaining()){position_=start;return {};}
-            return static_cast<std::uint8_t>(four_bit[read(1)]);
+            return static_cast<std::uint8_t>(four_bit[read(1)&1U]);
         }
         if(remaining()<2){position_=start;return {};}
         const auto prefix=(first<<2)|read(2);
         if(prefix!=31) {
             if(!remaining()){position_=start;return {};}
-            return static_cast<std::uint8_t>(six_bit[((prefix<<1)|read(1))-48]);
+            return six_bit_decode[((prefix<<1)|read(1))&15U];
         }
         if(remaining()<8){position_=start;return {};}
         const auto literal=read(8);

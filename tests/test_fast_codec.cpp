@@ -371,6 +371,20 @@ void capacity_rs() {
     check(outer_rs::correct(damaged,4,std::array<std::size_t,2>{0,2})==3 && damaged==expected,"GF65536 mixed errors and erasures obey 2e+v budget");
     rejects([&]{outer_rs::correct(damaged,4,std::array<std::size_t,2>{0,0});},"duplicate RS erasures rejected");
     rejects([&]{outer_rs::correct(damaged,4,std::array<std::size_t,1>{8});},"out of range RS erasures rejected");
+    for(const auto invalid:{expected.size()/2,expected.size()/2+1,
+                           std::numeric_limits<std::size_t>::max()/2,std::numeric_limits<std::size_t>::max()}) {
+        auto unchanged=expected;
+        rejects([&]{outer_rs::correct(unchanged,4,std::array<std::size_t,2>{0,invalid});},
+            "speculation-bounded RS address must not accept an invalid erasure as position zero");
+        check(unchanged==expected,"invalid RS erasure mutated caller bytes");
+    }
+    std::array<std::size_t,4> edge_erasures{0,1,6,7};
+    do {
+        damaged=expected;
+        for(const auto position:edge_erasures)damaged[2*position]^=0x80;
+        check(outer_rs::correct(damaged,4,edge_erasures)==4&&damaged==expected,
+            "bounded RS pivots preserve every ordering of full-budget edge erasures");
+    }while(std::next_permutation(edge_erasures.begin(),edge_erasures.end()));
     rejects([&]{outer_rs::encode(Bytes(3),4);},"odd RS source bytes rejected");
     Bytes oversized(65536*2);
     rejects([&]{outer_rs::encode(oversized,4);},"oversized RS source rejected before unpacking");
@@ -390,6 +404,13 @@ void capacity_rs() {
     const auto maximum_word=outer_rs::encode(maximum_data,176);damaged=maximum_word;
     for(std::size_t i=0;i<88;++i)damaged[i*1301]^=static_cast<std::uint8_t>(i+1);
     check(outer_rs::correct(damaged,176)==88 && damaged==maximum_word,"maximum capacity RS geometry corrects88 symbol errors");
+    const auto full_scratch=outer_rs::encode(Bytes{0xa5,0x5a},255);damaged=full_scratch;
+    std::array<std::size_t,255> full_erasures{};
+    for(std::size_t i=0;i<full_erasures.size();++i) {
+        full_erasures[i]=255-i;damaged[2*full_erasures[i]]^=0x80;
+    }
+    check(outer_rs::correct(damaged,255,full_erasures)==255&&damaged==full_scratch,
+        "bounded RS root slots and matrix preserve the largest legal correction count");
 }
 void capacity_interleaver_balance() {
     // QAM labels restart every2048 bits. Treating positions modulo only bps

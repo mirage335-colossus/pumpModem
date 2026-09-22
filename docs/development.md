@@ -13,6 +13,13 @@ This is a maintenance contract for the existing implementation. The
 [migration plan](packetless-stream-plan.md) and older validation entries describe
 historical designs; they do not override these current requirements.
 
+Preserve the restricted received-byte presentation and the selected index and
+validation-boundary protections documented in
+[receive processing hardening](receive-processing-hardening.md). Keep ordinary
+input checks and trusted allocation extents alongside those mitigations. Changes
+to protected paths need functional and performance validation; neither new wire
+overhead nor process/VM isolation is part of this design.
+
 For independent Fast Modem throughput work, consult the
 [coding and capacity study](fast-coding-study.md), including its development
 priorities and evidence limits, the [physical cable study](fast-cable-live-study.md),

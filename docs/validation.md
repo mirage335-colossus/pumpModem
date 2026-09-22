@@ -4,6 +4,89 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Targeted receive-processing hardening — 22 September 2026 UTC
+
+The [receive-processing review](receive-processing-hardening.md) adds selected
+index dependencies and validation barriers to short decoding, regular/Fast
+Reed–Solomon correction, recovery, OFDM interpolation, LZMA history access,
+attachment metadata, text filtering and explicit file writes. No process or VM
+isolation is added or counted as protection. These are defensive changes to
+selected accesses, not demonstrations of previously exploitable gadgets or a
+claim of immunity to Spectre, Meltdown or all CPU weaknesses.
+
+Both GCC 14.2 FLTK and Clang 19.1.7 Rev Release applications build. The 11-case
+focused selection passes with each compiler: helper semantics and generated
+code, pristine XZ inventory, short/source decoding, Reed–Solomon, recovery,
+regular/Fast attachment handling and explicit runtime file operations. All
+30 preservation-contract cases pass, including the 1,274.03-second receiver
+probability calibration. All 33 shared GUI cases pass in 226.00 seconds,
+including Legacy and Fast received-text policy checks. The four build-tool,
+generated-code and vendor-integrity cases also pass. Existing vectors,
+completion rules, progress assertions and timeouts remain unchanged.
+
+All 36 Fast cases pass across the group run and isolated rerun. The initial
+concurrent run passed 35 cases; the acoustic portion of the 92-case SNR matrix
+hit its existing 300-second subprocess timeout while other builds/tests were
+active. The complete SNR matrix, bulk-transfer and argument checks subsequently
+passed alone in 236.48 seconds. No timeout or success assertion was relaxed.
+
+All nine targeted ASan/UBSan cases pass in 130.70 seconds, including the actual
+instrumented private LZMA library and standalone index/load witness. UBSan
+halts on error; LeakSanitizer is disabled for the restricted process environment.
+Added malformed-input checks cover extreme erasure indices, invalid bit values,
+truncated UTF-8 metadata, incomplete authenticated tails and invalid LZMA
+properties. An exact-byte compression roundtrip crosses the fixed dictionary
+boundary twice; it does not assert which SIMD instructions or match distances
+the encoder selects.
+
+Generated-code witnesses pass with GCC and Clang, with and without stack
+protection, using GNU and LLVM disassemblers. AArch64 LP64 ordinary and
+stack-protected objects cross-compile and pass the codegen check; no ARM runtime
+result is claimed. Forced narrow `size_t` preprocessing reports unsupported.
+Synthetic bypass branches are rejected by the witness checker. Independent
+optimized regular-codec object inspection also retained the index dependencies
+and barriers. None of these checks measures transient hardware execution or
+proves that every application access is covered. MSVC/Windows runtime performance
+and native display workflows were not exercised by this processing-only change.
+
+The [comparison harness](../tools/benchmark_receive_processing.cpp) ran on a
+Linux x86-64 AMD Ryzen 5 PRO 5650U with GCC 14.2, Release libraries and an
+`-O3 -DNDEBUG` harness. Baseline archives and the two changed inline headers were
+saved from `f715839b5b921576c15d2179e7fb1d51dc7194d5` before rebuilding; their
+checksums were verified before measurement. Runs used baseline/current/current/
+baseline order after project builds and tests finished. Each run contains seven
+samples of at least 150 ms per workload. The table averages the two run medians;
+the [complete CSV](validation-data/receive-processing-2026-09-22.csv) retains
+per-run medians, minima, maxima and iteration counts.
+
+| Workload | Before, µs | After, µs | Runtime change |
+| --- | ---: | ---: | ---: |
+| Regular RS, 128 bytes / parity 48, clean | 15.952 | 15.921 | −0.2% |
+| Regular RS, 10 errors + 6 erasures | 41.522 | 41.961 | +1.1% |
+| Fast RS, 25,200 bytes / parity 38, clean | 3,165.174 | 3,306.313 | +4.5% |
+| Fast RS, 19 errors | 7,329.751 | 7,395.807 | +0.9% |
+| Short dictionary, 16 source bytes / 98 bits | 0.068 | 0.273 | +300.0% |
+| Raw LZMA2, 1 MiB high-entropy source | 93.303 | 97.603 | +4.6% |
+| Raw LZMA2, 1 MiB patterned source | 241.138 | 245.978 | +2.0% |
+| Received-text filter, 1 MiB high-entropy input | 5,040.587 | 4,944.779 | −1.9% |
+| Sampled Fast OFDM, complete raw 16-QAM cycle | 129,139.698 | 130,643.414 | +1.2% |
+
+These are local processing times, not changes in on-air bit count, airtime or
+detection probability. The short decoder's fourfold relative increase adds about
+0.205 µs per message. Small differences, including apparent speedups, should not
+be treated as exact improvements: CPU boost and scheduling were not controlled,
+and high-entropy LZMA run medians varied from 90.1–104.9 µs. Its mostly
+uncompressed chunks also exercise a different path from the patterned source.
+
+RS measurements include copying the input before correction. LZMA throughput
+counts decompressed source bytes; the short decoder counts its 16 source bytes.
+The OFDM fixture includes receiver construction, acquisition, scored physical
+completion and exact-bit validation. Its CSV throughput counts all 2,671,980
+bytes of supplied float PCM, including training and eight seconds of trailing
+silence, not payload throughput or isolated interpolation speed. Encoding/setup
+is outside timing. These results do not establish performance on MSVC, ARM,
+other profiles or physical audio/radio devices.
+
 ## In-memory Robust transmit epoch lock — 22 September 2026 UTC
 
 The live hardware sender now records the greatest exposed symbol epoch per

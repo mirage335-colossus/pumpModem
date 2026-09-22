@@ -80,6 +80,13 @@ backend and build flags; packaging includes it. This is configure-time
 provenance, not a claim of byte-for-byte reproducibility or an uncommitted diff
 archive. `./build.sh` reconfigures before building to refresh it. Existing
 `--version` output remains compatible.
+Configuration also compiles the receive-hardening header's capability probes and
+records index/barrier support, or an explicit unsupported status, in the build
+information. These compile-only probes support cross-compilation; they do not
+execute on or assess the target CPU. The status covers selected receive accesses
+and validation boundaries, not whole-program, firmware or OS protection. See
+[receive processing hardening](receive-processing-hardening.md) for architecture
+coverage and the `speculation` / `build_speculation_codegen` checks.
 Ninja/Make profiles also export `compile_commands.json` for editors and code
 analysis, avoiding guesswork about include paths and compiler options.
 

@@ -1,5 +1,6 @@
 #include "datapump/stream_codec.hpp"
 #include "datapump/compression.hpp"
+#include "datapump/speculation.h"
 #include <algorithm>
 #include <bit>
 #include <limits>
@@ -36,15 +37,18 @@ std::size_t error_locator(const Polynomial& syndrome,std::size_t count,Polynomia
     std::size_t degree=0,shift=1;std::uint8_t previous_discrepancy=1;
     for(std::size_t step=0;step<count;++step) {
         auto discrepancy=syndrome[step];
-        for(std::size_t i=1;i<=degree;++i)discrepancy^=gf.mul(locator[i],syndrome[step-i]);
+        for(std::size_t i=1;i<=degree;++i)
+            discrepancy^=gf.mul(locator[datapump_index_nospec(i,locator.size())],
+                syndrome[datapump_index_nospec(step-i,syndrome.size())]);
         if(!discrepancy){++shift;continue;}
         const auto saved=locator;const auto factor=gf.div(discrepancy,previous_discrepancy);
-        for(std::size_t i=0;i+shift<locator.size();++i)locator[i+shift]^=gf.mul(factor,previous[i]);
+        for(std::size_t i=0;i+shift<locator.size();++i)
+            locator[datapump_index_nospec(i+shift,locator.size())]^=gf.mul(factor,previous[i]);
         if(2*degree<=step) { degree=step+1-degree;previous=saved;previous_discrepancy=discrepancy;shift=1; }
         else ++shift;
     }
     if(2*degree>count)throw Error("Uncorrectable Reed-Solomon interval");
-    return degree;
+    return datapump_index_nospec(degree,locator.size());
 }
 std::size_t checked_product(std::size_t a,std::size_t b) {
     if(a && b>std::numeric_limits<std::size_t>::max()/a)throw Error("Source storage size overflow");
@@ -80,13 +84,17 @@ Bytes rs_encode(const Bytes& data,std::size_t parity) {
 std::size_t rs_correct(Bytes& word,std::size_t parity,std::span<const std::size_t> erasures) {
     if(!parity || parity>=word.size() || word.size()>255)throw Error("Invalid Reed-Solomon block dimensions");
     if(erasures.size()>parity)throw Error("Too many Reed-Solomon erasures");
+    datapump_speculation_barrier();
     std::array<bool,255> erased{};
     std::array<std::size_t,255> positions{};
     Polynomial locations{};
     std::size_t count=0;
     for(auto position:erasures) {
-        if(position>=word.size() || erased[position])throw Error("Invalid Reed-Solomon erasure position");
-        erased[position]=true;positions[count]=position;locations[count++]=gf.exp[word.size()-1-position];
+        if(position>=word.size())throw Error("Invalid Reed-Solomon erasure position");
+        position=datapump_index_nospec(position,word.size());
+        if(erased[position])throw Error("Invalid Reed-Solomon erasure position");
+        const auto slot=datapump_index_nospec(count,positions.size());
+        erased[position]=true;positions[slot]=position;locations[slot]=gf.exp[word.size()-1-position];++count;
     }
     const auto syndrome=syndromes(word,parity);
     if(std::all_of(syndrome.begin(),syndrome.begin()+static_cast<std::ptrdiff_t>(parity),[](auto x){return x==0;}))return 0;
@@ -104,10 +112,12 @@ std::size_t rs_correct(Bytes& word,std::size_t parity,std::span<const std::size_
         for(std::size_t i=errors;i>0;--i)value=gf.mul(value,inverse)^locator[i-1];
         if(!value) {
             if(erased[position] || count>=parity)throw Error("Uncorrectable Reed-Solomon interval");
-            positions[count]=position;locations[count++]=gf.exp[word.size()-1-position];
+            const auto slot=datapump_index_nospec(count,positions.size());
+            positions[slot]=position;locations[slot]=gf.exp[word.size()-1-position];++count;
         }
     }
     if(count!=erasures.size()+errors || !count)throw Error("Uncorrectable Reed-Solomon interval");
+    datapump_speculation_barrier();
     // Fixed upper-bound scratch; solve magnitudes against the original
     // syndrome. No allocation dimension comes from received bytes.
     std::array<std::array<std::uint8_t,256>,255> matrix{};
@@ -117,8 +127,10 @@ std::size_t rs_correct(Bytes& word,std::size_t parity,std::span<const std::size_
     }
     for(std::size_t row=0;row<count;++row)matrix[row][count]=syndrome[row];
     for(std::size_t column=0;column<count;++column) {
-        auto pivot=column;while(pivot<count&&!matrix[pivot][column])++pivot;
+        auto pivot=column;
+        while(pivot<count&&!matrix[datapump_index_nospec(pivot,matrix.size())][column])++pivot;
         if(pivot==count)throw Error("Uncorrectable Reed-Solomon interval");
+        pivot=datapump_index_nospec(pivot,count);
         std::swap(matrix[column],matrix[pivot]);const auto scale=matrix[column][column];
         for(std::size_t i=column;i<=count;++i)matrix[column][i]=gf.div(matrix[column][i],scale);
         for(std::size_t row=0;row<count;++row)if(row!=column) {
@@ -127,10 +139,13 @@ std::size_t rs_correct(Bytes& word,std::size_t parity,std::span<const std::size_
         }
     }
     auto repaired=word;std::size_t changed=0;
-    for(std::size_t i=0;i<count;++i)if(matrix[i][count]) { repaired[positions[i]]^=matrix[i][count];++changed; }
+    for(std::size_t i=0;i<count;++i)if(matrix[i][count]) {
+        repaired[datapump_index_nospec(positions[i],repaired.size())]^=matrix[i][count];++changed;
+    }
     const auto checked=syndromes(repaired,parity);
     if(std::any_of(checked.begin(),checked.begin()+static_cast<std::ptrdiff_t>(parity),[](auto x){return x!=0;}))
         throw Error("Uncorrectable Reed-Solomon interval");
+    datapump_speculation_barrier();
     word=std::move(repaired);return changed;
 }
 }
@@ -160,9 +175,12 @@ DecodedInterval decode_interval(std::span<const std::uint8_t> coded,const Interv
                                 std::span<const std::uint8_t> erasure_bits) {
     if(coded.size()!=stream_interval_bytes)throw Error("Incomplete fixed coding interval");
     if(!erasure_bits.empty() && erasure_bits.size()!=coded.size())throw Error("Incorrect interval erasure mask width");
+    datapump_speculation_barrier();
     std::array<std::uint8_t,stream_interval_bytes> missing{};
     for(auto position:erasures) {
-        if(position>=coded.size() || missing[position])throw Error("Invalid interval erasure position");
+        if(position>=coded.size())throw Error("Invalid interval erasure position");
+        position=datapump_index_nospec(position,missing.size());
+        if(missing[position])throw Error("Invalid interval erasure position");
         missing[position]=0xff;
     }
     if(!erasure_bits.empty())for(std::size_t i=0;i<missing.size();++i) {
@@ -180,6 +198,7 @@ DecodedInterval decode_interval(std::span<const std::uint8_t> coded,const Interv
     if(keyed) {
         const Bytes tag(body.begin()+static_cast<std::ptrdiff_t>(data_size),body.begin()+static_cast<std::ptrdiff_t>(data_size+stream_mac_bytes));
         if(!options.verifier(result.data,tag))throw Error("Interval authentication failed");
+        datapump_speculation_barrier();
         result.authenticated=true;
     }
     for(std::size_t i=0;i<coded.size();++i) {
@@ -225,6 +244,7 @@ Bytes encode_source(std::span<const std::uint8_t> input,std::size_t area,bool co
 Bytes decode_source(std::span<const std::uint8_t> areas,std::size_t area,bool compressed,std::size_t limit) {
     check_area(area);
     if(areas.empty() || areas.size()%area)throw Error("Incomplete source data areas");
+    datapump_speculation_barrier();
     limit=std::min(limit,Bytes{}.max_size());
     if(compressed) {
         auto decoded=compression::decode_lzma2(areas,limit);

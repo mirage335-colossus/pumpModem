@@ -22,7 +22,8 @@ void convention() {
     }
     for(const auto& name:{std::string{},std::string("../outside.bin"),std::string("a\\b"),std::string("a\nb"),
         std::string("a\0b",3),std::string(256,'x'),std::string("\xc0\x80",2),std::string(".."),std::string("a ###ATTACHMENT# b"),
-        std::string("a\xc2\x80" "b"),std::string("a\xc2\x85" "b"),std::string("a\xc2\x9f" "b")}) {
+        std::string("a\xc2\x80" "b"),std::string("a\xc2\x85" "b"),std::string("a\xc2\x9f" "b"),
+        std::string("\xc2"),std::string("\xe2\x82"),std::string("\xf0\x9f\x92")}) {
         bool rejected=false;try{attachment::marker(name);}catch(const Error&){rejected=true;}
         check(rejected,"invalid local attachment name was accepted");
         const auto raw=std::string(attachment::prefix)+name+std::string(attachment::suffix)+"payload";
