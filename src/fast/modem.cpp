@@ -418,7 +418,7 @@ struct Receiver::Impl {
         processing_rate(static_cast<double>(p.sample_rate)/low_rate_factor),sps(processing_rate/p.symbol_rate),
         omega(2*pi*p.carrier_hz/p.sample_rate),clock_period(sps) {
         validate(p);
-        equalizer_size=p.capacity_mode||p.channel==Channel::acoustic?21:5;
+        equalizer_size=p.capacity_mode||(p.channel==Channel::acoustic||p.channel==Channel::acoustic_short)?21:5;
         equalizer[equalizer_size/2]=1.;
         if(!sink)throw std::invalid_argument("fast receiver requires an interval sink");
         for(auto factor=low_rate_factor;factor>1;factor/=2)decimators.emplace_back();
@@ -622,7 +622,7 @@ struct Receiver::Impl {
         // quarters provide independent phase-invariant evidence; they never
         // authorize framing, refine timing, or search for a new boundary.
         constexpr std::size_t part_symbols=sync_symbols/4;
-        const auto threshold=config.channel==Channel::acoustic?.55:.72;
+        const auto threshold=(config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)?.55:.72;
         unsigned present_parts=0;
         double coherent_energy=0,total_energy=0;
         for(std::size_t begin=0;begin<sync_symbols;begin+=part_symbols) {
@@ -647,7 +647,7 @@ struct Receiver::Impl {
         const bool known_training=config.capacity_mode&&initial&&capacity_training_fit(fitted,clock_period).quality>.85;
         if(known_training)fitted=fit_initial_capacity_clock(fitted);
         const auto fit=correlation(fitted);
-        marker_present=fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && (initial || fit.energy>gain*gain*.06);
+        marker_present=fit.quality>((config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)?.55:.72) && fit.energy>1e-12 && (initial || fit.energy>gain*gain*.06);
         marker_good=marker_present;
         if(config.capacity_mode && marker_good) {
             // Exact 128-sign agreement strengthens provisional sync. Adaptive
@@ -700,7 +700,7 @@ struct Receiver::Impl {
             next_time=fitted+clock_period;
             marker_end=fitted;
             if(config.capacity_mode)group_phase_anchor=0;
-            if(config.channel==Channel::acoustic) {
+            if(config.channel==Channel::acoustic||config.channel==Channel::acoustic_short) {
                 // Supervised fractional-spaced NLMS on the known marker. No
                 // payload decisions or source interpretation select a lock.
                 equalizer.fill(0);equalizer[equalizer_size/2]=1.;
@@ -741,7 +741,7 @@ struct Receiver::Impl {
         // QPSK has a much wider decision region than dense APSK. Let the
         // acoustic loop follow its larger phase/ISI errors instead of freezing
         // precisely when tracking is needed most.
-        const auto tracking_limit=config.channel==Channel::acoustic&&config.constellation==4?.7:(train?.3:.08);
+        const auto tracking_limit=(config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)&&config.constellation==4?.7:(train?.3:.08);
         if(error_power>tracking_limit)return;
         if(!config.capacity_mode) {
             const auto phase_error=std::arg(value*std::conj(expected));
@@ -856,7 +856,7 @@ struct Receiver::Impl {
                     // amplitude/ISI error. Preserve and downweight their observed
                     // soft evidence for the inner code.
                     // Incoherent pilots and absent markers still erase positions.
-                    const float weight=config.channel==Channel::acoustic&&!incoherent?.2F:0.F;
+                    const float weight=(config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)&&!incoherent?.2F:0.F;
                     for(auto bit=begin;bit<end;++bit)soft[bit]*=weight;
                     // Capacity cadence remains established by the full marker.
                     // Only this group is erased; a later good pilot can resume
@@ -922,12 +922,12 @@ struct Receiver::Impl {
         ++sample;
         if(state.physical_complete)return;
         if(!locked) {
-            const auto time=static_cast<double>(sample)-(config.capacity_mode?8:(config.channel==Channel::acoustic?6:2))*sps-(config.capacity_mode?18:3);
+            const auto time=static_cast<double>(sample)-(config.capacity_mode?8:((config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)?6:2))*sps-(config.capacity_mode?18:3);
             if(time<static_cast<double>(sync_symbols+2)*sps)return;
             // The coarse search only proposes a timing hypothesis. The
             // full-precision fit and exact marker bits still admit it.
             const auto fit=correlation(time,!config.capacity_mode);
-            if(fit.quality>(config.channel==Channel::acoustic?.55:.72) && fit.energy>1e-12 && fit.quality>best_quality) {
+            if(fit.quality>((config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)?.55:.72) && fit.energy>1e-12 && fit.quality>best_quality) {
                 best_quality=fit.quality;best_time=time;
                 if(candidate_until==0)candidate_until=time+sps;
             }
@@ -936,7 +936,7 @@ struct Receiver::Impl {
                 best_quality=0;candidate_until=0;
             }
         }
-        while(locked && !state.physical_complete && static_cast<double>(sample)>next_time+(config.capacity_mode?8:(config.channel==Channel::acoustic?6:2))*sps+(config.capacity_mode?18:4)) {
+        while(locked && !state.physical_complete && static_cast<double>(sample)>next_time+(config.capacity_mode?8:((config.channel==Channel::acoustic||config.channel==Channel::acoustic_short)?6:2))*sps+(config.capacity_mode?18:4)) {
             if(position==0 && marker_size(config,interval_index)) {
                 const auto end=next_time;
                 // Absence accounting covers every whole training symbol,

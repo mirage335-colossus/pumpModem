@@ -324,10 +324,10 @@ void completion_between_polls() {
 int main() {
     try {
         continuous_console();completion_between_polls();
-        // Exercise the ordinary controller/session path for both shipped
-        // capacity defaults. Acoustic OFDM has independent startup, coding
-        // cycle and physical-end geometry from the cable waveform.
-        for(const auto profile:{"wire","acoustic"}) {
+        // Exercise the ordinary controller/session path for cable and both
+        // separate acoustic profiles, including their startup, coding cycle
+        // and physical-end geometry.
+        for(const auto profile:{"wire","acoustic","acoustic-short"}) {
             {
                 std::lock_guard lock(fixture::mutex);
                 fixture::transmitted.clear();fixture::input.clear();fixture::position=0;

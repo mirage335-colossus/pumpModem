@@ -5,7 +5,7 @@
 
 namespace datapump::fast {
 inline constexpr std::size_t physical_interval_bits=2048;
-enum class Channel { wire, ssb, fm, acoustic };
+enum class Channel { wire, ssb, fm, acoustic, acoustic_short };
 enum class CodeRate { half, three_quarters, seven_eighths, seven_ninths, eight_ninths, nine_tenths, two_thirds };
 struct Profile {
     Channel channel=Channel::wire;
@@ -15,6 +15,8 @@ struct Profile {
     unsigned ofdm_fft_size=8192;
     unsigned ofdm_prefix_samples=4096;
     unsigned ofdm_pilot_stride=8;
+    unsigned ofdm_training_blocks=16;
+    unsigned ldpc_frame_bits=64800;
     double ofdm_low_hz=500;
     double ofdm_high_hz=18000;
     unsigned marker_spacing_intervals=16;

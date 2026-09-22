@@ -15,9 +15,11 @@ namespace datapump::fast {
 using SourceReader = std::function<std::size_t(std::span<std::uint8_t>)>;
 class StreamEncoder;
 class StreamDecoder;
+enum class SourceEncoding;
 namespace testing {
 // Reproducible regression waveform only. Never selected by production settings.
 StreamEncoder deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t seed);
+StreamEncoder deterministic_encoder(Profile,const std::optional<Crypto>&,SourceReader,std::uint64_t seed,SourceEncoding);
 // Incomplete receptions retain opaque fixed source areas, including flags and
 // padding. Available only after physical end; null for a hole, an absent area,
 // or a successfully completed stream whose areas were compacted into its file.
@@ -99,6 +101,7 @@ private:
     StreamEncoder(Profile,const std::optional<Crypto>&,SourceReader,std::function<Bytes(std::size_t)>,
                   SourceEncoding = SourceEncoding::raw);
     friend StreamEncoder testing::deterministic_encoder(Profile,const Crypto&,SourceReader,std::uint64_t);
+    friend StreamEncoder testing::deterministic_encoder(Profile,const std::optional<Crypto>&,SourceReader,std::uint64_t,SourceEncoding);
 };
 
 class StreamDecoder {

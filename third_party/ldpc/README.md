@@ -11,6 +11,15 @@ All have normal frame length 64,800 bits. The project uses only LDPC, without
 DVB's outer BCH or broadcast framing. Original copyright and permissive license
 are retained in `LICENSE`. Original tables cite ETSI/DVB S2 and S2X standards.
 
+`short_tables.hpp` contains the unchanged `DVB_S2_TABLE_C4`, `C6`, and `C7`
+definitions from the same pinned `dvb_s2_tables.hh`. These have 16,200 coded
+bits and respectively 7,200, 10,800, and 11,880 information bits. Their nominal
+rate labels are 1/2, 2/3, and 3/4; the first and last actual short-frame rates
+are 4/9 and 11/15. Only the separate `acoustic-short` capacity profile uses
+these frames. Existing profiles retain the normal matrices and permutation.
+The [independent short-frame fixtures and checks](../../docs/validation-data/fast/acoustic-short-20260921/ldpc-short-method.md)
+document their upstream provenance and deterministic validation.
+
 `src/fast/ldpc.cpp` constructs an immutable sparse check graph and supplies a
 bounded, thread-safe layered log-domain sum-product decoder. The upstream
 algorithm motivated the layered ordering, but no upstream decoder code is
@@ -24,7 +33,8 @@ are recorded separately from the earlier cable sweep.
 ## Decoder contract and checks
 
 The public input is one exact, byte-aligned information block; the output is
-64,800 unpacked code bits, systematic information first, with MSB-first byte
+64,800 unpacked code bits by default, or 16,200 when explicitly selected by
+the local profile, systematic information first, with MSB-first byte
 packing. Soft input to decode is `log(P(bit=1)/P(bit=0))`, clipped to ±50.
 Fifty layered sum-product iterations are the default, with an explicit 1–100
 limit. Syndrome success is not an integrity check. All-zero likelihoods fail;

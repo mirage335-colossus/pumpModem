@@ -2,6 +2,7 @@
 #include "datapump/fast/file_transfer.hpp"
 #include "datapump/fast/codec.hpp"
 #include "datapump/fast/modem.hpp"
+#include "datapump/fast/ldpc.hpp"
 #include "datapump/fast/preset.hpp"
 #include "datapump/runtime.hpp"
 #include <algorithm>
@@ -27,9 +28,10 @@ const char* help=R"(Fast QAM/LDPC and APSK text and file transfer (separate from
   pump fast-listen [--device DEVICE] [--seconds N] [--save FILE]
 
 Matching local settings (no negotiation or received lengths):
-  --profile wire|ssb|fm|acoustic      Default wire
-  --format classic|capacity          Default capacity for all four channels
+  --profile wire|ssb|fm|acoustic|acoustic-short   Default wire
+  --format classic|capacity          Default capacity for every channel
                                     Acoustic: OFDM, 16-QAM, LDPC 3/4, depth 8
+                                    Acoustic-short: separate shorter-transfer acoustic profile
   --expected-snr DB                  Select modeled defaults over the ORIGINAL channel bandwidth
                                     Cable 65..25 dB / 18 kHz; acoustic 13..-27 dB / 17.5 kHz
                                     SSB/FM 20..-20 dB / 2.4 kHz; weak presets narrow bandwidth
@@ -39,7 +41,7 @@ Matching local settings (no negotiation or received lengths):
   --apsk 4|16|64|256                 Select classic format; default 256 (classic wire)
   --code-rate 1/2|2/3|3/4|7/8|7/9|8/9|9/10   Capacity supports 1/2, 2/3, 3/4, 7/9, 8/9, 9/10 LDPC
   --rs robust|high-rate|0.3%          Capacity uses approximately 0.3% parity/data
-  --interleave 1..16 (capacity), 1..64 (classic); defaults: cable/radio 4, acoustic 8
+  --interleave 1..16 (capacity), 1..64 (classic); defaults: cable/radio 4, acoustic 8, acoustic-short 1
   --sample-rate 44100..192000        Default 48000 Hz
   --symbol-rate HZ --carrier HZ --rolloff N --amplitude N
   --marker-spacing 1..16            Single-carrier capacity intervals per full marker (16)
@@ -143,7 +145,7 @@ Settings settings(const Args& a,bool load_key) {
         s.profile.ofdm_pilot_stride=static_cast<unsigned>(pilot_stride);
         s.profile.ofdm_low_hz=a.real("ofdm-low",s.profile.ofdm_low_hz);s.profile.ofdm_high_hz=a.real("ofdm-high",s.profile.ofdm_high_hz);
     } else for(const auto* option:{"ofdm-fft","ofdm-prefix","ofdm-low","ofdm-high","ofdm-pilots"})
-        if(a.has(option))throw Error("OFDM options require the acoustic capacity profile");
+        if(a.has(option))throw Error("OFDM options require an acoustic capacity profile");
     if(unsigned(a.has("mono"))+unsigned(a.has("right-mono"))+unsigned(a.has("stereo"))>1)
         throw Error("--mono, --right-mono and --stereo conflict");
     s.device=a.get("device","default");
@@ -215,7 +217,7 @@ int cli_main(int argc,char** argv) {
             <<",\"encrypted\":"<<(encrypted?"true":"false")<<",\"source_bytes_per_group\":"<<source_bytes_per_group(p,encrypted);
         if(p.capacity_mode) {
             const auto parity=capacity_parity_symbols(p)*2;
-            const auto info=static_cast<std::size_t>(std::llround(64800*code_rate_value(p.code_rate)))/8*p.interleave_depth;
+            const auto info=ldpc::data_bits(p.code_rate,p.ldpc_frame_bits)/8*p.interleave_depth;
             std::cout<<",\"source_bytes_per_cycle\":"<<capacity_source_bytes_per_cycle(p,encrypted)
                 <<",\"ldpc_blocks_per_cycle\":"<<p.interleave_depth
                 <<",\"rs_parity_bytes\":"<<parity<<",\"rs_parity_data_ratio\":"<<static_cast<double>(parity)/((info&~std::size_t{1})-parity);
@@ -234,6 +236,8 @@ int cli_main(int argc,char** argv) {
         if(p.acoustic_ofdm)std::cout<<",\"ofdm_fft_size\":"<<p.ofdm_fft_size<<",\"ofdm_prefix_samples\":"<<p.ofdm_prefix_samples<<",\"ofdm_pilot_stride\":"<<p.ofdm_pilot_stride
             <<",\"ofdm_low_hz\":"<<p.ofdm_low_hz<<",\"ofdm_high_hz\":"<<p.ofdm_high_hz
             <<",\"occupied_lower_hz\":"<<occupied_lower_hz(p)<<",\"occupied_upper_hz\":"<<occupied_upper_hz(p);
+        if(p.channel==Channel::acoustic_short&&p.capacity_mode)
+            std::cout<<",\"ldpc_frame_bits\":"<<p.ldpc_frame_bits<<",\"ofdm_training_blocks\":"<<p.ofdm_training_blocks;
         if(a.has("estimate-bytes")) {
             const auto estimate=estimate_transmission(p,encrypted,a.integer("estimate-bytes",0));
             std::cout<<",\"estimated_seconds\":"<<estimate.seconds<<",\"estimated_source_bps\":"<<estimate.source_bps

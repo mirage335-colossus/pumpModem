@@ -13,7 +13,6 @@ namespace datapump::fast::acoustic_ofdm {
 namespace {
 using C=std::complex<double>;
 constexpr double pi=std::numbers::pi;
-constexpr std::size_t training_blocks=16;
 constexpr std::size_t signature_tones=128;
 constexpr unsigned signature_errors=16;
 // Once acquired, the fixed block/cycle ordinal is already established. Allow
@@ -105,11 +104,11 @@ std::uint64_t transmission_samples(const Profile& p,std::size_t intervals) {
     if(intervals%g.cycle_intervals)throw Error("Acoustic OFDM requires complete fixed coding cycles");
     const auto cycles=intervals/g.cycle_intervals;
     const auto blocks=checked_product(cycles,g.blocks+1)-1;
-    if(blocks>std::numeric_limits<std::uint64_t>::max()-training_blocks)throw Error("Acoustic OFDM duration overflow");
-    return checked_product(blocks+training_blocks,g.length);
+    if(blocks>std::numeric_limits<std::uint64_t>::max()-p.ofdm_training_blocks)throw Error("Acoustic OFDM duration overflow");
+    return checked_product(blocks+p.ofdm_training_blocks,g.length);
 }
 std::size_t interval_symbols(const Profile& p,std::size_t){Geometry g(p);return (g.blocks+g.cycle_intervals-1)/g.cycle_intervals;}
-std::size_t preamble_symbols(const Profile&){return training_blocks;}
+std::size_t preamble_symbols(const Profile& p){return p.ofdm_training_blocks;}
 std::size_t pulse_tail_symbols(const Profile&){return 0;}
 double occupied_lower(const Profile& p){return std::ceil(p.ofdm_low_hz*p.ofdm_fft_size/p.sample_rate)*p.sample_rate/p.ofdm_fft_size;}
 double occupied_upper(const Profile& p){return std::floor(p.ofdm_high_hz*p.ofdm_fft_size/p.sample_rate)*p.sample_rate/p.ofdm_fft_size;}
@@ -131,12 +130,12 @@ struct Transmitter::Impl {
             }
             if(std::any_of(part.begin(),part.end(),[](auto b){return b>1;}))throw Error("Non-bit acoustic source");
         }
-        have_cycle=true;block_in_cycle=0;refresh=block>=training_blocks;return true;
+        have_cycle=true;block_in_cycle=0;refresh=block>=p.ofdm_training_blocks;return true;
     }
     bool next() {
         if(!have_cycle&&!load_cycle()){done=true;return false;}
         std::vector<C> spectrum(g.n);
-        if(block<training_blocks) {
+        if(block<p.ofdm_training_blocks) {
             for(const auto k:g.active)spectrum[k]=known(k,block<2?0:block);
         } else if(refresh) {
             for(const auto k:g.active)spectrum[k]=known(k,block);
@@ -181,7 +180,7 @@ struct Transmitter::Impl {
 
 struct Receiver::Impl {
     Profile p;Geometry g;IntervalSink sink;SymbolObserver observer,input_observer;DiagnosticObserver diagnostic;ModemProgress state;
-    std::vector<float> pcm,cycle_soft,pending_soft;std::uint64_t first=0,received=0,next_search=0,block=training_blocks;
+    std::vector<float> pcm,cycle_soft,pending_soft;std::uint64_t first=0,received=0,next_search=0,block=0;
     std::vector<C> reference_fft,channel;std::vector<double> variance;
     std::vector<std::size_t> signature;
     bool eof=false,pending=false,locked=false,refresh=false;
@@ -190,6 +189,7 @@ struct Receiver::Impl {
     Impl(Profile config,IntervalSink target,SymbolObserver cb,SymbolObserver input,DiagnosticObserver diag):p(checked(config)),g(p),sink(std::move(target)),observer(std::move(cb)),input_observer(std::move(input)),diagnostic(std::move(diag)),
         cycle_soft(g.cycle_bits),reference_fft(2*g.n),channel(g.n),variance(g.n,1) {
         validate(p);if(!sink)throw Error("Missing acoustic OFDM sink");
+        block=p.ofdm_training_blocks;
         std::vector<C> ref(g.n);
         for(auto k:g.active){ref[k]=known(k,0);ref[g.n-k]=std::conj(ref[k]);}
         fft(ref,true);
@@ -286,18 +286,18 @@ struct Receiver::Impl {
         // two identical training waveforms can accidentally fit away.
         // Use the last fitting block as the amplitude/timing reference so
         // startup gain settling does not anchor reception to its weakest part.
-        // Block 15 remains independent and is never included in this estimate.
-        auto anchor=spectrum(candidate+(training_blocks-2)*g.length*period,period);
-        for(auto k:g.active)anchor[k]/=known(k,training_blocks-2);
+        // The final training block remains independent of this estimate.
+        auto anchor=spectrum(candidate+(p.ofdm_training_blocks-2)*g.length*period,period);
+        for(auto k:g.active)anchor[k]/=known(k,p.ofdm_training_blocks-2);
         std::vector<C> sum(g.n);
         std::vector<double> squared(g.n),raw_variance(g.n);
-        const auto count=training_blocks-3;
+        const auto count=p.ofdm_training_blocks-3;
         double weight_sum=0;
-        for(std::size_t ordinal=2;ordinal<training_blocks-1;++ordinal) {
+        for(std::size_t ordinal=2;ordinal<p.ofdm_training_blocks-1;++ordinal) {
             auto current=spectrum(candidate+ordinal*g.length*period,period);
             for(auto k:g.active)current[k]/=known(k,ordinal);
             double residual_delay=0;C common=1.;
-            if(ordinal!=training_blocks-2) {
+            if(ordinal!=p.ofdm_training_blocks-2) {
                 double power=0;
                 for(auto k:g.active){cross[k]=current[k]*std::conj(anchor[k]);power+=std::norm(anchor[k]);}
                 const auto fitted=delay_fit(cross,g.active,6.);residual_delay=fitted.first;
@@ -326,7 +326,7 @@ struct Receiver::Impl {
             variance[k]=std::max(sum/count,std::norm(channel[k])*1e-6+1e-18);
         }
         const auto check=strongest(g.active);
-        auto verification=spectrum(candidate+(training_blocks-1)*g.length*period,period);
+        auto verification=spectrum(candidate+(p.ofdm_training_blocks-1)*g.length*period,period);
         // Startup gain control or slow timing motion can change the final
         // block relative to the fitting blocks without changing its
         // marker. Fit those common quantities using only the OTHER tones: all
@@ -337,16 +337,16 @@ struct Receiver::Impl {
         double normalization=0;
         for(auto k:g.active)if(!held_out[k]) {
             calibration.push_back(k);
-            cross[k]=verification[k]*std::conj(channel[k]*known(k,training_blocks-1));
+            cross[k]=verification[k]*std::conj(channel[k]*known(k,p.ofdm_training_blocks-1));
             normalization+=std::norm(channel[k]);
         }
         const auto [final_delay,correlation]=delay_fit(cross,calibration,6.);
         const auto common=normalization>1e-30?correlation/normalization:C{};
         if(std::abs(common)<=.1||std::abs(common)>=10||
-            !verify(verification,training_blocks-1,check,common,final_delay)){pending=false;return;}
+            !verify(verification,p.ofdm_training_blocks-1,check,common,final_delay)){pending=false;return;}
         signature=strongest(g.verify);locked=true;pending=false;state.acquired=true;
-        next_window=candidate+training_blocks*g.length*period+final_delay*.8;
-        state.clock_error_ppm=(period-1)*1e6;state.symbols=training_blocks;
+        next_window=candidate+p.ofdm_training_blocks*g.length*period+final_delay*.8;
+        state.clock_error_ppm=(period-1)*1e6;state.symbols=p.ofdm_training_blocks;
     }
     void process_block() {
         auto y=spectrum(next_window,period);std::vector<C> cross(g.n);
@@ -415,7 +415,7 @@ struct Receiver::Impl {
             // deep frequency-selective fades and yields confidently wrong bits.
             const auto input_noise=std::max(variance[k]*std::norm(common),local_error/std::max<std::size_t>(local_count,1));
             const auto nv=input_noise/std::max(norm,1e-30);
-            if(diagnostic)try{diagnostic({block,(block-training_blocks)/(g.blocks+1)*g.cycle_bits+offset,k,value,nv,norm,state.clock_error_ppm,delay,present});}catch(...){}
+            if(diagnostic)try{diagnostic({block,(block-p.ofdm_training_blocks)/(g.blocks+1)*g.cycle_bits+offset,k,value,nv,norm,state.clock_error_ppm,delay,present});}catch(...){}
             unsigned closest=0;
             if(present&&std::isfinite(value.real())&&std::isfinite(value.imag()))closest=square_qam_soft_demodulate(p.constellation,value,std::span(metrics).first(g.bps));
             error+=std::norm(value-qam(p.constellation,closest));++count;
@@ -450,7 +450,7 @@ struct Receiver::Impl {
                 if(received<next_window+g.length*period+18)break;
                 process_block();
             } else if(pending) {
-                if(received<candidate+training_blocks*g.length*1.001+20)break;
+                if(received<candidate+p.ofdm_training_blocks*g.length*1.001+20)break;
                 acquire();
             } else {
                 if(received<next_search)break;

@@ -15,7 +15,7 @@ namespace {
 double maximum_expected_snr(Channel c) {
     switch(c) {
     case Channel::wire:return 65;
-    case Channel::acoustic:return 13;
+    case Channel::acoustic:case Channel::acoustic_short:return 13;
     case Channel::ssb:case Channel::fm:return 20;
     }
     throw Error("Unknown Fast SNR channel");
@@ -23,7 +23,7 @@ double maximum_expected_snr(Channel c) {
 double reference_bandwidth(Channel c) {
     switch(c) {
     case Channel::wire:return 18000;
-    case Channel::acoustic:return 17500;
+    case Channel::acoustic:case Channel::acoustic_short:return 17500;
     case Channel::ssb:case Channel::fm:return 2400;
     }
     throw Error("Unknown Fast SNR channel");
@@ -64,8 +64,8 @@ double decoder_snr(unsigned order,CodeRate rate,Channel channel) {
 }
 Profile single_carrier_base(Channel c) {
     auto p=profile(c);
-    if(c==Channel::acoustic) {
-        p.acoustic_ofdm=false;p.carrier_hz=1800;p.rolloff=.20;
+    if(c==Channel::acoustic||c==Channel::acoustic_short) {
+        p.acoustic_ofdm=false;p.ofdm_training_blocks=16;p.carrier_hz=1800;p.rolloff=.20;
         // OFDM's nominal PCM RMS is amplitude/4.5; the unit-energy
         // single carrier produces amplitude/sqrt(2). Keep the same average
         // output power when narrowing, rather than adding about 10 dB.
@@ -79,7 +79,7 @@ Profile single_carrier_base(Channel c) {
 }
 double maximum_baud(const Profile& p) {
     auto bandwidth=reference_bandwidth(p.channel);
-    if(p.channel==Channel::acoustic)bandwidth=std::min(bandwidth,2*(p.carrier_hz-500));
+    if(p.channel==Channel::acoustic||p.channel==Channel::acoustic_short)bandwidth=std::min(bandwidth,2*(p.carrier_hz-500));
     bandwidth=std::min({bandwidth,2*(p.carrier_hz-50),2*(p.sample_rate*.45-p.carrier_hz)});
     return std::min(bandwidth/(1+p.rolloff),p.sample_rate/2.49);
 }
@@ -100,7 +100,7 @@ double parse_rate(std::string_view text) {
 double default_expected_snr(Channel c) {
     switch(c) {
     case Channel::wire:return 36;
-    case Channel::acoustic:return 3;
+    case Channel::acoustic:case Channel::acoustic_short:return 3;
     case Channel::ssb:case Channel::fm:return 20;
     }
     throw Error("Unknown Fast SNR channel");
@@ -134,7 +134,7 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
     constexpr std::array rates{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters,
         CodeRate::seven_ninths,CodeRate::eight_ninths,CodeRate::nine_tenths};
     for(const bool ofdm:{true,false}) {
-        if(ofdm&&c!=Channel::acoustic)continue;
+        if(ofdm&&c!=Channel::acoustic&&c!=Channel::acoustic_short)continue;
         for(unsigned order=4;order<=default_profile.constellation;order*=4)for(auto rate:rates) {
             // Gaussian/GMI estimates overstate this finite decoder's ability
             // to recover the many weak bit positions of very dense rate-1/2
@@ -149,7 +149,8 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
             // marker, OFDM has 256 held-out signs with an error allowance.
             // Do not advertise low-SNR LDPC operating points while ignoring
             // the stronger SNR needed to acquire/retain physical framing.
-            const auto target=std::max(ofdm?6.:13.,decoder_snr(order,rate,c)+3.);
+            const auto allowance=c==Channel::acoustic_short?2.:3.;
+            const auto target=std::max(ofdm?6.:13.,decoder_snr(order,rate,c)+allowance);
             const auto usable_band=band*std::min(1.,std::pow(10.,(expected-target)/10.));
             if(ofdm) {
                 if(usable_band<1000)continue;
@@ -159,7 +160,21 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
                 p.symbol_rate=canonical_frequency(std::min(maximum_baud(p),usable_band/(1+p.rolloff)));
                 if(p.symbol_rate<100)p.interleave_depth=1;
             }
-            if(!valid(p))continue;
+            if(c!=Channel::acoustic_short&&!valid(p))continue;
+            if(c==Channel::acoustic_short) {
+                // Minimize complete airtime for a 2.5 KiB message, allowing for
+                // XZ overhead and a bounded filename. This is a local preset
+                // choice, never a length selected from a received header.
+                for(const unsigned fft:{2048U,4096U,8192U,16384U,32768U}) {
+                    auto candidate=p;
+                    if(ofdm)candidate.ofdm_fft_size=fft;
+                    else if(fft!=2048)continue;
+                    if(!valid(candidate))continue;
+                    const auto score=-estimate_transmission(candidate,false,2800).seconds;
+                    if(score>best || best==-1) {best=score;result.profile=candidate;}
+                }
+                continue;
+            }
             if(ofdm) {
                 // Narrowing reduces data tones, so retaining eight LDPC frames
                 // made channel refreshes drift from about 10 to 37/74 seconds
@@ -175,7 +190,7 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
             if(throughput>best) {best=throughput;result.profile=p;}
         }
     }
-    if(best<0)throw Error("No implemented Fast waveform fits the requested SNR");
+    if(best==-1)throw Error("No implemented Fast waveform fits the requested SNR");
     if(!result.profile.acoustic_ofdm&&occupied_bandwidth_hz(result.profile)<band*.99)
         result.note+=" Narrow single-carrier presets retain about 13 dB selected-band SNR for marker acquisition.";
     return result;

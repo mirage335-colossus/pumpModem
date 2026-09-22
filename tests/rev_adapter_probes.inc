@@ -55,15 +55,15 @@
                     for(const auto& binding:bindings)if(binding.control.scope==ui::ScreenScope::fast)
                         require(binding.control.command!=ui::Command::fast_listen,"Rev Fast retained a listening control");
                     application.toggle(ui::Field::developer_mode,true);application.select_page(ui::Page::fast_modem);settle();
-                    for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
+                    for(const auto* channel:{"wire","acoustic","ssb","fm","acoustic-short"}) {
                         application.select(ui::Field::fast_profile,channel);settle();
-                        for(const auto field:{ui::Field::fast_expected_snr,ui::Field::fast_symbol_rate,ui::Field::fast_mono}) {
+                        for(const auto field:{ui::Field::fast_profile,ui::Field::fast_expected_snr,ui::Field::fast_symbol_rate,ui::Field::fast_mono}) {
                             auto* choice=by_field(field).choice;
                             require(choice&&allows_input(choice)&&choice->dropdownText,
-                                "Rev Fast SNR/rate/channel dropdown is hidden, disabled or lacks its value");
+                                "Rev Fast profile/SNR/rate/channel dropdown is hidden, disabled or lacks its value");
                             auto* text=choice->dropdownText;text->layoutText();
                             require(text->width<=text->rect.w&&text->height<=text->rect.h,
-                                "Rev Fast SNR/rate/channel value clips at the minimum window size");
+                                "Rev Fast profile/SNR/rate/channel value clips at the minimum window size");
                         }
                         const auto nominal=application.field(ui::Field::fast_expected_snr).options.at(1).id;
                         const auto low=application.field(ui::Field::fast_expected_snr).options.back().id;

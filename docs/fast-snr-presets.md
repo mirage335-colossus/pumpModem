@@ -15,6 +15,7 @@ initial GUI channel; output routing selections remain retained.
 | --- | ---: | ---: | ---: |
 | Audio cable | 36 dB | 65 to 25 dB | 18,000 Hz |
 | Speakers/microphone | 3 dB | 13 to −27 dB | 17,500 Hz |
+| Speakers/mic · short | 3 dB | 13 to −27 dB | 17,500 Hz |
 | IC-7100 SSB | 20 dB | 20 to −20 dB | 2,400 Hz |
 | IC-7100 FM | 20 dB | 20 to −20 dB | 2,400 Hz |
 
@@ -47,6 +48,12 @@ presets at those actual assumptions. Lower settings compare implemented square-Q
 combinations using estimated 50 MB source throughput, including actual cycle,
 marker, pilot and padding overhead. They do not optimize a received channel
 response or promise globally optimal coding.
+
+The separate [short acoustic profile](fast-acoustic-short.md) instead minimizes
+complete airtime for 2,800 encoded bytes, including startup and physical-end
+silence. It uses 16,200-bit LDPC frames and six OFDM training blocks, with a
+short-profile-only 2 dB decoder allowance and the same 6 dB acquisition floor.
+The other profiles retain their existing settings and selection rules.
 
 Low-order decoder thresholds use the archived
 [LDPC/QAM margin analysis](fast-acoustic-margin-targets.md); higher-order

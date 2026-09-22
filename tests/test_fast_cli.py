@@ -71,7 +71,7 @@ class FastCLI(unittest.TestCase):
         self.assertGreater(info["estimated_source_bps"], 310000)
 
     def test_local_output_routing(self):
-        for profile in ("wire", "ssb", "fm", "acoustic"):
+        for profile in ("wire", "ssb", "fm", "acoustic", "acoustic-short"):
             for flag, mono, channels in (("--mono", True, "left"), ("--right-mono", True, "right"), ("--stereo", False, "stereo")):
                 report = json.loads(self.run_pump("fast-info", "--profile", profile, flag).stdout)
                 self.assertEqual(report["mono"], mono)
@@ -79,6 +79,33 @@ class FastCLI(unittest.TestCase):
         self.run_pump("fast-info", "--mono", "--stereo", ok=False)
         self.run_pump("fast-info", "--mono", "--right-mono", ok=False)
         self.run_pump("fast-info", "--right-mono", "--stereo", ok=False)
+
+    def test_short_acoustic_profile_is_separate(self):
+        options = ("--expected-snr", "3", "--estimate-bytes", "2560")
+        existing = json.loads(self.run_pump("fast-info", "--profile", "acoustic", *options).stdout)
+        short = json.loads(self.run_pump("fast-info", "--profile", "acoustic-short", *options).stdout)
+        self.assertEqual(short["profile"], "acoustic-short")
+        self.assertEqual(short["format"], "capacity")
+        self.assertEqual(short["waveform"], "ofdm")
+        self.assertEqual(short["expected_snr_db"], 3)
+        self.assertTrue(short["snr_preset_unmodified"])
+        self.assertEqual(short["ldpc_blocks_per_cycle"], 1)
+        self.assertEqual(short["ldpc_frame_bits"], 16200)
+        self.assertEqual(short["ofdm_training_blocks"], 6)
+        self.assertLess(short["estimated_seconds"], existing["estimated_seconds"])
+        self.assertEqual(existing["ldpc_blocks_per_cycle"], 2)
+        self.assertNotIn("ldpc_frame_bits", existing)
+        for rate, systematic_bits in (("1/2", 7200), ("2/3", 10800), ("3/4", 11880)):
+            report = json.loads(self.run_pump("fast-info", "--profile", "acoustic-short", "--code-rate", rate).stdout)
+            parity = report["rs_parity_bytes"]
+            aligned_bytes = (systematic_bits // 8) & ~1
+            self.assertAlmostEqual(report["rs_parity_data_ratio"], parity / (aligned_bytes - parity))
+        for rate in ("7/9", "8/9", "9/10"):
+            self.run_pump("fast-info", "--profile", "acoustic-short", "--code-rate", rate, ok=False)
+        classic = json.loads(self.run_pump("fast-info", "--profile", "acoustic-short", "--format", "classic").stdout)
+        self.assertEqual(classic["profile"], "acoustic-short")
+        self.assertEqual(classic["format"], "classic")
+        self.assertEqual(classic["symbol_rate"], 500)
 
     def test_explicit_acoustic_capacity_profile(self):
         legacy = json.loads(self.run_pump("fast-info", "--profile", "acoustic", "--format", "classic").stdout)
@@ -292,6 +319,7 @@ class FastCLI(unittest.TestCase):
         self.assertIn(b"EOF/cancellation is not physical end", help_text)
         self.assertIn(b"--mono", help_text)
         self.assertIn(b"--stereo", help_text)
+        self.assertIn(b"acoustic-short", help_text)
         for option, value in (("profile", "unknown"), ("apsk", "32"),
                               ("interleave", "0"), ("interleave", "65"),
                               ("sample-rate", "8000"), ("sample-rate", "192001"),

@@ -147,7 +147,11 @@ for the default change and the [acoustic live study](fast-acoustic-live-study.md
 for earlier measurements and their limits. Select `--qam 64 --stereo` explicitly
 to reproduce the earlier preset; matching QAM is required at both peers.
 The GUI channel selector offers **Audio cable · QAM / LDPC**, **IC-7100 SSB ·
-2.4 kHz**, **IC-7100 FM · voice band**, and **Speakers / microphone**.
+2.4 kHz**, **IC-7100 FM · voice band**, **Speakers / microphone**, and
+**Speakers / mic · short**. The separate [short acoustic profile](fast-acoustic-short.md)
+uses smaller coding blocks and less training, taking about 11.8 seconds for the
+tested 2.5 KiB attachment at its default 3 dB expected SNR. Existing profiles
+and the initial speakers/microphone selection are unchanged.
 All four classic presets remain available through the CLI with
 `--format classic`.
 

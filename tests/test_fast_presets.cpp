@@ -65,6 +65,56 @@ int main() {try {
         rejects([&]{resolve_snr_preset(channel,std::numeric_limits<double>::quiet_NaN());});
         rejects([&]{resolve_snr_preset(channel,std::numeric_limits<double>::infinity());});
     }
+    // The short acoustic profile is additional; original local IDs and frame
+    // geometries keep their existing enum ordinals and default parameters.
+    require(static_cast<unsigned>(Channel::wire)==0&&static_cast<unsigned>(Channel::ssb)==1&&
+        static_cast<unsigned>(Channel::fm)==2&&static_cast<unsigned>(Channel::acoustic)==3,
+        "existing channel identity changed");
+    for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
+        require(profile(channel).ldpc_frame_bits==64800&&profile(channel).ofdm_training_blocks==16,
+            "existing channel frame/training geometry changed");
+        auto invalid=profile(channel);invalid.ldpc_frame_bits=16200;
+        rejects([&]{validate(invalid);});
+        invalid=profile(channel);invalid.ofdm_training_blocks=6;
+        rejects([&]{validate(invalid);});
+    }
+    require(parse_channel("acoustic-short")==Channel::acoustic_short&&
+        channel_name(Channel::acoustic_short)=="acoustic-short", "short profile name is not canonical");
+    require(default_expected_snr(Channel::acoustic_short)==3,"short profile default SNR changed");
+    const auto short_options=expected_snr_options(Channel::acoustic_short);
+    require(short_options==expected_snr_options(Channel::acoustic),"short acoustic SNR choices differ");
+    for(const auto snr:short_options) {
+        const auto selection=resolve_snr_preset(Channel::acoustic_short,snr);
+        const auto& p=selection.profile;validate(p);
+        require(p.channel==Channel::acoustic_short&&p.capacity_mode&&p.ldpc_frame_bits==16200&&
+            p.interleave_depth==1,"short preset lost fixed short coding geometry");
+        require(p.code_rate==CodeRate::half||p.code_rate==CodeRate::two_thirds||p.code_rate==CodeRate::three_quarters,
+            "short preset selected an unsupported LDPC rate");
+        require(p.ofdm_training_blocks==(p.acoustic_ofdm?6U:16U),"short preset training count mismatch");
+        require(occupied_bandwidth_hz(p)<=17500,"short acoustic preset escaped reference band");
+        if(snr<13&&!p.acoustic_ofdm)
+            require(snr+10*std::log10(17500/occupied_bandwidth_hz(p))>=12.99,
+                "short SC fallback ignores marker SNR requirement");
+        const auto rate=symbol_rate_option_id(p);
+        require(profile_id(apply_symbol_rate_option(p,rate))==profile_id(p),"short rate roundtrip changed identity");
+        require(estimate_transmission(p,false,2800).seconds>=6,"short estimate omitted physical absence");
+    }
+    const auto short_default=resolve_snr_preset(Channel::acoustic_short,3).profile;
+    const auto long_default=resolve_snr_preset(Channel::acoustic,3).profile;
+    require(short_default.acoustic_ofdm&&short_default.ofdm_training_blocks==6,
+        "default short profile is not OFDM with compact training");
+    require(preamble_symbols(short_default)==6&&preamble_symbols(long_default)==16,
+        "OFDM training does not follow local profile geometry");
+    require(estimate_transmission(short_default,false,2800).seconds<
+        estimate_transmission(long_default,false,2800).seconds,"short profile did not reduce complete airtime");
+    auto short_altered=short_default;short_altered.ofdm_training_blocks=8;
+    require(profile_id(short_default)!=profile_id(short_altered),"short training is not bound to integrity context");
+    short_altered=short_default;short_altered.ldpc_frame_bits=64800;
+    require(profile_id(short_default)!=profile_id(short_altered),"short LDPC geometry is not bound to integrity context");
+    short_altered=short_default;short_altered.ofdm_training_blocks=5;
+    rejects([&]{validate(short_altered);});
+    short_altered=short_default;short_altered.code_rate=CodeRate::eight_ninths;
+    rejects([&]{validate(short_altered);});
     const auto acoustic=expected_snr_options(Channel::acoustic);
     for(const double value:{13,10,6,3,0,-3,-6,-10,-20,-27})
         require(std::find(acoustic.begin(),acoustic.end(),value)!=acoustic.end(),"notable acoustic SNR missing");

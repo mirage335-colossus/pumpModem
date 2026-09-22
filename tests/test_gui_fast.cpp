@@ -181,6 +181,37 @@ void snr_and_symbol_rate_controls() {
     check(std::any_of(controller.field(F::fast_symbol_rate).options.begin(),controller.field(F::fast_symbol_rate).options.end(),
         [&](const auto& option){return option.id==fast::symbol_rate_option_id(narrow_auto);}),
         "Manual narrow SC Auto timing has no matching explicit dropdown option");
+    controller.select(F::fast_profile,"acoustic-short");
+    const auto short_acoustic=fast::resolve_snr_preset(fast::Channel::acoustic_short,3).profile;
+    check(controller.field(F::fast_profile).selected=="acoustic-short"&&
+        controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_symbol_rate).selected=="auto"&&
+        controller.field(F::fast_constellation).selected==std::to_string(short_acoustic.constellation)&&
+        controller.field(F::fast_depth).selected==std::to_string(short_acoustic.interleave_depth)&&
+        controller.field(F::fast_mono).selected=="left"&&
+        controller.field(F::fast_detail).text.find("acoustic-short")!=std::string::npos,
+        "Short-transfer acoustic profile did not select its independent 3 dB preset");
+    check(controller.field(F::fast_coding).options.size()==3&&
+        controller.field(F::fast_coding).options[0].id=="half"&&
+        controller.field(F::fast_coding).options[1].id=="two-thirds"&&
+        controller.field(F::fast_coding).options[2].id=="three-quarters",
+        "Short-transfer acoustic offered unsupported LDPC rates");
+    const auto short_coding=controller.field(F::fast_coding).selected;
+    controller.select(F::fast_coding,"nine-tenths");
+    check(controller.field(F::fast_coding).selected==short_coding,
+        "Unsupported normal-frame LDPC rate was accepted for short-transfer acoustic");
+    controller.select(F::fast_mono,"right");controller.select(F::fast_expected_snr,"0");
+    controller.select(F::fast_profile,"acoustic");
+    check(controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_depth).selected==std::to_string(default_acoustic.interleave_depth)&&
+        controller.field(F::fast_coding).options.size()==6&&
+        controller.field(F::fast_mono).selected=="stereo",
+        "Short-transfer acoustic settings changed the existing acoustic profile");
+    controller.select(F::fast_profile,"acoustic-short");
+    check(controller.field(F::fast_expected_snr).selected=="3"&&
+        controller.field(F::fast_depth).selected==std::to_string(short_acoustic.interleave_depth)&&
+        controller.field(F::fast_mono).selected=="right",
+        "Returning to short-transfer acoustic did not reset SNR while retaining its output routing");
     controller.select(F::fast_profile,"wire");
     check(controller.field(F::fast_expected_snr).selected=="36",
         "Returning to cable restored an old expected SNR instead of its 36 dB default");
@@ -227,8 +258,9 @@ void presentation_and_retention() {
     app.toggle(F::developer_mode,true);
     const auto acoustic=fast::resolve_snr_preset(fast::Channel::acoustic,3).profile;
     const auto& profiles=app.field(F::fast_profile).options;
-    check(profiles.size()==4&&profiles[0].id=="wire"&&profiles[1].id=="ssb"&&
-        profiles[2].id=="fm"&&profiles[3].id=="acoustic"&&app.field(F::fast_constellation).options.size()==11,
+    check(profiles.size()==5&&profiles[0].id=="wire"&&profiles[1].id=="ssb"&&
+        profiles[2].id=="fm"&&profiles[3].id=="acoustic"&&profiles[4].id=="acoustic-short"&&
+        profiles[4].label=="Speakers / mic · short"&&app.field(F::fast_constellation).options.size()==11,
           "Fast channel/constellation selections are incomplete");
     check(!app.field(F::fast_encryption).checked&&app.enabled(C::fast_listen)&&!app.enabled(C::fast_transmit),"Fast defaults must allow plain reception and require nonempty transmit text");
     check(!app.field(F::fast_key).enabled&&!app.enabled(C::fast_open_key)&&!app.enabled(C::fast_generate_key),"Plain mode retained active key controls");

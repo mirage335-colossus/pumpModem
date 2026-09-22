@@ -17,7 +17,7 @@ Profile classic_profile(Channel channel) {
     case Channel::wire: break;
     case Channel::ssb: p.symbol_rate=2000;p.carrier_hz=1500;break;
     case Channel::fm: p.symbol_rate=2000;p.carrier_hz=1500;p.constellation=4;break;
-    case Channel::acoustic: p.symbol_rate=500;p.carrier_hz=1800;p.constellation=4;p.amplitude=.35;p.interleave_depth=5;break;
+    case Channel::acoustic: case Channel::acoustic_short: p.symbol_rate=500;p.carrier_hz=1800;p.constellation=4;p.amplitude=.35;p.interleave_depth=5;break;
     default: throw Error("Unknown fast channel profile");
     }
     return p;
@@ -39,11 +39,16 @@ Profile capacity_profile(Channel channel) {
         p.marker_spacing_intervals=4;p.pilot_spacing_symbols=64;
         break;
     case Channel::acoustic:
+    case Channel::acoustic_short:
         p.acoustic_ofdm=true;
         p.constellation=16;p.code_rate=CodeRate::three_quarters;p.interleave_depth=8;
         p.ofdm_fft_size=32768;p.ofdm_prefix_samples=4096;p.ofdm_pilot_stride=16;
         p.symbol_rate=2000;p.carrier_hz=4000;p.rolloff=.20;p.amplitude=.40;
         p.marker_spacing_intervals=1;p.pilot_spacing_symbols=32;
+        if(channel==Channel::acoustic_short) {
+            p.ldpc_frame_bits=16200;p.ofdm_training_blocks=6;p.interleave_depth=1;
+            p.ofdm_fft_size=8192;p.ofdm_prefix_samples=512;
+        }
         break;
     default: throw Error("Unknown fast channel profile");
     }
@@ -55,13 +60,14 @@ std::string_view channel_name(Channel c) {
     case Channel::ssb:return "ssb";
     case Channel::fm:return "fm";
     case Channel::acoustic:return "acoustic";
+    case Channel::acoustic_short:return "acoustic-short";
     }
     throw Error("Unknown fast channel profile");
 }
 Channel parse_channel(std::string_view s) {
-    for(auto c:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic})
+    for(auto c:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic,Channel::acoustic_short})
         if(channel_name(c)==s)return c;
-    throw Error("Fast channel must be wire, ssb, fm or acoustic");
+    throw Error("Fast channel must be wire, ssb, fm, acoustic or acoustic-short");
 }
 double code_rate_value(CodeRate r) {
     switch(r) {
@@ -96,7 +102,7 @@ CodeRate parse_code_rate(std::string_view name) {
 void validate(const Profile& p) {
     (void)channel_name(p.channel);(void)code_rate_value(p.code_rate);
     if(p.acoustic_ofdm) {
-        if(!p.capacity_mode||p.channel!=Channel::acoustic)
+        if(!p.capacity_mode||(p.channel!=Channel::acoustic&&p.channel!=Channel::acoustic_short))
             throw Error("Acoustic OFDM requires the acoustic capacity profile");
         if(p.sample_rate!=48000)
             throw Error("Acoustic OFDM currently requires 48000 Hz processing audio");
@@ -112,7 +118,16 @@ void validate(const Profile& p) {
            std::ceil(p.ofdm_low_hz*p.ofdm_fft_size/p.sample_rate)+1<512)
             throw Error("Acoustic OFDM requires at least 512 active frequency bins");
     }
+    if(p.ofdm_training_blocks!=16 && (p.channel!=Channel::acoustic_short||
+       !p.acoustic_ofdm||p.ofdm_training_blocks<6||p.ofdm_training_blocks>16))
+        throw Error("Short acoustic OFDM training must use 6..16 blocks");
+    if(p.ldpc_frame_bits!=64800 && (p.channel!=Channel::acoustic_short||
+       !p.capacity_mode||p.ldpc_frame_bits!=16200))
+        throw Error("Short LDPC frames require the acoustic-short capacity profile");
     if(p.capacity_mode) {
+        if(p.ldpc_frame_bits==16200&&p.code_rate!=CodeRate::half&&
+           p.code_rate!=CodeRate::two_thirds&&p.code_rate!=CodeRate::three_quarters)
+            throw Error("Short Fast LDPC rate must be 1/2, 2/3 or 3/4");
         if(p.constellation<4||p.constellation>4194304||!std::has_single_bit(p.constellation)||std::countr_zero(p.constellation)%2)
             throw Error("Fast QAM order must be a power of four from 4 through 4194304");
         if(p.code_rate!=CodeRate::half&&p.code_rate!=CodeRate::two_thirds&&p.code_rate!=CodeRate::three_quarters&&p.code_rate!=CodeRate::seven_ninths&&
@@ -149,6 +164,10 @@ Bytes profile_id(const Profile& p) {
     const auto append=[&](std::uint64_t n) {for(int i=7;i>=0;--i)out.push_back(static_cast<std::uint8_t>(n>>(i*8)));};
     append(static_cast<unsigned>(p.channel));append(p.constellation);
     append(static_cast<unsigned>(p.code_rate));append(p.robust);append(p.interleave_depth);
+    if(p.ldpc_frame_bits!=64800||p.ofdm_training_blocks!=16) {
+        out.insert(out.end(),{'/','s','h','o','r','t','/','v','1'});
+        append(p.ldpc_frame_bits);append(p.ofdm_training_blocks);
+    }
     if(p.acoustic_ofdm) {
         // Bind every active OFDM wire parameter, with a separate domain.
         // Existing cable/classic IDs remain byte-for-byte unchanged.

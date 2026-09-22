@@ -376,6 +376,7 @@ void fast_mode_visibility() {
     };
     find_attach(*window);choose=fast_attach;
     auto* expected_snr=field_widget.template operator()<NativeChoice>("Expected SNR");
+    auto* profile=field_widget.template operator()<NativeChoice>("Channel profile");
     auto* symbol_rate=field_widget.template operator()<NativeChoice>("Symbol rate");
     auto* text=field_widget.template operator()<NativeEditor>("Message");
     NativeChoice* brightness=nullptr;
@@ -391,7 +392,7 @@ void fast_mode_visibility() {
     };
     find_fast_editor(*window);
     auto* file=field_widget.template operator()<NativeInput>("Source file");
-    require(selector&&encryption&&expected_snr&&symbol_rate&&text&&file&&choose&&transmit&&brightness&&regular,"Fast fixture lacks native controls");
+    require(selector&&encryption&&expected_snr&&profile&&symbol_rate&&text&&file&&choose&&transmit&&brightness&&regular,"Fast fixture lacks native controls");
     require(selector->value()==1&&app.application.field(ui::Field::fast_mode).selected=="robust"&&!find_button(*window,"Fast"),
         "Modem selector did not default to Robust Modem or retained the obsolete Fast toggle");
     app.application.toggle(ui::Field::fast_mode,true);
@@ -417,16 +418,16 @@ void fast_mode_visibility() {
         require(find_button(*window,"Console")->visible_r()&&!find_button(*window,"Modem details")->visible_r(),"Fast console did not hide developer tab by default");
         app.application.toggle(ui::Field::developer_mode,true);app.application.select_page(ui::Page::fast_modem);refresh();
         require(symbol_rate->visible_r()&&!text->visible_r(),"Fast modem page did not separate details from message controls");
-        for(const auto* channel:{"wire","acoustic","ssb","fm"}) {
+        for(const auto* channel:{"wire","acoustic","ssb","fm","acoustic-short"}) {
             app.application.select(ui::Field::fast_profile,channel);refresh();
-            for(const auto item:{std::pair{expected_snr,ui::Field::fast_expected_snr},std::pair{symbol_rate,ui::Field::fast_symbol_rate}}) {
+            for(const auto item:{std::pair{profile,ui::Field::fast_profile},std::pair{expected_snr,ui::Field::fast_expected_snr},std::pair{symbol_rate,ui::Field::fast_symbol_rate}}) {
                 auto* widget=item.first;
-                require(widget->visible_r()&&widget->active_r(),"Fast SNR/rate native dropdown is hidden or disabled");
+                require(widget->visible_r()&&widget->active_r(),"Fast profile/SNR/rate native dropdown is hidden or disabled");
                 fl_font(widget->textfont(),widget->textsize());
                 for(const auto& option:app.application.field(item.second).options) {
                     int width=0,height=0;fl_measure(option.label.c_str(),width,height,0);
                     if(width>widget->w()-28||height>widget->h())
-                        throw std::runtime_error("Fast SNR/rate choice clips at the native minimum window size: "+
+                        throw std::runtime_error("Fast profile/SNR/rate choice clips at the native minimum window size: "+
                             option.label+" needs "+std::to_string(width)+" x "+std::to_string(height)+
                             ", available "+std::to_string(widget->w()-28)+" x "+std::to_string(widget->h()));
                 }

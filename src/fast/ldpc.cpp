@@ -1,5 +1,6 @@
 #include "datapump/fast/ldpc.hpp"
 #include "../../third_party/ldpc/tables.hpp"
+#include "../../third_party/ldpc/short_tables.hpp"
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -10,15 +11,15 @@ namespace {
 // A graph is initialized once, never mutated, and shared safely across callers.
 // Every decode owns its messages and posterior values (under 3 MiB per call).
 struct Graph {
-    std::size_t k = 0;
+    std::size_t n = 0, k = 0;
     std::vector<std::uint32_t> offsets;
     std::vector<std::uint16_t> variables;
     std::vector<std::uint16_t> parity_rows;
 };
 template<class Table> Graph make_graph() {
-    static_assert(Table::N == coded_bits && Table::M == 360);
-    Graph g; g.k = Table::K;
-    const auto r = coded_bits - g.k;
+    static_assert((Table::N == coded_bits || Table::N == short_coded_bits) && Table::M == 360);
+    Graph g; g.n = Table::N; g.k = Table::K;
+    const auto r = g.n - g.k;
     const auto q = r / Table::M;
     std::vector<std::vector<std::uint16_t>> checks(r);
     std::size_t bit = 0, address = 0;
@@ -53,7 +54,16 @@ template<class Table> Graph make_graph() {
     if (g.variables.size() != Table::LINKS_TOTAL) throw Error("Invalid LDPC edge count");
     return g;
 }
-const Graph& graph(CodeRate rate) {
+const Graph& graph(CodeRate rate, std::size_t frame_bits) {
+    if (frame_bits == short_coded_bits) {
+        switch (rate) {
+        case CodeRate::half: { static const auto g = make_graph<DVB_S2_TABLE_C4>(); return g; }
+        case CodeRate::two_thirds: { static const auto g = make_graph<DVB_S2_TABLE_C6>(); return g; }
+        case CodeRate::three_quarters: { static const auto g = make_graph<DVB_S2_TABLE_C7>(); return g; }
+        default: throw Error("Unsupported Fast short-frame LDPC rate");
+        }
+    }
+    if (frame_bits != coded_bits) throw Error("Unsupported Fast LDPC frame size");
     switch (rate) {
     case CodeRate::two_thirds: { static const auto g = make_graph<DVB_S2_TABLE_B6>(); return g; }
     case CodeRate::half: { static const auto g = make_graph<DVB_S2_TABLE_B4>(); return g; }
@@ -80,9 +90,9 @@ double phi(double x) {
     if (x > 20) return 2 * std::exp(-x);
     return std::log1p(2 / std::expm1(x));
 }
-const std::array<std::uint16_t, coded_bits>& permutation() {
+template<std::size_t N> const std::array<std::uint16_t, N>& make_permutation() {
     static const auto result = [] {
-        std::array<std::uint16_t, coded_bits> indices{};
+        std::array<std::uint16_t, N> indices{};
         std::iota(indices.begin(), indices.end(), std::uint16_t{0});
         // Explicit xorshift32 plus descending Fisher-Yates: no implementation-
         // dependent standard-library distribution or shuffle on the wire.
@@ -95,13 +105,18 @@ const std::array<std::uint16_t, coded_bits>& permutation() {
     }();
     return result;
 }
+std::span<const std::uint16_t> permutation(std::size_t frame_bits) {
+    if (frame_bits == coded_bits) return make_permutation<coded_bits>();
+    if (frame_bits == short_coded_bits) return make_permutation<short_coded_bits>();
+    throw Error("Unsupported Fast LDPC frame size");
+}
 }
 
-std::size_t data_bits(CodeRate rate) { return graph(rate).k; }
-Bytes encode(std::span<const std::uint8_t> bytes, CodeRate rate) {
-    const auto& g = graph(rate);
+std::size_t data_bits(CodeRate rate, std::size_t frame_bits) { return graph(rate, frame_bits).k; }
+Bytes encode(std::span<const std::uint8_t> bytes, CodeRate rate, std::size_t frame_bits) {
+    const auto& g = graph(rate, frame_bits);
     if (bytes.size() != g.k / 8) throw Error("Fast LDPC requires exactly one data frame");
-    Bytes bits(coded_bits);
+    Bytes bits(frame_bits);
     for (std::size_t bit = 0; bit < g.k; ++bit)
         bits[bit] = (bytes[bit / 8] >> (7 - bit % 8)) & 1U;
     for (std::size_t row = 0; row < g.parity_rows.size(); ++row) {
@@ -110,23 +125,23 @@ Bytes encode(std::span<const std::uint8_t> bytes, CodeRate rate) {
         for (auto edge = g.offsets[row]; edge < data_end; ++edge)
             bits[g.k + parity_row] ^= bits[g.variables[edge]];
     }
-    for (std::size_t bit = g.k + 1; bit < coded_bits; ++bit) bits[bit] ^= bits[bit - 1];
+    for (std::size_t bit = g.k + 1; bit < frame_bits; ++bit) bits[bit] ^= bits[bit - 1];
     return bits;
 }
-bool valid_codeword(std::span<const std::uint8_t> bits, CodeRate rate) {
-    const auto& g = graph(rate);
-    if (bits.size() != coded_bits) throw Error("Fast LDPC requires exactly one codeword");
+bool valid_codeword(std::span<const std::uint8_t> bits, CodeRate rate, std::size_t frame_bits) {
+    const auto& g = graph(rate, frame_bits);
+    if (bits.size() != frame_bits) throw Error("Fast LDPC requires exactly one codeword");
     if (std::any_of(bits.begin(), bits.end(), [](auto b) { return b > 1; }))
         throw Error("Fast LDPC codeword contains a non-bit");
     return syndrome(g, [&](std::size_t bit) { return bits[bit]; });
 }
-DecodeResult decode(std::span<const float> soft, CodeRate rate, unsigned limit) {
-    const auto& g = graph(rate);
-    if (soft.size() != coded_bits) throw Error("Fast LDPC requires exactly one soft frame");
+DecodeResult decode(std::span<const float> soft, CodeRate rate, unsigned limit, std::size_t frame_bits) {
+    const auto& g = graph(rate, frame_bits);
+    if (soft.size() != frame_bits) throw Error("Fast LDPC requires exactly one soft frame");
     if (!limit || limit > maximum_iterations) throw Error("Invalid Fast LDPC iteration limit");
-    std::vector<double> posterior(coded_bits);
+    std::vector<double> posterior(frame_bits);
     bool informative = false;
-    for (std::size_t bit = 0; bit < coded_bits; ++bit) {
+    for (std::size_t bit = 0; bit < frame_bits; ++bit) {
         if (!std::isfinite(soft[bit])) throw Error("Nonfinite Fast LDPC likelihood");
         posterior[bit] = -std::clamp(double(soft[bit]), -50., 50.);
         informative |= soft[bit] != 0;
@@ -168,22 +183,22 @@ DecodeResult decode(std::span<const float> soft, CodeRate rate, unsigned limit) 
         if (posterior[bit] < 0) result.bytes[bit / 8] |= 1U << (7 - bit % 8);
     return result;
 }
-std::size_t interleave_index(std::size_t bit) {
-    if (bit >= coded_bits) throw Error("Fast LDPC interleave index outside frame");
-    return permutation()[bit];
+std::size_t interleave_index(std::size_t bit, std::size_t frame_bits) {
+    if (bit >= frame_bits) throw Error("Fast LDPC interleave index outside frame");
+    return permutation(frame_bits)[bit];
 }
-Bytes interleave(std::span<const std::uint8_t> bits) {
-    if (bits.size() != coded_bits) throw Error("Fast LDPC requires exactly one interleave frame");
-    Bytes out(coded_bits);
-    const auto& p = permutation();
-    for (std::size_t i = 0; i < coded_bits; ++i) out[i] = bits[p[i]];
+Bytes interleave(std::span<const std::uint8_t> bits, std::size_t frame_bits) {
+    if (bits.size() != frame_bits) throw Error("Fast LDPC requires exactly one interleave frame");
+    const auto p = permutation(frame_bits);
+    Bytes out(frame_bits);
+    for (std::size_t i = 0; i < frame_bits; ++i) out[i] = bits[p[i]];
     return out;
 }
-std::vector<float> deinterleave(std::span<const float> soft) {
-    if (soft.size() != coded_bits) throw Error("Fast LDPC requires exactly one deinterleave frame");
-    std::vector<float> out(coded_bits);
-    const auto& p = permutation();
-    for (std::size_t i = 0; i < coded_bits; ++i) out[p[i]] = soft[i];
+std::vector<float> deinterleave(std::span<const float> soft, std::size_t frame_bits) {
+    if (soft.size() != frame_bits) throw Error("Fast LDPC requires exactly one deinterleave frame");
+    const auto p = permutation(frame_bits);
+    std::vector<float> out(frame_bits);
+    for (std::size_t i = 0; i < frame_bits; ++i) out[p[i]] = soft[i];
     return out;
 }
 }
