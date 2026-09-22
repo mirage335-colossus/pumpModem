@@ -15,8 +15,8 @@ constexpr double pi = std::numbers::pi;
 constexpr double legacy_pulse_radius = 8;
 double radius(const Profile& p) { return p.capacity_mode ? std::ceil(6.4/p.rolloff) : legacy_pulse_radius; }
 std::size_t spacing(const Profile& p) { return p.capacity_mode ? p.pilot_spacing_symbols : pilot_spacing; }
-std::size_t pilot_length(const Profile& p) { return p.compact_convolutional ? 16 : pilot_symbols; }
-std::size_t marker_length(const Profile& p) { return p.compact_convolutional ? 192 : sync_symbols; }
+std::size_t pilot_length(const Profile& p) { return compact_acoustic_framing(p) ? 16 : pilot_symbols; }
+std::size_t marker_length(const Profile& p) { return compact_acoustic_framing(p) ? 192 : sync_symbols; }
 std::size_t marker_size(const Profile& p,std::size_t index) { return !p.capacity_mode || index%p.marker_spacing_intervals==0 ? marker_length(p) : 0; }
 constexpr unsigned table_resolution = 2048;
 unsigned label_bits(unsigned order) {
@@ -78,7 +78,7 @@ Complex qam_point(unsigned order,unsigned label) {
     const auto scale=std::sqrt(2.*(order-1)/3.);
     return {(2.*i+1-side)/scale,(2.*q+1-side)/scale};
 }
-Complex pilot(std::size_t index,const Profile& p) { return sync_symbol(11 + (p.compact_convolutional?index:index%4)*13); }
+Complex pilot(std::size_t index,const Profile& p) { return sync_symbol(11 + (compact_acoustic_framing(p)?index:index%4)*13); }
 std::array<Complex,192> sync_table() {
     std::array<Complex,192> result{};
     std::uint32_t state=0x65a39c17u;
@@ -225,7 +225,7 @@ std::size_t total_interval_symbols(const Profile& p,std::size_t count) {
     return count*payload+markers*marker_count;
 }
 std::size_t pulse_tail_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::pulse_tail_symbols(p):static_cast<std::size_t>(2*radius(p));}
-std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):p.capacity_mode?(p.compact_convolutional?256:2048):training_symbols;}
+std::size_t preamble_symbols(const Profile& p) {validate(p);return p.acoustic_ofdm?acoustic_ofdm::preamble_symbols(p):p.capacity_mode?(compact_acoustic_framing(p)?256:2048):training_symbols;}
 std::uint64_t transmission_samples(const Profile& p,std::size_t count) {
     validate(p);
     if(p.acoustic_ofdm)return acoustic_ofdm::transmission_samples(p,count);
@@ -556,7 +556,7 @@ struct Receiver::Impl {
         // reliably bootstrap a 128x128 constellation through channel tilt.
         constexpr std::size_t n=21;
         constexpr std::size_t guard=8;
-        const auto training=config.compact_convolutional&&initial?preamble_symbols(config):0;
+        const auto training=compact_acoustic_framing(config)&&initial?preamble_symbols(config):0;
         const auto fitting_count=training+sync_symbols;
         const auto expected=[&](std::size_t k) {return k<training?
             marker[(k*17+9)%sync_symbols]*Complex(0,1):marker[k-training];};
@@ -572,7 +572,7 @@ struct Receiver::Impl {
                     equations[i][n]+=std::conj(x[i])*target;
                 }
             }
-            const double ridge=config.compact_convolutional?8.:1e-4;
+            const double ridge=compact_acoustic_framing(config)?8.:1e-4;
             for(std::size_t i=0;i<n;++i)equations[i][i]+=ridge;
             equations[n/2][n]+=ridge;
             for(std::size_t i=0;i<n;++i) {
@@ -714,7 +714,7 @@ struct Receiver::Impl {
         soft.fill(0);
     }
     void accept_marker(double end,bool initial) {
-        if(config.compact_convolutional){accept_compact_marker(end,initial);return;}
+        if(compact_acoustic_framing(config)){accept_compact_marker(end,initial);return;}
         auto fitted=refine(end,initial?.8:.18*clock_period);
         const auto old_period=clock_period;
         const auto old_frequency=frequency;
@@ -911,8 +911,8 @@ struct Receiver::Impl {
                     // data symbol. A mere energy or nearest-QAM test would
                     // let unrelated tones/noise manufacture presence.
                     const auto prediction_error=(pilot_energy+pilot_length(config)-2*std::abs(pilot_correlation))/pilot_length(config);
-                    const bool present=!incoherent&&prediction_error<=(config.compact_convolutional?.8:.3)&&
-                        (!config.compact_convolutional||pilot_disagreements<=2);
+                    const bool present=!incoherent&&prediction_error<=(compact_acoustic_framing(config)?.8:.3)&&
+                        (!compact_acoustic_framing(config)||pilot_disagreements<=2);
                     capacity_group_present=present;
                     if(present) {
                         absent=0;capacity_interval_present=true;
@@ -927,7 +927,7 @@ struct Receiver::Impl {
                     capacity_pilot_present=present;
                     if(absent>=6) {state.physical_complete=true;return;}
                 }
-                if(pilot_error/pilot_length(config)>(config.compact_convolutional?.8:.3) || incoherent) {
+                if(pilot_error/pilot_length(config)>(compact_acoustic_framing(config)?.8:.3) || incoherent) {
                     const auto begin=std::min(start*bps,soft.size()),end=std::min((start+available)*bps,soft.size());
                     // Coherent acoustic pilots can have substantial residual
                     // amplitude/ISI error. Preserve and downweight their observed
@@ -953,7 +953,7 @@ struct Receiver::Impl {
                     const auto correction=std::arg(pilot_correlation);
                     complete_capacity_group(start,available,correction);
                     phase+=.8*correction;
-                    frequency=std::clamp(frequency+(config.compact_convolutional?.03:.15)*correction/static_cast<double>(available+pilot_length(config)),-.06,.06);
+                    frequency=std::clamp(frequency+(compact_acoustic_framing(config)?.03:.15)*correction/static_cast<double>(available+pilot_length(config)),-.06,.06);
                     group_phase_anchor=.2*correction;
                 }
             }

@@ -200,16 +200,16 @@ void snr_and_symbol_rate_controls() {
     check(controller.field(F::fast_coding).selected==short_coding,
         "Unsupported normal-frame LDPC rate was accepted for short-transfer acoustic");
     controller.select(F::fast_expected_snr,"-6");
-    check(controller.field(F::fast_coding).selected=="half"&&
-        controller.field(F::fast_coding).options.size()==2&&
-        controller.field(F::fast_coding).options[0].label=="Convolutional 1/2"&&
+    check(controller.field(F::fast_coding).selected=="three-quarters"&&
+        controller.field(F::fast_coding).options.size()==3&&
+        controller.field(F::fast_coding).options[0].label=="LDPC 1/2"&&
         controller.field(F::fast_depth).options.size()==16&&
         controller.field(F::fast_constellation).options.size()==1,
-        "Weak short profile did not expose its compact coding geometry");
+        "Weak short profile did not expose its small LDPC coding geometry");
     controller.select(F::fast_coding,"two-thirds");
-    check(controller.field(F::fast_coding).selected=="half"&&
-        controller.field(F::fast_expected_snr).selected=="-6",
-        "Weak short profile accepted an unsupported LDPC selection");
+    check(controller.field(F::fast_coding).selected=="two-thirds"&&
+        controller.field(F::fast_expected_snr).selected=="manual",
+        "Weak short profile rejected the supported stronger LDPC selection");
     controller.select(F::fast_expected_snr,"3");
     check(controller.field(F::fast_coding).options.size()==(short_acoustic.compact_convolutional?2U:3U)&&
         controller.field(F::fast_constellation).options.size()==11&&

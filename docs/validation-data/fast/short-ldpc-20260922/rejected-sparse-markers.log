@@ -1,0 +1,12 @@
+flat_text source_bytes=2 air_seconds=12.348 echo=0 ppm=0 acquired=1 complete=1 intervals=4 hard_errors=223 unknown_bits=0 changed_bits=154 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+public_text source_bytes=2 air_seconds=12.348 echo=0.3 ppm=100 acquired=1 complete=1 intervals=4 hard_errors=264 unknown_bits=0 changed_bits=192 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+keyed_text source_bytes=2 air_seconds=12.348 echo=0.3 ppm=-100 acquired=1 complete=1 intervals=4 hard_errors=318 unknown_bits=0 changed_bits=227 failed_frames=0 status=Verified and physically complete
+public_attachment source_bytes=32 air_seconds=12.348 echo=0.3 ppm=0 acquired=1 complete=1 intervals=4 hard_errors=212 unknown_bits=0 changed_bits=156 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+keyed_attachment source_bytes=32 air_seconds=12.348 echo=0.3 ppm=100 acquired=1 complete=0 intervals=4 hard_errors=527 unknown_bits=0 changed_bits=151 failed_frames=2 status=Uncorrectable capacity Reed-Solomon cycle
+long_text source_bytes=2560 air_seconds=28.6236 echo=0.3 ppm=0 acquired=1 complete=1 intervals=16 hard_errors=1212 unknown_bits=0 changed_bits=853 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+long_attachment source_bytes=2560 air_seconds=34.0489 echo=0.3 ppm=-100 acquired=1 complete=1 intervals=20 hard_errors=1130 unknown_bits=0 changed_bits=813 failed_frames=0 status=Verified and physically complete
+incomplete_controls EOF and incomplete training remain pending
+marker_holdout_control acquired=0 intervals=0 complete=0
+noise_only acquired=0 intervals=0 complete=0
+keyed_attachment: keyed_attachment: noisy short acoustic source did not complete exactly
+1 of 10 weak short acoustic cases failed

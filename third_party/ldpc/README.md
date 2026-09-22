@@ -20,6 +20,19 @@ these frames. Existing profiles retain the normal matrices and permutation.
 The [independent short-frame fixtures and checks](../../docs/validation-data/fast/acoustic-short-20260921/ldpc-short-method.md)
 document their upstream provenance and deterministic validation.
 
+`wifi_tables.hpp` contains the nine IEEE 802.11 QC matrices (648, 1,296 and
+1,944 coded bits, each at rates 1/2, 2/3 and 3/4), extracted from
+[tavildar/LDPC](https://github.com/tavildar/LDPC/blob/05ee7f4af36ed5dacf52861315af68b8a17e71e0/LdpcC/WiFiLDPC.h)
+at commit `05ee7f4af36ed5dacf52861315af68b8a17e71e0`. The path in that repository
+is `LdpcC/WiFiLDPC.h`. Its MIT notice is retained in `WIFI-LICENSE`.
+These matrices are used only in the independent short acoustic profile; this
+is not an IEEE 802.11 PHY implementation. The encoder fixes the last `K % 8`
+information coordinates to zero and accepts exactly `floor(K / 8)` bytes.
+Those known zero coordinates remain in the transmitted codeword (no puncturing).
+The decoder enforces their fixed values; they cannot turn absent likelihoods
+into successful reception. See the [independent back-substitution fixtures and
+comparison](../../docs/validation-data/fast/short-ldpc-20260922/README.md).
+
 `src/fast/ldpc.cpp` constructs an immutable sparse check graph and supplies a
 bounded, thread-safe layered log-domain sum-product decoder. The upstream
 algorithm motivated the layered ordering, but no upstream decoder code is
@@ -33,7 +46,7 @@ are recorded separately from the earlier cable sweep.
 ## Decoder contract and checks
 
 The public input is one exact, byte-aligned information block; the output is
-64,800 unpacked code bits by default, or 16,200 when explicitly selected by
+64,800 unpacked code bits by default, or 16,200 / 1,944 / 1,296 / 648 when selected by
 the local profile, systematic information first, with MSB-first byte
 packing. Soft input to decode is `log(P(bit=1)/P(bit=0))`, clipped to ±50.
 Fifty layered sum-product iterations are the default, with an explicit 1–100

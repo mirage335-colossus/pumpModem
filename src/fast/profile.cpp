@@ -127,10 +127,10 @@ void validate(const Profile& p) {
        !p.acoustic_ofdm||p.ofdm_training_blocks<6||p.ofdm_training_blocks>16))
         throw Error("Short acoustic OFDM training must use 6..16 blocks");
     if(p.ldpc_frame_bits!=64800 && (p.channel!=Channel::acoustic_short||
-       !p.capacity_mode||p.ldpc_frame_bits!=16200))
+       !p.capacity_mode||(p.ldpc_frame_bits!=16200&&!small_ldpc_frame(p.ldpc_frame_bits))))
         throw Error("Short LDPC frames require the acoustic-short capacity profile");
     if(p.capacity_mode) {
-        if(p.ldpc_frame_bits==16200&&p.code_rate!=CodeRate::half&&
+        if(p.ldpc_frame_bits!=64800&&p.code_rate!=CodeRate::half&&
            p.code_rate!=CodeRate::two_thirds&&p.code_rate!=CodeRate::three_quarters)
             throw Error("Short Fast LDPC rate must be 1/2, 2/3 or 3/4");
         if(p.constellation<4||p.constellation>4194304||!std::has_single_bit(p.constellation)||std::countr_zero(p.constellation)%2)
@@ -140,6 +140,13 @@ void validate(const Profile& p) {
             throw Error("Fast capacity LDPC rate must be 1/2, 2/3, 3/4, 7/9, 8/9 or 9/10");
         if(p.robust)throw Error("Capacity format uses the approximately 0.3% outer RS code");
         if(!p.interleave_depth||p.interleave_depth>16)throw Error("Fast LDPC interleave depth must be 1..16");
+        if(small_ldpc_frame(p.ldpc_frame_bits)) {
+            if(p.compact_convolutional)throw Error("Small LDPC frames cannot select convolutional coding");
+            if(!p.acoustic_ofdm&&p.constellation!=4)throw Error("Small LDPC single carrier requires QPSK");
+            const auto k=p.code_rate==CodeRate::half?p.ldpc_frame_bits/2:
+                p.code_rate==CodeRate::two_thirds?p.ldpc_frame_bits*2/3:p.ldpc_frame_bits*3/4;
+            if((k/8)*p.interleave_depth<80)throw Error("Small LDPC cycle cannot hold the fixed bootstrap and source protection");
+        }
         if(!p.marker_spacing_intervals||p.marker_spacing_intervals>16)throw Error("Fast marker spacing must be 1..16 intervals");
         if(p.pilot_spacing_symbols<16||p.pilot_spacing_symbols>1024)throw Error("Fast pilot spacing must be 16..1024 symbols");
     } else if(p.constellation!=4&&p.constellation!=16&&p.constellation!=64&&p.constellation!=256)

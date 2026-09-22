@@ -62,7 +62,7 @@ Bytes random_bytes(std::size_t size) {
     return value;
 }
 void validate_codec_profile(const Profile& p) {
-    if(p.compact_convolutional) {validate(p);return;}
+    if(p.compact_convolutional||small_ldpc_frame(p.ldpc_frame_bits)) {validate(p);return;}
     if(p.capacity_mode) {
         if(p.interleave_depth<1 || p.interleave_depth>16)throw Error("Capacity interleave depth must be 1 through 16 LDPC frames");
         (void)ldpc::data_bits(p.code_rate,p.ldpc_frame_bits);return;
@@ -228,10 +228,12 @@ const Bytes& capacity_rotations(const Profile& p) {
     if(!p.capacity_mode||p.compact_convolutional)throw Error("Capacity LDPC interleave requires an LDPC capacity profile");
     const auto depth=p.interleave_depth,bps=static_cast<unsigned>(std::countr_zero(p.constellation));
     struct Cached {std::once_flag once;Bytes rotations;};
-    // The finite profile grid bounds storage to 16*11*(64800+16200) bytes.
+    // The finite frame/depth/QAM grid bounds this cache (under 15 MiB).
     // Normal use initializes only the selected depth/QAM pair, before audio.
-    static std::array<std::array<std::array<Cached,11>,16>,2> cache;
-    auto& entry=cache[p.ldpc_frame_bits==ldpc::short_coded_bits?1:0][depth-1][bps/2-1];
+    static std::array<std::array<std::array<Cached,11>,16>,5> cache;
+    const auto frame_slot=p.ldpc_frame_bits==64800?0:p.ldpc_frame_bits==16200?1:
+        p.ldpc_frame_bits==648?2:p.ldpc_frame_bits==1296?3:4;
+    auto& entry=cache[frame_slot][depth-1][bps/2-1];
     std::call_once(entry.once,[&] {
         std::array<std::array<unsigned,22>,16> counts{};
         entry.rotations.resize(p.ldpc_frame_bits);

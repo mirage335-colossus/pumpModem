@@ -37,13 +37,13 @@ Profile short_profile() {
         default_expected_snr(Channel::acoustic_short)==3&&preset.expected_snr_db==reference_snr_db,
         "short acoustic default lost its original-band 3 dB reference");
     require(p.channel==Channel::acoustic_short&&p.capacity_mode&&
-        (p.compact_convolutional||p.ldpc_frame_bits==16200)&&
+        (p.compact_convolutional||p.ldpc_frame_bits==16200||small_ldpc_frame(p.ldpc_frame_bits))&&
         (!p.acoustic_ofdm||p.ofdm_training_blocks<16)&&p.interleave_depth>=1&&p.interleave_depth<=16,
         "short acoustic regression no longer uses the separate short-frame profile");
     require(p.sample_rate==48000&&(!p.acoustic_ofdm||p.ofdm_prefix_samples>echo_delay_samples),
         "short acoustic echo must remain inside the cyclic prefix");
-    if(reference_snr_db>=-6)require(estimate_transmission(p,true,60).seconds<=10.5,
-        "short acoustic preset lost the roughly 10-second minimum across supported SNR choices");
+    if(reference_snr_db>=-6)require(estimate_transmission(p,true,60).seconds<=12.5,
+        "short acoustic preset lost the 12.5-second minimum budget across supported SNR choices");
     return p;
 }
 

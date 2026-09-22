@@ -96,22 +96,28 @@ double parse_rate(std::string_view text) {
         throw Error("Invalid Fast symbol-rate selection");
     return result;
 }
-Profile short_acoustic_preset(double expected) {
-    constexpr double minimum_target_seconds=10.5;
+Profile search_short_acoustic(double expected,double minimum_target_seconds,bool include_small=true) {
     Profile best;double best_minimum=std::numeric_limits<double>::infinity(),best_rate=-1;
     bool within_target=false;
-    for(const bool compact:{false,true})for(const bool ofdm:{true,false})for(const unsigned order:{4U,16U})
+    for(const unsigned frame:{16200U,0U,648U,1296U,1944U})for(const bool ofdm:{true,false})for(const unsigned order:{4U,16U})
     for(const auto rate:{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters}) {
-        // Compact SC is the weak QPSK path; higher-rate acoustic choices keep
-        // OFDM's independently fitted frequency-selective channel response.
+        const bool compact=frame==0,small=small_ldpc_frame(frame);
+        if(small&&!include_small)continue;
+        // Small QC blocks share compact QPSK tracking. Larger/higher-order
+        // acoustic choices keep OFDM's frequency-selective channel fitting.
         if(compact&&rate==CodeRate::two_thirds)continue;
-        if(!ofdm&&(!compact||order!=4||rate!=CodeRate::half))continue;
+        if(!ofdm&&(!compact&&!small))continue;
+        if(!ofdm&&(order!=4||(compact&&rate!=CodeRate::half)))continue;
         const auto selected_snr=compact?(order==4?(rate==CodeRate::half?6.:8.):
             (rate==CodeRate::half?10.:14.)):
-            std::max(6.,decoder_snr(order,rate,Channel::acoustic_short)+2.);
-        const auto band=17500*std::min(1.,std::pow(10.,(expected-selected_snr)/10.));
+            std::max(6.,decoder_snr(order,rate,Channel::acoustic_short)+(small?3.:2.));
+        // The small QPSK 3/4 code passed the ideal sweep at 5 dB Es/N0.
+        // Retain the sampled compact link's stronger 6 dB in-band target.
+        const auto target_snr=small&&order==4?6.:selected_snr;
+        const auto band=17500*std::min(1.,std::pow(10.,(expected-target_snr)/10.));
         auto base=ofdm?profile(Channel::acoustic_short):single_carrier_base(Channel::acoustic_short);
         base.compact_convolutional=compact;base.constellation=order;base.code_rate=rate;
+        if(frame)base.ldpc_frame_bits=frame;
         base.marker_spacing_intervals=1;
         if(ofdm) {
             if(band<1000)continue;
@@ -119,6 +125,7 @@ Profile short_acoustic_preset(double expected) {
         } else {
             // Keep a 5 ms acoustic echo inside the compact equalizer's span.
             // Faster choices use OFDM's cyclic prefix and channel fitting.
+            if(small)base.pilot_spacing_symbols=128;
             base.symbol_rate=canonical_frequency(std::min({1000.,maximum_baud(base),band/(1+base.rolloff)}));
         }
         for(const unsigned fft:{2048U,4096U,8192U,16384U,32768U}) {
@@ -144,6 +151,19 @@ Profile short_acoustic_preset(double expected) {
     }
     if(best_rate<0)throw Error("No short acoustic waveform fits the requested SNR");
     return best;
+}
+Profile short_acoustic_preset(double expected) {
+    const auto previous=search_short_acoustic(expected,10.5,false);
+    auto quick=search_short_acoustic(expected,10.5);
+    // Avoid changing a qualified OFDM format for a marginal modeled gain.
+    if(estimate_transmission(quick,false,50000000).source_bps<
+       1.10*estimate_transmission(previous,false,50000000).source_bps)quick=previous;
+    const auto extended=search_short_acoustic(expected,12.5);
+    // Spend the extra startup time only for a material steady-throughput gain.
+    // Small LDPC already improves weak presets within the original budget.
+    const auto quick_rate=estimate_transmission(quick,false,50000000).source_bps;
+    const auto extended_rate=estimate_transmission(extended,false,50000000).source_bps;
+    return extended_rate>=1.20*quick_rate?extended:quick;
 }
 
 }
@@ -175,7 +195,7 @@ SnrPreset resolve_snr_preset(Channel c,double expected) {
         "Modeled presets require link testing; they are not measured margins."};
     if(c==Channel::acoustic_short) {
         result.profile=short_acoustic_preset(expected);
-        result.note+=" Coding-block selection limits minimum transfer overhead; weaker presets may still exceed ten seconds.";
+        result.note+=" Coding-block selection limits minimum transfer overhead; weaker presets may still exceed the 12.5-second target.";
         return result;
     }
     // Preserve the previously qualified nominal cable/acoustic waveforms and
@@ -277,7 +297,7 @@ std::vector<SymbolRateOption> symbol_rate_options(const Profile& p) {
 Profile apply_symbol_rate_option(Profile p,std::string_view id) {
     validate(p);
     if(id=="auto") {
-        const auto base=p.compact_convolutional&&!p.acoustic_ofdm?resolve_snr_preset(p.channel,-6).profile:
+        const auto base=compact_acoustic_framing(p)&&!p.acoustic_ofdm?resolve_snr_preset(p.channel,-6).profile:
             !p.capacity_mode?classic_profile(p.channel):
             p.acoustic_ofdm?profile(p.channel):single_carrier_base(p.channel);
         if(p.acoustic_ofdm) {

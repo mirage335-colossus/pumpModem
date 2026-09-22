@@ -94,7 +94,7 @@ int main() {try {
         require(p.ofdm_training_blocks==(p.acoustic_ofdm?6U:16U),"short preset training count mismatch");
         require(occupied_bandwidth_hz(p)<=17500,"short acoustic preset escaped reference band");
         if(snr<13&&!p.acoustic_ofdm)
-            require(snr+10*std::log10(17500/occupied_bandwidth_hz(p))>=(p.compact_convolutional?5.99:12.99),
+            require(snr+10*std::log10(17500/occupied_bandwidth_hz(p))>=(compact_acoustic_framing(p)?5.99:12.99),
                 "short SC fallback ignores marker SNR requirement");
         const auto rate=symbol_rate_option_id(p);
         require(profile_id(apply_symbol_rate_option(p,rate))==profile_id(p),"short rate roundtrip changed identity");
@@ -102,24 +102,24 @@ int main() {try {
         require(automatic.code_rate==p.code_rate&&automatic.compact_convolutional==p.compact_convolutional&&
             automatic.interleave_depth==p.interleave_depth,"short Auto rate discarded fixed coding choices");
         require(estimate_transmission(p,false,2800).seconds>=6,"short estimate omitted physical absence");
-        if(snr>=-6)require(estimate_transmission(p,true,60).seconds<=10.5,
+        if(snr>=-6)require(estimate_transmission(p,true,60).seconds<=12.5,
             "short preset failed its minimum-airtime target at a supported SNR");
         if(p.compact_convolutional)require(capacity_information_bytes(p)==p.interleave_depth*(p.code_rate==CodeRate::half?126U:190U),
             "compact preset source geometry is not locally fixed");
-        if(p.compact_convolutional&&!p.acoustic_ofdm)require(p.symbol_rate<=1000,
+        if(compact_acoustic_framing(p)&&!p.acoustic_ofdm)require(p.symbol_rate<=1000,
             "short acoustic single carrier exceeds its qualified echo span");
     }
     const auto weak_short=resolve_snr_preset(Channel::acoustic_short,-6).profile;
-    require(weak_short.compact_convolutional&&!weak_short.acoustic_ofdm&&
-        weak_short.constellation==4&&weak_short.code_rate==CodeRate::half&&
+    require(!weak_short.compact_convolutional&&weak_short.ldpc_frame_bits==1944&&!weak_short.acoustic_ofdm&&
+        weak_short.constellation==4&&weak_short.code_rate==CodeRate::three_quarters&&
         weak_short.interleave_depth==1&&cycle_intervals(weak_short)==1,
         "weak short preset lost its compact fixed-cycle format");
     require(preamble_symbols(weak_short)==256&&
         estimate_transmission(weak_short,true,60).seconds<=10.5&&
         end_silence_samples(weak_short)>=6ULL*weak_short.sample_rate,
         "weak short minimum airtime omitted absence or exceeded about ten seconds");
-    auto weak_altered=weak_short;weak_altered.compact_convolutional=false;
-    require(profile_id(weak_short)!=profile_id(weak_altered),"compact coding missing from profile identity");
+    auto weak_altered=weak_short;weak_altered.ldpc_frame_bits=1296;
+    require(profile_id(weak_short)!=profile_id(weak_altered),"small LDPC size missing from profile identity");
     for(const auto channel:{Channel::wire,Channel::ssb,Channel::fm,Channel::acoustic}) {
         weak_altered=weak_short;weak_altered.channel=channel;
         rejects([&]{validate(weak_altered);});
@@ -129,10 +129,10 @@ int main() {try {
     weak_altered=weak_short;weak_altered.interleave_depth=17;
     rejects([&]{validate(weak_altered);});
     weak_altered=apply_symbol_rate_option(weak_short,"sc:100");
-    weak_altered.code_rate=CodeRate::three_quarters;
+    weak_altered.code_rate=CodeRate::two_thirds;
     const auto weak_restored=apply_symbol_rate_option(weak_altered,"auto");
-    require(weak_restored.symbol_rate==weak_short.symbol_rate&&weak_restored.compact_convolutional&&
-        weak_restored.code_rate==CodeRate::three_quarters,"compact Auto timing discarded manual coding");
+    require(weak_restored.symbol_rate==weak_short.symbol_rate&&weak_restored.ldpc_frame_bits==1944&&
+        weak_restored.code_rate==CodeRate::two_thirds,"compact Auto timing discarded manual coding");
     const auto short_default=resolve_snr_preset(Channel::acoustic_short,3).profile;
     const auto long_default=resolve_snr_preset(Channel::acoustic,3).profile;
     require(short_default.acoustic_ofdm&&short_default.ofdm_training_blocks==6,

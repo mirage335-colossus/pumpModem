@@ -151,8 +151,9 @@ The GUI channel selector offers **Audio cable · QAM / LDPC**, **IC-7100 SSB ·
 **Speakers / mic · short**. The separate [short acoustic profile](fast-acoustic-short.md)
 uses smaller coding blocks and less training, taking about 11.8 seconds for the
 tested 2.5 KiB attachment at its default 3 dB expected SNR. Its general preset
-search targets approximately ten-second minimum transfers, including about
-9.8 seconds at −6 dB with compact coding; larger messages take longer. Existing profiles
+search targets approximately ten-second minimum transfers, allowing 12.5 seconds
+for a substantial throughput gain. Small LDPC gives about 9.8 seconds at −6 dB
+and 12.3 seconds at 0 dB; larger messages take longer. Existing profiles
 and the initial speakers/microphone selection are unchanged.
 All four classic presets remain available through the CLI with
 `--format classic`.

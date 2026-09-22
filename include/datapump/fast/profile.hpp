@@ -41,6 +41,12 @@ Profile classic_profile(Channel channel);
 // Bulk-file capacity presets; acoustic uses its independently tested OFDM path,
 // and the IC-7100 profiles use a 300..2700 Hz single-carrier audio waveform.
 Profile capacity_profile(Channel channel=Channel::wire);
+// The small LDPC family shares the short channel's compact acoustic framing.
+// Existing LDPC and convolutional profile identities and waveforms are intact.
+inline bool small_ldpc_frame(unsigned bits) {return bits==648||bits==1296||bits==1944;}
+inline bool compact_acoustic_framing(const Profile& p) {
+    return p.compact_convolutional||(p.channel==Channel::acoustic_short&&p.capacity_mode&&small_ldpc_frame(p.ldpc_frame_bits));
+}
 void validate(const Profile& profile);
 std::string_view channel_name(Channel channel);
 Channel parse_channel(std::string_view name);

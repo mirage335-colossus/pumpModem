@@ -1,0 +1,11 @@
+flat_text source_bytes=2 air_seconds=9.84402 echo=0 ppm=0 acquired=1 complete=1 intervals=2 hard_errors=79 unknown_bits=0 changed_bits=54 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+public_text source_bytes=2 air_seconds=9.84402 echo=0.3 ppm=100 acquired=1 complete=1 intervals=2 hard_errors=116 unknown_bits=0 changed_bits=87 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+keyed_text source_bytes=2 air_seconds=9.84402 echo=0.3 ppm=-100 acquired=1 complete=1 intervals=2 hard_errors=125 unknown_bits=0 changed_bits=81 failed_frames=0 status=Verified and physically complete
+public_attachment source_bytes=32 air_seconds=9.84402 echo=0.3 ppm=0 acquired=1 complete=1 intervals=2 hard_errors=121 unknown_bits=0 changed_bits=84 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+keyed_attachment source_bytes=32 air_seconds=9.84402 echo=0.3 ppm=100 acquired=1 complete=1 intervals=2 hard_errors=144 unknown_bits=0 changed_bits=117 failed_frames=0 status=Verified and physically complete
+long_text source_bytes=2560 air_seconds=31.7536 echo=0.3 ppm=0 acquired=1 complete=1 intervals=17 hard_errors=1010 unknown_bits=0 changed_bits=706 failed_frames=0 status=Checksum-verified and physically complete (not authenticated)
+long_attachment source_bytes=2560 air_seconds=39.0568 echo=0.3 ppm=-100 acquired=1 complete=1 intervals=22 hard_errors=1277 unknown_bits=0 changed_bits=936 failed_frames=0 status=Verified and physically complete
+incomplete_controls EOF and incomplete training remain pending
+marker_holdout_control acquired=0 intervals=0 complete=0
+noise_only acquired=0 intervals=0 complete=0
+Fast weak short acoustic sampled tests passed (10 cases)

@@ -904,6 +904,45 @@ void capacity_parallel_decode() {
             <<" iterations="<<expected.ldpc_iterations<<" failed_frames="<<expected.ldpc_failed_frames<<'\n';
     }
 }
+void small_ldpc_contracts() {
+    for(unsigned n:{648U,1296U,1944U})
+    for(auto rate:{CodeRate::half,CodeRate::two_thirds,CodeRate::three_quarters})
+    for(unsigned depth:{2U,3U})for(bool encrypted:{false,true}) {
+        auto p=capacity_profile(Channel::acoustic_short);p.ldpc_frame_bits=n;p.code_rate=rate;p.interleave_depth=depth;
+        const auto crypto=encrypted?std::optional<Crypto>(key()):std::nullopt;
+        const auto capacity=capacity_source_bytes_per_cycle(p,encrypted);
+        check(capacity_information_bytes(p)==depth*(ldpc::data_bits(rate,n)/8),"small byte-shortened fixed geometry");
+        for(auto size:{std::size_t{0},capacity-1,capacity,capacity+1}) {
+            Bytes source(size);for(std::size_t i=0;i<size;++i)source[i]=static_cast<std::uint8_t>(71*i+3);
+            if(size)source.back()=0;
+            const auto wire=transmit(p,crypto,source);
+            check(wire.size()==(2+size/capacity)*cycle_intervals(p)*physical_interval_bits,
+                "small LDPC exact boundary retains final cycle");
+            StreamDecoder rx(p,crypto);feed(rx,wire);rx.finish(false);
+            check(!rx.result()&&!rx.snapshot().source_bytes&&!rx.snapshot().physical_end,
+                "small LDPC source stays hidden at codec end and EOF");
+            rx.finish(true);
+            check(rx.result()&&Bytes(rx.result()->bytes().begin(),rx.result()->bytes().end())==source,
+                "small LDPC exact source/trailing zero recovery");
+            check(rx.snapshot().authenticated==encrypted&&!rx.snapshot().failed_cycles,
+                "small LDPC integrity mode retained");
+            check(estimate_transmission(p,encrypted,size).intervals==wire.size()/physical_interval_bits,
+                "small LDPC estimate follows actual frame padding");
+        }
+        const auto wire=transmit(p,crypto,Bytes(capacity*3+7,0x5a));
+        StreamDecoder erased(p,crypto);std::array<float,physical_interval_bits> soft{};
+        const auto width=cycle_intervals(p)*physical_interval_bits;
+        for(std::size_t at=0;at<wire.size();at+=physical_interval_bits) {
+            for(std::size_t i=0;i<soft.size();++i)soft[i]=at>=width&&at<2*width?0.F:(wire[at+i]?12.F:-12.F);
+            erased.push_interval(soft);
+        }
+        erased.finish(true);
+        check(!erased.result()&&erased.snapshot().failed&&erased.snapshot().failed_cycles==1,
+            "small LDPC absent cycle preserves its hole while later cycles retain position");
+        StreamDecoder wrong(p,encrypted?std::optional<Crypto>(key(1)):std::optional<Crypto>(key()));
+        feed(wrong,wire);wrong.finish(true);check(!wrong.result(),"small LDPC wrong key or mode fails closed");
+    }
+}
 void compact_capacity_contracts() {
     for(auto rate:{CodeRate::half,CodeRate::three_quarters}) {
         auto p=capacity_profile(Channel::acoustic_short);p.compact_convolutional=true;p.code_rate=rate;
@@ -1014,7 +1053,7 @@ int main(int argc,char** argv) {
             continue_after_damaged_cycle();std::cout<<"fast damaged-cycle continuation tests passed\n";return 0;
         }
         independent_vectors();roundtrips();public_roundtrips();public_malformed();canonical_sources();burst_and_soft();
-        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();capacity_malformed(Channel::acoustic_short);compact_capacity_contracts();continue_after_damaged_cycle();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
+        capacity_rs();capacity_interleaver_balance();capacity_roundtrips();capacity_malformed();capacity_malformed(Channel::acoustic_short);compact_capacity_contracts();small_ldpc_contracts();continue_after_damaged_cycle();capacity_acoustic_contracts();capacity_ofdm_context();capacity_parallel_decode();
         streamed(argc>1?2*1024*1024:100*1024);streamed(argc>1?2*1024*1024:100*1024,false);
         streamed(1024*1024,true,true);streamed(1024*1024,false,true);
         std::cout<<"fast fixed-cadence crypto/FEC/source tests passed\n";

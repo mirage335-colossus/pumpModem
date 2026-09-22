@@ -3,8 +3,10 @@
 #include <span>
 
 namespace datapump::fast::ldpc {
-// DVB-S2/S2X normal frames and DVB-S2 short frames. No BCH, shortening,
-// puncturing or implicit padding. Frame size is selected locally by the profile.
+// DVB-S2/S2X normal/short frames plus 648/1296/1944-bit IEEE QC matrices.
+// The QC family's final k%8 information positions are fixed zero;
+// callers supply floor(k/8) bytes. DVB codes retain their original exact bits.
+// No BCH or puncturing. Frame size is selected locally by the profile.
 inline constexpr std::size_t coded_bits = 64800;
 inline constexpr std::size_t short_coded_bits = 16200;
 inline constexpr unsigned default_iterations = 50;

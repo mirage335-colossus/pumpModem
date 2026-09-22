@@ -1,0 +1,8 @@
+selected n=1944 rate=3/4 depth=1 marker=1 pilots=128 minimum=9.84402 public=794.16 keyed=695.576 file=39.0568
+previous n=16200 rate=1/2 depth=1 marker=1 pilots=64 minimum=9.79619 public=445.066 keyed=315.048 file=76.9855
+extended n=1944 rate=3/4 depth=2 marker=1 pilots=128 minimum=12.7653 public=895.475 keyed=829.755 file=36.1355
+rejected_sparse n=1944 rate=3/4 depth=2 marker=2 pilots=128 minimum=12.348 public=964.356 keyed=893.582 file=34.0489
+stronger n=1944 rate=2/3 depth=1 marker=1 pilots=128 minimum=9.84402 public=684.621 keyed=520.315 file=50.7419
+half n=1944 rate=1/2 depth=1 marker=1 pilots=128 minimum=9.84402 public=454.591 keyed=345.052 file=71.1908
+648 n=648 rate=3/4 depth=3 marker=1 pilots=128 minimum=9.84402 public=783.205 keyed=695.576 file=39.0568
+1296 n=1296 rate=3/4 depth=1 marker=1 pilots=128 minimum=9.84402 public=454.591 keyed=345.052 file=71.1908

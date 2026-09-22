@@ -1,0 +1,17 @@
+Internal ctest changing into directory: /home/user/___quick/p/_cur/dataPump/pumpModem/build
+Test project /home/user/___quick/p/_cur/dataPump/pumpModem/build
+    Start  39: gui_fast
+    Start 103: gui_controller
+1/4 Test  #39: gui_fast .........................   Passed    2.23 sec
+    Start 121: fast_cli
+2/4 Test #121: fast_cli .........................   Passed   23.23 sec
+    Start  23: fast_presets
+3/4 Test  #23: fast_presets .....................   Passed    0.58 sec
+4/4 Test #103: gui_controller ...................   Passed   69.98 sec
+
+100% tests passed, 0 tests failed out of 4
+
+Label Time Summary:
+gui    =  72.21 sec*proc (2 tests)
+
+Total Test time (real) =  69.98 sec

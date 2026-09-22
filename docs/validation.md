@@ -4,6 +4,30 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Short acoustic LDPC alternatives — 22 September 2026 UTC
+
+Implemented 648-, 1,296- and 1,944-bit QC LDPC at rates 1/2, 2/3 and 3/4,
+restricted to Fast `acoustic-short`. The selected −6 dB profile uses one
+1,944-bit rate-3/4 frame with compact SC tracking. Its minimum remains 9.844
+seconds; steady public/keyed rates improve from 445/315 to 794/696 bit/s.
+A tested depth-2 option takes 12.765 seconds with 895/830 bit/s. At 0 dB,
+small LDPC OFDM gives 3,141 bit/s with a 12.328-second minimum. Default 3 dB
+and stronger menu settings are retained. All 172 saved reports for other
+channel profiles are identical.
+
+The [comparison record](validation-data/fast/short-ldpc-20260922/README.md)
+contains 14,336 ideal-noise codeword trials, nine independent frozen vectors,
+full audio results and rejected sparse-marker alternatives. Selected and
+extended −6 dB waveforms each pass all ten sampled cases, retaining six-second
+physical absence, withheld source, timed holes and bounded memory. The original
+convolutional wire vectors and frozen audio fixture remain active.
+
+All 46 selected Fast/shared GUI/ordinary compatibility checks pass across the
+broad run and focused reruns. Both native GUI adapters pass conformance on
+private displays. LDPC AddressSanitizer/UndefinedBehaviorSanitizer checks pass.
+This is deterministic generated-audio validation, not physical room testing or
+a statistical whole-file reliability guarantee.
+
 ## Fast receive browser and named attachments — 21 September 2026 UTC
 
 Fast opens on Speakers / microphone at 3 dB expected SNR. Switching channel

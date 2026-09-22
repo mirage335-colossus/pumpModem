@@ -128,14 +128,18 @@ struct Controller::Impl {
         } else if(capacity) {
             f(F::fast_constellation).options={{"4","4-QAM"},{"16","16-QAM"},{"64","64-QAM"},{"256","256-QAM"},{"1024","1024-QAM"},{"4096","4096-QAM"},{"16384","16384-QAM"},{"65536","65536-QAM"},{"262144","262144-QAM"},{"1048576","1048576-QAM"},{"4194304","4194304-QAM"}};
             f(F::fast_coding).options={{"half","LDPC 1/2"},{"two-thirds","LDPC 2/3"},{"three-quarters","LDPC 3/4"},{"seven-ninths","LDPC 7/9"},{"eight-ninths","LDPC 8/9"},{"nine-tenths","LDPC 9/10"}};
-            if(settings.profile.ldpc_frame_bits==16200)f(F::fast_coding).options.resize(3);
+            if(settings.profile.ldpc_frame_bits!=64800)f(F::fast_coding).options.resize(3);
+            if(fast::small_ldpc_frame(settings.profile.ldpc_frame_bits)&&!settings.profile.acoustic_ofdm)
+                f(F::fast_constellation).options={{"4","QPSK (4 points)"}};
             f(F::fast_depth).options={{"1","1 LDPC block"},{"2","2 LDPC blocks"},{"4","4 LDPC blocks"},{"8","8 LDPC blocks"},{"16","16 LDPC blocks"}};
             if(settings.profile.channel==fast::Channel::acoustic_short) {
                 f(F::fast_depth).options.clear();
                 for(unsigned depth=1;depth<=16;++depth)
                     f(F::fast_depth).options.push_back({std::to_string(depth),std::to_string(depth)+" LDPC block"+(depth==1?"":"s")});
             }
-            f(F::fast_fec).options={{"sparse","RS · approximately 0.3%"}};
+            f(F::fast_fec).options={{"sparse",fast::small_ldpc_frame(settings.profile.ldpc_frame_bits)?
+                "RS · "+std::to_string(2*fast::capacity_parity_symbols(settings.profile))+" parity bytes":
+                "RS · approximately 0.3%"}};
         } else {
             f(F::fast_constellation).options={{"4","QPSK (4 points)"},{"16","16-APSK"},{"64","64-APSK"},{"256","256-APSK"}};
             f(F::fast_coding).options={{"half","Rate 1/2"},{"three-quarters","Rate 3/4"},{"seven-eighths","Rate 7/8"}};
