@@ -100,18 +100,18 @@ void progress_and_bounded_text() {
 }
 void received_character_boundary() {
     legacy_ui::TextPresentation presentation;ui::FieldState transcript,draft;legacy::Snapshot snapshot;
-    const std::string allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=";
+    const std::string allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=\n";
     std::string restricted,shellcode;
     for(unsigned byte=0;byte<256;++byte) {
         const auto character=static_cast<char>(byte);
         restricted+=allowed.find(character)!=std::string::npos?character:'_';
-        shellcode+=byte>=0x20&&byte<=0x7e?character:'_';
+        shellcode+=(byte>=0x20&&byte<=0x7e)||byte=='\n'?character:'_';
         snapshot.events={{byte+1,false,std::string(1,character)}};
         check(presentation.update(snapshot,transcript,draft)&&transcript.text==restricted,
             "Legacy received byte escaped the restricted ASCII set or waited for another byte");
     }
     check(presentation.set_shellcode_mode(true,transcript)&&transcript.text==shellcode,
-        "Legacy shellcode view did not restrict retained bytes to printable ASCII");
+        "Legacy shellcode view did not restrict retained bytes to printable ASCII and LF");
     const std::string transmitted="local (;\\&) café\n";
     snapshot.events={{257,true,transmitted}};presentation.update(snapshot,transcript,draft);
     check(transcript.text==shellcode+transmitted,"RX restriction changed local transmitted echo");
@@ -119,9 +119,9 @@ void received_character_boundary() {
         "Disabling Legacy shellcode failed to withdraw received punctuation or changed TX echo");
     presentation.set_shellcode_mode(true,transcript);
     snapshot.events={{258,false,std::string(";\n\xc3\xa9",4)}};presentation.update(snapshot,transcript,draft);
-    check(transcript.text==shellcode+transmitted+";___","Shellcode admitted a received control or Unicode byte");
+    check(transcript.text==shellcode+transmitted+";\n__","Shellcode lost LF or admitted a forbidden control or Unicode byte");
     presentation.set_shellcode_mode(false,transcript);
-    check(transcript.text==restricted+transmitted+"____","New shellcode reception survived disabling the exception");
+    check(transcript.text==restricted+transmitted+"_\n__","Disabling the exception lost LF or retained received punctuation");
     // Both retained views obey the same bound, including a UTF-8 TX boundary.
     snapshot.events={{259,true,std::string("\xc3\xa9")+std::string(legacy_ui::TextPresentation::transcript_limit-1,'x')}};
     presentation.update(snapshot,transcript,draft);

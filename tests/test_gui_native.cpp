@@ -65,12 +65,12 @@ void retained_raw_bits() {
     check(signals.lines()[0].text.size()==4096);
 }
 void received_text_boundary() {
-    const std::string allowed="aZ09,.@ -_/=";
+    const std::string allowed="aZ09,.@ -_/=\n";
     const std::string punctuation="();\\&";
-    const std::string forbidden="\n\t\r\x1b\x7f\xc3\xa9";
+    const std::string forbidden="\t\r\x1b\x7f\xc3\xa9";
     const std::string original=allowed+punctuation+forbidden;
-    const std::string restricted=allowed+std::string(12,'_');
-    const std::string shellcode=allowed+punctuation+std::string(7,'_');
+    const std::string restricted=allowed+std::string(11,'_');
+    const std::string shellcode=allowed+punctuation+std::string(6,'_');
     gui::SignalLine line;
     line.text=original;line.complete=true;line.pattern_score=25.;
     gui::Signals signals;

@@ -20,7 +20,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
     if(slot==Slot::header) {control.font_size=22;control.scope=ScreenScope::shared;}
     if(slot==Slot::fast_mode) {control.scope=ScreenScope::shared;control.help="Choose Fast Modem, Robust Modem or Legacy Modem. Each mode keeps its own settings.";}
     if(slot==Slot::developer_mode||slot==Slot::shellcode_mode)control.scope=ScreenScope::shared;
-    if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
+    if(slot==Slot::shellcode_mode) {control.developer_only=true;control.help="Allow printable English ASCII in received text. Newlines are allowed in both modes; other controls and non-ASCII bytes remain underscores. Turning Developer mode off resets this exception.";}
     if(slot==Slot::developer_mode)control.help="Show advanced controls and inspection tabs. Hiding them keeps their current settings, including command-line overrides.";
     if(slot==Slot::callsign||slot==Slot::grid)control.help="Convenience text for the editable CQ greeting inserted when Message is cleared. Sent only as message text.";
     if(slot==Slot::repeatable)control.help="Prepends REPEATABLE-XXXXXXXX and a space before the CQ greeting. Each message edit generates 8 random consonants or digits. Automatically turns off for attachments or messages over 256 bytes, including the prefix.";
@@ -74,7 +74,7 @@ Control placed(Control control, Slot slot, Menu menu=Menu::none) {
         control.list_row_height=54;control.footer_height=24;control.follow_tail=true;
         control.activate_record=Command::copy_signal;control.activate_on_select=true;
         control.empty_text="Listening for signals...";
-        control.help="Received text uses only letters, digits, comma, period, @, space, hyphen, underscore, slash and equals. Each other byte becomes an underscore. Developer Shellcode mode allows printable ASCII. Complete bytes use this same policy; partial bytes show exact bits. Copy and Paste as message use the displayed character policy.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. Data shows measured pre-FEC accuracy after interval correction. Files use the file list.";
+        control.help="Received text uses only letters, digits, comma, period, @, space, hyphen, underscore, slash, equals and newlines. Each other byte becomes an underscore. Developer Shellcode mode allows additional printable ASCII. Complete bytes use this same policy; partial bytes show exact bits. Copy and Paste as message use the displayed character policy.\nPattern score is model-based evidence in natural-log units, not measured SNR or a calibrated probability. Completed pattern text and raw bits can be copied without a checksum. Data shows measured pre-FEC accuracy after interval correction. Files use the file list.";
     }
     if(slot==Slot::compression_signals) {
         control.list_row_height=54;control.follow_tail=true;control.activate_record=Command::copy_raw_signal;

@@ -52,7 +52,7 @@ int main() {
     try {
         using namespace datapump;using namespace gui;using F=ui::Field;using C=ui::Command;
         const std::string received="RX: CQ TEST\n",sent="TX: café 123\n",later="next draft";
-        const std::string displayed_received="RX_ CQ TEST_";
+        const std::string displayed_received="RX_ CQ TEST\n";
         legacy::Transmitter transmitter({legacy::Mode::bpsk125,1500},received);std::vector<float> block(400);
         for(auto n=transmitter.read(block);n;n=transmitter.read(block))fixture::input.insert(fixture::input.end(),block.begin(),block.begin()+static_cast<std::ptrdiff_t>(n));
         bool acquired=false;
@@ -60,7 +60,7 @@ int main() {
         check(!controller.active()&&!fixture::inputs,"Legacy ignored denied audio ownership");acquired=true;
         until(controller,[&]{return controller.field(F::legacy_transcript).text==displayed_received;});
         controller.set_shellcode_mode(true);
-        check(controller.field(F::legacy_transcript).text=="RX: CQ TEST_","Legacy shellcode mode lost printable ASCII or admitted a control");
+        check(controller.field(F::legacy_transcript).text=="RX: CQ TEST\n","Legacy shellcode mode lost printable ASCII or LF");
         controller.set_shellcode_mode(false);
         check(controller.field(F::legacy_transcript).text==displayed_received,"Legacy controller retained shellcode after disabling it");
         check(controller.bitmap_revision()>1,"Sampled RX did not update waterfall");

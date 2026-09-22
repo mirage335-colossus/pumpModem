@@ -29,10 +29,11 @@ run after physical completion. Those codecs necessarily inspect raw data; the
 presentation layer does not gain permission to interpret arbitrary bytes.
 
 [`received_text.hpp`](../include/datapump/received_text.hpp) maps each source byte
-independently to the restricted ASCII set or an underscore, without Unicode,
-locale or escape decoding. GUI Shellcode mode permits printable ASCII only when
-Developer mode also permits it. Native widgets, clipboard requests, received
-filenames, CLI text and received-derived transmit drafts get the permitted view.
+independently to the restricted ASCII set (including LF newlines) or an underscore,
+without Unicode, locale or escape decoding. GUI Shellcode mode permits additional
+printable ASCII only when Developer mode also permits it. Native widgets,
+clipboard requests, received filenames, CLI text and received-derived transmit
+drafts get the permitted view.
 Original bytes remain separate for explicit saving. See the complete
 [received-text policy](security.md#received-text-boundary), including revocation
 and the locally entered QR input exception.

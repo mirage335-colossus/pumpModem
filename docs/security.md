@@ -16,22 +16,27 @@ before received content reaches native GUI text, clipboard requests or a
 transmit draft. The CLI applies it to received content on terminals, in pipes
 and in JSON text fields. The default allowed bytes are exactly English ASCII
 `a-z`, `A-Z`, `0-9`, comma (`,`), period (`.`), at sign (`@`), space, hyphen (`-`),
-underscore (`_`), slash (`/`) and equals (`=`).
+underscore (`_`), slash (`/`), equals (`=`), and line-feed newline (`LF`, `0x0a`).
 
 Every other source byte becomes one ASCII underscore. This includes parentheses,
-semicolon, backslash, ampersand, all control bytes and every byte outside ASCII.
+semicolon, backslash, ampersand, every control byte except LF, and every byte
+outside ASCII. Carriage return (`CR`) and tab remain placeholders; CRLF is
+therefore displayed as an underscore followed by a newline.
 UTF-8 is not decoded: a two-byte UTF-8 character becomes two underscores.
 `received_text.hpp` implements this boundary with byte comparisons and a
 same-size output buffer, without locale handling, Unicode parsing or escape
-expansion. Received filenames use the default policy even in Shellcode mode.
+expansion. CLI JSON escapes the already-filtered LF as `\n` to preserve valid
+JSON; plain-text output and GUI message text retain actual newlines.
+Received filenames use the default policy even in Shellcode mode.
 Application-owned labels and diagnostics are distinct from received content.
 
 **Shellcode mode** is a GUI exception for copying bootstrap commands. It starts
 unchecked, is hidden unless **Developer mode** is checked, and permits only
-printable English ASCII bytes `0x20` through `0x7e`. Controls and non-ASCII bytes
-still become underscores. Turning Developer mode off also unchecks and hides
-Shellcode mode. Turning either permission off reapplies the default policy to
-received views and received-derived drafts/history, refreshes their QR previews,
+printable English ASCII bytes `0x20` through `0x7e` in addition to LF. Other
+controls and non-ASCII bytes still become underscores. Turning Developer mode
+off also unchecks and hides Shellcode mode. Turning either permission off
+reapplies the default policy to received views and received-derived drafts/history,
+refreshes their QR previews,
 and revokes pending copies made under the withdrawn exception. It cannot revoke
 content already copied to an external program or clipboard manager.
 

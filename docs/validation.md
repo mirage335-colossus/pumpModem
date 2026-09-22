@@ -4,6 +4,61 @@ The application and portable runtime are native C++. Python is optional test
 tooling for FLTK/CLI builds and required to embed Rev resources at build time;
 it is not installed with the application.
 
+## Received line-feed newlines — 22 September 2026 UTC
+
+The shared received-text allowlist now permits ASCII LF (`0x0a`) in both
+restricted and Shellcode views. Robust, Fast and Legacy received display,
+clipboard and received-derived drafts retain newlines, including after
+Shellcode permission is withdrawn. Every other previously forbidden byte
+remains an underscore. CR and tab are still blocked; CRLF therefore becomes
+an underscore followed by LF. Exact received bytes remain available through
+explicit saving and raw-bit operations.
+
+The filter still uses bounded, byte-by-byte comparisons with same-size output
+and the existing receive-processing barrier. CLI JSON escapes the filtered
+text, including LF, before emitting each record. Plain stdout/pipe text retains
+actual LF. The CLI regressions include leading/trailing and embedded newlines,
+all 256 byte values, exact saves and complete live reception JSON records.
+GUI regressions cover fixed-interval source text, short/raw-bit interpretations,
+Fast copy/paste and QR revocation, and Legacy live/all-byte presentation.
+
+The runtime all-byte tests and speculation semantic/code-generation checks pass
+with GCC and Clang. The Fast CLI suite also passes. A standalone GCC Release
+filter comparison against `a00e880` validates all 256 byte values independently,
+retains both barriers, and alternates nine baseline/current pairs for each input
+size and view. With no competing project tests/builds, the default-view median
+changes from 25.90 to 27.88 ns for 16 bytes, 4.555 to 4.751 µs for 4 KiB, and
+4.907 to 5.129 ms for 1 MiB. Shellcode medians change from 24.09 to 24.20 ns,
+2.896 to 3.841 µs, and 2.769 to 2.889 ms respectively. These allocation/filter/
+barrier measurements use deterministic mixed-byte data, not whole-modem or
+cross-platform timing. The benchmark source, samples and disassembly remain
+under the ignored `build/received-newlines/` directory.
+
+All **33/33** shared GUI cases pass with each compiler across the group runs
+and focused reruns. The initial concurrent runs encounter Fast acoustic-short
+capture overruns; the unchanged complete Fast live suite passes alone in
+102.54 seconds with GCC and 102.79 seconds with Clang. Clang also initially
+runs a binary-editor target compiled before its LF expectation was updated;
+rebuilding that target passes the final all-byte test. No capture limits,
+assertions or timeouts are weakened.
+
+The initial preservation-contract run passes **29/30** cases but the unchanged
+differential receiver calibration reaches its **1,500-second timeout** while
+other test groups and builds overlap the run. It reports no failed numerical
+assertion before the timeout. The original timeout is retained for the isolated
+rerun after all other workloads finish, which passes in **1,094.18 seconds**.
+All **30/30** preservation-contract cases therefore pass across the initial
+run and isolated rerun, including exact wire vectors, whole-symbol completion,
+next-poll pending progress and recovery behavior.
+
+All six targeted native conformance cases pass on isolated 2400×1800, 96 DPI
+Xvfb displays after the heavy workloads finish: FLTK adapter/document in
+67.99/0.03 seconds, and Rev adapter/platform/1×/2× coordinates in
+96.11/6.15/5.13/5.13 seconds. The production replay workflow is not rerun for
+this character-policy change; its latest recorded timing result below remains
+unchanged. Both applications are rebuilt. The private display helper disables
+TCP and does not use the user's desktop.
+
 ## Unencrypted transmit wait and one-shot override — 22 September 2026 UTC
 
 The shared Robust Console now offers **Force next transmission** beside

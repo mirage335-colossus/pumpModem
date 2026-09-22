@@ -1511,7 +1511,7 @@ BitmapImage render(const plots::PlotSnapshot& source) {
 }
 void fixed_text_reception() {
     using F=ui::Field;using C=ui::Command;
-    const std::string expected="A fixed interval!";
+    const std::string expected="A fixed\ninterval!";
     Controller controller({true,true});controller.edit(F::message,expected);prepare(controller);
     check(controller.inspection()->stream_layout && controller.estimate()->coded_bytes==128,
           "17-byte message uses the single fixed coded interval");
@@ -1532,19 +1532,19 @@ void fixed_text_reception() {
     check(index.has_value(),"completed source has a validated display row");
     controller.select(F::signals,std::to_string(controller.signals().lines()[*index].id));
     controller.activate(C::copy_signal);const auto requests=controller.take_services();
-    check(requests.size()==1 && requests.front().value=="A fixed interval_","copy must restrict decoded source bytes");
+    check(requests.size()==1 && requests.front().value=="A fixed\ninterval_","copy must preserve LF and restrict decoded source bytes");
     controller.complete_service({requests.front().id,false,{},{}});
     controller.activate(C::paste_signal);
-    check(controller.field(F::message).text=="A fixed interval_","paste must restrict decoded source text");
+    check(controller.field(F::message).text=="A fixed\ninterval_","paste must preserve LF and restrict decoded source text");
     controller.set_shellcode_mode(true);
     controller.activate(C::paste_signal);
-    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Shellcode permits printable ASCII source text");
+    check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Shellcode permits printable ASCII source text and LF");
     controller.activate(C::copy_signal);
     controller.set_shellcode_mode(false);
     const auto withdrawn=controller.take_services();
-    check(withdrawn.size()==1&&withdrawn.front().value=="A fixed interval_"&&
-          controller.field(F::message).text=="A fixed interval_",
-          "Revoking Shellcode must scrub the received draft and queued clipboard");
+    check(withdrawn.size()==1&&withdrawn.front().value=="A fixed\ninterval_"&&
+          controller.field(F::message).text=="A fixed\ninterval_",
+          "Revoking Shellcode must preserve LF and scrub punctuation from the received draft and queued clipboard");
     prepare(controller);noise_start_stop(controller);
     controller.activate(C::paste_previous);
     check(controller.message_bytes()==Bytes(expected.begin(),expected.end()),"Noise replaced the previous transmitted message");
@@ -1860,18 +1860,18 @@ void escaped_signal_message_paste() {
 }
 void received_raw_text_boundary() {
     using F=ui::Field;using C=ui::Command;
-    Controller controller({true,true});controller.edit(F::message,";()\\&");prepare(controller);
-    receive_pattern_text(controller,"_____");
+    Controller controller({true,true});controller.edit(F::message,";()\n\\&");prepare(controller);
+    receive_pattern_text(controller,"___\n__");
     controller.select(F::signals,std::to_string(controller.signals().lines().front().id));
     const auto bits=*controller.signals().copy_raw_bits(0);
     controller.activate(C::paste_raw_signal);prepare(controller);
-    check(controller.field(F::message).text=="_____"&&controller.field(F::short_bits).text==bits&&
-          controller.field(F::short_bits_detail).text.find("Expected text: '_____'")!=std::string::npos,
-          "Received raw bits leaked their decoded text into the composer or expected-text preview");
+    check(controller.field(F::message).text=="___\n__"&&controller.field(F::short_bits).text==bits&&
+          controller.field(F::short_bits_detail).text.find("Expected text: '___\n__'")!=std::string::npos,
+          "Received raw-bit interpretation lost LF or leaked punctuation into the composer or expected-text preview");
     controller.set_shellcode_mode(true);controller.activate(C::paste_raw_signal);
-    check(controller.field(F::message).text==";()\\&","Shellcode must allow printable ASCII raw-bit interpretations");
+    check(controller.field(F::message).text==";()\n\\&","Shellcode must allow printable ASCII and LF in raw-bit interpretations");
     controller.set_shellcode_mode(false);prepare(controller);
-    check(controller.field(F::message).text=="_____"&&controller.field(F::short_bits).text==bits&&
+    check(controller.field(F::message).text=="___\n__"&&controller.field(F::short_bits).text==bits&&
           controller.inspection()->binary&&controller.estimate()->wire_bits==bits.size(),
           "Revoking Shellcode must scrub text without changing original raw-bit transmission");
     controller.close();

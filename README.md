@@ -303,8 +303,9 @@ tests.
 
 The last command refuses to overwrite an existing file. Received text and
 filenames allow only ASCII letters, digits, comma, period, `@`, space, `-`, `_`,
-`/`, and `=`. Every other byte becomes `_`, including controls and each byte of
-Unicode text. This restriction applies to stdout, pipelines and JSON. `rx --json`
+`/`, `=`, and line-feed newlines (`LF`). Every other byte becomes `_`, including
+other controls and each byte of Unicode text. This restriction applies to stdout,
+pipelines and JSON, where newlines are escaped as `\n`. `rx --json`
 returns the restricted `data_text` field, exact recovered `raw_bits` as `0`/`1`,
 validation flags and DSP diagnostics. The former `data_base64` field is removed.
 Use explicit `--save PATH` to retrieve original source bytes; received content

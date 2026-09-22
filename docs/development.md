@@ -60,18 +60,20 @@ incomplete dictionary tokens into text.
 Robust, Fast and Legacy Modem must restrict received content before native GUI
 text, clipboard requests, CLI text output or transmit-draft processing. The
 default allowed bytes are exactly English ASCII `a-z`, `A-Z`, `0-9`, comma (`,`),
-period (`.`), at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`) and
-equals (`=`). Replace every other source byte with one ASCII underscore. Text
-presentation must not decode received UTF-8 or expose rejected bytes through lossless text escapes,
-Base64 output or an exact-byte stdout/pipe bypass. Received filenames follow
+period (`.`), at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`),
+equals (`=`), and line-feed newline (`LF`, `0x0a`). Replace every other source
+byte with one ASCII underscore. Text presentation must not decode received UTF-8
+or expose rejected bytes through lossless text escapes, Base64 output or an
+exact-byte stdout/pipe bypass. Received filenames follow
 the same default policy.
 
 The GUI may permit printable English ASCII `0x20` through `0x7e` only while both
 **Developer mode** and **Shellcode mode** are checked. Shellcode mode starts
 false, stays hidden unless Developer mode is checked, and is reset when
-Developer mode is turned off. Controls and non-ASCII bytes remain placeholders
-in either mode. Withdrawing the exception also restricts received-derived
-drafts, retained previous-message text and their QR previews, and revokes pending
+Developer mode is turned off. LF remains allowed in both modes; all other
+controls and non-ASCII bytes remain placeholders. Withdrawing the exception
+also restricts received-derived drafts, retained previous-message text and
+their QR previews, and revokes pending
 copies authorized by the old setting. Stale edits must not restore forbidden
 received characters after that change.
 

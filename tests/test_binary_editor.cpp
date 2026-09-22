@@ -144,17 +144,19 @@ void bounded_dictionary_selection() {
 }
 
 void received_binary_edits() {
-    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=";
+    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=\n";
     for(bool shellcode:{false,true})for(unsigned first=0;first<256;first+=16) {
         std::string bits,expected;
         Bytes raw;
         for(unsigned value=first;value<first+16;++value) {
-            expected+=((shellcode?value>=32&&value<=126:allowed.find(static_cast<char>(value))!=allowed.npos)?static_cast<char>(value):'_');
+            const bool permitted=shellcode?value=='\n'||(value>=32&&value<=126):
+                allowed.find(static_cast<char>(value))!=allowed.npos;
+            expected+=permitted?static_cast<char>(value):'_';
             for(unsigned n=8;n;--n) {bits+=(value>>(n-1))&1?'1':'0';raw.push_back((value>>(n-1))&1);}
         }
         BinaryEditor editor;editor.edit_binary(bits,shellcode);
         check(editor.text()==expected&&editor.bytes()==bytes(expected)&&!editor.escaped()&&editor.raw_bits()==raw,
-              "Received binary editing must preserve exact bits with only a filtered ASCII text view");
+              "Received binary editing must preserve exact bits with only permitted ASCII and LF in the text view");
     }
 }
 int main() {

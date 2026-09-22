@@ -178,7 +178,7 @@ void report(const Snapshot& s,bool json) {
         <<",\"estimated_seconds\":"<<s.estimated_seconds<<",\"transmit_fraction\":"<<s.transmit_fraction
         <<",\"evm\":"<<s.evm<<",\"goodput_bps\":"<<s.goodput_bps
         <<",\"is_attachment\":"<<(s.complete&&s.file&&s.file->is_attachment()?"true":"false")
-        <<",\"filename\":\""<<received_text(s.complete&&s.file?s.file->filename():std::string{})<<"\""
+        <<",\"filename\":\""<<json_escape(received_text(s.complete&&s.file?s.file->filename():std::string{}))<<"\""
         <<",\"status\":\""<<json_escape(s.status)<<"\",\"error\":\""<<json_escape(s.error)<<"\"}\n";
     else {
         std::cout<<s.status<<"; "<<s.source_bytes<<" source bytes, "<<s.intervals<<" fixed intervals; encryption "<<(s.encrypted?"on":"off")

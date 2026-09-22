@@ -87,17 +87,20 @@ range/bandwidth. Gross and measured source rates stay on Modem details.
 
 Robust, Fast and Legacy share one receive-text boundary. By default, received
 text contains only English ASCII `a-z`, `A-Z`, `0-9`, comma (`,`), period (`.`),
-at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`) and equals (`=`).
+at sign (`@`), space, hyphen (`-`), underscore (`_`), slash (`/`), equals (`=`),
+and line-feed newline (`LF`, `0x0a`).
 Each other source byte becomes one ASCII underscore before native widgets,
 clipboard requests, or transmit-draft processing receive it. This includes
-control bytes, forbidden punctuation and all non-ASCII bytes. The text boundary
-does not decode UTF-8 sequences or expose rejected bytes as hexadecimal escapes.
+control bytes other than LF, forbidden punctuation and all non-ASCII bytes. The
+text boundary does not decode UTF-8 sequences or expose rejected bytes as
+hexadecimal escapes.
 Received filenames always follow this default policy.
 
 **Developer mode** is available in all three modems. **Shellcode mode** sits
 beside it, starts unchecked, and is hidden and false unless Developer mode is
 checked. Enabling both permits printable English ASCII `0x20` through `0x7e`
-in received message text; controls and non-ASCII bytes still become underscores.
+in received message text alongside LF; other controls and non-ASCII bytes still
+become underscores.
 Turning Developer mode off resets and hides Shellcode mode. Disabling either
 permission restores restricted received displays, drafts and retained previous
 messages, refreshes their QR previews, and revokes pending copies made under

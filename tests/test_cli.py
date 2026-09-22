@@ -9,7 +9,7 @@ import unittest
 import wave
 
 PUMP = str(pathlib.Path(sys.argv.pop(1)).resolve())
-ALLOWED_RECEIVED = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/='
+ALLOWED_RECEIVED = b'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=\n'
 
 def safe_received(source):
     return ''.join(chr(byte) if byte in ALLOWED_RECEIVED else '_' for byte in source)
@@ -86,11 +86,14 @@ class StreamCLI(unittest.TestCase):
         # Each received byte must be filtered before JSON/terminal/pipe output.
         # Explicit save retains the original data, including controls, Unicode,
         # disallowed ASCII punctuation and trailing zero bytes.
-        sources=(b'A;()\\&\x1b\n\xc3\xa9',ALLOWED_RECEIVED+bytes(range(256))+b'\x00\x00')
+        sources=(b'\nA;()\\&\x1b\r\n\xc3\xa9\n',ALLOWED_RECEIVED+bytes(range(256))+b'\x00\x00')
         for source in sources:
             args=('simulate','--input','-','--snr','30',
                   '--clock-error-ppm','0','--phase-noise','0',*AUDIO)
-            value=json.loads(self.run_pump_with_exact_save(*args,'--json',data=source,source=source).stdout)
+            output=self.run_pump_with_exact_save(*args,'--json',data=source,source=source).stdout
+            self.assertEqual(output.count(b'\n'),1,'A received newline split a JSON record')
+            self.assertEqual(output.count(b'\\n'),source.count(b'\n'))
+            value=json.loads(output)
             self.assertTrue(value['stream_complete'])
             self.assertEqual(value['data_text'],safe_received(source))
             self.assertNotIn('data_base64',value)
@@ -435,7 +438,7 @@ class StreamCLI(unittest.TestCase):
         for command in ('tx','estimate','status-rx'):
             self.run_pump(command,'--recovery-seconds','0',*AUDIO,ok=False)
     def test_live_json_reception_identity(self):
-        result=self.run_pump('listen','--text','quick brown','--json','--seconds','8',
+        result=self.run_pump('listen','--text','quick\nbrown','--json','--seconds','8',
             '--simulation','3dBm -90dB','--bw','3600','--pattern','auto-pattern',
             '--target-snr','32','--receive-targets','55,32','--time','1800000000',
             '--search-seconds','0','--clock-error-ppm','0','--phase-noise','0')
@@ -445,7 +448,7 @@ class StreamCLI(unittest.TestCase):
         self.assertTrue(pending,'Live JSON lost the pending raw-bit events')
         self.assertEqual(len(completed),1,'Competing profiles emitted duplicate completed payloads')
         payload=completed[0]
-        self.assertEqual(payload['data_text'],'quick brown')
+        self.assertEqual(payload['data_text'],'quick\nbrown')
         updates=[event for event in events if event.get('event')=='reception_update']
         self.assertTrue(updates,'Completed interpretation did not publish its live reception identity')
         self.assertEqual(updates[-1]['reception_id'],payload['id'])

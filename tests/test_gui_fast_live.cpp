@@ -55,8 +55,8 @@ void capture(std::uint32_t rate,const std::string&,const CaptureCallback& consum
 }
 namespace {
 const std::string console_message="Continuous Fast console: café and exact bytes.;()\\&\n";
-const std::string restricted_message="Continuous Fast console_ caf__ and exact bytes.______";
-const std::string shellcode_message="Continuous Fast console: caf__ and exact bytes.;()\\&_";
+const std::string restricted_message="Continuous Fast console_ caf__ and exact bytes._____\n";
+const std::string shellcode_message="Continuous Fast console: caf__ and exact bytes.;()\\&\n";
 void check(bool condition,const char* why) {if(!condition)throw Error(why);}
 Bytes render(const BitmapSource& source) {
     BitmapImage image(128,80);
@@ -243,13 +243,13 @@ void continuous_console() {
         "Fast received punctuation or UTF-8 escaped into a native row or clipboard");
     controller.set_shellcode_mode(true);
     check(controller.field(F::fast_history).records.front().cells.front().text.ends_with(shellcode_message),
-        "Shellcode history did not show printable ASCII only");
+        "Shellcode history did not preserve printable ASCII and LF only");
     controller.activate(C::fast_copy_signal);controller.set_shellcode_mode(false);
     const auto withdrawn=controller.take_services();
     check(withdrawn.size()==1&&withdrawn.front().value==restricted_message,
         "Queued Fast clipboard text retained shellcode after disabling the exception");
     controller.set_shellcode_mode(true);controller.activate(C::fast_paste_signal);
-    check(controller.field(F::fast_text).text==shellcode_message,"Shellcode paste did not use the printable ASCII boundary");
+    check(controller.field(F::fast_text).text==shellcode_message,"Shellcode paste did not preserve permitted ASCII and LF");
     controller.edit(F::fast_text,controller.field(F::fast_text).text+"; locally typed");
     const auto shellcode_qr=render(controller.bitmap(ui::Bitmap::fast_qr));
     controller.set_shellcode_mode(false);

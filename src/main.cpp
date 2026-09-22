@@ -75,7 +75,8 @@ Input/output:
   --json                Received content as JSON with restricted ASCII text and diagnostics
   --callsign TEXT --grid TEXT --repeatable
 
-Received text and filenames use letters, digits, comma, period, @, space, -, _, /, =.
+Received text and filenames use letters, digits, comma, period, @, space, -, _, /, =,
+and newline (ASCII LF). JSON encodes newlines as \n.
 Every other received byte is displayed as _. Use --save for original source bytes.
 
 Modem:
@@ -483,9 +484,9 @@ void report(const Args& a,const StreamContent& stream,const modem::Diagnostics& 
           <<",\"short_text_decoded\":"<<(short_text_decoded?"true":"false")
           <<",\"authenticated\":"<<(content_validated&&stream.authenticated?"true":"false")
           <<",\"id\":\""<<id_string(m)<<"\",\"kind\":\""<<(m.kind==MessageKind::text?"text":m.kind==MessageKind::file?"file":"screenshot")
-          <<"\",\"filename\":\""<<received_text(m.filename)<<"\",\"callsign\":\""<<received_text(m.callsign)
-          <<"\",\"grid\":\""<<received_text(m.grid)<<"\",\"repeatable\":"<<(m.repeatable?"true":"false")
-          <<",\"data_text\":\""<<received_text(m.data)<<"\",\"corrected_bytes\":"<<stream.corrected_bytes
+          <<"\",\"filename\":\""<<json_escape(received_text(m.filename))<<"\",\"callsign\":\""<<json_escape(received_text(m.callsign))
+          <<"\",\"grid\":\""<<json_escape(received_text(m.grid))<<"\",\"repeatable\":"<<(m.repeatable?"true":"false")
+          <<",\"data_text\":\""<<json_escape(received_text(m.data))<<"\",\"corrected_bytes\":"<<stream.corrected_bytes
           <<",\"fec_repairs\":{\"data\":";
         report_fec_region(stream.fec_stats.data);std::cout<<",\"integrity\":";report_fec_region(stream.fec_stats.integrity);
         std::cout<<",\"parity\":";report_fec_region(stream.fec_stats.parity);std::cout<<"},\"pre_fec_accuracy\":";
@@ -805,7 +806,7 @@ void listen(const Args& a,const transfer::Options& options) {
                 <<",\"transmitting\":"<<(snapshot.transmitting?"true":"false")<<"}\n";
             for(const auto& signal:snapshot.signals) if(!signal.binary && !signal.validated && !signal.complete) {
                 std::cout<<"{\"event\":\"preview\",\"validated\":false,\"frequency_hz\":"<<signal.frequency_hz
-                    <<",\"data_text\":\""<<received_text(signal.text)<<'"';
+                    <<",\"data_text\":\""<<json_escape(received_text(signal.text))<<'"';
                 report_signal_identity(signal);std::cout<<"}\n";
             }
         }

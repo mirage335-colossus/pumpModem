@@ -55,9 +55,9 @@ int main() { try {
     check(terminal_text(Bytes{27,']','5','2',';',7})=="__52__");
     check(terminal_text(Bytes{'c','a','f',0xc3,0xa9})=="caf__");
     check(terminal_text(Bytes{0xc2,0x9b})=="__");
-    // Exhaustive independent allowlist: controls and every non-ASCII byte
-    // remain placeholders, including in the developer-only ASCII view.
-    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=";
+    // Exhaustive independent allowlist: controls other than LF and every
+    // non-ASCII byte remain placeholders in both received-text views.
+    constexpr std::string_view allowed="abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789,.@ -_/=\n";
     Bytes every_byte;for(unsigned value=0;value<256;++value)every_byte.push_back(static_cast<std::uint8_t>(value));
     const auto restricted=received_text(every_byte);
     const auto shellcode=received_text(every_byte,true);
@@ -65,11 +65,12 @@ int main() { try {
     for(unsigned value=0;value<256;++value) {
         const auto byte=static_cast<char>(value);
         check(restricted[value]==(allowed.find(byte)!=std::string_view::npos?byte:'_'));
-        check(shellcode[value]==(value>=32 && value<=126?byte:'_'));
+        check(shellcode[value]==(value==10 || (value>=32 && value<=126)?byte:'_'));
     }
     check(received_text(allowed)==allowed);
-    check(received_text(std::string_view("A\0;\\&\n\xc3\xa9",8))=="A_______");
-    check(received_text(std::string_view("A\0;\\&\n\xc3\xa9",8),true)=="A_;\\&___");
+    check(received_text(std::string_view("A\0;\\&\n\xc3\xa9",8))=="A____\n__");
+    check(received_text(std::string_view("A\0;\\&\n\xc3\xa9",8),true)=="A_;\\&\n__");
+    check(terminal_text(Bytes{'A','\n','\n','B','\r','\n','\t',27})=="A\n\nB_\n__");
     std::istringstream input("12345"); rejects([&]{read_bounded(input,4);});
     struct TemporaryDirectory {
         std::filesystem::path path=std::filesystem::temp_directory_path()/
