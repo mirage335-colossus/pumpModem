@@ -1353,6 +1353,10 @@ void layout_lifecycle() {
     require(Fl::first_window()==&unrelated,"Window identity fixture did not establish another first window");
     auto* window=application_window();require(window,"Layout lifecycle fixture has no native window");
     unrelated.hide();
+    // Reproduce the constrained Windows runner client area on every host.
+    // The fixture has only two custom controls, so it need not require the
+    // production console's minimum height for its bottom plot row.
+    window->size_range(1,1);window->size(1028,749);Fl::check();
     NativeInput* editor=nullptr;NativeBitmap* bitmap=nullptr;
     const std::function<void(Fl_Group&)> locate=[&](Fl_Group& parent) {
         for(int i=0;i<parent.children();++i) {

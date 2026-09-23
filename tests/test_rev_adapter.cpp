@@ -17,6 +17,10 @@ int run_native_probes(std::string_view selected={}) {
     if(selected=="--inline-document") {
         RevApp probe(windows,launch);probe.verify_inline_document_editor();return 0;
     }
+    if(selected=="--layout-lifecycle") {
+        auto controls=test::layout_lifecycle_controls();
+        RevApp probe(windows,launch,controls);probe.verify_layout_lifecycle(controls);return 0;
+    }
     if(selected=="--estimate-colors") {
         for(bool color:{false,true}) {
             launch.color=color;configure_theme(color);
